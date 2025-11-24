@@ -1,6 +1,15 @@
 [package]
 name = "solarxy"
+description = "Cross platform model viewer and checker powered by Web GPU and Rust."
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/marko-koljancic/solarxy"
 
 [dependencies]
+anyhow = "1.0"
+winit = {version = "0.30", features = ["android-native-activity"]}
+env_logger = "0.10"
+log = "0.4"
+wgpu = "27.0.0"
+pollster = "0.3"
