@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>solarxy</title>
+    <style>
+      * {
+        padding: 0;
+        margin: 0;
+      }
+      canvas {
+        background-color: black;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body id="root">
+    <canvas id="canvas"></canvas>
+    <script type="module">
+      import init from "./pkg/solarxy.js";
+      init()
+        .then(() => {
+          console.log("Init ::: solarxy loaded");
+        })
+        .catch(error => {
+          const msg = String((error && error.message) || error);
+          if (
+            msg.startsWith(
+              "Using exceptions for control flow, don't mind me. This isn't actually an error!",
+            )
+          ) {
+            return;
+          }
+          console.error("Unexpected init error:", error);
+        });
+    </script>
+  </body>
+</html>

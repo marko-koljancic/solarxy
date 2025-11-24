@@ -6,6 +6,18 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/marko-koljancic/solarxy"
 
+[profile.release]
+strip = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 anyhow = "1.0"
 winit = {version = "0.30", features = ["android-native-activity"]}
@@ -13,3 +25,15 @@ env_logger = "0.10"
 log = "0.4"
 wgpu = "27.0.0"
 pollster = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.6"
+console_log = "1.0"
+wgpu = { version = "27.0.0", features = ["webgl"]}
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.30"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+]}

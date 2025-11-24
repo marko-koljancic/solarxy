@@ -1,3 +1,6 @@
+use solarxy::run;
+
 fn main() {
-    println!("Hello, world!");
+    println!("::: Staring the application...");
+    run().unwrap();
 }
