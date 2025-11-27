@@ -565,8 +565,14 @@ impl State {
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
             use model::DrawModel;
-            render_pass
-                .draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+            render_pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
