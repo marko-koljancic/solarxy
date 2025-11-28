@@ -48,6 +48,7 @@ impl Camera {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
@@ -55,12 +56,14 @@ impl CameraUniform {
     fn new() -> Self {
         use cgmath::SquareMatrix;
         Self {
+            view_position: [0.0; 4],
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
     fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+        self.view_position = camera.eye.to_homogeneous().into();
+        self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into();
     }
 }
 
@@ -148,10 +151,11 @@ struct Instance {
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
+        let model =
+            cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation);
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
-            .into(),
+            model: model.into(),
+            normal: cgmath::Matrix3::from(self.rotation).into(),
         }
     }
 }
@@ -160,12 +164,12 @@ impl Instance {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
+    normal: [[f32; 3]; 3],
 }
 
-impl InstanceRaw {
+impl model::Vertex for InstanceRaw {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
-
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -189,6 +193,22 @@ impl InstanceRaw {
                     offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
                     shader_location: 8,
                     format: wgpu::VertexFormat::Float32x4,
+                },
+                // NEW!
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 19]>() as wgpu::BufferAddress,
+                    shader_location: 10,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 22]>() as wgpu::BufferAddress,
+                    shader_location: 11,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
             ],
         }
@@ -349,7 +369,7 @@ impl State {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -388,6 +408,12 @@ impl State {
                     } else {
                         cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
                     };
+
+                    // Single instance
+                    // let rotation = cgmath::Quaternion::from_axis_angle(
+                    //     (0.0, 1.0, 0.0).into(),
+                    //     cgmath::Deg(180.0),
+                    // );
 
                     Instance { position, rotation }
                 })
