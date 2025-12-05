@@ -1,6 +1,6 @@
 [package]
 name = "solarxy"
-description = "Cross platform model viewer and checker powered by Web GPU and Rust."
+description = "Cross platform model viewer and checker powered by WGPU and Rust."
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -14,18 +14,16 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 clap = "4.5.53"
-anyhow = "1.0"
-winit = { version = "0.30", features = ["android-native-activity"] }
-env_logger = "0.10"
-log = "0.4"
-wgpu = "27.0.0"
-pollster = "0.3"
+anyhow = "1.0.100"
+winit = "0.30.12"
+wgpu = "27.0.1"
+pollster = "0.4.0"
 bytemuck = { version = "1.24", features = ["derive"] }
 cgmath = "0.18"
 tobj = { version = "4.0.3", default-features = false, features = ["async"] }
 
 [dependencies.image]
-version = "0.24"
+version = "0.25.9"
 default-features = false
 features = ["png", "jpeg"]
 

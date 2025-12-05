@@ -65,14 +65,14 @@ impl ApplicationHandler<State> for App {
                                     event_loop.exit();
                                 }
                                 SurfaceError::Timeout => {
-                                    log::warn!("Surface timeout when rendering: {:?}", surface_error);
+                                    eprintln!("Surface timeout when rendering: {:?}", surface_error);
                                 }
                                 other => {
-                                    log::error!("Unhandled surface error when rendering: {:?}", other);
+                                    eprintln!("Unhandled surface error when rendering: {:?}", other);
                                 }
                             }
                         } else {
-                            log::error!("Unable to render: {:?}", e);
+                            eprintln!("Unable to render: {:?}", e);
                         }
                     }
                 }
@@ -101,7 +101,7 @@ impl ApplicationHandler<State> for App {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    env_logger::init();
+    // env_logger::init();
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App::new();
     event_loop.run_app(&mut app)?;

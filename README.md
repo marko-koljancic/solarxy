@@ -1,28 +1,32 @@
 # solarxy
 
-A lightweight, cross-platform tool to view and validate 3D models and scenes.
-This initial version provides a simple UI, glTF/OBJ import, basic shading,
-and a validation checker that catches common model issues.
-The renderer uses WebGPU for cross-platform GPU acceleration and Rust for core logic.
+A lightweight, cross-platform 3D model viewer and validator. Features a simple UI, glTF/OBJ support, basic shading, and validation checks for common model issues. Built with Rust and WebGPU for cross-platform GPU acceleration.
 
 ## Features
 
-- Open and inspect glTF, OBJ, and other common model formats
-- Real-time PBR and wireframe rendering modes
-- Validation and consistency checks
-- Command-line and GUI modes for different workflows
+- **Multi-format support**: Open and inspect OBJ, glTF, and other common 3D model formats
+- **Real-time rendering**: Simple, PBR and wireframe rendering modes
+- **Validation**: Built-in consistency checks to catch common model issues
+- **Flexible workflow**: Both command-line and GUI modes available
 
-## Getting started
+## Getting Started
 
-- [::: REMOVE :::] Browser (WASM): build to WebAssembly and serve with a static file server;
-  requires a WebGPU-capable browser
-- Native: build and run with Cargo (Rust and wgpu backends)
+### Prerequisites
+
+- Rust toolchain (install from [rustup.rs](https://rustup.rs))
+
+### Installation
+
+```bash
+cargo build --release
+cargo run --release
+```
 
 ## Development
 
-- [::: REMOVE :::] Core in Rust, rendering via wgpu (WebGPU abstraction)
-- [::: REMOVE :::] Minimal JS/HTML bootstrap for the WASM target
-- Tests and validation suites included (cargo test)
+- **Core**: Written in Rust
+- **Rendering**: wgpu (WebGPU abstraction layer)
+- **Testing**: Run `cargo test` for validation suites
 
 ## License
 
