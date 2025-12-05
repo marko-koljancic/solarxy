@@ -14,6 +14,7 @@ A lightweight, cross-platform 3D model viewer and validator. Features a simple U
 ### Prerequisites
 
 - Rust toolchain (install from [rustup.rs](https://rustup.rs))
+- **MSRV**: Rust 1.82.0 or later (required for edition 2024)
 
 ### Installation
 
