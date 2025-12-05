@@ -2,7 +2,7 @@ use std::ops::Range;
 use super::material::Material;
 
 pub trait Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static>;
+    fn description() -> wgpu::VertexBufferLayout<'static>;
 }
 
 #[repr(C)]
@@ -16,7 +16,7 @@ pub struct ModelVertex {
 }
 
 impl Vertex for ModelVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
+    fn description() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<ModelVertex>() as wgpu::BufferAddress,

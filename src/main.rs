@@ -1,6 +1,6 @@
-use solarxy::run;
+use solarxy::run_viewer;
 
 fn main() {
     println!("::: Solarxy starting :::");
-    run().unwrap();
+    run_viewer().unwrap();
 }

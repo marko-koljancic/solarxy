@@ -1,3 +1,6 @@
+mod cgi;
+mod state;
+
 use state::State;
 use std::sync::Arc;
 use wgpu::SurfaceError;
@@ -8,9 +11,6 @@ use winit::{
     keyboard::PhysicalKey,
     window::Window,
 };
-
-mod cgi;
-mod state;
 
 pub struct App {
     state: Option<State>,
@@ -24,9 +24,7 @@ impl App {
 
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        #[allow(unused_mut)]
-        let mut window_attributes = Window::default_attributes();
-
+        let window_attributes = Window::default_attributes();
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.state = Some(pollster::block_on(State::new(window)).unwrap());
     }
@@ -95,8 +93,7 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-pub fn run() -> anyhow::Result<()> {
-    // env_logger::init();
+pub fn run_viewer() -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App::new();
     event_loop.run_app(&mut app)?;

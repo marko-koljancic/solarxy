@@ -1,7 +1,5 @@
 use std::io::{BufReader, Cursor};
-
 use wgpu::util::DeviceExt;
-
 use super::{material, texture, model};
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {

@@ -39,7 +39,7 @@ struct InstanceRaw {
 }
 
 impl model::Vertex for InstanceRaw {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
+    fn description() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
@@ -162,7 +162,7 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        // Test uv-checker texture
+        // TODO: Load and use uv checker texture bundled with package, currently not used
         let diffuse_bytes = include_bytes!("../res/textures/uv-checker_4k.png");
         let diffuse_texture =
             texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "uv-checker_4k.png", false).unwrap();
@@ -360,14 +360,14 @@ impl State {
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/shader.wgsl").into()),
             };
             create_render_pipeline(
                 &device,
                 &render_pipeline_layout,
                 config.format,
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                &[model::ModelVertex::description(), InstanceRaw::description()],
                 shader,
             )
         };
@@ -380,14 +380,14 @@ impl State {
             });
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/light.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/light.wgsl").into()),
             };
             create_render_pipeline(
                 &device,
                 &layout,
                 config.format,
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc()],
+                &[model::ModelVertex::description()],
                 shader,
             )
         };
@@ -451,13 +451,11 @@ impl State {
 
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
-
         if !self.is_surface_configured {
             return Ok(());
         }
 
         let output = self.surface.get_current_texture()?;
-
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
