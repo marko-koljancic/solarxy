@@ -46,6 +46,7 @@ pub async fn load_model(
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
+    // TODO: Fix use of depricated function
     let (models, obj_materials) = tobj::load_obj_buf_async(
         &mut obj_reader,
         &tobj::LoadOptions {
@@ -62,8 +63,8 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture, false, device, queue).await?;
-        let normal_texture = load_texture(&m.normal_texture, true, device, queue).await?;
+        let diffuse_texture = load_texture(m.diffuse_texture.as_deref().unwrap_or(""), false, device, queue).await?;
+        let normal_texture = load_texture(m.normal_texture.as_deref().unwrap_or(""), true, device, queue).await?;
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout,
             entries: &[

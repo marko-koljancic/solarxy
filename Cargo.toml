@@ -1,5 +1,5 @@
 [package]
-name = "solarxy"
+name = "Solarxy"
 description = "Cross platform model viewer and checker powered by Web GPU and Rust."
 version = "0.1.0"
 edition = "2024"
@@ -22,7 +22,7 @@ wgpu = "27.0.0"
 pollster = "0.3"
 bytemuck = { version = "1.24", features = ["derive"] }
 cgmath = "0.18"
-tobj = { version = "3.2", default-features = false, features = ["async"] }
+tobj = { version = "4.0.3", default-features = false, features = ["async"] }
 
 [dependencies.image]
 version = "0.24"
