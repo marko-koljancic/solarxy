@@ -1,5 +1,5 @@
 use solarxy::run;
 fn main() {
-    println!("::: Staring the application...");
+    println!("::: Solarxy starting :::");
     run().unwrap();
 }

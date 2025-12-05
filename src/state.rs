@@ -230,9 +230,15 @@ impl State {
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let obj_model = resources::load_model("cube.obj", &device, &queue, &texture_binding_group_layout)
-            .await
-            .unwrap();
+        // TODO: Load model from cli args in runtime instead of hardcoding at compile time
+        let obj_model = resources::load_model(
+            "/Users/marko-koljancic/Documents/_dev/solarxy/res/models/cube/cube.obj",
+            &device,
+            &queue,
+            &texture_binding_group_layout,
+        )
+        .await
+        .unwrap();
 
         let camera = Camera {
             eye: (0.0, 5.0, 10.0).into(),
