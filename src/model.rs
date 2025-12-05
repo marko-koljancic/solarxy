@@ -1,4 +1,5 @@
 use std::ops::Range;
+use crate::material::Material;
 
 pub trait Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static>;
@@ -47,53 +48,6 @@ impl Vertex for ModelVertex {
                     format: wgpu::VertexFormat::Float32x3,
                 },
             ],
-        }
-    }
-}
-
-pub struct Material {
-    pub name: String,
-    pub diffuse_texture: crate::texture::Texture,
-    pub normal_texture: crate::texture::Texture,
-    pub bind_group: wgpu::BindGroup,
-}
-
-impl Material {
-    pub fn new(
-        device: &wgpu::Device,
-        name: &str,
-        diffuse_texture: crate::texture::Texture,
-        normal_texture: crate::texture::Texture,
-        layout: &wgpu::BindGroupLayout,
-    ) -> Self {
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
-                },
-            ],
-            label: Some(name),
-        });
-
-        Self {
-            name: name.to_string(),
-            diffuse_texture,
-            normal_texture,
-            bind_group,
         }
     }
 }

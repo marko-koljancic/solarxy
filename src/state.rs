@@ -9,6 +9,12 @@ use wgpu::util::DeviceExt;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
+const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.4235,
+    g: 0.4588,
+    b: 0.4902,
+    a: 1.0,
+};
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -458,12 +464,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.7,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(BACKGROUND_COLOR),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,

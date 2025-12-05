@@ -11,6 +11,7 @@ use winit::{
 
 mod camera;
 mod light;
+mod material;
 mod model;
 mod resources;
 mod state;

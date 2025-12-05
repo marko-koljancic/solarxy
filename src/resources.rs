@@ -2,10 +2,7 @@ use std::io::{BufReader, Cursor};
 
 use wgpu::util::DeviceExt;
 
-use crate::{
-    model::{self, Material},
-    texture,
-};
+use crate::{material, texture, model};
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let txt = {
@@ -86,7 +83,13 @@ pub async fn load_model(
             label: None,
         });
 
-        materials.push(Material::new(device, &m.name, diffuse_texture, normal_texture, layout));
+        materials.push(material::Material::new(
+            device,
+            &m.name,
+            diffuse_texture,
+            normal_texture,
+            layout,
+        ));
     }
 
     let meshes = models
