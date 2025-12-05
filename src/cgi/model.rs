@@ -1,5 +1,5 @@
 use std::ops::Range;
-use crate::material::Material;
+use super::material::Material;
 
 pub trait Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static>;

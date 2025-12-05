@@ -1,7 +1,7 @@
 pub struct Material {
     pub name: String,
-    pub diffuse_texture: crate::texture::Texture,
-    pub normal_texture: crate::texture::Texture,
+    pub diffuse_texture: super::texture::Texture,
+    pub normal_texture: super::texture::Texture,
     pub bind_group: wgpu::BindGroup,
 }
 
@@ -9,8 +9,8 @@ impl Material {
     pub fn new(
         device: &wgpu::Device,
         name: &str,
-        diffuse_texture: crate::texture::Texture,
-        normal_texture: crate::texture::Texture,
+        diffuse_texture: super::texture::Texture,
+        normal_texture: super::texture::Texture,
         layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

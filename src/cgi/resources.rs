@@ -2,7 +2,7 @@ use std::io::{BufReader, Cursor};
 
 use wgpu::util::DeviceExt;
 
-use crate::{material, texture, model};
+use super::{material, texture, model};
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let txt = {

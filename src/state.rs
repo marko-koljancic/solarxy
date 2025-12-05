@@ -1,8 +1,8 @@
-use crate::camera::{Camera, CameraController, CameraUniform};
-use crate::light::LightUniform;
-use crate::model::Model;
-use crate::model::{self, Vertex};
-use crate::{resources, texture};
+use crate::cgi::camera::{Camera, CameraController, CameraUniform};
+use crate::cgi::light::LightUniform;
+use crate::cgi::model::{Model};
+use crate::cgi::model::{self, Vertex};
+use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -435,6 +435,7 @@ impl State {
         }
     }
 
+    // TODO: Fix resize aspect ratio issue, I suspect camera aspect is not updated on resize
     pub fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
@@ -492,11 +493,11 @@ impl State {
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-            use crate::model::DrawLight;
+            use model::DrawLight;
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(&self.obj_model, &self.camera_bind_group, &self.light_bind_group);
 
-            use crate::model::DrawModel;
+            use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
                 &self.obj_model,

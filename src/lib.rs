@@ -9,13 +9,8 @@ use winit::{
     window::Window,
 };
 
-mod camera;
-mod light;
-mod material;
-mod model;
-mod resources;
+mod cgi;
 mod state;
-mod texture;
 
 pub struct App {
     state: Option<State>,
