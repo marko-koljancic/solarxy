@@ -204,7 +204,6 @@ where
     }
 }
 
-// model.rs
 pub trait DrawLight<'a> {
     fn draw_light_mesh(
         &mut self,

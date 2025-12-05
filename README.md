@@ -14,14 +14,14 @@ The renderer uses WebGPU for cross-platform GPU acceleration and Rust for core l
 
 ## Getting started
 
-- Browser (WASM): build to WebAssembly and serve with a static file server;
+- [::: REMOVE :::] Browser (WASM): build to WebAssembly and serve with a static file server;
   requires a WebGPU-capable browser
 - Native: build and run with Cargo (Rust and wgpu backends)
 
 ## Development
 
-- Core in Rust, rendering via wgpu (WebGPU abstraction)
-- Minimal JS/HTML bootstrap for the WASM target
+- [::: REMOVE :::] Core in Rust, rendering via wgpu (WebGPU abstraction)
+- [::: REMOVE :::] Minimal JS/HTML bootstrap for the WASM target
 - Tests and validation suites included (cargo test)
 
 ## License
