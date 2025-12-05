@@ -65,28 +65,6 @@ pub async fn load_model(
     for m in obj_materials? {
         let diffuse_texture = load_texture(m.diffuse_texture.as_deref().unwrap_or(""), false, device, queue).await?;
         let normal_texture = load_texture(m.normal_texture.as_deref().unwrap_or(""), true, device, queue).await?;
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
-                },
-            ],
-            label: None,
-        });
 
         materials.push(material::Material::new(
             device,
