@@ -1,12 +1,5 @@
-use crate::state::State;
-use std::sync::Arc;
-use wgpu::SurfaceError;
 use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
+    keyboard::{KeyCode},
 };
 
 #[rustfmt::skip]

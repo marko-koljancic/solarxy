@@ -40,12 +40,7 @@ impl ApplicationHandler<State> for App {
         self.state = Some(event);
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
         let state = match &mut self.state {
             Some(canvas) => canvas,
             None => return,
@@ -69,16 +64,10 @@ impl ApplicationHandler<State> for App {
                                     event_loop.exit();
                                 }
                                 SurfaceError::Timeout => {
-                                    log::warn!(
-                                        "Surface timeout when rendering: {:?}",
-                                        surface_error
-                                    );
+                                    log::warn!("Surface timeout when rendering: {:?}", surface_error);
                                 }
                                 other => {
-                                    log::error!(
-                                        "Unhandled surface error when rendering: {:?}",
-                                        other
-                                    );
+                                    log::error!("Unhandled surface error when rendering: {:?}", other);
                                 }
                             }
                         } else {
