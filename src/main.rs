@@ -1,4 +1,4 @@
-use Solarxy::run;
+use solarxy::run;
 
 fn main() {
     println!("::: Solarxy starting :::");
