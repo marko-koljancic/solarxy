@@ -14,11 +14,15 @@ use winit::{
 
 pub struct App {
     state: Option<State>,
+    model_path: String,
 }
 
 impl App {
-    pub fn new() -> Self {
-        Self { state: None }
+    pub fn new(model_path: String) -> Self {
+        Self {
+            state: None,
+            model_path,
+        }
     }
 }
 
@@ -26,7 +30,7 @@ impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes();
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        self.state = Some(pollster::block_on(State::new(window)).unwrap());
+        self.state = Some(pollster::block_on(State::new(window, self.model_path.clone())).unwrap());
     }
 
     #[allow(unused_mut)]
@@ -93,9 +97,9 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-pub fn run_viewer() -> anyhow::Result<()> {
+pub fn run_viewer(model_path: String) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new();
+    let mut app = App::new(model_path);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

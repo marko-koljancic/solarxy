@@ -24,7 +24,7 @@ pub struct Args {
     pub mode: OperationMode,
 }
 
-#[derive(Clone, clap::ValueEnum)]
+#[derive(Clone, clap::ValueEnum, PartialEq)]
 pub enum OperationMode {
     View = 0,
     Analyze = 1,

@@ -107,10 +107,11 @@ pub struct State {
     light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
     pub window: Arc<Window>,
+    pub model_path: String,
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, model_path: String) -> anyhow::Result<Self> {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -414,6 +415,7 @@ impl State {
             light_render_pipeline,
             light_bind_group,
             window,
+            model_path,
         })
     }
 
