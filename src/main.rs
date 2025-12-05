@@ -1,6 +1,7 @@
 use clap::Parser;
-use crate::cli::parser::Args;
+use crate::cli::parser::{Args, OperationMode};
 use solarxy::run_viewer;
+use std::fs;
 
 mod cli;
 
@@ -10,11 +11,17 @@ fn main() {
     println!("Model path >>> {}", args.model_path.display());
     println!("Operation mode >>> {:?}", args.mode);
 
-    if args.mode == cli::parser::OperationMode::View {
-        println!("Analyze mode is not yet implemented.");
-        return;
+    if args.mode == cli::parser::OperationMode::Analyze {
+        todo!("Implement analyze mode");
     }
 
-    let model_path = args.model_path.to_string_lossy().to_string();
-    run_viewer(model_path).unwrap();
+    match args.mode {
+        OperationMode::View => {
+            let model_path_buff = fs::canonicalize(&args.model_path).expect("Failed to canonicalize the model path");
+            let model_path = model_path_buff.to_string_lossy().to_string();
+
+            run_viewer(model_path).unwrap();
+        }
+        OperationMode::Analyze => todo!("Implement analyze mode"),
+    }
 }

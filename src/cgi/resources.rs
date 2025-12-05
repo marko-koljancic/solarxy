@@ -13,11 +13,11 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     Ok(txt)
 }
 
-pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary(file_path: &str) -> anyhow::Result<Vec<u8>> {
     let data = {
         // TODO: Change path to relative path once resources are bundled correctly, take cli args path
         let path =
-            std::path::Path::new("/Users/marko-koljancic/Documents/_dev/solarxy/res/models/cube").join(file_name);
+            std::path::Path::new("/Users/marko-koljancic/Documents/_dev/solarxy/res/models/cube").join(file_path);
         std::fs::read(path)?
     };
 
@@ -25,22 +25,23 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 pub async fn load_texture(
-    file_name: &str,
+    file_path: &str,
     is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<texture::Texture> {
-    let data = load_binary(file_name).await?;
-    texture::Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
+    let data = load_binary(file_path).await?;
+    texture::Texture::from_bytes(device, queue, &data, file_path, is_normal_map)
 }
 
 pub async fn load_model(
-    file_name: &str,
+    file_path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<model::Model> {
-    let obj_text = load_string(file_name).await?;
+    println!("Loading model from path: {}", file_path);
+    let obj_text = load_string(file_path).await?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
@@ -148,18 +149,18 @@ pub async fn load_model(
             }
 
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                label: Some(&format!("{:?} Vertex Buffer", file_path)),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
             let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Index Buffer", file_name)),
+                label: Some(&format!("{:?} Index Buffer", file_path)),
                 contents: bytemuck::cast_slice(&m.mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
 
             model::Mesh {
-                name: file_name.to_string(),
+                name: file_path.to_string(),
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
