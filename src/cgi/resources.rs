@@ -1,12 +1,11 @@
 use std::io::{BufReader, Cursor};
+use tobj::LoadError;
 use wgpu::util::DeviceExt;
 use super::{material, texture, model};
 
-pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
+pub async fn load_string(file_path: &str) -> anyhow::Result<String> {
     let txt = {
-        // TODO: Change path to relative path once resources are bundled correctly, take cli args path
-        let path =
-            std::path::Path::new("/Users/marko-koljancic/Documents/_dev/solarxy/res/models/cube").join(file_name);
+        let path = std::path::Path::new(file_path);
         std::fs::read_to_string(path)?
     };
 
@@ -15,9 +14,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
 
 pub async fn load_binary(file_path: &str) -> anyhow::Result<Vec<u8>> {
     let data = {
-        // TODO: Change path to relative path once resources are bundled correctly, take cli args path
-        let path =
-            std::path::Path::new("/Users/marko-koljancic/Documents/_dev/solarxy/res/models/cube").join(file_path);
+        let path = std::path::Path::new(file_path);
         std::fs::read(path)?
     };
 
@@ -45,6 +42,12 @@ pub async fn load_model(
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
+    // Get the directory containing the .obj file for resolving relative material paths
+    let obj_dir = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+
     // TODO: Fix use of depricated function
     let (models, obj_materials) = tobj::load_obj_buf_async(
         &mut obj_reader,
@@ -53,17 +56,34 @@ pub async fn load_model(
             single_index: true,
             ..Default::default()
         },
-        |p| async move {
-            let mat_text = load_string(&p).await.unwrap();
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+        |p| {
+            let value = obj_dir.clone();
+            async move {
+                let mat_path = std::path::Path::new(&value).join(&p);
+                let mat_text = load_string(&mat_path.to_string_lossy())
+                    .await
+                    .map_err(|_| LoadError::ReadError)?;
+                tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+            }
         },
     )
     .await?;
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(m.diffuse_texture.as_deref().unwrap_or(""), false, device, queue).await?;
-        let normal_texture = load_texture(m.normal_texture.as_deref().unwrap_or(""), true, device, queue).await?;
+        let diffuse_path = m
+            .diffuse_texture
+            .as_deref()
+            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string())
+            .unwrap_or_default();
+        let normal_path = m
+            .normal_texture
+            .as_deref()
+            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let diffuse_texture = load_texture(&diffuse_path, false, device, queue).await?;
+        let normal_texture = load_texture(&normal_path, true, device, queue).await?;
 
         materials.push(material::Material::new(
             device,
