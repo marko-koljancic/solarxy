@@ -70,10 +70,7 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        // TODO: Remove debugging logs
-        println!("Material: {}", m.name);
-        println!("  Diffuse texture: {:?}", m.diffuse_texture);
-        println!("  Normal texture: {:?}", m.normal_texture);
+        println!("Material: {:#?}", m);
 
         let diffuse_path = m
             .diffuse_texture
@@ -105,10 +102,7 @@ pub async fn load_model(
             Some(path) if !path.is_empty() => load_texture(&path, true, device, queue)
                 .await
                 .unwrap_or_else(|_| create_default_texture(device, queue, true)),
-            _ => {
-                println!("  Using default normal texture");
-                create_default_texture(device, queue, true)
-            }
+            _ => create_default_texture(device, queue, true),
         };
 
         materials.push(material::Material::new(

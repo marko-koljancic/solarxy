@@ -2,6 +2,7 @@ use crate::cgi::camera::{Camera, CameraController, CameraUniform};
 use crate::cgi::light::LightUniform;
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
+use crate::cgi::texture::Texture;
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
@@ -103,7 +104,7 @@ pub struct State {
     depth_texture: texture::Texture,
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
-    obj_model: Model,
+    model: Model,
     light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
     pub window: Arc<Window>,
@@ -163,11 +164,6 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        // TODO: Load and use uv checker texture bundled with package, currently not used
-        let diffuse_bytes = include_bytes!("../res/textures/uv-checker_4k.png");
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "uv-checker_4k.png", false).unwrap();
-
         let texture_binding_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -206,6 +202,12 @@ impl State {
             label: Some("texture_binding_group_layout"),
         });
 
+        let model = resources::load_model(&model_path, &device, &queue, &texture_binding_group_layout)
+            .await
+            .unwrap();
+
+        let diffuse_texture = &model.materials[0].diffuse_texture;
+
         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_binding_group_layout,
             entries: &[
@@ -230,10 +232,6 @@ impl State {
         });
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
-
-        let obj_model = resources::load_model(&model_path, &device, &queue, &texture_binding_group_layout)
-            .await
-            .unwrap();
 
         let camera = Camera {
             eye: (0.0, 5.0, 10.0).into(),
@@ -405,7 +403,7 @@ impl State {
             light_uniform,
             light_buffer,
             depth_texture,
-            obj_model,
+            model,
             light_render_pipeline,
             light_bind_group,
             window,
@@ -489,12 +487,12 @@ impl State {
 
             use model::DrawLight;
             render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(&self.obj_model, &self.camera_bind_group, &self.light_bind_group);
+            render_pass.draw_light_model(&self.model, &self.camera_bind_group, &self.light_bind_group);
 
             use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.obj_model,
+                &self.model,
                 0..self.instances.len() as u32,
                 &self.camera_bind_group,
                 &self.light_bind_group,
