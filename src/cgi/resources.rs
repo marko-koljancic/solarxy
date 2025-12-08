@@ -42,7 +42,6 @@ pub async fn load_model(
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    // Get the directory containing the .obj file for resolving relative material paths
     let obj_dir = std::path::Path::new(file_path)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
