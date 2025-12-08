@@ -2,7 +2,6 @@ use crate::cgi::camera::{Camera, CameraController, CameraUniform};
 use crate::cgi::light::LightUniform;
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
-use crate::cgi::texture::Texture;
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
@@ -99,7 +98,6 @@ pub struct State {
     camera_buffer: wgpu::Buffer,
     camera_controller: CameraController,
     camera_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     light_uniform: LightUniform,
@@ -277,30 +275,34 @@ impl State {
 
         let camera_controller = CameraController::new(0.2);
 
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        // const SPACE_BETWEEN: f32 = 3.0;
+        // let instances = (0..NUM_INSTANCES_PER_ROW)
+        //     .flat_map(|z| {
+        //         (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+        //             let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        //             let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
+        //             let position = cgmath::Vector3 { x, y: 0.0, z };
 
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
-                    };
+        //             let rotation = if position.is_zero() {
+        //                 cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+        //             } else {
+        //                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
+        //             };
 
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
+        //             Instance { position, rotation }
+        //         })
+        //     })
+        //     .collect::<Vec<_>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance = Instance {
+            position: cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+            rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
+        };
+
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
+            contents: bytemuck::cast_slice(&[instance.to_raw()]),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -398,7 +400,6 @@ impl State {
             camera_buffer,
             camera_bind_group,
             camera_controller,
-            instances,
             instance_buffer,
             light_uniform,
             light_buffer,
@@ -491,12 +492,7 @@ impl State {
 
             use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw_model_instanced(
-                &self.model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            render_pass.draw_model_instanced(&self.model, 0..1, &self.camera_bind_group, &self.light_bind_group);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
