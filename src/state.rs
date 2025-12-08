@@ -2,6 +2,7 @@ use crate::cgi::camera::{Camera, CameraController, CameraUniform};
 use crate::cgi::light::LightUniform;
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
+use crate::cgi::light;
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
@@ -465,7 +466,7 @@ impl State {
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-            use model::DrawLight;
+            use light::DrawLight;
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(&self.model, &self.camera_bind_group, &self.light_bind_group);
 
