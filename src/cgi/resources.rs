@@ -70,19 +70,46 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
+        // TODO: Remove debugging logs
+        println!("Material: {}", m.name);
+        println!("  Diffuse texture: {:?}", m.diffuse_texture);
+        println!("  Normal texture: {:?}", m.normal_texture);
+
         let diffuse_path = m
             .diffuse_texture
             .as_deref()
-            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string())
-            .unwrap_or_default();
-        let normal_path = m
-            .normal_texture
-            .as_deref()
-            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string())
-            .unwrap_or_default();
+            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string());
 
-        let diffuse_texture = load_texture(&diffuse_path, false, device, queue).await?;
-        let normal_texture = load_texture(&normal_path, true, device, queue).await?;
+        let normal_path = m.normal_texture.as_deref().map(|p| {
+            // Strip out map_Bump parameters like "-bm 1.000000"
+            let cleaned = p
+                .split_whitespace()
+                .filter(|s| !s.starts_with('-'))
+                .collect::<Vec<_>>()
+                .join(" ");
+            std::path::Path::new(&obj_dir)
+                .join(cleaned)
+                .to_string_lossy()
+                .to_string()
+        });
+
+        let diffuse_texture = match diffuse_path {
+            Some(path) if !path.is_empty() => load_texture(&path, false, device, queue).await.unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
+                create_default_texture(device, queue, false)
+            }),
+            _ => create_default_texture(device, queue, false),
+        };
+
+        let normal_texture = match normal_path {
+            Some(path) if !path.is_empty() => load_texture(&path, true, device, queue)
+                .await
+                .unwrap_or_else(|_| create_default_texture(device, queue, true)),
+            _ => {
+                println!("  Using default normal texture");
+                create_default_texture(device, queue, true)
+            }
+        };
 
         materials.push(material::Material::new(
             device,
@@ -103,7 +130,11 @@ pub async fn load_model(
                         m.mesh.positions[i * 3 + 1],
                         m.mesh.positions[i * 3 + 2],
                     ],
-                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]],
+                    tex_coords: if m.mesh.texcoords.is_empty() {
+                        [0.0, 0.0]
+                    } else {
+                        [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]]
+                    },
                     normal: [
                         m.mesh.normals[i * 3],
                         m.mesh.normals[i * 3 + 1],
@@ -189,4 +220,17 @@ pub async fn load_model(
         .collect::<Vec<_>>();
 
     Ok(model::Model { meshes, materials })
+}
+
+fn create_default_texture(device: &wgpu::Device, queue: &wgpu::Queue, is_normal_map: bool) -> texture::Texture {
+    let color = if is_normal_map {
+        image::Rgba([128u8, 128, 255, 255])
+    } else {
+        image::Rgba([255u8, 255, 255, 255])
+    };
+
+    let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, color));
+
+    texture::Texture::from_image(device, queue, &img, Some("default_texture"), is_normal_map)
+        .expect("Failed to create default texture")
 }
