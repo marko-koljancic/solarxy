@@ -21,196 +21,146 @@ impl ModelAnalyzer {
         })
     }
 
-    pub fn run_analysis(&self) {
-        self.print_header();
-        self.print_model_summary();
-        self.print_mesh_details();
-        self.print_material_details();
-        self.print_footer();
-    }
+    pub fn generate_report(&self) -> String {
+        let mut output = String::new();
 
-    fn print_header(&self) {
-        println!("\n{}", "=".repeat(80));
-        println!("{:^80}", "MODEL ANALYSIS REPORT");
-        println!("{}", "=".repeat(80));
-    }
-
-    fn print_footer(&self) {
-        println!("{}", "=".repeat(80));
-        println!();
-    }
-
-    fn print_model_summary(&self) {
-        println!("\n┌─ MODEL OVERVIEW {}", "─".repeat(62));
-        println!("│");
-        println!("│  Model Name:       {}", self.model_name);
-        println!("│  Mesh Count:       {}", self.meshes.len());
-        println!("│  Material Count:   {}", self.materials.len());
+        output.push_str("MODEL OVERVIEW\n\n");
+        output.push_str(&format!("Model Name:       {}\n", self.model_name));
+        output.push_str(&format!("Mesh Count:       {}\n", self.meshes.len()));
+        output.push_str(&format!("Material Count:   {}\n", self.materials.len()));
 
         let total_vertices: usize = self.meshes.iter().map(|m| m.positions.len() / 3).sum();
         let total_indices: usize = self.meshes.iter().map(|m| m.indices.len()).sum();
         let total_triangles: usize = self.meshes.iter().map(|m| m.indices.len() / 3).sum();
 
-        println!("│  Total Vertices:   {}", format_number(total_vertices));
-        println!("│  Total Indices:    {}", format_number(total_indices));
-        println!("│  Total Triangles:  {}", format_number(total_triangles));
-        println!("│");
-        println!("└{}", "─".repeat(79));
-    }
+        output.push_str(&format!("Total Vertices:   {}\n", format_number(total_vertices)));
+        output.push_str(&format!("Total Indices:    {}\n", format_number(total_indices)));
+        output.push_str(&format!("Total Triangles:  {}\n", format_number(total_triangles)));
 
-    fn print_mesh_details(&self) {
-        if self.meshes.is_empty() {
-            return;
-        }
+        if !self.meshes.is_empty() {
+            output.push_str("\n\nMESH DETAILS\n\n");
 
-        println!("\n┌─ MESH DETAILS {}", "─".repeat(64));
-        println!("│");
+            for (i, mesh) in self.meshes.iter().enumerate() {
+                let vertex_count = mesh.positions.len() / 3;
+                let index_count = mesh.indices.len();
+                let triangle_count = index_count / 3;
+                let normal_count = mesh.normals.len() / 3;
+                let texcoord_count = mesh.texcoords.len() / 2;
 
-        for (i, mesh) in self.meshes.iter().enumerate() {
-            let vertex_count = mesh.positions.len() / 3;
-            let index_count = mesh.indices.len();
-            let triangle_count = index_count / 3;
-            let normal_count = mesh.normals.len() / 3;
-            let texcoord_count = mesh.texcoords.len() / 2;
+                output.push_str(&format!("Mesh [{}]:\n", i));
+                output.push_str(&format!("  Vertices:        {}\n", format_number(vertex_count)));
+                output.push_str(&format!("  Indices:         {}\n", format_number(index_count)));
+                output.push_str(&format!("  Triangles:       {}\n", format_number(triangle_count)));
+                output.push_str(&format!(
+                    "  Normals:         {} {}\n",
+                    format_number(normal_count),
+                    if normal_count == vertex_count { "✓" } else { "⚠" }
+                ));
+                output.push_str(&format!(
+                    "  Texture Coords:  {} {}\n",
+                    format_number(texcoord_count),
+                    if texcoord_count == vertex_count {
+                        "✓"
+                    } else if texcoord_count == 0 {
+                        "✗"
+                    } else {
+                        "⚠"
+                    }
+                ));
 
-            println!("│  [{:3}] Mesh Statistics:", i);
-            println!("│       ├─ Vertices:        {:>10}", format_number(vertex_count));
-            println!("│       ├─ Indices:         {:>10}", format_number(index_count));
-            println!("│       ├─ Triangles:       {:>10}", format_number(triangle_count));
-            println!(
-                "│       ├─ Normals:         {:>10} {}",
-                format_number(normal_count),
-                if normal_count == vertex_count { "✓" } else { "⚠" }
-            );
-            println!(
-                "│       ├─ Texture Coords:  {:>10} {}",
-                format_number(texcoord_count),
-                if texcoord_count == vertex_count {
-                    "✓"
-                } else if texcoord_count == 0 {
-                    "✗"
+                if let Some(mat_id) = mesh.material_id {
+                    if mat_id < self.materials.len() {
+                        output.push_str(&format!(
+                            "  Material:        '{}' (ID: {})\n",
+                            self.materials[mat_id].name, mat_id
+                        ));
+                    } else {
+                        output.push_str(&format!("  Material:        Invalid ID: {}\n", mat_id));
+                    }
                 } else {
-                    "⚠"
+                    output.push_str("  Material:        None\n");
                 }
-            );
 
-            // Material reference
-            if let Some(mat_id) = mesh.material_id {
-                if mat_id < self.materials.len() {
-                    println!(
-                        "│       └─ Material:        '{}' (ID: {})",
-                        self.materials[mat_id].name, mat_id
-                    );
-                } else {
-                    println!("│       └─ Material:        Invalid ID: {}", mat_id);
+                if i < self.meshes.len() - 1 {
+                    output.push_str("\n");
                 }
-            } else {
-                println!("│       └─ Material:        None");
-            }
-
-            if i < self.meshes.len() - 1 {
-                println!("│");
             }
         }
 
-        println!("│");
-        println!("└{}", "─".repeat(79));
-    }
-
-    fn print_material_details(&self) {
         if self.materials.is_empty() {
-            println!("\n┌─ MATERIALS {}", "─".repeat(67));
-            println!("│");
-            println!("│  No materials found (.mtl file not provided or empty)");
-            println!("│");
-            println!("└{}", "─".repeat(79));
-            return;
-        }
+            output.push_str("\n\nMATERIALS\n\n");
+            output.push_str("No materials found (.mtl file not provided or empty)\n");
+        } else {
+            output.push_str("\n\nMATERIAL DETAILS\n\n");
 
-        println!("\n┌─ MATERIAL DETAILS {}", "─".repeat(60));
-        println!("│");
+            for (i, mat) in self.materials.iter().enumerate() {
+                output.push_str(&format!("Material [{}]: '{}'\n", i, mat.name));
+                output.push_str(&format!(
+                    "  Ambient:  [{:.3}, {:.3}, {:.3}]\n",
+                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[0],
+                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[1],
+                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[2]
+                ));
+                output.push_str(&format!(
+                    "  Diffuse:  [{:.3}, {:.3}, {:.3}]\n",
+                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[0],
+                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[1],
+                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[2]
+                ));
+                output.push_str(&format!(
+                    "  Specular: [{:.3}, {:.3}, {:.3}]\n",
+                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[0],
+                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[1],
+                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[2]
+                ));
 
-        for (i, mat) in self.materials.iter().enumerate() {
-            println!("│  [{:3}] Material: '{}'", i, mat.name);
-            println!(
-                "│       ├─ Ambient:  [{:.3}, {:.3}, {:.3}]",
-                mat.ambient.unwrap_or([0.0, 0.0, 0.0])[0],
-                mat.ambient.unwrap_or([0.0, 0.0, 0.0])[1],
-                mat.ambient.unwrap_or([0.0, 0.0, 0.0])[2]
-            );
-            println!(
-                "│       ├─ Diffuse:  [{:.3}, {:.3}, {:.3}]",
-                mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[0],
-                mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[1],
-                mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[2]
-            );
-            println!(
-                "│       ├─ Specular: [{:.3}, {:.3}, {:.3}]",
-                mat.specular.unwrap_or([0.0, 0.0, 0.0])[0],
-                mat.specular.unwrap_or([0.0, 0.0, 0.0])[1],
-                mat.specular.unwrap_or([0.0, 0.0, 0.0])[2]
-            );
+                if let Some(shininess) = mat.shininess {
+                    output.push_str(&format!("  Shininess: {:.3}\n", shininess));
+                }
+                if let Some(dissolve) = mat.dissolve {
+                    output.push_str(&format!("  Dissolve (opacity): {:.3}\n", dissolve));
+                }
+                if let Some(optical_density) = mat.optical_density {
+                    output.push_str(&format!("  Optical Density: {:.3}\n", optical_density));
+                }
 
-            if let Some(shininess) = mat.shininess {
-                println!("│       ├─ Shininess: {:.3}", shininess);
-            }
+                output.push_str("  Textures:\n");
 
-            if let Some(dissolve) = mat.dissolve {
-                println!("│       ├─ Dissolve (opacity): {:.3}", dissolve);
-            }
+                let mut has_textures = false;
 
-            if let Some(optical_density) = mat.optical_density {
-                println!("│       ├─ Optical Density: {:.3}", optical_density);
-            }
-
-            // Texture maps
-            println!("│       └─ Textures:");
-
-            let mut has_textures = false;
-
-            if let Some(ref tex) = mat.diffuse_texture {
-                println!("│          ├─ Diffuse:         '{}'", tex);
-                has_textures = true;
-            }
-
-            if let Some(ref tex) = mat.ambient_texture {
-                println!("│          ├─ Ambient:         '{}'", tex);
-                has_textures = true;
-            }
-
-            if let Some(ref tex) = mat.specular_texture {
-                println!("│          ├─ Specular:        '{}'", tex);
-                has_textures = true;
-            }
-
-            if let Some(ref tex) = mat.normal_texture {
-                println!("│          ├─ Normal:          '{}'", tex);
-                has_textures = true;
-            }
-
-            if let Some(ref tex) = mat.shininess_texture {
-                println!("│          ├─ Shininess:       '{}'", tex);
-                has_textures = true;
-            }
-
-            if let Some(ref tex) = mat.dissolve_texture {
-                println!("│          ├─ Dissolve:        '{}'", tex);
-                has_textures = true;
-            }
-
-            if !has_textures {
-                println!("│          └─ None");
-            } else {
-                println!("│          └─ [End of textures]");
-            }
-
-            if i < self.materials.len() - 1 {
-                println!("│");
+                if let Some(ref tex) = mat.diffuse_texture {
+                    output.push_str(&format!("    Diffuse:         '{}'\n", tex));
+                    has_textures = true;
+                }
+                if let Some(ref tex) = mat.ambient_texture {
+                    output.push_str(&format!("    Ambient:         '{}'\n", tex));
+                    has_textures = true;
+                }
+                if let Some(ref tex) = mat.specular_texture {
+                    output.push_str(&format!("    Specular:        '{}'\n", tex));
+                    has_textures = true;
+                }
+                if let Some(ref tex) = mat.normal_texture {
+                    output.push_str(&format!("    Normal:          '{}'\n", tex));
+                    has_textures = true;
+                }
+                if let Some(ref tex) = mat.shininess_texture {
+                    output.push_str(&format!("    Shininess:       '{}'\n", tex));
+                    has_textures = true;
+                }
+                if let Some(ref tex) = mat.dissolve_texture {
+                    output.push_str(&format!("    Dissolve:        '{}'\n", tex));
+                    has_textures = true;
+                }
+                if !has_textures {
+                    output.push_str("    None\n");
+                }
+                if i < self.materials.len() - 1 {
+                    output.push_str("\n");
+                }
             }
         }
-
-        println!("│");
-        println!("└{}", "─".repeat(79));
+        output
     }
 }
 
