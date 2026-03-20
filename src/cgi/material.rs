@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub struct Material {
     pub name: String,
     pub diffuse_texture: super::texture::Texture,

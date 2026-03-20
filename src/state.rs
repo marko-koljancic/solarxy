@@ -723,8 +723,8 @@ impl State {
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.0,
+                    constant: -2,
+                    slope_scale: -2.0,
                     clamp: 0.0,
                 },
             }),
