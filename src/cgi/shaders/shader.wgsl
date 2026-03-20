@@ -27,8 +27,10 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
     @location(1) tangent_position: vec3<f32>,
-    @location(2) tangent_light_position: vec3<f32>,
-    @location(3) tangent_view_position: vec3<f32>,
+    @location(2) tangent_view_position: vec3<f32>,
+    @location(3) tbn_col0: vec3<f32>,
+    @location(4) tbn_col1: vec3<f32>,
+    @location(5) tbn_col2: vec3<f32>,
 };
 
 @vertex
@@ -65,7 +67,9 @@ fn vs_main(
     out.tex_coords = model.tex_coords;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_light_position = tangent_matrix * light.position;
+    out.tbn_col0 = tangent_matrix[0];
+    out.tbn_col1 = tangent_matrix[1];
+    out.tbn_col2 = tangent_matrix[2];
     return out;
 }
 
@@ -78,33 +82,36 @@ var t_normal: texture_2d<f32>;
 @group(0) @binding(3)
 var s_normal: sampler;
 
-struct Light {
-    position: vec3<f32>,
-    color: vec3<f32>,
+struct LightEntry {
+    position: vec3<f32>,  // bytes 0-11; WGSL pads to 16 before next vec3
+    color: vec3<f32>,     // bytes 16-27
+    intensity: f32,       // bytes 28-31
 }
+struct LightsUniform { lights: array<LightEntry, 3>, }
 @group(2) @binding(0)
-var<uniform> light: Light;
+var<uniform> lights: LightsUniform;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, in.tex_coords);
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
 
-    let ambient_strength = 0.1;
-    let ambient_color = light.color * ambient_strength;
-
+    let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-    let light_dir = normalize(in.tangent_light_position - in.tangent_position);
-    let view_dir = normalize(in.tangent_view_position - in.tangent_position);
-    let half_dir = normalize(view_dir + light_dir);
 
-    let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
-    let diffuse_color = light.color * diffuse_strength;
+    let ambient = lights.lights[0].color * lights.lights[0].intensity * 0.1;
 
+    var accumulated = vec3<f32>(0.0);
+    for (var i = 0u; i < 3u; i++) {
+        let light_dir = normalize(tbn * lights.lights[i].position - in.tangent_position);
+        let view_dir = normalize(in.tangent_view_position - in.tangent_position);
+        let half_dir = normalize(view_dir + light_dir);
+        let diff = max(dot(tangent_normal, light_dir), 0.0);
+        let spec = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
+        let i_f = lights.lights[i].intensity;
+        accumulated += (lights.lights[i].color * diff + lights.lights[i].color * spec) * i_f;
+    }
 
-    let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
-    let specular_color = specular_strength * light.color;
-
-    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let result = (ambient + accumulated) * object_color.xyz;
     return vec4<f32>(result, object_color.a);
 }

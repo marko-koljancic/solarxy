@@ -268,6 +268,61 @@ pub async fn load_model(
     Ok(model::Model { meshes, materials, bounds })
 }
 
+pub fn create_sphere_mesh(device: &wgpu::Device, radius: f32, rings: u32, segments: u32, name: &str) -> model::Mesh {
+    use std::f32::consts::PI;
+
+    let mut vertices = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for i in 0..=rings {
+        let theta = PI * i as f32 / rings as f32;
+        for j in 0..=segments {
+            let phi = 2.0 * PI * j as f32 / segments as f32;
+            let x = radius * theta.sin() * phi.cos();
+            let y = radius * theta.cos();
+            let z = radius * theta.sin() * phi.sin();
+            vertices.push(model::ModelVertex {
+                position: [x, y, z],
+                tex_coords: [j as f32 / segments as f32, i as f32 / rings as f32],
+                normal: [x / radius, y / radius, z / radius],
+                tangent: [0.0; 3],
+                bitangent: [0.0; 3],
+            });
+        }
+    }
+
+    for i in 0..rings {
+        for j in 0..segments {
+            let row = i * (segments + 1);
+            let next_row = (i + 1) * (segments + 1);
+            let a = row + j;
+            let b = row + j + 1;
+            let c = next_row + j;
+            let d = next_row + j + 1;
+            indices.extend_from_slice(&[a, b, d, a, d, c]);
+        }
+    }
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{} Vertex Buffer", name)),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("{} Index Buffer", name)),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    model::Mesh {
+        name: name.to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    }
+}
+
 fn create_default_texture_colored(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> texture::Texture {
     let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)

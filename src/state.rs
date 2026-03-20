@@ -1,5 +1,5 @@
 use crate::cgi::camera::{camera_from_bounds, Camera, CameraController, CameraUniform};
-use crate::cgi::light::LightUniform;
+use crate::cgi::light::{LightsUniform, LightEntry};
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
 use crate::cgi::light;
@@ -100,9 +100,10 @@ pub struct State {
     camera_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
-    light_uniform: LightUniform,
+    lights_uniform: LightsUniform,
     light_buffer: wgpu::Buffer,
     model: Model,
+    sphere_mesh: model::Mesh,
     light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
     pub window: Arc<Window>,
@@ -278,16 +279,17 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let light_uniform = LightUniform {
-            position: [2.0, 2.0, 2.0],
-            pos_padding: 0,
-            color: [1.0, 1.0, 1.0],
-            color_padding: 0,
+        let lights_uniform = LightsUniform {
+            lights: [
+                LightEntry { position: [ 2.0,  3.0,  2.0], _pad0: 0.0, color: [1.0, 0.95, 0.85], intensity: 1.0  }, // key
+                LightEntry { position: [-2.0,  1.5,  2.0], _pad0: 0.0, color: [0.7, 0.80, 1.00], intensity: 0.5  }, // fill
+                LightEntry { position: [ 0.0,  2.0, -3.0], _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.75 }, // rim
+            ],
         };
 
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
+            contents: bytemuck::cast_slice(&[lights_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -359,6 +361,8 @@ impl State {
             )
         };
 
+        let sphere_mesh = resources::create_sphere_mesh(&device, 1.0, 8, 16, "light_sphere");
+
         Ok(Self {
             surface,
             device,
@@ -373,10 +377,11 @@ impl State {
             camera_bind_group,
             camera_controller,
             instance_buffer,
-            light_uniform,
+            lights_uniform,
             light_buffer,
             depth_texture,
             model,
+            sphere_mesh,
             light_render_pipeline,
             light_bind_group,
             window,
@@ -421,12 +426,6 @@ impl State {
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
-
-        let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0)) * old_position).into();
-        self.queue
-            .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_uniform]));
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -473,7 +472,7 @@ impl State {
 
             use light::DrawLight;
             render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(&self.model, &self.camera_bind_group, &self.light_bind_group);
+            render_pass.draw_light_mesh_instanced(&self.sphere_mesh, 0..3, &self.camera_bind_group, &self.light_bind_group);
 
             use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);

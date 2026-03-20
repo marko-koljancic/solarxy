@@ -5,12 +5,14 @@ struct Camera {
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
-struct Light {
-    position: vec3<f32>,
-    color: vec3<f32>,
+struct LightEntry {
+    position: vec3<f32>,  // bytes 0-11; WGSL pads to 16 before next vec3
+    color: vec3<f32>,     // bytes 16-27
+    intensity: f32,       // bytes 28-31
 }
+struct LightsUniform { lights: array<LightEntry, 3>, }
 @group(1) @binding(0)
-var<uniform> light: Light;
+var<uniform> lights: LightsUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -24,8 +26,10 @@ struct VertexOutput {
 @vertex
 fn vs_main(
     model: VertexInput,
+    @builtin(instance_index) idx: u32,
 ) -> VertexOutput {
-    let scale = 0.25;
+    let light = lights.lights[idx];
+    let scale = 0.1;
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + light.position, 1.0);
     out.color = light.color;
