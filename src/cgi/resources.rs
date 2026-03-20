@@ -37,7 +37,7 @@ pub async fn load_model(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> {
+) -> anyhow::Result<(model::Model, model::NormalsGeometry)> {
     println!("Loading model from path: {}", file_path);
     let obj_text = load_string(file_path).await?;
     let obj_cursor = Cursor::new(obj_text);
@@ -117,6 +117,9 @@ pub async fn load_model(
 
     let mut global_min = [f32::INFINITY; 3];
     let mut global_max = [f32::NEG_INFINITY; 3];
+
+    let mut vertex_lines: Vec<[f32; 3]> = Vec::new();
+    let mut face_lines: Vec<[f32; 3]> = Vec::new();
 
     let mut meshes = Vec::new();
     for m in models {
@@ -226,6 +229,50 @@ pub async fn load_model(
             }
         }
 
+        // Compute per-mesh normals lines
+        {
+            let mut mesh_min = [f32::INFINITY; 3];
+            let mut mesh_max = [f32::NEG_INFINITY; 3];
+            for v in &vertices {
+                for i in 0..3 {
+                    mesh_min[i] = mesh_min[i].min(v.position[i]);
+                    mesh_max[i] = mesh_max[i].max(v.position[i]);
+                }
+            }
+            let dx = mesh_max[0] - mesh_min[0];
+            let dy = mesh_max[1] - mesh_min[1];
+            let dz = mesh_max[2] - mesh_min[2];
+            let mesh_diagonal = (dx * dx + dy * dy + dz * dz).sqrt();
+            let scale = if mesh_diagonal > 1e-10 { mesh_diagonal * 0.05 } else { 0.1 };
+
+            for v in &vertices {
+                let nx = v.normal[0] * scale;
+                let ny = v.normal[1] * scale;
+                let nz = v.normal[2] * scale;
+                vertex_lines.push(v.position);
+                vertex_lines.push([v.position[0] + nx, v.position[1] + ny, v.position[2] + nz]);
+            }
+
+            for c in indices.chunks(3) {
+                let p0: cgmath::Vector3<f32> = vertices[c[0] as usize].position.into();
+                let p1: cgmath::Vector3<f32> = vertices[c[1] as usize].position.into();
+                let p2: cgmath::Vector3<f32> = vertices[c[2] as usize].position.into();
+                let edge1 = p1 - p0;
+                let edge2 = p2 - p0;
+                let face_normal = edge1.cross(edge2);
+                if face_normal.magnitude() > 1e-10 {
+                    let fn_norm = face_normal.normalize();
+                    let center = (p0 + p1 + p2) / 3.0;
+                    face_lines.push([center.x, center.y, center.z]);
+                    face_lines.push([
+                        center.x + fn_norm.x * scale,
+                        center.y + fn_norm.y * scale,
+                        center.z + fn_norm.z * scale,
+                    ]);
+                }
+            }
+        }
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{:?} Vertex Buffer", file_path)),
             contents: bytemuck::cast_slice(&vertices),
@@ -259,7 +306,7 @@ pub async fn load_model(
         max: cgmath::Point3::new(global_max[0], global_max[1], global_max[2]),
     };
 
-    Ok(model::Model { meshes, materials, bounds })
+    Ok((model::Model { meshes, materials, bounds }, model::NormalsGeometry { vertex_lines, face_lines }))
 }
 
 pub fn create_sphere_mesh(device: &wgpu::Device, radius: f32, rings: u32, segments: u32, name: &str) -> model::Mesh {
@@ -347,6 +394,37 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         num_elements: indices.len() as u32,
         material: 0,
     }
+}
+
+pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::Mesh, f32) {
+    let y = bounds.min.y - 0.001;
+    let he = bounds.diagonal() * 8.0;
+    let cell_size = bounds.diagonal() * 0.15;
+
+    let vertices: [[f32; 3]; 4] = [[-he, y, -he], [he, y, -he], [he, y, he], [-he, y, he]];
+    let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Grid Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Grid Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    (
+        model::Mesh {
+            name: "grid".to_string(),
+            vertex_buffer,
+            index_buffer,
+            num_elements: indices.len() as u32,
+            material: 0,
+        },
+        cell_size,
+    )
 }
 
 fn create_default_texture_colored(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> texture::Texture {

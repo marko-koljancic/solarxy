@@ -16,6 +16,20 @@ enum ViewMode {
     Ghosted,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum NormalsMode {
+    Off,
+    Face,
+    FaceAndVertex,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GridUniform {
+    cell_size: f32,
+    _pad: [f32; 3],
+}
+
 const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
     r: 0.4235,
     g: 0.4588,
@@ -138,6 +152,17 @@ pub struct State {
     ghosted_wire_pipeline: wgpu::RenderPipeline,
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
+    grid_mesh: model::Mesh,
+    grid_pipeline: wgpu::RenderPipeline,
+    grid_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    grid_uniform_buf: wgpu::Buffer,
+    normals_mode: NormalsMode,
+    normals_pipeline: wgpu::RenderPipeline,
+    vertex_normals_buf: wgpu::Buffer,
+    face_normals_buf: wgpu::Buffer,
+    vertex_normals_count: u32,
+    face_normals_count: u32,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -233,7 +258,7 @@ impl State {
             label: Some("texture_binding_group_layout"),
         });
 
-        let model = resources::load_model(&model_path, &device, &queue, &texture_binding_group_layout)
+        let (model, normals_geo) = resources::load_model(&model_path, &device, &queue, &texture_binding_group_layout)
             .await
             .unwrap();
 
@@ -737,6 +762,186 @@ impl State {
             cache: None,
         });
 
+        // Grid pipeline
+        let grid_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Grid Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let (grid_mesh, cell_size) = resources::create_grid_quad(&device, &model.bounds);
+        let grid_uniform = GridUniform { cell_size, _pad: [0.0; 3] };
+        let grid_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[grid_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Grid Bind Group"),
+            layout: &grid_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: grid_uniform_buf.as_entire_binding() },
+            ],
+        });
+        let grid_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Grid Pipeline Layout"),
+            bind_group_layouts: &[&grid_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Grid Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/grid.wgsl").into()),
+        });
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Grid Pipeline"),
+            layout: Some(&grid_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_shader,
+                entry_point: Some("vs_grid"),
+                buffers: &[model::LineVertex::description()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_shader,
+                entry_point: Some("fs_grid"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+            multiview: None,
+            cache: None,
+        });
+
+        // Normals pipeline
+        let normals_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Normals Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/normals.wgsl").into()),
+        });
+        let normals_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Normals Pipeline"),
+            layout: Some(&ghosted_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &normals_shader,
+                entry_point: Some("vs_normals"),
+                buffers: &[model::LineVertex::description()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &normals_shader,
+                entry_point: Some("fs_normals"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState {
+                        alpha: wgpu::BlendComponent::REPLACE,
+                        color: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+            multiview: None,
+            cache: None,
+        });
+
+        // Normals GPU buffers
+        let (vertex_normals_buf, vertex_normals_count) = if normals_geo.vertex_lines.is_empty() {
+            (
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Normals Buffer"),
+                    contents: &[0u8; 12],
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                0u32,
+            )
+        } else {
+            let count = normals_geo.vertex_lines.len() as u32;
+            (
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Normals Buffer"),
+                    contents: bytemuck::cast_slice(&normals_geo.vertex_lines),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                count,
+            )
+        };
+        let (face_normals_buf, face_normals_count) = if normals_geo.face_lines.is_empty() {
+            (
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Face Normals Buffer"),
+                    contents: &[0u8; 12],
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                0u32,
+            )
+        } else {
+            let count = normals_geo.face_lines.len() as u32;
+            (
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Face Normals Buffer"),
+                    contents: bytemuck::cast_slice(&normals_geo.face_lines),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                count,
+            )
+        };
+
         Ok(Self {
             surface,
             device,
@@ -769,6 +974,16 @@ impl State {
             ghosted_wire_pipeline,
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
+            grid_mesh,
+            grid_pipeline,
+            grid_bind_group,
+            grid_uniform_buf,
+            normals_mode: NormalsMode::Off,
+            normals_pipeline,
+            vertex_normals_buf,
+            face_normals_buf,
+            vertex_normals_count,
+            face_normals_count,
             window,
             model_path,
         })
@@ -808,6 +1023,12 @@ impl State {
                 self.prev_non_ghosted_mode = self.view_mode;
                 self.view_mode = ViewMode::Ghosted;
             }
+        } else if code == KeyCode::KeyN && is_pressed {
+            self.normals_mode = match self.normals_mode {
+                NormalsMode::Off => NormalsMode::Face,
+                NormalsMode::Face => NormalsMode::FaceAndVertex,
+                NormalsMode::FaceAndVertex => NormalsMode::Off,
+            };
         } else {
             self.camera_controller.handle_key(code, is_pressed);
         }
@@ -971,6 +1192,27 @@ impl State {
                     // Wire edges
                     render_pass.set_pipeline(&self.ghosted_wire_pipeline);
                     render_pass.draw_model_view_mode(&self.model, 0..1);
+                }
+            }
+
+            // Grid (all modes)
+            render_pass.set_pipeline(&self.grid_pipeline);
+            render_pass.set_bind_group(0, &self.grid_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.grid_mesh.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..self.grid_mesh.num_elements, 0, 0..1);
+
+            // Normals (all modes, if not Off)
+            if self.normals_mode != NormalsMode::Off {
+                render_pass.set_pipeline(&self.normals_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                if self.face_normals_count > 0 {
+                    render_pass.set_vertex_buffer(0, self.face_normals_buf.slice(..));
+                    render_pass.draw(0..self.face_normals_count, 0..1);
+                }
+                if self.normals_mode == NormalsMode::FaceAndVertex && self.vertex_normals_count > 0 {
+                    render_pass.set_vertex_buffer(0, self.vertex_normals_buf.slice(..));
+                    render_pass.draw(0..self.vertex_normals_count, 0..1);
                 }
             }
         }

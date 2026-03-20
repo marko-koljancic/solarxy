@@ -19,6 +19,21 @@ fn main() -> io::Result<()> {
 
     match args.mode {
         OperationMode::View => {
+            println!("╔══════════════════════════════════════╗");
+            println!("║       SolarXY Viewer Controls        ║");
+            println!("╠══════════════════════════════════════╣");
+            println!("║  W        Cycle view modes           ║");
+            println!("║           Shaded → Wireframe → ...   ║");
+            println!("║  X        Toggle Ghosted mode        ║");
+            println!("║  N        Cycle normal display       ║");
+            println!("║           Face → Face+Vertex → Off   ║");
+            println!("║  F        Frame model (reset camera) ║");
+            println!("║  Escape   Exit                       ║");
+            println!("╠══════════════════════════════════════╣");
+            println!("║  Left drag   Orbit camera            ║");
+            println!("║  Mid drag    Pan camera              ║");
+            println!("║  Scroll      Zoom in / out           ║");
+            println!("╚══════════════════════════════════════╝");
             println!("Launching viewer for model at path: {}", model_path);
             run_viewer(model_path).unwrap();
             Ok(())
