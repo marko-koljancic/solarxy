@@ -32,6 +32,7 @@ struct VertexOutput {
     @location(4) tbn_col1: vec3<f32>,
     @location(5) tbn_col2: vec3<f32>,
     @location(6) light_clip_pos: vec4<f32>,
+    @location(7) world_normal: vec3<f32>,
 };
 
 struct ShadowUniform { light_vp: mat4x4<f32> }
@@ -77,6 +78,7 @@ fn vs_main(
     out.tbn_col1              = tangent_matrix[1];
     out.tbn_col2              = tangent_matrix[2];
     out.light_clip_pos        = shadow_uni.light_vp * world_position;
+    out.world_normal          = world_normal;
     return out;
 }
 
@@ -94,14 +96,70 @@ struct LightsUniform { lights: array<LightEntry, 3>, }
 @group(2) @binding(0)
 var<uniform> lights: LightsUniform;
 
+const PI: f32 = 3.14159265358979;
+const ROUGHNESS: f32 = 0.5;
+const METALLIC: f32  = 0.0;
+
+// GGX / Trowbridge-Reitz normal distribution
+fn D_GGX(NdotH: f32, roughness: f32) -> f32 {
+    let a  = roughness * roughness;
+    let a2 = a * a;
+    let d  = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
+}
+
+// Smith/Schlick-GGX geometry term (single direction)
+fn G_schlick(NdotV: f32, roughness: f32) -> f32 {
+    let r = roughness + 1.0;
+    let k = (r * r) / 8.0;
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+// Smith combined geometry
+fn G_smith(NdotV: f32, NdotL: f32, roughness: f32) -> f32 {
+    return G_schlick(NdotV, roughness) * G_schlick(NdotL, roughness);
+}
+
+// Schlick Fresnel
+fn F_schlick(cosTheta: f32, F0: vec3<f32>) -> vec3<f32> {
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// Cook-Torrance specular BRDF
+fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
+    let H      = normalize(V + L);
+    let NdotV  = max(dot(N, V), 0.001);
+    let NdotL  = max(dot(N, L), 0.001);
+    let NdotH  = max(dot(N, H), 0.0);
+    let HdotV  = max(dot(H, V), 0.0);
+
+    let F0     = mix(vec3(0.04), albedo, METALLIC);
+    let F      = F_schlick(HdotV, F0);
+    let D      = D_GGX(NdotH, ROUGHNESS);
+    let G      = G_smith(NdotV, NdotL, ROUGHNESS);
+
+    let specular = (D * G * F) / (4.0 * NdotV * NdotL);
+    let kD       = (1.0 - F) * (1.0 - METALLIC);
+    let diffuse  = kD * albedo / PI;
+
+    return (diffuse + specular) * NdotL;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let albedo   = textureSample(t_diffuse, s_diffuse, in.tex_coords);
-    let n_sample = textureSample(t_normal,  s_normal,  in.tex_coords);
+    let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let n_sample      = textureSample(t_normal,  s_normal,  in.tex_coords);
+    let albedo        = albedo_sample.xyz;
 
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
-    let N   = normalize(n_sample.xyz * 2.0 - 1.0);
+    let N   = normalize(n_sample.xyz * 2.0 - 1.0);   // tangent-space normal
     let V   = normalize(in.tangent_view_position - in.tangent_position);
+
+    // Hemisphere ambient using world-space normal
+    let N_world = normalize(in.world_normal);
+    let sky     = vec3(0.20, 0.22, 0.28);
+    let ground  = vec3(0.12, 0.10, 0.08);
+    let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo;
 
     // Shadow factor for key light
     let proj   = in.light_clip_pos.xyz / in.light_clip_pos.w;
@@ -109,30 +167,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let in_map = all(uv >= vec2(0.0)) && all(uv <= vec2(1.0));
     let shadow = select(1.0, textureSampleCompare(shadow_map, shadow_sampler, uv, proj.z - 0.002), in_map);
 
-    let ambient = vec3(0.18, 0.18, 0.20);
-    var diff_acc = vec3(0.0);
-    var spec_acc = vec3(0.0);
+    var radiance_acc = vec3(0.0);
 
     // Key light (index 0) — shadowed
     {
-        let L    = normalize(tbn * lights.lights[0].position - in.tangent_position);
-        let H    = normalize(V + L);
-        let diff = max(dot(N, L), 0.0) * shadow;
-        let spec = pow(max(dot(N, H), 0.0), 128.0) * shadow;
-        diff_acc += lights.lights[0].color * diff * lights.lights[0].intensity;
-        spec_acc += lights.lights[0].color * spec * lights.lights[0].intensity * 0.5;
+        let L        = normalize(tbn * lights.lights[0].position - in.tangent_position);
+        let scale    = lights.lights[0].intensity * 3.0 * shadow;
+        radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo) * scale;
     }
     // Fill + rim (indices 1, 2) — unshadowed
     for (var i = 1u; i < 3u; i++) {
-        let L    = normalize(tbn * lights.lights[i].position - in.tangent_position);
-        let H    = normalize(V + L);
-        let diff = max(dot(N, L), 0.0);
-        let spec = pow(max(dot(N, H), 0.0), 128.0);
-        diff_acc += lights.lights[i].color * diff * lights.lights[i].intensity;
-        spec_acc += lights.lights[i].color * spec * lights.lights[i].intensity * 0.2;
+        let L     = normalize(tbn * lights.lights[i].position - in.tangent_position);
+        let scale = lights.lights[i].intensity * 3.0;
+        radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo) * scale;
     }
 
-    let color = (ambient + diff_acc) * albedo.xyz + spec_acc;
+    let color  = ambient + radiance_acc;
     let mapped = color / (color + vec3(1.0));  // Reinhard tone mapping
-    return vec4(mapped, albedo.a);
+    return vec4(mapped, albedo_sample.a);
 }

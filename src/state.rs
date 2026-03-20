@@ -2,7 +2,6 @@ use crate::cgi::camera::{camera_from_bounds, Camera, CameraController, CameraUni
 use crate::cgi::light::{LightsUniform, LightEntry};
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
-use crate::cgi::light;
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
@@ -117,8 +116,6 @@ pub struct State {
     lights_uniform: LightsUniform,
     light_buffer: wgpu::Buffer,
     model: Model,
-    sphere_mesh: model::Mesh,
-    light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
     shadow_texture_view: wgpu::TextureView,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -523,28 +520,6 @@ impl State {
             )
         };
 
-        let light_render_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/light.wgsl").into()),
-            };
-            create_render_pipeline(
-                &device,
-                &layout,
-                config.format,
-                Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::description()],
-                shader,
-            )
-        };
-
-        let sphere_mesh = resources::create_sphere_mesh(&device, 1.0, 8, 16, "light_sphere");
-
         let floor_mesh = resources::create_floor_quad(&device, &model.bounds);
 
         let floor_pipeline = {
@@ -620,8 +595,6 @@ impl State {
             light_buffer,
             depth_texture,
             model,
-            sphere_mesh,
-            light_render_pipeline,
             light_bind_group,
             shadow_texture_view,
             shadow_pipeline,
@@ -650,6 +623,10 @@ impl State {
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if code == KeyCode::Escape && is_pressed {
             event_loop.exit();
+        } else if code == KeyCode::KeyF && is_pressed {
+            let aspect = self.camera.aspect;
+            self.camera = camera_from_bounds(&self.model.bounds, aspect);
+            self.camera_controller = CameraController::new(0.2);
         } else {
             self.camera_controller.handle_key(code, is_pressed);
         }
@@ -678,6 +655,17 @@ impl State {
         self.lights_uniform = lights_from_camera(&self.camera, &self.model.bounds);
         self.queue
             .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.lights_uniform]));
+
+        // Update shadow VP from the (now updated) key light position
+        let key_pos = self.lights_uniform.lights[0].position;
+        let light_vp = compute_light_vp(
+            cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+            self.model.bounds.center(),
+            self.model.bounds.diagonal() / 2.0,
+        );
+        self.shadow_uniform.light_vp = light_vp.into();
+        self.queue
+            .write_buffer(&self.shadow_uniform_buffer, 0, bytemuck::cast_slice(&[self.shadow_uniform]));
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -746,10 +734,6 @@ impl State {
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-            use light::DrawLight;
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_mesh_instanced(&self.sphere_mesh, 0..3, &self.camera_bind_group, &self.light_bind_group);
-
             use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
@@ -806,9 +790,13 @@ fn compute_light_vp(
     target: cgmath::Point3<f32>,
     extent: f32,
 ) -> cgmath::Matrix4<f32> {
+    use cgmath::MetricSpace;
+    let dist = light_pos.distance(target);
+    let near = (dist - extent * 2.0).max(0.1);
+    let far = dist + extent * 4.0;
     let view = cgmath::Matrix4::look_at_rh(light_pos, target, cgmath::Vector3::unit_y());
     let s = extent * 1.5;
-    let proj = cgmath::ortho(-s, s, -s, s, 0.1, extent * 8.0);
+    let proj = cgmath::ortho(-s, s, -s, s, near, far);
     OPENGL_TO_WGPU_MATRIX * proj * view
 }
 
