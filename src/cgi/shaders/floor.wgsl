@@ -5,7 +5,8 @@ struct Camera {
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
-struct ShadowUniform { light_vp: mat4x4<f32> }
+struct ShadowUniform {
+    light_vp: mat4x4<f32>}
 @group(1) @binding(0) var<uniform> shadow_uni: ShadowUniform;
 @group(1) @binding(1) var shadow_map: texture_depth_2d;
 @group(1) @binding(2) var shadow_sampler: sampler_comparison;

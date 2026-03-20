@@ -38,11 +38,13 @@ cargo build && cargo build --release
 **Execution Modes**
 
 View Mode:
+
 ```bash
 cargo r --release -- --model res/models/xyzrgb_dragon.obj
 ```
 
 Analyze Mode:
+
 ```bash
 cargo r --release -- --model res/models/xyzrgb_dragon.obj --mode 'analyze'
 ```

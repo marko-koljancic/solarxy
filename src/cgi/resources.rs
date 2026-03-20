@@ -38,7 +38,6 @@ pub async fn load_model(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry)> {
-    println!("Loading model from path: {}", file_path);
     let obj_text = load_string(file_path).await?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
@@ -65,15 +64,12 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {
-        println!("Material: {:#?}", m);
-
         let diffuse_path = m
             .diffuse_texture
             .as_deref()
             .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string());
 
         let normal_path = m.normal_texture.as_deref().map(|p| {
-            // Strip out map_Bump parameters like "-bm 1.000000"
             let cleaned = p
                 .split_whitespace()
                 .filter(|s| !s.starts_with('-'))
@@ -135,7 +131,7 @@ pub async fn load_model(
                 } else {
                     [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]]
                 },
-                normal: [0.0, 0.0, 0.0],  // filled below if missing
+                normal: [0.0, 0.0, 0.0],
 
                 tangent: [0.0; 3],
                 bitangent: [0.0; 3],
@@ -293,7 +289,6 @@ pub async fn load_model(
         });
     }
 
-    // Guard against empty models
     for i in 0..3 {
         if global_min[i].is_infinite() {
             global_min[i] = -1.0;

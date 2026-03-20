@@ -1,7 +1,4 @@
-use winit::{
-    event::MouseButton,
-    keyboard::KeyCode,
-};
+use winit::{event::MouseButton, keyboard::KeyCode};
 use super::model;
 
 #[rustfmt::skip]
@@ -74,14 +71,11 @@ pub struct CameraController {
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
-    // Mouse orbit (left-drag)
     is_left_mouse_pressed: bool,
     last_mouse_pos: Option<(f32, f32)>,
     orbit_delta: (f32, f32),
-    // Mouse pan (middle-drag)
     is_middle_mouse_pressed: bool,
     pan_delta: (f32, f32),
-    // Zoom
     zoom_delta: f32,
 }
 
@@ -189,7 +183,6 @@ impl CameraController {
             camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
         }
 
-        // Mouse orbit
         if self.orbit_delta.0 != 0.0 || self.orbit_delta.1 != 0.0 {
             let offset = camera.eye - camera.target;
             let r = offset.magnitude();
@@ -198,20 +191,17 @@ impl CameraController {
             let mut pitch = f32::atan2(offset.y, horiz);
 
             yaw += self.orbit_delta.0;
-            pitch = (pitch + self.orbit_delta.1).clamp(
-                -89.0_f32.to_radians(),
-                89.0_f32.to_radians(),
-            );
+            pitch = (pitch + self.orbit_delta.1).clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
 
-            camera.eye = camera.target + cgmath::Vector3::new(
-                r * pitch.cos() * yaw.sin(),
-                r * pitch.sin(),
-                r * pitch.cos() * yaw.cos(),
-            );
+            camera.eye = camera.target
+                + cgmath::Vector3::new(
+                    r * pitch.cos() * yaw.sin(),
+                    r * pitch.sin(),
+                    r * pitch.cos() * yaw.cos(),
+                );
             self.orbit_delta = (0.0, 0.0);
         }
 
-        // Mouse pan
         if self.pan_delta.0 != 0.0 || self.pan_delta.1 != 0.0 {
             let fwd = (camera.target - camera.eye).normalize();
             let right = fwd.cross(camera.up).normalize();
@@ -224,7 +214,6 @@ impl CameraController {
             self.pan_delta = (0.0, 0.0);
         }
 
-        // Mouse zoom
         if self.zoom_delta != 0.0 {
             let fwd = camera.target - camera.eye;
             let fwd_norm = fwd.normalize();
@@ -235,7 +224,6 @@ impl CameraController {
             self.zoom_delta = 0.0;
         }
 
-        // Keep near/far planes proportional to current distance
         let dist = (camera.target - camera.eye).magnitude();
         camera.znear = (dist / 100.0).max(0.01);
         camera.zfar = dist * 50.0;

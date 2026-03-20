@@ -380,11 +380,13 @@ impl State {
             label: None,
         });
 
-        // --- Shadow resources ---
-
         let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shadow_texture"),
-            size: wgpu::Extent3d { width: 2048, height: 2048, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 2048,
+                height: 2048,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -412,14 +414,15 @@ impl State {
             model.bounds.center(),
             model.bounds.diagonal() / 2.0,
         );
-        let shadow_uniform = ShadowUniform { light_vp: light_vp.into() };
+        let shadow_uniform = ShadowUniform {
+            light_vp: light_vp.into(),
+        };
         let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Shadow Uniform Buffer"),
             contents: bytemuck::cast_slice(&[shadow_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Layout used inside the shadow pipeline (group 0)
         let shadow_pass_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow_pass_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -434,7 +437,6 @@ impl State {
             }],
         });
 
-        // Layout used in the main pipeline as group 3
         let shadow_read_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow_read_layout"),
             entries: &[
@@ -495,7 +497,6 @@ impl State {
             ],
         });
 
-        // Shadow pipeline (depth-only)
         let shadow_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Shadow Pipeline Layout"),
             bind_group_layouts: &[&shadow_pass_layout],
@@ -544,7 +545,6 @@ impl State {
             cache: None,
         });
 
-        // Main render pipeline (now includes shadow_read_layout as group 3)
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Rendering Pipeline Layout"),
             bind_group_layouts: &[
@@ -628,7 +628,6 @@ impl State {
             })
         };
 
-        // Ghosted + wireframe pipelines — minimal flat-color shader, camera-only layout
         let ghosted_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Ghosted Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
@@ -775,7 +774,6 @@ impl State {
             cache: None,
         });
 
-        // Grid pipeline
         let grid_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Grid Bind Group Layout"),
             entries: &[
@@ -802,7 +800,10 @@ impl State {
             ],
         });
         let (grid_mesh, cell_size) = resources::create_grid_quad(&device, &model.bounds);
-        let grid_uniform = GridUniform { cell_size, _pad: [0.0; 3] };
+        let grid_uniform = GridUniform {
+            cell_size,
+            _pad: [0.0; 3],
+        };
         let grid_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Uniform Buffer"),
             contents: bytemuck::cast_slice(&[grid_uniform]),
@@ -812,8 +813,14 @@ impl State {
             label: Some("Grid Bind Group"),
             layout: &grid_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: grid_uniform_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grid_uniform_buf.as_entire_binding(),
+                },
             ],
         });
         let grid_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -860,12 +867,15 @@ impl State {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
 
-        // Normals pipeline
         let normals_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Normals Bind Group Layout"),
             entries: &[
@@ -938,12 +948,15 @@ impl State {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
 
-        // Normals GPU buffers
         let (vertex_normals_buf, vertex_normals_count) = if normals_geo.vertex_lines.is_empty() {
             (
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -985,31 +998,46 @@ impl State {
             )
         };
 
-        // Normals color buffers and bind groups
         let face_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Face Normals Color Buffer"),
-            contents: bytemuck::cast_slice(&[NormalsColor { color: [0.2, 0.85, 0.2, 1.0] }]),
+            contents: bytemuck::cast_slice(&[NormalsColor {
+                color: [0.2, 0.85, 0.2, 1.0],
+            }]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let vertex_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Normals Color Buffer"),
-            contents: bytemuck::cast_slice(&[NormalsColor { color: [0.25, 0.55, 1.0, 1.0] }]),
+            contents: bytemuck::cast_slice(&[NormalsColor {
+                color: [0.25, 0.55, 1.0, 1.0],
+            }]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let face_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Face Normals Bind Group"),
             layout: &normals_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: face_normals_color_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: face_normals_color_buf.as_entire_binding(),
+                },
             ],
         });
         let vertex_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Vertex Normals Bind Group"),
             layout: &normals_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: vertex_normals_color_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: vertex_normals_color_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -1124,19 +1152,16 @@ impl State {
         self.camera_controller.handle_scroll(delta);
     }
 
-    // Fix resize aspect ratio issue
     pub fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
-        // Update lights to follow camera orientation every frame
         self.lights_uniform = lights_from_camera(&self.camera, &self.model.bounds);
         self.queue
             .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.lights_uniform]));
 
-        // Update shadow VP from the (now updated) key light position
         let key_pos = self.lights_uniform.lights[0].position;
         let light_vp = compute_light_vp(
             cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
@@ -1144,8 +1169,11 @@ impl State {
             self.model.bounds.diagonal() / 2.0,
         );
         self.shadow_uniform.light_vp = light_vp.into();
-        self.queue
-            .write_buffer(&self.shadow_uniform_buffer, 0, bytemuck::cast_slice(&[self.shadow_uniform]));
+        self.queue.write_buffer(
+            &self.shadow_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.shadow_uniform]),
+        );
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -1161,7 +1189,6 @@ impl State {
             label: Some("Render Encoder"),
         });
 
-        // Shadow pass — depth only, renders model from key light's perspective
         {
             let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Shadow Pass"),
@@ -1184,7 +1211,6 @@ impl State {
             shadow_pass.draw_model_shadow_instanced(&self.model, 0..1);
         }
 
-        // Main render pass
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -1224,17 +1250,14 @@ impl State {
                         &self.camera_bind_group,
                         &self.light_bind_group,
                     );
-                    // Floor
                     render_pass.set_pipeline(&self.floor_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                     render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
-                    render_pass
-                        .set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
                 }
                 ViewMode::ShadedWireframe => {
-                    // Shaded draw
                     render_pass.set_pipeline(&self.render_pipeline);
                     render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
                     render_pass.draw_model_instanced(
@@ -1243,15 +1266,12 @@ impl State {
                         &self.camera_bind_group,
                         &self.light_bind_group,
                     );
-                    // Floor
                     render_pass.set_pipeline(&self.floor_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                     render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
-                    render_pass
-                        .set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
-                    // Black wireframe overlay on top
                     render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
                     render_pass.set_pipeline(&self.wireframe_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
@@ -1263,24 +1283,20 @@ impl State {
                     render_pass.draw_model_view_mode(&self.model, 0..1);
                 }
                 ViewMode::Ghosted => {
-                    // Translucent fill
                     render_pass.set_pipeline(&self.ghosted_fill_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                     render_pass.draw_model_view_mode(&self.model, 0..1);
-                    // Wire edges
                     render_pass.set_pipeline(&self.ghosted_wire_pipeline);
                     render_pass.draw_model_view_mode(&self.model, 0..1);
                 }
             }
 
-            // Grid (all modes)
             render_pass.set_pipeline(&self.grid_pipeline);
             render_pass.set_bind_group(0, &self.grid_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.grid_mesh.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..self.grid_mesh.num_elements, 0, 0..1);
 
-            // Normals (all modes, if not Off)
             if self.normals_mode != NormalsMode::Off {
                 render_pass.set_pipeline(&self.normals_pipeline);
                 if matches!(self.normals_mode, NormalsMode::Face | NormalsMode::FaceAndVertex)
@@ -1317,31 +1333,41 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
     let right = forward.cross(camera.up).normalize();
     let up = right.cross(forward);
 
-    // Camera-space offsets: x=right, y=up, z pointing toward viewer (-forward)
-    let key_dir  = (right * -0.5 + up *  0.8 + (-forward) *  0.5).normalize();
-    let fill_dir = (right *  1.0 + up *  0.5 + (-forward) *  0.5).normalize();
-    let rim_dir  = (right *  0.0 + up *  0.5 + ( forward) *  1.5).normalize();
+    let key_dir = (right * -0.5 + up * 0.8 + (-forward) * 0.5).normalize();
+    let fill_dir = (right * 1.0 + up * 0.5 + (-forward) * 0.5).normalize();
+    let rim_dir = (right * 0.0 + up * 0.5 + (forward) * 1.5).normalize();
 
-    let key  = target + key_dir  * radius;
+    let key = target + key_dir * radius;
     let fill = target + fill_dir * radius;
-    let rim  = target + rim_dir  * radius;
+    let rim = target + rim_dir * radius;
 
     LightsUniform {
         lights: [
-            LightEntry { position: [key.x,  key.y,  key.z],  _pad0: 0.0, color: [1.0, 0.98, 0.95], intensity: 2.0 },
-            LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.90, 0.93, 1.00], intensity: 1.0 },
-            LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.8 },
+            LightEntry {
+                position: [key.x, key.y, key.z],
+                _pad0: 0.0,
+                color: [1.0, 0.98, 0.95],
+                intensity: 2.0,
+            },
+            LightEntry {
+                position: [fill.x, fill.y, fill.z],
+                _pad0: 0.0,
+                color: [0.90, 0.93, 1.00],
+                intensity: 1.0,
+            },
+            LightEntry {
+                position: [rim.x, rim.y, rim.z],
+                _pad0: 0.0,
+                color: [1.0, 1.00, 1.00],
+                intensity: 0.8,
+            },
         ],
         sphere_scale: bounds.diagonal() * 0.04,
         _pad1: [0.0; 3],
     }
 }
 
-fn compute_light_vp(
-    light_pos: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    extent: f32,
-) -> cgmath::Matrix4<f32> {
+fn compute_light_vp(light_pos: cgmath::Point3<f32>, target: cgmath::Point3<f32>, extent: f32) -> cgmath::Matrix4<f32> {
     use cgmath::MetricSpace;
     let dist = light_pos.distance(target);
     let near = (dist - extent * 2.0).max(0.1);

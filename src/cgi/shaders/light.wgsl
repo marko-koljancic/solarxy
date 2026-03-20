@@ -6,11 +6,14 @@ struct Camera {
 var<uniform> camera: Camera;
 
 struct LightEntry {
-    position: vec3<f32>,  // bytes 0-11; WGSL pads to 16 before next vec3
-    color: vec3<f32>,     // bytes 16-27
-    intensity: f32,       // bytes 28-31
+    position: vec3<f32>,
+    color: vec3<f32>,
+    intensity: f32,
 }
-struct LightsUniform { lights: array<LightEntry, 3>, sphere_scale: f32, }
+struct LightsUniform {
+    lights: array<LightEntry, 3>,
+    sphere_scale: f32,
+}
 @group(1) @binding(0)
 var<uniform> lights: LightsUniform;
 

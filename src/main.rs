@@ -25,6 +25,7 @@ fn main() -> io::Result<()> {
             println!("║  W        Cycle view modes           ║");
             println!("║           Shaded → Wireframe → ...   ║");
             println!("║  X        Toggle Ghosted mode        ║");
+            println!("║  S        Shaded view mode           ║");
             println!("║  N        Cycle normal display       ║");
             println!("║           Face → Face+Vertex → Off   ║");
             println!("║  F        Frame model (reset camera) ║");
@@ -34,7 +35,6 @@ fn main() -> io::Result<()> {
             println!("║  Mid drag    Pan camera              ║");
             println!("║  Scroll      Zoom in / out           ║");
             println!("╚══════════════════════════════════════╝");
-            println!("Launching viewer for model at path: {}", model_path);
             run_viewer(model_path).unwrap();
             Ok(())
         }

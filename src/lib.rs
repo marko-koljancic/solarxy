@@ -74,7 +74,11 @@ impl ApplicationHandler<State> for App {
                     }
                 }
             }
-            WindowEvent::MouseInput { state: btn_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button,
+                ..
+            } => {
                 state.handle_mouse_button(button, btn_state.is_pressed());
             }
             WindowEvent::CursorMoved { position, .. } => {
