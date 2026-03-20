@@ -25,19 +25,26 @@ A lightweight, cross-platform 3D model viewer and validator, built with Rust and
 - Rust toolchain (install from [rustup.rs](https://rustup.rs))
 - MSRV (Minimum Supported Rust Version): See `Cargo.toml`.
 
-### Installation & Running
+### Build & Run
 
-To build and run the application in release mode:
+**Compilation**
+
+To compile both debug and release versions:
 
 ```bash
-cargo build --release
-cargo run --release -- --model [path-to-your-model.obj]
+cargo build && cargo build --release
 ```
 
-To run in debug mode:
+**Execution Modes**
 
+View Mode:
 ```bash
-cargo run -- --model [path-to-your-model.obj]
+cargo r --release -- --model res/models/xyzrgb_dragon.obj
+```
+
+Analyze Mode:
+```bash
+cargo r --release -- --model res/models/xyzrgb_dragon.obj --mode 'analyze'
 ```
 
 ## Contributing
