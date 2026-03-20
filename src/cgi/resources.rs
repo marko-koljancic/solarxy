@@ -323,6 +323,38 @@ pub fn create_sphere_mesh(device: &wgpu::Device, radius: f32, rings: u32, segmen
     }
 }
 
+pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::Mesh {
+    let y = bounds.min.y - 0.001;
+    let he = bounds.diagonal() * 1.5;
+
+    let vertices = [
+        model::ModelVertex { position: [-he, y, -he], tex_coords: [0.0, 0.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
+        model::ModelVertex { position: [ he, y, -he], tex_coords: [1.0, 0.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
+        model::ModelVertex { position: [ he, y,  he], tex_coords: [1.0, 1.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
+        model::ModelVertex { position: [-he, y,  he], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
+    ];
+    let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Floor Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Floor Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    model::Mesh {
+        name: "floor".to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    }
+}
+
 fn create_default_texture_colored(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> texture::Texture {
     let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)

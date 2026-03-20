@@ -133,5 +133,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let color = (ambient + diff_acc) * albedo.xyz + spec_acc;
-    return vec4(color, albedo.a);
+    let mapped = color / (color + vec3(1.0));  // Reinhard tone mapping
+    return vec4(mapped, albedo.a);
 }

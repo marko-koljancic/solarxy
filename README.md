@@ -6,7 +6,7 @@ A lightweight, cross-platform 3D model viewer and validator, built with Rust and
 
 - **Multi-format Support**: Load and inspect `.obj` models. (glTF support is on the roadmap).
 - **Real-time Rendering**: Basic real-time rendering with texturing and lighting.
-- **Validation**: Built-in checks to identify common issues in 3D models.
+- **Validation**: Built-in checks to identify common issues in supported 3D models.
 - **Flexible Workflow**: Use either the graphical interface or the command-line for validation.
 
 ## Technical Details

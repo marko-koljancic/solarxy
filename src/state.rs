@@ -126,6 +126,8 @@ pub struct State {
     shadow_bind_group: wgpu::BindGroup,
     shadow_uniform: ShadowUniform,
     shadow_uniform_buffer: wgpu::Buffer,
+    floor_mesh: model::Mesh,
+    floor_pipeline: wgpu::RenderPipeline,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -543,6 +545,63 @@ impl State {
 
         let sphere_mesh = resources::create_sphere_mesh(&device, 1.0, 8, 16, "light_sphere");
 
+        let floor_mesh = resources::create_floor_quad(&device, &model.bounds);
+
+        let floor_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Floor Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &shadow_read_layout],
+                push_constant_ranges: &[],
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Floor Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/floor.wgsl").into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Floor Pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_floor"),
+                    buffers: &[model::ModelVertex::description()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_floor"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+
         Ok(Self {
             surface,
             device,
@@ -570,6 +629,8 @@ impl State {
             shadow_bind_group,
             shadow_uniform,
             shadow_uniform_buffer,
+            floor_mesh,
+            floor_pipeline,
             window,
             model_path,
         })
@@ -688,6 +749,14 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
             render_pass.draw_model_instanced(&self.model, 0..1, &self.camera_bind_group, &self.light_bind_group);
+
+            // Transparent shadow-catching floor (drawn after opaque geometry)
+            render_pass.set_pipeline(&self.floor_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -709,6 +778,8 @@ fn lights_from_bounds(bounds: &model::AABB) -> LightsUniform {
             LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.7, 0.80, 1.00], intensity: 0.5  },
             LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.75 },
         ],
+        sphere_scale: bounds.diagonal() * 0.04,
+        _pad1: [0.0; 3],
     }
 }
 

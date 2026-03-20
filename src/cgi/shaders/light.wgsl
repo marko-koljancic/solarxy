@@ -10,7 +10,7 @@ struct LightEntry {
     color: vec3<f32>,     // bytes 16-27
     intensity: f32,       // bytes 28-31
 }
-struct LightsUniform { lights: array<LightEntry, 3>, }
+struct LightsUniform { lights: array<LightEntry, 3>, sphere_scale: f32, }
 @group(1) @binding(0)
 var<uniform> lights: LightsUniform;
 
@@ -29,7 +29,7 @@ fn vs_main(
     @builtin(instance_index) idx: u32,
 ) -> VertexOutput {
     let light = lights.lights[idx];
-    let scale = 0.1;
+    let scale = lights.sphere_scale;
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + light.position, 1.0);
     out.color = light.color;

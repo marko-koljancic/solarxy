@@ -15,10 +15,12 @@ pub struct LightEntry {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LightsUniform {
     pub lights: [LightEntry; 3],
+    pub sphere_scale: f32,
+    pub _pad1: [f32; 3],
 }
 
 const _: () = assert!(std::mem::size_of::<LightEntry>() == 32);
-const _: () = assert!(std::mem::size_of::<LightsUniform>() == 96);
+const _: () = assert!(std::mem::size_of::<LightsUniform>() == 112);
 
 pub trait DrawLight<'a> {
     fn draw_light_mesh(
