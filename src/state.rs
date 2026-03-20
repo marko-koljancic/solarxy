@@ -301,7 +301,7 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let lights_uniform = lights_from_bounds(&model.bounds);
+        let lights_uniform = lights_from_camera(&camera, &model.bounds);
 
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light VB"),
@@ -673,6 +673,11 @@ impl State {
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+
+        // Update lights to follow camera orientation every frame
+        self.lights_uniform = lights_from_camera(&self.camera, &self.model.bounds);
+        self.queue
+            .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.lights_uniform]));
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -766,17 +771,30 @@ impl State {
     }
 }
 
-fn lights_from_bounds(bounds: &model::AABB) -> LightsUniform {
-    let center = bounds.center();
-    let d = bounds.diagonal() / 2.0 * 2.5;
-    let key  = center + cgmath::Vector3::new( 1.0_f32,  1.5,  1.0).normalize() * d;
-    let fill = center + cgmath::Vector3::new(-1.0_f32,  0.75, 1.0).normalize() * d;
-    let rim  = center + cgmath::Vector3::new( 0.0_f32,  1.0, -1.5).normalize() * d;
+fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
+    use cgmath::InnerSpace;
+
+    let target = camera.target;
+    let radius = (camera.eye - camera.target).magnitude() * 2.0;
+
+    let forward = (camera.target - camera.eye).normalize();
+    let right = forward.cross(camera.up).normalize();
+    let up = right.cross(forward);
+
+    // Camera-space offsets: x=right, y=up, z pointing toward viewer (-forward)
+    let key_dir  = (right * -0.5 + up *  0.8 + (-forward) *  0.5).normalize();
+    let fill_dir = (right *  1.0 + up *  0.5 + (-forward) *  0.5).normalize();
+    let rim_dir  = (right *  0.0 + up *  0.5 + ( forward) *  1.5).normalize();
+
+    let key  = target + key_dir  * radius;
+    let fill = target + fill_dir * radius;
+    let rim  = target + rim_dir  * radius;
+
     LightsUniform {
         lights: [
-            LightEntry { position: [key.x,  key.y,  key.z],  _pad0: 0.0, color: [1.0, 0.95, 0.85], intensity: 1.0  },
-            LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.7, 0.80, 1.00], intensity: 0.5  },
-            LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.75 },
+            LightEntry { position: [key.x,  key.y,  key.z],  _pad0: 0.0, color: [1.0, 0.95, 0.85], intensity: 0.8 },
+            LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.7, 0.85, 1.00], intensity: 0.4 },
+            LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.3 },
         ],
         sphere_scale: bounds.diagonal() * 0.04,
         _pad1: [0.0; 3],

@@ -48,8 +48,7 @@ pub async fn load_model(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".to_string());
 
-    // TODO: Fix use of depricated function
-    let (models, obj_materials) = tobj::load_obj_buf_async(
+    let (models, obj_materials) = tobj::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
@@ -57,17 +56,12 @@ pub async fn load_model(
             ..Default::default()
         },
         |p| {
-            let value = obj_dir.clone();
-            async move {
-                let mat_path = std::path::Path::new(&value).join(&p);
-                let mat_text = load_string(&mat_path.to_string_lossy())
-                    .await
-                    .map_err(|_| LoadError::ReadError)?;
-                tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
-            }
+            let mat_path = std::path::Path::new(&obj_dir).join(p);
+            let mat_text = std::fs::read_to_string(&mat_path)
+                .map_err(|_| LoadError::ReadError)?;
+            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
-    )
-    .await?;
+    )?;
 
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {

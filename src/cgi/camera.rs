@@ -229,10 +229,15 @@ impl CameraController {
             let fwd = camera.target - camera.eye;
             let fwd_norm = fwd.normalize();
             let dist = fwd.magnitude();
-            let min_dist = camera.znear * 2.0;
+            let min_dist = 0.01;
             let new_dist = (dist - self.zoom_delta * self.speed * 5.0).max(min_dist);
             camera.eye = camera.target - fwd_norm * new_dist;
             self.zoom_delta = 0.0;
         }
+
+        // Keep near/far planes proportional to current distance
+        let dist = (camera.target - camera.eye).magnitude();
+        camera.znear = (dist / 100.0).max(0.01);
+        camera.zfar = dist * 50.0;
     }
 }

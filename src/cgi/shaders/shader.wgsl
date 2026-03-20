@@ -109,7 +109,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let in_map = all(uv >= vec2(0.0)) && all(uv <= vec2(1.0));
     let shadow = select(1.0, textureSampleCompare(shadow_map, shadow_sampler, uv, proj.z - 0.002), in_map);
 
-    let ambient = vec3(0.03, 0.03, 0.035);
+    let ambient = vec3(0.18, 0.18, 0.20);
     var diff_acc = vec3(0.0);
     var spec_acc = vec3(0.0);
 
