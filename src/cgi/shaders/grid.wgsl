@@ -37,5 +37,5 @@ fn fs_grid(in: VertexOutput) -> @location(0) vec4<f32> {
     if alpha < 0.01 {
         discard;
     }
-    return vec4<f32>(0.55, 0.60, 0.65, alpha * 0.5);
+    return vec4<f32>(0.28, 0.28, 0.28, alpha * 0.75);
 }

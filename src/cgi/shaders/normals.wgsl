@@ -4,6 +4,11 @@ struct Camera {
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 
+struct NormalsColor {
+    color: vec4<f32>,
+}
+@group(0) @binding(1) var<uniform> normals_color: NormalsColor;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
 }
@@ -21,5 +26,5 @@ fn vs_normals(model: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_normals(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(0.0, 0.8, 0.2, 1.0);
+    return normals_color.color;
 }

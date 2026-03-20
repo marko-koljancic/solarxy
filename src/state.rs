@@ -20,7 +20,14 @@ enum ViewMode {
 enum NormalsMode {
     Off,
     Face,
+    Vertex,
     FaceAndVertex,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct NormalsColor {
+    color: [f32; 4],
 }
 
 #[repr(C)]
@@ -163,6 +170,12 @@ pub struct State {
     face_normals_buf: wgpu::Buffer,
     vertex_normals_count: u32,
     face_normals_count: u32,
+    face_normals_bind_group: wgpu::BindGroup,
+    vertex_normals_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    face_normals_color_buf: wgpu::Buffer,
+    #[allow(dead_code)]
+    vertex_normals_color_buf: wgpu::Buffer,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -853,13 +866,43 @@ impl State {
         });
 
         // Normals pipeline
+        let normals_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Normals Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let normals_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Normals Pipeline Layout"),
+            bind_group_layouts: &[&normals_bind_group_layout],
+            push_constant_ranges: &[],
+        });
         let normals_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Normals Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/normals.wgsl").into()),
         });
         let normals_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Normals Pipeline"),
-            layout: Some(&ghosted_pipeline_layout),
+            layout: Some(&normals_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &normals_shader,
                 entry_point: Some("vs_normals"),
@@ -942,6 +985,34 @@ impl State {
             )
         };
 
+        // Normals color buffers and bind groups
+        let face_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Face Normals Color Buffer"),
+            contents: bytemuck::cast_slice(&[NormalsColor { color: [0.2, 0.85, 0.2, 1.0] }]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let vertex_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Normals Color Buffer"),
+            contents: bytemuck::cast_slice(&[NormalsColor { color: [0.25, 0.55, 1.0, 1.0] }]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let face_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Face Normals Bind Group"),
+            layout: &normals_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: face_normals_color_buf.as_entire_binding() },
+            ],
+        });
+        let vertex_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Vertex Normals Bind Group"),
+            layout: &normals_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: vertex_normals_color_buf.as_entire_binding() },
+            ],
+        });
+
         Ok(Self {
             surface,
             device,
@@ -984,6 +1055,10 @@ impl State {
             face_normals_buf,
             vertex_normals_count,
             face_normals_count,
+            face_normals_bind_group,
+            vertex_normals_bind_group,
+            face_normals_color_buf,
+            vertex_normals_color_buf,
             window,
             model_path,
         })
@@ -1023,10 +1098,13 @@ impl State {
                 self.prev_non_ghosted_mode = self.view_mode;
                 self.view_mode = ViewMode::Ghosted;
             }
+        } else if code == KeyCode::KeyS && is_pressed {
+            self.view_mode = ViewMode::Shaded;
         } else if code == KeyCode::KeyN && is_pressed {
             self.normals_mode = match self.normals_mode {
                 NormalsMode::Off => NormalsMode::Face,
-                NormalsMode::Face => NormalsMode::FaceAndVertex,
+                NormalsMode::Face => NormalsMode::Vertex,
+                NormalsMode::Vertex => NormalsMode::FaceAndVertex,
                 NormalsMode::FaceAndVertex => NormalsMode::Off,
             };
         } else {
@@ -1205,12 +1283,17 @@ impl State {
             // Normals (all modes, if not Off)
             if self.normals_mode != NormalsMode::Off {
                 render_pass.set_pipeline(&self.normals_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                if self.face_normals_count > 0 {
+                if matches!(self.normals_mode, NormalsMode::Face | NormalsMode::FaceAndVertex)
+                    && self.face_normals_count > 0
+                {
+                    render_pass.set_bind_group(0, &self.face_normals_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, self.face_normals_buf.slice(..));
                     render_pass.draw(0..self.face_normals_count, 0..1);
                 }
-                if self.normals_mode == NormalsMode::FaceAndVertex && self.vertex_normals_count > 0 {
+                if matches!(self.normals_mode, NormalsMode::Vertex | NormalsMode::FaceAndVertex)
+                    && self.vertex_normals_count > 0
+                {
+                    render_pass.set_bind_group(0, &self.vertex_normals_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, self.vertex_normals_buf.slice(..));
                     render_pass.draw(0..self.vertex_normals_count, 0..1);
                 }
