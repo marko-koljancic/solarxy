@@ -1,4 +1,4 @@
-use crate::cgi::camera::{Camera, CameraController, CameraUniform};
+use crate::cgi::camera::{camera_from_bounds, Camera, CameraController, CameraUniform};
 use crate::cgi::light::LightUniform;
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
@@ -7,7 +7,7 @@ use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
     r: 0.4235,
@@ -231,15 +231,7 @@ impl State {
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let camera = Camera {
-            eye: (0.0, 5.0, 10.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+        let camera = camera_from_bounds(&model.bounds, config.width as f32 / config.height as f32);
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
@@ -396,6 +388,7 @@ impl State {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
+            self.camera.aspect = width as f32 / height as f32;
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             self.is_surface_configured = true;
@@ -410,7 +403,19 @@ impl State {
         }
     }
 
-    // TODO: Fix resize aspect ratio issue, I suspect camera aspect is not updated on resize
+    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        self.camera_controller.handle_mouse_button(button, pressed);
+    }
+
+    pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
+        self.camera_controller.handle_mouse_move(x, y);
+    }
+
+    pub fn handle_scroll(&mut self, delta: f32) {
+        self.camera_controller.handle_scroll(delta);
+    }
+
+    // Fix resize aspect ratio issue
     pub fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);

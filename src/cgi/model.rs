@@ -1,6 +1,26 @@
 use std::ops::Range;
 use super::material::Material;
 
+pub struct AABB {
+    pub min: cgmath::Point3<f32>,
+    pub max: cgmath::Point3<f32>,
+}
+
+impl AABB {
+    pub fn center(&self) -> cgmath::Point3<f32> {
+        cgmath::Point3::new(
+            (self.min.x + self.max.x) / 2.0,
+            (self.min.y + self.max.y) / 2.0,
+            (self.min.z + self.max.z) / 2.0,
+        )
+    }
+
+    pub fn diagonal(&self) -> f32 {
+        use cgmath::InnerSpace;
+        (self.max - self.min).magnitude()
+    }
+}
+
 pub trait Vertex {
     fn description() -> wgpu::VertexBufferLayout<'static>;
 }
@@ -63,6 +83,7 @@ pub struct Mesh {
 pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
+    pub bounds: AABB,
 }
 
 pub trait DrawModel<'a> {
