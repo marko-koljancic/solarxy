@@ -8,6 +8,14 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
+#[derive(Clone, Copy, PartialEq)]
+enum ViewMode {
+    Shaded,
+    ShadedWireframe,
+    WireframeOnly,
+    Ghosted,
+}
+
 const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
     r: 0.4235,
     g: 0.4588,
@@ -125,6 +133,11 @@ pub struct State {
     shadow_uniform_buffer: wgpu::Buffer,
     floor_mesh: model::Mesh,
     floor_pipeline: wgpu::RenderPipeline,
+    wireframe_pipeline: wgpu::RenderPipeline,
+    ghosted_fill_pipeline: wgpu::RenderPipeline,
+    ghosted_wire_pipeline: wgpu::RenderPipeline,
+    view_mode: ViewMode,
+    prev_non_ghosted_mode: ViewMode,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -151,7 +164,7 @@ impl State {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::empty(),
+                required_features: wgpu::Features::POLYGON_MODE_LINE,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
@@ -577,6 +590,153 @@ impl State {
             })
         };
 
+        // Ghosted + wireframe pipelines — minimal flat-color shader, camera-only layout
+        let ghosted_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Ghosted Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let ghosted_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Ghosted Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("cgi/shaders/ghosted.wgsl").into()),
+        });
+        let ghosted_fill_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Ghosted Fill Pipeline"),
+            layout: Some(&ghosted_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ghosted_shader,
+                entry_point: Some("vs_ghosted"),
+                buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ghosted_shader,
+                entry_point: Some("fs_ghosted_fill"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+        let ghosted_wire_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Ghosted Wire Pipeline"),
+            layout: Some(&ghosted_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ghosted_shader,
+                entry_point: Some("vs_ghosted"),
+                buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ghosted_shader,
+                entry_point: Some("fs_ghosted_wire"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Line,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+        let wireframe_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Wireframe Pipeline"),
+            layout: Some(&ghosted_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ghosted_shader,
+                entry_point: Some("vs_ghosted"),
+                buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ghosted_shader,
+                entry_point: Some("fs_wireframe"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState {
+                        alpha: wgpu::BlendComponent::REPLACE,
+                        color: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Line,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         Ok(Self {
             surface,
             device,
@@ -604,6 +764,11 @@ impl State {
             shadow_uniform_buffer,
             floor_mesh,
             floor_pipeline,
+            wireframe_pipeline,
+            ghosted_fill_pipeline,
+            ghosted_wire_pipeline,
+            view_mode: ViewMode::Shaded,
+            prev_non_ghosted_mode: ViewMode::Shaded,
             window,
             model_path,
         })
@@ -627,6 +792,22 @@ impl State {
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds(&self.model.bounds, aspect);
             self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyW && is_pressed {
+            if self.view_mode != ViewMode::Ghosted {
+                self.view_mode = match self.view_mode {
+                    ViewMode::Shaded => ViewMode::ShadedWireframe,
+                    ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
+                    ViewMode::WireframeOnly => ViewMode::Shaded,
+                    ViewMode::Ghosted => unreachable!(),
+                };
+            }
+        } else if code == KeyCode::KeyX && is_pressed {
+            if self.view_mode == ViewMode::Ghosted {
+                self.view_mode = self.prev_non_ghosted_mode;
+            } else {
+                self.prev_non_ghosted_mode = self.view_mode;
+                self.view_mode = ViewMode::Ghosted;
+            }
         } else {
             self.camera_controller.handle_key(code, is_pressed);
         }
@@ -729,23 +910,69 @@ impl State {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-
             use model::DrawModel;
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
-            render_pass.draw_model_instanced(&self.model, 0..1, &self.camera_bind_group, &self.light_bind_group);
+            use model::DrawViewMode;
 
-            // Transparent shadow-catching floor (drawn after opaque geometry)
-            render_pass.set_pipeline(&self.floor_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+            match self.view_mode {
+                ViewMode::Shaded => {
+                    render_pass.set_pipeline(&self.render_pipeline);
+                    render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
+                    render_pass.draw_model_instanced(
+                        &self.model,
+                        0..1,
+                        &self.camera_bind_group,
+                        &self.light_bind_group,
+                    );
+                    // Floor
+                    render_pass.set_pipeline(&self.floor_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
+                    render_pass
+                        .set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
+                }
+                ViewMode::ShadedWireframe => {
+                    // Shaded draw
+                    render_pass.set_pipeline(&self.render_pipeline);
+                    render_pass.set_bind_group(3, &self.shadow_bind_group, &[]);
+                    render_pass.draw_model_instanced(
+                        &self.model,
+                        0..1,
+                        &self.camera_bind_group,
+                        &self.light_bind_group,
+                    );
+                    // Floor
+                    render_pass.set_pipeline(&self.floor_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.floor_mesh.vertex_buffer.slice(..));
+                    render_pass
+                        .set_index_buffer(self.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..self.floor_mesh.num_elements, 0, 0..1);
+                    // Black wireframe overlay on top
+                    render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                    render_pass.set_pipeline(&self.wireframe_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.draw_model_view_mode(&self.model, 0..1);
+                }
+                ViewMode::WireframeOnly => {
+                    render_pass.set_pipeline(&self.wireframe_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.draw_model_view_mode(&self.model, 0..1);
+                }
+                ViewMode::Ghosted => {
+                    // Translucent fill
+                    render_pass.set_pipeline(&self.ghosted_fill_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.draw_model_view_mode(&self.model, 0..1);
+                    // Wire edges
+                    render_pass.set_pipeline(&self.ghosted_wire_pipeline);
+                    render_pass.draw_model_view_mode(&self.model, 0..1);
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -776,9 +1003,9 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
 
     LightsUniform {
         lights: [
-            LightEntry { position: [key.x,  key.y,  key.z],  _pad0: 0.0, color: [1.0, 0.95, 0.85], intensity: 0.8 },
-            LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.7, 0.85, 1.00], intensity: 0.4 },
-            LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.3 },
+            LightEntry { position: [key.x,  key.y,  key.z],  _pad0: 0.0, color: [1.0, 0.98, 0.95], intensity: 2.0 },
+            LightEntry { position: [fill.x, fill.y, fill.z], _pad0: 0.0, color: [0.90, 0.93, 1.00], intensity: 1.0 },
+            LightEntry { position: [rim.x,  rim.y,  rim.z],  _pad0: 0.0, color: [1.0, 1.00, 1.00], intensity: 0.8 },
         ],
         sphere_scale: bounds.diagonal() * 0.04,
         _pad1: [0.0; 3],

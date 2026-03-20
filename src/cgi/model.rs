@@ -103,6 +103,23 @@ where
     }
 }
 
+pub trait DrawViewMode<'a> {
+    fn draw_model_view_mode(&mut self, model: &'a Model, instances: std::ops::Range<u32>);
+}
+
+impl<'a, 'b> DrawViewMode<'b> for wgpu::RenderPass<'a>
+where
+    'b: 'a,
+{
+    fn draw_model_view_mode(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
+        for mesh in &model.meshes {
+            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            self.draw_indexed(0..mesh.num_elements, 0, instances.clone());
+        }
+    }
+}
+
 pub trait DrawModel<'a> {
     fn draw_mesh(
         &mut self,

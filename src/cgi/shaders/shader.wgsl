@@ -157,8 +157,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Hemisphere ambient using world-space normal
     let N_world = normalize(in.world_normal);
-    let sky     = vec3(0.20, 0.22, 0.28);
-    let ground  = vec3(0.12, 0.10, 0.08);
+    let sky     = vec3(0.45, 0.48, 0.55);
+    let ground  = vec3(0.25, 0.22, 0.18);
     let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo;
 
     // Shadow factor for key light
