@@ -18,9 +18,9 @@ pub struct Args {
     long = "mode",
     help = "Operation mode: 'view' or 'analyze'",
     default_value = "view")]
-    /// The operation mode that determines how the application will run.
-    /// This field specifies whether the application operates in client mode,
-    /// server mode, or any other supported operational configuration.
+    /// The operation mode that determines how the application will run with the provided model.
+    /// - 'view': Launches a viewer to display the model visually.
+    /// - 'analyze': Performs analysis on the model and displays results in a terminal interface.
     pub mode: OperationMode,
 }
 

@@ -1,6 +1,7 @@
 use std::io::{BufReader, Cursor};
 use tobj::LoadError;
 use wgpu::util::DeviceExt;
+use cgmath::InnerSpace;
 use super::{material, texture, model};
 
 pub async fn load_string(file_path: &str) -> anyhow::Result<String> {
@@ -69,7 +70,7 @@ pub async fn load_model(
     .await?;
 
     let mut materials = Vec::new();
-    for m in obj_materials? {
+    for m in obj_materials.unwrap_or_default() {
         println!("Material: {:#?}", m);
 
         let diffuse_path = m
@@ -114,6 +115,12 @@ pub async fn load_model(
         ));
     }
 
+    if materials.is_empty() {
+        let diffuse = create_default_texture_colored(device, queue, [147, 132, 120, 255]);
+        let normal = create_default_texture(device, queue, true);
+        materials.push(material::Material::new(device, "clay_default", diffuse, normal, layout));
+    }
+
     let meshes = models
         .into_iter()
         .map(|m| {
@@ -129,11 +136,7 @@ pub async fn load_model(
                     } else {
                         [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]]
                     },
-                    normal: [
-                        m.mesh.normals[i * 3],
-                        m.mesh.normals[i * 3 + 1],
-                        m.mesh.normals[i * 3 + 2],
-                    ],
+                    normal: [0.0, 0.0, 0.0],  // filled below if missing
 
                     tangent: [0.0; 3],
                     bitangent: [0.0; 3],
@@ -142,6 +145,33 @@ pub async fn load_model(
 
             let indices = &m.mesh.indices;
             let mut triangles_included = vec![0; vertices.len()];
+
+            if m.mesh.normals.is_empty() {
+                for c in indices.chunks(3) {
+                    let p0: cgmath::Vector3<f32> = vertices[c[0] as usize].position.into();
+                    let p1: cgmath::Vector3<f32> = vertices[c[1] as usize].position.into();
+                    let p2: cgmath::Vector3<f32> = vertices[c[2] as usize].position.into();
+                    let face_normal = (p1 - p0).cross(p2 - p0);
+                    for &vi in c {
+                        let n = cgmath::Vector3::from(vertices[vi as usize].normal) + face_normal;
+                        vertices[vi as usize].normal = n.into();
+                    }
+                }
+                for v in &mut vertices {
+                    let n = cgmath::Vector3::from(v.normal);
+                    if n.magnitude() > 0.0 {
+                        v.normal = n.normalize().into();
+                    }
+                }
+            } else {
+                for (i, v) in vertices.iter_mut().enumerate() {
+                    v.normal = [
+                        m.mesh.normals[i * 3],
+                        m.mesh.normals[i * 3 + 1],
+                        m.mesh.normals[i * 3 + 2],
+                    ];
+                }
+            }
 
             for c in indices.chunks(3) {
                 let v0 = vertices[c[0] as usize];
@@ -214,6 +244,12 @@ pub async fn load_model(
         .collect::<Vec<_>>();
 
     Ok(model::Model { meshes, materials })
+}
+
+fn create_default_texture_colored(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> texture::Texture {
+    let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
+    texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)
+        .expect("Failed to create default texture")
 }
 
 fn create_default_texture(device: &wgpu::Device, queue: &wgpu::Queue, is_normal_map: bool) -> texture::Texture {
