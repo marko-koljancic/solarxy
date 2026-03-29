@@ -9,6 +9,12 @@ const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ProjectionMode {
+    Perspective,
+    Orthographic,
+}
+
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
@@ -17,12 +23,23 @@ pub struct Camera {
     pub fovy: f32,
     pub znear: f32,
     pub zfar: f32,
+    pub projection: ProjectionMode,
+    pub ortho_scale: f32,
 }
 
 impl Camera {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        let proj = match self.projection {
+            ProjectionMode::Perspective => {
+                cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
+            }
+            ProjectionMode::Orthographic => {
+                let half_h = self.ortho_scale;
+                let half_w = half_h * self.aspect;
+                cgmath::ortho(-half_w, half_w, -half_h, half_h, self.znear, self.zfar)
+            }
+        };
         OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
@@ -40,6 +57,43 @@ pub fn camera_from_bounds(bounds: &model::AABB, aspect: f32) -> Camera {
         fovy,
         znear: (distance / 100.0).max(0.01),
         zfar: distance * 20.0,
+        projection: ProjectionMode::Perspective,
+        ortho_scale: distance * (fovy / 2.0).to_radians().tan(),
+    }
+}
+
+pub fn camera_from_bounds_axis(
+    bounds: &model::AABB,
+    aspect: f32,
+    direction: cgmath::Vector3<f32>,
+    up: cgmath::Vector3<f32>,
+) -> Camera {
+    use cgmath::InnerSpace;
+
+    let center = bounds.center();
+    let half_ext = bounds.half_extents();
+    let fovy = 45.0_f32;
+    let extent = bounds.diagonal() / 2.0;
+    let distance = (extent / (fovy / 2.0).to_radians().tan()) * 1.5;
+
+    let dir_n = direction.normalize();
+    let right = dir_n.cross(up).normalize();
+    let up_n = right.cross(dir_n);
+    let half_w = half_ext.x * right.x.abs() + half_ext.y * right.y.abs() + half_ext.z * right.z.abs();
+    let half_h = half_ext.x * up_n.x.abs() + half_ext.y * up_n.y.abs() + half_ext.z * up_n.z.abs();
+
+    let ortho_scale = half_h.max(half_w / aspect) * 1.2;
+
+    Camera {
+        eye: center + direction * distance,
+        target: center,
+        up,
+        aspect,
+        fovy,
+        znear: (distance / 100.0).max(0.01),
+        zfar: distance * 20.0,
+        projection: ProjectionMode::Orthographic,
+        ortho_scale,
     }
 }
 
@@ -206,8 +260,10 @@ impl CameraController {
             let fwd = (camera.target - camera.eye).normalize();
             let right = fwd.cross(camera.up).normalize();
             let up = right.cross(fwd);
-            let dist = (camera.target - camera.eye).magnitude();
-            let scale = dist * 0.001;
+            let scale = match camera.projection {
+                ProjectionMode::Perspective => (camera.target - camera.eye).magnitude() * 0.001,
+                ProjectionMode::Orthographic => camera.ortho_scale * 0.002,
+            };
             let shift = right * (-self.pan_delta.0 * scale) + up * (self.pan_delta.1 * scale);
             camera.eye += shift;
             camera.target += shift;
@@ -215,12 +271,20 @@ impl CameraController {
         }
 
         if self.zoom_delta != 0.0 {
-            let fwd = camera.target - camera.eye;
-            let fwd_norm = fwd.normalize();
-            let dist = fwd.magnitude();
-            let min_dist = 0.01;
-            let new_dist = (dist - self.zoom_delta * self.speed * 5.0).max(min_dist);
-            camera.eye = camera.target - fwd_norm * new_dist;
+            match camera.projection {
+                ProjectionMode::Perspective => {
+                    let fwd = camera.target - camera.eye;
+                    let fwd_norm = fwd.normalize();
+                    let dist = fwd.magnitude();
+                    let min_dist = 0.01;
+                    let new_dist = (dist - self.zoom_delta * self.speed * 5.0).max(min_dist);
+                    camera.eye = camera.target - fwd_norm * new_dist;
+                }
+                ProjectionMode::Orthographic => {
+                    let zoom_factor = 1.0 - self.zoom_delta * self.speed * 0.5;
+                    camera.ortho_scale = (camera.ortho_scale * zoom_factor).max(0.01);
+                }
+            }
             self.zoom_delta = 0.0;
         }
 

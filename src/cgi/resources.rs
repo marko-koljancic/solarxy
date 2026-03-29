@@ -56,8 +56,7 @@ pub async fn load_model(
         },
         |p| {
             let mat_path = std::path::Path::new(&obj_dir).join(p);
-            let mat_text = std::fs::read_to_string(&mat_path)
-                .map_err(|_| LoadError::ReadError)?;
+            let mat_text = std::fs::read_to_string(&mat_path).map_err(|_| LoadError::ReadError)?;
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
     )?;
@@ -192,12 +191,9 @@ pub async fn load_model(
 
             let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
 
-            vertices[c[0] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[0] as usize].tangent)).into();
-            vertices[c[1] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[1] as usize].tangent)).into();
-            vertices[c[2] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[2] as usize].tangent)).into();
+            vertices[c[0] as usize].tangent = (tangent + cgmath::Vector3::from(vertices[c[0] as usize].tangent)).into();
+            vertices[c[1] as usize].tangent = (tangent + cgmath::Vector3::from(vertices[c[1] as usize].tangent)).into();
+            vertices[c[2] as usize].tangent = (tangent + cgmath::Vector3::from(vertices[c[2] as usize].tangent)).into();
             vertices[c[0] as usize].bitangent =
                 (bitangent + cgmath::Vector3::from(vertices[c[0] as usize].bitangent)).into();
             vertices[c[1] as usize].bitangent =
@@ -217,7 +213,6 @@ pub async fn load_model(
             v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
         }
 
-        // Accumulate bounding box
         for v in &vertices {
             for i in 0..3 {
                 global_min[i] = global_min[i].min(v.position[i]);
@@ -225,7 +220,6 @@ pub async fn load_model(
             }
         }
 
-        // Compute per-mesh normals lines
         {
             let mut mesh_min = [f32::INFINITY; 3];
             let mut mesh_max = [f32::NEG_INFINITY; 3];
@@ -239,7 +233,11 @@ pub async fn load_model(
             let dy = mesh_max[1] - mesh_min[1];
             let dz = mesh_max[2] - mesh_min[2];
             let mesh_diagonal = (dx * dx + dy * dy + dz * dz).sqrt();
-            let scale = if mesh_diagonal > 1e-10 { mesh_diagonal * 0.05 } else { 0.1 };
+            let scale = if mesh_diagonal > 1e-10 {
+                mesh_diagonal * 0.05
+            } else {
+                0.1
+            };
 
             for v in &vertices {
                 let nx = v.normal[0] * scale;
@@ -301,7 +299,17 @@ pub async fn load_model(
         max: cgmath::Point3::new(global_max[0], global_max[1], global_max[2]),
     };
 
-    Ok((model::Model { meshes, materials, bounds }, model::NormalsGeometry { vertex_lines, face_lines }))
+    Ok((
+        model::Model {
+            meshes,
+            materials,
+            bounds,
+        },
+        model::NormalsGeometry {
+            vertex_lines,
+            face_lines,
+        },
+    ))
 }
 
 pub fn create_sphere_mesh(device: &wgpu::Device, radius: f32, rings: u32, segments: u32, name: &str) -> model::Mesh {
@@ -364,10 +372,34 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
     let he = bounds.diagonal() * 1.5;
 
     let vertices = [
-        model::ModelVertex { position: [-he, y, -he], tex_coords: [0.0, 0.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
-        model::ModelVertex { position: [ he, y, -he], tex_coords: [1.0, 0.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
-        model::ModelVertex { position: [ he, y,  he], tex_coords: [1.0, 1.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
-        model::ModelVertex { position: [-he, y,  he], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0], tangent: [1.0, 0.0, 0.0], bitangent: [0.0, 0.0, 1.0] },
+        model::ModelVertex {
+            position: [-he, y, -he],
+            tex_coords: [0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        model::ModelVertex {
+            position: [he, y, -he],
+            tex_coords: [1.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        model::ModelVertex {
+            position: [he, y, he],
+            tex_coords: [1.0, 1.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        model::ModelVertex {
+            position: [-he, y, he],
+            tex_coords: [0.0, 1.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
     ];
     let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];
 

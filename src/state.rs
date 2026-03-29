@@ -1,4 +1,6 @@
-use crate::cgi::camera::{camera_from_bounds, Camera, CameraController, CameraUniform};
+use crate::cgi::camera::{
+    camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform, ProjectionMode,
+};
 use crate::cgi::light::{LightsUniform, LightEntry};
 use crate::cgi::model::{Model};
 use crate::cgi::model::{self, Vertex};
@@ -1106,10 +1108,62 @@ impl State {
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if code == KeyCode::Escape && is_pressed {
             event_loop.exit();
-        } else if code == KeyCode::KeyF && is_pressed {
+        } else if code == KeyCode::KeyH && is_pressed {
+            // Frame model (reset camera to initial view)
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds(&self.model.bounds, aspect);
             self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyT && is_pressed {
+            // Top view: camera above, looking down -Y
+            let aspect = self.camera.aspect;
+            self.camera = camera_from_bounds_axis(
+                &self.model.bounds,
+                aspect,
+                cgmath::Vector3::unit_y(),
+                -cgmath::Vector3::unit_z(),
+            );
+            self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyF && is_pressed {
+            // Front view: camera at +Z, looking toward -Z
+            let aspect = self.camera.aspect;
+            self.camera = camera_from_bounds_axis(
+                &self.model.bounds,
+                aspect,
+                cgmath::Vector3::unit_z(),
+                cgmath::Vector3::unit_y(),
+            );
+            self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyL && is_pressed {
+            // Left view: camera at -X, looking toward +X
+            let aspect = self.camera.aspect;
+            self.camera = camera_from_bounds_axis(
+                &self.model.bounds,
+                aspect,
+                -cgmath::Vector3::unit_x(),
+                cgmath::Vector3::unit_y(),
+            );
+            self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyR && is_pressed {
+            // Right view: camera at +X, looking toward -X
+            let aspect = self.camera.aspect;
+            self.camera = camera_from_bounds_axis(
+                &self.model.bounds,
+                aspect,
+                cgmath::Vector3::unit_x(),
+                cgmath::Vector3::unit_y(),
+            );
+            self.camera_controller = CameraController::new(0.2);
+        } else if code == KeyCode::KeyP && is_pressed {
+            // Switch to perspective projection
+            self.camera.projection = ProjectionMode::Perspective;
+        } else if code == KeyCode::KeyO && is_pressed {
+            // Switch to orthographic projection
+            if self.camera.projection != ProjectionMode::Orthographic {
+                use cgmath::InnerSpace;
+                let dist = (self.camera.target - self.camera.eye).magnitude();
+                self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
+                self.camera.projection = ProjectionMode::Orthographic;
+            }
         } else if code == KeyCode::KeyW && is_pressed {
             if self.view_mode != ViewMode::Ghosted {
                 self.view_mode = match self.view_mode {

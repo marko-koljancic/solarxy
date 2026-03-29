@@ -19,6 +19,14 @@ impl AABB {
         use cgmath::InnerSpace;
         (self.max - self.min).magnitude()
     }
+
+    pub fn half_extents(&self) -> cgmath::Vector3<f32> {
+        cgmath::Vector3::new(
+            (self.max.x - self.min.x) / 2.0,
+            (self.max.y - self.min.y) / 2.0,
+            (self.max.z - self.min.z) / 2.0,
+        )
+    }
 }
 
 pub trait Vertex {
