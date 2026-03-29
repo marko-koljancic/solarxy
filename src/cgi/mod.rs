@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod hud;
 pub mod light;
 pub mod material;
 pub mod model;

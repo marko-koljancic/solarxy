@@ -15,6 +15,15 @@ pub enum ProjectionMode {
     Orthographic,
 }
 
+impl std::fmt::Display for ProjectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectionMode::Perspective => write!(f, "Perspective"),
+            ProjectionMode::Orthographic => write!(f, "Orthographic"),
+        }
+    }
+}
+
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,

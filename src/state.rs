@@ -1,8 +1,9 @@
 use crate::cgi::camera::{
     camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform, ProjectionMode,
 };
+use crate::cgi::hud::HudRenderer;
 use crate::cgi::light::{LightsUniform, LightEntry};
-use crate::cgi::model::{Model};
+use crate::cgi::model::Model;
 use crate::cgi::model::{self, Vertex};
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
@@ -18,12 +19,34 @@ enum ViewMode {
     Ghosted,
 }
 
+impl std::fmt::Display for ViewMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ViewMode::Shaded => write!(f, "Shaded"),
+            ViewMode::ShadedWireframe => write!(f, "Shaded+Wire"),
+            ViewMode::WireframeOnly => write!(f, "Wireframe"),
+            ViewMode::Ghosted => write!(f, "Ghosted"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum NormalsMode {
     Off,
     Face,
     Vertex,
     FaceAndVertex,
+}
+
+impl std::fmt::Display for NormalsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NormalsMode::Off => write!(f, "Off"),
+            NormalsMode::Face => write!(f, "Face"),
+            NormalsMode::Vertex => write!(f, "Vertex"),
+            NormalsMode::FaceAndVertex => write!(f, "Face+Vertex"),
+        }
+    }
 }
 
 #[repr(C)]
@@ -178,6 +201,7 @@ pub struct State {
     face_normals_color_buf: wgpu::Buffer,
     #[allow(dead_code)]
     vertex_normals_color_buf: wgpu::Buffer,
+    hud: HudRenderer,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -1043,6 +1067,15 @@ impl State {
             ],
         });
 
+        let hud = HudRenderer::new(
+            &device,
+            surface_formats,
+            size.width,
+            size.height,
+            &model_path,
+            window.scale_factor(),
+        );
+
         Ok(Self {
             surface,
             device,
@@ -1089,6 +1122,7 @@ impl State {
             vertex_normals_bind_group,
             face_normals_color_buf,
             vertex_normals_color_buf,
+            hud,
             window,
             model_path,
         })
@@ -1102,19 +1136,23 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             self.is_surface_configured = true;
+            self.hud.resize(width, height, &self.queue);
+            self.hud.set_scale_factor(self.window.scale_factor());
         }
+    }
+
+    pub fn toggle_hints(&mut self) {
+        self.hud.toggle_hints();
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if code == KeyCode::Escape && is_pressed {
             event_loop.exit();
         } else if code == KeyCode::KeyH && is_pressed {
-            // Frame model (reset camera to initial view)
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds(&self.model.bounds, aspect);
             self.camera_controller = CameraController::new(0.2);
         } else if code == KeyCode::KeyT && is_pressed {
-            // Top view: camera above, looking down -Y
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds_axis(
                 &self.model.bounds,
@@ -1124,7 +1162,6 @@ impl State {
             );
             self.camera_controller = CameraController::new(0.2);
         } else if code == KeyCode::KeyF && is_pressed {
-            // Front view: camera at +Z, looking toward -Z
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds_axis(
                 &self.model.bounds,
@@ -1134,7 +1171,6 @@ impl State {
             );
             self.camera_controller = CameraController::new(0.2);
         } else if code == KeyCode::KeyL && is_pressed {
-            // Left view: camera at -X, looking toward +X
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds_axis(
                 &self.model.bounds,
@@ -1144,7 +1180,6 @@ impl State {
             );
             self.camera_controller = CameraController::new(0.2);
         } else if code == KeyCode::KeyR && is_pressed {
-            // Right view: camera at +X, looking toward -X
             let aspect = self.camera.aspect;
             self.camera = camera_from_bounds_axis(
                 &self.model.bounds,
@@ -1154,10 +1189,8 @@ impl State {
             );
             self.camera_controller = CameraController::new(0.2);
         } else if code == KeyCode::KeyP && is_pressed {
-            // Switch to perspective projection
             self.camera.projection = ProjectionMode::Perspective;
         } else if code == KeyCode::KeyO && is_pressed {
-            // Switch to orthographic projection
             if self.camera.projection != ProjectionMode::Orthographic {
                 use cgmath::InnerSpace;
                 let dist = (self.camera.target - self.camera.eye).magnitude();
@@ -1369,6 +1402,18 @@ impl State {
                 }
             }
         }
+
+        self.hud.render(
+            &self.device,
+            &mut encoder,
+            &view,
+            &self.queue,
+            self.config.width,
+            self.config.height,
+            &self.view_mode.to_string(),
+            &self.camera.projection.to_string(),
+            &self.normals_mode.to_string(),
+        );
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();

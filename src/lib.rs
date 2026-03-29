@@ -8,7 +8,7 @@ use winit::{
     application::ApplicationHandler,
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::PhysicalKey,
+    keyboard::{Key, PhysicalKey},
     window::Window,
 };
 
@@ -91,15 +91,17 @@ impl ApplicationHandler<State> for App {
                 };
                 state.handle_scroll(scroll);
             }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(code),
-                        state: key_state,
-                        ..
-                    },
-                ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
+            WindowEvent::KeyboardInput { ref event, .. } => {
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    state.handle_key(event_loop, code, event.state.is_pressed());
+                }
+                if event.state.is_pressed()
+                    && let Key::Character(ref ch) = event.logical_key
+                    && ch.as_str() == "?"
+                {
+                    state.toggle_hints();
+                }
+            }
             _ => {}
         }
     }

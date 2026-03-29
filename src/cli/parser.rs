@@ -14,10 +14,12 @@ pub struct Args {
     /// This field specifies the filesystem location of the model that will be used
     /// by the application. The path can be either relative or absolute.
     pub model_path: PathBuf,
-    #[clap(short = 'o',
-    long = "mode",
-    help = "Operation mode: 'view' or 'analyze'",
-    default_value = "view")]
+    #[clap(
+        short = 'o',
+        long = "mode",
+        help = "Operation mode: 'view' or 'analyze'",
+        default_value = "view"
+    )]
     /// The operation mode that determines how the application will run with the provided model.
     /// - 'view': Launches a viewer to display the model visually.
     /// - 'analyze': Performs analysis on the model and displays results in a terminal interface.
@@ -31,12 +33,10 @@ pub enum OperationMode {
 }
 
 impl std::fmt::Debug for OperationMode {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::View => write!(f, "View"),
             Self::Analyze => write!(f, "Analyze"),
         }
     }
 }
-
-
