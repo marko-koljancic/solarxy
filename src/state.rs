@@ -122,6 +122,45 @@ impl std::fmt::Display for BackgroundPreset {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum BackgroundMode {
+    Gradient,
+    Solid(BackgroundPreset),
+}
+
+impl BackgroundMode {
+    fn clear_color(self) -> wgpu::Color {
+        match self {
+            Self::Gradient => wgpu::Color {
+                r: 0.165,
+                g: 0.165,
+                b: 0.180,
+                a: 1.0,
+            },
+            Self::Solid(preset) => preset.color(),
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Gradient => Self::Solid(BackgroundPreset::BlueGray),
+            Self::Solid(preset) => match preset {
+                BackgroundPreset::Black => Self::Gradient,
+                other => Self::Solid(other.next()),
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for BackgroundMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Gradient => write!(f, "Gradient"),
+            Self::Solid(preset) => preset.fmt(f),
+        }
+    }
+}
+
 struct ModelScene {
     model: Model,
     cam: CameraState,
@@ -213,7 +252,9 @@ pub struct State {
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
-    background: BackgroundPreset,
+    background_mode: BackgroundMode,
+    _gradient_buffer: wgpu::Buffer,
+    gradient_bind_group: wgpu::BindGroup,
     capture_requested: bool,
     last_frame_time: Instant,
     dt: f32,
@@ -295,6 +336,21 @@ impl State {
             window.scale_factor(),
         );
 
+        let gradient_data: [f32; 8] = [0.165, 0.165, 0.180, 1.0, 0.290, 0.290, 0.314, 1.0];
+        let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Gradient Uniform"),
+            contents: bytemuck::cast_slice(&gradient_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let gradient_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Gradient Bind Group"),
+            layout: &layouts.background,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gradient_buffer.as_entire_binding(),
+            }],
+        });
+
         Ok(Self {
             surface,
             device,
@@ -310,7 +366,9 @@ impl State {
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
-            background: BackgroundPreset::BlueGray,
+            background_mode: BackgroundMode::Gradient,
+            _gradient_buffer: gradient_buffer,
+            gradient_bind_group,
             capture_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
@@ -456,7 +514,7 @@ impl State {
                 }
             }
             KeyCode::KeyB => {
-                self.background = self.background.next();
+                self.background_mode = self.background_mode.next();
             }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
@@ -555,8 +613,8 @@ impl State {
             &self.view_mode.to_string(),
             &projection_str,
             &normals_str,
-            &self.background.to_string(),
-            self.background.color(),
+            &self.background_mode.to_string(),
+            self.background_mode.clear_color(),
             frame_ms,
             has_model,
         );
@@ -672,14 +730,20 @@ impl State {
         }
     }
 
+    fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        pass.set_pipeline(&self.pipelines.background);
+        pass.set_bind_group(0, &self.gradient_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.msaa_color_view,
                 resolve_target: Some(view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.background.color()),
+                    load: wgpu::LoadOp::Clear(self.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -695,6 +759,9 @@ impl State {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
+        if self.background_mode == BackgroundMode::Gradient {
+            self.draw_background_gradient(&mut pass);
+        }
     }
 
     fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
@@ -726,7 +793,7 @@ impl State {
                 view: &self.msaa_color_view,
                 resolve_target: Some(view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.background.color()),
+                    load: wgpu::LoadOp::Clear(self.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -742,6 +809,10 @@ impl State {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
+
+        if self.background_mode == BackgroundMode::Gradient {
+            self.draw_background_gradient(&mut pass);
+        }
 
         use model::DrawMeshSimple;
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));

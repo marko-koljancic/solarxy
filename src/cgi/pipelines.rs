@@ -80,6 +80,7 @@ pub(crate) struct Pipelines {
     pub(crate) ghosted_wire: wgpu::RenderPipeline,
     pub(crate) grid: wgpu::RenderPipeline,
     pub(crate) normals: wgpu::RenderPipeline,
+    pub(crate) background: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -356,6 +357,60 @@ impl Pipelines {
             })
         };
 
+        let background = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Background Pipeline Layout"),
+                bind_group_layouts: &[&layouts.background],
+                push_constant_ranges: &[],
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Background Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background.wgsl").into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Background Pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_background"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_background"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState {
+                            alpha: wgpu::BlendComponent::REPLACE,
+                            color: wgpu::BlendComponent::REPLACE,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+
         Pipelines {
             main,
             shadow: shadow_pipeline,
@@ -365,6 +420,7 @@ impl Pipelines {
             ghosted_wire,
             grid,
             normals,
+            background,
         }
     }
 }
