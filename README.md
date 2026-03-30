@@ -2,6 +2,7 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)
+![Release](https://github.com/marko-koljancic/solarxy/actions/workflows/release.yml/badge.svg)
 
 A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks.
 
