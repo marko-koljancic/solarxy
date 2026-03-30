@@ -10,8 +10,10 @@ repository = "https://github.com/marko-koljancic/solarxy"
 [profile.release]
 strip = true
 
-[lib]
-crate-type = ["rlib"]
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
