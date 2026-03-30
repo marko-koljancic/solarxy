@@ -21,28 +21,6 @@ fn main() -> io::Result<()> {
 
     match args.mode {
         OperationMode::View => {
-            println!();
-            println!("  SolarXY Viewer Controls");
-            println!();
-            println!("  View");
-            println!("    W          Cycle modes (Shaded / Shaded+Wire / Wireframe)");
-            println!("    S          Shaded mode");
-            println!("    X          Toggle Ghosted");
-            println!("    N          Cycle normals (Off / Face / Vertex / Face+Vertex)");
-            println!();
-            println!("  Camera");
-            println!("    H          Frame (reset view)");
-            println!("    T / F      Top / Front");
-            println!("    L / R      Left / Right");
-            println!("    P / O      Perspective / Orthographic");
-            println!("    Left drag  Orbit");
-            println!("    Mid drag   Pan");
-            println!("    Scroll     Zoom");
-            println!();
-            println!("  Other");
-            println!("    ?          Toggle shortcut hints");
-            println!("    Esc        Exit");
-            println!();
             run_viewer(model_path).unwrap();
             Ok(())
         }

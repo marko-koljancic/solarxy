@@ -119,6 +119,10 @@ impl ApplicationHandler<State> for App {
                     state.toggle_hints();
                 }
             }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                let size = state.window.inner_size();
+                state.resize(size.width, size.height);
+            }
             _ => {}
         }
     }
