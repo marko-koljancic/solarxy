@@ -54,12 +54,73 @@ impl std::fmt::Display for NormalsMode {
     }
 }
 
-const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.4235,
-    g: 0.4588,
-    b: 0.4902,
-    a: 1.0,
-};
+#[derive(Clone, Copy, PartialEq)]
+enum BackgroundPreset {
+    BlueGray,
+    DarkGray,
+    StudioGray,
+    White,
+    Black,
+}
+
+impl BackgroundPreset {
+    fn color(self) -> wgpu::Color {
+        match self {
+            Self::BlueGray => wgpu::Color {
+                r: 0.4235,
+                g: 0.4588,
+                b: 0.4902,
+                a: 1.0,
+            },
+            Self::DarkGray => wgpu::Color {
+                r: 0.12,
+                g: 0.12,
+                b: 0.12,
+                a: 1.0,
+            },
+            Self::StudioGray => wgpu::Color {
+                r: 0.45,
+                g: 0.45,
+                b: 0.45,
+                a: 1.0,
+            },
+            Self::White => wgpu::Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+            Self::Black => wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::BlueGray => Self::DarkGray,
+            Self::DarkGray => Self::StudioGray,
+            Self::StudioGray => Self::White,
+            Self::White => Self::Black,
+            Self::Black => Self::BlueGray,
+        }
+    }
+}
+
+impl std::fmt::Display for BackgroundPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BlueGray => write!(f, "Blue-gray"),
+            Self::DarkGray => write!(f, "Dark"),
+            Self::StudioGray => write!(f, "Studio"),
+            Self::White => write!(f, "White"),
+            Self::Black => write!(f, "Black"),
+        }
+    }
+}
 
 struct ModelScene {
     model: Model,
@@ -149,6 +210,7 @@ pub struct State {
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
+    background: BackgroundPreset,
     capture_requested: bool,
     last_frame_time: Instant,
     pub window: Arc<Window>,
@@ -241,6 +303,7 @@ impl State {
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
+            background: BackgroundPreset::BlueGray,
             capture_requested: false,
             last_frame_time: Instant::now(),
             window,
@@ -382,6 +445,9 @@ impl State {
                     self.capture_requested = true;
                 }
             }
+            KeyCode::KeyB => {
+                self.background = self.background.next();
+            }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
@@ -476,6 +542,8 @@ impl State {
             &self.view_mode.to_string(),
             &projection_str,
             &normals_str,
+            &self.background.to_string(),
+            self.background.color(),
             frame_ms,
             has_model,
         );
@@ -598,7 +666,7 @@ impl State {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(BACKGROUND_COLOR),
+                    load: wgpu::LoadOp::Clear(self.background.color()),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
@@ -645,7 +713,7 @@ impl State {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(BACKGROUND_COLOR),
+                    load: wgpu::LoadOp::Clear(self.background.color()),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,

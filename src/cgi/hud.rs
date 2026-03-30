@@ -118,6 +118,8 @@ impl HudRenderer {
         view_mode: &str,
         projection: &str,
         normals: &str,
+        bg_name: &str,
+        bg_color: wgpu::Color,
         frame_ms: f32,
         has_model: bool,
     ) {
@@ -134,23 +136,28 @@ impl HudRenderer {
         let fps = 1000.0 / avg_ms;
         let timing_text = format!("{:.1} ms  {} fps", avg_ms, fps as u32);
 
-        let black: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-        let hint_color: [f32; 4] = [0.0, 0.0, 0.0, 0.6];
-        let state_text = format!("Mode: {}  Proj: {}  Normals: {}", view_mode, projection, normals);
+        let lum = 0.2126 * bg_color.r + 0.7152 * bg_color.g + 0.0722 * bg_color.b;
+        let text_val = if lum > 0.5 { 0.0_f32 } else { 1.0_f32 };
+        let text_color: [f32; 4] = [text_val, text_val, text_val, 1.0];
+        let hint_color: [f32; 4] = [text_val, text_val, text_val, 0.6];
+        let state_text = format!(
+            "Mode: {}  Proj: {}  Normals: {}  BG: {}",
+            view_mode, projection, normals, bg_name
+        );
 
         let mut sections: Vec<Section> = Vec::new();
 
         if has_model {
             sections.push(
                 Section::default()
-                    .add_text(Text::new(&self.stats_text).with_scale(font_size_main).with_color(black))
+                    .add_text(Text::new(&self.stats_text).with_scale(font_size_main).with_color(text_color))
                     .with_screen_position((margin, margin))
                     .with_layout(Layout::default_single_line()),
             );
 
             sections.push(
                 Section::default()
-                    .add_text(Text::new(&state_text).with_scale(font_size_main).with_color(black))
+                    .add_text(Text::new(&state_text).with_scale(font_size_main).with_color(text_color))
                     .with_screen_position((screen_width as f32 - margin, margin))
                     .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right)),
             );
@@ -158,7 +165,7 @@ impl HudRenderer {
 
         sections.push(
             Section::default()
-                .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(black))
+                .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(text_color))
                 .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
                 .with_layout(
                     Layout::default_single_line()
@@ -168,7 +175,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints"
         } else {
             "? Hints"
         };
@@ -202,7 +209,7 @@ impl HudRenderer {
         }
 
         if !has_model && self.toast.is_none() {
-            let drop_color: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
+            let drop_color: [f32; 4] = [text_val, text_val, text_val, 0.5];
             let font_size_drop = 18.0 * sf;
             sections.push(
                 Section::default()
