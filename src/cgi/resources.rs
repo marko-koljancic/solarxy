@@ -1,7 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use super::geometry::{self, RawModelData};
-use super::{loader_obj, loader_ply, loader_stl, material, model, texture};
+use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
 
 pub fn load_model_any(
     file_path: &str,
@@ -18,6 +18,7 @@ pub fn load_model_any(
     let raw = match ext.as_str() {
         "stl" => loader_stl::load_stl(file_path)?,
         "ply" => loader_ply::load_ply(file_path)?,
+        "gltf" | "glb" => loader_gltf::load_gltf(file_path)?,
         _ => loader_obj::load_obj(file_path)?,
     };
 
@@ -40,19 +41,50 @@ fn upload_model(
     let (mesh_vertices, mesh_indices, bounds, normals_geo) = geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
     for mat in &raw.materials {
-        let diffuse_texture = match &mat.diffuse_texture_path {
-            Some(path) if !path.is_empty() => load_texture(path, false, device, queue).unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
+        let diffuse_texture = if let Some(ref data) = mat.diffuse_texture_data {
+            texture::Texture::from_raw_rgba(
+                device,
+                queue,
+                &data.pixels,
+                data.width,
+                data.height,
+                Some(&mat.name),
+                false,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to load embedded diffuse texture: {}", e);
                 create_default_texture(device, queue, false)
-            }),
-            _ => create_default_texture(device, queue, false),
+            })
+        } else {
+            match &mat.diffuse_texture_path {
+                Some(path) if !path.is_empty() => load_texture(path, false, device, queue).unwrap_or_else(|e| {
+                    eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
+                    create_default_texture(device, queue, false)
+                }),
+                _ => create_default_texture(device, queue, false),
+            }
         };
 
-        let normal_texture = match &mat.normal_texture_path {
-            Some(path) if !path.is_empty() => {
-                load_texture(path, true, device, queue).unwrap_or_else(|_| create_default_texture(device, queue, true))
+        let normal_texture = if let Some(ref data) = mat.normal_texture_data {
+            texture::Texture::from_raw_rgba(
+                device,
+                queue,
+                &data.pixels,
+                data.width,
+                data.height,
+                Some(&mat.name),
+                true,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to load embedded normal texture: {}", e);
+                create_default_texture(device, queue, true)
+            })
+        } else {
+            match &mat.normal_texture_path {
+                Some(path) if !path.is_empty() => load_texture(path, true, device, queue)
+                    .unwrap_or_else(|_| create_default_texture(device, queue, true)),
+                _ => create_default_texture(device, queue, true),
             }
-            _ => create_default_texture(device, queue, true),
         };
 
         gpu_materials.push(material::Material::new(

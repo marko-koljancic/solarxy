@@ -50,6 +50,8 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             name: m.name.clone(),
             diffuse_texture_path: diffuse_path,
             normal_texture_path: normal_path,
+            diffuse_texture_data: None,
+            normal_texture_data: None,
         });
     }
 

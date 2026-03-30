@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply"];
+const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
 
 pub fn is_valid_model_path(path: &str) -> Result<PathBuf, String> {
     let path_buf = PathBuf::from(path);
@@ -18,11 +18,11 @@ pub fn is_valid_model_path(path: &str) -> Result<PathBuf, String> {
             .canonicalize()
             .map_err(|e| format!("Failed to resolve path: {}", e)),
         Some(ext) => Err(format!(
-            "Invalid file extension '.{}', expected '.obj', '.stl', or '.ply'",
+            "Invalid file extension '.{}', expected '.obj', '.stl', '.ply', '.gltf', or '.glb'",
             ext
         )),
         None => Err(String::from(
-            "File has no extension, expected '.obj', '.stl', or '.ply'",
+            "File has no extension, expected '.obj', '.stl', '.ply', '.gltf', or '.glb'",
         )),
     }
 }

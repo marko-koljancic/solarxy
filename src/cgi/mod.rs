@@ -4,6 +4,7 @@ pub mod camera_state;
 pub mod geometry;
 pub mod hud;
 pub mod light;
+pub mod loader_gltf;
 pub mod loader_obj;
 pub mod loader_ply;
 pub mod loader_stl;

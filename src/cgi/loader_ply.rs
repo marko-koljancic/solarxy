@@ -230,6 +230,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         name: mat_name.to_string(),
         diffuse_texture_path: companion_tex,
         normal_texture_path: None,
+        diffuse_texture_data: None,
+        normal_texture_data: None,
     });
 
     Ok(RawModelData {

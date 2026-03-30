@@ -11,10 +11,18 @@ pub struct RawMeshData {
     pub material_index: Option<usize>,
 }
 
+pub struct RawImageData {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<String>,
     pub normal_texture_path: Option<String>,
+    pub diffuse_texture_data: Option<RawImageData>,
+    pub normal_texture_data: Option<RawImageData>,
 }
 
 pub struct RawModelData {

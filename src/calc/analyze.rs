@@ -45,6 +45,7 @@ impl ModelAnalyzer {
         match ext.as_str() {
             "stl" => Self::from_stl(path),
             "ply" => Self::from_ply(path),
+            "gltf" | "glb" => Self::from_gltf(path),
             _ => Self::from_obj(path),
         }
     }
@@ -207,6 +208,87 @@ impl ModelAnalyzer {
             meshes: vec![mesh],
             materials: Vec::new(),
         })
+    }
+
+    fn from_gltf(path: &str) -> Result<Self> {
+        let model_name = path.split('/').next_back().unwrap_or(path).to_string();
+        let (document, buffers, _images) = gltf::import(path)?;
+
+        let mut meshes = Vec::new();
+        for scene in document.scenes() {
+            for node in scene.nodes() {
+                Self::collect_gltf_meshes(&node, &buffers, &mut meshes);
+            }
+        }
+
+        let materials = document
+            .materials()
+            .map(|mat| {
+                let pbr = mat.pbr_metallic_roughness();
+                let base_color = pbr.base_color_factor();
+                AnalyzerMaterial {
+                    name: mat.name().unwrap_or("gltf_material").to_string(),
+                    ambient: None,
+                    diffuse: Some([base_color[0], base_color[1], base_color[2]]),
+                    specular: None,
+                    shininess: None,
+                    dissolve: Some(base_color[3]),
+                    optical_density: None,
+                    diffuse_texture: pbr
+                        .base_color_texture()
+                        .map(|t| format!("texture_index:{}", t.texture().source().index())),
+                    ambient_texture: None,
+                    specular_texture: None,
+                    normal_texture: mat
+                        .normal_texture()
+                        .map(|t| format!("texture_index:{}", t.texture().source().index())),
+                    shininess_texture: None,
+                    dissolve_texture: None,
+                }
+            })
+            .collect();
+
+        Ok(ModelAnalyzer {
+            model_name,
+            meshes,
+            materials,
+        })
+    }
+
+    fn collect_gltf_meshes(node: &gltf::Node, buffers: &[gltf::buffer::Data], meshes: &mut Vec<AnalyzerMesh>) {
+        if let Some(mesh) = node.mesh() {
+            for primitive in mesh.primitives() {
+                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+
+                let positions: Vec<f32> = reader
+                    .read_positions()
+                    .map(|iter| iter.flatten().collect())
+                    .unwrap_or_default();
+                let indices: Vec<u32> = reader
+                    .read_indices()
+                    .map(|iter| iter.into_u32().collect())
+                    .unwrap_or_default();
+                let normals: Vec<f32> = reader
+                    .read_normals()
+                    .map(|iter| iter.flatten().collect())
+                    .unwrap_or_default();
+                let texcoords: Vec<f32> = reader
+                    .read_tex_coords(0)
+                    .map(|iter| iter.into_f32().flatten().collect())
+                    .unwrap_or_default();
+
+                meshes.push(AnalyzerMesh {
+                    positions,
+                    indices,
+                    normals,
+                    texcoords,
+                    material_id: primitive.material().index(),
+                });
+            }
+        }
+        for child in node.children() {
+            Self::collect_gltf_meshes(&child, buffers, meshes);
+        }
     }
 
     pub fn generate_report(&self) -> String {
