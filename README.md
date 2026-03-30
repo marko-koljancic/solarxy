@@ -1,53 +1,124 @@
 # solarxy
 
-A lightweight, cross-platform 3D model viewer and validator, built with Rust and `wgpu`. It provides a simple interface for inspecting 3D models, with support for common formats and validation checks.
+A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks.
 
-## Roadmap
+## Features
 
-- **Multi-format Support**: Load and inspect `.obj` models. (glTF support is on the roadmap).
-- **Real-time Rendering**: Basic real-time rendering with texturing and lighting.
-- **Validation**: Built-in checks to identify common issues in supported 3D models.
-- **Flexible Workflow**: Use either the graphical interface or the command-line for validation.
+- **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
+- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, 3-light system
+- **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
+- **Report export** -- save analysis reports to file or pipe to stdout
 
-## Technical Details
+## Supported Formats
 
-- **Core**: Written in Rust (2024 Edition).
-- **Rendering**: `wgpu` for cross-platform graphics, using shaders written in WGSL.
-- **Windowing**: `winit` for window creation and management.
-- **CLI**: `clap` for command-line argument parsing and `ratatui` for the terminal user interface.
-- **Model Loading**: `tobj` for `.obj` file parsing.
-- **Math**: `cgmath` for 3D mathematics.
+| Format | Extensions | Notes |
+|---|---|---|
+| Wavefront OBJ | `.obj` | Meshes, materials (`.mtl`), textures, UVs |
+| STL | `.stl` | Geometry only, no materials |
+| PLY | `.ply` | Flexible vertex attributes, optional normals and UVs |
+| glTF 2.0 | `.gltf`, `.glb` | PBR materials, normal maps, embedded textures |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Rust toolchain (install from [rustup.rs](https://rustup.rs))
-- MSRV (Minimum Supported Rust Version): See `Cargo.toml`.
+- MSRV: see `Cargo.toml`
 
-### Build & Run
-
-**Compilation**
-
-To compile both debug and release versions:
+### Build
 
 ```bash
-cargo build && cargo build --release
+cargo build --release
 ```
 
-**Execution Modes**
+### Usage
 
-View Mode:
+View a model (default mode):
 
 ```bash
-cargo r --release -- --model res/models/xyzrgb_dragon.obj
+cargo r --release -- --model path/to/model.obj
 ```
 
-Analyze Mode:
+Analyze a model in the terminal:
 
 ```bash
-cargo r --release -- --model res/models/xyzrgb_dragon.obj --mode 'analyze'
+cargo r --release -- --model path/to/model.glb --mode analyze
 ```
+
+Analyze and save the report to a file:
+
+```bash
+cargo r --release -- --model path/to/model.glb --mode analyze --output report.txt
+```
+
+## CLI Reference
+
+| Flag | Description | Default |
+|---|---|---|
+| `-m, --model <PATH>` | Path to model file (required) | -- |
+| `-M, --mode <MODE>` | `view` or `analyze` | `view` |
+| `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
+
+## View Mode
+
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, and real-time shadow mapping. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor and an infinite grid.
+
+### Camera Controls
+
+| Input | Action |
+|---|---|
+| Left mouse drag | Orbit |
+| Middle mouse drag | Pan |
+| Scroll wheel | Zoom |
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `W` | Cycle view mode (Shaded / Shaded+Wire / Wireframe) |
+| `S` | Shaded mode |
+| `X` | Toggle ghosted view |
+| `N` | Cycle normals (Off / Face / Vertex / Face+Vertex) |
+| `H` | Frame model (reset view) |
+| `T` `F` `L` `R` | Top / Front / Left / Right view |
+| `P` | Perspective projection |
+| `O` | Orthographic projection |
+| `?` | Toggle keybinding hints |
+| `Esc` | Exit |
+
+## Analyze Mode
+
+The analyzer opens a terminal UI with four tabs: **Overview**, **Meshes**, **Materials**, and **Validation**. Overview shows aggregate counts and bounding box dimensions. Meshes and Materials provide per-element breakdowns. Validation lists errors and warnings found in the model.
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift+Tab` | Next / previous tab |
+| `1` `2` `3` `4` | Jump to tab |
+| `j` / `k`, arrows | Scroll up / down |
+| `g` / `G` | Jump to top / bottom |
+| `PgUp` / `PgDn` | Page scroll |
+| `e` | Export report (prompts for filename) |
+| `q` / `Esc` | Quit |
+
+## Validation Checks
+
+The analyzer runs the following checks and reports errors or warnings:
+
+- Normal count does not match vertex count
+- UV count does not match vertex count
+- Missing UVs (severity depends on format)
+- Non-triangulated meshes (index count not divisible by 3)
+- Empty index buffers
+- Invalid material references
+- Missing texture files
+
+## Tech Stack
+
+**Core:** Rust 2024 Edition, wgpu, winit, WGSL shaders
+
+**Libraries:** clap, ratatui, crossterm, tobj, stl_io, ply-rs-bw, gltf, wgpu_text, cgmath, image
 
 ## Contributing
 
