@@ -22,6 +22,7 @@ pub struct HudRenderer {
     scale_factor: f64,
     stats_text: String,
     toast: Option<Toast>,
+    loading_message: Option<String>,
     frame_times: VecDeque<f32>,
 }
 
@@ -47,6 +48,7 @@ impl HudRenderer {
             scale_factor,
             stats_text,
             toast: None,
+            loading_message: None,
             frame_times: VecDeque::with_capacity(30),
         }
     }
@@ -96,6 +98,14 @@ impl HudRenderer {
             created: Instant::now(),
             duration: Duration::from_secs(3),
         });
+    }
+
+    pub fn set_loading_message(&mut self, msg: &str) {
+        self.loading_message = Some(msg.to_string());
+    }
+
+    pub fn clear_loading_message(&mut self) {
+        self.loading_message = None;
     }
 
     pub fn clear_expired_toast(&mut self) {
@@ -216,7 +226,20 @@ impl HudRenderer {
             );
         }
 
-        if !has_model && self.toast.is_none() {
+        if let Some(ref msg) = self.loading_message {
+            let loading_color: [f32; 4] = [0.5, 0.7, 1.0, 0.9];
+            let font_size_loading = 18.0 * sf;
+            sections.push(
+                Section::default()
+                    .add_text(Text::new(msg).with_scale(font_size_loading).with_color(loading_color))
+                    .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 / 2.0))
+                    .with_layout(
+                        Layout::default_single_line()
+                            .h_align(HorizontalAlign::Center)
+                            .v_align(VerticalAlign::Center),
+                    ),
+            );
+        } else if !has_model && self.toast.is_none() {
             let drop_color: [f32; 4] = [text_val, text_val, text_val, 0.5];
             let font_size_drop = 18.0 * sf;
             sections.push(

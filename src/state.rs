@@ -11,7 +11,7 @@ use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
 use cgmath::prelude::*;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
@@ -262,6 +262,11 @@ impl ModelScene {
     }
 }
 
+struct PendingLoad {
+    receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
+    filename: String,
+}
+
 const MSAA_SAMPLE_COUNT: u32 = 4;
 
 pub struct State {
@@ -272,10 +277,11 @@ pub struct State {
     is_surface_configured: bool,
     depth_texture: texture::Texture,
     msaa_color_view: wgpu::TextureView,
-    layouts: BindGroupLayouts,
+    layouts: Arc<BindGroupLayouts>,
     pipelines: Pipelines,
     hud: HudRenderer,
     scene: Option<ModelScene>,
+    pending_load: Option<PendingLoad>,
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
@@ -343,36 +349,15 @@ impl State {
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture", MSAA_SAMPLE_COUNT);
         let msaa_color_view = texture::create_msaa_color_texture(&device, &config, MSAA_SAMPLE_COUNT);
-        let layouts = BindGroupLayouts::new(&device);
+        let layouts = Arc::new(BindGroupLayouts::new(&device));
         let pipelines = Pipelines::new(&device, &config, &layouts, MSAA_SAMPLE_COUNT);
-
-        let (scene, stats) = match model_path {
-            Some(path) => {
-                let s = ModelScene::new(path, &device, &queue, &layouts, &config)?;
-                let stats = ModelStats {
-                    polys: s.stats.polys,
-                    tris: s.stats.tris,
-                    verts: s.stats.verts,
-                };
-                (Some(s), Some(stats))
-            }
-            None => (None, None),
-        };
-
-        if let Some(ref s) = scene {
-            let filename = std::path::Path::new(&s.model_path)
-                .file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or(&s.model_path);
-            window.set_title(&format!("Solarxy \u{2014} {}", filename));
-        }
 
         let hud = HudRenderer::new(
             &device,
             surface_format,
             size.width,
             size.height,
-            stats.as_ref(),
+            None,
             window.scale_factor(),
         );
 
@@ -439,7 +424,7 @@ impl State {
             ],
         });
 
-        Ok(Self {
+        let mut state = Self {
             surface,
             device,
             queue,
@@ -450,7 +435,8 @@ impl State {
             layouts,
             pipelines,
             hud,
-            scene,
+            scene: None,
+            pending_load: None,
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
@@ -466,7 +452,13 @@ impl State {
             last_frame_time: Instant::now(),
             dt: 0.0,
             window,
-        })
+        };
+
+        if let Some(path) = model_path {
+            state.spawn_load(path);
+        }
+
+        Ok(state)
     }
 
     pub fn handle_dropped_file(&mut self, path: PathBuf) {
@@ -486,24 +478,31 @@ impl State {
             }
         };
 
-        match ModelScene::new(model_path, &self.device, &self.queue, &self.layouts, &self.config) {
-            Ok(new_scene) => {
-                self.hud.update_stats(Some(&new_scene.stats));
-                let filename = std::path::Path::new(&new_scene.model_path)
-                    .file_name()
-                    .and_then(|f| f.to_str())
-                    .unwrap_or(&new_scene.model_path);
-                self.window.set_title(&format!("Solarxy \u{2014} {}", filename));
-                self.scene = Some(new_scene);
-                self.view_mode = ViewMode::Shaded;
-                self.prev_non_ghosted_mode = ViewMode::Shaded;
-                self.normals_mode = NormalsMode::Off;
-            }
-            Err(e) => {
-                self.hud
-                    .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
-            }
-        }
+        self.spawn_load(model_path);
+    }
+
+    fn spawn_load(&mut self, model_path: String) {
+        let filename = std::path::Path::new(&model_path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or(&model_path)
+            .to_string();
+
+        self.hud.set_loading_message(&format!("Loading {}...", filename));
+
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        let layouts = Arc::clone(&self.layouts);
+        let config = self.config.clone();
+
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let result = ModelScene::new(model_path, &device, &queue, &layouts, &config);
+            let _ = tx.send(result);
+        });
+
+        self.pending_load = Some(PendingLoad { receiver: rx, filename });
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -661,6 +660,35 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        let poll = self.pending_load.as_ref().map(|p| p.receiver.try_recv());
+        match poll {
+            Some(Ok(Ok(new_scene))) => {
+                let pending = self.pending_load.take().unwrap();
+                self.hud.update_stats(Some(&new_scene.stats));
+                self.hud.clear_loading_message();
+                self.window.set_title(&format!("Solarxy \u{2014} {}", pending.filename));
+                self.scene = Some(new_scene);
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.resize(self.config.width as f32 / self.config.height as f32);
+                }
+                self.view_mode = ViewMode::Shaded;
+                self.prev_non_ghosted_mode = ViewMode::Shaded;
+                self.normals_mode = NormalsMode::Off;
+            }
+            Some(Ok(Err(e))) => {
+                self.pending_load.take();
+                self.hud.clear_loading_message();
+                self.hud
+                    .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
+            }
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.pending_load.take();
+                self.hud.clear_loading_message();
+                self.hud.set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
+            }
+            _ => {}
+        }
+
         let now = Instant::now();
         self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
         self.last_frame_time = now;
