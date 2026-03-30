@@ -13,8 +13,11 @@ mod cli;
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
-    let model_path_buff = fs::canonicalize(&args.model_path).expect("Failed to canonicalize the model path");
-    let model_path = model_path_buff.to_string_lossy().to_string();
+
+    let model_path = args.model_path.map(|p| {
+        let canonical = fs::canonicalize(&p).expect("Failed to canonicalize the model path");
+        canonical.to_string_lossy().to_string()
+    });
 
     match args.mode {
         OperationMode::View => {
@@ -44,6 +47,7 @@ fn main() -> io::Result<()> {
             Ok(())
         }
         OperationMode::Analyze => {
+            let model_path = model_path.expect("Model path is required for analyze mode (use -m <path>)");
             let analyzer = ModelAnalyzer::new(&model_path).expect("Failed to load model for analysis");
             let report = analyzer.generate_report();
 

@@ -5,10 +5,12 @@ use crate::cgi::hud::HudRenderer;
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::{self, Model};
 use crate::cgi::pipelines::{Instance, Pipelines};
+use crate::cgi::resources::{self, ModelStats};
 use crate::cgi::shadow::ShadowState;
 use crate::cgi::visualization::VisualizationState;
-use crate::cgi::{resources, texture};
+use crate::cgi::texture;
 use cgmath::prelude::*;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
@@ -59,6 +61,80 @@ const BACKGROUND_COLOR: wgpu::Color = wgpu::Color {
     a: 1.0,
 };
 
+struct ModelScene {
+    model: Model,
+    cam: CameraState,
+    lights_uniform: LightsUniform,
+    light_buffer: wgpu::Buffer,
+    light_bind_group: wgpu::BindGroup,
+    instance_buffer: wgpu::Buffer,
+    shadow: ShadowState,
+    vis: VisualizationState,
+    #[allow(dead_code)]
+    model_path: String,
+    stats: ModelStats,
+}
+
+impl ModelScene {
+    fn new(
+        model_path: String,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layouts: &BindGroupLayouts,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> anyhow::Result<Self> {
+        let (model, normals_geo, stats) = resources::load_model_any(&model_path, device, queue, &layouts.texture)?;
+
+        let cam = CameraState::new(
+            device,
+            &layouts.camera,
+            &model.bounds,
+            config.width as f32 / config.height as f32,
+        );
+
+        let instance_data = Instance {
+            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
+            rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
+        };
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&[instance_data.to_raw()]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let lights_uniform = lights_from_camera(&cam.camera, &model.bounds);
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light VB"),
+            contents: bytemuck::cast_slice(&[lights_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &layouts.light,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
+        });
+
+        let shadow = ShadowState::new(device, layouts, &lights_uniform, &model);
+        let vis = VisualizationState::new(device, layouts, &model, &normals_geo, &cam.buffer);
+
+        Ok(ModelScene {
+            model,
+            cam,
+            lights_uniform,
+            light_buffer,
+            light_bind_group,
+            instance_buffer,
+            shadow,
+            vis,
+            model_path,
+            stats,
+        })
+    }
+}
+
 pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -66,27 +142,20 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     depth_texture: texture::Texture,
-    cam: CameraState,
-    lights_uniform: LightsUniform,
-    light_buffer: wgpu::Buffer,
-    light_bind_group: wgpu::BindGroup,
-    instance_buffer: wgpu::Buffer,
-    shadow: ShadowState,
+    layouts: BindGroupLayouts,
     pipelines: Pipelines,
-    vis: VisualizationState,
-    model: Model,
     hud: HudRenderer,
+    scene: Option<ModelScene>,
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
     capture_requested: bool,
     last_frame_time: Instant,
     pub window: Arc<Window>,
-    pub model_path: String,
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>, model_path: String) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>, model_path: Option<String>) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -134,48 +203,27 @@ impl State {
         };
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         let layouts = BindGroupLayouts::new(&device);
-        let (model, normals_geo, model_stats) =
-            resources::load_model_any(&model_path, &device, &queue, &layouts.texture)?;
-
-        let cam = CameraState::new(
-            &device,
-            &layouts.camera,
-            &model.bounds,
-            config.width as f32 / config.height as f32,
-        );
-        let instance_data = Instance {
-            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
-            rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
-        };
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&[instance_data.to_raw()]),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let lights_uniform = lights_from_camera(&cam.camera, &model.bounds);
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[lights_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &layouts.light,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-        });
-        let shadow = ShadowState::new(&device, &layouts, &lights_uniform, &model);
         let pipelines = Pipelines::new(&device, &config, &layouts);
-        let vis = VisualizationState::new(&device, &layouts, &model, &normals_geo, &cam.buffer);
+
+        let (scene, stats) = match model_path {
+            Some(path) => {
+                let s = ModelScene::new(path, &device, &queue, &layouts, &config)?;
+                let stats = ModelStats {
+                    polys: s.stats.polys,
+                    tris: s.stats.tris,
+                    verts: s.stats.verts,
+                };
+                (Some(s), Some(stats))
+            }
+            None => (None, None),
+        };
 
         let hud = HudRenderer::new(
             &device,
             surface_format,
             size.width,
             size.height,
-            &model_stats,
+            stats.as_ref(),
             window.scale_factor(),
         );
 
@@ -186,36 +234,63 @@ impl State {
             config,
             is_surface_configured: false,
             depth_texture,
-            cam,
-            lights_uniform,
-            light_buffer,
-            light_bind_group,
-            instance_buffer,
-            shadow,
+            layouts,
             pipelines,
-            vis,
-            model,
             hud,
+            scene,
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             capture_requested: false,
             last_frame_time: Instant::now(),
             window,
-            model_path,
         })
+    }
+
+    pub fn handle_dropped_file(&mut self, path: PathBuf) {
+        if !resources::is_supported_model_extension(&path) {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
+            self.hud
+                .set_toast(&format!("Unsupported format: .{}", ext), [0.6, 0.0, 0.0, 1.0]);
+            return;
+        }
+
+        let model_path = match path.canonicalize() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) => {
+                self.hud
+                    .set_toast(&format!("Invalid path: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                return;
+            }
+        };
+
+        match ModelScene::new(model_path, &self.device, &self.queue, &self.layouts, &self.config) {
+            Ok(new_scene) => {
+                self.hud.update_stats(Some(&new_scene.stats));
+                self.scene = Some(new_scene);
+                self.view_mode = ViewMode::Shaded;
+                self.prev_non_ghosted_mode = ViewMode::Shaded;
+                self.normals_mode = NormalsMode::Off;
+            }
+            Err(e) => {
+                self.hud
+                    .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
+            }
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
-            self.cam.resize(width as f32 / height as f32);
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             self.is_surface_configured = true;
             self.hud.resize(width, height, &self.queue);
             self.hud.set_scale_factor(self.window.scale_factor());
+            if let Some(scene) = &mut self.scene {
+                scene.cam.resize(width as f32 / height as f32);
+            }
         }
     }
 
@@ -225,32 +300,64 @@ impl State {
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if !is_pressed {
-            self.cam.handle_key(code, is_pressed);
+            if let Some(scene) = &mut self.scene {
+                scene.cam.handle_key(code, is_pressed);
+            }
             return;
         }
         match code {
             KeyCode::Escape => event_loop.exit(),
-            KeyCode::KeyH => self.cam.reset_to_bounds(&self.model.bounds),
-            KeyCode::KeyT => self.cam.reset_to_bounds_axis(
-                &self.model.bounds,
-                cgmath::Vector3::unit_y(),
-                -cgmath::Vector3::unit_z(),
-            ),
+            KeyCode::KeyH => {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.reset_to_bounds(&scene.model.bounds);
+                }
+            }
+            KeyCode::KeyT => {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.reset_to_bounds_axis(
+                        &scene.model.bounds,
+                        cgmath::Vector3::unit_y(),
+                        -cgmath::Vector3::unit_z(),
+                    );
+                }
+            }
             KeyCode::KeyF => {
-                self.cam
-                    .reset_to_bounds_axis(&self.model.bounds, cgmath::Vector3::unit_z(), cgmath::Vector3::unit_y())
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.reset_to_bounds_axis(
+                        &scene.model.bounds,
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Vector3::unit_y(),
+                    );
+                }
             }
-            KeyCode::KeyL => self.cam.reset_to_bounds_axis(
-                &self.model.bounds,
-                -cgmath::Vector3::unit_x(),
-                cgmath::Vector3::unit_y(),
-            ),
+            KeyCode::KeyL => {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.reset_to_bounds_axis(
+                        &scene.model.bounds,
+                        -cgmath::Vector3::unit_x(),
+                        cgmath::Vector3::unit_y(),
+                    );
+                }
+            }
             KeyCode::KeyR => {
-                self.cam
-                    .reset_to_bounds_axis(&self.model.bounds, cgmath::Vector3::unit_x(), cgmath::Vector3::unit_y())
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.reset_to_bounds_axis(
+                        &scene.model.bounds,
+                        cgmath::Vector3::unit_x(),
+                        cgmath::Vector3::unit_y(),
+                    );
+                }
             }
-            KeyCode::KeyP => self.cam.set_projection(ProjectionMode::Perspective),
-            KeyCode::KeyO => self.cam.set_projection(ProjectionMode::Orthographic),
+            KeyCode::KeyP => {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.set_projection(ProjectionMode::Perspective);
+                }
+            }
+            KeyCode::KeyO => {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.set_projection(ProjectionMode::Orthographic);
+                }
+            }
             KeyCode::KeyW => {
                 if self.view_mode != ViewMode::Ghosted {
                     self.view_mode = match self.view_mode {
@@ -270,7 +377,11 @@ impl State {
                 }
             }
             KeyCode::KeyS => self.view_mode = ViewMode::Shaded,
-            KeyCode::KeyC => self.capture_requested = true,
+            KeyCode::KeyC => {
+                if self.scene.is_some() {
+                    self.capture_requested = true;
+                }
+            }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
@@ -280,37 +391,47 @@ impl State {
                 };
             }
             _ => {
-                self.cam.handle_key(code, is_pressed);
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.handle_key(code, is_pressed);
+                }
             }
         }
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        self.cam.handle_mouse_button(button, pressed);
+        if let Some(scene) = &mut self.scene {
+            scene.cam.handle_mouse_button(button, pressed);
+        }
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        self.cam.handle_mouse_move(x, y);
+        if let Some(scene) = &mut self.scene {
+            scene.cam.handle_mouse_move(x, y);
+        }
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        self.cam.handle_scroll(delta);
+        if let Some(scene) = &mut self.scene {
+            scene.cam.handle_scroll(delta);
+        }
     }
 
     pub fn update(&mut self) {
-        self.cam.update(&self.queue);
+        if let Some(scene) = &mut self.scene {
+            scene.cam.update(&self.queue);
 
-        self.lights_uniform = lights_from_camera(&self.cam.camera, &self.model.bounds);
-        self.queue
-            .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.lights_uniform]));
+            scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
+            self.queue
+                .write_buffer(&scene.light_buffer, 0, bytemuck::cast_slice(&[scene.lights_uniform]));
 
-        let key_pos = self.lights_uniform.lights[0].position;
-        self.shadow.update_light_vp(
-            &self.queue,
-            cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-            self.model.bounds.center(),
-            self.model.bounds.diagonal() / 2.0,
-        );
+            let key_pos = scene.lights_uniform.lights[0].position;
+            scene.shadow.update_light_vp(
+                &self.queue,
+                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                scene.model.bounds.center(),
+                scene.model.bounds.diagonal() / 2.0,
+            );
+        }
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -322,7 +443,7 @@ impl State {
         let frame_ms = self.last_frame_time.elapsed().as_secs_f32() * 1000.0;
         self.last_frame_time = Instant::now();
 
-        self.hud.clear_expired_message();
+        self.hud.clear_expired_toast();
 
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -330,8 +451,21 @@ impl State {
             label: Some("Render Encoder"),
         });
 
-        self.render_shadow_pass(&mut encoder);
-        self.render_main_pass(&mut encoder, &view);
+        let has_model = self.scene.is_some();
+
+        if let Some(scene) = &self.scene {
+            self.render_shadow_pass(&mut encoder, scene);
+            self.render_main_pass(&mut encoder, &view, scene);
+        } else {
+            self.render_empty_pass(&mut encoder, &view);
+        }
+
+        let (projection_str, normals_str) = if let Some(scene) = &self.scene {
+            (scene.cam.camera.projection.to_string(), self.normals_mode.to_string())
+        } else {
+            (String::new(), String::new())
+        };
+
         self.hud.render(
             &self.device,
             &mut encoder,
@@ -340,9 +474,10 @@ impl State {
             self.config.width,
             self.config.height,
             &self.view_mode.to_string(),
-            &self.cam.camera.projection.to_string(),
-            &self.normals_mode.to_string(),
+            &projection_str,
+            &normals_str,
             frame_ms,
+            has_model,
         );
 
         let capture_buffer = if self.capture_requested {
@@ -456,12 +591,37 @@ impl State {
         }
     }
 
-    fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+    fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Empty Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(BACKGROUND_COLOR),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+    }
+
+    fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Shadow Pass"),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.shadow.texture_view,
+                view: &scene.shadow.texture_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -472,13 +632,13 @@ impl State {
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipelines.shadow);
-        pass.set_bind_group(0, &self.shadow.pass_bind_group, &[]);
-        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         use model::DrawMeshSimple;
-        pass.draw_model_simple(&self.model, 0..1);
+        pass.draw_model_simple(&scene.model, 0..1);
     }
 
-    fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+    fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, scene: &ModelScene) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -503,75 +663,75 @@ impl State {
         });
 
         use model::DrawMeshSimple;
-        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         match self.view_mode {
             ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                self.draw_shaded_model(&mut pass);
-                self.draw_floor(&mut pass);
+                self.draw_shaded_model(&mut pass, scene);
+                self.draw_floor(&mut pass, scene);
                 if self.view_mode == ViewMode::ShadedWireframe {
-                    pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.set_pipeline(&self.pipelines.wireframe);
-                    pass.set_bind_group(0, &self.cam.bind_group, &[]);
-                    pass.draw_model_simple(&self.model, 0..1);
+                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.draw_model_simple(&scene.model, 0..1);
                 }
             }
             ViewMode::WireframeOnly => {
                 pass.set_pipeline(&self.pipelines.wireframe);
-                pass.set_bind_group(0, &self.cam.bind_group, &[]);
-                pass.draw_model_simple(&self.model, 0..1);
+                pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                pass.draw_model_simple(&scene.model, 0..1);
             }
             ViewMode::Ghosted => {
                 pass.set_pipeline(&self.pipelines.ghosted_fill);
-                pass.set_bind_group(0, &self.cam.bind_group, &[]);
-                pass.draw_model_simple(&self.model, 0..1);
+                pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                pass.draw_model_simple(&scene.model, 0..1);
                 pass.set_pipeline(&self.pipelines.ghosted_wire);
-                pass.draw_model_simple(&self.model, 0..1);
+                pass.draw_model_simple(&scene.model, 0..1);
             }
         }
 
         pass.set_pipeline(&self.pipelines.grid);
-        pass.set_bind_group(0, &self.vis.grid_bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vis.grid_mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(self.vis.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..self.vis.grid_mesh.num_elements, 0, 0..1);
-        self.draw_normals(&mut pass);
+        pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
+        pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
+        pass.set_index_buffer(scene.vis.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
+        self.draw_normals(&mut pass, scene);
     }
 
-    fn draw_shaded_model<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    fn draw_shaded_model<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
         use model::DrawModel;
         pass.set_pipeline(&self.pipelines.main);
-        pass.set_bind_group(3, &self.shadow.sample_bind_group, &[]);
-        pass.draw_model_instanced(&self.model, 0..1, &self.cam.bind_group, &self.light_bind_group);
+        pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
+        pass.draw_model_instanced(&scene.model, 0..1, &scene.cam.bind_group, &scene.light_bind_group);
     }
 
-    fn draw_floor<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    fn draw_floor<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
         pass.set_pipeline(&self.pipelines.floor);
-        pass.set_bind_group(0, &self.cam.bind_group, &[]);
-        pass.set_bind_group(1, &self.shadow.sample_bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vis.floor_mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(self.vis.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..self.vis.floor_mesh.num_elements, 0, 0..1);
+        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(1, &scene.shadow.sample_bind_group, &[]);
+        pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
+        pass.set_index_buffer(scene.vis.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..scene.vis.floor_mesh.num_elements, 0, 0..1);
     }
 
-    fn draw_normals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    fn draw_normals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
         if self.normals_mode == NormalsMode::Off {
             return;
         }
         pass.set_pipeline(&self.pipelines.normals);
         if matches!(self.normals_mode, NormalsMode::Face | NormalsMode::FaceAndVertex)
-            && self.vis.face_normals_count > 0
+            && scene.vis.face_normals_count > 0
         {
-            pass.set_bind_group(0, &self.vis.face_normals_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vis.face_normals_buf.slice(..));
-            pass.draw(0..self.vis.face_normals_count, 0..1);
+            pass.set_bind_group(0, &scene.vis.face_normals_bind_group, &[]);
+            pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
+            pass.draw(0..scene.vis.face_normals_count, 0..1);
         }
         if matches!(self.normals_mode, NormalsMode::Vertex | NormalsMode::FaceAndVertex)
-            && self.vis.vertex_normals_count > 0
+            && scene.vis.vertex_normals_count > 0
         {
-            pass.set_bind_group(0, &self.vis.vertex_normals_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vis.vertex_normals_buf.slice(..));
-            pass.draw(0..self.vis.vertex_normals_count, 0..1);
+            pass.set_bind_group(0, &scene.vis.vertex_normals_bind_group, &[]);
+            pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));
+            pass.draw(0..scene.vis.vertex_normals_count, 0..1);
         }
     }
 }

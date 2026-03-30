@@ -8,10 +8,9 @@ use super::validators::is_valid_model_path;
 pub struct Args {
     #[clap(short = 'm',
     long = "model",
-    required = true,
-    help = "Path to the model file",
+    help = "Path to the model file (optional in view mode — drop a file onto the window)",
     value_parser = is_valid_model_path)]
-    pub model_path: PathBuf,
+    pub model_path: Option<PathBuf>,
     #[clap(
         short = 'M',
         long = "mode",

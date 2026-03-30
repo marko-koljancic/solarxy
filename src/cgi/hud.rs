@@ -9,12 +9,19 @@ use crate::format_number;
 
 use super::resources::ModelStats;
 
+struct Toast {
+    message: String,
+    color: [f32; 4],
+    created: Instant,
+    duration: Duration,
+}
+
 pub struct HudRenderer {
     brush: TextBrush<FontRef<'static>>,
     hints_visible: bool,
     scale_factor: f64,
     stats_text: String,
-    capture_message: Option<(String, Instant)>,
+    toast: Option<Toast>,
     frame_times: VecDeque<f32>,
 }
 
@@ -24,7 +31,7 @@ impl HudRenderer {
         surface_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
-        stats: &ModelStats,
+        stats: Option<&ModelStats>,
         scale_factor: f64,
     ) -> Self {
         let font_bytes: &[u8] = include_bytes!("../../res/Lilex/static/Lilex-Medium.ttf");
@@ -32,21 +39,32 @@ impl HudRenderer {
             .expect("Failed to load font")
             .build(device, width, height, surface_format);
 
-        let stats_text = format!(
-            "Polys {}  Tris {}  Verts {}",
-            format_number(stats.polys),
-            format_number(stats.tris),
-            format_number(stats.verts),
-        );
+        let stats_text = Self::format_stats(stats);
 
         HudRenderer {
             brush,
             hints_visible: true,
             scale_factor,
             stats_text,
-            capture_message: None,
+            toast: None,
             frame_times: VecDeque::with_capacity(30),
         }
+    }
+
+    fn format_stats(stats: Option<&ModelStats>) -> String {
+        match stats {
+            Some(s) => format!(
+                "Polys {}  Tris {}  Verts {}",
+                format_number(s.polys),
+                format_number(s.tris),
+                format_number(s.verts),
+            ),
+            None => String::new(),
+        }
+    }
+
+    pub fn update_stats(&mut self, stats: Option<&ModelStats>) {
+        self.stats_text = Self::format_stats(stats);
     }
 
     pub fn resize(&mut self, width: u32, height: u32, queue: &wgpu::Queue) {
@@ -63,14 +81,28 @@ impl HudRenderer {
 
     pub fn set_capture_message(&mut self, filename: String) {
         let msg = format!("Saved {}", filename);
-        self.capture_message = Some((msg, Instant::now()));
+        self.toast = Some(Toast {
+            message: msg,
+            color: [0.0, 0.4, 0.0, 1.0],
+            created: Instant::now(),
+            duration: Duration::from_secs(2),
+        });
     }
 
-    pub fn clear_expired_message(&mut self) {
-        if let Some((_, created)) = &self.capture_message
-            && created.elapsed() > Duration::from_secs(2)
+    pub fn set_toast(&mut self, msg: &str, color: [f32; 4]) {
+        self.toast = Some(Toast {
+            message: msg.to_string(),
+            color,
+            created: Instant::now(),
+            duration: Duration::from_secs(3),
+        });
+    }
+
+    pub fn clear_expired_toast(&mut self) {
+        if let Some(ref toast) = self.toast
+            && toast.created.elapsed() > toast.duration
         {
-            self.capture_message = None;
+            self.toast = None;
         }
     }
 
@@ -87,6 +119,7 @@ impl HudRenderer {
         projection: &str,
         normals: &str,
         frame_ms: f32,
+        has_model: bool,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -103,31 +136,42 @@ impl HudRenderer {
 
         let black: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         let hint_color: [f32; 4] = [0.0, 0.0, 0.0, 0.6];
-
-        let stats_section = Section::default()
-            .add_text(Text::new(&self.stats_text).with_scale(font_size_main).with_color(black))
-            .with_screen_position((margin, margin))
-            .with_layout(Layout::default_single_line());
-
         let state_text = format!("Mode: {}  Proj: {}  Normals: {}", view_mode, projection, normals);
-        let state_section = Section::default()
-            .add_text(Text::new(&state_text).with_scale(font_size_main).with_color(black))
-            .with_screen_position((screen_width as f32 - margin, margin))
-            .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right));
 
-        let timing_section = Section::default()
-            .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(black))
-            .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
-            .with_layout(
-                Layout::default_single_line()
-                    .h_align(HorizontalAlign::Right)
-                    .v_align(VerticalAlign::Bottom),
+        let mut sections: Vec<Section> = Vec::new();
+
+        if has_model {
+            sections.push(
+                Section::default()
+                    .add_text(Text::new(&self.stats_text).with_scale(font_size_main).with_color(black))
+                    .with_screen_position((margin, margin))
+                    .with_layout(Layout::default_single_line()),
             );
 
-        let mut sections: Vec<&Section> = vec![&stats_section, &state_section, &timing_section];
+            sections.push(
+                Section::default()
+                    .add_text(Text::new(&state_text).with_scale(font_size_main).with_color(black))
+                    .with_screen_position((screen_width as f32 - margin, margin))
+                    .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right)),
+            );
+        }
 
-        let hints =
-            "W Mode  S Shaded  X Ghost  N Normals  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints";
+        sections.push(
+            Section::default()
+                .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(black))
+                .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
+                .with_layout(
+                    Layout::default_single_line()
+                        .h_align(HorizontalAlign::Right)
+                        .v_align(VerticalAlign::Bottom),
+                ),
+        );
+
+        let hints = if has_model {
+            "W Mode  S Shaded  X Ghost  N Normals  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints"
+        } else {
+            "? Hints"
+        };
         let hint_section = Section::default()
             .add_text(Text::new(hints).with_scale(font_size_hints).with_color(hint_color))
             .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 - margin))
@@ -137,28 +181,51 @@ impl HudRenderer {
                     .v_align(VerticalAlign::Bottom),
             );
 
-        let capture_section;
-        if let Some((msg, _)) = &self.capture_message {
-            let success_color: [f32; 4] = [0.0, 0.4, 0.0, 1.0];
-            capture_section = Section::default()
-                .add_text(Text::new(msg).with_scale(font_size_main).with_color(success_color))
-                .with_screen_position((
-                    screen_width as f32 / 2.0,
-                    screen_height as f32 - margin - font_size_hints - margin,
-                ))
-                .with_layout(
-                    Layout::default_single_line()
-                        .h_align(HorizontalAlign::Center)
-                        .v_align(VerticalAlign::Bottom),
-                );
-            sections.push(&capture_section);
+        if let Some(ref toast) = self.toast {
+            sections.push(
+                Section::default()
+                    .add_text(
+                        Text::new(&toast.message)
+                            .with_scale(font_size_main)
+                            .with_color(toast.color),
+                    )
+                    .with_screen_position((
+                        screen_width as f32 / 2.0,
+                        screen_height as f32 - margin - font_size_hints - margin,
+                    ))
+                    .with_layout(
+                        Layout::default_single_line()
+                            .h_align(HorizontalAlign::Center)
+                            .v_align(VerticalAlign::Bottom),
+                    ),
+            );
+        }
+
+        if !has_model && self.toast.is_none() {
+            let drop_color: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
+            let font_size_drop = 18.0 * sf;
+            sections.push(
+                Section::default()
+                    .add_text(
+                        Text::new("Drop a 3D model to view\n(.obj  .stl  .ply  .gltf  .glb)")
+                            .with_scale(font_size_drop)
+                            .with_color(drop_color),
+                    )
+                    .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 / 2.0))
+                    .with_layout(
+                        Layout::default_wrap()
+                            .h_align(HorizontalAlign::Center)
+                            .v_align(VerticalAlign::Center),
+                    ),
+            );
         }
 
         if self.hints_visible {
-            sections.push(&hint_section);
+            sections.push(hint_section);
         }
 
-        self.brush.queue(device, queue, sections).unwrap();
+        let section_refs: Vec<&Section> = sections.iter().collect();
+        self.brush.queue(device, queue, section_refs).unwrap();
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

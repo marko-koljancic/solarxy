@@ -1,5 +1,5 @@
 pub mod aabb;
-mod cgi;
+pub mod cgi;
 mod state;
 
 use state::State;
@@ -15,11 +15,11 @@ use winit::{
 
 pub struct App {
     state: Option<State>,
-    model_path: String,
+    model_path: Option<String>,
 }
 
 impl App {
-    pub fn new(model_path: String) -> Self {
+    pub fn new(model_path: Option<String>) -> Self {
         Self {
             state: None,
             model_path,
@@ -61,6 +61,9 @@ impl ApplicationHandler<State> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
+            WindowEvent::DroppedFile(path) => {
+                state.handle_dropped_file(path);
+            }
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
@@ -136,7 +139,7 @@ pub fn format_number(n: usize) -> String {
     result
 }
 
-pub fn run_viewer(model_path: String) -> anyhow::Result<()> {
+pub fn run_viewer(model_path: Option<String>) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App::new(model_path);
     event_loop.run_app(&mut app)?;

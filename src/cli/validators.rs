@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
+use solarxy::cgi::resources::SUPPORTED_EXTENSIONS;
 
 pub fn is_valid_model_path(path: &str) -> Result<PathBuf, String> {
     let path_buf = PathBuf::from(path);

@@ -1,7 +1,18 @@
+use std::path::Path;
+
 use wgpu::util::DeviceExt;
 
 use super::geometry::{self, RawModelData};
 use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
+
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
+
+pub fn is_supported_model_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| SUPPORTED_EXTENSIONS.iter().any(|s| ext.eq_ignore_ascii_case(s)))
+        .unwrap_or(false)
+}
 
 pub fn load_model_any(
     file_path: &str,
