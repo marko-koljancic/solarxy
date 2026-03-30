@@ -236,9 +236,14 @@ impl Pipelines {
             None,
             sample_count,
         );
+        let wireframe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Wireframe Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_color],
+            push_constant_ranges: &[],
+        });
         let wireframe = create_ghosted_pipeline(
             device,
-            &ghosted_layout,
+            &wireframe_layout,
             &ghosted_shader,
             config.format,
             "fs_wireframe",

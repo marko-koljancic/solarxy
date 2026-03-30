@@ -150,6 +150,16 @@ impl BackgroundMode {
             },
         }
     }
+
+    fn wireframe_color(self) -> [f32; 4] {
+        let c = self.clear_color();
+        let luminance = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+        if luminance < 0.3 {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            [0.0, 0.0, 0.0, 1.0]
+        }
+    }
 }
 
 impl std::fmt::Display for BackgroundMode {
@@ -255,6 +265,8 @@ pub struct State {
     background_mode: BackgroundMode,
     _gradient_buffer: wgpu::Buffer,
     gradient_bind_group: wgpu::BindGroup,
+    wireframe_color_buffer: wgpu::Buffer,
+    wireframe_color_bind_group: wgpu::BindGroup,
     capture_requested: bool,
     last_frame_time: Instant,
     dt: f32,
@@ -336,7 +348,7 @@ impl State {
             window.scale_factor(),
         );
 
-        let gradient_data: [f32; 8] = [0.165, 0.165, 0.180, 1.0, 0.290, 0.290, 0.314, 1.0];
+        let gradient_data: [f32; 8] = [0.35, 0.41, 0.47, 1.0, 0.66, 0.70, 0.72, 1.0];
         let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Gradient Uniform"),
             contents: bytemuck::cast_slice(&gradient_data),
@@ -348,6 +360,22 @@ impl State {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: gradient_buffer.as_entire_binding(),
+            }],
+        });
+
+        let background_mode = BackgroundMode::Gradient;
+        let wireframe_color_data = background_mode.wireframe_color();
+        let wireframe_color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Wireframe Color Uniform"),
+            contents: bytemuck::cast_slice(&wireframe_color_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let wireframe_color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Wireframe Color Bind Group"),
+            layout: &layouts.wireframe_color,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wireframe_color_buffer.as_entire_binding(),
             }],
         });
 
@@ -366,9 +394,11 @@ impl State {
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
-            background_mode: BackgroundMode::Gradient,
+            background_mode,
             _gradient_buffer: gradient_buffer,
             gradient_bind_group,
+            wireframe_color_buffer,
+            wireframe_color_bind_group,
             capture_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
@@ -515,6 +545,11 @@ impl State {
             }
             KeyCode::KeyB => {
                 self.background_mode = self.background_mode.next();
+                self.queue.write_buffer(
+                    &self.wireframe_color_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.background_mode.wireframe_color()),
+                );
             }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
@@ -825,12 +860,14 @@ impl State {
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.set_pipeline(&self.pipelines.wireframe);
                     pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
                     pass.draw_model_simple(&scene.model, 0..1);
                 }
             }
             ViewMode::WireframeOnly => {
                 pass.set_pipeline(&self.pipelines.wireframe);
                 pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
                 pass.draw_model_simple(&scene.model, 0..1);
             }
             ViewMode::Ghosted => {

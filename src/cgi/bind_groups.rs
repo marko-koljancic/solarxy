@@ -7,6 +7,7 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) grid: wgpu::BindGroupLayout,
     pub(crate) normals: wgpu::BindGroupLayout,
     pub(crate) background: wgpu::BindGroupLayout,
+    pub(crate) wireframe_color: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -78,6 +79,10 @@ impl BindGroupLayouts {
             label: Some("background_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+        let wireframe_color = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wireframe_color_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -87,6 +92,7 @@ impl BindGroupLayouts {
             grid,
             normals,
             background,
+            wireframe_color,
         }
     }
 }

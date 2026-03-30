@@ -51,7 +51,10 @@ fn fs_ghosted_wire(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4(0.15, 0.18, 0.30, 0.85);
 }
 
+@group(1) @binding(0)
+var<uniform> wire_color: vec4<f32>;
+
 @fragment
 fn fs_wireframe(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(0.0, 0.0, 0.0, 1.0);
+    return wire_color;
 }
