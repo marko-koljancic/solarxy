@@ -29,8 +29,21 @@ impl App {
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("Solarxy");
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        self.state = Some(pollster::block_on(State::new(window, self.model_path.clone())).unwrap());
+        let window = match event_loop.create_window(window_attributes) {
+            Ok(w) => Arc::new(w),
+            Err(e) => {
+                eprintln!("Failed to create window: {}", e);
+                event_loop.exit();
+                return;
+            }
+        };
+        match pollster::block_on(State::new(window, self.model_path.clone())) {
+            Ok(state) => self.state = Some(state),
+            Err(e) => {
+                eprintln!("Failed to initialize renderer: {}", e);
+                event_loop.exit();
+            }
+        }
     }
 
     #[allow(unused_mut)]

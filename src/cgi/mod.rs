@@ -1,6 +1,10 @@
 pub mod camera;
+pub mod geometry;
 pub mod hud;
 pub mod light;
+pub mod loader_obj;
+pub mod loader_ply;
+pub mod loader_stl;
 pub mod material;
 pub mod model;
 pub mod resources;

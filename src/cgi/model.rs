@@ -120,32 +120,15 @@ pub struct Model {
     pub bounds: AABB,
 }
 
-pub trait DrawShadow<'a> {
-    fn draw_model_shadow_instanced(&mut self, model: &'a Model, instances: std::ops::Range<u32>);
+pub trait DrawMeshSimple<'a> {
+    fn draw_model_simple(&mut self, model: &'a Model, instances: std::ops::Range<u32>);
 }
 
-impl<'a, 'b> DrawShadow<'b> for wgpu::RenderPass<'a>
+impl<'a, 'b> DrawMeshSimple<'b> for wgpu::RenderPass<'a>
 where
     'b: 'a,
 {
-    fn draw_model_shadow_instanced(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
-        for mesh in &model.meshes {
-            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            self.draw_indexed(0..mesh.num_elements, 0, instances.clone());
-        }
-    }
-}
-
-pub trait DrawViewMode<'a> {
-    fn draw_model_view_mode(&mut self, model: &'a Model, instances: std::ops::Range<u32>);
-}
-
-impl<'a, 'b> DrawViewMode<'b> for wgpu::RenderPass<'a>
-where
-    'b: 'a,
-{
-    fn draw_model_view_mode(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
+    fn draw_model_simple(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
         for mesh in &model.meshes {
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

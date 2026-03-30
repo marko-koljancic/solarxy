@@ -3,7 +3,7 @@ use crate::cli::{
     parser::{Args, OperationMode},
     tui::TerminalApp,
 };
-use crate::calc::analyize::ModelAnalyzer;
+use crate::calc::analyze::ModelAnalyzer;
 use solarxy::{run_viewer};
 use std::fs;
 

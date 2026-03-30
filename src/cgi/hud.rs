@@ -2,114 +2,7 @@ use wgpu_text::glyph_brush::{ab_glyph::FontRef, HorizontalAlign, Layout, Section
 use wgpu_text::BrushBuilder;
 use wgpu_text::TextBrush;
 
-pub struct ModelStats {
-    pub polys: usize,
-    pub tris: usize,
-    pub verts: usize,
-}
-
-impl ModelStats {
-    pub fn from_path(path: &str) -> Self {
-        let ext = std::path::Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        match ext.as_str() {
-            "stl" => Self::from_stl(path),
-            "ply" => Self::from_ply(path),
-            _ => Self::from_obj(path),
-        }
-    }
-
-    fn from_obj(path: &str) -> Self {
-        let (models_raw, _) = tobj::load_obj(
-            path,
-            &tobj::LoadOptions {
-                triangulate: false,
-                single_index: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let polys: usize = models_raw
-            .iter()
-            .map(|m| {
-                if m.mesh.face_arities.is_empty() {
-                    m.mesh.indices.len() / 3
-                } else {
-                    m.mesh.face_arities.len()
-                }
-            })
-            .sum();
-
-        let (models_tri, _) = tobj::load_obj(
-            path,
-            &tobj::LoadOptions {
-                triangulate: true,
-                single_index: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let tris: usize = models_tri.iter().map(|m| m.mesh.indices.len() / 3).sum();
-        let verts: usize = models_tri.iter().map(|m| m.mesh.positions.len() / 3).sum();
-
-        ModelStats { polys, tris, verts }
-    }
-
-    fn from_stl(path: &str) -> Self {
-        let file = std::fs::File::open(path).unwrap();
-        let mut reader = std::io::BufReader::new(file);
-        let mesh = stl_io::read_stl(&mut reader).unwrap();
-
-        let tris = mesh.faces.len();
-        let verts = mesh.vertices.len();
-
-        ModelStats {
-            polys: tris,
-            tris,
-            verts,
-        }
-    }
-
-    fn from_ply(path: &str) -> Self {
-        let file = std::fs::File::open(path).unwrap();
-        let mut reader = std::io::BufReader::new(file);
-        let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
-        let ply = parser.read_ply(&mut reader).unwrap();
-
-        let verts = ply.payload.get("vertex").map_or(0, |v| v.len());
-
-        let mut polys = 0usize;
-        let mut tris = 0usize;
-        if let Some(faces) = ply.payload.get("face") {
-            polys = faces.len();
-            for face in faces {
-                let n = face
-                    .get("vertex_indices")
-                    .or_else(|| face.get("vertex_index"))
-                    .map(|p| match p {
-                        ply_rs_bw::ply::Property::ListInt(v) => v.len(),
-                        ply_rs_bw::ply::Property::ListUInt(v) => v.len(),
-                        ply_rs_bw::ply::Property::ListShort(v) => v.len(),
-                        ply_rs_bw::ply::Property::ListUShort(v) => v.len(),
-                        ply_rs_bw::ply::Property::ListUChar(v) => v.len(),
-                        ply_rs_bw::ply::Property::ListChar(v) => v.len(),
-                        _ => 0,
-                    })
-                    .unwrap_or(0);
-                if n >= 3 {
-                    tris += n - 2;
-                }
-            }
-        }
-
-        ModelStats { polys, tris, verts }
-    }
-}
+use super::resources::ModelStats;
 
 pub struct HudRenderer {
     brush: TextBrush<FontRef<'static>>,
@@ -124,7 +17,7 @@ impl HudRenderer {
         surface_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
-        model_path: &str,
+        stats: &ModelStats,
         scale_factor: f64,
     ) -> Self {
         let font_bytes: &[u8] = include_bytes!("../../res/Lilex/static/Lilex-Medium.ttf");
@@ -132,7 +25,6 @@ impl HudRenderer {
             .expect("Failed to load font")
             .build(device, width, height, surface_format);
 
-        let stats = ModelStats::from_path(model_path);
         let stats_text = format!(
             "Polys {}  Tris {}  Verts {}",
             format_number(stats.polys),

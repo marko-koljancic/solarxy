@@ -1,1 +1,1 @@
-pub mod analyize;
+pub mod analyze;
