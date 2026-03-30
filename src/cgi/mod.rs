@@ -1,3 +1,4 @@
+pub mod bind_groups;
 pub mod camera;
 pub mod camera_state;
 pub mod geometry;
@@ -8,5 +9,8 @@ pub mod loader_ply;
 pub mod loader_stl;
 pub mod material;
 pub mod model;
+pub mod pipelines;
 pub mod resources;
+pub mod shadow;
 pub mod texture;
+pub mod visualization;
