@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod camera_state;
 pub mod geometry;
 pub mod hud;
 pub mod light;

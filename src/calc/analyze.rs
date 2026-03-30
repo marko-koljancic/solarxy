@@ -1,6 +1,9 @@
 use std::io::BufReader;
 use std::path::Path;
+
+use anyhow::Result;
 use ply_rs_bw::ply::Property;
+use solarxy::format_number;
 
 pub struct AnalyzerMesh {
     pub positions: Vec<f32>,
@@ -33,7 +36,7 @@ pub struct ModelAnalyzer {
 }
 
 impl ModelAnalyzer {
-    pub fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(path: &str) -> Result<Self> {
         let ext = Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
@@ -46,7 +49,7 @@ impl ModelAnalyzer {
         }
     }
 
-    fn from_obj(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_obj(path: &str) -> Result<Self> {
         let model_name = path.split('/').next_back().unwrap_or(path).to_string();
         let (models, materials) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
 
@@ -88,7 +91,7 @@ impl ModelAnalyzer {
         })
     }
 
-    fn from_stl(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_stl(path: &str) -> Result<Self> {
         let model_name = path.split('/').next_back().unwrap_or(path).to_string();
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
@@ -117,15 +120,21 @@ impl ModelAnalyzer {
         })
     }
 
-    fn from_ply(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_ply(path: &str) -> Result<Self> {
         let model_name = path.split('/').next_back().unwrap_or(path).to_string();
         let file = std::fs::File::open(path)?;
         let mut reader = BufReader::new(file);
         let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
         let ply = parser.read_ply(&mut reader)?;
 
-        let ply_vertices = ply.payload.get("vertex").ok_or("PLY file has no 'vertex' element")?;
-        let ply_faces = ply.payload.get("face").ok_or("PLY file has no 'face' element")?;
+        let ply_vertices = ply
+            .payload
+            .get("vertex")
+            .ok_or_else(|| anyhow::anyhow!("PLY file has no 'vertex' element"))?;
+        let ply_faces = ply
+            .payload
+            .get("face")
+            .ok_or_else(|| anyhow::anyhow!("PLY file has no 'face' element"))?;
 
         let (has_normals, uv_keys) = if let Some(first) = ply_vertices.first() {
             let has_normals = first.get("nx").is_some();
@@ -274,23 +283,20 @@ impl ModelAnalyzer {
 
             for (i, mat) in self.materials.iter().enumerate() {
                 output.push_str(&format!("Material [{}]: '{}'\n", i, mat.name));
+                let ambient = mat.ambient.unwrap_or([0.0; 3]);
+                let diffuse = mat.diffuse.unwrap_or([0.0; 3]);
+                let specular = mat.specular.unwrap_or([0.0; 3]);
                 output.push_str(&format!(
                     "  Ambient:  [{:.3}, {:.3}, {:.3}]\n",
-                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[0],
-                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[1],
-                    mat.ambient.unwrap_or([0.0, 0.0, 0.0])[2]
+                    ambient[0], ambient[1], ambient[2]
                 ));
                 output.push_str(&format!(
                     "  Diffuse:  [{:.3}, {:.3}, {:.3}]\n",
-                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[0],
-                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[1],
-                    mat.diffuse.unwrap_or([0.0, 0.0, 0.0])[2]
+                    diffuse[0], diffuse[1], diffuse[2]
                 ));
                 output.push_str(&format!(
                     "  Specular: [{:.3}, {:.3}, {:.3}]\n",
-                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[0],
-                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[1],
-                    mat.specular.unwrap_or([0.0, 0.0, 0.0])[2]
+                    specular[0], specular[1], specular[2]
                 ));
 
                 if let Some(shininess) = mat.shininess {
@@ -367,19 +373,4 @@ fn ply_analyzer_prop_to_indices(prop: &Property) -> Vec<u32> {
         Property::ListChar(v) => v.iter().map(|&i| i as u32).collect(),
         _ => Vec::new(),
     }
-}
-
-fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(*c);
-    }
-
-    result
 }

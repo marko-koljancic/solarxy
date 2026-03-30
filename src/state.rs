@@ -1,7 +1,5 @@
-use crate::cgi::camera::{
-    camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform, ProjectionMode,
-    OPENGL_TO_WGPU_MATRIX,
-};
+use crate::cgi::camera::{Camera, ProjectionMode, OPENGL_TO_WGPU_MATRIX};
+use crate::cgi::camera_state::CameraState;
 use crate::cgi::hud::HudRenderer;
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::Model;
@@ -145,6 +143,16 @@ impl model::Vertex for InstanceRaw {
     }
 }
 
+struct BindGroupLayouts {
+    texture: wgpu::BindGroupLayout,
+    camera: wgpu::BindGroupLayout,
+    light: wgpu::BindGroupLayout,
+    shadow_pass: wgpu::BindGroupLayout,
+    shadow_read: wgpu::BindGroupLayout,
+    grid: wgpu::BindGroupLayout,
+    normals: wgpu::BindGroupLayout,
+}
+
 struct Pipelines {
     main: wgpu::RenderPipeline,
     shadow: wgpu::RenderPipeline,
@@ -189,11 +197,7 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     depth_texture: texture::Texture,
-    camera: Camera,
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
-    camera_controller: CameraController,
+    cam: CameraState,
     lights_uniform: LightsUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
@@ -258,49 +262,16 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
-        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("texture_binding_group_layout"),
-            entries: &[
-                bgl_texture_entry(0),
-                bgl_sampler_entry(1),
-                bgl_texture_entry(2),
-                bgl_sampler_entry(3),
-            ],
-        });
-        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("camera_binding_group_layout"),
-            entries: &[bgl_uniform_entry(
-                0,
-                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            )],
-        });
-        let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("light_bind_group_layout"),
-            entries: &[bgl_uniform_entry(
-                0,
-                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            )],
-        });
+        let layouts = create_bind_group_layouts(&device);
         let (model, normals_geo, model_stats) =
-            resources::load_model_any(&model_path, &device, &queue, &texture_layout)?;
+            resources::load_model_any(&model_path, &device, &queue, &layouts.texture)?;
 
-        let camera = camera_from_bounds(&model.bounds, config.width as f32 / config.height as f32);
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera_bind_group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
-        let camera_controller = CameraController::new(0.2);
+        let cam = CameraState::new(
+            &device,
+            &layouts.camera,
+            &model.bounds,
+            config.width as f32 / config.height as f32,
+        );
         let instance_data = Instance {
             position: cgmath::Vector3::new(0.0, 0.0, 0.0),
             rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
@@ -310,7 +281,7 @@ impl State {
             contents: bytemuck::cast_slice(&[instance_data.to_raw()]),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let lights_uniform = lights_from_camera(&camera, &model.bounds);
+        let lights_uniform = lights_from_camera(&cam.camera, &model.bounds);
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light VB"),
             contents: bytemuck::cast_slice(&[lights_uniform]),
@@ -318,23 +289,15 @@ impl State {
         });
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &light_layout,
+            layout: &layouts.light,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: light_buffer.as_entire_binding(),
             }],
         });
-        let shadow = init_shadow_system(&device, &lights_uniform, &model);
-        let pipelines = init_pipelines(
-            &device,
-            &config,
-            &texture_layout,
-            &camera_layout,
-            &light_layout,
-            &shadow,
-        );
-
-        let vis = init_visualization(&device, &model, &normals_geo, &camera_buffer);
+        let shadow = init_shadow_system(&device, &layouts, &lights_uniform, &model);
+        let pipelines = init_pipelines(&device, &config, &layouts);
+        let vis = init_visualization(&device, &layouts, &model, &normals_geo, &cam.buffer);
 
         let hud = HudRenderer::new(
             &device,
@@ -352,11 +315,7 @@ impl State {
             config,
             is_surface_configured: false,
             depth_texture,
-            camera,
-            camera_uniform,
-            camera_buffer,
-            camera_bind_group,
-            camera_controller,
+            cam,
             lights_uniform,
             light_buffer,
             light_bind_group,
@@ -378,7 +337,7 @@ impl State {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
-            self.camera.aspect = width as f32 / height as f32;
+            self.cam.resize(width as f32 / height as f32);
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             self.is_surface_configured = true;
@@ -392,106 +351,82 @@ impl State {
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        if code == KeyCode::Escape && is_pressed {
-            event_loop.exit();
-        } else if code == KeyCode::KeyH && is_pressed {
-            let aspect = self.camera.aspect;
-            self.camera = camera_from_bounds(&self.model.bounds, aspect);
-            self.camera_controller = CameraController::new(0.2);
-        } else if code == KeyCode::KeyT && is_pressed {
-            let aspect = self.camera.aspect;
-            self.camera = camera_from_bounds_axis(
+        if !is_pressed {
+            self.cam.handle_key(code, is_pressed);
+            return;
+        }
+        match code {
+            KeyCode::Escape => event_loop.exit(),
+            KeyCode::KeyH => self.cam.reset_to_bounds(&self.model.bounds),
+            KeyCode::KeyT => self.cam.reset_to_bounds_axis(
                 &self.model.bounds,
-                aspect,
                 cgmath::Vector3::unit_y(),
                 -cgmath::Vector3::unit_z(),
-            );
-            self.camera_controller = CameraController::new(0.2);
-        } else if code == KeyCode::KeyF && is_pressed {
-            let aspect = self.camera.aspect;
-            self.camera = camera_from_bounds_axis(
+            ),
+            KeyCode::KeyF => {
+                self.cam
+                    .reset_to_bounds_axis(&self.model.bounds, cgmath::Vector3::unit_z(), cgmath::Vector3::unit_y())
+            }
+            KeyCode::KeyL => self.cam.reset_to_bounds_axis(
                 &self.model.bounds,
-                aspect,
-                cgmath::Vector3::unit_z(),
-                cgmath::Vector3::unit_y(),
-            );
-            self.camera_controller = CameraController::new(0.2);
-        } else if code == KeyCode::KeyL && is_pressed {
-            let aspect = self.camera.aspect;
-            self.camera = camera_from_bounds_axis(
-                &self.model.bounds,
-                aspect,
                 -cgmath::Vector3::unit_x(),
                 cgmath::Vector3::unit_y(),
-            );
-            self.camera_controller = CameraController::new(0.2);
-        } else if code == KeyCode::KeyR && is_pressed {
-            let aspect = self.camera.aspect;
-            self.camera = camera_from_bounds_axis(
-                &self.model.bounds,
-                aspect,
-                cgmath::Vector3::unit_x(),
-                cgmath::Vector3::unit_y(),
-            );
-            self.camera_controller = CameraController::new(0.2);
-        } else if code == KeyCode::KeyP && is_pressed {
-            self.camera.projection = ProjectionMode::Perspective;
-        } else if code == KeyCode::KeyO && is_pressed {
-            if self.camera.projection != ProjectionMode::Orthographic {
-                use cgmath::InnerSpace;
-                let dist = (self.camera.target - self.camera.eye).magnitude();
-                self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
-                self.camera.projection = ProjectionMode::Orthographic;
+            ),
+            KeyCode::KeyR => {
+                self.cam
+                    .reset_to_bounds_axis(&self.model.bounds, cgmath::Vector3::unit_x(), cgmath::Vector3::unit_y())
             }
-        } else if code == KeyCode::KeyW && is_pressed {
-            if self.view_mode != ViewMode::Ghosted {
-                self.view_mode = match self.view_mode {
-                    ViewMode::Shaded => ViewMode::ShadedWireframe,
-                    ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
-                    ViewMode::WireframeOnly => ViewMode::Shaded,
-                    ViewMode::Ghosted => unreachable!(),
+            KeyCode::KeyP => self.cam.set_projection(ProjectionMode::Perspective),
+            KeyCode::KeyO => self.cam.set_projection(ProjectionMode::Orthographic),
+            KeyCode::KeyW => {
+                if self.view_mode != ViewMode::Ghosted {
+                    self.view_mode = match self.view_mode {
+                        ViewMode::Shaded => ViewMode::ShadedWireframe,
+                        ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
+                        ViewMode::WireframeOnly => ViewMode::Shaded,
+                        ViewMode::Ghosted => unreachable!(),
+                    };
+                }
+            }
+            KeyCode::KeyX => {
+                if self.view_mode == ViewMode::Ghosted {
+                    self.view_mode = self.prev_non_ghosted_mode;
+                } else {
+                    self.prev_non_ghosted_mode = self.view_mode;
+                    self.view_mode = ViewMode::Ghosted;
+                }
+            }
+            KeyCode::KeyS => self.view_mode = ViewMode::Shaded,
+            KeyCode::KeyN => {
+                self.normals_mode = match self.normals_mode {
+                    NormalsMode::Off => NormalsMode::Face,
+                    NormalsMode::Face => NormalsMode::Vertex,
+                    NormalsMode::Vertex => NormalsMode::FaceAndVertex,
+                    NormalsMode::FaceAndVertex => NormalsMode::Off,
                 };
             }
-        } else if code == KeyCode::KeyX && is_pressed {
-            if self.view_mode == ViewMode::Ghosted {
-                self.view_mode = self.prev_non_ghosted_mode;
-            } else {
-                self.prev_non_ghosted_mode = self.view_mode;
-                self.view_mode = ViewMode::Ghosted;
+            _ => {
+                self.cam.handle_key(code, is_pressed);
             }
-        } else if code == KeyCode::KeyS && is_pressed {
-            self.view_mode = ViewMode::Shaded;
-        } else if code == KeyCode::KeyN && is_pressed {
-            self.normals_mode = match self.normals_mode {
-                NormalsMode::Off => NormalsMode::Face,
-                NormalsMode::Face => NormalsMode::Vertex,
-                NormalsMode::Vertex => NormalsMode::FaceAndVertex,
-                NormalsMode::FaceAndVertex => NormalsMode::Off,
-            };
-        } else {
-            self.camera_controller.handle_key(code, is_pressed);
         }
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        self.camera_controller.handle_mouse_button(button, pressed);
+        self.cam.handle_mouse_button(button, pressed);
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        self.camera_controller.handle_mouse_move(x, y);
+        self.cam.handle_mouse_move(x, y);
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        self.camera_controller.handle_scroll(delta);
+        self.cam.handle_scroll(delta);
     }
 
     pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
-        self.queue
-            .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+        self.cam.update(&self.queue);
 
-        self.lights_uniform = lights_from_camera(&self.camera, &self.model.bounds);
+        self.lights_uniform = lights_from_camera(&self.cam.camera, &self.model.bounds);
         self.queue
             .write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.lights_uniform]));
 
@@ -531,7 +466,7 @@ impl State {
             self.config.width,
             self.config.height,
             &self.view_mode.to_string(),
-            &self.camera.projection.to_string(),
+            &self.cam.camera.projection.to_string(),
             &self.normals_mode.to_string(),
         );
 
@@ -596,18 +531,18 @@ impl State {
                 if self.view_mode == ViewMode::ShadedWireframe {
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
                     pass.set_pipeline(&self.pipelines.wireframe);
-                    pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    pass.set_bind_group(0, &self.cam.bind_group, &[]);
                     pass.draw_model_simple(&self.model, 0..1);
                 }
             }
             ViewMode::WireframeOnly => {
                 pass.set_pipeline(&self.pipelines.wireframe);
-                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_bind_group(0, &self.cam.bind_group, &[]);
                 pass.draw_model_simple(&self.model, 0..1);
             }
             ViewMode::Ghosted => {
                 pass.set_pipeline(&self.pipelines.ghosted_fill);
-                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_bind_group(0, &self.cam.bind_group, &[]);
                 pass.draw_model_simple(&self.model, 0..1);
                 pass.set_pipeline(&self.pipelines.ghosted_wire);
                 pass.draw_model_simple(&self.model, 0..1);
@@ -626,12 +561,12 @@ impl State {
         use model::DrawModel;
         pass.set_pipeline(&self.pipelines.main);
         pass.set_bind_group(3, &self.shadow.sample_bind_group, &[]);
-        pass.draw_model_instanced(&self.model, 0..1, &self.camera_bind_group, &self.light_bind_group);
+        pass.draw_model_instanced(&self.model, 0..1, &self.cam.bind_group, &self.light_bind_group);
     }
 
     fn draw_floor<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.pipelines.floor);
-        pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        pass.set_bind_group(0, &self.cam.bind_group, &[]);
         pass.set_bind_group(1, &self.shadow.sample_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vis.floor_mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(self.vis.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -660,7 +595,12 @@ impl State {
     }
 }
 
-fn init_shadow_system(device: &wgpu::Device, lights_uniform: &LightsUniform, model: &Model) -> ShadowState {
+fn init_shadow_system(
+    device: &wgpu::Device,
+    layouts: &BindGroupLayouts,
+    lights_uniform: &LightsUniform,
+    model: &Model,
+) -> ShadowState {
     let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow_texture"),
         size: wgpu::Extent3d {
@@ -704,37 +644,9 @@ fn init_shadow_system(device: &wgpu::Device, lights_uniform: &LightsUniform, mod
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    let pass_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("shadow_pass_layout"),
-        entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX)],
-    });
-
-    let read_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("shadow_read_layout"),
-        entries: &[
-            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Depth,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                count: None,
-            },
-        ],
-    });
-
     let pass_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("shadow_pass_bind_group"),
-        layout: &pass_layout,
+        layout: &layouts.shadow_pass,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: uniform_buffer.as_entire_binding(),
@@ -743,7 +655,7 @@ fn init_shadow_system(device: &wgpu::Device, lights_uniform: &LightsUniform, mod
 
     let sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("shadow_bind_group"),
-        layout: &read_layout,
+        layout: &layouts.shadow_read,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -769,47 +681,11 @@ fn init_shadow_system(device: &wgpu::Device, lights_uniform: &LightsUniform, mod
     }
 }
 
-fn init_pipelines(
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-    texture_layout: &wgpu::BindGroupLayout,
-    camera_layout: &wgpu::BindGroupLayout,
-    light_layout: &wgpu::BindGroupLayout,
-    shadow: &ShadowState,
-) -> Pipelines {
-    let shadow_pass_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("shadow_pass_layout_for_pipeline"),
-        entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX)],
-    });
-
-    let shadow_read_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("shadow_read_layout_for_pipeline"),
-        entries: &[
-            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Depth,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                count: None,
-            },
-        ],
-    });
-
-    let _ = shadow;
+fn init_pipelines(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, layouts: &BindGroupLayouts) -> Pipelines {
     let shadow_pipeline = {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Shadow Pipeline Layout"),
-            bind_group_layouts: &[&shadow_pass_layout],
+            bind_group_layouts: &[&layouts.shadow_pass],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -852,7 +728,7 @@ fn init_pipelines(
     let main = {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Rendering Pipeline Layout"),
-            bind_group_layouts: &[texture_layout, camera_layout, light_layout, &shadow_read_layout],
+            bind_group_layouts: &[&layouts.texture, &layouts.camera, &layouts.light, &layouts.shadow_read],
             push_constant_ranges: &[],
         });
         create_render_pipeline(
@@ -871,7 +747,7 @@ fn init_pipelines(
     let floor = {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Floor Pipeline Layout"),
-            bind_group_layouts: &[camera_layout, &shadow_read_layout],
+            bind_group_layouts: &[&layouts.camera, &layouts.shadow_read],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -917,7 +793,7 @@ fn init_pipelines(
 
     let ghosted_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Ghosted Pipeline Layout"),
-        bind_group_layouts: &[camera_layout],
+        bind_group_layouts: &[&layouts.camera],
         push_constant_ranges: &[],
     });
     let ghosted_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -961,16 +837,9 @@ fn init_pipelines(
     );
 
     let grid = {
-        let grid_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Grid Bind Group Layout"),
-            entries: &[
-                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-                bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
-            ],
-        });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Grid Pipeline Layout"),
-            bind_group_layouts: &[&grid_bind_group_layout],
+            bind_group_layouts: &[&layouts.grid],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1015,16 +884,9 @@ fn init_pipelines(
     };
 
     let normals = {
-        let normals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Normals Bind Group Layout"),
-            entries: &[
-                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-                bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
-            ],
-        });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Normals Pipeline Layout"),
-            bind_group_layouts: &[&normals_layout],
+            bind_group_layouts: &[&layouts.normals],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1085,6 +947,7 @@ fn init_pipelines(
 
 fn init_visualization(
     device: &wgpu::Device,
+    layouts: &BindGroupLayouts,
     model: &Model,
     normals_geo: &model::NormalsGeometry,
     camera_buffer: &wgpu::Buffer,
@@ -1102,16 +965,9 @@ fn init_visualization(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    let grid_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Grid Bind Group Layout"),
-        entries: &[
-            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-            bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
-        ],
-    });
     let grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Grid Bind Group"),
-        layout: &grid_bind_group_layout,
+        layout: &layouts.grid,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -1121,14 +977,6 @@ fn init_visualization(
                 binding: 1,
                 resource: grid_uniform_buf.as_entire_binding(),
             },
-        ],
-    });
-
-    let normals_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Normals Bind Group Layout"),
-        entries: &[
-            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-            bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
         ],
     });
 
@@ -1154,7 +1002,7 @@ fn init_visualization(
 
     let face_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Face Normals Bind Group"),
-        layout: &normals_bind_group_layout,
+        layout: &layouts.normals,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -1168,7 +1016,7 @@ fn init_visualization(
     });
     let vertex_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Vertex Normals Bind Group"),
-        layout: &normals_bind_group_layout,
+        layout: &layouts.normals,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -1216,6 +1064,81 @@ fn create_normals_buffer(device: &wgpu::Device, lines: &[[f32; 3]], label: &str)
             }),
             lines.len() as u32,
         )
+    }
+}
+
+fn create_bind_group_layouts(device: &wgpu::Device) -> BindGroupLayouts {
+    let texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("texture_binding_group_layout"),
+        entries: &[
+            bgl_texture_entry(0),
+            bgl_sampler_entry(1),
+            bgl_texture_entry(2),
+            bgl_sampler_entry(3),
+        ],
+    });
+    let camera = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("camera_binding_group_layout"),
+        entries: &[bgl_uniform_entry(
+            0,
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+        )],
+    });
+    let light = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("light_bind_group_layout"),
+        entries: &[bgl_uniform_entry(
+            0,
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+        )],
+    });
+    let shadow_pass = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shadow_pass_layout"),
+        entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+    });
+    let shadow_read = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shadow_read_layout"),
+        entries: &[
+            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                count: None,
+            },
+        ],
+    });
+    let grid = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("grid_bind_group_layout"),
+        entries: &[
+            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+            bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
+        ],
+    });
+    let normals = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("normals_bind_group_layout"),
+        entries: &[
+            bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+            bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
+        ],
+    });
+    BindGroupLayouts {
+        texture,
+        camera,
+        light,
+        shadow_pass,
+        shadow_read,
+        grid,
+        normals,
     }
 }
 

@@ -120,6 +120,21 @@ impl ApplicationHandler<State> for App {
     }
 }
 
+pub fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let chars: Vec<char> = s.chars().collect();
+
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(*c);
+    }
+
+    result
+}
+
 pub fn run_viewer(model_path: String) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App::new(model_path);

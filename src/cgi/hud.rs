@@ -2,6 +2,8 @@ use wgpu_text::glyph_brush::{ab_glyph::FontRef, HorizontalAlign, Layout, Section
 use wgpu_text::BrushBuilder;
 use wgpu_text::TextBrush;
 
+use crate::format_number;
+
 use super::resources::ModelStats;
 
 pub struct HudRenderer {
@@ -122,19 +124,4 @@ impl HudRenderer {
             self.brush.draw(&mut pass);
         }
     }
-}
-
-fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(*c);
-    }
-
-    result
 }

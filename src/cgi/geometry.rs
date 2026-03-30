@@ -2,7 +2,6 @@ use cgmath::InnerSpace;
 
 use super::model::{self, ModelVertex, NormalsGeometry, AABB};
 
-/// Format-agnostic raw mesh data produced by format-specific loaders.
 pub struct RawMeshData {
     pub name: String,
     pub positions: Vec<[f32; 3]>,
@@ -21,12 +20,9 @@ pub struct RawMaterialData {
 pub struct RawModelData {
     pub meshes: Vec<RawMeshData>,
     pub materials: Vec<RawMaterialData>,
-    /// Number of polygons before triangulation (for HUD stats).
     pub polygon_count: usize,
 }
 
-/// Compute smooth vertex normals by averaging face normals.
-/// Operates in-place on a flat [f32;3] buffer sized to match `positions`.
 pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0f32; 3]; positions.len()];
 
@@ -49,8 +45,6 @@ pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]>
     normals
 }
 
-/// Compute tangent and bitangent vectors for normal mapping.
-/// Returns (tangents, bitangents) arrays sized to match `positions`.
 pub fn compute_tangent_basis(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
@@ -96,11 +90,10 @@ pub fn compute_tangent_basis(
         }
     }
 
-    let _ = normals; // normals available for future Gram-Schmidt orthogonalization
+    let _ = normals;
     (tangents, bitangents)
 }
 
-/// Compute axis-aligned bounding box from positions.
 pub fn compute_bounds(positions: &[[f32; 3]]) -> AABB {
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
@@ -125,7 +118,6 @@ pub fn compute_bounds(positions: &[[f32; 3]]) -> AABB {
     }
 }
 
-/// Build line geometry for visualizing vertex and face normals.
 pub fn build_normals_geometry(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
@@ -133,12 +125,20 @@ pub fn build_normals_geometry(
     bounds: &AABB,
 ) -> NormalsGeometry {
     let mesh_diagonal = bounds.diagonal();
-    let scale = if mesh_diagonal > 1e-10 { mesh_diagonal * 0.05 } else { 0.1 };
+    let scale = if mesh_diagonal > 1e-10 {
+        mesh_diagonal * 0.05
+    } else {
+        0.1
+    };
 
     let mut vertex_lines: Vec<[f32; 3]> = Vec::with_capacity(positions.len() * 2);
     for (pos, normal) in positions.iter().zip(normals.iter()) {
         vertex_lines.push(*pos);
-        vertex_lines.push([pos[0] + normal[0] * scale, pos[1] + normal[1] * scale, pos[2] + normal[2] * scale]);
+        vertex_lines.push([
+            pos[0] + normal[0] * scale,
+            pos[1] + normal[1] * scale,
+            pos[2] + normal[2] * scale,
+        ]);
     }
 
     let mut face_lines: Vec<[f32; 3]> = Vec::new();
@@ -153,18 +153,21 @@ pub fn build_normals_geometry(
             let fn_norm = face_normal.normalize();
             let center = (p0 + p1 + p2) / 3.0;
             face_lines.push([center.x, center.y, center.z]);
-            face_lines.push([center.x + fn_norm.x * scale, center.y + fn_norm.y * scale, center.z + fn_norm.z * scale]);
+            face_lines.push([
+                center.x + fn_norm.x * scale,
+                center.y + fn_norm.y * scale,
+                center.z + fn_norm.z * scale,
+            ]);
         }
     }
 
-    NormalsGeometry { vertex_lines, face_lines }
+    NormalsGeometry {
+        vertex_lines,
+        face_lines,
+    }
 }
 
-/// Convert RawMeshData into ModelVertex arrays with normals, tangents, and bounds.
-/// This is the shared post-processing pipeline used by all format loaders.
-pub fn process_raw_model(
-    raw: &RawModelData,
-) -> (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, NormalsGeometry) {
+pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, NormalsGeometry) {
     let mut all_positions: Vec<[f32; 3]> = Vec::new();
     let mut all_normals: Vec<[f32; 3]> = Vec::new();
     let mut global_min = [f32::INFINITY; 3];
@@ -196,7 +199,10 @@ pub fn process_raw_model(
         let (tangents, bitangents) = if has_uvs {
             compute_tangent_basis(&mesh.positions, &normals, &tex_coords, &mesh.indices)
         } else {
-            (vec![[0.0; 3]; mesh.positions.len()], vec![[0.0; 3]; mesh.positions.len()])
+            (
+                vec![[0.0; 3]; mesh.positions.len()],
+                vec![[0.0; 3]; mesh.positions.len()],
+            )
         };
 
         let vertices: Vec<ModelVertex> = mesh

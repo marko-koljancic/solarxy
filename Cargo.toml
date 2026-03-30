@@ -10,7 +10,7 @@ repository = "https://github.com/marko-koljancic/solarxy"
 strip = true
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
@@ -20,7 +20,7 @@ wgpu = "27.0.1"
 pollster = "0.4.0"
 bytemuck = { version = "1.24", features = ["derive"] }
 cgmath = "0.18"
-tobj = { version = "4.0.3", default-features = false, features = ["async"] }
+tobj = { version = "4.0.3", default-features = false }
 stl_io = "0.7"
 wgpu_text = "27.0.1"
 crossterm = "0.28.1"
