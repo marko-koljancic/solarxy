@@ -3,6 +3,7 @@ name = "solarxy"
 description = "Cross platform model viewer and checker powered by WGPU and Rust."
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/marko-koljancic/solarxy"
 

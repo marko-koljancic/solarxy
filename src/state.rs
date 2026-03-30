@@ -359,6 +359,14 @@ impl State {
             None => (None, None),
         };
 
+        if let Some(ref s) = scene {
+            let filename = std::path::Path::new(&s.model_path)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(&s.model_path);
+            window.set_title(&format!("Solarxy \u{2014} {}", filename));
+        }
+
         let hud = HudRenderer::new(
             &device,
             surface_format,
@@ -481,6 +489,11 @@ impl State {
         match ModelScene::new(model_path, &self.device, &self.queue, &self.layouts, &self.config) {
             Ok(new_scene) => {
                 self.hud.update_stats(Some(&new_scene.stats));
+                let filename = std::path::Path::new(&new_scene.model_path)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(&new_scene.model_path);
+                self.window.set_title(&format!("Solarxy \u{2014} {}", filename));
                 self.scene = Some(new_scene);
                 self.view_mode = ViewMode::Shaded;
                 self.prev_non_ghosted_mode = ViewMode::Shaded;
@@ -920,7 +933,6 @@ impl State {
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         if self.uv_mode != UvMode::Off {
-            // UV fill: replaces shaded/ghosted fill surface
             pass.set_bind_group(0, &scene.cam.bind_group, &[]);
             if !scene.model.has_uvs {
                 pass.set_pipeline(&self.pipelines.uv_no_uvs);
@@ -938,7 +950,6 @@ impl State {
             }
             pass.draw_model_simple(&scene.model, 0..1);
 
-            // ViewMode overlays on top of UV fill
             match self.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
