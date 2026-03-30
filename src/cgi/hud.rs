@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use wgpu_text::glyph_brush::{ab_glyph::FontRef, HorizontalAlign, Layout, Section, Text, VerticalAlign};
@@ -14,6 +15,7 @@ pub struct HudRenderer {
     scale_factor: f64,
     stats_text: String,
     capture_message: Option<(String, Instant)>,
+    frame_times: VecDeque<f32>,
 }
 
 impl HudRenderer {
@@ -43,6 +45,7 @@ impl HudRenderer {
             scale_factor,
             stats_text,
             capture_message: None,
+            frame_times: VecDeque::with_capacity(30),
         }
     }
 
@@ -83,11 +86,20 @@ impl HudRenderer {
         view_mode: &str,
         projection: &str,
         normals: &str,
+        frame_ms: f32,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
         let font_size_hints = 13.0 * sf;
         let margin = 12.0 * sf;
+
+        if self.frame_times.len() >= 30 {
+            self.frame_times.pop_front();
+        }
+        self.frame_times.push_back(frame_ms);
+        let avg_ms: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
+        let fps = 1000.0 / avg_ms;
+        let timing_text = format!("{:.1} ms  {} fps", avg_ms, fps as u32);
 
         let black: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         let hint_color: [f32; 4] = [0.0, 0.0, 0.0, 0.6];
@@ -103,7 +115,16 @@ impl HudRenderer {
             .with_screen_position((screen_width as f32 - margin, margin))
             .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right));
 
-        let mut sections: Vec<&Section> = vec![&stats_section, &state_section];
+        let timing_section = Section::default()
+            .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(black))
+            .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
+            .with_layout(
+                Layout::default_single_line()
+                    .h_align(HorizontalAlign::Right)
+                    .v_align(VerticalAlign::Bottom),
+            );
+
+        let mut sections: Vec<&Section> = vec![&stats_section, &state_section, &timing_section];
 
         let hints =
             "W Mode  S Shaded  X Ghost  N Normals  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints";

@@ -10,6 +10,7 @@ use crate::cgi::visualization::VisualizationState;
 use crate::cgi::{resources, texture};
 use cgmath::prelude::*;
 use std::sync::Arc;
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
@@ -79,6 +80,7 @@ pub struct State {
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
     capture_requested: bool,
+    last_frame_time: Instant,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -198,6 +200,7 @@ impl State {
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             capture_requested: false,
+            last_frame_time: Instant::now(),
             window,
             model_path,
         })
@@ -316,6 +319,9 @@ impl State {
             return Ok(());
         }
 
+        let frame_ms = self.last_frame_time.elapsed().as_secs_f32() * 1000.0;
+        self.last_frame_time = Instant::now();
+
         self.hud.clear_expired_message();
 
         let output = self.surface.get_current_texture()?;
@@ -336,6 +342,7 @@ impl State {
             &self.view_mode.to_string(),
             &self.cam.camera.projection.to_string(),
             &self.normals_mode.to_string(),
+            frame_ms,
         );
 
         let capture_buffer = if self.capture_requested {
