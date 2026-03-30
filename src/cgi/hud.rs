@@ -150,7 +150,11 @@ impl HudRenderer {
         if has_model {
             sections.push(
                 Section::default()
-                    .add_text(Text::new(&self.stats_text).with_scale(font_size_main).with_color(text_color))
+                    .add_text(
+                        Text::new(&self.stats_text)
+                            .with_scale(font_size_main)
+                            .with_color(text_color),
+                    )
                     .with_screen_position((margin, margin))
                     .with_layout(Layout::default_single_line()),
             );
@@ -165,7 +169,11 @@ impl HudRenderer {
 
         sections.push(
             Section::default()
-                .add_text(Text::new(&timing_text).with_scale(font_size_main).with_color(text_color))
+                .add_text(
+                    Text::new(&timing_text)
+                        .with_scale(font_size_main)
+                        .with_color(text_color),
+                )
                 .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
                 .with_layout(
                     Layout::default_single_line()

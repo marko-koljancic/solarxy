@@ -108,7 +108,7 @@ fn upload_model(
     }
 
     if gpu_materials.is_empty() {
-        let diffuse = create_default_texture_colored(device, queue, [147, 132, 120, 255]);
+        let diffuse = create_default_texture_colored(device, queue, [226, 213, 195, 255]);
         let normal = create_default_texture(device, queue, true);
         gpu_materials.push(material::Material::new(device, "clay_default", diffuse, normal, layout));
     }
