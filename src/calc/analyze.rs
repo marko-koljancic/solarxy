@@ -1,9 +1,13 @@
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use ply_rs_bw::ply::Property;
-use solarxy::format_number;
+
+use super::geometry::compute_bounds;
+use super::report::{
+    AnalysisReport, IssueScope, MaterialSummary, MeshSummary, Severity, TextureEntry, ValidationIssue, ValidationReport,
+};
 
 pub struct AnalyzerMesh {
     pub positions: Vec<f32>,
@@ -29,10 +33,26 @@ pub struct AnalyzerMaterial {
     pub dissolve_texture: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceFormat {
+    Obj,
+    Stl,
+    Ply,
+    Gltf,
+}
+
+impl SourceFormat {
+    pub fn supports_uvs(self) -> bool {
+        matches!(self, SourceFormat::Obj | SourceFormat::Gltf)
+    }
+}
+
 pub struct ModelAnalyzer {
     pub model_name: String,
     pub meshes: Vec<AnalyzerMesh>,
     pub materials: Vec<AnalyzerMaterial>,
+    pub obj_dir: Option<PathBuf>,
+    pub source_format: SourceFormat,
 }
 
 impl ModelAnalyzer {
@@ -48,6 +68,10 @@ impl ModelAnalyzer {
             "gltf" | "glb" => Self::from_gltf(path),
             _ => Self::from_obj(path),
         }
+    }
+
+    fn parent_dir(path: &str) -> Option<PathBuf> {
+        Path::new(path).parent().map(|p| p.to_path_buf())
     }
 
     fn from_obj(path: &str) -> Result<Self> {
@@ -89,6 +113,8 @@ impl ModelAnalyzer {
             model_name,
             meshes,
             materials,
+            obj_dir: Self::parent_dir(path),
+            source_format: SourceFormat::Obj,
         })
     }
 
@@ -118,6 +144,8 @@ impl ModelAnalyzer {
             model_name,
             meshes: vec![mesh],
             materials: Vec::new(),
+            obj_dir: Self::parent_dir(path),
+            source_format: SourceFormat::Stl,
         })
     }
 
@@ -207,6 +235,8 @@ impl ModelAnalyzer {
             model_name,
             meshes: vec![mesh],
             materials: Vec::new(),
+            obj_dir: Self::parent_dir(path),
+            source_format: SourceFormat::Ply,
         })
     }
 
@@ -252,6 +282,8 @@ impl ModelAnalyzer {
             model_name,
             meshes,
             materials,
+            obj_dir: Self::parent_dir(path),
+            source_format: SourceFormat::Gltf,
         })
     }
 
@@ -291,144 +323,193 @@ impl ModelAnalyzer {
         }
     }
 
-    pub fn generate_report(&self) -> String {
-        let mut output = String::new();
-
-        output.push_str("MODEL OVERVIEW\n\n");
-        output.push_str(&format!("Model Name:       {}\n", self.model_name));
-        output.push_str(&format!("Mesh Count:       {}\n", self.meshes.len()));
-        output.push_str(&format!("Material Count:   {}\n", self.materials.len()));
+    pub fn generate_report(&self) -> AnalysisReport {
+        let mut issues = Vec::new();
 
         let total_vertices: usize = self.meshes.iter().map(|m| m.positions.len() / 3).sum();
         let total_indices: usize = self.meshes.iter().map(|m| m.indices.len()).sum();
         let total_triangles: usize = self.meshes.iter().map(|m| m.indices.len() / 3).sum();
 
-        output.push_str(&format!("Total Vertices:   {}\n", format_number(total_vertices)));
-        output.push_str(&format!("Total Indices:    {}\n", format_number(total_indices)));
-        output.push_str(&format!("Total Triangles:  {}\n", format_number(total_triangles)));
-
-        if !self.meshes.is_empty() {
-            output.push_str("\n\nMESH DETAILS\n\n");
-
-            for (i, mesh) in self.meshes.iter().enumerate() {
+        // Build mesh summaries with validation
+        let meshes: Vec<MeshSummary> = self
+            .meshes
+            .iter()
+            .enumerate()
+            .map(|(i, mesh)| {
                 let vertex_count = mesh.positions.len() / 3;
                 let index_count = mesh.indices.len();
-                let triangle_count = index_count / 3;
                 let normal_count = mesh.normals.len() / 3;
                 let texcoord_count = mesh.texcoords.len() / 2;
 
-                output.push_str(&format!("Mesh [{}]:\n", i));
-                output.push_str(&format!("  Vertices:        {}\n", format_number(vertex_count)));
-                output.push_str(&format!("  Indices:         {}\n", format_number(index_count)));
-                output.push_str(&format!("  Triangles:       {}\n", format_number(triangle_count)));
-                output.push_str(&format!(
-                    "  Normals:         {} {}\n",
-                    format_number(normal_count),
-                    if normal_count == vertex_count { "✓" } else { "⚠" }
-                ));
-                output.push_str(&format!(
-                    "  Texture Coords:  {} {}\n",
-                    format_number(texcoord_count),
-                    if texcoord_count == vertex_count {
-                        "✓"
-                    } else if texcoord_count == 0 {
-                        "✗"
-                    } else {
-                        "⚠"
-                    }
-                ));
+                // Validation: normal count mismatch
+                if !mesh.normals.is_empty() && normal_count != vertex_count {
+                    issues.push(ValidationIssue {
+                        severity: Severity::Error,
+                        scope: IssueScope::Mesh(i),
+                        message: format!(
+                            "Normal count ({}) does not match vertex count ({})",
+                            normal_count, vertex_count
+                        ),
+                    });
+                }
 
-                if let Some(mat_id) = mesh.material_id {
+                // Validation: UV count mismatch
+                if !mesh.texcoords.is_empty() && texcoord_count != vertex_count {
+                    issues.push(ValidationIssue {
+                        severity: Severity::Warning,
+                        scope: IssueScope::Mesh(i),
+                        message: format!(
+                            "Texture coordinate count ({}) does not match vertex count ({})",
+                            texcoord_count, vertex_count
+                        ),
+                    });
+                }
+
+                // Validation: no UVs (format-aware)
+                if mesh.texcoords.is_empty() && self.source_format.supports_uvs() {
+                    issues.push(ValidationIssue {
+                        severity: Severity::Warning,
+                        scope: IssueScope::Mesh(i),
+                        message: "No texture coordinates".to_string(),
+                    });
+                }
+
+                // Validation: non-triangulated
+                if index_count % 3 != 0 {
+                    issues.push(ValidationIssue {
+                        severity: Severity::Error,
+                        scope: IssueScope::Mesh(i),
+                        message: format!("Index count ({}) is not divisible by 3 (non-triangulated)", index_count),
+                    });
+                }
+
+                // Validation: empty indices
+                if mesh.indices.is_empty() {
+                    issues.push(ValidationIssue {
+                        severity: Severity::Error,
+                        scope: IssueScope::Mesh(i),
+                        message: "Empty index buffer".to_string(),
+                    });
+                }
+
+                // Validation: invalid material_id
+                let (material_name, material_id) = if let Some(mat_id) = mesh.material_id {
                     if mat_id < self.materials.len() {
-                        output.push_str(&format!(
-                            "  Material:        '{}' (ID: {})\n",
-                            self.materials[mat_id].name, mat_id
-                        ));
+                        (Some(self.materials[mat_id].name.clone()), Some(mat_id))
                     } else {
-                        output.push_str(&format!("  Material:        Invalid ID: {}\n", mat_id));
+                        issues.push(ValidationIssue {
+                            severity: Severity::Error,
+                            scope: IssueScope::Mesh(i),
+                            message: format!(
+                                "Material ID {} is out of range (only {} materials available)",
+                                mat_id,
+                                self.materials.len()
+                            ),
+                        });
+                        (None, Some(mat_id))
                     }
                 } else {
-                    output.push_str("  Material:        None\n");
+                    (None, None)
+                };
+
+                MeshSummary {
+                    index: i,
+                    vertex_count,
+                    index_count,
+                    triangle_count: index_count / 3,
+                    normal_count,
+                    texcoord_count,
+                    material_name,
+                    material_id,
+                }
+            })
+            .collect();
+
+        // Build material summaries with texture existence checks
+        let materials: Vec<MaterialSummary> = self
+            .materials
+            .iter()
+            .enumerate()
+            .map(|(i, mat)| {
+                let mut textures = Vec::new();
+                let tex_fields: &[(&str, &Option<String>)] = &[
+                    ("Diffuse", &mat.diffuse_texture),
+                    ("Ambient", &mat.ambient_texture),
+                    ("Specular", &mat.specular_texture),
+                    ("Normal", &mat.normal_texture),
+                    ("Shininess", &mat.shininess_texture),
+                    ("Dissolve", &mat.dissolve_texture),
+                ];
+                for &(slot, tex_opt) in tex_fields {
+                    if let Some(entry) = check_texture(&self.obj_dir, tex_opt, slot, &mut issues, i) {
+                        textures.push(entry);
+                    }
                 }
 
-                if i < self.meshes.len() - 1 {
-                    output.push('\n');
+                MaterialSummary {
+                    index: i,
+                    name: mat.name.clone(),
+                    ambient: mat.ambient.unwrap_or([0.0; 3]),
+                    diffuse: mat.diffuse.unwrap_or([0.0; 3]),
+                    specular: mat.specular.unwrap_or([0.0; 3]),
+                    shininess: mat.shininess,
+                    dissolve: mat.dissolve,
+                    optical_density: mat.optical_density,
+                    textures,
                 }
-            }
+            })
+            .collect();
+
+        let bounds = compute_bounds(&self.meshes);
+
+        AnalysisReport {
+            model_name: self.model_name.clone(),
+            mesh_count: self.meshes.len(),
+            material_count: self.materials.len(),
+            total_vertices,
+            total_indices,
+            total_triangles,
+            bounds,
+            meshes,
+            materials,
+            validation: ValidationReport { issues },
         }
-
-        if self.materials.is_empty() {
-            output.push_str("\n\nMATERIALS\n\n");
-            output.push_str("No materials found (.mtl file not provided or empty)\n");
-        } else {
-            output.push_str("\n\nMATERIAL DETAILS\n\n");
-
-            for (i, mat) in self.materials.iter().enumerate() {
-                output.push_str(&format!("Material [{}]: '{}'\n", i, mat.name));
-                let ambient = mat.ambient.unwrap_or([0.0; 3]);
-                let diffuse = mat.diffuse.unwrap_or([0.0; 3]);
-                let specular = mat.specular.unwrap_or([0.0; 3]);
-                output.push_str(&format!(
-                    "  Ambient:  [{:.3}, {:.3}, {:.3}]\n",
-                    ambient[0], ambient[1], ambient[2]
-                ));
-                output.push_str(&format!(
-                    "  Diffuse:  [{:.3}, {:.3}, {:.3}]\n",
-                    diffuse[0], diffuse[1], diffuse[2]
-                ));
-                output.push_str(&format!(
-                    "  Specular: [{:.3}, {:.3}, {:.3}]\n",
-                    specular[0], specular[1], specular[2]
-                ));
-
-                if let Some(shininess) = mat.shininess {
-                    output.push_str(&format!("  Shininess: {:.3}\n", shininess));
-                }
-                if let Some(dissolve) = mat.dissolve {
-                    output.push_str(&format!("  Dissolve (opacity): {:.3}\n", dissolve));
-                }
-                if let Some(optical_density) = mat.optical_density {
-                    output.push_str(&format!("  Optical Density: {:.3}\n", optical_density));
-                }
-
-                output.push_str("  Textures:\n");
-
-                let mut has_textures = false;
-
-                if let Some(ref tex) = mat.diffuse_texture {
-                    output.push_str(&format!("    Diffuse:         '{}'\n", tex));
-                    has_textures = true;
-                }
-                if let Some(ref tex) = mat.ambient_texture {
-                    output.push_str(&format!("    Ambient:         '{}'\n", tex));
-                    has_textures = true;
-                }
-                if let Some(ref tex) = mat.specular_texture {
-                    output.push_str(&format!("    Specular:        '{}'\n", tex));
-                    has_textures = true;
-                }
-                if let Some(ref tex) = mat.normal_texture {
-                    output.push_str(&format!("    Normal:          '{}'\n", tex));
-                    has_textures = true;
-                }
-                if let Some(ref tex) = mat.shininess_texture {
-                    output.push_str(&format!("    Shininess:       '{}'\n", tex));
-                    has_textures = true;
-                }
-                if let Some(ref tex) = mat.dissolve_texture {
-                    output.push_str(&format!("    Dissolve:        '{}'\n", tex));
-                    has_textures = true;
-                }
-                if !has_textures {
-                    output.push_str("    None\n");
-                }
-                if i < self.materials.len() - 1 {
-                    output.push('\n');
-                }
-            }
-        }
-        output
     }
+}
+
+fn check_texture(
+    obj_dir: &Option<PathBuf>,
+    tex_path: &Option<String>,
+    slot: &str,
+    issues: &mut Vec<ValidationIssue>,
+    mat_index: usize,
+) -> Option<TextureEntry> {
+    let path = tex_path.as_ref()?;
+
+    // glTF uses "texture_index:N" for embedded textures — skip file check
+    if path.starts_with("texture_index:") {
+        return Some(TextureEntry {
+            slot: slot.to_string(),
+            path: path.clone(),
+            exists: true,
+        });
+    }
+
+    let exists = obj_dir.as_ref().is_some_and(|dir| dir.join(path).exists());
+
+    if !exists {
+        issues.push(ValidationIssue {
+            severity: Severity::Error,
+            scope: IssueScope::Material(mat_index),
+            message: format!("Texture file not found: '{}'", path),
+        });
+    }
+
+    Some(TextureEntry {
+        slot: slot.to_string(),
+        path: path.clone(),
+        exists,
+    })
 }
 
 fn ply_analyzer_prop_to_f32(prop: Option<&Property>) -> f32 {

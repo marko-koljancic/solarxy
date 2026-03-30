@@ -1,13 +1,12 @@
-use clap::Parser;
-use crate::cli::{
-    parser::{Args, OperationMode},
-    tui::TerminalApp,
-};
-use crate::calc::analyze::ModelAnalyzer;
-use solarxy::{run_viewer};
 use std::fs;
+use std::io::{self, IsTerminal};
 
-use std::io;
+use clap::Parser;
+use solarxy::run_viewer;
+
+use crate::calc::analyze::ModelAnalyzer;
+use crate::cli::parser::{Args, OperationMode};
+use crate::cli::tui::TerminalApp;
 
 mod calc;
 mod cli;
@@ -46,10 +45,21 @@ fn main() -> io::Result<()> {
         }
         OperationMode::Analyze => {
             let analyzer = ModelAnalyzer::new(&model_path).expect("Failed to load model for analysis");
-            let mut terminal = ratatui::init();
-            let app_result = TerminalApp::new(analyzer.generate_report()).run(&mut terminal);
-            ratatui::restore();
-            app_result
+            let report = analyzer.generate_report();
+
+            if let Some(ref output_path) = args.output {
+                std::fs::write(output_path, report.to_string()).expect("Failed to write report file");
+                eprintln!("Report written to {}", output_path.display());
+                Ok(())
+            } else if !io::stdout().is_terminal() {
+                print!("{}", report);
+                Ok(())
+            } else {
+                let mut terminal = ratatui::init();
+                let app_result = TerminalApp::new(report).run(&mut terminal);
+                ratatui::restore();
+                app_result
+            }
         }
     }
 }
