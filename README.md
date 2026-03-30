@@ -1,13 +1,17 @@
 # solarxy
 
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)
+
 A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks.
 
 ## Features
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
-- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, 3-light system
+- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, 3-light system, 4x MSAA
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
 - **Report export** -- save analysis reports to file or pipe to stdout
+- **Drag-and-drop** -- drop model files directly into the viewer window
 
 ## Supported Formats
 
@@ -39,6 +43,12 @@ View a model (default mode):
 cargo r --release -- --model path/to/model.obj
 ```
 
+Or launch the viewer and drag a file onto the window:
+
+```bash
+cargo r --release
+```
+
 Analyze a model in the terminal:
 
 ```bash
@@ -55,13 +65,17 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 | Flag | Description | Default |
 |---|---|---|
-| `-m, --model <PATH>` | Path to model file (required) | -- |
+| `-m, --model <PATH>` | Path to model file (optional in view mode -- supports drag-and-drop) | -- |
 | `-M, --mode <MODE>` | `view` or `analyze` | `view` |
 | `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, and real-time shadow mapping. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor and an infinite grid.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor and an infinite grid. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
+
+<p align="center">
+  <img src="docs/img/solarxy-view.png" width="100%">
+</p>
 
 ### Camera Controls
 
@@ -79,16 +93,23 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `S` | Shaded mode |
 | `X` | Toggle ghosted view |
 | `N` | Cycle normals (Off / Face / Vertex / Face+Vertex) |
+| `U` | Cycle UV overlay (Off / Gradient / Checker) |
 | `H` | Frame model (reset view) |
 | `T` `F` `L` `R` | Top / Front / Left / Right view |
 | `P` | Perspective projection |
 | `O` | Orthographic projection |
+| `B` | Cycle background (Gradient / Blue-gray / Dark / Studio / White / Black) |
+| `C` | Save screenshot (PNG) |
 | `?` | Toggle keybinding hints |
 | `Esc` | Exit |
 
 ## Analyze Mode
 
 The analyzer opens a terminal UI with four tabs: **Overview**, **Meshes**, **Materials**, and **Validation**. Overview shows aggregate counts and bounding box dimensions. Meshes and Materials provide per-element breakdowns. Validation lists errors and warnings found in the model.
+
+<p align="center">
+  <img src="docs/img/solarxy-analyze.png" width="100%">
+</p>
 
 ### Navigation
 
