@@ -78,6 +78,7 @@ pub struct State {
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
     normals_mode: NormalsMode,
+    capture_requested: bool,
     pub window: Arc<Window>,
     pub model_path: String,
 }
@@ -120,7 +121,7 @@ impl State {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format: surface_format,
             width: size.width,
             height: size.height,
@@ -196,6 +197,7 @@ impl State {
             view_mode: ViewMode::Shaded,
             prev_non_ghosted_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
+            capture_requested: false,
             window,
             model_path,
         })
@@ -265,6 +267,7 @@ impl State {
                 }
             }
             KeyCode::KeyS => self.view_mode = ViewMode::Shaded,
+            KeyCode::KeyC => self.capture_requested = true,
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
@@ -313,6 +316,8 @@ impl State {
             return Ok(());
         }
 
+        self.hud.clear_expired_message();
+
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -333,9 +338,115 @@ impl State {
             &self.normals_mode.to_string(),
         );
 
+        let capture_buffer = if self.capture_requested {
+            self.capture_requested = false;
+            Some(self.encode_capture(&output.texture, &mut encoder))
+        } else {
+            None
+        };
+
         self.queue.submit(std::iter::once(encoder.finish()));
+
+        if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
+            self.save_capture(buffer, padded_row_bytes, width, height);
+        }
+
         output.present();
         Ok(())
+    }
+
+    fn encode_capture(
+        &self,
+        texture: &wgpu::Texture,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> (wgpu::Buffer, u32, u32, u32) {
+        let width = self.config.width;
+        let height = self.config.height;
+        let bytes_per_pixel = 4u32;
+        let unpadded_row_bytes = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_row_bytes = unpadded_row_bytes.div_ceil(align) * align;
+
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Capture Staging Buffer"),
+            size: (padded_row_bytes * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row_bytes),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        (buffer, padded_row_bytes, width, height)
+    }
+
+    fn save_capture(&mut self, buffer: wgpu::Buffer, padded_row_bytes: u32, width: u32, height: u32) {
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            tx.send(result).unwrap();
+        });
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+
+        if rx.recv().unwrap().is_err() {
+            eprintln!("Failed to map capture buffer");
+            return;
+        }
+
+        let data = slice.get_mapped_range();
+        let bytes_per_pixel = 4u32;
+        let unpadded_row_bytes = width * bytes_per_pixel;
+
+        let mut pixels = Vec::with_capacity((unpadded_row_bytes * height) as usize);
+        for row in 0..height {
+            let start = (row * padded_row_bytes) as usize;
+            let end = start + unpadded_row_bytes as usize;
+            pixels.extend_from_slice(&data[start..end]);
+        }
+        drop(data);
+        buffer.unmap();
+
+        let needs_swizzle = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+        if needs_swizzle {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk.swap(0, 2);
+            }
+        }
+
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("solarxy_{}.png", timestamp);
+
+        let img = image::RgbaImage::from_raw(width, height, pixels).expect("Failed to create image from pixel data");
+        if let Err(e) = img.save(&filename) {
+            eprintln!("Failed to save screenshot: {}", e);
+        } else {
+            self.hud.set_capture_message(filename);
+        }
     }
 
     fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {

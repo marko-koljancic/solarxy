@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use wgpu_text::glyph_brush::{ab_glyph::FontRef, HorizontalAlign, Layout, Section, Text, VerticalAlign};
 use wgpu_text::BrushBuilder;
 use wgpu_text::TextBrush;
@@ -11,6 +13,7 @@ pub struct HudRenderer {
     hints_visible: bool,
     scale_factor: f64,
     stats_text: String,
+    capture_message: Option<(String, Instant)>,
 }
 
 impl HudRenderer {
@@ -39,6 +42,7 @@ impl HudRenderer {
             hints_visible: true,
             scale_factor,
             stats_text,
+            capture_message: None,
         }
     }
 
@@ -52,6 +56,19 @@ impl HudRenderer {
 
     pub fn toggle_hints(&mut self) {
         self.hints_visible = !self.hints_visible;
+    }
+
+    pub fn set_capture_message(&mut self, filename: String) {
+        let msg = format!("Saved {}", filename);
+        self.capture_message = Some((msg, Instant::now()));
+    }
+
+    pub fn clear_expired_message(&mut self) {
+        if let Some((_, created)) = &self.capture_message
+            && created.elapsed() > Duration::from_secs(2)
+        {
+            self.capture_message = None;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -88,7 +105,8 @@ impl HudRenderer {
 
         let mut sections: Vec<&Section> = vec![&stats_section, &state_section];
 
-        let hints = "W Mode  S Shaded  X Ghost  N Normals  H Frame  T F L R Views  P Persp  O Ortho  ? Hints";
+        let hints =
+            "W Mode  S Shaded  X Ghost  N Normals  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints";
         let hint_section = Section::default()
             .add_text(Text::new(hints).with_scale(font_size_hints).with_color(hint_color))
             .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 - margin))
@@ -97,6 +115,23 @@ impl HudRenderer {
                     .h_align(HorizontalAlign::Center)
                     .v_align(VerticalAlign::Bottom),
             );
+
+        let capture_section;
+        if let Some((msg, _)) = &self.capture_message {
+            let success_color: [f32; 4] = [0.0, 0.4, 0.0, 1.0];
+            capture_section = Section::default()
+                .add_text(Text::new(msg).with_scale(font_size_main).with_color(success_color))
+                .with_screen_position((
+                    screen_width as f32 / 2.0,
+                    screen_height as f32 - margin - font_size_hints - margin,
+                ))
+                .with_layout(
+                    Layout::default_single_line()
+                        .h_align(HorizontalAlign::Center)
+                        .v_align(VerticalAlign::Bottom),
+                );
+            sections.push(&capture_section);
+        }
 
         if self.hints_visible {
             sections.push(&hint_section);
