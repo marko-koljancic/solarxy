@@ -297,9 +297,10 @@ impl State {
             label: Some("texture_binding_group_layout"),
         });
 
-        let (model, normals_geo) = resources::load_model(&model_path, &device, &queue, &texture_binding_group_layout)
-            .await
-            .unwrap();
+        let (model, normals_geo) =
+            resources::load_model_any(&model_path, &device, &queue, &texture_binding_group_layout)
+                .await
+                .unwrap();
 
         let diffuse_texture = &model.materials[0].diffuse_texture;
 

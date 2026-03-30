@@ -1,23 +1,117 @@
-use tobj;
+use std::io::BufReader;
+use std::path::Path;
+
+pub struct AnalyzerMesh {
+    pub positions: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub normals: Vec<f32>,
+    pub texcoords: Vec<f32>,
+    pub material_id: Option<usize>,
+}
+
+pub struct AnalyzerMaterial {
+    pub name: String,
+    pub ambient: Option<[f32; 3]>,
+    pub diffuse: Option<[f32; 3]>,
+    pub specular: Option<[f32; 3]>,
+    pub shininess: Option<f32>,
+    pub dissolve: Option<f32>,
+    pub optical_density: Option<f32>,
+    pub diffuse_texture: Option<String>,
+    pub ambient_texture: Option<String>,
+    pub specular_texture: Option<String>,
+    pub normal_texture: Option<String>,
+    pub shininess_texture: Option<String>,
+    pub dissolve_texture: Option<String>,
+}
 
 pub struct ModelAnalyzer {
     pub model_name: String,
-    pub meshes: Vec<tobj::Mesh>,
-    pub materials: Vec<tobj::Material>,
+    pub meshes: Vec<AnalyzerMesh>,
+    pub materials: Vec<AnalyzerMaterial>,
 }
 
 impl ModelAnalyzer {
-    pub fn new(path: &str) -> Result<Self, tobj::LoadError> {
-        let model_name = path.split('/').last().unwrap_or(path).to_string();
+    pub fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match ext.as_str() {
+            "stl" => Self::from_stl(path),
+            _ => Self::from_obj(path),
+        }
+    }
+
+    fn from_obj(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let model_name = path.split('/').next_back().unwrap_or(path).to_string();
         let (models, materials) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
 
-        let meshes = models.into_iter().map(|m| m.mesh).collect();
-        let materials = materials.unwrap_or_default();
+        let meshes = models
+            .into_iter()
+            .map(|m| AnalyzerMesh {
+                positions: m.mesh.positions,
+                indices: m.mesh.indices,
+                normals: m.mesh.normals,
+                texcoords: m.mesh.texcoords,
+                material_id: m.mesh.material_id,
+            })
+            .collect();
+
+        let materials = materials
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| AnalyzerMaterial {
+                name: m.name,
+                ambient: m.ambient,
+                diffuse: m.diffuse,
+                specular: m.specular,
+                shininess: m.shininess,
+                dissolve: m.dissolve,
+                optical_density: m.optical_density,
+                diffuse_texture: m.diffuse_texture,
+                ambient_texture: m.ambient_texture,
+                specular_texture: m.specular_texture,
+                normal_texture: m.normal_texture,
+                shininess_texture: m.shininess_texture,
+                dissolve_texture: m.dissolve_texture,
+            })
+            .collect();
 
         Ok(ModelAnalyzer {
             model_name,
             meshes,
             materials,
+        })
+    }
+
+    fn from_stl(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let model_name = path.split('/').next_back().unwrap_or(path).to_string();
+        let file = std::fs::File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let indexed_mesh = stl_io::read_stl(&mut reader)?;
+
+        let positions: Vec<f32> = indexed_mesh.vertices.iter().flat_map(|v| [v[0], v[1], v[2]]).collect();
+
+        let indices: Vec<u32> = indexed_mesh
+            .faces
+            .iter()
+            .flat_map(|f| f.vertices.iter().map(|&i| i as u32))
+            .collect();
+
+        let mesh = AnalyzerMesh {
+            positions,
+            indices,
+            normals: Vec::new(),
+            texcoords: Vec::new(),
+            material_id: None,
+        };
+
+        Ok(ModelAnalyzer {
+            model_name,
+            meshes: vec![mesh],
+            materials: Vec::new(),
         })
     }
 
@@ -82,7 +176,7 @@ impl ModelAnalyzer {
                 }
 
                 if i < self.meshes.len() - 1 {
-                    output.push_str("\n");
+                    output.push('\n');
                 }
             }
         }
@@ -156,7 +250,7 @@ impl ModelAnalyzer {
                     output.push_str("    None\n");
                 }
                 if i < self.materials.len() - 1 {
-                    output.push_str("\n");
+                    output.push('\n');
                 }
             }
         }
@@ -170,7 +264,7 @@ fn format_number(n: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
 
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i) % 3 == 0 {
+        if i > 0 && (chars.len() - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(*c);

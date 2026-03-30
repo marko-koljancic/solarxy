@@ -21,6 +21,7 @@ pollster = "0.4.0"
 bytemuck = { version = "1.24", features = ["derive"] }
 cgmath = "0.18"
 tobj = { version = "4.0.3", default-features = false, features = ["async"] }
+stl_io = "0.7"
 wgpu_text = "27.0.1"
 color-eyre = "0.6.3"
 crossterm = "0.28.1"

@@ -9,7 +9,19 @@ pub struct ModelStats {
 }
 
 impl ModelStats {
-    pub fn from_obj(path: &str) -> Self {
+    pub fn from_path(path: &str) -> Self {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match ext.as_str() {
+            "stl" => Self::from_stl(path),
+            _ => Self::from_obj(path),
+        }
+    }
+
+    fn from_obj(path: &str) -> Self {
         let (models_raw, _) = tobj::load_obj(
             path,
             &tobj::LoadOptions {
@@ -46,6 +58,21 @@ impl ModelStats {
 
         ModelStats { polys, tris, verts }
     }
+
+    fn from_stl(path: &str) -> Self {
+        let file = std::fs::File::open(path).unwrap();
+        let mut reader = std::io::BufReader::new(file);
+        let mesh = stl_io::read_stl(&mut reader).unwrap();
+
+        let tris = mesh.faces.len();
+        let verts = mesh.vertices.len();
+
+        ModelStats {
+            polys: tris,
+            tris,
+            verts,
+        }
+    }
 }
 
 pub struct HudRenderer {
@@ -69,7 +96,7 @@ impl HudRenderer {
             .expect("Failed to load font")
             .build(device, width, height, surface_format);
 
-        let stats = ModelStats::from_obj(model_path);
+        let stats = ModelStats::from_path(model_path);
         let stats_text = format!(
             "Polys {}  Tris {}  Verts {}",
             format_number(stats.polys),

@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::path::PathBuf;
-use super::validators::is_valid_obj_model_path;
+use super::validators::is_valid_model_path;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -9,7 +9,7 @@ pub struct Args {
     long = "model", 
     required = true, 
     help = "Path to the model file", 
-    value_parser = is_valid_obj_model_path)]
+    value_parser = is_valid_model_path)]
     /// Path to the model file to be loaded or processed.
     /// This field specifies the filesystem location of the model that will be used
     /// by the application. The path can be either relative or absolute.
