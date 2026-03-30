@@ -83,7 +83,12 @@ pub(crate) struct Pipelines {
 }
 
 impl Pipelines {
-    pub(crate) fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, layouts: &BindGroupLayouts) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        layouts: &BindGroupLayouts,
+        sample_count: u32,
+    ) -> Self {
         let shadow_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Shadow Pipeline Layout"),
@@ -143,6 +148,7 @@ impl Pipelines {
                     label: Some("Normal Shader"),
                     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
                 },
+                sample_count,
             )
         };
 
@@ -187,7 +193,11 @@ impl Pipelines {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
                 multiview: None,
                 cache: None,
             })
@@ -212,6 +222,7 @@ impl Pipelines {
             wgpu::PolygonMode::Fill,
             false,
             None,
+            sample_count,
         );
         let ghosted_wire = create_ghosted_pipeline(
             device,
@@ -222,6 +233,7 @@ impl Pipelines {
             wgpu::PolygonMode::Line,
             false,
             None,
+            sample_count,
         );
         let wireframe = create_ghosted_pipeline(
             device,
@@ -236,6 +248,7 @@ impl Pipelines {
                 slope_scale: -2.0,
                 clamp: 0.0,
             }),
+            sample_count,
         );
 
         let grid = {
@@ -279,7 +292,11 @@ impl Pipelines {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
                 multiview: None,
                 cache: None,
             })
@@ -329,7 +346,11 @@ impl Pipelines {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
                 multiview: None,
                 cache: None,
             })
@@ -358,6 +379,7 @@ fn create_ghosted_pipeline(
     polygon_mode: wgpu::PolygonMode,
     depth_write: bool,
     depth_bias: Option<wgpu::DepthBiasState>,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
     let cull_mode = if depth_write { Some(wgpu::Face::Back) } else { None };
     let blend = if depth_write {
@@ -402,7 +424,11 @@ fn create_ghosted_pipeline(
             stencil: wgpu::StencilState::default(),
             bias: depth_bias.unwrap_or_default(),
         }),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
         multiview: None,
         cache: None,
     })
@@ -415,6 +441,7 @@ fn create_render_pipeline(
     depth_format: Option<wgpu::TextureFormat>,
     vertex_layouts: &[wgpu::VertexBufferLayout],
     shader: wgpu::ShaderModuleDescriptor,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(shader);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -452,7 +479,11 @@ fn create_render_pipeline(
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
         multiview: None,
         cache: None,
     })

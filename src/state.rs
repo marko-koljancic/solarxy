@@ -196,6 +196,8 @@ impl ModelScene {
     }
 }
 
+const MSAA_SAMPLE_COUNT: u32 = 4;
+
 pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -203,6 +205,7 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     depth_texture: texture::Texture,
+    msaa_color_view: wgpu::TextureView,
     layouts: BindGroupLayouts,
     pipelines: Pipelines,
     hud: HudRenderer,
@@ -264,9 +267,11 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &config, "depth_texture", MSAA_SAMPLE_COUNT);
+        let msaa_color_view = texture::create_msaa_color_texture(&device, &config, MSAA_SAMPLE_COUNT);
         let layouts = BindGroupLayouts::new(&device);
-        let pipelines = Pipelines::new(&device, &config, &layouts);
+        let pipelines = Pipelines::new(&device, &config, &layouts, MSAA_SAMPLE_COUNT);
 
         let (scene, stats) = match model_path {
             Some(path) => {
@@ -297,6 +302,7 @@ impl State {
             config,
             is_surface_configured: false,
             depth_texture,
+            msaa_color_view,
             layouts,
             pipelines,
             hud,
@@ -349,7 +355,9 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture =
+                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture", MSAA_SAMPLE_COUNT);
+            self.msaa_color_view = texture::create_msaa_color_texture(&self.device, &self.config, MSAA_SAMPLE_COUNT);
             self.is_surface_configured = true;
             self.hud.resize(width, height, &self.queue);
             self.hud.set_scale_factor(self.window.scale_factor());
@@ -668,11 +676,11 @@ impl State {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
+                view: &self.msaa_color_view,
+                resolve_target: Some(view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(self.background.color()),
-                    store: wgpu::StoreOp::Store,
+                    store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
             })],
@@ -715,11 +723,11 @@ impl State {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
+                view: &self.msaa_color_view,
+                resolve_target: Some(view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(self.background.color()),
-                    store: wgpu::StoreOp::Store,
+                    store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
             })],
