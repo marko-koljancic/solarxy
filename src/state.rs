@@ -213,6 +213,7 @@ pub struct State {
     background: BackgroundPreset,
     capture_requested: bool,
     last_frame_time: Instant,
+    dt: f32,
     pub window: Arc<Window>,
 }
 
@@ -306,6 +307,7 @@ impl State {
             background: BackgroundPreset::BlueGray,
             capture_requested: false,
             last_frame_time: Instant::now(),
+            dt: 0.0,
             window,
         })
     }
@@ -483,8 +485,12 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        let now = Instant::now();
+        self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
+        self.last_frame_time = now;
+
         if let Some(scene) = &mut self.scene {
-            scene.cam.update(&self.queue);
+            scene.cam.update(&self.queue, self.dt);
 
             scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
             self.queue
@@ -506,8 +512,7 @@ impl State {
             return Ok(());
         }
 
-        let frame_ms = self.last_frame_time.elapsed().as_secs_f32() * 1000.0;
-        self.last_frame_time = Instant::now();
+        let frame_ms = self.dt * 1000.0;
 
         self.hud.clear_expired_toast();
 
