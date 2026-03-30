@@ -1,5 +1,6 @@
 use std::io::BufReader;
 use std::path::Path;
+use ply_rs_bw::ply::Property;
 
 pub struct AnalyzerMesh {
     pub positions: Vec<f32>,
@@ -40,6 +41,7 @@ impl ModelAnalyzer {
             .to_ascii_lowercase();
         match ext.as_str() {
             "stl" => Self::from_stl(path),
+            "ply" => Self::from_ply(path),
             _ => Self::from_obj(path),
         }
     }
@@ -105,6 +107,89 @@ impl ModelAnalyzer {
             indices,
             normals: Vec::new(),
             texcoords: Vec::new(),
+            material_id: None,
+        };
+
+        Ok(ModelAnalyzer {
+            model_name,
+            meshes: vec![mesh],
+            materials: Vec::new(),
+        })
+    }
+
+    fn from_ply(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let model_name = path.split('/').next_back().unwrap_or(path).to_string();
+        let file = std::fs::File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
+        let ply = parser.read_ply(&mut reader)?;
+
+        let ply_vertices = ply.payload.get("vertex").ok_or("PLY file has no 'vertex' element")?;
+        let ply_faces = ply.payload.get("face").ok_or("PLY file has no 'face' element")?;
+
+        let (has_normals, uv_keys) = if let Some(first) = ply_vertices.first() {
+            let has_normals = first.get("nx").is_some();
+            let uv_keys: Option<(&str, &str)> = if first.get("s").is_some() && first.get("t").is_some() {
+                Some(("s", "t"))
+            } else if first.get("u").is_some() && first.get("v").is_some() {
+                Some(("u", "v"))
+            } else if first.get("texture_u").is_some() && first.get("texture_v").is_some() {
+                Some(("texture_u", "texture_v"))
+            } else {
+                None
+            };
+            (has_normals, uv_keys)
+        } else {
+            (false, None)
+        };
+
+        let mut positions: Vec<f32> = Vec::with_capacity(ply_vertices.len() * 3);
+        let mut normals: Vec<f32> = Vec::new();
+        let mut texcoords: Vec<f32> = Vec::new();
+
+        if has_normals {
+            normals.reserve(ply_vertices.len() * 3);
+        }
+        if uv_keys.is_some() {
+            texcoords.reserve(ply_vertices.len() * 2);
+        }
+
+        for elem in ply_vertices {
+            positions.push(ply_analyzer_prop_to_f32(elem.get("x")));
+            positions.push(ply_analyzer_prop_to_f32(elem.get("y")));
+            positions.push(ply_analyzer_prop_to_f32(elem.get("z")));
+
+            if has_normals {
+                normals.push(ply_analyzer_prop_to_f32(elem.get("nx")));
+                normals.push(ply_analyzer_prop_to_f32(elem.get("ny")));
+                normals.push(ply_analyzer_prop_to_f32(elem.get("nz")));
+            }
+
+            if let Some((u_key, v_key)) = uv_keys {
+                texcoords.push(ply_analyzer_prop_to_f32(elem.get(u_key)));
+                texcoords.push(ply_analyzer_prop_to_f32(elem.get(v_key)));
+            }
+        }
+
+        let mut indices: Vec<u32> = Vec::new();
+        for face in ply_faces {
+            let vis = face
+                .get("vertex_indices")
+                .or_else(|| face.get("vertex_index"))
+                .map(ply_analyzer_prop_to_indices)
+                .unwrap_or_default();
+            for i in 1..vis.len().saturating_sub(1) {
+                indices.push(vis[0]);
+                indices.push(vis[i] as u32);
+                indices.push(vis[i + 1] as u32);
+            }
+        }
+
+        let mesh = AnalyzerMesh {
+            positions,
+            indices,
+            normals,
+            texcoords,
             material_id: None,
         };
 
@@ -255,6 +340,32 @@ impl ModelAnalyzer {
             }
         }
         output
+    }
+}
+
+fn ply_analyzer_prop_to_f32(prop: Option<&Property>) -> f32 {
+    match prop {
+        Some(Property::Float(v)) => *v,
+        Some(Property::Double(v)) => *v as f32,
+        Some(Property::Int(v)) => *v as f32,
+        Some(Property::UInt(v)) => *v as f32,
+        Some(Property::Short(v)) => *v as f32,
+        Some(Property::UShort(v)) => *v as f32,
+        Some(Property::Char(v)) => *v as f32,
+        Some(Property::UChar(v)) => *v as f32,
+        _ => 0.0,
+    }
+}
+
+fn ply_analyzer_prop_to_indices(prop: &Property) -> Vec<u32> {
+    match prop {
+        Property::ListInt(v) => v.iter().map(|&i| i as u32).collect(),
+        Property::ListUInt(v) => v.clone(),
+        Property::ListShort(v) => v.iter().map(|&i| i as u32).collect(),
+        Property::ListUShort(v) => v.iter().map(|&i| i as u32).collect(),
+        Property::ListUChar(v) => v.iter().map(|&i| i as u32).collect(),
+        Property::ListChar(v) => v.iter().map(|&i| i as u32).collect(),
+        _ => Vec::new(),
     }
 }
 

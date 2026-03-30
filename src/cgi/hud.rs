@@ -17,6 +17,7 @@ impl ModelStats {
             .to_ascii_lowercase();
         match ext.as_str() {
             "stl" => Self::from_stl(path),
+            "ply" => Self::from_ply(path),
             _ => Self::from_obj(path),
         }
     }
@@ -72,6 +73,41 @@ impl ModelStats {
             tris,
             verts,
         }
+    }
+
+    fn from_ply(path: &str) -> Self {
+        let file = std::fs::File::open(path).unwrap();
+        let mut reader = std::io::BufReader::new(file);
+        let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
+        let ply = parser.read_ply(&mut reader).unwrap();
+
+        let verts = ply.payload.get("vertex").map_or(0, |v| v.len());
+
+        let mut polys = 0usize;
+        let mut tris = 0usize;
+        if let Some(faces) = ply.payload.get("face") {
+            polys = faces.len();
+            for face in faces {
+                let n = face
+                    .get("vertex_indices")
+                    .or_else(|| face.get("vertex_index"))
+                    .map(|p| match p {
+                        ply_rs_bw::ply::Property::ListInt(v) => v.len(),
+                        ply_rs_bw::ply::Property::ListUInt(v) => v.len(),
+                        ply_rs_bw::ply::Property::ListShort(v) => v.len(),
+                        ply_rs_bw::ply::Property::ListUShort(v) => v.len(),
+                        ply_rs_bw::ply::Property::ListUChar(v) => v.len(),
+                        ply_rs_bw::ply::Property::ListChar(v) => v.len(),
+                        _ => 0,
+                    })
+                    .unwrap_or(0);
+                if n >= 3 {
+                    tris += n - 2;
+                }
+            }
+        }
+
+        ModelStats { polys, tris, verts }
     }
 }
 

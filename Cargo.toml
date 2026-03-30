@@ -26,6 +26,7 @@ wgpu_text = "27.0.1"
 color-eyre = "0.6.3"
 crossterm = "0.28.1"
 ratatui = "0.29.0"
+ply-rs-bw = "3.0.3"
 
 [dependencies.image]
 version = "0.25.9"
