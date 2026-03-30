@@ -81,6 +81,9 @@ pub(crate) struct Pipelines {
     pub(crate) grid: wgpu::RenderPipeline,
     pub(crate) normals: wgpu::RenderPipeline,
     pub(crate) background: wgpu::RenderPipeline,
+    pub(crate) uv_gradient: wgpu::RenderPipeline,
+    pub(crate) uv_checker: wgpu::RenderPipeline,
+    pub(crate) uv_no_uvs: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -219,6 +222,7 @@ impl Pipelines {
             &ghosted_layout,
             &ghosted_shader,
             config.format,
+            "vs_ghosted",
             "fs_ghosted_fill",
             wgpu::PolygonMode::Fill,
             false,
@@ -230,6 +234,7 @@ impl Pipelines {
             &ghosted_layout,
             &ghosted_shader,
             config.format,
+            "vs_ghosted",
             "fs_ghosted_wire",
             wgpu::PolygonMode::Line,
             false,
@@ -246,6 +251,7 @@ impl Pipelines {
             &wireframe_layout,
             &ghosted_shader,
             config.format,
+            "vs_ghosted",
             "fs_wireframe",
             wgpu::PolygonMode::Line,
             true,
@@ -416,6 +422,57 @@ impl Pipelines {
             })
         };
 
+        let uv_debug_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("UV Debug Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/uv_debug.wgsl").into()),
+        });
+        let uv_camera_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("UV Camera-Only Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera],
+            push_constant_ranges: &[],
+        });
+        let uv_gradient = create_ghosted_pipeline(
+            device,
+            &uv_camera_layout,
+            &uv_debug_shader,
+            config.format,
+            "vs_uv_debug",
+            "fs_uv_gradient",
+            wgpu::PolygonMode::Fill,
+            true,
+            None,
+            sample_count,
+        );
+        let uv_no_uvs = create_ghosted_pipeline(
+            device,
+            &uv_camera_layout,
+            &uv_debug_shader,
+            config.format,
+            "vs_uv_debug",
+            "fs_uv_no_uvs",
+            wgpu::PolygonMode::Fill,
+            true,
+            None,
+            sample_count,
+        );
+        let uv_checker_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("UV Checker Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.uv_checker],
+            push_constant_ranges: &[],
+        });
+        let uv_checker = create_ghosted_pipeline(
+            device,
+            &uv_checker_layout,
+            &uv_debug_shader,
+            config.format,
+            "vs_uv_debug",
+            "fs_uv_checker",
+            wgpu::PolygonMode::Fill,
+            true,
+            None,
+            sample_count,
+        );
+
         Pipelines {
             main,
             shadow: shadow_pipeline,
@@ -426,6 +483,9 @@ impl Pipelines {
             grid,
             normals,
             background,
+            uv_gradient,
+            uv_checker,
+            uv_no_uvs,
         }
     }
 }
@@ -436,6 +496,7 @@ fn create_ghosted_pipeline(
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     format: wgpu::TextureFormat,
+    vertex_entry: &str,
     fragment_entry: &str,
     polygon_mode: wgpu::PolygonMode,
     depth_write: bool,
@@ -457,7 +518,7 @@ fn create_ghosted_pipeline(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("vs_ghosted"),
+            entry_point: Some(vertex_entry),
             buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
             compilation_options: Default::default(),
         },

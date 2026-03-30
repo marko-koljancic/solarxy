@@ -8,6 +8,7 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) normals: wgpu::BindGroupLayout,
     pub(crate) background: wgpu::BindGroupLayout,
     pub(crate) wireframe_color: wgpu::BindGroupLayout,
+    pub(crate) uv_checker: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -83,6 +84,10 @@ impl BindGroupLayouts {
             label: Some("wireframe_color_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+        let uv_checker = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("uv_checker_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -93,6 +98,7 @@ impl BindGroupLayouts {
             normals,
             background,
             wireframe_color,
+            uv_checker,
         }
     }
 }

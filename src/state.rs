@@ -55,6 +55,23 @@ impl std::fmt::Display for NormalsMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+enum UvMode {
+    Off,
+    Gradient,
+    Checker,
+}
+
+impl std::fmt::Display for UvMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UvMode::Off => write!(f, "Off"),
+            UvMode::Gradient => write!(f, "UV: Gradient"),
+            UvMode::Checker => write!(f, "UV: Checker"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum BackgroundPreset {
     BlueGray,
     DarkGray,
@@ -267,6 +284,9 @@ pub struct State {
     gradient_bind_group: wgpu::BindGroup,
     wireframe_color_buffer: wgpu::Buffer,
     wireframe_color_bind_group: wgpu::BindGroup,
+    uv_mode: UvMode,
+    _checker_texture: texture::Texture,
+    uv_checker_bind_group: wgpu::BindGroup,
     capture_requested: bool,
     last_frame_time: Instant,
     dt: f32,
@@ -379,6 +399,38 @@ impl State {
             }],
         });
 
+        let checker_texture = texture::Texture::from_bytes(
+            &device,
+            &queue,
+            include_bytes!("../res/textures/uv-checker_1k.png"),
+            "uv_checker_texture",
+            false,
+        )?;
+        let checker_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("UV Checker Sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let uv_checker_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UV Checker Bind Group"),
+            layout: &layouts.uv_checker,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&checker_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&checker_sampler),
+                },
+            ],
+        });
+
         Ok(Self {
             surface,
             device,
@@ -399,6 +451,9 @@ impl State {
             gradient_bind_group,
             wireframe_color_buffer,
             wireframe_color_bind_group,
+            uv_mode: UvMode::Off,
+            _checker_texture: checker_texture,
+            uv_checker_bind_group,
             capture_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
@@ -559,6 +614,13 @@ impl State {
                     NormalsMode::FaceAndVertex => NormalsMode::Off,
                 };
             }
+            KeyCode::KeyU => {
+                self.uv_mode = match self.uv_mode {
+                    UvMode::Off => UvMode::Gradient,
+                    UvMode::Gradient => UvMode::Checker,
+                    UvMode::Checker => UvMode::Off,
+                };
+            }
             _ => {
                 if let Some(scene) = &mut self.scene {
                     scene.cam.handle_key(code, is_pressed);
@@ -638,6 +700,11 @@ impl State {
             (String::new(), String::new())
         };
 
+        let mode_str = if self.uv_mode != UvMode::Off {
+            format!("{} [{}]", self.view_mode, self.uv_mode)
+        } else {
+            self.view_mode.to_string()
+        };
         self.hud.render(
             &self.device,
             &mut encoder,
@@ -645,7 +712,7 @@ impl State {
             &self.queue,
             self.config.width,
             self.config.height,
-            &self.view_mode.to_string(),
+            &mode_str,
             &projection_str,
             &normals_str,
             &self.background_mode.to_string(),
@@ -852,30 +919,67 @@ impl State {
         use model::DrawMeshSimple;
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
-        match self.view_mode {
-            ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                self.draw_shaded_model(&mut pass, scene);
-                self.draw_floor(&mut pass, scene);
-                if self.view_mode == ViewMode::ShadedWireframe {
+        if self.uv_mode != UvMode::Off {
+            // UV fill: replaces shaded/ghosted fill surface
+            pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+            if !scene.model.has_uvs {
+                pass.set_pipeline(&self.pipelines.uv_no_uvs);
+            } else {
+                match self.uv_mode {
+                    UvMode::Gradient => {
+                        pass.set_pipeline(&self.pipelines.uv_gradient);
+                    }
+                    UvMode::Checker => {
+                        pass.set_pipeline(&self.pipelines.uv_checker);
+                        pass.set_bind_group(1, &self.uv_checker_bind_group, &[]);
+                    }
+                    UvMode::Off => unreachable!(),
+                }
+            }
+            pass.draw_model_simple(&scene.model, 0..1);
+
+            // ViewMode overlays on top of UV fill
+            match self.view_mode {
+                ViewMode::Shaded => {}
+                ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.set_pipeline(&self.pipelines.wireframe);
                     pass.set_bind_group(0, &scene.cam.bind_group, &[]);
                     pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
                     pass.draw_model_simple(&scene.model, 0..1);
                 }
+                ViewMode::Ghosted => {
+                    pass.set_pipeline(&self.pipelines.ghosted_wire);
+                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.draw_model_simple(&scene.model, 0..1);
+                }
             }
-            ViewMode::WireframeOnly => {
-                pass.set_pipeline(&self.pipelines.wireframe);
-                pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
-                pass.draw_model_simple(&scene.model, 0..1);
-            }
-            ViewMode::Ghosted => {
-                pass.set_pipeline(&self.pipelines.ghosted_fill);
-                pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                pass.draw_model_simple(&scene.model, 0..1);
-                pass.set_pipeline(&self.pipelines.ghosted_wire);
-                pass.draw_model_simple(&scene.model, 0..1);
+        } else {
+            match self.view_mode {
+                ViewMode::Shaded | ViewMode::ShadedWireframe => {
+                    self.draw_shaded_model(&mut pass, scene);
+                    self.draw_floor(&mut pass, scene);
+                    if self.view_mode == ViewMode::ShadedWireframe {
+                        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+                        pass.set_pipeline(&self.pipelines.wireframe);
+                        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                        pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
+                        pass.draw_model_simple(&scene.model, 0..1);
+                    }
+                }
+                ViewMode::WireframeOnly => {
+                    pass.set_pipeline(&self.pipelines.wireframe);
+                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
+                    pass.draw_model_simple(&scene.model, 0..1);
+                }
+                ViewMode::Ghosted => {
+                    pass.set_pipeline(&self.pipelines.ghosted_fill);
+                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.draw_model_simple(&scene.model, 0..1);
+                    pass.set_pipeline(&self.pipelines.ghosted_wire);
+                    pass.draw_model_simple(&scene.model, 0..1);
+                }
             }
         }
 

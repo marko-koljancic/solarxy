@@ -49,6 +49,7 @@ fn upload_model(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
+    let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
     let (mesh_vertices, mesh_indices, bounds, normals_geo) = geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
     for mat in &raw.materials {
@@ -153,6 +154,7 @@ fn upload_model(
             meshes: gpu_meshes,
             materials: gpu_materials,
             bounds,
+            has_uvs,
         },
         normals_geo,
         stats,

@@ -93,6 +93,7 @@ pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
     pub bounds: AABB,
+    pub has_uvs: bool,
 }
 
 pub trait DrawMeshSimple<'a> {
