@@ -6,7 +6,7 @@ use solarxy::run_viewer;
 
 use crate::calc::analyze::ModelAnalyzer;
 use crate::cli::parser::{Args, OperationMode, OutputFormat};
-use crate::cli::tui::TerminalApp;
+use crate::cli::tui::{PreferencesApp, TerminalApp};
 
 mod calc;
 mod cli;
@@ -34,13 +34,15 @@ fn main() -> io::Result<()> {
         canonical.to_string_lossy().to_string()
     });
 
+    let preferences = solarxy::preferences::load();
+
     match args.mode {
         OperationMode::View => {
             if args.format == OutputFormat::Json {
                 eprintln!("Error: --format json requires --mode analyze");
                 std::process::exit(1);
             }
-            run_viewer(model_path).unwrap();
+            run_viewer(model_path, preferences).unwrap();
             Ok(())
         }
         OperationMode::Analyze => {
@@ -71,6 +73,12 @@ fn main() -> io::Result<()> {
                 ratatui::restore();
                 app_result
             }
+        }
+        OperationMode::Preferences => {
+            let mut terminal = ratatui::init();
+            let app_result = PreferencesApp::new(preferences).run(&mut terminal);
+            ratatui::restore();
+            app_result
         }
     }
 }

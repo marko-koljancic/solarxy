@@ -1,7 +1,9 @@
 pub mod aabb;
 pub mod cgi;
+pub mod preferences;
 mod state;
 
+use preferences::Preferences;
 use state::State;
 use std::sync::Arc;
 use wgpu::SurfaceError;
@@ -16,13 +18,15 @@ use winit::{
 pub struct App {
     state: Option<State>,
     model_path: Option<String>,
+    preferences: Preferences,
 }
 
 impl App {
-    pub fn new(model_path: Option<String>) -> Self {
+    pub fn new(model_path: Option<String>, preferences: Preferences) -> Self {
         Self {
             state: None,
             model_path,
+            preferences,
         }
     }
 }
@@ -38,7 +42,7 @@ impl ApplicationHandler<State> for App {
                 return;
             }
         };
-        match pollster::block_on(State::new(window, self.model_path.clone())) {
+        match pollster::block_on(State::new(window, self.model_path.clone(), self.preferences.clone())) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
                 eprintln!("Failed to initialize renderer: {}", e);
@@ -146,9 +150,9 @@ pub fn format_number(n: usize) -> String {
     result
 }
 
-pub fn run_viewer(model_path: Option<String>) -> anyhow::Result<()> {
+pub fn run_viewer(model_path: Option<String>, preferences: Preferences) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new(model_path);
+    let mut app = App::new(model_path, preferences);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

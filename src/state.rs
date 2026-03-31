@@ -9,6 +9,7 @@ use crate::cgi::resources::{self, ModelStats};
 use crate::cgi::shadow::ShadowState;
 use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
+use crate::preferences::{self, BackgroundMode, LineWeight, NormalsMode, Preferences, ViewMode};
 use cgmath::prelude::*;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -20,79 +21,6 @@ use winit::{
     keyboard::{KeyCode, ModifiersState},
     window::Window,
 };
-
-#[derive(Clone, Copy, PartialEq)]
-enum ViewMode {
-    Shaded,
-    ShadedWireframe,
-    WireframeOnly,
-    Ghosted,
-}
-
-impl std::fmt::Display for ViewMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ViewMode::Shaded => write!(f, "Shaded"),
-            ViewMode::ShadedWireframe => write!(f, "Shaded+Wire"),
-            ViewMode::WireframeOnly => write!(f, "Wireframe"),
-            ViewMode::Ghosted => write!(f, "Ghosted"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum LineWeight {
-    Light,
-    Medium,
-    Bold,
-}
-
-impl LineWeight {
-    fn width_px(self) -> f32 {
-        match self {
-            Self::Light => 1.0,
-            Self::Medium => 2.0,
-            Self::Bold => 3.0,
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Self::Light => Self::Medium,
-            Self::Medium => Self::Bold,
-            Self::Bold => Self::Light,
-        }
-    }
-}
-
-impl std::fmt::Display for LineWeight {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Light => write!(f, "Light"),
-            Self::Medium => write!(f, "Medium"),
-            Self::Bold => write!(f, "Bold"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum NormalsMode {
-    Off,
-    Face,
-    Vertex,
-    FaceAndVertex,
-}
-
-impl std::fmt::Display for NormalsMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NormalsMode::Off => write!(f, "Off"),
-            NormalsMode::Face => write!(f, "Face"),
-            NormalsMode::Vertex => write!(f, "Vertex"),
-            NormalsMode::FaceAndVertex => write!(f, "Face+Vertex"),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq)]
 enum UvMode {
@@ -128,14 +56,7 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum BackgroundMode {
-    White,
-    Gradient,
-    DarkGray,
-    Black,
-}
-
+// wgpu-dependent methods for BackgroundMode (enum defined in preferences.rs)
 impl BackgroundMode {
     fn clear_color(self) -> wgpu::Color {
         match self {
@@ -166,15 +87,6 @@ impl BackgroundMode {
         }
     }
 
-    fn next(self) -> Self {
-        match self {
-            Self::White => Self::Gradient,
-            Self::Gradient => Self::DarkGray,
-            Self::DarkGray => Self::Black,
-            Self::Black => Self::White,
-        }
-    }
-
     fn wireframe_color(self) -> [f32; 4] {
         let c = self.clear_color();
         let luminance = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
@@ -194,17 +106,6 @@ impl BackgroundMode {
         } else {
             let v = (lum - 0.20).max(0.0);
             [v, v, v]
-        }
-    }
-}
-
-impl std::fmt::Display for BackgroundMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::White => write!(f, "White"),
-            Self::Gradient => write!(f, "Gradient"),
-            Self::DarkGray => write!(f, "Dark"),
-            Self::Black => write!(f, "Black"),
         }
     }
 }
@@ -288,9 +189,9 @@ impl ModelScene {
 struct PendingLoad {
     receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
     filename: String,
+    path: String,
 }
 
-const MSAA_SAMPLE_COUNT: u32 = 4;
 const TURNTABLE_SPEED: f32 = std::f32::consts::PI / 6.0;
 const BLOOM_THRESHOLD: f32 = 0.8;
 const BLOOM_STRENGTH: f32 = 0.8;
@@ -348,11 +249,17 @@ pub struct State {
     modifiers: ModifiersState,
     last_frame_time: Instant,
     dt: f32,
+    preferences: Preferences,
+    msaa_sample_count: u32,
     pub window: Arc<Window>,
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>, model_path: Option<String>) -> anyhow::Result<Self> {
+    pub async fn new(
+        window: Arc<Window>,
+        model_path: Option<String>,
+        preferences: Preferences,
+    ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -398,9 +305,10 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
+        let msaa_sample_count = preferences.rendering.msaa_sample_count;
         let depth_texture =
-            texture::Texture::create_depth_texture(&device, &config, "depth_texture", MSAA_SAMPLE_COUNT);
-        let msaa_hdr_view = texture::create_msaa_hdr_texture(&device, config.width, config.height, MSAA_SAMPLE_COUNT);
+            texture::Texture::create_depth_texture(&device, &config, "depth_texture", msaa_sample_count);
+        let msaa_hdr_view = texture::create_msaa_hdr_texture(&device, config.width, config.height, msaa_sample_count);
         let (hdr_resolve_texture, hdr_resolve_view) =
             texture::create_hdr_resolve_texture(&device, config.width, config.height);
         let (bloom_ping_texture, bloom_ping_view) =
@@ -420,7 +328,7 @@ impl State {
         });
 
         let layouts = Arc::new(BindGroupLayouts::new(&device));
-        let pipelines = Pipelines::new(&device, &config, &layouts, MSAA_SAMPLE_COUNT);
+        let pipelines = Pipelines::new(&device, &config, &layouts, msaa_sample_count);
 
         let hud = HudRenderer::new(
             &device,
@@ -446,10 +354,10 @@ impl State {
             }],
         });
 
-        let background_mode = BackgroundMode::Gradient;
+        let background_mode = preferences.display.background;
         let wire_color = background_mode.wireframe_color();
 
-        let line_weight = LineWeight::Medium;
+        let line_weight = preferences.rendering.wireframe_line_weight;
         let wireframe_params_data: [f32; 8] = [
             wire_color[0],
             wire_color[1],
@@ -531,7 +439,8 @@ impl State {
         let composite_params_data: [u8; 16] = {
             let mut buf = [0u8; 16];
             buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
-            buf[4..8].copy_from_slice(&1u32.to_le_bytes());
+            let bloom_flag: u32 = if preferences.display.bloom_enabled { 1 } else { 0 };
+            buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
             buf
         };
         let composite_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -579,15 +488,15 @@ impl State {
             composite_params_buffer,
             composite_params_bind_group,
             composite_bind_group,
-            bloom_enabled: true,
+            bloom_enabled: preferences.display.bloom_enabled,
             layouts,
             pipelines,
             hud,
             scene: None,
             pending_load: None,
-            view_mode: ViewMode::Shaded,
+            view_mode: preferences.display.view_mode,
             prev_non_ghosted_mode: ViewMode::Shaded,
-            normals_mode: NormalsMode::Off,
+            normals_mode: preferences.display.normals_mode,
             background_mode,
             _gradient_buffer: gradient_buffer,
             gradient_bind_group,
@@ -600,12 +509,14 @@ impl State {
             uv_checker_bind_group,
             capture_requested: false,
             turntable_active: false,
-            show_grid: true,
-            lights_locked: false,
-            show_axis_gizmo: false,
+            show_grid: preferences.display.grid_visible,
+            lights_locked: preferences.lighting.lock,
+            show_axis_gizmo: preferences.display.axis_gizmo_visible,
             modifiers: ModifiersState::empty(),
             last_frame_time: Instant::now(),
             dt: 0.0,
+            preferences,
+            msaa_sample_count,
             window,
         };
 
@@ -666,6 +577,7 @@ impl State {
         let layouts = Arc::clone(&self.layouts);
         let config = self.config.clone();
         let initial_grid_color = self.background_mode.grid_color();
+        let path = model_path.clone();
 
         let (tx, rx) = mpsc::channel();
 
@@ -674,7 +586,11 @@ impl State {
             let _ = tx.send(result);
         });
 
-        self.pending_load = Some(PendingLoad { receiver: rx, filename });
+        self.pending_load = Some(PendingLoad {
+            receiver: rx,
+            filename,
+            path,
+        });
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -682,9 +598,13 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.depth_texture =
-                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture", MSAA_SAMPLE_COUNT);
-            self.msaa_hdr_view = texture::create_msaa_hdr_texture(&self.device, width, height, MSAA_SAMPLE_COUNT);
+            self.depth_texture = texture::Texture::create_depth_texture(
+                &self.device,
+                &self.config,
+                "depth_texture",
+                self.msaa_sample_count,
+            );
+            self.msaa_hdr_view = texture::create_msaa_hdr_texture(&self.device, width, height, self.msaa_sample_count);
             let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
             self.hdr_resolve_texture = hdr_tex;
             self.hdr_resolve_view = hdr_view;
@@ -828,7 +748,13 @@ impl State {
                     self.view_mode = ViewMode::Ghosted;
                 }
             }
-            KeyCode::KeyS => self.view_mode = ViewMode::Shaded,
+            KeyCode::KeyS => {
+                if self.modifiers.shift_key() {
+                    self.save_preferences();
+                } else {
+                    self.view_mode = ViewMode::Shaded;
+                }
+            }
             KeyCode::KeyC => {
                 if self.scene.is_some() {
                     self.capture_requested = true;
@@ -892,6 +818,22 @@ impl State {
         }
     }
 
+    fn save_preferences(&mut self) {
+        self.preferences.display.background = self.background_mode;
+        self.preferences.display.view_mode = self.view_mode;
+        self.preferences.display.normals_mode = self.normals_mode;
+        self.preferences.display.grid_visible = self.show_grid;
+        self.preferences.display.axis_gizmo_visible = self.show_axis_gizmo;
+        self.preferences.display.bloom_enabled = self.bloom_enabled;
+        self.preferences.rendering.wireframe_line_weight = self.line_weight;
+        self.preferences.lighting.lock = self.lights_locked;
+
+        match preferences::save(&self.preferences) {
+            Ok(()) => self.hud.set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]),
+            Err(e) => self.hud.set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]),
+        }
+    }
+
     fn update_grid_color(&self) {
         if let Some(scene) = &self.scene {
             let color = self.background_mode.grid_color();
@@ -928,13 +870,14 @@ impl State {
                     .update_model_info(&pending.filename, new_scene.model.meshes.len());
                 self.hud.clear_loading_message();
                 self.window.set_title(&format!("Solarxy \u{2014} {}", pending.filename));
+                preferences::add_recent_file(&mut self.preferences, &pending.path);
                 self.scene = Some(new_scene);
                 if let Some(scene) = &mut self.scene {
                     scene.cam.resize(self.config.width as f32 / self.config.height as f32);
                 }
-                self.view_mode = ViewMode::Shaded;
+                self.view_mode = self.preferences.display.view_mode;
                 self.prev_non_ghosted_mode = ViewMode::Shaded;
-                self.normals_mode = NormalsMode::Off;
+                self.normals_mode = self.preferences.display.normals_mode;
             }
             Some(Ok(Err(e))) => {
                 self.pending_load.take();
