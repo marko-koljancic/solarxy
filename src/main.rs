@@ -14,6 +14,21 @@ mod cli;
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
+    if args.about {
+        let version = env!("CARGO_PKG_VERSION");
+        let description = env!("CARGO_PKG_DESCRIPTION");
+        let repository = env!("CARGO_PKG_REPOSITORY");
+        let license = env!("CARGO_PKG_LICENSE");
+
+        println!("Solarxy {version}");
+        println!("{description}");
+        println!();
+        println!("Repository   {repository}");
+        println!("License      {license}");
+        println!("Contact      https://koljam.com");
+        return Ok(());
+    }
+
     let model_path = args.model_path.map(|p| {
         let canonical = fs::canonicalize(&p).expect("Failed to canonicalize the model path");
         canonical.to_string_lossy().to_string()
