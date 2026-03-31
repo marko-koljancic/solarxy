@@ -182,6 +182,18 @@ impl BackgroundMode {
             [0.0, 0.0, 0.0, 1.0]
         }
     }
+
+    fn grid_color(self) -> [f32; 3] {
+        let c = self.clear_color();
+        let lum = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) as f32;
+        if lum < 0.3 {
+            let v = (lum + 0.15).min(1.0);
+            [v, v, v]
+        } else {
+            let v = (lum - 0.20).max(0.0);
+            [v, v, v]
+        }
+    }
 }
 
 impl std::fmt::Display for BackgroundMode {
@@ -214,6 +226,7 @@ impl ModelScene {
         queue: &wgpu::Queue,
         layouts: &BindGroupLayouts,
         config: &wgpu::SurfaceConfiguration,
+        initial_grid_color: [f32; 3],
     ) -> anyhow::Result<Self> {
         let (model, normals_geo, stats) = resources::load_model_any(&model_path, device, queue, &layouts.texture)?;
 
@@ -250,7 +263,7 @@ impl ModelScene {
         });
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, &model);
-        let vis = VisualizationState::new(device, layouts, &model, &normals_geo, &cam.buffer);
+        let vis = VisualizationState::new(device, layouts, &model, &normals_geo, &cam.buffer, initial_grid_color);
 
         Ok(ModelScene {
             model,
@@ -301,6 +314,7 @@ pub struct State {
     uv_checker_bind_group: wgpu::BindGroup,
     capture_requested: bool,
     turntable_active: bool,
+    show_grid: bool,
     lights_locked: bool,
     modifiers: ModifiersState,
     last_frame_time: Instant,
@@ -459,6 +473,7 @@ impl State {
             uv_checker_bind_group,
             capture_requested: false,
             turntable_active: false,
+            show_grid: true,
             lights_locked: false,
             modifiers: ModifiersState::empty(),
             last_frame_time: Instant::now(),
@@ -506,11 +521,12 @@ impl State {
         let queue = self.queue.clone();
         let layouts = Arc::clone(&self.layouts);
         let config = self.config.clone();
+        let initial_grid_color = self.background_mode.grid_color();
 
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
-            let result = ModelScene::new(model_path, &device, &queue, &layouts, &config);
+            let result = ModelScene::new(model_path, &device, &queue, &layouts, &config, initial_grid_color);
             let _ = tx.send(result);
         });
 
@@ -634,6 +650,7 @@ impl State {
                     self.capture_requested = true;
                 }
             }
+            KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyB => {
                 self.background_mode = self.background_mode.next();
                 self.queue.write_buffer(
@@ -641,6 +658,7 @@ impl State {
                     0,
                     bytemuck::cast_slice(&self.background_mode.wireframe_color()),
                 );
+                self.update_grid_color();
             }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
@@ -663,6 +681,14 @@ impl State {
                     scene.cam.handle_key(code, is_pressed);
                 }
             }
+        }
+    }
+
+    fn update_grid_color(&self) {
+        if let Some(scene) = &self.scene {
+            let color = self.background_mode.grid_color();
+            self.queue
+                .write_buffer(&scene.vis.grid_uniform_buf, 4, bytemuck::cast_slice(&color));
         }
     }
 
@@ -790,6 +816,7 @@ impl State {
             self.background_mode.clear_color(),
             frame_ms,
             has_model,
+            self.show_grid,
             self.lights_locked,
         );
 
@@ -1053,11 +1080,13 @@ impl State {
             }
         }
 
-        pass.set_pipeline(&self.pipelines.grid);
-        pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
-        pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(scene.vis.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
+        if self.show_grid {
+            pass.set_pipeline(&self.pipelines.grid);
+            pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
+            pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(scene.vis.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
+        }
         self.draw_normals(&mut pass, scene);
     }
 

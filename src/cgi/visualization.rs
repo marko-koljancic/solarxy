@@ -11,16 +11,15 @@ struct NormalsColor {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GridUniform {
-    cell_size: f32,
-    _pad: [f32; 3],
+pub(crate) struct GridUniform {
+    pub(crate) cell_size: f32,
+    pub(crate) color: [f32; 3],
 }
 
 pub(crate) struct VisualizationState {
     pub(crate) grid_mesh: model::Mesh,
     pub(crate) grid_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
-    grid_uniform_buf: wgpu::Buffer,
+    pub(crate) grid_uniform_buf: wgpu::Buffer,
     pub(crate) floor_mesh: model::Mesh,
     pub(crate) vertex_normals_buf: wgpu::Buffer,
     pub(crate) face_normals_buf: wgpu::Buffer,
@@ -41,13 +40,14 @@ impl VisualizationState {
         model: &Model,
         normals_geo: &model::NormalsGeometry,
         camera_buffer: &wgpu::Buffer,
+        initial_grid_color: [f32; 3],
     ) -> Self {
         let floor_mesh = resources::create_floor_quad(device, &model.bounds);
         let (grid_mesh, cell_size) = resources::create_grid_quad(device, &model.bounds);
 
         let grid_uniform = GridUniform {
             cell_size,
-            _pad: [0.0; 3],
+            color: initial_grid_color,
         };
         let grid_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Uniform Buffer"),

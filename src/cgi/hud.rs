@@ -132,6 +132,7 @@ impl HudRenderer {
         bg_color: wgpu::Color,
         frame_ms: f32,
         has_model: bool,
+        show_grid: bool,
         lights_locked: bool,
     ) {
         let sf = self.scale_factor as f32;
@@ -151,17 +152,16 @@ impl HudRenderer {
         let text_val = if lum > 0.5 { 0.0_f32 } else { 1.0_f32 };
         let text_color: [f32; 4] = [text_val, text_val, text_val, 1.0];
         let hint_color: [f32; 4] = [text_val, text_val, text_val, 0.6];
-        let state_text = if lights_locked {
-            format!(
-                "Mode: {}  Proj: {}  Normals: {}  BG: {}  Lights: Locked",
-                view_mode, projection, normals, bg_name
-            )
-        } else {
-            format!(
-                "Mode: {}  Proj: {}  Normals: {}  BG: {}",
-                view_mode, projection, normals, bg_name
-            )
-        };
+        let mut state_text = format!(
+            "Mode: {}  Proj: {}  Normals: {}  BG: {}",
+            view_mode, projection, normals, bg_name
+        );
+        if !show_grid {
+            state_text.push_str("  Grid: Off");
+        }
+        if lights_locked {
+            state_text.push_str("  Lights: Locked");
+        }
 
         let mut sections: Vec<Section> = Vec::new();
 
@@ -201,7 +201,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
         } else {
             "? Hints"
         };

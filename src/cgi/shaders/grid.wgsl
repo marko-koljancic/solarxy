@@ -6,9 +6,9 @@ struct Camera {
 
 struct GridUniform {
     cell_size: f32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
+    color_r: f32,
+    color_g: f32,
+    color_b: f32,
 }
 @group(0) @binding(1) var<uniform> grid: GridUniform;
 
@@ -37,5 +37,9 @@ fn fs_grid(in: VertexOutput) -> @location(0) vec4<f32> {
     if alpha < 0.01 {
         discard;
     }
-    return vec4<f32>(0.28, 0.28, 0.28, alpha * 0.75);
+    let world_pos = vec3<f32>(in.world_xz.x, 0.0, in.world_xz.y);
+    let dist = distance(camera.view_pos.xyz, world_pos);
+    let fade = 1.0 - smoothstep(grid.cell_size * 30.0, grid.cell_size * 60.0, dist);
+    let color = vec3<f32>(grid.color_r, grid.color_g, grid.color_b);
+    return vec4<f32>(color, alpha * 0.75 * fade);
 }
