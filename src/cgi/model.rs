@@ -108,6 +108,13 @@ impl Vertex for ModelVertex {
     }
 }
 
+pub struct EdgeData {
+    pub positions_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub num_edges: u32,
+    pub bind_group: wgpu::BindGroup,
+}
+
 #[allow(dead_code)]
 pub struct Mesh {
     pub name: String,
@@ -115,6 +122,7 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+    pub edge_data: Option<EdgeData>,
 }
 
 pub struct Model {

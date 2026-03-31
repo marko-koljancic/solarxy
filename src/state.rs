@@ -41,6 +41,41 @@ impl std::fmt::Display for ViewMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+enum LineWeight {
+    Light,
+    Medium,
+    Bold,
+}
+
+impl LineWeight {
+    fn width_px(self) -> f32 {
+        match self {
+            Self::Light => 1.0,
+            Self::Medium => 2.0,
+            Self::Bold => 3.0,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Light => Self::Medium,
+            Self::Medium => Self::Bold,
+            Self::Bold => Self::Light,
+        }
+    }
+}
+
+impl std::fmt::Display for LineWeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Light => write!(f, "Light"),
+            Self::Medium => write!(f, "Medium"),
+            Self::Bold => write!(f, "Bold"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum NormalsMode {
     Off,
     Face,
@@ -94,39 +129,32 @@ impl std::fmt::Display for BoundsMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum BackgroundPreset {
-    BlueGray,
-    DarkGray,
-    StudioGray,
+enum BackgroundMode {
     White,
+    Gradient,
+    DarkGray,
     Black,
 }
 
-impl BackgroundPreset {
-    fn color(self) -> wgpu::Color {
+impl BackgroundMode {
+    fn clear_color(self) -> wgpu::Color {
         match self {
-            Self::BlueGray => wgpu::Color {
-                r: 0.4235,
-                g: 0.4588,
-                b: 0.4902,
+            Self::White => wgpu::Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+            Self::Gradient => wgpu::Color {
+                r: 0.165,
+                g: 0.165,
+                b: 0.180,
                 a: 1.0,
             },
             Self::DarkGray => wgpu::Color {
                 r: 0.12,
                 g: 0.12,
                 b: 0.12,
-                a: 1.0,
-            },
-            Self::StudioGray => wgpu::Color {
-                r: 0.45,
-                g: 0.45,
-                b: 0.45,
-                a: 1.0,
-            },
-            Self::White => wgpu::Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
                 a: 1.0,
             },
             Self::Black => wgpu::Color {
@@ -140,53 +168,10 @@ impl BackgroundPreset {
 
     fn next(self) -> Self {
         match self {
-            Self::BlueGray => Self::DarkGray,
-            Self::DarkGray => Self::StudioGray,
-            Self::StudioGray => Self::White,
-            Self::White => Self::Black,
-            Self::Black => Self::BlueGray,
-        }
-    }
-}
-
-impl std::fmt::Display for BackgroundPreset {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BlueGray => write!(f, "Blue-gray"),
-            Self::DarkGray => write!(f, "Dark"),
-            Self::StudioGray => write!(f, "Studio"),
-            Self::White => write!(f, "White"),
-            Self::Black => write!(f, "Black"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum BackgroundMode {
-    Gradient,
-    Solid(BackgroundPreset),
-}
-
-impl BackgroundMode {
-    fn clear_color(self) -> wgpu::Color {
-        match self {
-            Self::Gradient => wgpu::Color {
-                r: 0.165,
-                g: 0.165,
-                b: 0.180,
-                a: 1.0,
-            },
-            Self::Solid(preset) => preset.color(),
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Self::Gradient => Self::Solid(BackgroundPreset::BlueGray),
-            Self::Solid(preset) => match preset {
-                BackgroundPreset::Black => Self::Gradient,
-                other => Self::Solid(other.next()),
-            },
+            Self::White => Self::Gradient,
+            Self::Gradient => Self::DarkGray,
+            Self::DarkGray => Self::Black,
+            Self::Black => Self::White,
         }
     }
 
@@ -216,8 +201,10 @@ impl BackgroundMode {
 impl std::fmt::Display for BackgroundMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::White => write!(f, "White"),
             Self::Gradient => write!(f, "Gradient"),
-            Self::Solid(preset) => preset.fmt(f),
+            Self::DarkGray => write!(f, "Dark"),
+            Self::Black => write!(f, "Black"),
         }
     }
 }
@@ -245,7 +232,8 @@ impl ModelScene {
         config: &wgpu::SurfaceConfiguration,
         initial_grid_color: [f32; 3],
     ) -> anyhow::Result<Self> {
-        let (model, normals_geo, stats) = resources::load_model_any(&model_path, device, queue, &layouts.texture)?;
+        let (model, normals_geo, stats) =
+            resources::load_model_any(&model_path, device, queue, &layouts.texture, &layouts.edge_geometry)?;
 
         let cam = CameraState::new(
             device,
@@ -345,8 +333,9 @@ pub struct State {
     background_mode: BackgroundMode,
     _gradient_buffer: wgpu::Buffer,
     gradient_bind_group: wgpu::BindGroup,
-    wireframe_color_buffer: wgpu::Buffer,
-    wireframe_color_bind_group: wgpu::BindGroup,
+    line_weight: LineWeight,
+    wireframe_params_buffer: wgpu::Buffer,
+    wireframe_params_bind_group: wgpu::BindGroup,
     uv_mode: UvMode,
     bounds_mode: BoundsMode,
     _checker_texture: texture::Texture,
@@ -380,7 +369,7 @@ impl State {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::POLYGON_MODE_LINE,
+                required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
@@ -458,18 +447,30 @@ impl State {
         });
 
         let background_mode = BackgroundMode::Gradient;
-        let wireframe_color_data = background_mode.wireframe_color();
-        let wireframe_color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Wireframe Color Uniform"),
-            contents: bytemuck::cast_slice(&wireframe_color_data),
+        let wire_color = background_mode.wireframe_color();
+
+        let line_weight = LineWeight::Medium;
+        let wireframe_params_data: [f32; 8] = [
+            wire_color[0],
+            wire_color[1],
+            wire_color[2],
+            wire_color[3],
+            line_weight.width_px(),
+            size.width as f32,
+            size.height as f32,
+            0.0,
+        ];
+        let wireframe_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Wireframe Params Uniform"),
+            contents: bytemuck::cast_slice(&wireframe_params_data),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let wireframe_color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Wireframe Color Bind Group"),
-            layout: &layouts.wireframe_color,
+        let wireframe_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Wireframe Params Bind Group"),
+            layout: &layouts.wireframe_params,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wireframe_color_buffer.as_entire_binding(),
+                resource: wireframe_params_buffer.as_entire_binding(),
             }],
         });
 
@@ -590,8 +591,9 @@ impl State {
             background_mode,
             _gradient_buffer: gradient_buffer,
             gradient_bind_group,
-            wireframe_color_buffer,
-            wireframe_color_bind_group,
+            line_weight,
+            wireframe_params_buffer,
+            wireframe_params_bind_group,
             uv_mode: UvMode::Off,
             bounds_mode: BoundsMode::Off,
             _checker_texture: checker_texture,
@@ -632,6 +634,22 @@ impl State {
         };
 
         self.spawn_load(model_path);
+    }
+
+    fn update_wireframe_params(&self) {
+        let color = self.background_mode.wireframe_color();
+        let data: [f32; 8] = [
+            color[0],
+            color[1],
+            color[2],
+            color[3],
+            self.line_weight.width_px(),
+            self.config.width as f32,
+            self.config.height as f32,
+            0.0,
+        ];
+        self.queue
+            .write_buffer(&self.wireframe_params_buffer, 0, bytemuck::cast_slice(&data));
     }
 
     fn spawn_load(&mut self, model_path: String) {
@@ -704,6 +722,7 @@ impl State {
             self.is_surface_configured = true;
             self.hud.resize(width, height, &self.queue);
             self.hud.set_scale_factor(self.window.scale_factor());
+            self.update_wireframe_params();
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(width as f32 / height as f32);
             }
@@ -787,7 +806,12 @@ impl State {
                 }
             }
             KeyCode::KeyW => {
-                if self.view_mode != ViewMode::Ghosted {
+                if self.modifiers.shift_key() {
+                    self.line_weight = self.line_weight.next();
+                    self.update_wireframe_params();
+                    self.hud
+                        .set_toast(&format!("Line Weight: {}", self.line_weight), [0.0, 0.4, 0.0, 1.0]);
+                } else if self.view_mode != ViewMode::Ghosted {
                     self.view_mode = match self.view_mode {
                         ViewMode::Shaded => ViewMode::ShadedWireframe,
                         ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
@@ -828,11 +852,7 @@ impl State {
                     self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 } else {
                     self.background_mode = self.background_mode.next();
-                    self.queue.write_buffer(
-                        &self.wireframe_color_buffer,
-                        0,
-                        bytemuck::cast_slice(&self.background_mode.wireframe_color()),
-                    );
+                    self.update_wireframe_params();
                     self.update_grid_color();
                 }
             }
@@ -1046,6 +1066,7 @@ impl State {
             self.show_axis_gizmo,
             &self.bounds_mode.to_string(),
             &bounds_info,
+            &self.line_weight.to_string(),
         );
 
         let capture_buffer = if self.capture_requested {
@@ -1370,16 +1391,14 @@ impl State {
             match self.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
-                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-                    pass.set_pipeline(&self.pipelines.wireframe);
-                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                    pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
-                    pass.draw_model_simple(&scene.model, 0..1);
+                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
                 }
                 ViewMode::Ghosted => {
-                    pass.set_pipeline(&self.pipelines.ghosted_wire);
-                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                    pass.draw_model_simple(&scene.model, 0..1);
+                    if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
+                        || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
+                    {
+                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire_ghosted);
+                    }
                 }
             }
         } else {
@@ -1388,25 +1407,22 @@ impl State {
                     self.draw_shaded_model(&mut pass, scene);
                     self.draw_floor(&mut pass, scene);
                     if self.view_mode == ViewMode::ShadedWireframe {
-                        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-                        pass.set_pipeline(&self.pipelines.wireframe);
-                        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                        pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
-                        pass.draw_model_simple(&scene.model, 0..1);
+                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
                     }
                 }
                 ViewMode::WireframeOnly => {
-                    pass.set_pipeline(&self.pipelines.wireframe);
-                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
-                    pass.set_bind_group(1, &self.wireframe_color_bind_group, &[]);
-                    pass.draw_model_simple(&scene.model, 0..1);
+                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
                 }
                 ViewMode::Ghosted => {
                     pass.set_pipeline(&self.pipelines.ghosted_fill);
                     pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.draw_model_simple(&scene.model, 0..1);
-                    pass.set_pipeline(&self.pipelines.ghosted_wire);
-                    pass.draw_model_simple(&scene.model, 0..1);
+                    if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
+                        || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
+                    {
+                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire_ghosted);
+                    }
                 }
             }
         }
@@ -1428,6 +1444,24 @@ impl State {
         pass.set_pipeline(&self.pipelines.main);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
         pass.draw_model_instanced(&scene.model, 0..1, &scene.cam.bind_group, &scene.light_bind_group);
+    }
+
+    fn draw_edge_wireframe<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        pipeline: &'a wgpu::RenderPipeline,
+    ) {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(1, &self.wireframe_params_bind_group, &[]);
+        pass.set_vertex_buffer(0, scene.instance_buffer.slice(..));
+        for mesh in &scene.model.meshes {
+            if let Some(edge) = &mesh.edge_data {
+                pass.set_bind_group(2, &edge.bind_group, &[]);
+                pass.draw(0..edge.num_edges * 6, 0..1);
+            }
+        }
     }
 
     fn draw_floor<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {

@@ -23,38 +23,43 @@ struct InstanceInput {
     @location(11) normal_matrix_2: vec3<f32>,
 }
 
-struct VertexOutput {
+struct GhostedVertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_normal: vec3<f32>,
+    @location(1) world_position: vec3<f32>,
 }
 
 @vertex
-fn vs_ghosted(model: VertexInput, instance: InstanceInput) -> VertexOutput {
+fn vs_ghosted(model: VertexInput, instance: InstanceInput) -> GhostedVertexOutput {
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
         instance.model_matrix_1,
         instance.model_matrix_2,
         instance.model_matrix_3,
     );
+    let normal_matrix = mat3x3<f32>(
+        instance.normal_matrix_0,
+        instance.normal_matrix_1,
+        instance.normal_matrix_2,
+    );
     let world_pos = model_matrix * vec4<f32>(model.position, 1.0);
-    var out: VertexOutput;
+    var out: GhostedVertexOutput;
     out.clip_position = camera.view_proj * world_pos;
+    out.world_normal = normalize(normal_matrix * model.normal);
+    out.world_position = world_pos.xyz;
     return out;
 }
 
-@fragment
-fn fs_ghosted_fill(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(0.65, 0.70, 0.80, 0.25);
-}
+const GHOSTED_BASE_COLOR = vec3<f32>(0.65, 0.70, 0.80);
+const GHOSTED_EDGE_COLOR = vec3<f32>(0.85, 0.88, 0.95);
+const GHOSTED_FILL_ALPHA: f32 = 0.5;
+const FRESNEL_POWER: f32 = 3.0;
 
 @fragment
-fn fs_ghosted_wire(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(0.15, 0.18, 0.30, 0.85);
-}
-
-@group(1) @binding(0)
-var<uniform> wire_color: vec4<f32>;
-
-@fragment
-fn fs_wireframe(in: VertexOutput) -> @location(0) vec4<f32> {
-    return wire_color;
+fn fs_ghosted_fill(in: GhostedVertexOutput) -> @location(0) vec4<f32> {
+    let N = normalize(in.world_normal);
+    let V = normalize(camera.view_pos.xyz - in.world_position);
+    let fresnel = pow(1.0 - abs(dot(N, V)), FRESNEL_POWER);
+    let color = mix(GHOSTED_BASE_COLOR, GHOSTED_EDGE_COLOR, fresnel);
+    return vec4(color, GHOSTED_FILL_ALPHA);
 }

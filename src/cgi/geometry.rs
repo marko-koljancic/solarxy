@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use cgmath::InnerSpace;
 
 use super::model::{self, ModelVertex, NormalsGeometry, AABB};
@@ -173,6 +175,25 @@ pub fn build_normals_geometry(
         vertex_lines,
         face_lines,
     }
+}
+
+pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
+    let mut edge_set = HashSet::with_capacity(indices.len());
+    for tri in indices.chunks(3) {
+        if tri.len() < 3 {
+            continue;
+        }
+        let (a, b, c) = (tri[0], tri[1], tri[2]);
+        edge_set.insert((a.min(b), a.max(b)));
+        edge_set.insert((b.min(c), b.max(c)));
+        edge_set.insert((a.min(c), a.max(c)));
+    }
+    let mut result = Vec::with_capacity(edge_set.len() * 2);
+    for (i0, i1) in edge_set {
+        result.push(i0);
+        result.push(i1);
+    }
+    result
 }
 
 type ProcessedModel = (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, Vec<AABB>, NormalsGeometry);

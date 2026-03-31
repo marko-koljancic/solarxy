@@ -155,6 +155,7 @@ impl HudRenderer {
         show_axis_gizmo: bool,
         bounds_mode: &str,
         bounds_info: &str,
+        line_weight: &str,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -190,6 +191,9 @@ impl HudRenderer {
                 format!("Normals: {}", normals),
                 format!("BG: {}", bg_name),
             ];
+            if line_weight != "Medium" {
+                lines.push(format!("Weight: {}", line_weight));
+            }
             if !show_grid {
                 lines.push("Grid: Off".to_string());
             }
@@ -270,7 +274,7 @@ impl HudRenderer {
         }
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  \u{21e7}M Bloom  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  \u{21e7}W Weight  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  \u{21e7}M Bloom  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
         } else {
             "? Hints"
         };

@@ -7,12 +7,13 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) grid: wgpu::BindGroupLayout,
     pub(crate) normals: wgpu::BindGroupLayout,
     pub(crate) background: wgpu::BindGroupLayout,
-    pub(crate) wireframe_color: wgpu::BindGroupLayout,
     pub(crate) uv_checker: wgpu::BindGroupLayout,
     pub(crate) bloom_texture: wgpu::BindGroupLayout,
     pub(crate) bloom_params: wgpu::BindGroupLayout,
     pub(crate) composite: wgpu::BindGroupLayout,
     pub(crate) composite_params: wgpu::BindGroupLayout,
+    pub(crate) edge_geometry: wgpu::BindGroupLayout,
+    pub(crate) wireframe_params: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -84,10 +85,6 @@ impl BindGroupLayouts {
             label: Some("background_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
-        let wireframe_color = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("wireframe_color_bind_group_layout"),
-            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
-        });
         let uv_checker = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("uv_checker_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
@@ -108,6 +105,38 @@ impl BindGroupLayouts {
             label: Some("composite_params_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+        let edge_geometry = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("edge_geometry_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let wireframe_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wireframe_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(
+                0,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            )],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -117,12 +146,13 @@ impl BindGroupLayouts {
             grid,
             normals,
             background,
-            wireframe_color,
             uv_checker,
             bloom_texture,
             bloom_params,
             composite,
             composite_params,
+            edge_geometry,
+            wireframe_params,
         }
     }
 }

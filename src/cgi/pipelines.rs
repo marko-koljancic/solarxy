@@ -75,9 +75,9 @@ pub(crate) struct Pipelines {
     pub(crate) main: wgpu::RenderPipeline,
     pub(crate) shadow: wgpu::RenderPipeline,
     pub(crate) floor: wgpu::RenderPipeline,
-    pub(crate) wireframe: wgpu::RenderPipeline,
     pub(crate) ghosted_fill: wgpu::RenderPipeline,
-    pub(crate) ghosted_wire: wgpu::RenderPipeline,
+    pub(crate) edge_wire: wgpu::RenderPipeline,
+    pub(crate) edge_wire_ghosted: wgpu::RenderPipeline,
     pub(crate) grid: wgpu::RenderPipeline,
     pub(crate) normals: wgpu::RenderPipeline,
     pub(crate) background: wgpu::RenderPipeline,
@@ -236,37 +236,37 @@ impl Pipelines {
             None,
             sample_count,
         );
-        let ghosted_wire = create_ghosted_pipeline(
-            device,
-            &ghosted_layout,
-            &ghosted_shader,
-            hdr_format,
-            "vs_ghosted",
-            "fs_ghosted_wire",
-            wgpu::PolygonMode::Line,
-            false,
-            None,
-            sample_count,
-        );
-        let wireframe_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Wireframe Pipeline Layout"),
-            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_color],
+        let edge_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Edge Wire Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge_wire.wgsl").into()),
+        });
+        let edge_wire_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Edge Wire Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_params, &layouts.edge_geometry],
             push_constant_ranges: &[],
         });
-        let wireframe = create_ghosted_pipeline(
+        let edge_wire = create_edge_wire_pipeline(
             device,
-            &wireframe_layout,
-            &ghosted_shader,
+            &edge_wire_layout,
+            &edge_wire_shader,
             hdr_format,
-            "vs_ghosted",
-            "fs_wireframe",
-            wgpu::PolygonMode::Line,
+            "fs_edge_wire",
             true,
             Some(wgpu::DepthBiasState {
                 constant: -2,
                 slope_scale: -2.0,
                 clamp: 0.0,
             }),
+            sample_count,
+        );
+        let edge_wire_ghosted = create_edge_wire_pipeline(
+            device,
+            &edge_wire_layout,
+            &edge_wire_shader,
+            hdr_format,
+            "fs_edge_wire_ghosted",
+            false,
+            None,
             sample_count,
         );
 
@@ -611,9 +611,9 @@ impl Pipelines {
             main,
             shadow: shadow_pipeline,
             floor,
-            wireframe,
             ghosted_fill,
-            ghosted_wire,
+            edge_wire,
+            edge_wire_ghosted,
             grid,
             normals,
             background,
@@ -682,6 +682,69 @@ fn create_ghosted_pipeline(
             format: texture::Texture::DEPTH_FORMAT,
             depth_write_enabled: depth_write,
             depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: depth_bias.unwrap_or_default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_edge_wire_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    fragment_entry: &str,
+    depth_write: bool,
+    depth_bias: Option<wgpu::DepthBiasState>,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let blend = if depth_write {
+        wgpu::BlendState {
+            alpha: wgpu::BlendComponent::REPLACE,
+            color: wgpu::BlendComponent::REPLACE,
+        }
+    } else {
+        wgpu::BlendState::ALPHA_BLENDING
+    };
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(fragment_entry),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_edge_quad"),
+            buffers: &[InstanceRaw::description()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(fragment_entry),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: texture::Texture::DEPTH_FORMAT,
+            depth_write_enabled: depth_write,
+            depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: wgpu::StencilState::default(),
             bias: depth_bias.unwrap_or_default(),
         }),

@@ -19,6 +19,7 @@ pub fn load_model_any(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    edge_geometry_layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
     let ext = std::path::Path::new(file_path)
         .extension()
@@ -33,7 +34,7 @@ pub fn load_model_any(
         _ => loader_obj::load_obj(file_path)?,
     };
 
-    upload_model(raw, file_path, device, queue, layout)
+    upload_model(raw, file_path, device, queue, layout, edge_geometry_layout)
 }
 
 pub struct ModelStats {
@@ -48,6 +49,7 @@ fn upload_model(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    edge_geometry_layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
     let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
     let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) = geometry::process_raw_model(&raw);
@@ -132,6 +134,38 @@ fn upload_model(
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let edge_indices_data = geometry::extract_edges(indices);
+        let num_edges = (edge_indices_data.len() / 2) as u32;
+
+        let positions_padded: Vec<[f32; 4]> = vertices
+            .iter()
+            .map(|v| [v.position[0], v.position[1], v.position[2], 0.0])
+            .collect();
+        let edge_positions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{:?} Edge Positions {}", file_path, i)),
+            contents: bytemuck::cast_slice(&positions_padded),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let edge_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{:?} Edge Indices {}", file_path, i)),
+            contents: bytemuck::cast_slice(&edge_indices_data),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let edge_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{:?} Edge Bind Group {}", file_path, i)),
+            layout: edge_geometry_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: edge_positions_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: edge_index_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let material_index = raw.meshes[i].material_index.unwrap_or(0);
         gpu_meshes.push(model::Mesh {
             name: raw.meshes[i].name.clone(),
@@ -139,6 +173,12 @@ fn upload_model(
             index_buffer,
             num_elements: indices.len() as u32,
             material: material_index,
+            edge_data: Some(model::EdgeData {
+                positions_buffer: edge_positions_buffer,
+                index_buffer: edge_index_buffer,
+                num_edges,
+                bind_group: edge_bind_group,
+            }),
         });
         gpu_mesh_bounds.push(per_mesh_bounds[i]);
     }
@@ -232,6 +272,7 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         index_buffer,
         num_elements: indices.len() as u32,
         material: 0,
+        edge_data: None,
     }
 }
 
@@ -261,6 +302,7 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
             index_buffer,
             num_elements: indices.len() as u32,
             material: 0,
+            edge_data: None,
         },
         cell_size,
     )
