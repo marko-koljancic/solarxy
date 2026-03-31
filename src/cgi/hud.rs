@@ -274,7 +274,7 @@ impl HudRenderer {
         }
 
         let hints = if has_model {
-            "W Mode  \u{21e7}W Weight  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  \u{21e7}M Bloom  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+L Lights  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
         } else {
             "? Hints"
         };
@@ -282,7 +282,7 @@ impl HudRenderer {
             .add_text(Text::new(hints).with_scale(font_size_hints).with_color(hint_color))
             .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 - margin))
             .with_layout(
-                Layout::default_single_line()
+                Layout::default_wrap()
                     .h_align(HorizontalAlign::Center)
                     .v_align(VerticalAlign::Bottom),
             );
@@ -297,7 +297,7 @@ impl HudRenderer {
                     )
                     .with_screen_position((
                         screen_width as f32 / 2.0,
-                        screen_height as f32 - margin - font_size_hints - margin,
+                        screen_height as f32 - margin - font_size_hints * 2.0 - margin,
                     ))
                     .with_layout(
                         Layout::default_single_line()
