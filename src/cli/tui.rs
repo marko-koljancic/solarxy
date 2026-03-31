@@ -11,6 +11,7 @@ use solarxy::format_number;
 
 use std::io;
 
+use crate::calc::json::report_to_json;
 use crate::calc::report::{AnalysisReport, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,22 +42,26 @@ impl Tab {
 pub struct TerminalApp {
     exit: bool,
     report: AnalysisReport,
+    model_path: String,
     active_tab: Tab,
     scroll_offsets: [u16; 4],
     content_heights: [u16; 4],
     export_input: Option<String>,
+    export_json_input: Option<String>,
     status_message: Option<(String, bool)>, // (message, is_success)
 }
 
 impl TerminalApp {
-    pub fn new(report: AnalysisReport) -> Self {
+    pub fn new(report: AnalysisReport, model_path: String) -> Self {
         Self {
             exit: false,
             report,
+            model_path,
             active_tab: Tab::Overview,
             scroll_offsets: [0; 4],
             content_heights: [0; 4],
             export_input: None,
+            export_json_input: None,
             status_message: None,
         }
     }
@@ -124,7 +129,22 @@ impl TerminalApp {
             self.content_heights[tab_idx]
         );
 
-        let instructions = if let Some(ref path) = self.export_input {
+        let instructions = if let Some(ref path) = self.export_json_input {
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "Export JSON to: ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(path.clone(), Style::default().fg(Color::White)),
+                Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
+                Span::raw("  "),
+                Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(" Save  "),
+                Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(" Cancel "),
+            ])
+        } else if let Some(ref path) = self.export_input {
             Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
@@ -132,7 +152,7 @@ impl TerminalApp {
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(path.clone(), Style::default().fg(Color::White)),
-                Span::styled("\u{2588}", Style::default().fg(Color::Yellow)), // cursor block
+                Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
                 Span::raw("  "),
                 Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw(" Save  "),
@@ -160,6 +180,8 @@ impl TerminalApp {
                 Span::raw(" Top/Bottom  "),
                 Span::styled("e", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw(" Export  "),
+                Span::styled("J", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(" JSON  "),
                 Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw(" Quit "),
             ])
@@ -206,7 +228,25 @@ impl TerminalApp {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        // Export input mode
+        // JSON export input mode
+        if let Some(ref mut path) = self.export_json_input {
+            match key_event.code {
+                KeyCode::Enter => {
+                    let path = path.clone();
+                    self.export_json_report(&path);
+                    self.export_json_input = None;
+                }
+                KeyCode::Esc => self.export_json_input = None,
+                KeyCode::Char(c) => path.push(c),
+                KeyCode::Backspace => {
+                    path.pop();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Text export input mode
         if let Some(ref mut path) = self.export_input {
             match key_event.code {
                 KeyCode::Enter => {
@@ -232,6 +272,9 @@ impl TerminalApp {
             KeyCode::Char('q') | KeyCode::Esc => self.exit = true,
             KeyCode::Char('e') => {
                 self.export_input = Some(self.default_export_filename());
+            }
+            KeyCode::Char('J') => {
+                self.export_json_input = Some(self.default_json_export_path());
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx].saturating_sub(1);
@@ -271,10 +314,25 @@ impl TerminalApp {
         }
     }
 
+    fn default_json_export_path(&self) -> String {
+        std::path::Path::new(&self.model_path)
+            .with_extension("json")
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn export_report(&mut self, path: &str) {
         match std::fs::write(path, self.report.to_string()) {
             Ok(_) => self.status_message = Some((format!("Report saved to {}", path), true)),
             Err(e) => self.status_message = Some((format!("Export failed: {}", e), false)),
+        }
+    }
+
+    fn export_json_report(&mut self, path: &str) {
+        let json = report_to_json(&self.report);
+        match std::fs::write(path, json) {
+            Ok(_) => self.status_message = Some((format!("JSON report saved to {}", path), true)),
+            Err(e) => self.status_message = Some((format!("JSON export failed: {}", e), false)),
         }
     }
 

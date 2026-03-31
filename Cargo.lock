@@ -2274,6 +2274,8 @@ dependencies = [
  "ply-rs-bw",
  "pollster",
  "ratatui",
+ "serde",
+ "serde_json",
  "stl_io",
  "tobj",
  "wgpu",

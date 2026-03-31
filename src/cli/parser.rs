@@ -19,11 +19,34 @@ pub struct Args {
     )]
     pub mode: OperationMode,
     #[clap(
+        short = 'f',
+        long = "format",
+        help = "Output format: 'text' or 'json' (requires analyze mode)",
+        default_value = "text"
+    )]
+    pub format: OutputFormat,
+    #[clap(
         short = 'o',
         long = "output",
         help = "Write analysis report to file (requires analyze mode)"
     )]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Clone, Default, clap::ValueEnum, PartialEq)]
+pub enum OutputFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+impl std::fmt::Debug for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text => write!(f, "Text"),
+            Self::Json => write!(f, "Json"),
+        }
+    }
 }
 
 #[derive(Clone, clap::ValueEnum, PartialEq)]
