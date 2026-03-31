@@ -268,6 +268,7 @@ struct PendingLoad {
 }
 
 const MSAA_SAMPLE_COUNT: u32 = 4;
+const TURNTABLE_SPEED: f32 = std::f32::consts::PI / 6.0;
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -294,6 +295,7 @@ pub struct State {
     _checker_texture: texture::Texture,
     uv_checker_bind_group: wgpu::BindGroup,
     capture_requested: bool,
+    turntable_active: bool,
     last_frame_time: Instant,
     dt: f32,
     pub window: Arc<Window>,
@@ -449,6 +451,7 @@ impl State {
             _checker_texture: checker_texture,
             uv_checker_bind_group,
             capture_requested: false,
+            turntable_active: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
             window,
@@ -626,6 +629,7 @@ impl State {
                     NormalsMode::FaceAndVertex => NormalsMode::Off,
                 };
             }
+            KeyCode::KeyV => self.turntable_active = !self.turntable_active,
             KeyCode::KeyU => {
                 self.uv_mode = match self.uv_mode {
                     UvMode::Off => UvMode::Gradient,
@@ -694,6 +698,9 @@ impl State {
         self.last_frame_time = now;
 
         if let Some(scene) = &mut self.scene {
+            if self.turntable_active && !scene.cam.is_orbiting() {
+                scene.cam.inject_orbit_yaw(TURNTABLE_SPEED * self.dt);
+            }
             scene.cam.update(&self.queue, self.dt);
 
             scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);

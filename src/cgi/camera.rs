@@ -143,6 +143,14 @@ pub struct CameraController {
 }
 
 impl CameraController {
+    pub fn is_orbiting(&self) -> bool {
+        self.is_left_mouse_pressed
+    }
+
+    pub fn inject_orbit_yaw(&mut self, yaw: f32) {
+        self.orbit_delta.0 += yaw;
+    }
+
     pub fn new(speed: f32) -> Self {
         Self {
             speed,

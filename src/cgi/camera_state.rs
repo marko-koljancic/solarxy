@@ -91,10 +91,7 @@ impl CameraState {
     }
 
     fn start_transition(&mut self, dest: &Camera) {
-        // When switching to orthographic, compute equivalent starting ortho_scale
-        if dest.projection == ProjectionMode::Orthographic
-            && self.camera.projection != ProjectionMode::Orthographic
-        {
+        if dest.projection == ProjectionMode::Orthographic && self.camera.projection != ProjectionMode::Orthographic {
             let dist = (self.camera.target - self.camera.eye).magnitude();
             self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
         }
@@ -143,6 +140,14 @@ impl CameraState {
             return;
         }
         self.controller.handle_scroll(delta);
+    }
+
+    pub fn is_orbiting(&self) -> bool {
+        self.controller.is_orbiting()
+    }
+
+    pub fn inject_orbit_yaw(&mut self, yaw: f32) {
+        self.controller.inject_orbit_yaw(yaw);
     }
 }
 

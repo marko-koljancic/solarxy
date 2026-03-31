@@ -193,7 +193,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  ? Hints"
         } else {
             "? Hints"
         };
