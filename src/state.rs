@@ -304,6 +304,8 @@ struct PendingLoad {
 
 const MSAA_SAMPLE_COUNT: u32 = 4;
 const TURNTABLE_SPEED: f32 = std::f32::consts::PI / 6.0;
+const BLOOM_THRESHOLD: f32 = 0.8;
+const BLOOM_STRENGTH: f32 = 0.8;
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -312,7 +314,26 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     depth_texture: texture::Texture,
-    msaa_color_view: wgpu::TextureView,
+    msaa_hdr_view: wgpu::TextureView,
+    #[allow(unused)]
+    hdr_resolve_texture: wgpu::Texture,
+    hdr_resolve_view: wgpu::TextureView,
+    #[allow(unused)]
+    bloom_ping_texture: wgpu::Texture,
+    bloom_ping_view: wgpu::TextureView,
+    #[allow(unused)]
+    bloom_pong_texture: wgpu::Texture,
+    bloom_pong_view: wgpu::TextureView,
+    bloom_sampler: wgpu::Sampler,
+    bloom_params_buffer: wgpu::Buffer,
+    bloom_params_bind_group: wgpu::BindGroup,
+    bloom_extract_bind_group: wgpu::BindGroup,
+    bloom_blur_h_bind_group: wgpu::BindGroup,
+    bloom_blur_v_bind_group: wgpu::BindGroup,
+    composite_params_buffer: wgpu::Buffer,
+    composite_params_bind_group: wgpu::BindGroup,
+    composite_bind_group: wgpu::BindGroup,
+    bloom_enabled: bool,
     layouts: Arc<BindGroupLayouts>,
     pipelines: Pipelines,
     hud: HudRenderer,
@@ -390,7 +411,25 @@ impl State {
         };
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture", MSAA_SAMPLE_COUNT);
-        let msaa_color_view = texture::create_msaa_color_texture(&device, &config, MSAA_SAMPLE_COUNT);
+        let msaa_hdr_view = texture::create_msaa_hdr_texture(&device, config.width, config.height, MSAA_SAMPLE_COUNT);
+        let (hdr_resolve_texture, hdr_resolve_view) =
+            texture::create_hdr_resolve_texture(&device, config.width, config.height);
+        let (bloom_ping_texture, bloom_ping_view) =
+            texture::create_bloom_texture(&device, config.width, config.height, "Bloom Ping");
+        let (bloom_pong_texture, bloom_pong_view) =
+            texture::create_bloom_texture(&device, config.width, config.height, "Bloom Pong");
+
+        let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Bloom Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
         let layouts = Arc::new(BindGroupLayouts::new(&device));
         let pipelines = Pipelines::new(&device, &config, &layouts, MSAA_SAMPLE_COUNT);
 
@@ -466,6 +505,56 @@ impl State {
             ],
         });
 
+        let bloom_params_data: [f32; 4] = [BLOOM_THRESHOLD, BLOOM_STRENGTH, 0.0, 0.0];
+        let bloom_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Bloom Params Uniform"),
+            contents: bytemuck::cast_slice(&bloom_params_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bloom_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bloom Params Bind Group"),
+            layout: &layouts.bloom_params,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: bloom_params_buffer.as_entire_binding(),
+            }],
+        });
+
+        let bloom_extract_bind_group =
+            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &hdr_resolve_view, &bloom_sampler);
+        let bloom_blur_h_bind_group =
+            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &bloom_ping_view, &bloom_sampler);
+        let bloom_blur_v_bind_group =
+            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &bloom_pong_view, &bloom_sampler);
+
+        let composite_params_data: [u8; 16] = {
+            let mut buf = [0u8; 16];
+            buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
+            buf[4..8].copy_from_slice(&1u32.to_le_bytes());
+            buf
+        };
+        let composite_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Composite Params Uniform"),
+            contents: &composite_params_data,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let composite_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Composite Params Bind Group"),
+            layout: &layouts.composite_params,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: composite_params_buffer.as_entire_binding(),
+            }],
+        });
+
+        let composite_bind_group = create_composite_bind_group(
+            &device,
+            &layouts.composite,
+            &hdr_resolve_view,
+            &bloom_ping_view,
+            &bloom_sampler,
+        );
+
         let mut state = Self {
             surface,
             device,
@@ -473,7 +562,23 @@ impl State {
             config,
             is_surface_configured: false,
             depth_texture,
-            msaa_color_view,
+            msaa_hdr_view,
+            hdr_resolve_texture,
+            hdr_resolve_view,
+            bloom_ping_texture,
+            bloom_ping_view,
+            bloom_pong_texture,
+            bloom_pong_view,
+            bloom_sampler,
+            bloom_params_buffer,
+            bloom_params_bind_group,
+            bloom_extract_bind_group,
+            bloom_blur_h_bind_group,
+            bloom_blur_v_bind_group,
+            composite_params_buffer,
+            composite_params_bind_group,
+            composite_bind_group,
+            bloom_enabled: true,
             layouts,
             pipelines,
             hud,
@@ -561,7 +666,41 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture", MSAA_SAMPLE_COUNT);
-            self.msaa_color_view = texture::create_msaa_color_texture(&self.device, &self.config, MSAA_SAMPLE_COUNT);
+            self.msaa_hdr_view = texture::create_msaa_hdr_texture(&self.device, width, height, MSAA_SAMPLE_COUNT);
+            let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
+            self.hdr_resolve_texture = hdr_tex;
+            self.hdr_resolve_view = hdr_view;
+            let (ping_tex, ping_view) = texture::create_bloom_texture(&self.device, width, height, "Bloom Ping");
+            self.bloom_ping_texture = ping_tex;
+            self.bloom_ping_view = ping_view;
+            let (pong_tex, pong_view) = texture::create_bloom_texture(&self.device, width, height, "Bloom Pong");
+            self.bloom_pong_texture = pong_tex;
+            self.bloom_pong_view = pong_view;
+            self.bloom_extract_bind_group = create_bloom_sample_bind_group(
+                &self.device,
+                &self.layouts.bloom_texture,
+                &self.hdr_resolve_view,
+                &self.bloom_sampler,
+            );
+            self.bloom_blur_h_bind_group = create_bloom_sample_bind_group(
+                &self.device,
+                &self.layouts.bloom_texture,
+                &self.bloom_ping_view,
+                &self.bloom_sampler,
+            );
+            self.bloom_blur_v_bind_group = create_bloom_sample_bind_group(
+                &self.device,
+                &self.layouts.bloom_texture,
+                &self.bloom_pong_view,
+                &self.bloom_sampler,
+            );
+            self.composite_bind_group = create_composite_bind_group(
+                &self.device,
+                &self.layouts.composite,
+                &self.hdr_resolve_view,
+                &self.bloom_ping_view,
+                &self.bloom_sampler,
+            );
             self.is_surface_configured = true;
             self.hud.resize(width, height, &self.queue);
             self.hud.set_scale_factor(self.window.scale_factor());
@@ -697,6 +836,18 @@ impl State {
                     self.update_grid_color();
                 }
             }
+            KeyCode::KeyM => {
+                if self.modifiers.shift_key() {
+                    self.bloom_enabled = !self.bloom_enabled;
+                    let enabled_bits = if self.bloom_enabled { 1u32 } else { 0u32 };
+                    let mut buf = [0u8; 16];
+                    buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
+                    buf[4..8].copy_from_slice(&enabled_bits.to_le_bytes());
+                    self.queue.write_buffer(&self.composite_params_buffer, 0, &buf);
+                    let msg = if self.bloom_enabled { "Bloom: On" } else { "Bloom: Off" };
+                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                }
+            }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
@@ -823,10 +974,15 @@ impl State {
 
         if let Some(scene) = &self.scene {
             self.render_shadow_pass(&mut encoder, scene);
-            self.render_main_pass(&mut encoder, &view, scene);
+            self.render_main_pass(&mut encoder, scene);
         } else {
-            self.render_empty_pass(&mut encoder, &view);
+            self.render_empty_pass(&mut encoder);
         }
+
+        if self.bloom_enabled {
+            self.render_bloom_passes(&mut encoder);
+        }
+        self.render_composite_pass(&mut encoder, &view);
 
         let (projection_str, normals_str) = if let Some(scene) = &self.scene {
             (scene.cam.camera.projection.to_string(), self.normals_mode.to_string())
@@ -1007,12 +1163,12 @@ impl State {
         pass.draw(0..3, 0..1);
     }
 
-    fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+    fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.msaa_color_view,
-                resolve_target: Some(view),
+                view: &self.msaa_hdr_view,
+                resolve_target: Some(&self.hdr_resolve_view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(self.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
@@ -1033,6 +1189,109 @@ impl State {
         if self.background_mode == BackgroundMode::Gradient {
             self.draw_background_gradient(&mut pass);
         }
+    }
+
+    fn render_bloom_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        let full_texel: [f32; 4] = [
+            BLOOM_THRESHOLD,
+            BLOOM_STRENGTH,
+            1.0 / self.config.width.max(1) as f32,
+            1.0 / self.config.height.max(1) as f32,
+        ];
+        self.queue
+            .write_buffer(&self.bloom_params_buffer, 0, bytemuck::cast_slice(&full_texel));
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Bloom Extract Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.bloom_ping_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.bloom_extract);
+            pass.set_bind_group(0, &self.bloom_extract_bind_group, &[]);
+            pass.set_bind_group(1, &self.bloom_params_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let half_w = (self.config.width / 2).max(1) as f32;
+        let half_h = (self.config.height / 2).max(1) as f32;
+        let half_texel: [f32; 4] = [BLOOM_THRESHOLD, BLOOM_STRENGTH, 1.0 / half_w, 1.0 / half_h];
+        self.queue
+            .write_buffer(&self.bloom_params_buffer, 0, bytemuck::cast_slice(&half_texel));
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Bloom Blur H Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.bloom_pong_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.bloom_blur_h);
+            pass.set_bind_group(0, &self.bloom_blur_h_bind_group, &[]);
+            pass.set_bind_group(1, &self.bloom_params_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Bloom Blur V Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.bloom_ping_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.bloom_blur_v);
+            pass.set_bind_group(0, &self.bloom_blur_v_bind_group, &[]);
+            pass.set_bind_group(1, &self.bloom_params_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    fn render_composite_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Composite Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipelines.composite);
+        pass.set_bind_group(0, &self.composite_bind_group, &[]);
+        pass.set_bind_group(1, &self.composite_params_bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
@@ -1057,12 +1316,12 @@ impl State {
         pass.draw_model_simple(&scene.model, 0..1);
     }
 
-    fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, scene: &ModelScene) {
+    fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.msaa_color_view,
-                resolve_target: Some(view),
+                view: &self.msaa_hdr_view,
+                resolve_target: Some(&self.hdr_resolve_view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(self.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
@@ -1273,4 +1532,53 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
         sphere_scale: bounds.diagonal() * 0.04,
         _pad1: [0.0; 3],
     }
+}
+
+fn create_bloom_sample_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    texture_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Bloom Sample Bind Group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
+fn create_composite_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    scene_view: &wgpu::TextureView,
+    bloom_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Composite Bind Group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(scene_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(bloom_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
 }

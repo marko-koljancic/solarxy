@@ -9,6 +9,10 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) background: wgpu::BindGroupLayout,
     pub(crate) wireframe_color: wgpu::BindGroupLayout,
     pub(crate) uv_checker: wgpu::BindGroupLayout,
+    pub(crate) bloom_texture: wgpu::BindGroupLayout,
+    pub(crate) bloom_params: wgpu::BindGroupLayout,
+    pub(crate) composite: wgpu::BindGroupLayout,
+    pub(crate) composite_params: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -88,6 +92,22 @@ impl BindGroupLayouts {
             label: Some("uv_checker_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
+        let bloom_texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom_texture_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
+        let bloom_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let composite = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("composite_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_texture_entry(1), bgl_sampler_entry(2)],
+        });
+        let composite_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("composite_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -99,6 +119,10 @@ impl BindGroupLayouts {
             background,
             wireframe_color,
             uv_checker,
+            bloom_texture,
+            bloom_params,
+            composite,
+            composite_params,
         }
     }
 }

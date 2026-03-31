@@ -85,6 +85,10 @@ pub(crate) struct Pipelines {
     pub(crate) uv_checker: wgpu::RenderPipeline,
     pub(crate) uv_no_uvs: wgpu::RenderPipeline,
     pub(crate) gizmo: wgpu::RenderPipeline,
+    pub(crate) bloom_extract: wgpu::RenderPipeline,
+    pub(crate) bloom_blur_h: wgpu::RenderPipeline,
+    pub(crate) bloom_blur_v: wgpu::RenderPipeline,
+    pub(crate) composite: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -94,6 +98,8 @@ impl Pipelines {
         layouts: &BindGroupLayouts,
         sample_count: u32,
     ) -> Self {
+        let hdr_format = texture::Texture::HDR_FORMAT;
+
         let shadow_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Shadow Pipeline Layout"),
@@ -146,7 +152,7 @@ impl Pipelines {
             create_render_pipeline(
                 device,
                 &layout,
-                config.format,
+                hdr_format,
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::description(), InstanceRaw::description()],
                 wgpu::ShaderModuleDescriptor {
@@ -180,7 +186,7 @@ impl Pipelines {
                     module: &shader,
                     entry_point: Some("fs_floor"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: hdr_format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -222,7 +228,7 @@ impl Pipelines {
             device,
             &ghosted_layout,
             &ghosted_shader,
-            config.format,
+            hdr_format,
             "vs_ghosted",
             "fs_ghosted_fill",
             wgpu::PolygonMode::Fill,
@@ -234,7 +240,7 @@ impl Pipelines {
             device,
             &ghosted_layout,
             &ghosted_shader,
-            config.format,
+            hdr_format,
             "vs_ghosted",
             "fs_ghosted_wire",
             wgpu::PolygonMode::Line,
@@ -251,7 +257,7 @@ impl Pipelines {
             device,
             &wireframe_layout,
             &ghosted_shader,
-            config.format,
+            hdr_format,
             "vs_ghosted",
             "fs_wireframe",
             wgpu::PolygonMode::Line,
@@ -287,7 +293,7 @@ impl Pipelines {
                     module: &shader,
                     entry_point: Some("fs_grid"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: hdr_format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -338,7 +344,7 @@ impl Pipelines {
                     module: &shader,
                     entry_point: Some("fs_normals"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: hdr_format,
                         blend: Some(wgpu::BlendState {
                             alpha: wgpu::BlendComponent::REPLACE,
                             color: wgpu::BlendComponent::REPLACE,
@@ -392,7 +398,7 @@ impl Pipelines {
                     module: &shader,
                     entry_point: Some("fs_background"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: hdr_format,
                         blend: Some(wgpu::BlendState {
                             alpha: wgpu::BlendComponent::REPLACE,
                             color: wgpu::BlendComponent::REPLACE,
@@ -436,7 +442,7 @@ impl Pipelines {
             device,
             &uv_camera_layout,
             &uv_debug_shader,
-            config.format,
+            hdr_format,
             "vs_uv_debug",
             "fs_uv_gradient",
             wgpu::PolygonMode::Fill,
@@ -448,7 +454,7 @@ impl Pipelines {
             device,
             &uv_camera_layout,
             &uv_debug_shader,
-            config.format,
+            hdr_format,
             "vs_uv_debug",
             "fs_uv_no_uvs",
             wgpu::PolygonMode::Fill,
@@ -465,7 +471,7 @@ impl Pipelines {
             device,
             &uv_checker_layout,
             &uv_debug_shader,
-            config.format,
+            hdr_format,
             "vs_uv_debug",
             "fs_uv_checker",
             wgpu::PolygonMode::Fill,
@@ -497,7 +503,7 @@ impl Pipelines {
                     module: &shader,
                     entry_point: Some("fs_gizmo"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: hdr_format,
                         blend: Some(wgpu::BlendState {
                             alpha: wgpu::BlendComponent::REPLACE,
                             color: wgpu::BlendComponent::REPLACE,
@@ -528,6 +534,79 @@ impl Pipelines {
             })
         };
 
+        let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Bloom Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
+        });
+
+        let bloom_extract = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Bloom Extract Pipeline Layout"),
+                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+                push_constant_ranges: &[],
+            });
+            create_fullscreen_pipeline(
+                device,
+                &layout,
+                &bloom_shader,
+                "fs_brightness_extract",
+                hdr_format,
+                "Bloom Extract Pipeline",
+            )
+        };
+
+        let bloom_blur_h = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Bloom Blur H Pipeline Layout"),
+                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+                push_constant_ranges: &[],
+            });
+            create_fullscreen_pipeline(
+                device,
+                &layout,
+                &bloom_shader,
+                "fs_blur_horizontal",
+                hdr_format,
+                "Bloom Blur H Pipeline",
+            )
+        };
+
+        let bloom_blur_v = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Bloom Blur V Pipeline Layout"),
+                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+                push_constant_ranges: &[],
+            });
+            create_fullscreen_pipeline(
+                device,
+                &layout,
+                &bloom_shader,
+                "fs_blur_vertical",
+                hdr_format,
+                "Bloom Blur V Pipeline",
+            )
+        };
+
+        let composite = {
+            let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Composite Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Composite Pipeline Layout"),
+                bind_group_layouts: &[&layouts.composite, &layouts.composite_params],
+                push_constant_ranges: &[],
+            });
+            create_fullscreen_pipeline(
+                device,
+                &layout,
+                &composite_shader,
+                "fs_composite",
+                config.format,
+                "Composite Pipeline",
+            )
+        };
+
         Pipelines {
             main,
             shadow: shadow_pipeline,
@@ -542,6 +621,10 @@ impl Pipelines {
             uv_checker,
             uv_no_uvs,
             gizmo,
+            bloom_extract,
+            bloom_blur_h,
+            bloom_blur_v,
+            composite,
         }
     }
 }
@@ -607,6 +690,45 @@ fn create_ghosted_pipeline(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
+        multiview: None,
+        cache: None,
+    })
+}
+
+fn create_fullscreen_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    fragment_entry: &str,
+    format: wgpu::TextureFormat,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_fullscreen"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(fragment_entry),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
         multiview: None,
         cache: None,
     })

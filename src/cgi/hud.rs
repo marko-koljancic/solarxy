@@ -219,7 +219,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  \u{21e7}M Bloom  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
         } else {
             "? Hints"
         };
