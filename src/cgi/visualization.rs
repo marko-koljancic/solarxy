@@ -31,6 +31,7 @@ pub(crate) struct VisualizationState {
     face_normals_color_buf: wgpu::Buffer,
     #[allow(dead_code)]
     vertex_normals_color_buf: wgpu::Buffer,
+    pub(crate) axes_vertex_buf: wgpu::Buffer,
 }
 
 impl VisualizationState {
@@ -119,6 +120,39 @@ impl VisualizationState {
             ],
         });
 
+        let axis_len = model.bounds.diagonal() * 0.5;
+        let axes_vertices: [model::GizmoVertex; 6] = [
+            model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: [1.0, 0.2, 0.2],
+            },
+            model::GizmoVertex {
+                position: [axis_len, 0.0, 0.0],
+                color: [1.0, 0.2, 0.2],
+            },
+            model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: [0.2, 1.0, 0.2],
+            },
+            model::GizmoVertex {
+                position: [0.0, axis_len, 0.0],
+                color: [0.2, 1.0, 0.2],
+            },
+            model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: [0.3, 0.5, 1.0],
+            },
+            model::GizmoVertex {
+                position: [0.0, 0.0, axis_len],
+                color: [0.3, 0.5, 1.0],
+            },
+        ];
+        let axes_vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Axes Vertex Buffer"),
+            contents: bytemuck::cast_slice(&axes_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         VisualizationState {
             grid_mesh,
             grid_bind_group,
@@ -132,6 +166,7 @@ impl VisualizationState {
             vertex_normals_bind_group,
             face_normals_color_buf,
             vertex_normals_color_buf,
+            axes_vertex_buf,
         }
     }
 }

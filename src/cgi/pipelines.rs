@@ -84,6 +84,7 @@ pub(crate) struct Pipelines {
     pub(crate) uv_gradient: wgpu::RenderPipeline,
     pub(crate) uv_checker: wgpu::RenderPipeline,
     pub(crate) uv_no_uvs: wgpu::RenderPipeline,
+    pub(crate) gizmo: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -473,6 +474,60 @@ impl Pipelines {
             sample_count,
         );
 
+        let gizmo = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Gizmo Pipeline Layout"),
+                bind_group_layouts: &[&layouts.camera],
+                push_constant_ranges: &[],
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Gizmo Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gizmo.wgsl").into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Gizmo Pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_gizmo"),
+                    buffers: &[model::GizmoVertex::description()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_gizmo"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState {
+                            alpha: wgpu::BlendComponent::REPLACE,
+                            color: wgpu::BlendComponent::REPLACE,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+
         Pipelines {
             main,
             shadow: shadow_pipeline,
@@ -486,6 +541,7 @@ impl Pipelines {
             uv_gradient,
             uv_checker,
             uv_no_uvs,
+            gizmo,
         }
     }
 }

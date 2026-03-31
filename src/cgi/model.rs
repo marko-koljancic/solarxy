@@ -28,6 +28,34 @@ impl Vertex for LineVertex {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GizmoVertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+
+impl Vertex for GizmoVertex {
+    fn description() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: 24,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
 pub struct NormalsGeometry {
     pub vertex_lines: Vec<[f32; 3]>,
     pub face_lines: Vec<[f32; 3]>,

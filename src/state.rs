@@ -316,6 +316,7 @@ pub struct State {
     turntable_active: bool,
     show_grid: bool,
     lights_locked: bool,
+    show_axis_gizmo: bool,
     modifiers: ModifiersState,
     last_frame_time: Instant,
     dt: f32,
@@ -475,6 +476,7 @@ impl State {
             turntable_active: false,
             show_grid: true,
             lights_locked: false,
+            show_axis_gizmo: false,
             modifiers: ModifiersState::empty(),
             last_frame_time: Instant::now(),
             dt: 0.0,
@@ -650,6 +652,7 @@ impl State {
                     self.capture_requested = true;
                 }
             }
+            KeyCode::KeyA => self.show_axis_gizmo = !self.show_axis_gizmo,
             KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyB => {
                 self.background_mode = self.background_mode.next();
@@ -818,6 +821,7 @@ impl State {
             has_model,
             self.show_grid,
             self.lights_locked,
+            self.show_axis_gizmo,
         );
 
         let capture_buffer = if self.capture_requested {
@@ -1088,6 +1092,7 @@ impl State {
             pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
         }
         self.draw_normals(&mut pass, scene);
+        self.draw_axes(&mut pass, scene);
     }
 
     fn draw_shaded_model<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
@@ -1104,6 +1109,16 @@ impl State {
         pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(scene.vis.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..scene.vis.floor_mesh.num_elements, 0, 0..1);
+    }
+
+    fn draw_axes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+        if !self.show_axis_gizmo {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_vertex_buffer(0, scene.vis.axes_vertex_buf.slice(..));
+        pass.draw(0..6, 0..1);
     }
 
     fn draw_normals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {

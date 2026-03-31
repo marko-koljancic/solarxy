@@ -134,6 +134,7 @@ impl HudRenderer {
         has_model: bool,
         show_grid: bool,
         lights_locked: bool,
+        show_axis_gizmo: bool,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -161,6 +162,9 @@ impl HudRenderer {
         }
         if lights_locked {
             state_text.push_str("  Lights: Locked");
+        }
+        if show_axis_gizmo {
+            state_text.push_str("  Axes: On");
         }
 
         let mut sections: Vec<Section> = Vec::new();
@@ -201,7 +205,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
         } else {
             "? Hints"
         };
