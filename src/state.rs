@@ -14,7 +14,12 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 use wgpu::util::DeviceExt;
-use winit::{event::MouseButton, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::{
+    event::MouseButton,
+    event_loop::ActiveEventLoop,
+    keyboard::{KeyCode, ModifiersState},
+    window::Window,
+};
 
 #[derive(Clone, Copy, PartialEq)]
 enum ViewMode {
@@ -296,6 +301,8 @@ pub struct State {
     uv_checker_bind_group: wgpu::BindGroup,
     capture_requested: bool,
     turntable_active: bool,
+    lights_locked: bool,
+    modifiers: ModifiersState,
     last_frame_time: Instant,
     dt: f32,
     pub window: Arc<Window>,
@@ -452,6 +459,8 @@ impl State {
             uv_checker_bind_group,
             capture_requested: false,
             turntable_active: false,
+            lights_locked: false,
+            modifiers: ModifiersState::empty(),
             last_frame_time: Instant::now(),
             dt: 0.0,
             window,
@@ -525,6 +534,10 @@ impl State {
         }
     }
 
+    pub fn set_modifiers(&mut self, modifiers: ModifiersState) {
+        self.modifiers = modifiers;
+    }
+
     pub fn toggle_hints(&mut self) {
         self.hud.toggle_hints();
     }
@@ -562,7 +575,15 @@ impl State {
                 }
             }
             KeyCode::KeyL => {
-                if let Some(scene) = &mut self.scene {
+                if self.modifiers.shift_key() {
+                    self.lights_locked = !self.lights_locked;
+                    let msg = if self.lights_locked {
+                        "Lights locked"
+                    } else {
+                        "Lights unlocked"
+                    };
+                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                } else if let Some(scene) = &mut self.scene {
                     scene.cam.reset_to_bounds_axis(
                         &scene.model.bounds,
                         -cgmath::Vector3::unit_x(),
@@ -703,17 +724,19 @@ impl State {
             }
             scene.cam.update(&self.queue, self.dt);
 
-            scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
-            self.queue
-                .write_buffer(&scene.light_buffer, 0, bytemuck::cast_slice(&[scene.lights_uniform]));
+            if !self.lights_locked {
+                scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
+                self.queue
+                    .write_buffer(&scene.light_buffer, 0, bytemuck::cast_slice(&[scene.lights_uniform]));
 
-            let key_pos = scene.lights_uniform.lights[0].position;
-            scene.shadow.update_light_vp(
-                &self.queue,
-                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                scene.model.bounds.center(),
-                scene.model.bounds.diagonal() / 2.0,
-            );
+                let key_pos = scene.lights_uniform.lights[0].position;
+                scene.shadow.update_light_vp(
+                    &self.queue,
+                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                    scene.model.bounds.center(),
+                    scene.model.bounds.diagonal() / 2.0,
+                );
+            }
         }
     }
 
@@ -767,6 +790,7 @@ impl State {
             self.background_mode.clear_color(),
             frame_ms,
             has_model,
+            self.lights_locked,
         );
 
         let capture_buffer = if self.capture_requested {

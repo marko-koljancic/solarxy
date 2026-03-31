@@ -108,6 +108,9 @@ impl ApplicationHandler<State> for App {
                 };
                 state.handle_scroll(scroll);
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                state.set_modifiers(modifiers.state());
+            }
             WindowEvent::KeyboardInput { ref event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     state.handle_key(event_loop, code, event.state.is_pressed());
