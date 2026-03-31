@@ -904,6 +904,8 @@ impl State {
             Some(Ok(Ok(new_scene))) => {
                 let pending = self.pending_load.take().unwrap();
                 self.hud.update_stats(Some(&new_scene.stats));
+                self.hud
+                    .update_model_info(&pending.filename, new_scene.model.meshes.len());
                 self.hud.clear_loading_message();
                 self.window.set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 self.scene = Some(new_scene);

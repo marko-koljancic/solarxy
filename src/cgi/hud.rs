@@ -20,6 +20,8 @@ pub struct HudRenderer {
     brush: TextBrush<FontRef<'static>>,
     hints_visible: bool,
     scale_factor: f64,
+    filename: String,
+    mesh_count: usize,
     stats_text: String,
     toast: Option<Toast>,
     loading_message: Option<String>,
@@ -46,6 +48,8 @@ impl HudRenderer {
             brush,
             hints_visible: true,
             scale_factor,
+            filename: String::new(),
+            mesh_count: 0,
             stats_text,
             toast: None,
             loading_message: None,
@@ -67,6 +71,20 @@ impl HudRenderer {
 
     pub fn update_stats(&mut self, stats: Option<&ModelStats>) {
         self.stats_text = Self::format_stats(stats);
+    }
+
+    pub fn update_model_info(&mut self, filename: &str, mesh_count: usize) {
+        self.filename = Self::truncate_filename(filename, 30);
+        self.mesh_count = mesh_count;
+    }
+
+    fn truncate_filename(name: &str, max_chars: usize) -> String {
+        if name.chars().count() > max_chars {
+            let truncated: String = name.chars().take(max_chars - 3).collect();
+            format!("{truncated}...")
+        } else {
+            name.to_string()
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32, queue: &wgpu::Queue) {
@@ -142,6 +160,8 @@ impl HudRenderer {
         let font_size_main = 14.0 * sf;
         let font_size_hints = 13.0 * sf;
         let margin = 12.0 * sf;
+        let line_gap = 4.0 * sf;
+        let line_height = font_size_main + line_gap;
 
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -155,26 +175,52 @@ impl HudRenderer {
         let text_val = if lum > 0.5 { 0.0_f32 } else { 1.0_f32 };
         let text_color: [f32; 4] = [text_val, text_val, text_val, 1.0];
         let hint_color: [f32; 4] = [text_val, text_val, text_val, 0.6];
-        let mut state_text = format!(
-            "Mode: {}  Proj: {}  Normals: {}  BG: {}",
-            view_mode, projection, normals, bg_name
-        );
-        if !show_grid {
-            state_text.push_str("  Grid: Off");
-        }
-        if lights_locked {
-            state_text.push_str("  Lights: Locked");
-        }
-        if show_axis_gizmo {
-            state_text.push_str("  Axes: On");
-        }
-        if bounds_mode != "Off" {
-            state_text.push_str(&format!("  Bounds: {}", bounds_mode));
-        }
+
+        let file_info = if has_model && !self.filename.is_empty() {
+            let mesh_label = if self.mesh_count == 1 { "mesh" } else { "meshes" };
+            format!("{} \u{2014} {} {}", self.filename, self.mesh_count, mesh_label)
+        } else {
+            String::new()
+        };
+
+        let state_lines: Vec<String> = if has_model {
+            let mut lines = vec![
+                format!("Mode: {}", view_mode),
+                format!("Proj: {}", projection),
+                format!("Normals: {}", normals),
+                format!("BG: {}", bg_name),
+            ];
+            if !show_grid {
+                lines.push("Grid: Off".to_string());
+            }
+            if lights_locked {
+                lines.push("Lights: Locked".to_string());
+            }
+            if show_axis_gizmo {
+                lines.push("Axes: On".to_string());
+            }
+            if bounds_mode != "Off" {
+                lines.push(format!("Bounds: {}", bounds_mode));
+            }
+            lines
+        } else {
+            Vec::new()
+        };
 
         let mut sections: Vec<Section> = Vec::new();
+        let mut y = margin;
 
         if has_model {
+            if !file_info.is_empty() {
+                sections.push(
+                    Section::default()
+                        .add_text(Text::new(&file_info).with_scale(font_size_main).with_color(text_color))
+                        .with_screen_position((margin, y))
+                        .with_layout(Layout::default_single_line()),
+                );
+                y += line_height;
+            }
+
             sections.push(
                 Section::default()
                     .add_text(
@@ -182,25 +228,21 @@ impl HudRenderer {
                             .with_scale(font_size_main)
                             .with_color(text_color),
                     )
-                    .with_screen_position((margin, margin))
+                    .with_screen_position((margin, y))
                     .with_layout(Layout::default_single_line()),
             );
+            y += line_height;
 
             if !bounds_info.is_empty() {
                 sections.push(
                     Section::default()
                         .add_text(Text::new(bounds_info).with_scale(font_size_main).with_color(text_color))
-                        .with_screen_position((margin, margin + font_size_main + 4.0 * sf))
+                        .with_screen_position((margin, y))
                         .with_layout(Layout::default().h_align(HorizontalAlign::Left)),
                 );
+                let bounds_lines = bounds_info.lines().count().max(1);
+                y += line_height * bounds_lines as f32;
             }
-
-            sections.push(
-                Section::default()
-                    .add_text(Text::new(&state_text).with_scale(font_size_main).with_color(text_color))
-                    .with_screen_position((screen_width as f32 - margin, margin))
-                    .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right)),
-            );
         }
 
         sections.push(
@@ -210,13 +252,22 @@ impl HudRenderer {
                         .with_scale(font_size_main)
                         .with_color(text_color),
                 )
-                .with_screen_position((screen_width as f32 - margin, screen_height as f32 - margin))
-                .with_layout(
-                    Layout::default_single_line()
-                        .h_align(HorizontalAlign::Right)
-                        .v_align(VerticalAlign::Bottom),
-                ),
+                .with_screen_position((margin, y))
+                .with_layout(Layout::default_single_line()),
         );
+
+        if has_model {
+            let mut yr = margin;
+            for line in &state_lines {
+                sections.push(
+                    Section::default()
+                        .add_text(Text::new(line).with_scale(font_size_main).with_color(text_color))
+                        .with_screen_position((screen_width as f32 - margin, yr))
+                        .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right)),
+                );
+                yr += line_height;
+            }
+        }
 
         let hints = if has_model {
             "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  \u{21e7}M Bloom  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
