@@ -121,6 +121,7 @@ pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
     pub bounds: AABB,
+    pub mesh_bounds: Vec<AABB>,
     pub has_uvs: bool,
 }
 

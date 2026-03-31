@@ -175,7 +175,9 @@ pub fn build_normals_geometry(
     }
 }
 
-pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, NormalsGeometry) {
+type ProcessedModel = (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, Vec<AABB>, NormalsGeometry);
+
+pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let mut all_positions: Vec<[f32; 3]> = Vec::new();
     let mut all_normals: Vec<[f32; 3]> = Vec::new();
     let mut global_min = [f32::INFINITY; 3];
@@ -183,6 +185,7 @@ pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<
 
     let mut mesh_vertex_data: Vec<Vec<ModelVertex>> = Vec::new();
     let mut mesh_index_data: Vec<Vec<u32>> = Vec::new();
+    let mut mesh_bounds: Vec<AABB> = Vec::new();
     let mut all_vertex_lines: Vec<[f32; 3]> = Vec::new();
     let mut all_face_lines: Vec<[f32; 3]> = Vec::new();
 
@@ -190,6 +193,10 @@ pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<
         if mesh.positions.is_empty() || mesh.indices.is_empty() {
             mesh_vertex_data.push(Vec::new());
             mesh_index_data.push(Vec::new());
+            mesh_bounds.push(AABB {
+                min: cgmath::Point3::new(0.0, 0.0, 0.0),
+                max: cgmath::Point3::new(0.0, 0.0, 0.0),
+            });
             continue;
         }
 
@@ -237,7 +244,9 @@ pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<
         all_normals.extend_from_slice(&normals);
 
         let bounds = compute_bounds(&mesh.positions);
-        let normals_geo = build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
+        mesh_bounds.push(bounds);
+        let bounds = mesh_bounds.last().unwrap();
+        let normals_geo = build_normals_geometry(&mesh.positions, &normals, &mesh.indices, bounds);
         all_vertex_lines.extend(normals_geo.vertex_lines);
         all_face_lines.extend(normals_geo.face_lines);
 
@@ -262,5 +271,5 @@ pub fn process_raw_model(raw: &RawModelData) -> (Vec<Vec<ModelVertex>>, Vec<Vec<
         face_lines: all_face_lines,
     };
 
-    (mesh_vertex_data, mesh_index_data, bounds, normals_geo)
+    (mesh_vertex_data, mesh_index_data, bounds, mesh_bounds, normals_geo)
 }

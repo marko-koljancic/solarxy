@@ -135,6 +135,8 @@ impl HudRenderer {
         show_grid: bool,
         lights_locked: bool,
         show_axis_gizmo: bool,
+        bounds_mode: &str,
+        bounds_info: &str,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -166,6 +168,9 @@ impl HudRenderer {
         if show_axis_gizmo {
             state_text.push_str("  Axes: On");
         }
+        if bounds_mode != "Off" {
+            state_text.push_str(&format!("  Bounds: {}", bounds_mode));
+        }
 
         let mut sections: Vec<Section> = Vec::new();
 
@@ -180,6 +185,15 @@ impl HudRenderer {
                     .with_screen_position((margin, margin))
                     .with_layout(Layout::default_single_line()),
             );
+
+            if !bounds_info.is_empty() {
+                sections.push(
+                    Section::default()
+                        .add_text(Text::new(bounds_info).with_scale(font_size_main).with_color(text_color))
+                        .with_screen_position((margin, margin + font_size_main + 4.0 * sf))
+                        .with_layout(Layout::default().h_align(HorizontalAlign::Left)),
+                );
+            }
 
             sections.push(
                 Section::default()
@@ -205,7 +219,7 @@ impl HudRenderer {
         );
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  G Grid  A Axes  B Background  \u{21e7}B Bounds  C Capture  H Frame  T F L R Views  P Persp  O Ortho  V Turntable  \u{21e7}L Lock Lights  ? Hints"
         } else {
             "? Hints"
         };

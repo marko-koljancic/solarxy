@@ -1,3 +1,4 @@
+use crate::aabb::AABB;
 use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::model::{self, Model};
 use crate::cgi::resources;
@@ -32,6 +33,10 @@ pub(crate) struct VisualizationState {
     #[allow(dead_code)]
     vertex_normals_color_buf: wgpu::Buffer,
     pub(crate) axes_vertex_buf: wgpu::Buffer,
+    pub(crate) bounds_whole_buf: wgpu::Buffer,
+    pub(crate) bounds_whole_count: u32,
+    pub(crate) bounds_per_mesh_buf: wgpu::Buffer,
+    pub(crate) bounds_per_mesh_count: u32,
 }
 
 impl VisualizationState {
@@ -153,6 +158,34 @@ impl VisualizationState {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let whole_verts = aabb_line_vertices(&model.bounds, [1.0, 0.65, 0.0]);
+        let bounds_whole_count = whole_verts.len() as u32;
+        let bounds_whole_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Bounds Whole Buffer"),
+            contents: bytemuck::cast_slice(&whole_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let palette = bounds_color_palette();
+        let mut per_mesh_verts: Vec<model::GizmoVertex> = Vec::new();
+        for (i, mesh_aabb) in model.mesh_bounds.iter().enumerate() {
+            per_mesh_verts.extend(aabb_line_vertices(mesh_aabb, palette[i % palette.len()]));
+        }
+        let bounds_per_mesh_count = per_mesh_verts.len() as u32;
+        let bounds_per_mesh_buf = if per_mesh_verts.is_empty() {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Bounds Per Mesh Buffer"),
+                contents: &[0u8; 24],
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        } else {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Bounds Per Mesh Buffer"),
+                contents: bytemuck::cast_slice(&per_mesh_verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        };
+
         VisualizationState {
             grid_mesh,
             grid_bind_group,
@@ -167,8 +200,69 @@ impl VisualizationState {
             face_normals_color_buf,
             vertex_normals_color_buf,
             axes_vertex_buf,
+            bounds_whole_buf,
+            bounds_whole_count,
+            bounds_per_mesh_buf,
+            bounds_per_mesh_count,
         }
     }
+}
+
+fn aabb_line_vertices(aabb: &AABB, color: [f32; 3]) -> Vec<model::GizmoVertex> {
+    let mn = [aabb.min.x, aabb.min.y, aabb.min.z];
+    let mx = [aabb.max.x, aabb.max.y, aabb.max.z];
+
+    let corners: [[f32; 3]; 8] = [
+        [mn[0], mn[1], mn[2]], // 0: min
+        [mx[0], mn[1], mn[2]], // 1
+        [mx[0], mn[1], mx[2]], // 2
+        [mn[0], mn[1], mx[2]], // 3
+        [mn[0], mx[1], mn[2]], // 4
+        [mx[0], mx[1], mn[2]], // 5
+        [mx[0], mx[1], mx[2]], // 6: max
+        [mn[0], mx[1], mx[2]], // 7
+    ];
+
+    let edges: [(usize, usize); 12] = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0), // bottom
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4), // top
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7), // verticals
+    ];
+
+    let mut verts = Vec::with_capacity(24);
+    for (a, b) in edges {
+        verts.push(model::GizmoVertex {
+            position: corners[a],
+            color,
+        });
+        verts.push(model::GizmoVertex {
+            position: corners[b],
+            color,
+        });
+    }
+    verts
+}
+
+fn bounds_color_palette() -> [[f32; 3]; 8] {
+    [
+        [1.0, 0.4, 0.4],   // salmon
+        [0.3, 0.85, 0.4],  // green
+        [0.4, 0.6, 1.0],   // cornflower
+        [1.0, 0.85, 0.2],  // gold
+        [0.85, 0.4, 1.0],  // violet
+        [0.2, 0.9, 0.9],   // cyan
+        [1.0, 0.55, 0.75], // pink
+        [0.7, 0.9, 0.3],   // lime
+    ]
 }
 
 fn create_normals_buffer(device: &wgpu::Device, lines: &[[f32; 3]], label: &str) -> (wgpu::Buffer, u32) {

@@ -77,6 +77,23 @@ impl std::fmt::Display for UvMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+enum BoundsMode {
+    Off,
+    WholeModel,
+    PerMesh,
+}
+
+impl std::fmt::Display for BoundsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BoundsMode::Off => write!(f, "Off"),
+            BoundsMode::WholeModel => write!(f, "Model"),
+            BoundsMode::PerMesh => write!(f, "Per Mesh"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum BackgroundPreset {
     BlueGray,
     DarkGray,
@@ -310,6 +327,7 @@ pub struct State {
     wireframe_color_buffer: wgpu::Buffer,
     wireframe_color_bind_group: wgpu::BindGroup,
     uv_mode: UvMode,
+    bounds_mode: BoundsMode,
     _checker_texture: texture::Texture,
     uv_checker_bind_group: wgpu::BindGroup,
     capture_requested: bool,
@@ -470,6 +488,7 @@ impl State {
             wireframe_color_buffer,
             wireframe_color_bind_group,
             uv_mode: UvMode::Off,
+            bounds_mode: BoundsMode::Off,
             _checker_texture: checker_texture,
             uv_checker_bind_group,
             capture_requested: false,
@@ -655,13 +674,28 @@ impl State {
             KeyCode::KeyA => self.show_axis_gizmo = !self.show_axis_gizmo,
             KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyB => {
-                self.background_mode = self.background_mode.next();
-                self.queue.write_buffer(
-                    &self.wireframe_color_buffer,
-                    0,
-                    bytemuck::cast_slice(&self.background_mode.wireframe_color()),
-                );
-                self.update_grid_color();
+                if self.modifiers.shift_key() {
+                    let is_multi = self.scene.as_ref().is_some_and(|s| s.model.meshes.len() > 1);
+                    self.bounds_mode = match self.bounds_mode {
+                        BoundsMode::Off => BoundsMode::WholeModel,
+                        BoundsMode::WholeModel if is_multi => BoundsMode::PerMesh,
+                        BoundsMode::WholeModel | BoundsMode::PerMesh => BoundsMode::Off,
+                    };
+                    let msg = match self.bounds_mode {
+                        BoundsMode::Off => "Bounds: Off",
+                        BoundsMode::WholeModel => "Bounds: Whole Model",
+                        BoundsMode::PerMesh => "Bounds: Per Mesh",
+                    };
+                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                } else {
+                    self.background_mode = self.background_mode.next();
+                    self.queue.write_buffer(
+                        &self.wireframe_color_buffer,
+                        0,
+                        bytemuck::cast_slice(&self.background_mode.wireframe_color()),
+                    );
+                    self.update_grid_color();
+                }
             }
             KeyCode::KeyN => {
                 self.normals_mode = match self.normals_mode {
@@ -805,6 +839,36 @@ impl State {
         } else {
             self.view_mode.to_string()
         };
+
+        let bounds_info = match self.bounds_mode {
+            BoundsMode::Off => String::new(),
+            BoundsMode::WholeModel => {
+                if let Some(scene) = &self.scene {
+                    let s = scene.model.bounds.size();
+                    format!("Extents: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}", s.x, s.y, s.z)
+                } else {
+                    String::new()
+                }
+            }
+            BoundsMode::PerMesh => {
+                if let Some(scene) = &self.scene {
+                    let mut lines = Vec::new();
+                    for (i, mesh) in scene.model.meshes.iter().enumerate() {
+                        let s = scene.model.mesh_bounds[i].size();
+                        let name = if mesh.name.len() > 20 {
+                            format!("{}\u{2026}", &mesh.name[..19])
+                        } else {
+                            mesh.name.clone()
+                        };
+                        lines.push(format!("{}: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}", name, s.x, s.y, s.z));
+                    }
+                    lines.join("\n")
+                } else {
+                    String::new()
+                }
+            }
+        };
+
         self.hud.render(
             &self.device,
             &mut encoder,
@@ -822,6 +886,8 @@ impl State {
             self.show_grid,
             self.lights_locked,
             self.show_axis_gizmo,
+            &self.bounds_mode.to_string(),
+            &bounds_info,
         );
 
         let capture_buffer = if self.capture_requested {
@@ -1093,6 +1159,7 @@ impl State {
         }
         self.draw_normals(&mut pass, scene);
         self.draw_axes(&mut pass, scene);
+        self.draw_bounds(&mut pass, scene);
     }
 
     fn draw_shaded_model<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
@@ -1119,6 +1186,27 @@ impl State {
         pass.set_bind_group(0, &scene.cam.bind_group, &[]);
         pass.set_vertex_buffer(0, scene.vis.axes_vertex_buf.slice(..));
         pass.draw(0..6, 0..1);
+    }
+
+    fn draw_bounds<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+        if self.bounds_mode == BoundsMode::Off {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        match self.bounds_mode {
+            BoundsMode::Off => unreachable!(),
+            BoundsMode::WholeModel => {
+                pass.set_vertex_buffer(0, scene.vis.bounds_whole_buf.slice(..));
+                pass.draw(0..scene.vis.bounds_whole_count, 0..1);
+            }
+            BoundsMode::PerMesh => {
+                if scene.vis.bounds_per_mesh_count > 0 {
+                    pass.set_vertex_buffer(0, scene.vis.bounds_per_mesh_buf.slice(..));
+                    pass.draw(0..scene.vis.bounds_per_mesh_count, 0..1);
+                }
+            }
+        }
     }
 
     fn draw_normals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {

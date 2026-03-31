@@ -50,7 +50,7 @@ fn upload_model(
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
     let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
-    let (mesh_vertices, mesh_indices, bounds, normals_geo) = geometry::process_raw_model(&raw);
+    let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) = geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
     for mat in &raw.materials {
         let diffuse_texture = if let Some(ref data) = mat.diffuse_texture_data {
@@ -115,6 +115,7 @@ fn upload_model(
     }
 
     let mut gpu_meshes = Vec::new();
+    let mut gpu_mesh_bounds = Vec::new();
     for (i, (vertices, indices)) in mesh_vertices.iter().zip(mesh_indices.iter()).enumerate() {
         if vertices.is_empty() {
             continue;
@@ -139,6 +140,7 @@ fn upload_model(
             num_elements: indices.len() as u32,
             material: material_index,
         });
+        gpu_mesh_bounds.push(per_mesh_bounds[i]);
     }
 
     let total_tris: usize = mesh_indices.iter().map(|idx| idx.len() / 3).sum();
@@ -154,6 +156,7 @@ fn upload_model(
             meshes: gpu_meshes,
             materials: gpu_materials,
             bounds,
+            mesh_bounds: gpu_mesh_bounds,
             has_uvs,
         },
         normals_geo,
