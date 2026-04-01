@@ -49,11 +49,17 @@ pub struct ValidationReport {
 
 impl ValidationReport {
     pub fn error_count(&self) -> usize {
-        self.issues.iter().filter(|i| i.severity == Severity::Error).count()
+        self.issues
+            .iter()
+            .filter(|i| i.severity == Severity::Error)
+            .count()
     }
 
     pub fn warning_count(&self) -> usize {
-        self.issues.iter().filter(|i| i.severity == Severity::Warning).count()
+        self.issues
+            .iter()
+            .filter(|i| i.severity == Severity::Warning)
+            .count()
     }
 
     pub fn is_clean(&self) -> bool {
@@ -132,9 +138,17 @@ impl fmt::Display for AnalysisReport {
         writeln!(f, "Model Name:       {}", self.model_name)?;
         writeln!(f, "Mesh Count:       {}", self.mesh_count)?;
         writeln!(f, "Material Count:   {}", self.material_count)?;
-        writeln!(f, "Total Vertices:   {}", format_number(self.total_vertices))?;
+        writeln!(
+            f,
+            "Total Vertices:   {}",
+            format_number(self.total_vertices)
+        )?;
         writeln!(f, "Total Indices:    {}", format_number(self.total_indices))?;
-        writeln!(f, "Total Triangles:  {}", format_number(self.total_triangles))?;
+        writeln!(
+            f,
+            "Total Triangles:  {}",
+            format_number(self.total_triangles)
+        )?;
 
         if let Some(ref bounds) = self.bounds {
             writeln!(f)?;
@@ -169,7 +183,11 @@ impl fmt::Display for AnalysisReport {
                 writeln!(f, "Mesh [{}]:", mesh.index)?;
                 writeln!(f, "  Vertices:        {}", format_number(mesh.vertex_count))?;
                 writeln!(f, "  Indices:         {}", format_number(mesh.index_count))?;
-                writeln!(f, "  Triangles:       {}", format_number(mesh.triangle_count))?;
+                writeln!(
+                    f,
+                    "  Triangles:       {}",
+                    format_number(mesh.triangle_count)
+                )?;
                 writeln!(
                     f,
                     "  Normals:         {} {}",
@@ -194,7 +212,9 @@ impl fmt::Display for AnalysisReport {
                 )?;
 
                 match (&mesh.material_name, mesh.material_id) {
-                    (Some(name), Some(id)) => writeln!(f, "  Material:        '{}' (ID: {})", name, id)?,
+                    (Some(name), Some(id)) => {
+                        writeln!(f, "  Material:        '{}' (ID: {})", name, id)?
+                    }
                     (None, Some(id)) => writeln!(f, "  Material:        Invalid ID: {}", id)?,
                     _ => writeln!(f, "  Material:        None")?,
                 }
@@ -245,7 +265,13 @@ impl fmt::Display for AnalysisReport {
                 } else {
                     for tex in &mat.textures {
                         let indicator = if tex.exists { "" } else { " [MISSING]" };
-                        writeln!(f, "    {:14} '{}'{}", format!("{}:", tex.slot), tex.path, indicator)?;
+                        writeln!(
+                            f,
+                            "    {:14} '{}'{}",
+                            format!("{}:", tex.slot),
+                            tex.path,
+                            indicator
+                        )?;
                     }
                 }
 

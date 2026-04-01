@@ -1,5 +1,5 @@
 use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::camera::{Camera, ProjectionMode};
+use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::hud::HudRenderer;
 use crate::cgi::light::{LightEntry, LightsUniform};
@@ -9,7 +9,9 @@ use crate::cgi::resources::{self, ModelStats};
 use crate::cgi::shadow::ShadowState;
 use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
-use crate::preferences::{self, BackgroundMode, LineWeight, NormalsMode, Preferences, ViewMode};
+use crate::preferences::{
+    self, BackgroundMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode, ViewMode,
+};
 use cgmath::prelude::*;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -21,23 +23,6 @@ use winit::{
     keyboard::{KeyCode, ModifiersState},
     window::Window,
 };
-
-#[derive(Clone, Copy, PartialEq)]
-enum UvMode {
-    Off,
-    Gradient,
-    Checker,
-}
-
-impl std::fmt::Display for UvMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UvMode::Off => write!(f, "Off"),
-            UvMode::Gradient => write!(f, "UV: Gradient"),
-            UvMode::Checker => write!(f, "UV: Checker"),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq)]
 enum BoundsMode {
@@ -56,7 +41,6 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
-// wgpu-dependent methods for BackgroundMode (enum defined in preferences.rs)
 impl BackgroundMode {
     fn clear_color(self) -> wgpu::Color {
         match self {
@@ -133,8 +117,13 @@ impl ModelScene {
         config: &wgpu::SurfaceConfiguration,
         initial_grid_color: [f32; 3],
     ) -> anyhow::Result<Self> {
-        let (model, normals_geo, stats) =
-            resources::load_model_any(&model_path, device, queue, &layouts.texture, &layouts.edge_geometry)?;
+        let (model, normals_geo, stats) = resources::load_model_any(
+            &model_path,
+            device,
+            queue,
+            &layouts.texture,
+            &layouts.edge_geometry,
+        )?;
 
         let cam = CameraState::new(
             device,
@@ -145,7 +134,10 @@ impl ModelScene {
 
         let instance_data = Instance {
             position: cgmath::Vector3::new(0.0, 0.0, 0.0),
-            rotation: cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ),
         };
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
@@ -169,7 +161,14 @@ impl ModelScene {
         });
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, &model);
-        let vis = VisualizationState::new(device, layouts, &model, &normals_geo, &cam.buffer, initial_grid_color);
+        let vis = VisualizationState::new(
+            device,
+            layouts,
+            &model,
+            &normals_geo,
+            &cam.buffer,
+            initial_grid_color,
+        );
 
         Ok(ModelScene {
             model,
@@ -306,9 +305,18 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
         let msaa_sample_count = preferences.rendering.msaa_sample_count;
-        let depth_texture =
-            texture::Texture::create_depth_texture(&device, &config, "depth_texture", msaa_sample_count);
-        let msaa_hdr_view = texture::create_msaa_hdr_texture(&device, config.width, config.height, msaa_sample_count);
+        let depth_texture = texture::Texture::create_depth_texture(
+            &device,
+            &config,
+            "depth_texture",
+            msaa_sample_count,
+        );
+        let msaa_hdr_view = texture::create_msaa_hdr_texture(
+            &device,
+            config.width,
+            config.height,
+            msaa_sample_count,
+        );
         let (hdr_resolve_texture, hdr_resolve_view) =
             texture::create_hdr_resolve_texture(&device, config.width, config.height);
         let (bloom_ping_texture, bloom_ping_view) =
@@ -368,11 +376,12 @@ impl State {
             size.height as f32,
             0.0,
         ];
-        let wireframe_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Wireframe Params Uniform"),
-            contents: bytemuck::cast_slice(&wireframe_params_data),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let wireframe_params_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Wireframe Params Uniform"),
+                contents: bytemuck::cast_slice(&wireframe_params_data),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let wireframe_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Wireframe Params Bind Group"),
             layout: &layouts.wireframe_params,
@@ -429,25 +438,42 @@ impl State {
             }],
         });
 
-        let bloom_extract_bind_group =
-            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &hdr_resolve_view, &bloom_sampler);
-        let bloom_blur_h_bind_group =
-            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &bloom_ping_view, &bloom_sampler);
-        let bloom_blur_v_bind_group =
-            create_bloom_sample_bind_group(&device, &layouts.bloom_texture, &bloom_pong_view, &bloom_sampler);
+        let bloom_extract_bind_group = create_bloom_sample_bind_group(
+            &device,
+            &layouts.bloom_texture,
+            &hdr_resolve_view,
+            &bloom_sampler,
+        );
+        let bloom_blur_h_bind_group = create_bloom_sample_bind_group(
+            &device,
+            &layouts.bloom_texture,
+            &bloom_ping_view,
+            &bloom_sampler,
+        );
+        let bloom_blur_v_bind_group = create_bloom_sample_bind_group(
+            &device,
+            &layouts.bloom_texture,
+            &bloom_pong_view,
+            &bloom_sampler,
+        );
 
         let composite_params_data: [u8; 16] = {
             let mut buf = [0u8; 16];
             buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
-            let bloom_flag: u32 = if preferences.display.bloom_enabled { 1 } else { 0 };
+            let bloom_flag: u32 = if preferences.display.bloom_enabled {
+                1
+            } else {
+                0
+            };
             buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
             buf
         };
-        let composite_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Composite Params Uniform"),
-            contents: &composite_params_data,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let composite_params_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Composite Params Uniform"),
+                contents: &composite_params_data,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let composite_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Composite Params Bind Group"),
             layout: &layouts.composite_params,
@@ -503,12 +529,12 @@ impl State {
             line_weight,
             wireframe_params_buffer,
             wireframe_params_bind_group,
-            uv_mode: UvMode::Off,
+            uv_mode: preferences.display.uv_mode,
             bounds_mode: BoundsMode::Off,
             _checker_texture: checker_texture,
             uv_checker_bind_group,
             capture_requested: false,
-            turntable_active: false,
+            turntable_active: preferences.display.turntable_active,
             show_grid: preferences.display.grid_visible,
             lights_locked: preferences.lighting.lock,
             show_axis_gizmo: preferences.display.axis_gizmo_visible,
@@ -530,8 +556,10 @@ impl State {
     pub fn handle_dropped_file(&mut self, path: PathBuf) {
         if !resources::is_supported_model_extension(&path) {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
-            self.hud
-                .set_toast(&format!("Unsupported format: .{}", ext), [0.6, 0.0, 0.0, 1.0]);
+            self.hud.set_toast(
+                &format!("Unsupported format: .{}", ext),
+                [0.6, 0.0, 0.0, 1.0],
+            );
             return;
         }
 
@@ -559,8 +587,11 @@ impl State {
             self.config.height as f32,
             0.0,
         ];
-        self.queue
-            .write_buffer(&self.wireframe_params_buffer, 0, bytemuck::cast_slice(&data));
+        self.queue.write_buffer(
+            &self.wireframe_params_buffer,
+            0,
+            bytemuck::cast_slice(&data),
+        );
     }
 
     fn spawn_load(&mut self, model_path: String) {
@@ -570,7 +601,8 @@ impl State {
             .unwrap_or(&model_path)
             .to_string();
 
-        self.hud.set_loading_message(&format!("Loading {}...", filename));
+        self.hud
+            .set_loading_message(&format!("Loading {}...", filename));
 
         let device = self.device.clone();
         let queue = self.queue.clone();
@@ -582,7 +614,14 @@ impl State {
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
-            let result = ModelScene::new(model_path, &device, &queue, &layouts, &config, initial_grid_color);
+            let result = ModelScene::new(
+                model_path,
+                &device,
+                &queue,
+                &layouts,
+                &config,
+                initial_grid_color,
+            );
             let _ = tx.send(result);
         });
 
@@ -604,14 +643,22 @@ impl State {
                 "depth_texture",
                 self.msaa_sample_count,
             );
-            self.msaa_hdr_view = texture::create_msaa_hdr_texture(&self.device, width, height, self.msaa_sample_count);
-            let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
+            self.msaa_hdr_view = texture::create_msaa_hdr_texture(
+                &self.device,
+                width,
+                height,
+                self.msaa_sample_count,
+            );
+            let (hdr_tex, hdr_view) =
+                texture::create_hdr_resolve_texture(&self.device, width, height);
             self.hdr_resolve_texture = hdr_tex;
             self.hdr_resolve_view = hdr_view;
-            let (ping_tex, ping_view) = texture::create_bloom_texture(&self.device, width, height, "Bloom Ping");
+            let (ping_tex, ping_view) =
+                texture::create_bloom_texture(&self.device, width, height, "Bloom Ping");
             self.bloom_ping_texture = ping_tex;
             self.bloom_ping_view = ping_view;
-            let (pong_tex, pong_view) = texture::create_bloom_texture(&self.device, width, height, "Bloom Pong");
+            let (pong_tex, pong_view) =
+                texture::create_bloom_texture(&self.device, width, height, "Bloom Pong");
             self.bloom_pong_texture = pong_tex;
             self.bloom_pong_view = pong_view;
             self.bloom_extract_bind_group = create_bloom_sample_bind_group(
@@ -729,8 +776,10 @@ impl State {
                 if self.modifiers.shift_key() {
                     self.line_weight = self.line_weight.next();
                     self.update_wireframe_params();
-                    self.hud
-                        .set_toast(&format!("Line Weight: {}", self.line_weight), [0.0, 0.4, 0.0, 1.0]);
+                    self.hud.set_toast(
+                        &format!("Line Weight: {}", self.line_weight),
+                        [0.0, 0.4, 0.0, 1.0],
+                    );
                 } else if self.view_mode != ViewMode::Ghosted {
                     self.view_mode = match self.view_mode {
                         ViewMode::Shaded => ViewMode::ShadedWireframe,
@@ -764,7 +813,10 @@ impl State {
             KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyB => {
                 if self.modifiers.shift_key() {
-                    let is_multi = self.scene.as_ref().is_some_and(|s| s.model.meshes.len() > 1);
+                    let is_multi = self
+                        .scene
+                        .as_ref()
+                        .is_some_and(|s| s.model.meshes.len() > 1);
                     self.bounds_mode = match self.bounds_mode {
                         BoundsMode::Off => BoundsMode::WholeModel,
                         BoundsMode::WholeModel if is_multi => BoundsMode::PerMesh,
@@ -789,8 +841,13 @@ impl State {
                     let mut buf = [0u8; 16];
                     buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
                     buf[4..8].copy_from_slice(&enabled_bits.to_le_bytes());
-                    self.queue.write_buffer(&self.composite_params_buffer, 0, &buf);
-                    let msg = if self.bloom_enabled { "Bloom: On" } else { "Bloom: Off" };
+                    self.queue
+                        .write_buffer(&self.composite_params_buffer, 0, &buf);
+                    let msg = if self.bloom_enabled {
+                        "Bloom: On"
+                    } else {
+                        "Bloom: Off"
+                    };
                     self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 }
             }
@@ -825,12 +882,21 @@ impl State {
         self.preferences.display.grid_visible = self.show_grid;
         self.preferences.display.axis_gizmo_visible = self.show_axis_gizmo;
         self.preferences.display.bloom_enabled = self.bloom_enabled;
+        self.preferences.display.uv_mode = self.uv_mode;
+        self.preferences.display.turntable_active = self.turntable_active;
+        if let Some(scene) = &self.scene {
+            self.preferences.display.projection_mode = scene.cam.camera.projection;
+        }
         self.preferences.rendering.wireframe_line_weight = self.line_weight;
         self.preferences.lighting.lock = self.lights_locked;
 
         match preferences::save(&self.preferences) {
-            Ok(()) => self.hud.set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]),
-            Err(e) => self.hud.set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]),
+            Ok(()) => self
+                .hud
+                .set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]),
+            Err(e) => self
+                .hud
+                .set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]),
         }
     }
 
@@ -869,15 +935,23 @@ impl State {
                 self.hud
                     .update_model_info(&pending.filename, new_scene.model.meshes.len());
                 self.hud.clear_loading_message();
-                self.window.set_title(&format!("Solarxy \u{2014} {}", pending.filename));
+                self.window
+                    .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
                 self.scene = Some(new_scene);
                 if let Some(scene) = &mut self.scene {
-                    scene.cam.resize(self.config.width as f32 / self.config.height as f32);
+                    scene
+                        .cam
+                        .resize(self.config.width as f32 / self.config.height as f32);
+                    scene
+                        .cam
+                        .set_projection(self.preferences.display.projection_mode);
                 }
                 self.view_mode = self.preferences.display.view_mode;
                 self.prev_non_ghosted_mode = ViewMode::Shaded;
                 self.normals_mode = self.preferences.display.normals_mode;
+                self.uv_mode = self.preferences.display.uv_mode;
+                self.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {
                 self.pending_load.take();
@@ -888,7 +962,8 @@ impl State {
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_load.take();
                 self.hud.clear_loading_message();
-                self.hud.set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
+                self.hud
+                    .set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
             }
             _ => {}
         }
@@ -905,8 +980,11 @@ impl State {
 
             if !self.lights_locked {
                 scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
-                self.queue
-                    .write_buffer(&scene.light_buffer, 0, bytemuck::cast_slice(&[scene.lights_uniform]));
+                self.queue.write_buffer(
+                    &scene.light_buffer,
+                    0,
+                    bytemuck::cast_slice(&[scene.lights_uniform]),
+                );
 
                 let key_pos = scene.lights_uniform.lights[0].position;
                 scene.shadow.update_light_vp(
@@ -930,10 +1008,14 @@ impl State {
         self.hud.clear_expired_toast();
 
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         let has_model = self.scene.is_some();
 
@@ -950,13 +1032,16 @@ impl State {
         self.render_composite_pass(&mut encoder, &view);
 
         let (projection_str, normals_str) = if let Some(scene) = &self.scene {
-            (scene.cam.camera.projection.to_string(), self.normals_mode.to_string())
+            (
+                scene.cam.camera.projection.to_string(),
+                self.normals_mode.to_string(),
+            )
         } else {
             (String::new(), String::new())
         };
 
         let mode_str = if self.uv_mode != UvMode::Off {
-            format!("{} [{}]", self.view_mode, self.uv_mode)
+            format!("{} [UV: {}]", self.view_mode, self.uv_mode)
         } else {
             self.view_mode.to_string()
         };
@@ -966,7 +1051,10 @@ impl State {
             BoundsMode::WholeModel => {
                 if let Some(scene) = &self.scene {
                     let s = scene.model.bounds.size();
-                    format!("Extents: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}", s.x, s.y, s.z)
+                    format!(
+                        "Extents: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}",
+                        s.x, s.y, s.z
+                    )
                 } else {
                     String::new()
                 }
@@ -981,7 +1069,10 @@ impl State {
                         } else {
                             mesh.name.clone()
                         };
-                        lines.push(format!("{}: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}", name, s.x, s.y, s.z));
+                        lines.push(format!(
+                            "{}: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}",
+                            name, s.x, s.y, s.z
+                        ));
                     }
                     lines.join("\n")
                 } else {
@@ -1073,7 +1164,13 @@ impl State {
         (buffer, padded_row_bytes, width, height)
     }
 
-    fn save_capture(&mut self, buffer: wgpu::Buffer, padded_row_bytes: u32, width: u32, height: u32) {
+    fn save_capture(
+        &mut self,
+        buffer: wgpu::Buffer,
+        padded_row_bytes: u32,
+        width: u32,
+        height: u32,
+    ) {
         let slice = buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
@@ -1115,7 +1212,8 @@ impl State {
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let filename = format!("solarxy_{}.png", timestamp);
 
-        let img = image::RgbaImage::from_raw(width, height, pixels).expect("Failed to create image from pixel data");
+        let img = image::RgbaImage::from_raw(width, height, pixels)
+            .expect("Failed to create image from pixel data");
         if let Err(e) = img.save(&filename) {
             eprintln!("Failed to save screenshot: {}", e);
         } else {
@@ -1164,8 +1262,11 @@ impl State {
             1.0 / self.config.width.max(1) as f32,
             1.0 / self.config.height.max(1) as f32,
         ];
-        self.queue
-            .write_buffer(&self.bloom_params_buffer, 0, bytemuck::cast_slice(&full_texel));
+        self.queue.write_buffer(
+            &self.bloom_params_buffer,
+            0,
+            bytemuck::cast_slice(&full_texel),
+        );
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Bloom Extract Pass"),
@@ -1190,8 +1291,11 @@ impl State {
         let half_w = (self.config.width / 2).max(1) as f32;
         let half_h = (self.config.height / 2).max(1) as f32;
         let half_texel: [f32; 4] = [BLOOM_THRESHOLD, BLOOM_STRENGTH, 1.0 / half_w, 1.0 / half_h];
-        self.queue
-            .write_buffer(&self.bloom_params_buffer, 0, bytemuck::cast_slice(&half_texel));
+        self.queue.write_buffer(
+            &self.bloom_params_buffer,
+            0,
+            bytemuck::cast_slice(&half_texel),
+        );
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1340,7 +1444,11 @@ impl State {
                     if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
                         || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
                     {
-                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire_ghosted);
+                        self.draw_edge_wireframe(
+                            &mut pass,
+                            scene,
+                            &self.pipelines.edge_wire_ghosted,
+                        );
                     }
                 }
             }
@@ -1364,7 +1472,11 @@ impl State {
                     if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
                         || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
                     {
-                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire_ghosted);
+                        self.draw_edge_wireframe(
+                            &mut pass,
+                            scene,
+                            &self.pipelines.edge_wire_ghosted,
+                        );
                     }
                 }
             }
@@ -1374,7 +1486,10 @@ impl State {
             pass.set_pipeline(&self.pipelines.grid);
             pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(scene.vis.grid_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_index_buffer(
+                scene.vis.grid_mesh.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
             pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
         }
         self.draw_normals(&mut pass, scene);
@@ -1386,7 +1501,12 @@ impl State {
         use model::DrawModel;
         pass.set_pipeline(&self.pipelines.main);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
-        pass.draw_model_instanced(&scene.model, 0..1, &scene.cam.bind_group, &scene.light_bind_group);
+        pass.draw_model_instanced(
+            &scene.model,
+            0..1,
+            &scene.cam.bind_group,
+            &scene.light_bind_group,
+        );
     }
 
     fn draw_edge_wireframe<'a>(
@@ -1412,7 +1532,10 @@ impl State {
         pass.set_bind_group(0, &scene.cam.bind_group, &[]);
         pass.set_bind_group(1, &scene.shadow.sample_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(scene.vis.floor_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.set_index_buffer(
+            scene.vis.floor_mesh.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint32,
+        );
         pass.draw_indexed(0..scene.vis.floor_mesh.num_elements, 0, 0..1);
     }
 
@@ -1452,15 +1575,19 @@ impl State {
             return;
         }
         pass.set_pipeline(&self.pipelines.normals);
-        if matches!(self.normals_mode, NormalsMode::Face | NormalsMode::FaceAndVertex)
-            && scene.vis.face_normals_count > 0
+        if matches!(
+            self.normals_mode,
+            NormalsMode::Face | NormalsMode::FaceAndVertex
+        ) && scene.vis.face_normals_count > 0
         {
             pass.set_bind_group(0, &scene.vis.face_normals_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
             pass.draw(0..scene.vis.face_normals_count, 0..1);
         }
-        if matches!(self.normals_mode, NormalsMode::Vertex | NormalsMode::FaceAndVertex)
-            && scene.vis.vertex_normals_count > 0
+        if matches!(
+            self.normals_mode,
+            NormalsMode::Vertex | NormalsMode::FaceAndVertex
+        ) && scene.vis.vertex_normals_count > 0
         {
             pass.set_bind_group(0, &scene.vis.vertex_normals_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));

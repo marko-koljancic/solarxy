@@ -83,7 +83,11 @@ impl Texture {
             ..Default::default()
         });
 
-        Ok(Self { texture, view, sampler })
+        Ok(Self {
+            texture,
+            view,
+            sampler,
+        })
     }
 
     pub fn from_raw_rgba(
@@ -144,7 +148,11 @@ impl Texture {
             ..Default::default()
         });
 
-        Ok(Self { texture, view, sampler })
+        Ok(Self {
+            texture,
+            view,
+            sampler,
+        })
     }
 
     pub fn create_depth_texture(
@@ -188,7 +196,11 @@ impl Texture {
             ..Default::default()
         });
 
-        Self { texture, view, sampler }
+        Self {
+            texture,
+            view,
+            sampler,
+        }
     }
 }
 
@@ -214,7 +226,12 @@ pub fn create_msaa_color_texture(
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-pub fn create_msaa_hdr_texture(device: &wgpu::Device, width: u32, height: u32, sample_count: u32) -> wgpu::TextureView {
+pub fn create_msaa_hdr_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    sample_count: u32,
+) -> wgpu::TextureView {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("MSAA HDR Color Texture"),
         size: wgpu::Extent3d {

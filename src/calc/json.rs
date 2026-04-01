@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use super::report::{
-    AnalysisReport, BoundsSummary, IssueScope, MaterialSummary, MeshSummary, Severity, TextureEntry, ValidationIssue,
-    ValidationReport,
+    AnalysisReport, BoundsSummary, IssueScope, MaterialSummary, MeshSummary, Severity,
+    TextureEntry, ValidationIssue, ValidationReport,
 };
 
 #[derive(Serialize)]

@@ -6,7 +6,8 @@ use ply_rs_bw::ply::Property;
 
 use super::geometry::compute_bounds;
 use super::report::{
-    AnalysisReport, IssueScope, MaterialSummary, MeshSummary, Severity, TextureEntry, ValidationIssue, ValidationReport,
+    AnalysisReport, IssueScope, MaterialSummary, MeshSummary, Severity, TextureEntry,
+    ValidationIssue, ValidationReport,
 };
 
 pub struct AnalyzerMesh {
@@ -124,7 +125,11 @@ impl ModelAnalyzer {
         let mut reader = BufReader::new(file);
         let indexed_mesh = stl_io::read_stl(&mut reader)?;
 
-        let positions: Vec<f32> = indexed_mesh.vertices.iter().flat_map(|v| [v[0], v[1], v[2]]).collect();
+        let positions: Vec<f32> = indexed_mesh
+            .vertices
+            .iter()
+            .flat_map(|v| [v[0], v[1], v[2]])
+            .collect();
 
         let indices: Vec<u32> = indexed_mesh
             .faces
@@ -167,15 +172,16 @@ impl ModelAnalyzer {
 
         let (has_normals, uv_keys) = if let Some(first) = ply_vertices.first() {
             let has_normals = first.get("nx").is_some();
-            let uv_keys: Option<(&str, &str)> = if first.get("s").is_some() && first.get("t").is_some() {
-                Some(("s", "t"))
-            } else if first.get("u").is_some() && first.get("v").is_some() {
-                Some(("u", "v"))
-            } else if first.get("texture_u").is_some() && first.get("texture_v").is_some() {
-                Some(("texture_u", "texture_v"))
-            } else {
-                None
-            };
+            let uv_keys: Option<(&str, &str)> =
+                if first.get("s").is_some() && first.get("t").is_some() {
+                    Some(("s", "t"))
+                } else if first.get("u").is_some() && first.get("v").is_some() {
+                    Some(("u", "v"))
+                } else if first.get("texture_u").is_some() && first.get("texture_v").is_some() {
+                    Some(("texture_u", "texture_v"))
+                } else {
+                    None
+                };
             (has_normals, uv_keys)
         } else {
             (false, None)
@@ -287,7 +293,11 @@ impl ModelAnalyzer {
         })
     }
 
-    fn collect_gltf_meshes(node: &gltf::Node, buffers: &[gltf::buffer::Data], meshes: &mut Vec<AnalyzerMesh>) {
+    fn collect_gltf_meshes(
+        node: &gltf::Node,
+        buffers: &[gltf::buffer::Data],
+        meshes: &mut Vec<AnalyzerMesh>,
+    ) {
         if let Some(mesh) = node.mesh() {
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -379,7 +389,10 @@ impl ModelAnalyzer {
                     issues.push(ValidationIssue {
                         severity: Severity::Error,
                         scope: IssueScope::Mesh(i),
-                        message: format!("Index count ({}) is not divisible by 3 (non-triangulated)", index_count),
+                        message: format!(
+                            "Index count ({}) is not divisible by 3 (non-triangulated)",
+                            index_count
+                        ),
                     });
                 }
 
@@ -441,7 +454,8 @@ impl ModelAnalyzer {
                     ("Dissolve", &mat.dissolve_texture),
                 ];
                 for &(slot, tex_opt) in tex_fields {
-                    if let Some(entry) = check_texture(&self.obj_dir, tex_opt, slot, &mut issues, i) {
+                    if let Some(entry) = check_texture(&self.obj_dir, tex_opt, slot, &mut issues, i)
+                    {
                         textures.push(entry);
                     }
                 }

@@ -178,8 +178,15 @@ impl HudRenderer {
         let hint_color: [f32; 4] = [text_val, text_val, text_val, 0.6];
 
         let file_info = if has_model && !self.filename.is_empty() {
-            let mesh_label = if self.mesh_count == 1 { "mesh" } else { "meshes" };
-            format!("{} \u{2014} {} {}", self.filename, self.mesh_count, mesh_label)
+            let mesh_label = if self.mesh_count == 1 {
+                "mesh"
+            } else {
+                "meshes"
+            };
+            format!(
+                "{} \u{2014} {} {}",
+                self.filename, self.mesh_count, mesh_label
+            )
         } else {
             String::new()
         };
@@ -218,7 +225,11 @@ impl HudRenderer {
             if !file_info.is_empty() {
                 sections.push(
                     Section::default()
-                        .add_text(Text::new(&file_info).with_scale(font_size_main).with_color(text_color))
+                        .add_text(
+                            Text::new(&file_info)
+                                .with_scale(font_size_main)
+                                .with_color(text_color),
+                        )
                         .with_screen_position((margin, y))
                         .with_layout(Layout::default_single_line()),
                 );
@@ -240,7 +251,11 @@ impl HudRenderer {
             if !bounds_info.is_empty() {
                 sections.push(
                     Section::default()
-                        .add_text(Text::new(bounds_info).with_scale(font_size_main).with_color(text_color))
+                        .add_text(
+                            Text::new(bounds_info)
+                                .with_scale(font_size_main)
+                                .with_color(text_color),
+                        )
                         .with_screen_position((margin, y))
                         .with_layout(Layout::default().h_align(HorizontalAlign::Left)),
                 );
@@ -265,7 +280,11 @@ impl HudRenderer {
             for line in &state_lines {
                 sections.push(
                     Section::default()
-                        .add_text(Text::new(line).with_scale(font_size_main).with_color(text_color))
+                        .add_text(
+                            Text::new(line)
+                                .with_scale(font_size_main)
+                                .with_color(text_color),
+                        )
                         .with_screen_position((screen_width as f32 - margin, yr))
                         .with_layout(Layout::default_single_line().h_align(HorizontalAlign::Right)),
                 );
@@ -279,7 +298,11 @@ impl HudRenderer {
             "? Hints"
         };
         let hint_section = Section::default()
-            .add_text(Text::new(hints).with_scale(font_size_hints).with_color(hint_color))
+            .add_text(
+                Text::new(hints)
+                    .with_scale(font_size_hints)
+                    .with_color(hint_color),
+            )
             .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 - margin))
             .with_layout(
                 Layout::default_wrap()
@@ -312,7 +335,11 @@ impl HudRenderer {
             let font_size_loading = 18.0 * sf;
             sections.push(
                 Section::default()
-                    .add_text(Text::new(msg).with_scale(font_size_loading).with_color(loading_color))
+                    .add_text(
+                        Text::new(msg)
+                            .with_scale(font_size_loading)
+                            .with_color(loading_color),
+                    )
                     .with_screen_position((screen_width as f32 / 2.0, screen_height as f32 / 2.0))
                     .with_layout(
                         Layout::default_single_line()

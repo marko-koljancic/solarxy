@@ -103,7 +103,6 @@ const PI: f32 = 3.14159265358979;
 const ROUGHNESS: f32 = 0.5;
 const METALLIC: f32 = 0.0;
 
-// GGX / Trowbridge-Reitz normal distribution
 fn D_GGX(NdotH: f32, roughness: f32) -> f32 {
     let a = roughness * roughness;
     let a2 = a * a;
@@ -111,24 +110,20 @@ fn D_GGX(NdotH: f32, roughness: f32) -> f32 {
     return a2 / (PI * d * d);
 }
 
-// Smith/Schlick-GGX geometry term (single direction)
 fn G_schlick(NdotV: f32, roughness: f32) -> f32 {
     let r = roughness + 1.0;
     let k = (r * r) / 8.0;
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
-// Smith combined geometry
 fn G_smith(NdotV: f32, NdotL: f32, roughness: f32) -> f32 {
     return G_schlick(NdotV, roughness) * G_schlick(NdotL, roughness);
 }
 
-// Schlick Fresnel
 fn F_schlick(cosTheta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// Cook-Torrance specular BRDF
 fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
     let H = normalize(V + L);
     let NdotV = max(dot(N, V), 0.001);
@@ -155,16 +150,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo = albedo_sample.xyz;
 
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
-    let N = normalize(n_sample.xyz * 2.0 - 1.0);   // tangent-space normal
+    let N = normalize(n_sample.xyz * 2.0 - 1.0);
     let V = normalize(in.tangent_view_position - in.tangent_position);
 
-    // Hemisphere ambient using world-space normal
     let N_world = normalize(in.world_normal);
     let sky = vec3(0.45, 0.48, 0.55);
     let ground = vec3(0.25, 0.22, 0.18);
     let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo;
 
-    // Shadow factor for key light
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;
     let in_map = all(uv >= vec2(0.0)) && all(uv <= vec2(1.0));
@@ -172,13 +165,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var radiance_acc = vec3(0.0);
 
-    // Key light (index 0) — shadowed
     {
         let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
         let scale = lights.lights[0].intensity * 3.0 * shadow;
         radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo) * scale;
     }
-    // Fill + rim (indices 1, 2) — unshadowed
+
     for (var i = 1u; i < 3u; i++) {
         let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
         let scale = lights.lights[i].intensity * 3.0;
@@ -186,6 +178,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let color = ambient + radiance_acc;
-    // HDR output — tone mapping applied in the composite pass
     return vec4(color, albedo_sample.a);
 }

@@ -196,7 +196,13 @@ pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
     result
 }
 
-type ProcessedModel = (Vec<Vec<ModelVertex>>, Vec<Vec<u32>>, AABB, Vec<AABB>, NormalsGeometry);
+type ProcessedModel = (
+    Vec<Vec<ModelVertex>>,
+    Vec<Vec<u32>>,
+    AABB,
+    Vec<AABB>,
+    NormalsGeometry,
+);
 
 pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let mut all_positions: Vec<[f32; 3]> = Vec::new();
@@ -292,5 +298,11 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         face_lines: all_face_lines,
     };
 
-    (mesh_vertex_data, mesh_index_data, bounds, mesh_bounds, normals_geo)
+    (
+        mesh_vertex_data,
+        mesh_index_data,
+        bounds,
+        mesh_bounds,
+        normals_geo,
+    )
 }

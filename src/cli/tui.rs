@@ -8,7 +8,9 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use solarxy::format_number;
-use solarxy::preferences::{self, BackgroundMode, LineWeight, NormalsMode, Preferences, ViewMode};
+use solarxy::preferences::{
+    self, BackgroundMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode, ViewMode,
+};
 
 use std::io;
 
@@ -49,7 +51,7 @@ pub struct TerminalApp {
     content_heights: [u16; 4],
     export_input: Option<String>,
     export_json_input: Option<String>,
-    status_message: Option<(String, bool)>, // (message, is_success)
+    status_message: Option<(String, bool)>,
 }
 
 impl TerminalApp {
@@ -83,12 +85,16 @@ impl TerminalApp {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(area);
 
-        // Tab bar
         let title = Line::from(vec![
             Span::raw(" "),
             Span::styled("\u{2600}", Style::default().fg(Color::Yellow)),
             Span::raw(" "),
-            Span::styled("Solarxy", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Solarxy",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
             Span::styled("Model Analysis", Style::default().fg(Color::White)),
             Span::raw(" "),
@@ -113,14 +119,13 @@ impl TerminalApp {
             .divider(" \u{2502} ");
         frame.render_widget(tabs_widget, chunks[0]);
 
-        // Content area
         let tab_idx = self.active_tab.index();
         let content_text = self.format_tab_content();
         self.content_heights[tab_idx] = content_text.lines.len() as u16;
 
-        let inner_height = chunks[1].height.saturating_sub(2); // borders
-        self.scroll_offsets[tab_idx] =
-            self.scroll_offsets[tab_idx].min(self.content_heights[tab_idx].saturating_sub(inner_height));
+        let inner_height = chunks[1].height.saturating_sub(2);
+        self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx]
+            .min(self.content_heights[tab_idx].saturating_sub(inner_height));
 
         let position = format!(
             " [{}/{}] ",
@@ -135,14 +140,26 @@ impl TerminalApp {
                 Span::raw(" "),
                 Span::styled(
                     "Export JSON to: ",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(path.clone(), Style::default().fg(Color::White)),
                 Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
                 Span::raw("  "),
-                Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Save  "),
-                Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Cancel "),
             ])
         } else if let Some(ref path) = self.export_input {
@@ -150,21 +167,36 @@ impl TerminalApp {
                 Span::raw(" "),
                 Span::styled(
                     "Export to: ",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(path.clone(), Style::default().fg(Color::White)),
                 Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
                 Span::raw("  "),
-                Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Save  "),
-                Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Cancel "),
             ])
         } else if let Some((ref msg, success)) = self.status_message {
             let color = if success { Color::Green } else { Color::Red };
             Line::from(vec![
                 Span::raw(" "),
-                Span::styled(msg.clone(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    msg.clone(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" "),
             ])
         } else {
@@ -172,18 +204,45 @@ impl TerminalApp {
                 Span::raw(" "),
                 Span::styled(
                     "Tab/1-4",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Switch  "),
-                Span::styled("j/k", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "j/k",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Scroll  "),
-                Span::styled("g/G", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "g/G",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Top/Bottom  "),
-                Span::styled("e", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "e",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Export  "),
-                Span::styled("J", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "J",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" JSON  "),
-                Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "q",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" Quit "),
             ])
         };
@@ -201,7 +260,6 @@ impl TerminalApp {
             .wrap(Wrap { trim: false });
         frame.render_widget(paragraph, chunks[1]);
 
-        // Scrollbar
         if self.content_heights[tab_idx] > inner_height {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("\u{2191}"))
@@ -222,14 +280,15 @@ impl TerminalApp {
 
     fn handle_events(&mut self) -> io::Result<()> {
         match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => self.handle_key_event(key_event),
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
             _ => {}
         };
         Ok(())
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        // JSON export input mode
         if let Some(ref mut path) = self.export_json_input {
             match key_event.code {
                 KeyCode::Enter => {
@@ -247,7 +306,6 @@ impl TerminalApp {
             return;
         }
 
-        // Text export input mode
         if let Some(ref mut path) = self.export_input {
             match key_event.code {
                 KeyCode::Enter => {
@@ -265,7 +323,6 @@ impl TerminalApp {
             return;
         }
 
-        // Clear status message on any keypress
         self.status_message = None;
 
         let tab_idx = self.active_tab.index();
@@ -355,7 +412,10 @@ impl TerminalApp {
             kv_line("Material Count", &self.report.material_count.to_string()),
             kv_line("Total Vertices", &format_number(self.report.total_vertices)),
             kv_line("Total Indices", &format_number(self.report.total_indices)),
-            kv_line("Total Triangles", &format_number(self.report.total_triangles)),
+            kv_line(
+                "Total Triangles",
+                &format_number(self.report.total_triangles),
+            ),
         ];
 
         if let Some(ref bounds) = self.report.bounds {
@@ -364,15 +424,24 @@ impl TerminalApp {
             lines.push(Line::from(""));
             lines.push(kv_line(
                 "Min",
-                &format!("[{:.3}, {:.3}, {:.3}]", bounds.min[0], bounds.min[1], bounds.min[2]),
+                &format!(
+                    "[{:.3}, {:.3}, {:.3}]",
+                    bounds.min[0], bounds.min[1], bounds.min[2]
+                ),
             ));
             lines.push(kv_line(
                 "Max",
-                &format!("[{:.3}, {:.3}, {:.3}]", bounds.max[0], bounds.max[1], bounds.max[2]),
+                &format!(
+                    "[{:.3}, {:.3}, {:.3}]",
+                    bounds.max[0], bounds.max[1], bounds.max[2]
+                ),
             ));
             lines.push(kv_line(
                 "Size",
-                &format!("[{:.3}, {:.3}, {:.3}]", bounds.size[0], bounds.size[1], bounds.size[2]),
+                &format!(
+                    "[{:.3}, {:.3}, {:.3}]",
+                    bounds.size[0], bounds.size[1], bounds.size[2]
+                ),
             ));
             lines.push(kv_line(
                 "Center",
@@ -404,7 +473,9 @@ impl TerminalApp {
         for (i, mesh) in self.report.meshes.iter().enumerate() {
             lines.push(Line::from(Span::styled(
                 format!("Mesh [{}]:", mesh.index),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(kv_line("  Vertices", &format_number(mesh.vertex_count)));
             lines.push(kv_line("  Indices", &format_number(mesh.index_count)));
@@ -429,7 +500,11 @@ impl TerminalApp {
             };
             lines.push(kv_line(
                 "  Texture Coords",
-                &format!("{} {}", format_number(mesh.texcoord_count), texcoord_indicator),
+                &format!(
+                    "{} {}",
+                    format_number(mesh.texcoord_count),
+                    texcoord_indicator
+                ),
             ));
 
             let mat_str = match (&mesh.material_name, mesh.material_id) {
@@ -466,15 +541,23 @@ impl TerminalApp {
         for (i, mat) in self.report.materials.iter().enumerate() {
             lines.push(Line::from(Span::styled(
                 format!("Material [{}]: '{}'", mat.index, mat.name),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(kv_line(
                 "  Ambient",
-                &format!("[{:.3}, {:.3}, {:.3}]", mat.ambient[0], mat.ambient[1], mat.ambient[2]),
+                &format!(
+                    "[{:.3}, {:.3}, {:.3}]",
+                    mat.ambient[0], mat.ambient[1], mat.ambient[2]
+                ),
             ));
             lines.push(kv_line(
                 "  Diffuse",
-                &format!("[{:.3}, {:.3}, {:.3}]", mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]),
+                &format!(
+                    "[{:.3}, {:.3}, {:.3}]",
+                    mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]
+                ),
             ));
             lines.push(kv_line(
                 "  Specular",
@@ -491,12 +574,18 @@ impl TerminalApp {
                 lines.push(kv_line("  Dissolve (opacity)", &format!("{:.3}", dissolve)));
             }
             if let Some(optical_density) = mat.optical_density {
-                lines.push(kv_line("  Optical Density", &format!("{:.3}", optical_density)));
+                lines.push(kv_line(
+                    "  Optical Density",
+                    &format!("{:.3}", optical_density),
+                ));
             }
 
             lines.push(kv_line_label_only("  Textures"));
             if mat.textures.is_empty() {
-                lines.push(Line::from(Span::styled("    None", Style::default().fg(Color::Gray))));
+                lines.push(Line::from(Span::styled(
+                    "    None",
+                    Style::default().fg(Color::Gray),
+                )));
             } else {
                 for tex in &mat.textures {
                     let style = if tex.exists {
@@ -509,7 +598,9 @@ impl TerminalApp {
                         Span::raw("    "),
                         Span::styled(
                             format!("{}:", tex.slot),
-                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw(" "),
                         Span::styled(format!("'{}'", tex.path), style),
@@ -535,7 +626,9 @@ impl TerminalApp {
         if self.report.validation.is_clean() {
             lines.push(Line::from(Span::styled(
                 "\u{2713} No issues found",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             )));
             return Text::from(lines);
         }
@@ -550,7 +643,11 @@ impl TerminalApp {
             Span::raw(", "),
             Span::styled(
                 format!("{} warning(s)", warnings),
-                Style::default().fg(if warnings > 0 { Color::Yellow } else { Color::Green }),
+                Style::default().fg(if warnings > 0 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                }),
             ),
         ]));
         lines.push(Line::from(""));
@@ -565,7 +662,10 @@ impl TerminalApp {
                     format!("{} ", tag),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{}", issue.scope), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}", issue.scope),
+                    Style::default().fg(Color::White),
+                ),
                 Span::raw(": "),
                 Span::styled(issue.message.clone(), Style::default().fg(color)),
             ]));
@@ -578,7 +678,9 @@ impl TerminalApp {
 fn section_header(text: &str) -> Line<'static> {
     Line::from(Span::styled(
         text.to_string(),
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -586,7 +688,9 @@ fn kv_line(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             format!("{}:", label),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(value.to_string(), Style::default().fg(Color::White)),
@@ -596,7 +700,9 @@ fn kv_line(label: &str, value: &str) -> Line<'static> {
 fn kv_line_label_only(label: &str) -> Line<'static> {
     Line::from(Span::styled(
         format!("{}:", label),
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -605,7 +711,9 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     if v.is_clean() {
         Line::from(Span::styled(
             " \u{2713} Clean ".to_string(),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ))
     } else {
         let mut spans = Vec::new();
@@ -613,7 +721,11 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
         let warnings = v.warning_count();
         if errors > 0 {
             spans.push(Span::styled(
-                format!(" \u{2717} {} error{} ", errors, if errors == 1 { "" } else { "s" }),
+                format!(
+                    " \u{2717} {} error{} ",
+                    errors,
+                    if errors == 1 { "" } else { "s" }
+                ),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         }
@@ -624,18 +736,16 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
                     warnings,
                     if warnings == 1 { "" } else { "s" }
                 ),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         Line::from(spans)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preferences TUI
-// ---------------------------------------------------------------------------
-
-const PREF_FIELD_COUNT: usize = 9;
+const PREF_FIELD_COUNT: usize = 12;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -674,16 +784,24 @@ impl PreferencesApp {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
             .split(area);
 
-        // Title bar
         let dirty_marker = if self.is_dirty() { " *" } else { "" };
         let title = Line::from(vec![
             Span::raw(" "),
             Span::styled("\u{2600}", Style::default().fg(Color::Yellow)),
             Span::raw(" "),
-            Span::styled("Solarxy", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Solarxy",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
             Span::styled("Preferences", Style::default().fg(Color::White)),
             Span::styled(dirty_marker.to_string(), Style::default().fg(Color::Yellow)),
@@ -695,7 +813,6 @@ impl PreferencesApp {
             .border_style(Style::default().fg(Color::Cyan));
         frame.render_widget(title_block, chunks[0]);
 
-        // Content area — preference fields
         let content = self.format_fields();
         let content_block = Block::bordered()
             .border_set(border::ROUNDED)
@@ -703,12 +820,14 @@ impl PreferencesApp {
         let paragraph = Paragraph::new(content).block(content_block);
         frame.render_widget(paragraph, chunks[1]);
 
-        // Bottom bar — keybinding hints + status
         let bottom_line = if let Some((ref msg, is_success)) = self.status_message {
             let color = if is_success { Color::Green } else { Color::Red };
             Line::from(vec![
                 Span::raw(" "),
-                Span::styled(msg.clone(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    msg.clone(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
             ])
         } else {
             Line::from(vec![
@@ -740,6 +859,9 @@ impl PreferencesApp {
             "Grid Visible",
             "Axis Gizmo Visible",
             "Bloom Enabled",
+            "UV Mode",
+            "Projection Mode",
+            "Turntable Active",
             "Wireframe Line Weight",
             "MSAA Sample Count",
             "Lighting Lock",
@@ -752,6 +874,9 @@ impl PreferencesApp {
             format!("{}", self.preferences.display.grid_visible),
             format!("{}", self.preferences.display.axis_gizmo_visible),
             format!("{}", self.preferences.display.bloom_enabled),
+            format!("{}", self.preferences.display.uv_mode),
+            format!("{}", self.preferences.display.projection_mode),
+            format!("{}", self.preferences.display.turntable_active),
             format!("{}", self.preferences.rendering.wireframe_line_weight),
             format!("{}", self.preferences.rendering.msaa_sample_count),
             format!("{}", self.preferences.lighting.lock),
@@ -764,6 +889,9 @@ impl PreferencesApp {
             format!("{}", self.original.display.grid_visible),
             format!("{}", self.original.display.axis_gizmo_visible),
             format!("{}", self.original.display.bloom_enabled),
+            format!("{}", self.original.display.uv_mode),
+            format!("{}", self.original.display.projection_mode),
+            format!("{}", self.original.display.turntable_active),
             format!("{}", self.original.rendering.wireframe_line_weight),
             format!("{}", self.original.rendering.msaa_sample_count),
             format!("{}", self.original.lighting.lock),
@@ -777,15 +905,23 @@ impl PreferencesApp {
             let is_changed = values[i] != original_values[i];
 
             let marker = if is_selected { "\u{25b6} " } else { "  " };
-            let value_color = if is_changed { Color::Yellow } else { Color::White };
+            let value_color = if is_changed {
+                Color::Yellow
+            } else {
+                Color::White
+            };
             let label_style = if is_selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Green)
             };
 
             let value_style = if is_selected {
-                Style::default().fg(value_color).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(value_color)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(value_color)
             };
@@ -802,7 +938,9 @@ impl PreferencesApp {
 
     fn handle_events(&mut self) -> io::Result<()> {
         match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => self.handle_key_event(key_event),
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
             _ => {}
         };
         Ok(())
@@ -859,16 +997,37 @@ impl PreferencesApp {
                 };
             }
             3 => self.preferences.display.grid_visible = !self.preferences.display.grid_visible,
-            4 => self.preferences.display.axis_gizmo_visible = !self.preferences.display.axis_gizmo_visible,
+            4 => {
+                self.preferences.display.axis_gizmo_visible =
+                    !self.preferences.display.axis_gizmo_visible
+            }
             5 => self.preferences.display.bloom_enabled = !self.preferences.display.bloom_enabled,
             6 => {
+                self.preferences.display.uv_mode = if forward {
+                    self.preferences.display.uv_mode.next()
+                } else {
+                    cycle_back_uv_mode(self.preferences.display.uv_mode)
+                };
+            }
+            7 => {
+                self.preferences.display.projection_mode = if forward {
+                    self.preferences.display.projection_mode.next()
+                } else {
+                    cycle_back_projection_mode(self.preferences.display.projection_mode)
+                };
+            }
+            8 => {
+                self.preferences.display.turntable_active =
+                    !self.preferences.display.turntable_active
+            }
+            9 => {
                 self.preferences.rendering.wireframe_line_weight = if forward {
                     self.preferences.rendering.wireframe_line_weight.next()
                 } else {
                     cycle_back_line_weight(self.preferences.rendering.wireframe_line_weight)
                 };
             }
-            7 => {
+            10 => {
                 self.preferences.rendering.msaa_sample_count = if forward {
                     match self.preferences.rendering.msaa_sample_count {
                         1 => 2,
@@ -883,7 +1042,7 @@ impl PreferencesApp {
                     }
                 };
             }
-            8 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
+            11 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
             _ => {}
         }
     }
@@ -947,5 +1106,20 @@ fn cycle_back_line_weight(weight: LineWeight) -> LineWeight {
         LineWeight::Light => LineWeight::Bold,
         LineWeight::Medium => LineWeight::Light,
         LineWeight::Bold => LineWeight::Medium,
+    }
+}
+
+fn cycle_back_uv_mode(mode: UvMode) -> UvMode {
+    match mode {
+        UvMode::Off => UvMode::Checker,
+        UvMode::Gradient => UvMode::Off,
+        UvMode::Checker => UvMode::Gradient,
+    }
+}
+
+fn cycle_back_projection_mode(mode: ProjectionMode) -> ProjectionMode {
+    match mode {
+        ProjectionMode::Perspective => ProjectionMode::Orthographic,
+        ProjectionMode::Orthographic => ProjectionMode::Perspective,
     }
 }

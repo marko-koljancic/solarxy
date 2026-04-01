@@ -29,10 +29,12 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
 
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {
-        let diffuse_path = m
-            .diffuse_texture
-            .as_deref()
-            .map(|p| std::path::Path::new(&obj_dir).join(p).to_string_lossy().to_string());
+        let diffuse_path = m.diffuse_texture.as_deref().map(|p| {
+            std::path::Path::new(&obj_dir)
+                .join(p)
+                .to_string_lossy()
+                .to_string()
+        });
 
         let normal_path = m.normal_texture.as_deref().map(|p| {
             let cleaned = p

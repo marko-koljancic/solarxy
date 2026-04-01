@@ -1,6 +1,3 @@
-// Bloom extraction and blur passes.
-// Operates pre-tone-map on linear HDR values.
-
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -11,7 +8,6 @@ fn vs_fullscreen(@builtin(vertex_index) id: u32) -> VertexOutput {
     let uv = vec2<f32>(f32((id << 1u) & 2u), f32(id & 2u));
     var out: VertexOutput;
     out.position = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
-    // Flip V so uv (0,0) maps to texture top-left
     out.uv = vec2<f32>(uv.x, 1.0 - uv.y);
     return out;
 }
@@ -38,7 +34,6 @@ fn fs_brightness_extract(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(color * contribution, 1.0);
 }
 
-// 9-tap separable Gaussian, sigma ~= 2.0
 const OFFSETS: array<f32, 4> = array<f32, 4>(1.0, 2.0, 3.0, 4.0);
 const WEIGHTS: array<f32, 5> = array<f32, 5>(
     0.2270270270,

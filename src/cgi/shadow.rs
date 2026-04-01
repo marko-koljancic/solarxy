@@ -114,7 +114,11 @@ impl ShadowState {
     ) {
         let light_vp = compute_light_vp(light_pos, target, extent);
         self.uniform.light_vp = light_vp.into();
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.uniform]),
+        );
     }
 }
 

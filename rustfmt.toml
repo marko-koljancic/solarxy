@@ -1,9 +1,9 @@
 use_field_init_shorthand = true
 newline_style = "Unix"
 style_edition = "2024"
-max_width = 120
+max_width = 100
 wrap_comments = false
-comment_width = 120
+comment_width = 100
 normalize_comments = true
 reorder_imports = false
 merge_imports = true

@@ -1,5 +1,6 @@
 use winit::{event::MouseButton, keyboard::KeyCode};
 use super::model;
+use crate::preferences::ProjectionMode;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -8,21 +9,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum ProjectionMode {
-    Perspective,
-    Orthographic,
-}
-
-impl std::fmt::Display for ProjectionMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectionMode::Perspective => write!(f, "Perspective"),
-            ProjectionMode::Orthographic => write!(f, "Orthographic"),
-        }
-    }
-}
 
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
@@ -88,7 +74,8 @@ pub fn camera_from_bounds_axis(
     let dir_n = direction.normalize();
     let right = dir_n.cross(up).normalize();
     let up_n = right.cross(dir_n);
-    let half_w = half_ext.x * right.x.abs() + half_ext.y * right.y.abs() + half_ext.z * right.z.abs();
+    let half_w =
+        half_ext.x * right.x.abs() + half_ext.y * right.y.abs() + half_ext.z * right.z.abs();
     let half_h = half_ext.x * up_n.x.abs() + half_ext.y * up_n.y.abs() + half_ext.z * up_n.z.abs();
 
     let ortho_scale = half_h.max(half_w / aspect) * 1.2;
@@ -262,7 +249,8 @@ impl CameraController {
             let mut pitch = f32::atan2(offset.y, horiz);
 
             yaw += self.orbit_delta.0;
-            pitch = (pitch + self.orbit_delta.1).clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
+            pitch =
+                (pitch + self.orbit_delta.1).clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
 
             camera.eye = camera.target
                 + cgmath::Vector3::new(

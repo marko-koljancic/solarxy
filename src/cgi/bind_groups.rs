@@ -99,7 +99,11 @@ impl BindGroupLayouts {
         });
         let composite = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("composite_bind_group_layout"),
-            entries: &[bgl_texture_entry(0), bgl_texture_entry(1), bgl_sampler_entry(2)],
+            entries: &[
+                bgl_texture_entry(0),
+                bgl_texture_entry(1),
+                bgl_sampler_entry(2),
+            ],
         });
         let composite_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("composite_params_bind_group_layout"),

@@ -9,7 +9,8 @@ pub(crate) struct Instance {
 
 impl Instance {
     pub(crate) fn to_raw(&self) -> InstanceRaw {
-        let model = cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation);
+        let model =
+            cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation);
         InstanceRaw {
             model: model.into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
@@ -116,7 +117,10 @@ impl Pipelines {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_shadow"),
-                    buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
+                    buffers: &[
+                        model::ModelVertex::description(),
+                        InstanceRaw::description(),
+                    ],
                     compilation_options: Default::default(),
                 },
                 fragment: None,
@@ -146,7 +150,12 @@ impl Pipelines {
         let main = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Rendering Pipeline Layout"),
-                bind_group_layouts: &[&layouts.texture, &layouts.camera, &layouts.light, &layouts.shadow_read],
+                bind_group_layouts: &[
+                    &layouts.texture,
+                    &layouts.camera,
+                    &layouts.light,
+                    &layouts.shadow_read,
+                ],
                 push_constant_ranges: &[],
             });
             create_render_pipeline(
@@ -154,7 +163,10 @@ impl Pipelines {
                 &layout,
                 hdr_format,
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::description(), InstanceRaw::description()],
+                &[
+                    model::ModelVertex::description(),
+                    InstanceRaw::description(),
+                ],
                 wgpu::ShaderModuleDescriptor {
                     label: Some("Normal Shader"),
                     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
@@ -242,7 +254,11 @@ impl Pipelines {
         });
         let edge_wire_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Edge Wire Pipeline Layout"),
-            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_params, &layouts.edge_geometry],
+            bind_group_layouts: &[
+                &layouts.camera,
+                &layouts.wireframe_params,
+                &layouts.edge_geometry,
+            ],
             push_constant_ranges: &[],
         });
         let edge_wire = create_edge_wire_pipeline(
@@ -642,7 +658,11 @@ fn create_ghosted_pipeline(
     depth_bias: Option<wgpu::DepthBiasState>,
     sample_count: u32,
 ) -> wgpu::RenderPipeline {
-    let cull_mode = if depth_write { Some(wgpu::Face::Back) } else { None };
+    let cull_mode = if depth_write {
+        Some(wgpu::Face::Back)
+    } else {
+        None
+    };
     let blend = if depth_write {
         wgpu::BlendState {
             alpha: wgpu::BlendComponent::REPLACE,
@@ -658,7 +678,10 @@ fn create_ghosted_pipeline(
         vertex: wgpu::VertexState {
             module: shader,
             entry_point: Some(vertex_entry),
-            buffers: &[model::ModelVertex::description(), InstanceRaw::description()],
+            buffers: &[
+                model::ModelVertex::description(),
+                InstanceRaw::description(),
+            ],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {

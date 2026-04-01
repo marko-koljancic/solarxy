@@ -1,11 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// ---------------------------------------------------------------------------
-// Enums (moved from state.rs — shared between viewer and TUI)
-// ---------------------------------------------------------------------------
-
-/// Display mode for model geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode {
     Shaded,
@@ -36,7 +31,6 @@ impl std::fmt::Display for ViewMode {
     }
 }
 
-/// Wireframe line thickness.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LineWeight {
     Light,
@@ -72,7 +66,6 @@ impl std::fmt::Display for LineWeight {
     }
 }
 
-/// Normals visualization mode.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum NormalsMode {
     Off,
@@ -103,7 +96,6 @@ impl std::fmt::Display for NormalsMode {
     }
 }
 
-/// Named background color presets.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BackgroundMode {
     White,
@@ -134,86 +126,103 @@ impl std::fmt::Display for BackgroundMode {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preferences structs
-// ---------------------------------------------------------------------------
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum UvMode {
+    #[default]
+    Off,
+    Gradient,
+    Checker,
+}
 
-/// Top-level preferences, serialized as TOML.
-///
-/// Schema version is tracked via `config_version` for forward compatibility.
-/// Unknown fields are silently ignored on deserialization.
+impl UvMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Gradient,
+            Self::Gradient => Self::Checker,
+            Self::Checker => Self::Off,
+        }
+    }
+}
+
+impl std::fmt::Display for UvMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Off => write!(f, "Off"),
+            Self::Gradient => write!(f, "Gradient"),
+            Self::Checker => write!(f, "Checker"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ProjectionMode {
+    #[default]
+    Perspective,
+    Orthographic,
+}
+
+impl ProjectionMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Perspective => Self::Orthographic,
+            Self::Orthographic => Self::Perspective,
+        }
+    }
+}
+
+impl std::fmt::Display for ProjectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Perspective => write!(f, "Perspective"),
+            Self::Orthographic => write!(f, "Orthographic"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
-    /// Schema version — always 1 for now.
     pub config_version: u32,
-
-    /// Display-related preferences (background, modes, toggles).
     #[serde(default)]
     pub display: DisplayPrefs,
-
-    /// Rendering quality settings.
     #[serde(default)]
     pub rendering: RenderingPrefs,
-
-    /// Lighting behavior.
     #[serde(default)]
     pub lighting: LightingPrefs,
-
-    /// Usage history (recent files).
     #[serde(default)]
     pub history: HistoryPrefs,
 }
 
-/// Display settings that control visual appearance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayPrefs {
-    /// Background color preset: White, Gradient, DarkGray, or Black.
     pub background: BackgroundMode,
-
-    /// Initial view mode: Shaded, ShadedWireframe, WireframeOnly, or Ghosted.
     pub view_mode: ViewMode,
-
-    /// Normals visualization: Off, Face, Vertex, or FaceAndVertex.
     pub normals_mode: NormalsMode,
-
-    /// Whether the ground grid is visible on launch.
     pub grid_visible: bool,
-
-    /// Whether the axis orientation gizmo is visible on launch.
     pub axis_gizmo_visible: bool,
-
-    /// Whether the bloom post-processing effect is enabled on launch.
     pub bloom_enabled: bool,
+    #[serde(default)]
+    pub uv_mode: UvMode,
+    #[serde(default)]
+    pub projection_mode: ProjectionMode,
+    #[serde(default)]
+    pub turntable_active: bool,
 }
 
-/// Rendering quality settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RenderingPrefs {
-    /// Wireframe line thickness: Light (1px), Medium (2px), or Bold (3px).
     pub wireframe_line_weight: LineWeight,
-
-    /// MSAA sample count. Valid values: 1 (off), 2, or 4. Applied on launch only.
     pub msaa_sample_count: u32,
 }
 
-/// Lighting behavior settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LightingPrefs {
-    /// When true, lights are locked in world space.
-    /// When false (default), lights follow the camera.
     pub lock: bool,
 }
 
-/// Usage history.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistoryPrefs {
-    /// Recently opened model file paths, most recent first. Max 20 entries.
     pub recent_files: Vec<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Defaults — match the original hardcoded values in state.rs
-// ---------------------------------------------------------------------------
 
 impl Default for Preferences {
     fn default() -> Self {
@@ -236,6 +245,9 @@ impl Default for DisplayPrefs {
             grid_visible: true,
             axis_gizmo_visible: false,
             bloom_enabled: true,
+            uv_mode: UvMode::Off,
+            projection_mode: ProjectionMode::Perspective,
+            turntable_active: false,
         }
     }
 }
@@ -249,18 +261,12 @@ impl Default for RenderingPrefs {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Config file I/O
-// ---------------------------------------------------------------------------
-
 const MAX_RECENT_FILES: usize = 20;
 
-/// Returns the config file path: `<config_dir>/solarxy/config.toml`.
 pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("solarxy").join("config.toml"))
 }
 
-/// Load preferences from disk. Returns compiled-in defaults on any error.
 pub fn load() -> Preferences {
     #[cfg(debug_assertions)]
     if let Some(ref path) = config_path() {
@@ -294,15 +300,16 @@ pub fn load() -> Preferences {
     }
 }
 
-/// Save preferences to disk. Creates the config directory if needed.
 pub fn save(prefs: &Preferences) -> Result<(), String> {
     let path = config_path().ok_or("Could not determine config directory")?;
 
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create config directory: {}", e))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
     }
 
-    let toml_str = toml::to_string_pretty(prefs).map_err(|e| format!("Failed to serialize preferences: {}", e))?;
+    let toml_str = toml::to_string_pretty(prefs)
+        .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
 
     let tmp_path = path.with_extension("toml.tmp");
     std::fs::write(&tmp_path, &toml_str).map_err(|e| format!("Failed to write config: {}", e))?;
@@ -311,7 +318,6 @@ pub fn save(prefs: &Preferences) -> Result<(), String> {
     Ok(())
 }
 
-/// Add a file path to the recent files list, deduplicate, and persist.
 pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
     let files = &mut prefs.history.recent_files;
     files.retain(|p| p != path);
@@ -319,10 +325,6 @@ pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
     files.truncate(MAX_RECENT_FILES);
     let _ = save(prefs);
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -347,6 +349,9 @@ mod tests {
                 grid_visible: false,
                 axis_gizmo_visible: true,
                 bloom_enabled: false,
+                uv_mode: UvMode::Checker,
+                projection_mode: ProjectionMode::Orthographic,
+                turntable_active: true,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
@@ -375,6 +380,9 @@ mod tests {
             grid_visible = true
             axis_gizmo_visible = false
             bloom_enabled = true
+            uv_mode = "Off"
+            projection_mode = "Perspective"
+            turntable_active = false
             future_toggle = true
 
             [rendering]
@@ -424,7 +432,6 @@ mod tests {
     fn recent_files_dedup_and_truncate() {
         let mut prefs = Preferences::default();
         for i in 0..25 {
-            // Don't actually save to disk in tests
             let files = &mut prefs.history.recent_files;
             let path = format!("/tmp/model_{}.obj", i);
             files.retain(|p| *p != path);
@@ -434,12 +441,12 @@ mod tests {
         assert_eq!(prefs.history.recent_files.len(), MAX_RECENT_FILES);
         assert_eq!(prefs.history.recent_files[0], "/tmp/model_24.obj");
 
-        // Add a duplicate — should move to front, not increase count
         let files = &mut prefs.history.recent_files;
         let dup = "/tmp/model_10.obj".to_string();
         files.retain(|p| *p != dup);
         files.insert(0, dup.clone());
         files.truncate(MAX_RECENT_FILES);
+
         assert_eq!(prefs.history.recent_files.len(), MAX_RECENT_FILES);
         assert_eq!(prefs.history.recent_files[0], "/tmp/model_10.obj");
     }

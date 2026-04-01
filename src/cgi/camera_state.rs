@@ -3,7 +3,10 @@ use wgpu::util::DeviceExt;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use super::camera::{camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform, ProjectionMode};
+use super::camera::{
+    camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform,
+};
+use crate::preferences::ProjectionMode;
 use super::model::AABB;
 
 struct CameraTransition {
@@ -23,7 +26,12 @@ pub struct CameraState {
 }
 
 impl CameraState {
-    pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, bounds: &AABB, aspect: f32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        bounds: &AABB,
+        aspect: f32,
+    ) -> Self {
         let camera = camera_from_bounds(bounds, aspect);
         let mut uniform = CameraUniform::new();
         uniform.update_view_proj(&camera);
@@ -58,7 +66,8 @@ impl CameraState {
             self.camera.eye = lerp_point3(self.camera.eye, transition.dest_eye, factor);
             self.camera.target = lerp_point3(self.camera.target, transition.dest_target, factor);
             self.camera.up = lerp_vec3(self.camera.up, transition.dest_up, factor).normalize();
-            self.camera.ortho_scale = lerp_f32(self.camera.ortho_scale, transition.dest_ortho_scale, factor);
+            self.camera.ortho_scale =
+                lerp_f32(self.camera.ortho_scale, transition.dest_ortho_scale, factor);
 
             let eye_done = (self.camera.eye - transition.dest_eye).magnitude2() < 0.000001;
             let target_done = (self.camera.target - transition.dest_target).magnitude2() < 0.000001;
@@ -85,13 +94,20 @@ impl CameraState {
         self.start_transition(&dest);
     }
 
-    pub fn reset_to_bounds_axis(&mut self, bounds: &AABB, direction: cgmath::Vector3<f32>, up: cgmath::Vector3<f32>) {
+    pub fn reset_to_bounds_axis(
+        &mut self,
+        bounds: &AABB,
+        direction: cgmath::Vector3<f32>,
+        up: cgmath::Vector3<f32>,
+    ) {
         let dest = camera_from_bounds_axis(bounds, self.camera.aspect, direction, up);
         self.start_transition(&dest);
     }
 
     fn start_transition(&mut self, dest: &Camera) {
-        if dest.projection == ProjectionMode::Orthographic && self.camera.projection != ProjectionMode::Orthographic {
+        if dest.projection == ProjectionMode::Orthographic
+            && self.camera.projection != ProjectionMode::Orthographic
+        {
             let dist = (self.camera.target - self.camera.eye).magnitude();
             self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
         }
@@ -107,7 +123,9 @@ impl CameraState {
     }
 
     pub fn set_projection(&mut self, mode: ProjectionMode) {
-        if mode == ProjectionMode::Orthographic && self.camera.projection != ProjectionMode::Orthographic {
+        if mode == ProjectionMode::Orthographic
+            && self.camera.projection != ProjectionMode::Orthographic
+        {
             let dist = (self.camera.target - self.camera.eye).magnitude();
             self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
         }
@@ -156,9 +174,17 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn lerp_point3(a: cgmath::Point3<f32>, b: cgmath::Point3<f32>, t: f32) -> cgmath::Point3<f32> {
-    cgmath::Point3::new(lerp_f32(a.x, b.x, t), lerp_f32(a.y, b.y, t), lerp_f32(a.z, b.z, t))
+    cgmath::Point3::new(
+        lerp_f32(a.x, b.x, t),
+        lerp_f32(a.y, b.y, t),
+        lerp_f32(a.z, b.z, t),
+    )
 }
 
 fn lerp_vec3(a: cgmath::Vector3<f32>, b: cgmath::Vector3<f32>, t: f32) -> cgmath::Vector3<f32> {
-    cgmath::Vector3::new(lerp_f32(a.x, b.x, t), lerp_f32(a.y, b.y, t), lerp_f32(a.z, b.z, t))
+    cgmath::Vector3::new(
+        lerp_f32(a.x, b.x, t),
+        lerp_f32(a.y, b.y, t),
+        lerp_f32(a.z, b.z, t),
+    )
 }

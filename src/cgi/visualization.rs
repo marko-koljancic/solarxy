@@ -88,13 +88,14 @@ impl VisualizationState {
             }]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let vertex_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Normals Color Buffer"),
-            contents: bytemuck::cast_slice(&[NormalsColor {
-                color: [0.25, 0.55, 1.0, 1.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let vertex_normals_color_buf =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Normals Color Buffer"),
+                contents: bytemuck::cast_slice(&[NormalsColor {
+                    color: [0.25, 0.55, 1.0, 1.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
         let face_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Face Normals Bind Group"),
@@ -265,7 +266,11 @@ fn bounds_color_palette() -> [[f32; 3]; 8] {
     ]
 }
 
-fn create_normals_buffer(device: &wgpu::Device, lines: &[[f32; 3]], label: &str) -> (wgpu::Buffer, u32) {
+fn create_normals_buffer(
+    device: &wgpu::Device,
+    lines: &[[f32; 3]],
+    label: &str,
+) -> (wgpu::Buffer, u32) {
     if lines.is_empty() {
         (
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

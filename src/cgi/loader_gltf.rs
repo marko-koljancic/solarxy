@@ -25,7 +25,11 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
     })
 }
 
-fn extract_materials(document: &gltf::Document, images: &[gltf::image::Data], file_path: &str) -> Vec<RawMaterialData> {
+fn extract_materials(
+    document: &gltf::Document,
+    images: &[gltf::image::Data],
+    file_path: &str,
+) -> Vec<RawMaterialData> {
     let parent_dir = std::path::Path::new(file_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
@@ -105,7 +109,11 @@ fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
             .chunks_exact(2)
             .flat_map(|rg| [rg[0], rg[1], 0, 255])
             .collect(),
-        gltf::image::Format::R16G16 => img.pixels.chunks_exact(4).flat_map(|c| [c[0], c[2], 0, 255]).collect(),
+        gltf::image::Format::R16G16 => img
+            .pixels
+            .chunks_exact(4)
+            .flat_map(|c| [c[0], c[2], 0, 255])
+            .collect(),
         gltf::image::Format::R32G32B32A32FLOAT => img
             .pixels
             .chunks_exact(16)
@@ -146,13 +154,22 @@ fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
     })
 }
 
-fn extract_meshes(document: &gltf::Document, buffers: &[gltf::buffer::Data]) -> (Vec<RawMeshData>, usize) {
+fn extract_meshes(
+    document: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+) -> (Vec<RawMeshData>, usize) {
     let mut meshes = Vec::new();
     let mut total_polygons = 0usize;
 
     for scene in document.scenes() {
         for node in scene.nodes() {
-            collect_meshes_recursive(&node, Matrix4::identity(), buffers, &mut meshes, &mut total_polygons);
+            collect_meshes_recursive(
+                &node,
+                Matrix4::identity(),
+                buffers,
+                &mut meshes,
+                &mut total_polygons,
+            );
         }
     }
 
@@ -212,7 +229,9 @@ fn collect_meshes_recursive(
                 .collect()
             });
 
-            let tex_coords: Option<Vec<[f32; 2]>> = reader.read_tex_coords(0).map(|iter| iter.into_f32().collect());
+            let tex_coords: Option<Vec<[f32; 2]>> = reader
+                .read_tex_coords(0)
+                .map(|iter| iter.into_f32().collect());
 
             let material_index = Some(primitive.material().index().unwrap_or(0));
 

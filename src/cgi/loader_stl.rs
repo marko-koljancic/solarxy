@@ -11,7 +11,11 @@ pub fn load_stl(file_path: &str) -> anyhow::Result<RawModelData> {
         anyhow::bail!("STL file contains no geometry");
     }
 
-    let positions: Vec<[f32; 3]> = indexed_mesh.vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
+    let positions: Vec<[f32; 3]> = indexed_mesh
+        .vertices
+        .iter()
+        .map(|v| [v[0], v[1], v[2]])
+        .collect();
 
     let indices: Vec<u32> = indexed_mesh
         .faces

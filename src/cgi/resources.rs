@@ -10,7 +10,11 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
 pub fn is_supported_model_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| SUPPORTED_EXTENSIONS.iter().any(|s| ext.eq_ignore_ascii_case(s)))
+        .map(|ext| {
+            SUPPORTED_EXTENSIONS
+                .iter()
+                .any(|s| ext.eq_ignore_ascii_case(s))
+        })
         .unwrap_or(false)
 }
 
@@ -52,7 +56,8 @@ fn upload_model(
     edge_geometry_layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
     let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
-    let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) = geometry::process_raw_model(&raw);
+    let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) =
+        geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
     for mat in &raw.materials {
         let diffuse_texture = if let Some(ref data) = mat.diffuse_texture_data {
@@ -71,10 +76,11 @@ fn upload_model(
             })
         } else {
             match &mat.diffuse_texture_path {
-                Some(path) if !path.is_empty() => load_texture(path, false, device, queue).unwrap_or_else(|e| {
-                    eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
-                    create_default_texture(device, queue, false)
-                }),
+                Some(path) if !path.is_empty() => load_texture(path, false, device, queue)
+                    .unwrap_or_else(|e| {
+                        eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
+                        create_default_texture(device, queue, false)
+                    }),
                 _ => create_default_texture(device, queue, false),
             }
         };
@@ -113,7 +119,13 @@ fn upload_model(
     if gpu_materials.is_empty() {
         let diffuse = create_default_texture_colored(device, queue, [226, 213, 195, 255]);
         let normal = create_default_texture(device, queue, true);
-        gpu_materials.push(material::Material::new(device, "clay_default", diffuse, normal, layout));
+        gpu_materials.push(material::Material::new(
+            device,
+            "clay_default",
+            diffuse,
+            normal,
+            layout,
+        ));
     }
 
     let mut gpu_meshes = Vec::new();
@@ -308,13 +320,22 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
     )
 }
 
-fn create_default_texture_colored(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> texture::Texture {
-    let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
+fn create_default_texture_colored(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    rgba: [u8; 4],
+) -> texture::Texture {
+    let img =
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)
         .expect("Failed to create default texture")
 }
 
-fn create_default_texture(device: &wgpu::Device, queue: &wgpu::Queue, is_normal_map: bool) -> texture::Texture {
+fn create_default_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    is_normal_map: bool,
+) -> texture::Texture {
     let color = if is_normal_map {
         image::Rgba([128u8, 128, 255, 255])
     } else {

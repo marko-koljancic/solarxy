@@ -68,7 +68,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
 
     let (has_normals, has_uvs, uv_keys) = if let Some(first) = ply_vertices.first() {
         let has_normals = first.get("nx").is_some();
-        let uv_keys: Option<(&str, &str)> = if first.get("s").is_some() && first.get("t").is_some() {
+        let uv_keys: Option<(&str, &str)> = if first.get("s").is_some() && first.get("t").is_some()
+        {
             Some(("s", "t"))
         } else if first.get("u").is_some() && first.get("v").is_some() {
             Some(("u", "v"))
@@ -84,8 +85,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
 
     let multi_tex_verts = ply.payload.get("multi_texture_vertex");
     let multi_tex_faces = ply.payload.get("multi_texture_face");
-    let has_multi_tex =
-        multi_tex_verts.is_some_and(|v| !v.is_empty()) && multi_tex_faces.is_some_and(|f| !f.is_empty());
+    let has_multi_tex = multi_tex_verts.is_some_and(|v| !v.is_empty())
+        && multi_tex_faces.is_some_and(|f| !f.is_empty());
 
     let multi_tex_uvs: Vec<[f32; 2]> = if has_multi_tex {
         multi_tex_verts
@@ -145,13 +146,18 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
             })
             .collect();
 
-        let mut vert_map: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+        let mut vert_map: std::collections::HashMap<(u32, u32), u32> =
+            std::collections::HashMap::new();
         let mut final_positions: Vec<[f32; 3]> = Vec::new();
         let mut final_normals: Vec<[f32; 3]> = Vec::new();
         let mut final_uvs: Vec<[f32; 2]> = Vec::new();
 
         for (fi, mt_face) in mt_faces.iter().enumerate() {
-            let vis = if fi < geo_faces.len() { &geo_faces[fi] } else { continue };
+            let vis = if fi < geo_faces.len() {
+                &geo_faces[fi]
+            } else {
+                continue;
+            };
             let tex_vis = mt_face
                 .get("texture_vertex_indices")
                 .or_else(|| mt_face.get("texture_vertex_index"))

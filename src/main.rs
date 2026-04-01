@@ -46,8 +46,10 @@ fn main() -> io::Result<()> {
             Ok(())
         }
         OperationMode::Analyze => {
-            let model_path = model_path.expect("Model path is required for analyze mode (use -m <path>)");
-            let analyzer = ModelAnalyzer::new(&model_path).expect("Failed to load model for analysis");
+            let model_path =
+                model_path.expect("Model path is required for analyze mode (use -m <path>)");
+            let analyzer =
+                ModelAnalyzer::new(&model_path).expect("Failed to load model for analysis");
             let report = analyzer.generate_report();
 
             let output = match args.format {

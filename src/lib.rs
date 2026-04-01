@@ -42,7 +42,11 @@ impl ApplicationHandler<State> for App {
                 return;
             }
         };
-        match pollster::block_on(State::new(window, self.model_path.clone(), self.preferences.clone())) {
+        match pollster::block_on(State::new(
+            window,
+            self.model_path.clone(),
+            self.preferences.clone(),
+        )) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
                 eprintln!("Failed to initialize renderer: {}", e);
@@ -56,7 +60,12 @@ impl ApplicationHandler<State> for App {
         self.state = Some(event);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
         let state = match &mut self.state {
             Some(canvas) => canvas,
             None => return,
@@ -83,10 +92,16 @@ impl ApplicationHandler<State> for App {
                                     event_loop.exit();
                                 }
                                 SurfaceError::Timeout => {
-                                    eprintln!("Surface timeout when rendering: {:?}", surface_error);
+                                    eprintln!(
+                                        "Surface timeout when rendering: {:?}",
+                                        surface_error
+                                    );
                                 }
                                 other => {
-                                    eprintln!("Unhandled surface error when rendering: {:?}", other);
+                                    eprintln!(
+                                        "Unhandled surface error when rendering: {:?}",
+                                        other
+                                    );
                                 }
                             }
                         } else {
