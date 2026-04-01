@@ -746,7 +746,7 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     }
 }
 
-const PREF_FIELD_COUNT: usize = 13;
+const PREF_FIELD_COUNT: usize = 14;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -860,6 +860,7 @@ impl PreferencesApp {
             "Grid Visible",
             "Axis Gizmo Visible",
             "Bloom Enabled",
+            "SSAO Enabled",
             "UV Mode",
             "Projection Mode",
             "Turntable Active",
@@ -876,6 +877,7 @@ impl PreferencesApp {
             format!("{}", self.preferences.display.grid_visible),
             format!("{}", self.preferences.display.axis_gizmo_visible),
             format!("{}", self.preferences.display.bloom_enabled),
+            format!("{}", self.preferences.display.ssao_enabled),
             format!("{}", self.preferences.display.uv_mode),
             format!("{}", self.preferences.display.projection_mode),
             format!("{}", self.preferences.display.turntable_active),
@@ -892,6 +894,7 @@ impl PreferencesApp {
             format!("{}", self.original.display.grid_visible),
             format!("{}", self.original.display.axis_gizmo_visible),
             format!("{}", self.original.display.bloom_enabled),
+            format!("{}", self.original.display.ssao_enabled),
             format!("{}", self.original.display.uv_mode),
             format!("{}", self.original.display.projection_mode),
             format!("{}", self.original.display.turntable_active),
@@ -1006,25 +1009,26 @@ impl PreferencesApp {
                     !self.preferences.display.axis_gizmo_visible
             }
             5 => self.preferences.display.bloom_enabled = !self.preferences.display.bloom_enabled,
-            6 => {
+            6 => self.preferences.display.ssao_enabled = !self.preferences.display.ssao_enabled,
+            7 => {
                 self.preferences.display.uv_mode = if forward {
                     self.preferences.display.uv_mode.next()
                 } else {
                     cycle_back_uv_mode(self.preferences.display.uv_mode)
                 };
             }
-            7 => {
+            8 => {
                 self.preferences.display.projection_mode = if forward {
                     self.preferences.display.projection_mode.next()
                 } else {
                     cycle_back_projection_mode(self.preferences.display.projection_mode)
                 };
             }
-            8 => {
+            9 => {
                 self.preferences.display.turntable_active =
                     !self.preferences.display.turntable_active
             }
-            9 => {
+            10 => {
                 self.preferences.display.ibl_mode = if forward {
                     match self.preferences.display.ibl_mode {
                         IblMode::Off => IblMode::Diffuse,
@@ -1039,14 +1043,14 @@ impl PreferencesApp {
                     }
                 };
             }
-            10 => {
+            11 => {
                 self.preferences.rendering.wireframe_line_weight = if forward {
                     self.preferences.rendering.wireframe_line_weight.next()
                 } else {
                     cycle_back_line_weight(self.preferences.rendering.wireframe_line_weight)
                 };
             }
-            11 => {
+            12 => {
                 self.preferences.rendering.msaa_sample_count = if forward {
                     match self.preferences.rendering.msaa_sample_count {
                         1 => 2,
@@ -1061,7 +1065,7 @@ impl PreferencesApp {
                     }
                 };
             }
-            12 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
+            13 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
             _ => {}
         }
     }

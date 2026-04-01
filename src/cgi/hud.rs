@@ -301,7 +301,7 @@ impl HudRenderer {
         }
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+A SSAO  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
         } else {
             "? Hints"
         };
