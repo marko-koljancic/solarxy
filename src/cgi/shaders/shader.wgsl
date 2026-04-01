@@ -33,6 +33,7 @@ struct VertexOutput {
     @location(5) tbn_col2: vec3<f32>,
     @location(6) light_clip_pos: vec4<f32>,
     @location(7) world_normal: vec3<f32>,
+    @location(8) world_position: vec3<f32>,
 };
 
 struct ShadowUniform {
@@ -40,6 +41,9 @@ struct ShadowUniform {
 @group(3) @binding(0) var<uniform> shadow_uni: ShadowUniform;
 @group(3) @binding(1) var shadow_map: texture_depth_2d;
 @group(3) @binding(2) var shadow_sampler: sampler_comparison;
+
+@group(2) @binding(1) var t_ibl: texture_cube<f32>;
+@group(2) @binding(2) var s_ibl: sampler;
 
 @vertex
 fn vs_main(
@@ -80,6 +84,7 @@ fn vs_main(
     out.tbn_col2 = tangent_matrix[2];
     out.light_clip_pos = shadow_uni.light_vp * world_position;
     out.world_normal = world_normal;
+    out.world_position = world_position.xyz;
     return out;
 }
 
@@ -178,9 +183,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let V = normalize(in.tangent_view_position - in.tangent_position);
 
     let N_world = normalize(in.world_normal);
-    let sky = vec3(0.45, 0.48, 0.55);
-    let ground = vec3(0.25, 0.22, 0.18);
-    let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo * ao;
+    let V_world = normalize(camera.view_pos.xyz - in.world_position);
+    let F0 = mix(vec3(0.04), albedo, metallic);
+    let NdotV_ibl = max(dot(N_world, V_world), 0.001);
+    let F_ibl = F_schlick(NdotV_ibl, F0);
+    let kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
+    let irradiance = textureSampleLevel(t_ibl, s_ibl, N_world, 0.0).rgb;
+    let ambient = irradiance * albedo * kD_ibl * ao;
 
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;

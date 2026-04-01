@@ -75,7 +75,7 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, HDR bloom, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, IBL diffuse irradiance, HDR bloom, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
 
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
@@ -104,6 +104,7 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `V` | Toggle turntable rotation |
 | `Shift+W` | Cycle wireframe line weight (Light / Medium / Bold) |
 | `Shift+B` | Cycle bounds display (Off / Whole Model / Per Mesh) |
+| `I` | Toggle IBL (image-based lighting) |
 | `Shift+M` | Toggle bloom effect |
 | `Shift+L` | Toggle lights lock |
 | `Shift+S` | Save preferences to disk |

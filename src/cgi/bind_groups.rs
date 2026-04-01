@@ -41,10 +41,20 @@ impl BindGroupLayouts {
         });
         let light = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("light_bind_group_layout"),
-            entries: &[bgl_uniform_entry(
-                0,
-                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            )],
+            entries: &[
+                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                bgl_sampler_entry(2),
+            ],
         });
         let shadow_pass = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow_pass_layout"),

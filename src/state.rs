@@ -2,6 +2,7 @@ use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::hud::HudRenderer;
+use crate::cgi::ibl::IblState;
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::{self, Model};
 use crate::cgi::pipelines::{Instance, Pipelines};
@@ -81,6 +82,15 @@ impl BackgroundMode {
         }
     }
 
+    fn sky_colors(self) -> ([f32; 3], [f32; 3]) {
+        match self {
+            Self::White => ([1.0, 1.0, 1.0], [0.85, 0.85, 0.85]),
+            Self::Gradient => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
+            Self::DarkGray => ([0.30, 0.32, 0.35], [0.15, 0.14, 0.13]),
+            Self::Black => ([0.20, 0.22, 0.25], [0.08, 0.07, 0.06]),
+        }
+    }
+
     fn grid_color(self) -> [f32; 3] {
         let c = self.clear_color();
         let lum = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) as f32;
@@ -106,6 +116,32 @@ struct ModelScene {
     #[allow(dead_code)]
     model_path: String,
     stats: ModelStats,
+}
+
+fn create_light_bind_group(
+    device: &wgpu::Device,
+    layouts: &BindGroupLayouts,
+    light_buffer: &wgpu::Buffer,
+    ibl: &IblState,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &layouts.light,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&ibl.irradiance_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&ibl.sampler),
+            },
+        ],
+    })
 }
 
 impl ModelScene {
@@ -151,14 +187,9 @@ impl ModelScene {
             contents: bytemuck::cast_slice(&[lights_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &layouts.light,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-        });
+        let placeholder_ibl = IblState::fallback(device, queue);
+        let light_bind_group =
+            create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl);
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, &model);
         let vis = VisualizationState::new(
@@ -222,6 +253,9 @@ pub struct State {
     composite_params_bind_group: wgpu::BindGroup,
     composite_bind_group: wgpu::BindGroup,
     bloom_enabled: bool,
+    ibl: IblState,
+    ibl_fallback: IblState,
+    ibl_enabled: bool,
     layouts: Arc<BindGroupLayouts>,
     pipelines: Pipelines,
     hud: HudRenderer,
@@ -363,6 +397,11 @@ impl State {
         });
 
         let background_mode = preferences.display.background;
+
+        let (ibl_top, ibl_bottom) = background_mode.sky_colors();
+        let ibl = IblState::from_sky_colors(&device, &queue, ibl_top, ibl_bottom);
+        let ibl_fallback = IblState::fallback(&device, &queue);
+
         let wire_color = background_mode.wireframe_color();
 
         let line_weight = preferences.rendering.wireframe_line_weight;
@@ -515,6 +554,9 @@ impl State {
             composite_params_bind_group,
             composite_bind_group,
             bloom_enabled: preferences.display.bloom_enabled,
+            ibl,
+            ibl_fallback,
+            ibl_enabled: true,
             layouts,
             pipelines,
             hud,
@@ -554,6 +596,24 @@ impl State {
     }
 
     pub fn handle_dropped_file(&mut self, path: PathBuf) {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr") {
+                match IblState::from_hdri(&self.device, &self.queue, &path) {
+                    Ok(new_ibl) => {
+                        self.ibl = new_ibl;
+                        self.ibl_enabled = true;
+                        self.rebuild_light_bind_group();
+                        self.hud.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
+                    }
+                    Err(e) => {
+                        self.hud
+                            .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                    }
+                }
+                return;
+            }
+        }
+
         if !resources::is_supported_model_extension(&path) {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
             self.hud.set_toast(
@@ -573,6 +633,30 @@ impl State {
         };
 
         self.spawn_load(model_path);
+    }
+
+    fn active_ibl(&self) -> &IblState {
+        if self.ibl_enabled {
+            &self.ibl
+        } else {
+            &self.ibl_fallback
+        }
+    }
+
+    fn rebuild_light_bind_group(&mut self) {
+        if let Some(scene) = &mut self.scene {
+            let active_ibl = if self.ibl_enabled {
+                &self.ibl
+            } else {
+                &self.ibl_fallback
+            };
+            scene.light_bind_group = create_light_bind_group(
+                &self.device,
+                &self.layouts,
+                &scene.light_buffer,
+                active_ibl,
+            );
+        }
     }
 
     fn update_wireframe_params(&self) {
@@ -811,6 +895,16 @@ impl State {
             }
             KeyCode::KeyA => self.show_axis_gizmo = !self.show_axis_gizmo,
             KeyCode::KeyG => self.show_grid = !self.show_grid,
+            KeyCode::KeyI => {
+                self.ibl_enabled = !self.ibl_enabled;
+                self.rebuild_light_bind_group();
+                let msg = if self.ibl_enabled {
+                    "IBL: On"
+                } else {
+                    "IBL: Off"
+                };
+                self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+            }
             KeyCode::KeyB => {
                 if self.modifiers.shift_key() {
                     let is_multi = self
@@ -832,6 +926,9 @@ impl State {
                     self.background_mode = self.background_mode.next();
                     self.update_wireframe_params();
                     self.update_grid_color();
+                    let (top, bottom) = self.background_mode.sky_colors();
+                    self.ibl = IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+                    self.rebuild_light_bind_group();
                 }
             }
             KeyCode::KeyM => {
@@ -929,8 +1026,15 @@ impl State {
     pub fn update(&mut self) {
         let poll = self.pending_load.as_ref().map(|p| p.receiver.try_recv());
         match poll {
-            Some(Ok(Ok(new_scene))) => {
+            Some(Ok(Ok(mut new_scene))) => {
                 let pending = self.pending_load.take().unwrap();
+                let active_ibl = self.active_ibl();
+                new_scene.light_bind_group = create_light_bind_group(
+                    &self.device,
+                    &self.layouts,
+                    &new_scene.light_buffer,
+                    active_ibl,
+                );
                 self.hud.update_stats(Some(&new_scene.stats));
                 self.hud
                     .update_model_info(&pending.filename, new_scene.model.meshes.len());
@@ -1101,6 +1205,7 @@ impl State {
             &self.bounds_mode.to_string(),
             &bounds_info,
             &self.line_weight.to_string(),
+            self.ibl_enabled,
         );
 
         let capture_buffer = if self.capture_requested {

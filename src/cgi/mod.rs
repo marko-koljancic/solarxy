@@ -3,6 +3,7 @@ pub mod camera;
 pub mod camera_state;
 pub mod geometry;
 pub mod hud;
+pub mod ibl;
 pub mod light;
 pub mod loader_gltf;
 pub mod loader_obj;
