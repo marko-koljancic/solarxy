@@ -9,9 +9,10 @@ A lightweight, cross-platform 3D model viewer and validator built with Rust and 
 ## Features
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
-- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, 3-light system, 4x MSAA
+- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, bloom, 3-light system, 4x MSAA
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
-- **Report export** -- save analysis reports to file or pipe to stdout
+- **Report export** -- save analysis reports to file in text or JSON format
+- **Persistent preferences** -- configure display, rendering, and lighting settings via TUI or in-viewer shortcuts
 - **Drag-and-drop** -- drop model files directly into the viewer window
 
 ## Supported Formats
@@ -67,12 +68,14 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 | Flag | Description | Default |
 |---|---|---|
 | `-m, --model <PATH>` | Path to model file (optional in view mode -- supports drag-and-drop) | -- |
-| `-M, --mode <MODE>` | `view` or `analyze` | `view` |
+| `-M, --mode <MODE>` | `view`, `analyze`, or `preferences` | `view` |
+| `-f, --format <FORMAT>` | Output format: `text` or `json` (analyze mode only) | `text` |
 | `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
+| `--about` | Show version and application info | -- |
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor and an infinite grid. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, HDR bloom, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
 
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
@@ -95,11 +98,19 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `X` | Toggle ghosted view |
 | `N` | Cycle normals (Off / Face / Vertex / Face+Vertex) |
 | `U` | Cycle UV overlay (Off / Gradient / Checker) |
+| `B` | Cycle background (White / Gradient / Dark Gray / Black) |
+| `G` | Toggle grid |
+| `A` | Toggle axis gizmo |
+| `V` | Toggle turntable rotation |
+| `Shift+W` | Cycle wireframe line weight (Light / Medium / Bold) |
+| `Shift+B` | Cycle bounds display (Off / Whole Model / Per Mesh) |
+| `Shift+M` | Toggle bloom effect |
+| `Shift+L` | Toggle lights lock |
+| `Shift+S` | Save preferences to disk |
 | `H` | Frame model (reset view) |
 | `T` `F` `L` `R` | Top / Front / Left / Right view |
 | `P` | Perspective projection |
 | `O` | Orthographic projection |
-| `B` | Cycle background (Gradient / Blue-gray / Dark / Studio / White / Black) |
 | `C` | Save screenshot (PNG) |
 | `?` | Toggle keybinding hints |
 | `Esc` | Exit |
@@ -121,8 +132,53 @@ The analyzer opens a terminal UI with four tabs: **Overview**, **Meshes**, **Mat
 | `j` / `k`, arrows | Scroll up / down |
 | `g` / `G` | Jump to top / bottom |
 | `PgUp` / `PgDn` | Page scroll |
-| `e` | Export report (prompts for filename) |
+| `e` | Export text report (prompts for filename) |
+| `J` | Export JSON report (prompts for filename) |
 | `q` / `Esc` | Quit |
+
+## Preferences
+
+Solarxy persists display, rendering, and lighting settings in a TOML configuration file at `~/.config/solarxy/config.toml`. Preferences are loaded automatically on startup and can be managed in three ways: through the dedicated preferences editor, with keyboard shortcuts in the viewer, or by editing the config file directly.
+
+Launch the preferences editor:
+
+```bash
+cargo r --release -- --mode preferences
+```
+
+<p align="center">
+  <img src="docs/img/solarxy-preferences.png" width="100%">
+</p>
+
+### Configurable Settings
+
+| Category | Setting | Values |
+|---|---|---|
+| Display | Background | White / Gradient / Dark Gray / Black |
+| Display | View Mode | Shaded / Shaded+Wire / Wireframe / Ghosted |
+| Display | Normals Mode | Off / Face / Vertex / Face+Vertex |
+| Display | Grid Visible | on / off |
+| Display | Axis Gizmo Visible | on / off |
+| Display | Bloom Enabled | on / off |
+| Display | UV Mode | Off / Gradient / Checker |
+| Display | Projection Mode | Perspective / Orthographic |
+| Display | Turntable Active | on / off |
+| Rendering | Wireframe Line Weight | Light / Medium / Bold |
+| Rendering | MSAA Sample Count | 1 / 2 / 4 |
+| Lighting | Lighting Lock | on / off |
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `↑` / `↓`, `k` / `j` | Navigate settings |
+| `Enter` / `Space` / `→` | Cycle value forward |
+| `←` / `h` | Cycle value backward |
+| `s` | Save preferences |
+| `r` | Reset to defaults |
+| `q` / `Esc` | Quit |
+
+Settings can also be changed on the fly in the viewer using keyboard shortcuts and saved with `Shift+S`.
 
 ## Validation Checks
 
