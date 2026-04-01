@@ -8,6 +8,7 @@ use crate::cgi::model::{self, Model};
 use crate::cgi::pipelines::{Instance, Pipelines};
 use crate::cgi::resources::{self, ModelStats};
 use crate::cgi::shadow::ShadowState;
+use crate::cgi::ssao::SsaoState;
 use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
 use crate::preferences::{
@@ -283,6 +284,8 @@ pub struct State {
     composite_params_bind_group: wgpu::BindGroup,
     composite_bind_group: wgpu::BindGroup,
     bloom_enabled: bool,
+    ssao: SsaoState,
+    ssao_enabled: bool,
     ibl: IblState,
     ibl_fallback: IblState,
     brdf_lut: BrdfLut,
@@ -529,17 +532,10 @@ impl State {
             &bloom_sampler,
         );
 
-        let composite_params_data: [u8; 16] = {
-            let mut buf = [0u8; 16];
-            buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
-            let bloom_flag: u32 = if preferences.display.bloom_enabled {
-                1
-            } else {
-                0
-            };
-            buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
-            buf
-        };
+        let composite_params_data: [u8; 16] = build_composite_params(
+            preferences.display.bloom_enabled,
+            preferences.display.ssao_enabled,
+        );
         let composite_params_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Composite Params Uniform"),
@@ -561,6 +557,21 @@ impl State {
             &hdr_resolve_view,
             &bloom_ping_view,
             &bloom_sampler,
+        );
+
+        // Dummy camera buffer for initial SSAO state (rebuilt when model loads)
+        let dummy_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dummy Camera Buffer for SSAO"),
+            contents: &[0u8; 288],
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let ssao = SsaoState::new(
+            &device,
+            &queue,
+            &layouts,
+            &dummy_camera_buffer,
+            config.width,
+            config.height,
         );
 
         let mut state = Self {
@@ -587,6 +598,8 @@ impl State {
             composite_params_bind_group,
             composite_bind_group,
             bloom_enabled: preferences.display.bloom_enabled,
+            ssao,
+            ssao_enabled: preferences.display.ssao_enabled,
             ibl,
             ibl_fallback,
             brdf_lut,
@@ -823,6 +836,25 @@ impl State {
                 &self.bloom_ping_view,
                 &self.bloom_sampler,
             );
+            if let Some(scene) = &self.scene {
+                self.ssao.resize(
+                    &self.device,
+                    &self.layouts,
+                    &scene.cam.buffer,
+                    width,
+                    height,
+                );
+            } else {
+                let dummy_buf = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Dummy Camera Buffer for SSAO resize"),
+                        contents: &[0u8; 288],
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                self.ssao
+                    .resize(&self.device, &self.layouts, &dummy_buf, width, height);
+            }
             self.is_surface_configured = true;
             self.hud.resize(width, height, &self.queue);
             self.hud.set_scale_factor(self.window.scale_factor());
@@ -946,7 +978,20 @@ impl State {
                     self.capture_requested = true;
                 }
             }
-            KeyCode::KeyA => self.show_axis_gizmo = !self.show_axis_gizmo,
+            KeyCode::KeyA => {
+                if self.modifiers.shift_key() {
+                    self.ssao_enabled = !self.ssao_enabled;
+                    self.write_composite_params();
+                    let msg = if self.ssao_enabled {
+                        "SSAO: On"
+                    } else {
+                        "SSAO: Off"
+                    };
+                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                } else {
+                    self.show_axis_gizmo = !self.show_axis_gizmo;
+                }
+            }
             KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyI => {
                 if self.modifiers.shift_key() {
@@ -1001,12 +1046,7 @@ impl State {
             KeyCode::KeyM => {
                 if self.modifiers.shift_key() {
                     self.bloom_enabled = !self.bloom_enabled;
-                    let enabled_bits = if self.bloom_enabled { 1u32 } else { 0u32 };
-                    let mut buf = [0u8; 16];
-                    buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
-                    buf[4..8].copy_from_slice(&enabled_bits.to_le_bytes());
-                    self.queue
-                        .write_buffer(&self.composite_params_buffer, 0, &buf);
+                    self.write_composite_params();
                     let msg = if self.bloom_enabled {
                         "Bloom: On"
                     } else {
@@ -1046,6 +1086,7 @@ impl State {
         self.preferences.display.grid_visible = self.show_grid;
         self.preferences.display.axis_gizmo_visible = self.show_axis_gizmo;
         self.preferences.display.bloom_enabled = self.bloom_enabled;
+        self.preferences.display.ssao_enabled = self.ssao_enabled;
         self.preferences.display.uv_mode = self.uv_mode;
         self.preferences.display.turntable_active = self.turntable_active;
         if let Some(scene) = &self.scene {
@@ -1112,6 +1153,10 @@ impl State {
                     .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
                 self.scene = Some(new_scene);
+                if let Some(scene) = &self.scene {
+                    self.ssao
+                        .rebuild_bind_groups(&self.device, &self.layouts, &scene.cam.buffer);
+                }
                 if let Some(scene) = &mut self.scene {
                     scene
                         .cam
@@ -1194,9 +1239,16 @@ impl State {
 
         if let Some(scene) = &self.scene {
             self.render_shadow_pass(&mut encoder, scene);
+            if self.ssao_enabled {
+                self.render_gbuffer_pass(&mut encoder, scene);
+            }
             self.render_main_pass(&mut encoder, scene);
         } else {
             self.render_empty_pass(&mut encoder);
+        }
+
+        if self.ssao_enabled {
+            self.render_ssao_passes(&mut encoder);
         }
 
         if self.bloom_enabled {
@@ -1275,6 +1327,7 @@ impl State {
             &bounds_info,
             &self.line_weight.to_string(),
             &self.ibl_mode.to_string(),
+            self.ssao_enabled,
         );
 
         let capture_buffer = if self.capture_requested {
@@ -1535,7 +1588,123 @@ impl State {
         pass.set_pipeline(&self.pipelines.composite);
         pass.set_bind_group(0, &self.composite_bind_group, &[]);
         pass.set_bind_group(1, &self.composite_params_bind_group, &[]);
+        if self.ssao_enabled {
+            pass.set_bind_group(2, &self.ssao.read_bind_group, &[]);
+        } else {
+            pass.set_bind_group(2, &self.ssao.read_off_bind_group, &[]);
+        }
         pass.draw(0..3, 0..1);
+    }
+
+    fn write_composite_params(&self) {
+        let buf = build_composite_params(self.bloom_enabled, self.ssao_enabled);
+        self.queue
+            .write_buffer(&self.composite_params_buffer, 0, &buf);
+    }
+
+    fn render_gbuffer_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("G-Buffer Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.ssao.gbuffer_normal_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.5,
+                        g: 0.5,
+                        b: 1.0,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.ssao.gbuffer_depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipelines.gbuffer);
+        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+        for mesh in &scene.model.meshes {
+            let material = &scene.model.materials[mesh.material];
+            if material.uniform.alpha_mode == 2 {
+                continue;
+            }
+            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+        }
+    }
+
+    fn render_ssao_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SSAO Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.ssao.ssao_raw_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.ssao);
+            pass.set_bind_group(0, &self.ssao.ssao_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SSAO Blur H Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.ssao.ssao_blur_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.ssao_blur_h);
+            pass.set_bind_group(0, &self.ssao.blur_h_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SSAO Blur V Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.ssao.ssao_output_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.ssao_blur_v);
+            pass.set_bind_group(0, &self.ssao.blur_v_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 
     fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
@@ -1890,6 +2059,19 @@ fn create_bloom_sample_bind_group(
             },
         ],
     })
+}
+
+const SSAO_STRENGTH: f32 = 1.0;
+
+fn build_composite_params(bloom_enabled: bool, ssao_enabled: bool) -> [u8; 16] {
+    let mut buf = [0u8; 16];
+    buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
+    let bloom_flag: u32 = if bloom_enabled { 1 } else { 0 };
+    buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
+    let ssao_flag: u32 = if ssao_enabled { 1 } else { 0 };
+    buf[8..12].copy_from_slice(&ssao_flag.to_le_bytes());
+    buf[12..16].copy_from_slice(&SSAO_STRENGTH.to_le_bytes());
+    buf
 }
 
 fn create_composite_bind_group(

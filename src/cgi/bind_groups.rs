@@ -14,6 +14,9 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) composite_params: wgpu::BindGroupLayout,
     pub(crate) edge_geometry: wgpu::BindGroupLayout,
     pub(crate) wireframe_params: wgpu::BindGroupLayout,
+    pub(crate) ssao: wgpu::BindGroupLayout,
+    pub(crate) ssao_blur: wgpu::BindGroupLayout,
+    pub(crate) ssao_read: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -169,6 +172,48 @@ impl BindGroupLayouts {
                 wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
             )],
         });
+        let ssao = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ssao_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
+                bgl_texture_entry(1),
+                bgl_texture_entry(2),
+                bgl_sampler_entry(3),
+                bgl_uniform_entry(4, wgpu::ShaderStages::FRAGMENT),
+                bgl_uniform_entry(5, wgpu::ShaderStages::FRAGMENT),
+            ],
+        });
+        let ssao_blur = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ssao_blur_bind_group_layout"),
+            entries: &[
+                bgl_texture_entry(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
+                bgl_sampler_entry(2),
+                bgl_uniform_entry(3, wgpu::ShaderStages::FRAGMENT),
+            ],
+        });
+        let ssao_read = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ssao_read_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -185,6 +230,9 @@ impl BindGroupLayouts {
             composite_params,
             edge_geometry,
             wireframe_params,
+            ssao,
+            ssao_blur,
+            ssao_read,
         }
     }
 }

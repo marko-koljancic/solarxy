@@ -23,9 +23,12 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = match self.projection {
+    pub fn build_view_matrix(&self) -> cgmath::Matrix4<f32> {
+        cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up)
+    }
+
+    pub fn build_proj_matrix(&self) -> cgmath::Matrix4<f32> {
+        match self.projection {
             ProjectionMode::Perspective => {
                 cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
             }
@@ -34,8 +37,11 @@ impl Camera {
                 let half_w = half_h * self.aspect;
                 cgmath::ortho(-half_w, half_w, -half_h, half_h, self.znear, self.zfar)
             }
-        };
-        OPENGL_TO_WGPU_MATRIX * proj * view
+        }
+    }
+
+    pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        OPENGL_TO_WGPU_MATRIX * self.build_proj_matrix() * self.build_view_matrix()
     }
 }
 
@@ -98,20 +104,41 @@ pub fn camera_from_bounds_axis(
 pub struct CameraUniform {
     view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
+    view: [[f32; 4]; 4],
+    proj: [[f32; 4]; 4],
+    inv_proj: [[f32; 4]; 4],
+    near: f32,
+    far: f32,
+    _pad: [f32; 2],
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
         use cgmath::SquareMatrix;
+        let identity: [[f32; 4]; 4] = cgmath::Matrix4::identity().into();
         Self {
             view_position: [0.0; 4],
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_proj: identity,
+            view: identity,
+            proj: identity,
+            inv_proj: identity,
+            near: 0.01,
+            far: 100.0,
+            _pad: [0.0; 2],
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
+        use cgmath::SquareMatrix;
         self.view_position = camera.eye.to_homogeneous().into();
-        self.view_proj = camera.build_view_projection_matrix().into();
+        let view = camera.build_view_matrix();
+        let proj = OPENGL_TO_WGPU_MATRIX * camera.build_proj_matrix();
+        self.view_proj = (proj * view).into();
+        self.view = view.into();
+        self.proj = proj.into();
+        self.inv_proj = proj.invert().unwrap_or(cgmath::Matrix4::identity()).into();
+        self.near = camera.znear;
+        self.far = camera.zfar;
     }
 }
 

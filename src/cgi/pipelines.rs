@@ -91,6 +91,10 @@ pub(crate) struct Pipelines {
     pub(crate) bloom_blur_h: wgpu::RenderPipeline,
     pub(crate) bloom_blur_v: wgpu::RenderPipeline,
     pub(crate) composite: wgpu::RenderPipeline,
+    pub(crate) gbuffer: wgpu::RenderPipeline,
+    pub(crate) ssao: wgpu::RenderPipeline,
+    pub(crate) ssao_blur_h: wgpu::RenderPipeline,
+    pub(crate) ssao_blur_v: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -660,7 +664,11 @@ impl Pipelines {
             });
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Composite Pipeline Layout"),
-                bind_group_layouts: &[&layouts.composite, &layouts.composite_params],
+                bind_group_layouts: &[
+                    &layouts.composite,
+                    &layouts.composite_params,
+                    &layouts.ssao_read,
+                ],
                 push_constant_ranges: &[],
             });
             create_fullscreen_pipeline(
@@ -672,6 +680,103 @@ impl Pipelines {
                 "Composite Pipeline",
             )
         };
+
+        let gbuffer = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("G-Buffer Pipeline Layout"),
+                bind_group_layouts: &[&layouts.camera],
+                push_constant_ranges: &[],
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("G-Buffer Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gbuffer.wgsl").into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("G-Buffer Pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_gbuffer"),
+                    buffers: &[
+                        model::ModelVertex::description(),
+                        InstanceRaw::description(),
+                    ],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_gbuffer"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: texture::Texture::HDR_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+
+        let ssao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("SSAO Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ssao.wgsl").into()),
+        });
+        let ssao = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("SSAO Pipeline Layout"),
+                bind_group_layouts: &[&layouts.ssao],
+                push_constant_ranges: &[],
+            });
+            create_fullscreen_pipeline(
+                device,
+                &layout,
+                &ssao_shader,
+                "fs_ssao",
+                wgpu::TextureFormat::R8Unorm,
+                "SSAO Pipeline",
+            )
+        };
+
+        let ssao_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("SSAO Blur Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ssao_blur.wgsl").into()),
+        });
+        let ssao_blur_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SSAO Blur Pipeline Layout"),
+            bind_group_layouts: &[&layouts.ssao_blur],
+            push_constant_ranges: &[],
+        });
+        let ssao_blur_h = create_fullscreen_pipeline(
+            device,
+            &ssao_blur_layout,
+            &ssao_blur_shader,
+            "fs_blur_h",
+            wgpu::TextureFormat::R8Unorm,
+            "SSAO Blur H Pipeline",
+        );
+        let ssao_blur_v = create_fullscreen_pipeline(
+            device,
+            &ssao_blur_layout,
+            &ssao_blur_shader,
+            "fs_blur_v",
+            wgpu::TextureFormat::R8Unorm,
+            "SSAO Blur V Pipeline",
+        );
 
         Pipelines {
             main,
@@ -692,6 +797,10 @@ impl Pipelines {
             bloom_blur_h,
             bloom_blur_v,
             composite,
+            gbuffer,
+            ssao,
+            ssao_blur_h,
+            ssao_blur_v,
         }
     }
 }

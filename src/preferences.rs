@@ -226,6 +226,12 @@ pub struct DisplayPrefs {
     pub turntable_active: bool,
     #[serde(default)]
     pub ibl_mode: IblMode,
+    #[serde(default = "default_true")]
+    pub ssao_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -269,6 +275,7 @@ impl Default for DisplayPrefs {
             projection_mode: ProjectionMode::Perspective,
             turntable_active: false,
             ibl_mode: IblMode::Full,
+            ssao_enabled: true,
         }
     }
 }
@@ -374,6 +381,7 @@ mod tests {
                 projection_mode: ProjectionMode::Orthographic,
                 turntable_active: true,
                 ibl_mode: IblMode::Diffuse,
+                ssao_enabled: false,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,

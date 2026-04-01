@@ -19,9 +19,13 @@ fn vs_fullscreen(@builtin(vertex_index) id: u32) -> VertexOutput {
 struct CompositeParams {
     bloom_strength: f32,
     bloom_enabled: u32,
-    _pad: vec2<f32>,
+    ssao_enabled: u32,
+    ssao_strength: f32,
 }
 @group(1) @binding(0) var<uniform> composite: CompositeParams;
+
+@group(2) @binding(0) var ssao_texture: texture_2d<f32>;
+@group(2) @binding(1) var ssao_sampler: sampler;
 
 @fragment
 fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -29,6 +33,10 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
     if composite.bloom_enabled != 0u {
         let bloom_color = textureSample(bloom_texture, tex_sampler, in.uv).rgb;
         color = color + bloom_color * composite.bloom_strength;
+    }
+    if composite.ssao_enabled != 0u {
+        let ao = textureSample(ssao_texture, ssao_sampler, in.uv).r;
+        color = color * mix(1.0, ao, composite.ssao_strength);
     }
     let mapped = color / (color + vec3<f32>(1.0));
     return vec4<f32>(mapped, 1.0);

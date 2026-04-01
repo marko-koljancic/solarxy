@@ -14,5 +14,6 @@ pub mod model;
 pub mod pipelines;
 pub mod resources;
 pub mod shadow;
+pub mod ssao;
 pub mod texture;
 pub mod visualization;

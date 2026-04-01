@@ -8,8 +8,7 @@ struct Camera {
     far: f32,
     _pad: vec2<f32>,
 }
-@group(0) @binding(0)
-var<uniform> camera: Camera;
+@group(0) @binding(0) var<uniform> camera: Camera;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -29,14 +28,13 @@ struct InstanceInput {
     @location(11) normal_matrix_2: vec3<f32>,
 }
 
-struct GhostedVertexOutput {
+struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_normal: vec3<f32>,
-    @location(1) world_position: vec3<f32>,
 }
 
 @vertex
-fn vs_ghosted(model: VertexInput, instance: InstanceInput) -> GhostedVertexOutput {
+fn vs_gbuffer(model: VertexInput, instance: InstanceInput) -> VertexOutput {
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
         instance.model_matrix_1,
@@ -48,24 +46,14 @@ fn vs_ghosted(model: VertexInput, instance: InstanceInput) -> GhostedVertexOutpu
         instance.normal_matrix_1,
         instance.normal_matrix_2,
     );
-    let world_pos = model_matrix * vec4<f32>(model.position, 1.0);
-    var out: GhostedVertexOutput;
-    out.clip_position = camera.view_proj * world_pos;
+    let world_position = model_matrix * vec4<f32>(model.position, 1.0);
+    var out: VertexOutput;
+    out.clip_position = camera.view_proj * world_position;
     out.world_normal = normalize(normal_matrix * model.normal);
-    out.world_position = world_pos.xyz;
     return out;
 }
 
-const GHOSTED_BASE_COLOR = vec3<f32>(0.65, 0.70, 0.80);
-const GHOSTED_EDGE_COLOR = vec3<f32>(0.85, 0.88, 0.95);
-const GHOSTED_FILL_ALPHA: f32 = 0.5;
-const FRESNEL_POWER: f32 = 3.0;
-
 @fragment
-fn fs_ghosted_fill(in: GhostedVertexOutput) -> @location(0) vec4<f32> {
-    let N = normalize(in.world_normal);
-    let V = normalize(camera.view_pos.xyz - in.world_position);
-    let fresnel = pow(1.0 - abs(dot(N, V)), FRESNEL_POWER);
-    let color = mix(GHOSTED_BASE_COLOR, GHOSTED_EDGE_COLOR, fresnel);
-    return vec4(color, GHOSTED_FILL_ALPHA);
+fn fs_gbuffer(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(normalize(in.world_normal) * 0.5 + 0.5, 1.0);
 }

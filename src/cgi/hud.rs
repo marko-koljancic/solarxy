@@ -157,6 +157,7 @@ impl HudRenderer {
         bounds_info: &str,
         line_weight: &str,
         ibl_mode: &str,
+        ssao_enabled: bool,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -216,6 +217,9 @@ impl HudRenderer {
             }
             if ibl_mode != "Full" {
                 lines.push(format!("IBL: {}", ibl_mode));
+            }
+            if !ssao_enabled {
+                lines.push("SSAO: Off".to_string());
             }
             lines
         } else {
