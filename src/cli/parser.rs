@@ -14,7 +14,7 @@ pub struct Args {
     #[clap(
         short = 'M',
         long = "mode",
-        help = "Operation mode: 'view', 'analyze', or 'preferences'",
+        help = "Operation mode: 'view', 'analyze', 'preferences', or 'docs'",
         default_value = "view"
     )]
     pub mode: OperationMode,
@@ -56,6 +56,7 @@ pub enum OperationMode {
     View = 0,
     Analyze = 1,
     Preferences = 2,
+    Docs = 3,
 }
 
 impl std::fmt::Debug for OperationMode {
@@ -64,6 +65,7 @@ impl std::fmt::Debug for OperationMode {
             Self::View => write!(f, "View"),
             Self::Analyze => write!(f, "Analyze"),
             Self::Preferences => write!(f, "Preferences"),
+            Self::Docs => write!(f, "Docs"),
         }
     }
 }

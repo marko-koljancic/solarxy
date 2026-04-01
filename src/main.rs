@@ -6,7 +6,7 @@ use solarxy::run_viewer;
 
 use crate::calc::analyze::ModelAnalyzer;
 use crate::cli::parser::{Args, OperationMode, OutputFormat};
-use crate::cli::tui::{PreferencesApp, TerminalApp};
+use crate::cli::tui::{DocsApp, PreferencesApp, TerminalApp};
 
 mod calc;
 mod cli;
@@ -79,6 +79,12 @@ fn main() -> io::Result<()> {
         OperationMode::Preferences => {
             let mut terminal = ratatui::init();
             let app_result = PreferencesApp::new(preferences).run(&mut terminal);
+            ratatui::restore();
+            app_result
+        }
+        OperationMode::Docs => {
+            let mut terminal = ratatui::init();
+            let app_result = DocsApp::new().run(&mut terminal);
             ratatui::restore();
             app_result
         }

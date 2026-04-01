@@ -68,7 +68,7 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 | Flag | Description | Default |
 |---|---|---|
 | `-m, --model <PATH>` | Path to model file (optional in view mode -- supports drag-and-drop) | -- |
-| `-M, --mode <MODE>` | `view`, `analyze`, or `preferences` | `view` |
+| `-M, --mode <MODE>` | `view`, `analyze`, `preferences`, or `docs` | `view` |
 | `-f, --format <FORMAT>` | Output format: `text` or `json` (analyze mode only) | `text` |
 | `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
 | `--about` | Show version and application info | -- |
@@ -179,6 +179,29 @@ cargo r --release -- --mode preferences
 | `q` / `Esc` | Quit |
 
 Settings can also be changed on the fly in the viewer using keyboard shortcuts and saved with `Shift+S`.
+
+## Docs Mode
+
+The built-in documentation viewer provides an interactive, four-tab reference covering all modes, keyboard shortcuts, CLI options, and preferences -- accessible offline without leaving the terminal.
+
+```bash
+cargo r --release -- --mode docs
+```
+
+<p align="center">
+  <img src="docs/img/solarxy-docs.png" width="100%">
+</p>
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift+Tab` | Next / previous tab |
+| `1` `2` `3` `4` | Jump to tab |
+| `j` / `k`, arrows | Scroll up / down |
+| `g` / `G` | Jump to top / bottom |
+| `PgUp` / `PgDn` | Page scroll |
+| `q` / `Esc` | Quit |
 
 ## Validation Checks
 

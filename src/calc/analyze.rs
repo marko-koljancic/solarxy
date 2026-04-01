@@ -339,8 +339,6 @@ impl ModelAnalyzer {
         let total_vertices: usize = self.meshes.iter().map(|m| m.positions.len() / 3).sum();
         let total_indices: usize = self.meshes.iter().map(|m| m.indices.len()).sum();
         let total_triangles: usize = self.meshes.iter().map(|m| m.indices.len() / 3).sum();
-
-        // Build mesh summaries with validation
         let meshes: Vec<MeshSummary> = self
             .meshes
             .iter()
@@ -351,7 +349,6 @@ impl ModelAnalyzer {
                 let normal_count = mesh.normals.len() / 3;
                 let texcoord_count = mesh.texcoords.len() / 2;
 
-                // Validation: normal count mismatch
                 if !mesh.normals.is_empty() && normal_count != vertex_count {
                     issues.push(ValidationIssue {
                         severity: Severity::Error,
@@ -363,7 +360,6 @@ impl ModelAnalyzer {
                     });
                 }
 
-                // Validation: UV count mismatch
                 if !mesh.texcoords.is_empty() && texcoord_count != vertex_count {
                     issues.push(ValidationIssue {
                         severity: Severity::Warning,
@@ -375,7 +371,6 @@ impl ModelAnalyzer {
                     });
                 }
 
-                // Validation: no UVs (format-aware)
                 if mesh.texcoords.is_empty() && self.source_format.supports_uvs() {
                     issues.push(ValidationIssue {
                         severity: Severity::Warning,
@@ -384,7 +379,6 @@ impl ModelAnalyzer {
                     });
                 }
 
-                // Validation: non-triangulated
                 if index_count % 3 != 0 {
                     issues.push(ValidationIssue {
                         severity: Severity::Error,
@@ -396,7 +390,6 @@ impl ModelAnalyzer {
                     });
                 }
 
-                // Validation: empty indices
                 if mesh.indices.is_empty() {
                     issues.push(ValidationIssue {
                         severity: Severity::Error,
@@ -405,7 +398,6 @@ impl ModelAnalyzer {
                     });
                 }
 
-                // Validation: invalid material_id
                 let (material_name, material_id) = if let Some(mat_id) = mesh.material_id {
                     if mat_id < self.materials.len() {
                         (Some(self.materials[mat_id].name.clone()), Some(mat_id))
@@ -438,7 +430,6 @@ impl ModelAnalyzer {
             })
             .collect();
 
-        // Build material summaries with texture existence checks
         let materials: Vec<MaterialSummary> = self
             .materials
             .iter()
@@ -499,8 +490,6 @@ fn check_texture(
     mat_index: usize,
 ) -> Option<TextureEntry> {
     let path = tex_path.as_ref()?;
-
-    // glTF uses "texture_index:N" for embedded textures — skip file check
     if path.starts_with("texture_index:") {
         return Some(TextureEntry {
             slot: slot.to_string(),
