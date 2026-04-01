@@ -54,6 +54,19 @@ impl BindGroupLayouts {
                     count: None,
                 },
                 bgl_sampler_entry(2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                bgl_sampler_entry(4),
+                bgl_texture_entry(5),
+                bgl_sampler_entry(6),
             ],
         });
         let shadow_pass = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

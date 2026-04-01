@@ -44,6 +44,10 @@ struct ShadowUniform {
 
 @group(2) @binding(1) var t_ibl: texture_cube<f32>;
 @group(2) @binding(2) var s_ibl: sampler;
+@group(2) @binding(3) var t_prefiltered: texture_cube<f32>;
+@group(2) @binding(4) var s_prefiltered: sampler;
+@group(2) @binding(5) var t_brdf_lut: texture_2d<f32>;
+@group(2) @binding(6) var s_brdf_lut: sampler;
 
 @vertex
 fn vs_main(
@@ -189,7 +193,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let F_ibl = F_schlick(NdotV_ibl, F0);
     let kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
     let irradiance = textureSampleLevel(t_ibl, s_ibl, N_world, 0.0).rgb;
-    let ambient = irradiance * albedo * kD_ibl * ao;
+    let diffuse_ibl = irradiance * albedo * kD_ibl;
+
+    let R = reflect(-V_world, N_world);
+    let MAX_REFLECTION_LOD = 5.0;
+    let mip_level = roughness * MAX_REFLECTION_LOD;
+    let prefiltered_color = textureSampleLevel(t_prefiltered, s_prefiltered, R, mip_level).rgb;
+    let brdf_uv = vec2(max(dot(N_world, V_world), 0.0), roughness);
+    let brdf = textureSample(t_brdf_lut, s_brdf_lut, brdf_uv).rg;
+    let specular_ibl = prefiltered_color * (F0 * brdf.x + brdf.y);
+
+    let ambient = (diffuse_ibl + specular_ibl) * ao;
 
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;

@@ -11,7 +11,8 @@ use crate::cgi::shadow::ShadowState;
 use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
 use crate::preferences::{
-    self, BackgroundMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode, ViewMode,
+    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode,
+    ViewMode,
 };
 use cgmath::prelude::*;
 use std::path::PathBuf;
@@ -124,8 +125,18 @@ fn create_light_bind_group(
     light_buffer: &wgpu::Buffer,
     ibl: &IblState,
 ) -> wgpu::BindGroup {
+    create_light_bind_group_selective(device, layouts, light_buffer, ibl, ibl)
+}
+
+fn create_light_bind_group_selective(
+    device: &wgpu::Device,
+    layouts: &BindGroupLayouts,
+    light_buffer: &wgpu::Buffer,
+    diffuse_src: &IblState,
+    specular_src: &IblState,
+) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
+        label: Some("light_bind_group"),
         layout: &layouts.light,
         entries: &[
             wgpu::BindGroupEntry {
@@ -134,11 +145,27 @@ fn create_light_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&ibl.irradiance_view),
+                resource: wgpu::BindingResource::TextureView(&diffuse_src.irradiance_view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::Sampler(&ibl.sampler),
+                resource: wgpu::BindingResource::Sampler(&diffuse_src.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&specular_src.prefiltered_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&specular_src.prefiltered_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&specular_src.brdf_lut_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::Sampler(&specular_src.brdf_lut_sampler),
             },
         ],
     })
@@ -255,7 +282,8 @@ pub struct State {
     bloom_enabled: bool,
     ibl: IblState,
     ibl_fallback: IblState,
-    ibl_enabled: bool,
+    ibl_mode: IblMode,
+    last_active_ibl_mode: IblMode,
     layouts: Arc<BindGroupLayouts>,
     pipelines: Pipelines,
     hud: HudRenderer,
@@ -556,7 +584,11 @@ impl State {
             bloom_enabled: preferences.display.bloom_enabled,
             ibl,
             ibl_fallback,
-            ibl_enabled: true,
+            ibl_mode: preferences.display.ibl_mode,
+            last_active_ibl_mode: match preferences.display.ibl_mode {
+                IblMode::Off => IblMode::Full,
+                other => other,
+            },
             layouts,
             pipelines,
             hud,
@@ -601,7 +633,8 @@ impl State {
                 match IblState::from_hdri(&self.device, &self.queue, &path) {
                     Ok(new_ibl) => {
                         self.ibl = new_ibl;
-                        self.ibl_enabled = true;
+                        self.ibl_mode = IblMode::Full;
+                        self.last_active_ibl_mode = IblMode::Full;
                         self.rebuild_light_bind_group();
                         self.hud.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
                     }
@@ -636,26 +669,35 @@ impl State {
     }
 
     fn active_ibl(&self) -> &IblState {
-        if self.ibl_enabled {
-            &self.ibl
-        } else {
-            &self.ibl_fallback
+        match self.ibl_mode {
+            IblMode::Off => &self.ibl_fallback,
+            IblMode::Diffuse | IblMode::Full => &self.ibl,
         }
     }
 
     fn rebuild_light_bind_group(&mut self) {
         if let Some(scene) = &mut self.scene {
-            let active_ibl = if self.ibl_enabled {
-                &self.ibl
-            } else {
-                &self.ibl_fallback
+            scene.light_bind_group = match self.ibl_mode {
+                IblMode::Off => create_light_bind_group(
+                    &self.device,
+                    &self.layouts,
+                    &scene.light_buffer,
+                    &self.ibl_fallback,
+                ),
+                IblMode::Diffuse => create_light_bind_group_selective(
+                    &self.device,
+                    &self.layouts,
+                    &scene.light_buffer,
+                    &self.ibl,
+                    &self.ibl_fallback,
+                ),
+                IblMode::Full => create_light_bind_group(
+                    &self.device,
+                    &self.layouts,
+                    &scene.light_buffer,
+                    &self.ibl,
+                ),
             };
-            scene.light_bind_group = create_light_bind_group(
-                &self.device,
-                &self.layouts,
-                &scene.light_buffer,
-                active_ibl,
-            );
         }
     }
 
@@ -896,12 +938,26 @@ impl State {
             KeyCode::KeyA => self.show_axis_gizmo = !self.show_axis_gizmo,
             KeyCode::KeyG => self.show_grid = !self.show_grid,
             KeyCode::KeyI => {
-                self.ibl_enabled = !self.ibl_enabled;
-                self.rebuild_light_bind_group();
-                let msg = if self.ibl_enabled {
-                    "IBL: On"
+                if self.modifiers.shift_key() {
+                    if self.ibl_mode != IblMode::Off {
+                        self.ibl_mode = match self.ibl_mode {
+                            IblMode::Diffuse => IblMode::Full,
+                            IblMode::Full => IblMode::Diffuse,
+                            IblMode::Off => unreachable!(),
+                        };
+                        self.last_active_ibl_mode = self.ibl_mode;
+                    }
+                } else if self.ibl_mode == IblMode::Off {
+                    self.ibl_mode = self.last_active_ibl_mode;
                 } else {
-                    "IBL: Off"
+                    self.last_active_ibl_mode = self.ibl_mode;
+                    self.ibl_mode = IblMode::Off;
+                }
+                self.rebuild_light_bind_group();
+                let msg = match self.ibl_mode {
+                    IblMode::Off => "IBL: Off",
+                    IblMode::Diffuse => "IBL: Diffuse",
+                    IblMode::Full => "IBL: Full",
                 };
                 self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
             }
@@ -986,6 +1042,7 @@ impl State {
         }
         self.preferences.rendering.wireframe_line_weight = self.line_weight;
         self.preferences.lighting.lock = self.lights_locked;
+        self.preferences.display.ibl_mode = self.ibl_mode;
 
         match preferences::save(&self.preferences) {
             Ok(()) => self
@@ -1205,7 +1262,7 @@ impl State {
             &self.bounds_mode.to_string(),
             &bounds_info,
             &self.line_weight.to_string(),
-            self.ibl_enabled,
+            &self.ibl_mode.to_string(),
         );
 
         let capture_buffer = if self.capture_requested {

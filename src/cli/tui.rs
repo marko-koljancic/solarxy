@@ -9,7 +9,8 @@ use ratatui::{
 };
 use solarxy::format_number;
 use solarxy::preferences::{
-    self, BackgroundMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode, ViewMode,
+    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode,
+    ViewMode,
 };
 
 use std::io;
@@ -745,7 +746,7 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     }
 }
 
-const PREF_FIELD_COUNT: usize = 12;
+const PREF_FIELD_COUNT: usize = 13;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -862,6 +863,7 @@ impl PreferencesApp {
             "UV Mode",
             "Projection Mode",
             "Turntable Active",
+            "IBL Mode",
             "Wireframe Line Weight",
             "MSAA Sample Count",
             "Lighting Lock",
@@ -877,6 +879,7 @@ impl PreferencesApp {
             format!("{}", self.preferences.display.uv_mode),
             format!("{}", self.preferences.display.projection_mode),
             format!("{}", self.preferences.display.turntable_active),
+            format!("{}", self.preferences.display.ibl_mode),
             format!("{}", self.preferences.rendering.wireframe_line_weight),
             format!("{}", self.preferences.rendering.msaa_sample_count),
             format!("{}", self.preferences.lighting.lock),
@@ -892,6 +895,7 @@ impl PreferencesApp {
             format!("{}", self.original.display.uv_mode),
             format!("{}", self.original.display.projection_mode),
             format!("{}", self.original.display.turntable_active),
+            format!("{}", self.original.display.ibl_mode),
             format!("{}", self.original.rendering.wireframe_line_weight),
             format!("{}", self.original.rendering.msaa_sample_count),
             format!("{}", self.original.lighting.lock),
@@ -1021,13 +1025,28 @@ impl PreferencesApp {
                     !self.preferences.display.turntable_active
             }
             9 => {
+                self.preferences.display.ibl_mode = if forward {
+                    match self.preferences.display.ibl_mode {
+                        IblMode::Off => IblMode::Diffuse,
+                        IblMode::Diffuse => IblMode::Full,
+                        IblMode::Full => IblMode::Off,
+                    }
+                } else {
+                    match self.preferences.display.ibl_mode {
+                        IblMode::Off => IblMode::Full,
+                        IblMode::Diffuse => IblMode::Off,
+                        IblMode::Full => IblMode::Diffuse,
+                    }
+                };
+            }
+            10 => {
                 self.preferences.rendering.wireframe_line_weight = if forward {
                     self.preferences.rendering.wireframe_line_weight.next()
                 } else {
                     cycle_back_line_weight(self.preferences.rendering.wireframe_line_weight)
                 };
             }
-            10 => {
+            11 => {
                 self.preferences.rendering.msaa_sample_count = if forward {
                     match self.preferences.rendering.msaa_sample_count {
                         1 => 2,
@@ -1042,7 +1061,7 @@ impl PreferencesApp {
                     }
                 };
             }
-            11 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
+            12 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
             _ => {}
         }
     }

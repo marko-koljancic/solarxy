@@ -179,6 +179,24 @@ impl std::fmt::Display for ProjectionMode {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IblMode {
+    Off,
+    Diffuse,
+    #[default]
+    Full,
+}
+
+impl std::fmt::Display for IblMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Off => write!(f, "Off"),
+            Self::Diffuse => write!(f, "Diffuse"),
+            Self::Full => write!(f, "Full"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     pub config_version: u32,
@@ -206,6 +224,8 @@ pub struct DisplayPrefs {
     pub projection_mode: ProjectionMode,
     #[serde(default)]
     pub turntable_active: bool,
+    #[serde(default)]
+    pub ibl_mode: IblMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -248,6 +268,7 @@ impl Default for DisplayPrefs {
             uv_mode: UvMode::Off,
             projection_mode: ProjectionMode::Perspective,
             turntable_active: false,
+            ibl_mode: IblMode::Full,
         }
     }
 }
@@ -352,6 +373,7 @@ mod tests {
                 uv_mode: UvMode::Checker,
                 projection_mode: ProjectionMode::Orthographic,
                 turntable_active: true,
+                ibl_mode: IblMode::Diffuse,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
