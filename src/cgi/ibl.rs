@@ -2,6 +2,13 @@ use std::path::Path;
 
 use half::f16;
 
+pub(crate) struct BrdfLut {
+    #[allow(dead_code)]
+    pub(crate) texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+    pub(crate) sampler: wgpu::Sampler,
+}
+
 pub(crate) struct IblState {
     #[allow(dead_code)]
     pub(crate) irradiance_texture: wgpu::Texture,
@@ -11,10 +18,6 @@ pub(crate) struct IblState {
     pub(crate) prefiltered_texture: wgpu::Texture,
     pub(crate) prefiltered_view: wgpu::TextureView,
     pub(crate) prefiltered_sampler: wgpu::Sampler,
-    #[allow(dead_code)]
-    pub(crate) brdf_lut_texture: wgpu::Texture,
-    pub(crate) brdf_lut_view: wgpu::TextureView,
-    pub(crate) brdf_lut_sampler: wgpu::Sampler,
 }
 
 fn write_rgba16f(buf: &mut [u8], offset: usize, r: f32, g: f32, b: f32, a: f32) {
@@ -49,6 +52,84 @@ const PREFILTERED_MIP_COUNT: u32 = 6;
 const BRDF_LUT_SIZE: u32 = 512;
 const BRDF_LUT_SAMPLES: u32 = 1024;
 
+impl BrdfLut {
+    pub(crate) fn generate(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let texture = generate_brdf_lut(device, queue);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("IBL BRDF LUT View"),
+            ..Default::default()
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("IBL BRDF LUT Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+    }
+
+    pub(crate) fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("IBL Fallback BRDF LUT"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mut lut_pixel = [0u8; 4];
+        write_rg16f(&mut lut_pixel, 0, 1.0, 0.0);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &lut_pixel,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("IBL BRDF LUT View"),
+            ..Default::default()
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("IBL BRDF LUT Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+    }
+}
+
 impl IblState {
     pub(crate) fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut pixel_bytes = [0u8; 8];
@@ -67,48 +148,7 @@ impl IblState {
             write_cubemap_face(queue, &prefiltered_texture, face, 0, 1, &black_pixel);
         }
 
-        let brdf_lut_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("IBL Fallback BRDF LUT"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rg16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let mut lut_pixel = [0u8; 4];
-        write_rg16f(&mut lut_pixel, 0, 1.0, 0.0);
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &brdf_lut_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &lut_pixel,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        Self::from_parts(
-            device,
-            irradiance_texture,
-            prefiltered_texture,
-            brdf_lut_texture,
-        )
+        Self::from_parts(device, irradiance_texture, prefiltered_texture)
     }
 
     pub(crate) fn from_sky_colors(
@@ -119,14 +159,8 @@ impl IblState {
     ) -> Self {
         let irradiance_texture = generate_irradiance_sky(device, queue, top, bottom);
         let prefiltered_texture = generate_prefiltered_sky(device, queue, top, bottom);
-        let brdf_lut_texture = generate_brdf_lut(device, queue);
 
-        Self::from_parts(
-            device,
-            irradiance_texture,
-            prefiltered_texture,
-            brdf_lut_texture,
-        )
+        Self::from_parts(device, irradiance_texture, prefiltered_texture)
     }
 
     pub(crate) fn from_hdri(
@@ -150,13 +184,11 @@ impl IblState {
         let irradiance_texture = irradiance_faces_to_texture(device, queue, &irradiance);
         let prefiltered_texture =
             generate_prefiltered_equirect(device, queue, width, height, &pixels);
-        let brdf_lut_texture = generate_brdf_lut(device, queue);
 
         Ok(Self::from_parts(
             device,
             irradiance_texture,
             prefiltered_texture,
-            brdf_lut_texture,
         ))
     }
 
@@ -164,7 +196,6 @@ impl IblState {
         device: &wgpu::Device,
         irradiance_texture: wgpu::Texture,
         prefiltered_texture: wgpu::Texture,
-        brdf_lut_texture: wgpu::Texture,
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -199,20 +230,6 @@ impl IblState {
             ..Default::default()
         });
 
-        let brdf_lut_view = brdf_lut_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("IBL BRDF LUT View"),
-            ..Default::default()
-        });
-
-        let brdf_lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("IBL BRDF LUT Sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            ..Default::default()
-        });
-
         Self {
             irradiance_texture,
             irradiance_view,
@@ -220,9 +237,6 @@ impl IblState {
             prefiltered_texture,
             prefiltered_view,
             prefiltered_sampler,
-            brdf_lut_texture,
-            brdf_lut_view,
-            brdf_lut_sampler,
         }
     }
 }
@@ -285,7 +299,7 @@ fn generate_irradiance_sky(
     bottom: [f32; 3],
 ) -> wgpu::Texture {
     const SIZE: u32 = 32;
-    const SAMPLES: u32 = 256;
+    const SAMPLES: u32 = 64;
 
     let texture = create_cubemap(device, "IBL Sky Irradiance Cubemap", SIZE, 1);
     let face_bytes = (SIZE * SIZE * 8) as usize;
@@ -374,7 +388,7 @@ fn generate_prefiltered_sky(
     for mip in 0..PREFILTERED_MIP_COUNT {
         let roughness = mip as f32 / (PREFILTERED_MIP_COUNT - 1) as f32;
         let face_size = (PREFILTERED_SIZE >> mip).max(2);
-        let sample_count = (512u32 >> mip).max(16);
+        let sample_count = (128u32 >> mip).max(16);
         let face_bytes = (face_size * face_size * 8) as usize;
         let mut face_data = vec![0u8; face_bytes];
 

@@ -2,7 +2,7 @@ use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::hud::HudRenderer;
-use crate::cgi::ibl::IblState;
+use crate::cgi::ibl::{BrdfLut, IblState};
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::{self, Model};
 use crate::cgi::pipelines::{Instance, Pipelines};
@@ -124,8 +124,9 @@ fn create_light_bind_group(
     layouts: &BindGroupLayouts,
     light_buffer: &wgpu::Buffer,
     ibl: &IblState,
+    brdf_lut: &BrdfLut,
 ) -> wgpu::BindGroup {
-    create_light_bind_group_selective(device, layouts, light_buffer, ibl, ibl)
+    create_light_bind_group_selective(device, layouts, light_buffer, ibl, ibl, brdf_lut)
 }
 
 fn create_light_bind_group_selective(
@@ -134,6 +135,7 @@ fn create_light_bind_group_selective(
     light_buffer: &wgpu::Buffer,
     diffuse_src: &IblState,
     specular_src: &IblState,
+    brdf_lut: &BrdfLut,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("light_bind_group"),
@@ -161,11 +163,11 @@ fn create_light_bind_group_selective(
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: wgpu::BindingResource::TextureView(&specular_src.brdf_lut_view),
+                resource: wgpu::BindingResource::TextureView(&brdf_lut.view),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
-                resource: wgpu::BindingResource::Sampler(&specular_src.brdf_lut_sampler),
+                resource: wgpu::BindingResource::Sampler(&brdf_lut.sampler),
             },
         ],
     })
@@ -179,6 +181,7 @@ impl ModelScene {
         layouts: &BindGroupLayouts,
         config: &wgpu::SurfaceConfiguration,
         initial_grid_color: [f32; 3],
+        brdf_lut: &BrdfLut,
     ) -> anyhow::Result<Self> {
         let (model, normals_geo, stats) = resources::load_model_any(
             &model_path,
@@ -216,7 +219,7 @@ impl ModelScene {
         });
         let placeholder_ibl = IblState::fallback(device, queue);
         let light_bind_group =
-            create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl);
+            create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl, brdf_lut);
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, &model);
         let vis = VisualizationState::new(
@@ -282,6 +285,7 @@ pub struct State {
     bloom_enabled: bool,
     ibl: IblState,
     ibl_fallback: IblState,
+    brdf_lut: BrdfLut,
     ibl_mode: IblMode,
     last_active_ibl_mode: IblMode,
     layouts: Arc<BindGroupLayouts>,
@@ -426,6 +430,7 @@ impl State {
 
         let background_mode = preferences.display.background;
 
+        let brdf_lut = BrdfLut::generate(&device, &queue);
         let (ibl_top, ibl_bottom) = background_mode.sky_colors();
         let ibl = IblState::from_sky_colors(&device, &queue, ibl_top, ibl_bottom);
         let ibl_fallback = IblState::fallback(&device, &queue);
@@ -584,6 +589,7 @@ impl State {
             bloom_enabled: preferences.display.bloom_enabled,
             ibl,
             ibl_fallback,
+            brdf_lut,
             ibl_mode: preferences.display.ibl_mode,
             last_active_ibl_mode: match preferences.display.ibl_mode {
                 IblMode::Off => IblMode::Full,
@@ -683,6 +689,7 @@ impl State {
                     &self.layouts,
                     &scene.light_buffer,
                     &self.ibl_fallback,
+                    &self.brdf_lut,
                 ),
                 IblMode::Diffuse => create_light_bind_group_selective(
                     &self.device,
@@ -690,12 +697,14 @@ impl State {
                     &scene.light_buffer,
                     &self.ibl,
                     &self.ibl_fallback,
+                    &self.brdf_lut,
                 ),
                 IblMode::Full => create_light_bind_group(
                     &self.device,
                     &self.layouts,
                     &scene.light_buffer,
                     &self.ibl,
+                    &self.brdf_lut,
                 ),
             };
         }
@@ -740,6 +749,7 @@ impl State {
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
+            let placeholder_brdf = BrdfLut::fallback(&device, &queue);
             let result = ModelScene::new(
                 model_path,
                 &device,
@@ -747,6 +757,7 @@ impl State {
                 &layouts,
                 &config,
                 initial_grid_color,
+                &placeholder_brdf,
             );
             let _ = tx.send(result);
         });
@@ -1091,6 +1102,7 @@ impl State {
                     &self.layouts,
                     &new_scene.light_buffer,
                     active_ibl,
+                    &self.brdf_lut,
                 );
                 self.hud.update_stats(Some(&new_scene.stats));
                 self.hud
@@ -1546,6 +1558,9 @@ impl State {
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
             let material = &scene.model.materials[mesh.material];
+            if material.uniform.alpha_mode == 2 {
+                continue;
+            }
             pass.set_bind_group(1, &material.bind_group, &[]);
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1622,11 +1637,12 @@ impl State {
         } else {
             match self.view_mode {
                 ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                    self.draw_shaded_model(&mut pass, scene);
+                    self.draw_opaque_meshes(&mut pass, scene);
                     self.draw_floor(&mut pass, scene);
                     if self.view_mode == ViewMode::ShadedWireframe {
                         self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
                     }
+                    self.draw_blend_meshes(&mut pass, scene);
                 }
                 ViewMode::WireframeOnly => {
                     self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
@@ -1664,16 +1680,63 @@ impl State {
         self.draw_bounds(&mut pass, scene);
     }
 
-    fn draw_shaded_model<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_opaque_meshes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
         use model::DrawModel;
         pass.set_pipeline(&self.pipelines.main);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
-        pass.draw_model_instanced(
-            &scene.model,
-            0..1,
-            &scene.cam.bind_group,
-            &scene.light_bind_group,
-        );
+        for mesh in &scene.model.meshes {
+            let material = &scene.model.materials[mesh.material];
+            if material.uniform.alpha_mode == 2 {
+                continue;
+            }
+            pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..1,
+                &scene.cam.bind_group,
+                &scene.light_bind_group,
+            );
+        }
+    }
+
+    fn draw_blend_meshes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+        use model::DrawModel;
+
+        let forward = (scene.cam.camera.target - scene.cam.camera.eye).normalize();
+        let eye = scene.cam.camera.eye;
+
+        let mut blend_list: Vec<(usize, f32)> = Vec::new();
+        for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            let material = &scene.model.materials[mesh.material];
+            if material.uniform.alpha_mode != 2 {
+                continue;
+            }
+            let center = scene.model.mesh_bounds[i].center();
+            let to_center = center - eye;
+            let depth = to_center.dot(forward);
+            blend_list.push((i, depth));
+        }
+
+        if blend_list.is_empty() {
+            return;
+        }
+
+        blend_list
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        pass.set_pipeline(&self.pipelines.alpha_blend);
+        pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
+        for (idx, _) in &blend_list {
+            let mesh = &scene.model.meshes[*idx];
+            let material = &scene.model.materials[mesh.material];
+            pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..1,
+                &scene.cam.bind_group,
+                &scene.light_bind_group,
+            );
+        }
     }
 
     fn draw_edge_wireframe<'a>(
