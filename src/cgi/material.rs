@@ -1,5 +1,13 @@
 use wgpu::util::DeviceExt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AlphaMode {
+    #[default]
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialUniform {

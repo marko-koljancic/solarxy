@@ -158,6 +158,11 @@ fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, ro
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+
+    if material.alpha_mode == 1u && albedo_sample.a < material.alpha_cutoff {
+        discard;
+    }
+
     let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
     let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
     let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);

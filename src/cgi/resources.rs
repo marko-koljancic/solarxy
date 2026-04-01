@@ -93,9 +93,9 @@ fn upload_model(
             roughness_factor: mat.roughness_factor,
             metallic_factor: mat.metallic_factor,
             ao_strength: 1.0,
-            alpha_cutoff: 0.5,
+            alpha_cutoff: mat.alpha_cutoff,
             emissive: mat.emissive_factor,
-            alpha_mode: 0,
+            alpha_mode: mat.alpha_mode,
         };
 
         gpu_materials.push(material::Material::new(

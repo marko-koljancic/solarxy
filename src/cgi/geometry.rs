@@ -34,6 +34,8 @@ pub struct RawMaterialData {
     pub roughness_factor: f32,
     pub metallic_factor: f32,
     pub emissive_factor: [f32; 3],
+    pub alpha_mode: u32,
+    pub alpha_cutoff: f32,
 }
 
 pub struct RawModelData {

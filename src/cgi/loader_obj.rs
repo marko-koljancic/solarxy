@@ -59,6 +59,11 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(0.0);
 
+        let (alpha_mode, alpha_cutoff) = match m.dissolve {
+            Some(d) if d < 1.0 => (1u32, 0.5f32),
+            _ => (0, 0.5),
+        };
+
         materials.push(RawMaterialData {
             name: m.name.clone(),
             diffuse_texture_path: diffuse_path,
@@ -74,6 +79,8 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             roughness_factor,
             metallic_factor,
             emissive_factor: [0.0, 0.0, 0.0],
+            alpha_mode,
+            alpha_cutoff,
         });
     }
 

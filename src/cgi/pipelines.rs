@@ -104,7 +104,7 @@ impl Pipelines {
         let shadow_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Shadow Pipeline Layout"),
-                bind_group_layouts: &[&layouts.shadow_pass],
+                bind_group_layouts: &[&layouts.shadow_pass, &layouts.texture],
                 push_constant_ranges: &[],
             });
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -123,7 +123,12 @@ impl Pipelines {
                     ],
                     compilation_options: Default::default(),
                 },
-                fragment: None,
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_shadow"),
+                    targets: &[],
+                    compilation_options: Default::default(),
+                }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     front_face: wgpu::FrontFace::Ccw,

@@ -1382,8 +1382,13 @@ impl State {
         pass.set_pipeline(&self.pipelines.shadow);
         pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-        use model::DrawMeshSimple;
-        pass.draw_model_simple(&scene.model, 0..1);
+        for mesh in &scene.model.meshes {
+            let material = &scene.model.materials[mesh.material];
+            pass.set_bind_group(1, &material.bind_group, &[]);
+            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+        }
     }
 
     fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {

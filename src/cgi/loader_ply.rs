@@ -247,6 +247,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         roughness_factor: 0.5,
         metallic_factor: 0.0,
         emissive_factor: [0.0, 0.0, 0.0],
+        alpha_mode: 0,
+        alpha_cutoff: 0.5,
     });
 
     Ok(RawModelData {

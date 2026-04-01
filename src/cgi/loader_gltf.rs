@@ -24,6 +24,8 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
             roughness_factor: 0.5,
             metallic_factor: 0.0,
             emissive_factor: [0.0, 0.0, 0.0],
+            alpha_mode: 0,
+            alpha_cutoff: 0.5,
         });
     }
 
@@ -75,6 +77,13 @@ fn extract_materials(
 
             let emissive_factor = mat.emissive_factor();
 
+            let alpha_mode = match mat.alpha_mode() {
+                gltf::material::AlphaMode::Opaque => 0,
+                gltf::material::AlphaMode::Mask => 1,
+                gltf::material::AlphaMode::Blend => 2,
+            };
+            let alpha_cutoff = mat.alpha_cutoff().unwrap_or(0.5);
+
             RawMaterialData {
                 name: mat.name().unwrap_or("gltf_material").to_string(),
                 diffuse_texture_path: diffuse_path,
@@ -90,6 +99,8 @@ fn extract_materials(
                 roughness_factor: pbr.roughness_factor(),
                 metallic_factor: pbr.metallic_factor(),
                 emissive_factor,
+                alpha_mode,
+                alpha_cutoff,
             }
         })
         .collect()
