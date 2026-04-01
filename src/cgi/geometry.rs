@@ -25,6 +25,15 @@ pub struct RawMaterialData {
     pub normal_texture_path: Option<String>,
     pub diffuse_texture_data: Option<RawImageData>,
     pub normal_texture_data: Option<RawImageData>,
+    pub metallic_roughness_texture_path: Option<String>,
+    pub metallic_roughness_texture_data: Option<RawImageData>,
+    pub occlusion_texture_path: Option<String>,
+    pub occlusion_texture_data: Option<RawImageData>,
+    pub emissive_texture_path: Option<String>,
+    pub emissive_texture_data: Option<RawImageData>,
+    pub roughness_factor: f32,
+    pub metallic_factor: f32,
+    pub emissive_factor: [f32; 3],
 }
 
 pub struct RawModelData {

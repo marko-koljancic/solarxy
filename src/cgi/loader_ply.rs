@@ -238,6 +238,15 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         normal_texture_path: None,
         diffuse_texture_data: None,
         normal_texture_data: None,
+        metallic_roughness_texture_path: None,
+        metallic_roughness_texture_data: None,
+        occlusion_texture_path: None,
+        occlusion_texture_data: None,
+        emissive_texture_path: None,
+        emissive_texture_data: None,
+        roughness_factor: 0.5,
+        metallic_factor: 0.0,
+        emissive_factor: [0.0, 0.0, 0.0],
     });
 
     Ok(RawModelData {

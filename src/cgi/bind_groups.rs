@@ -21,10 +21,15 @@ impl BindGroupLayouts {
         let texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("texture_binding_group_layout"),
             entries: &[
-                bgl_texture_entry(0),
-                bgl_sampler_entry(1),
-                bgl_texture_entry(2),
-                bgl_sampler_entry(3),
+                bgl_texture_entry(0),                               // diffuse texture
+                bgl_sampler_entry(1),                               // diffuse sampler
+                bgl_texture_entry(2),                               // normal texture
+                bgl_sampler_entry(3),                               // normal sampler
+                bgl_texture_entry(4),                               // ORM texture
+                bgl_sampler_entry(5),                               // ORM sampler
+                bgl_texture_entry(6),                               // emissive texture
+                bgl_sampler_entry(7),                               // emissive sampler
+                bgl_uniform_entry(8, wgpu::ShaderStages::FRAGMENT), // MaterialUniform
             ],
         });
         let camera = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

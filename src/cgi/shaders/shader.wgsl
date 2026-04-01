@@ -87,6 +87,20 @@ fn vs_main(
 @group(0) @binding(1) var s_diffuse: sampler;
 @group(0) @binding(2) var t_normal: texture_2d<f32>;
 @group(0) @binding(3) var s_normal: sampler;
+@group(0) @binding(4) var t_orm: texture_2d<f32>;
+@group(0) @binding(5) var s_orm: sampler;
+@group(0) @binding(6) var t_emissive: texture_2d<f32>;
+@group(0) @binding(7) var s_emissive: sampler;
+
+struct MaterialUniform {
+    roughness_factor: f32,
+    metallic_factor: f32,
+    ao_strength: f32,
+    alpha_cutoff: f32,
+    emissive: vec3<f32>,
+    alpha_mode: u32,
+}
+@group(0) @binding(8) var<uniform> material: MaterialUniform;
 
 struct LightEntry {
     position: vec3<f32>,
@@ -100,8 +114,6 @@ struct LightsUniform {
 var<uniform> lights: LightsUniform;
 
 const PI: f32 = 3.14159265358979;
-const ROUGHNESS: f32 = 0.5;
-const METALLIC: f32 = 0.0;
 
 fn D_GGX(NdotH: f32, roughness: f32) -> f32 {
     let a = roughness * roughness;
@@ -124,20 +136,20 @@ fn F_schlick(cosTheta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
+fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
     let H = normalize(V + L);
     let NdotV = max(dot(N, V), 0.001);
     let NdotL = max(dot(N, L), 0.001);
     let NdotH = max(dot(N, H), 0.0);
     let HdotV = max(dot(H, V), 0.0);
 
-    let F0 = mix(vec3(0.04), albedo, METALLIC);
+    let F0 = mix(vec3(0.04), albedo, metallic);
     let F = F_schlick(HdotV, F0);
-    let D = D_GGX(NdotH, ROUGHNESS);
-    let G = G_smith(NdotV, NdotL, ROUGHNESS);
+    let D = D_GGX(NdotH, roughness);
+    let G = G_smith(NdotV, NdotL, roughness);
 
     let specular = (D * G * F) / (4.0 * NdotV * NdotL);
-    let kD = (1.0 - F) * (1.0 - METALLIC);
+    let kD = (1.0 - F) * (1.0 - metallic);
     let diffuse = kD * albedo / PI;
 
     return (diffuse + specular) * NdotL;
@@ -147,7 +159,14 @@ fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) ->
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
     let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
+    let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
+    let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
+
     let albedo = albedo_sample.xyz;
+
+    let ao = mix(1.0, orm_sample.r, material.ao_strength);
+    let roughness = material.roughness_factor * orm_sample.g;
+    let metallic = material.metallic_factor * orm_sample.b;
 
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
     let N = normalize(n_sample.xyz * 2.0 - 1.0);
@@ -156,7 +175,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let N_world = normalize(in.world_normal);
     let sky = vec3(0.45, 0.48, 0.55);
     let ground = vec3(0.25, 0.22, 0.18);
-    let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo;
+    let ambient = mix(ground, sky, N_world.y * 0.5 + 0.5) * albedo * ao;
 
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;
@@ -168,15 +187,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     {
         let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
         let scale = lights.lights[0].intensity * 3.0 * shadow;
-        radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo) * scale;
+        radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
     }
 
     for (var i = 1u; i < 3u; i++) {
         let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
         let scale = lights.lights[i].intensity * 3.0;
-        radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo) * scale;
+        radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
     }
 
-    let color = ambient + radiance_acc;
+    let emissive = material.emissive * emissive_sample.rgb;
+    let color = ambient + radiance_acc + emissive;
     return vec4(color, albedo_sample.a);
 }

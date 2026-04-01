@@ -2,7 +2,7 @@ use std::path::Path;
 
 use wgpu::util::DeviceExt;
 
-use super::geometry::{self, RawModelData};
+use super::geometry::{self, RawImageData, RawMaterialData, RawModelData};
 use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
@@ -60,51 +60,42 @@ fn upload_model(
         geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
     for mat in &raw.materials {
-        let diffuse_texture = if let Some(ref data) = mat.diffuse_texture_data {
-            texture::Texture::from_raw_rgba(
-                device,
-                queue,
-                &data.pixels,
-                data.width,
-                data.height,
-                Some(&mat.name),
-                false,
-            )
-            .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to load embedded diffuse texture: {}", e);
-                create_default_texture(device, queue, false)
-            })
-        } else {
-            match &mat.diffuse_texture_path {
-                Some(path) if !path.is_empty() => load_texture(path, false, device, queue)
-                    .unwrap_or_else(|e| {
-                        eprintln!("Warning: Failed to load diffuse texture '{}': {}", path, e);
-                        create_default_texture(device, queue, false)
-                    }),
-                _ => create_default_texture(device, queue, false),
-            }
-        };
+        let diffuse_texture = load_or_fallback_texture(
+            device,
+            queue,
+            &mat.diffuse_texture_data,
+            &mat.diffuse_texture_path,
+            false,
+            &mat.name,
+            "diffuse",
+        );
+        let normal_texture = load_or_fallback_texture(
+            device,
+            queue,
+            &mat.normal_texture_data,
+            &mat.normal_texture_path,
+            true,
+            &mat.name,
+            "normal",
+        );
+        let orm_texture = load_or_create_orm(device, queue, mat);
+        let emissive_texture = load_or_fallback_texture(
+            device,
+            queue,
+            &mat.emissive_texture_data,
+            &mat.emissive_texture_path,
+            false,
+            &mat.name,
+            "emissive",
+        );
 
-        let normal_texture = if let Some(ref data) = mat.normal_texture_data {
-            texture::Texture::from_raw_rgba(
-                device,
-                queue,
-                &data.pixels,
-                data.width,
-                data.height,
-                Some(&mat.name),
-                true,
-            )
-            .unwrap_or_else(|e| {
-                eprintln!("Warning: Failed to load embedded normal texture: {}", e);
-                create_default_texture(device, queue, true)
-            })
-        } else {
-            match &mat.normal_texture_path {
-                Some(path) if !path.is_empty() => load_texture(path, true, device, queue)
-                    .unwrap_or_else(|_| create_default_texture(device, queue, true)),
-                _ => create_default_texture(device, queue, true),
-            }
+        let uniform = material::MaterialUniform {
+            roughness_factor: mat.roughness_factor,
+            metallic_factor: mat.metallic_factor,
+            ao_strength: 1.0,
+            alpha_cutoff: 0.5,
+            emissive: mat.emissive_factor,
+            alpha_mode: 0,
         };
 
         gpu_materials.push(material::Material::new(
@@ -112,6 +103,9 @@ fn upload_model(
             &mat.name,
             diffuse_texture,
             normal_texture,
+            orm_texture,
+            emissive_texture,
+            uniform,
             layout,
         ));
     }
@@ -119,11 +113,16 @@ fn upload_model(
     if gpu_materials.is_empty() {
         let diffuse = create_default_texture_colored(device, queue, [226, 213, 195, 255]);
         let normal = create_default_texture(device, queue, true);
+        let orm = create_default_orm_texture(device, queue);
+        let emissive = create_default_emissive_texture(device, queue);
         gpu_materials.push(material::Material::new(
             device,
             "clay_default",
             diffuse,
             normal,
+            orm,
+            emissive,
+            material::MaterialUniform::default(),
             layout,
         ));
     }
@@ -346,4 +345,149 @@ fn create_default_texture(
 
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), is_normal_map)
         .expect("Failed to create default texture")
+}
+
+fn create_default_orm_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> texture::Texture {
+    texture::Texture::from_raw_rgba(
+        device,
+        queue,
+        &[255, 255, 255, 255],
+        1,
+        1,
+        Some("default_orm"),
+        true,
+    )
+    .expect("Failed to create default ORM texture")
+}
+
+fn create_default_emissive_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> texture::Texture {
+    texture::Texture::from_raw_rgba(
+        device,
+        queue,
+        &[255, 255, 255, 255],
+        1,
+        1,
+        Some("default_emissive"),
+        false,
+    )
+    .expect("Failed to create default emissive texture")
+}
+
+fn load_or_fallback_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    embedded: &Option<RawImageData>,
+    path: &Option<String>,
+    is_linear: bool,
+    mat_name: &str,
+    kind: &str,
+) -> texture::Texture {
+    if let Some(data) = embedded {
+        texture::Texture::from_raw_rgba(
+            device,
+            queue,
+            &data.pixels,
+            data.width,
+            data.height,
+            Some(mat_name),
+            is_linear,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to load embedded {kind} texture: {e}");
+            create_default_texture(device, queue, is_linear)
+        })
+    } else {
+        match path {
+            Some(p) if !p.is_empty() => {
+                load_texture(p, is_linear, device, queue).unwrap_or_else(|e| {
+                    eprintln!("Warning: Failed to load {kind} texture '{p}': {e}");
+                    create_default_texture(device, queue, is_linear)
+                })
+            }
+            _ => {
+                if kind == "emissive" {
+                    create_default_emissive_texture(device, queue)
+                } else if kind == "orm" {
+                    create_default_orm_texture(device, queue)
+                } else {
+                    create_default_texture(device, queue, is_linear)
+                }
+            }
+        }
+    }
+}
+
+fn load_or_create_orm(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    mat: &RawMaterialData,
+) -> texture::Texture {
+    let mr_tex = if mat.metallic_roughness_texture_data.is_some()
+        || mat.metallic_roughness_texture_path.is_some()
+    {
+        load_or_fallback_texture(
+            device,
+            queue,
+            &mat.metallic_roughness_texture_data,
+            &mat.metallic_roughness_texture_path,
+            true,
+            &mat.name,
+            "orm",
+        )
+    } else {
+        return create_default_orm_texture(device, queue);
+    };
+
+    if mat.occlusion_texture_data.is_some() || mat.occlusion_texture_path.is_some() {
+        let same_image = match (
+            &mat.metallic_roughness_texture_path,
+            &mat.occlusion_texture_path,
+        ) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        if same_image {
+            return mr_tex;
+        }
+
+        if let Some(ref occ_data) = mat.occlusion_texture_data {
+            if let Some(composited) =
+                composite_orm_pixels(&mat.metallic_roughness_texture_data, occ_data)
+            {
+                return texture::Texture::from_raw_rgba(
+                    device,
+                    queue,
+                    &composited.pixels,
+                    composited.width,
+                    composited.height,
+                    Some(&mat.name),
+                    true,
+                )
+                .unwrap_or(mr_tex);
+            }
+        }
+    }
+
+    mr_tex
+}
+
+fn composite_orm_pixels(
+    mr_data: &Option<RawImageData>,
+    occ_data: &RawImageData,
+) -> Option<RawImageData> {
+    let mr = mr_data.as_ref()?;
+    if mr.width != occ_data.width || mr.height != occ_data.height {
+        return None;
+    }
+    let mut pixels = mr.pixels.clone();
+    for i in (0..pixels.len()).step_by(4) {
+        if i < occ_data.pixels.len() {
+            pixels[i] = occ_data.pixels[i];
+        }
+    }
+    Some(RawImageData {
+        pixels,
+        width: mr.width,
+        height: mr.height,
+    })
 }

@@ -48,12 +48,32 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
                 .to_string()
         });
 
+        let roughness_factor = m
+            .unknown_param
+            .get("Pr")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.5);
+        let metallic_factor = m
+            .unknown_param
+            .get("Pm")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.0);
+
         materials.push(RawMaterialData {
             name: m.name.clone(),
             diffuse_texture_path: diffuse_path,
             normal_texture_path: normal_path,
             diffuse_texture_data: None,
             normal_texture_data: None,
+            metallic_roughness_texture_path: None,
+            metallic_roughness_texture_data: None,
+            occlusion_texture_path: None,
+            occlusion_texture_data: None,
+            emissive_texture_path: None,
+            emissive_texture_data: None,
+            roughness_factor,
+            metallic_factor,
+            emissive_factor: [0.0, 0.0, 0.0],
         });
     }
 

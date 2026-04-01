@@ -15,6 +15,15 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
             normal_texture_path: None,
             diffuse_texture_data: None,
             normal_texture_data: None,
+            metallic_roughness_texture_path: None,
+            metallic_roughness_texture_data: None,
+            occlusion_texture_path: None,
+            occlusion_texture_data: None,
+            emissive_texture_path: None,
+            emissive_texture_data: None,
+            roughness_factor: 0.5,
+            metallic_factor: 0.0,
+            emissive_factor: [0.0, 0.0, 0.0],
         });
     }
 
@@ -49,12 +58,38 @@ fn extract_materials(
                 None => (None, None),
             };
 
+            let (mr_path, mr_data) = match pbr.metallic_roughness_texture() {
+                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                None => (None, None),
+            };
+
+            let (occ_path, occ_data) = match mat.occlusion_texture() {
+                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                None => (None, None),
+            };
+
+            let (emissive_path, emissive_data) = match mat.emissive_texture() {
+                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                None => (None, None),
+            };
+
+            let emissive_factor = mat.emissive_factor();
+
             RawMaterialData {
                 name: mat.name().unwrap_or("gltf_material").to_string(),
                 diffuse_texture_path: diffuse_path,
                 normal_texture_path: normal_path,
                 diffuse_texture_data: diffuse_data,
                 normal_texture_data: normal_data,
+                metallic_roughness_texture_path: mr_path,
+                metallic_roughness_texture_data: mr_data,
+                occlusion_texture_path: occ_path,
+                occlusion_texture_data: occ_data,
+                emissive_texture_path: emissive_path,
+                emissive_texture_data: emissive_data,
+                roughness_factor: pbr.roughness_factor(),
+                metallic_factor: pbr.metallic_factor(),
+                emissive_factor,
             }
         })
         .collect()
