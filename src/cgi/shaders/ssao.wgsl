@@ -34,8 +34,8 @@ struct SsaoKernel {
 }
 @group(0) @binding(5) var<uniform> kernel: SsaoKernel;
 
-const RADIUS: f32 = 0.5;
-const BIAS: f32 = 0.025;
+const RADIUS: f32 = 0.15;
+const BIAS: f32 = 0.04;
 const KERNEL_SIZE: u32 = 64u;
 
 fn reconstruct_view_pos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
@@ -46,10 +46,12 @@ fn reconstruct_view_pos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 
 @fragment
 fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex_size = vec2<f32>(textureDimensions(normal_texture));
+    let normal_tex_size = vec2<f32>(textureDimensions(normal_texture));
+    let depth_tex_size = vec2<f32>(textureDimensions(depth_texture));
     let noise_size = vec2<f32>(textureDimensions(noise_texture));
 
-    let depth = textureSample(depth_texture, tex_sampler, in.uv);
+    let depth_coords = vec2<i32>(in.uv * depth_tex_size);
+    let depth = textureLoad(depth_texture, depth_coords, 0);
     if depth >= 1.0 {
         return vec4<f32>(1.0);
     }
@@ -59,7 +61,7 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_normal = textureSample(normal_texture, tex_sampler, in.uv).xyz * 2.0 - 1.0;
     let view_normal = normalize((camera.view * vec4<f32>(world_normal, 0.0)).xyz);
 
-    let noise_uv = in.uv * tex_size / noise_size;
+    let noise_uv = in.uv * normal_tex_size / noise_size;
     let random_vec = textureSample(noise_texture, tex_sampler, noise_uv).xy;
     let random_vec3 = vec3<f32>(random_vec, 0.0);
 
@@ -67,6 +69,7 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
     let bitangent = cross(view_normal, tangent);
     let tbn = mat3x3<f32>(tangent, bitangent, view_normal);
 
+    let depth_max = vec2<i32>(depth_tex_size) - 1;
     var occlusion = 0.0;
     for (var i = 0u; i < KERNEL_SIZE; i++) {
         let sample_dir = tbn * kernel.samples[i].xyz;
@@ -77,7 +80,8 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
         sample_uv = sample_uv * 0.5 + 0.5;
         sample_uv.y = 1.0 - sample_uv.y;
 
-        let sample_depth = textureSample(depth_texture, tex_sampler, sample_uv);
+        let sample_coords = clamp(vec2<i32>(sample_uv * depth_tex_size), vec2<i32>(0), depth_max);
+        let sample_depth = textureLoad(depth_texture, sample_coords, 0);
         let sample_view_pos = reconstruct_view_pos(sample_uv, sample_depth);
 
         let range_check = smoothstep(0.0, 1.0, RADIUS / abs(frag_pos.z - sample_view_pos.z));
@@ -86,6 +90,6 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    let ao = 1.0 - occlusion / f32(KERNEL_SIZE);
+    let ao = pow(1.0 - occlusion / f32(KERNEL_SIZE), 2.0);
     return vec4<f32>(ao, ao, ao, 1.0);
 }

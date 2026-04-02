@@ -28,7 +28,7 @@ struct Camera {
 }
 @group(0) @binding(3) var<uniform> camera: Camera;
 
-const BLUR_RADIUS: i32 = 4;
+const BLUR_RADIUS: i32 = 6;
 const DEPTH_THRESHOLD: f32 = 0.1;
 
 fn linearize_depth(d: f32) -> f32 {
@@ -37,11 +37,13 @@ fn linearize_depth(d: f32) -> f32 {
 
 fn bilateral_blur(uv: vec2<f32>, direction: vec2<f32>) -> f32 {
     let tex_size = vec2<f32>(textureDimensions(ao_texture));
+    let depth_size = vec2<f32>(textureDimensions(depth_texture));
     let texel = 1.0 / tex_size;
 
     let center_ao = textureSample(ao_texture, tex_sampler, uv).r;
-    let center_depth = linearize_depth(textureSample(depth_texture, tex_sampler, uv));
+    let center_depth = linearize_depth(textureLoad(depth_texture, vec2<i32>(uv * depth_size), 0));
 
+    let depth_max = vec2<i32>(depth_size) - 1;
     var result = center_ao;
     var total_weight = 1.0;
 
@@ -52,10 +54,11 @@ fn bilateral_blur(uv: vec2<f32>, direction: vec2<f32>) -> f32 {
         for (var sign = -1; sign <= 1; sign += 2) {
             let sample_uv = uv + offset * f32(sign);
             let sample_ao = textureSample(ao_texture, tex_sampler, sample_uv).r;
-            let sample_depth = linearize_depth(textureSample(depth_texture, tex_sampler, sample_uv));
+            let sample_coords = clamp(vec2<i32>(sample_uv * depth_size), vec2<i32>(0), depth_max);
+            let sample_depth = linearize_depth(textureLoad(depth_texture, sample_coords, 0));
 
             let depth_diff = abs(center_depth - sample_depth);
-            let depth_weight = select(0.0, 1.0, depth_diff < DEPTH_THRESHOLD);
+            let depth_weight = exp(-depth_diff * depth_diff / (2.0 * DEPTH_THRESHOLD * DEPTH_THRESHOLD));
 
             let weight = gauss_weight * depth_weight;
             result += sample_ao * weight;

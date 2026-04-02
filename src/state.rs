@@ -2081,7 +2081,7 @@ fn create_bloom_sample_bind_group(
     })
 }
 
-const SSAO_STRENGTH: f32 = 1.0;
+const SSAO_STRENGTH: f32 = 0.8;
 
 fn build_composite_params(bloom_enabled: bool, ssao_enabled: bool) -> [u8; 16] {
     let mut buf = [0u8; 16];

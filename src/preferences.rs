@@ -298,7 +298,7 @@ impl Default for DisplayPrefs {
             projection_mode: ProjectionMode::Perspective,
             turntable_active: false,
             ibl_mode: IblMode::Full,
-            ssao_enabled: true,
+            ssao_enabled: false,
         }
     }
 }

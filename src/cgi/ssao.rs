@@ -2,6 +2,7 @@ use super::bind_groups::BindGroupLayouts;
 use wgpu::util::DeviceExt;
 
 const KERNEL_SIZE: usize = 64;
+const NOISE_SIZE: u32 = 64;
 
 pub struct SsaoState {
     pub gbuffer_normal_texture: wgpu::Texture,
@@ -51,8 +52,8 @@ impl SsaoState {
         let noise_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SSAO Noise Texture"),
             size: wgpu::Extent3d {
-                width: 4,
-                height: 4,
+                width: NOISE_SIZE,
+                height: NOISE_SIZE,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -72,12 +73,12 @@ impl SsaoState {
             &noise_data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * 4), // 4 texels * 4 bytes (rgba8)
-                rows_per_image: Some(4),
+                bytes_per_row: Some(NOISE_SIZE * 4),
+                rows_per_image: Some(NOISE_SIZE),
             },
             wgpu::Extent3d {
-                width: 4,
-                height: 4,
+                width: NOISE_SIZE,
+                height: NOISE_SIZE,
                 depth_or_array_layers: 1,
             },
         );
@@ -131,7 +132,8 @@ impl SsaoState {
             create_normal_texture(device, width, height);
         let (gbuffer_depth_texture, gbuffer_depth_view) =
             create_gbuffer_depth_texture(device, width, height);
-        let (ssao_raw_texture, ssao_raw_view) = create_ao_texture(device, width, height, "SSAO Raw");
+        let (ssao_raw_texture, ssao_raw_view) =
+            create_ao_texture(device, width, height, "SSAO Raw");
         let (ssao_blur_texture, ssao_blur_view) =
             create_ao_texture(device, width, height, "SSAO Blur Scratch");
         let (ssao_output_texture, ssao_output_view) =
@@ -446,7 +448,6 @@ fn generate_kernel() -> [[f32; 4]; KERNEL_SIZE] {
         let u = halton(i as u32 + 1, 2);
         let v = halton(i as u32 + 1, 3);
 
-        // Cosine-weighted hemisphere sampling
         let theta = 2.0 * std::f32::consts::PI * u;
         let cos_phi = (1.0 - v).sqrt();
         let sin_phi = v.sqrt();
@@ -455,7 +456,6 @@ fn generate_kernel() -> [[f32; 4]; KERNEL_SIZE] {
         let y = theta.sin() * sin_phi;
         let z = cos_phi;
 
-        // Scale to concentrate samples near origin
         let scale = lerp(0.1, 1.0, (fi / KERNEL_SIZE as f32).powi(2));
         *sample = [x * scale, y * scale, z * scale, 0.0];
     }
@@ -463,16 +463,20 @@ fn generate_kernel() -> [[f32; 4]; KERNEL_SIZE] {
 }
 
 fn generate_noise() -> Vec<u8> {
-    // 4x4 texture of 2D rotation vectors stored as Rgba8Snorm (4 bytes per texel)
-    let mut data = Vec::with_capacity(4 * 4 * 4);
-    for i in 0..16u32 {
-        let angle = halton(i + 1, 7) * 2.0 * std::f32::consts::PI;
+    let count = (NOISE_SIZE * NOISE_SIZE) as usize;
+    let mut data = Vec::with_capacity(count * 4);
+    for i in 0..count as u32 {
+        let mut h = i.wrapping_mul(0x9E37_79B9);
+        h ^= h >> 16;
+        h = h.wrapping_mul(0x45D9_F3B);
+        h ^= h >> 16;
+        let angle = (h as f32 / u32::MAX as f32) * 2.0 * std::f32::consts::PI;
         let x = angle.cos();
         let y = angle.sin();
         data.push((x * 127.0) as i8 as u8);
         data.push((y * 127.0) as i8 as u8);
-        data.push(0u8); // z = 0
-        data.push(0u8); // w = 0
+        data.push(0u8);
+        data.push(0u8);
     }
     data
 }
