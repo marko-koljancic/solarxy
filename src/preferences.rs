@@ -256,7 +256,6 @@ pub const MAX_WINDOW_HEIGHT: u32 = 4320;
 pub struct WindowPrefs {
     pub window_width: u32,
     pub window_height: u32,
-    pub start_maximized: bool,
 }
 
 impl Default for WindowPrefs {
@@ -264,7 +263,6 @@ impl Default for WindowPrefs {
         Self {
             window_width: 1280,
             window_height: 720,
-            start_maximized: false,
         }
     }
 }
@@ -424,7 +422,6 @@ mod tests {
             window: WindowPrefs {
                 window_width: 1920,
                 window_height: 1080,
-                start_maximized: true,
             },
             history: HistoryPrefs {
                 recent_files: vec!["/tmp/model.obj".to_string()],
@@ -528,7 +525,6 @@ mod tests {
             [window]
             window_width = 100
             window_height = 99999
-            start_maximized = false
         "#;
         let mut parsed: Preferences = toml::from_str(toml_str).unwrap();
         parsed.window.window_width = parsed

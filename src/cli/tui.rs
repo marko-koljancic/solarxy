@@ -746,7 +746,7 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     }
 }
 
-const PREF_FIELD_COUNT: usize = 17;
+const PREF_FIELD_COUNT: usize = 16;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -870,7 +870,6 @@ impl PreferencesApp {
             "Lighting Lock",
             "Window Width",
             "Window Height",
-            "Start Maximized",
         ];
 
         let values: [String; PREF_FIELD_COUNT] = [
@@ -890,7 +889,6 @@ impl PreferencesApp {
             format!("{}", self.preferences.lighting.lock),
             format!("{}", self.preferences.window.window_width),
             format!("{}", self.preferences.window.window_height),
-            format!("{}", self.preferences.window.start_maximized),
         ];
 
         let original_values: [String; PREF_FIELD_COUNT] = [
@@ -910,7 +908,6 @@ impl PreferencesApp {
             format!("{}", self.original.lighting.lock),
             format!("{}", self.original.window.window_width),
             format!("{}", self.original.window.window_height),
-            format!("{}", self.original.window.start_maximized),
         ];
 
         let mut lines = Vec::new();
@@ -1088,9 +1085,6 @@ impl PreferencesApp {
                     .clamp(MIN_WINDOW_HEIGHT as i32, MAX_WINDOW_HEIGHT as i32)
                     as u32;
                 self.preferences.window.window_height = new_val;
-            }
-            16 => {
-                self.preferences.window.start_maximized = !self.preferences.window.start_maximized
             }
             _ => {}
         }

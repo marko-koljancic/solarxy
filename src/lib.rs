@@ -38,8 +38,7 @@ impl ApplicationHandler<State> for App {
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.preferences.window.window_width,
                 self.preferences.window.window_height,
-            ))
-            .with_maximized(self.preferences.window.start_maximized);
+            ));
         let window = match event_loop.create_window(window_attributes) {
             Ok(w) => Arc::new(w),
             Err(e) => {
