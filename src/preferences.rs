@@ -207,6 +207,8 @@ pub struct Preferences {
     #[serde(default)]
     pub lighting: LightingPrefs,
     #[serde(default)]
+    pub window: WindowPrefs,
+    #[serde(default)]
     pub history: HistoryPrefs,
 }
 
@@ -245,6 +247,28 @@ pub struct LightingPrefs {
     pub lock: bool,
 }
 
+pub const MIN_WINDOW_WIDTH: u32 = 640;
+pub const MIN_WINDOW_HEIGHT: u32 = 480;
+pub const MAX_WINDOW_WIDTH: u32 = 7680;
+pub const MAX_WINDOW_HEIGHT: u32 = 4320;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindowPrefs {
+    pub window_width: u32,
+    pub window_height: u32,
+    pub start_maximized: bool,
+}
+
+impl Default for WindowPrefs {
+    fn default() -> Self {
+        Self {
+            window_width: 1280,
+            window_height: 720,
+            start_maximized: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistoryPrefs {
     pub recent_files: Vec<String>,
@@ -257,6 +281,7 @@ impl Default for Preferences {
             display: DisplayPrefs::default(),
             rendering: RenderingPrefs::default(),
             lighting: LightingPrefs::default(),
+            window: WindowPrefs::default(),
             history: HistoryPrefs::default(),
         }
     }
@@ -319,6 +344,14 @@ pub fn load() -> Preferences {
                 );
                 prefs.rendering.msaa_sample_count = 4;
             }
+            prefs.window.window_width = prefs
+                .window
+                .window_width
+                .clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH);
+            prefs.window.window_height = prefs
+                .window
+                .window_height
+                .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
             prefs
         }
         Err(e) => {
@@ -388,6 +421,11 @@ mod tests {
                 msaa_sample_count: 2,
             },
             lighting: LightingPrefs { lock: true },
+            window: WindowPrefs {
+                window_width: 1920,
+                window_height: 1080,
+                start_maximized: true,
+            },
             history: HistoryPrefs {
                 recent_files: vec!["/tmp/model.obj".to_string()],
             },
@@ -448,6 +486,7 @@ mod tests {
         let parsed: Preferences = toml::from_str(toml_str).unwrap();
         assert_eq!(parsed.rendering, RenderingPrefs::default());
         assert_eq!(parsed.lighting, LightingPrefs::default());
+        assert_eq!(parsed.window, WindowPrefs::default());
         assert_eq!(parsed.history, HistoryPrefs::default());
         assert_eq!(parsed.display.background, BackgroundMode::Black);
     }
@@ -479,6 +518,29 @@ mod tests {
 
         assert_eq!(prefs.history.recent_files.len(), MAX_RECENT_FILES);
         assert_eq!(prefs.history.recent_files[0], "/tmp/model_10.obj");
+    }
+
+    #[test]
+    fn window_prefs_clamped() {
+        let toml_str = r#"
+            config_version = 1
+
+            [window]
+            window_width = 100
+            window_height = 99999
+            start_maximized = false
+        "#;
+        let mut parsed: Preferences = toml::from_str(toml_str).unwrap();
+        parsed.window.window_width = parsed
+            .window
+            .window_width
+            .clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH);
+        parsed.window.window_height = parsed
+            .window
+            .window_height
+            .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
+        assert_eq!(parsed.window.window_width, MIN_WINDOW_WIDTH);
+        assert_eq!(parsed.window.window_height, MAX_WINDOW_HEIGHT);
     }
 
     #[test]

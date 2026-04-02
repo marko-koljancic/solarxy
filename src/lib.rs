@@ -33,7 +33,13 @@ impl App {
 
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window_attributes = Window::default_attributes().with_title("Solarxy");
+        let window_attributes = Window::default_attributes()
+            .with_title("Solarxy")
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.preferences.window.window_width,
+                self.preferences.window.window_height,
+            ))
+            .with_maximized(self.preferences.window.start_maximized);
         let window = match event_loop.create_window(window_attributes) {
             Ok(w) => Arc::new(w),
             Err(e) => {

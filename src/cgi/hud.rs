@@ -23,6 +23,7 @@ pub struct HudRenderer {
     filename: String,
     mesh_count: usize,
     stats_text: String,
+    backend_info: String,
     toast: Option<Toast>,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
@@ -51,6 +52,7 @@ impl HudRenderer {
             filename: String::new(),
             mesh_count: 0,
             stats_text,
+            backend_info: String::new(),
             toast: None,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
@@ -76,6 +78,10 @@ impl HudRenderer {
     pub fn update_model_info(&mut self, filename: &str, mesh_count: usize) {
         self.filename = Self::truncate_filename(filename, 30);
         self.mesh_count = mesh_count;
+    }
+
+    pub fn set_backend_info(&mut self, info: String) {
+        self.backend_info = info;
     }
 
     fn truncate_filename(name: &str, max_chars: usize) -> String {
@@ -244,6 +250,20 @@ impl HudRenderer {
                 y += line_height;
             }
 
+            if !self.backend_info.is_empty() {
+                sections.push(
+                    Section::default()
+                        .add_text(
+                            Text::new(&self.backend_info)
+                                .with_scale(font_size_main)
+                                .with_color(text_color),
+                        )
+                        .with_screen_position((margin, y))
+                        .with_layout(Layout::default_single_line()),
+                );
+                y += line_height;
+            }
+
             sections.push(
                 Section::default()
                     .add_text(
@@ -271,6 +291,19 @@ impl HudRenderer {
                 y += line_height * bounds_lines as f32;
             }
         }
+
+        let window_size_text = format!("{} \u{00d7} {}", screen_width, screen_height);
+        sections.push(
+            Section::default()
+                .add_text(
+                    Text::new(&window_size_text)
+                        .with_scale(font_size_main)
+                        .with_color(text_color),
+                )
+                .with_screen_position((margin, y))
+                .with_layout(Layout::default_single_line()),
+        );
+        y += line_height;
 
         sections.push(
             Section::default()

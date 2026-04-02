@@ -317,6 +317,8 @@ pub struct State {
     modifiers: ModifiersState,
     last_frame_time: Instant,
     dt: f32,
+    #[allow(unused)]
+    backend_info: String,
     preferences: Preferences,
     msaa_sample_count: u32,
     pub window: Arc<Window>,
@@ -341,6 +343,16 @@ impl State {
                 force_fallback_adapter: false,
             })
             .await?;
+        let adapter_info = adapter.get_info();
+        let backend_info = if adapter_info.driver_info.is_empty() {
+            format!("{:?} \u{2014} {}", adapter_info.backend, adapter_info.name)
+        } else {
+            format!(
+                "{:?} \u{2014} {} \u{2014} {}",
+                adapter_info.backend, adapter_info.name, adapter_info.driver_info
+            )
+        };
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
@@ -407,7 +419,7 @@ impl State {
         let layouts = Arc::new(BindGroupLayouts::new(&device));
         let pipelines = Pipelines::new(&device, &config, &layouts, msaa_sample_count);
 
-        let hud = HudRenderer::new(
+        let mut hud = HudRenderer::new(
             &device,
             surface_format,
             size.width,
@@ -415,6 +427,7 @@ impl State {
             None,
             window.scale_factor(),
         );
+        hud.set_backend_info(backend_info.clone());
 
         let gradient_data: [f32; 8] = [0.35, 0.41, 0.47, 1.0, 0.66, 0.70, 0.72, 1.0];
         let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -559,7 +572,6 @@ impl State {
             &bloom_sampler,
         );
 
-        // Dummy camera buffer for initial SSAO state (rebuilt when model loads)
         let dummy_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dummy Camera Buffer for SSAO"),
             contents: &[0u8; 288],
@@ -634,6 +646,7 @@ impl State {
             modifiers: ModifiersState::empty(),
             last_frame_time: Instant::now(),
             dt: 0.0,
+            backend_info,
             preferences,
             msaa_sample_count,
             window,

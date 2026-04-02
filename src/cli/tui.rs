@@ -10,7 +10,7 @@ use ratatui::{
 use solarxy::format_number;
 use solarxy::preferences::{
     self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode,
-    ViewMode,
+    ViewMode, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
 };
 
 use std::io;
@@ -746,7 +746,7 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     }
 }
 
-const PREF_FIELD_COUNT: usize = 14;
+const PREF_FIELD_COUNT: usize = 17;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -868,6 +868,9 @@ impl PreferencesApp {
             "Wireframe Line Weight",
             "MSAA Sample Count",
             "Lighting Lock",
+            "Window Width",
+            "Window Height",
+            "Start Maximized",
         ];
 
         let values: [String; PREF_FIELD_COUNT] = [
@@ -885,6 +888,9 @@ impl PreferencesApp {
             format!("{}", self.preferences.rendering.wireframe_line_weight),
             format!("{}", self.preferences.rendering.msaa_sample_count),
             format!("{}", self.preferences.lighting.lock),
+            format!("{}", self.preferences.window.window_width),
+            format!("{}", self.preferences.window.window_height),
+            format!("{}", self.preferences.window.start_maximized),
         ];
 
         let original_values: [String; PREF_FIELD_COUNT] = [
@@ -902,6 +908,9 @@ impl PreferencesApp {
             format!("{}", self.original.rendering.wireframe_line_weight),
             format!("{}", self.original.rendering.msaa_sample_count),
             format!("{}", self.original.lighting.lock),
+            format!("{}", self.original.window.window_width),
+            format!("{}", self.original.window.window_height),
+            format!("{}", self.original.window.start_maximized),
         ];
 
         let mut lines = Vec::new();
@@ -1066,6 +1075,23 @@ impl PreferencesApp {
                 };
             }
             13 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
+            14 => {
+                let step: i32 = if forward { 160 } else { -160 };
+                let new_val = (self.preferences.window.window_width as i32 + step)
+                    .clamp(MIN_WINDOW_WIDTH as i32, MAX_WINDOW_WIDTH as i32)
+                    as u32;
+                self.preferences.window.window_width = new_val;
+            }
+            15 => {
+                let step: i32 = if forward { 160 } else { -160 };
+                let new_val = (self.preferences.window.window_height as i32 + step)
+                    .clamp(MIN_WINDOW_HEIGHT as i32, MAX_WINDOW_HEIGHT as i32)
+                    as u32;
+                self.preferences.window.window_height = new_val;
+            }
+            16 => {
+                self.preferences.window.start_maximized = !self.preferences.window.start_maximized
+            }
             _ => {}
         }
     }
