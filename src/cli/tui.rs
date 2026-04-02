@@ -1191,14 +1191,16 @@ enum DocsTab {
     About = 0,
     ViewMode = 1,
     AnalyzeMode = 2,
-    Preferences = 3,
+    Formats = 3,
+    Preferences = 4,
 }
 
 impl DocsTab {
-    const ALL: [DocsTab; 4] = [
+    const ALL: [DocsTab; 5] = [
         DocsTab::About,
         DocsTab::ViewMode,
         DocsTab::AnalyzeMode,
+        DocsTab::Formats,
         DocsTab::Preferences,
     ];
 
@@ -1207,6 +1209,7 @@ impl DocsTab {
             DocsTab::About => "About",
             DocsTab::ViewMode => "View Mode",
             DocsTab::AnalyzeMode => "Analyze Mode",
+            DocsTab::Formats => "Formats",
             DocsTab::Preferences => "Preferences",
         }
     }
@@ -1219,8 +1222,8 @@ impl DocsTab {
 pub struct DocsApp {
     exit: bool,
     active_tab: DocsTab,
-    scroll_offsets: [u16; 4],
-    content_heights: [u16; 4],
+    scroll_offsets: [u16; 5],
+    content_heights: [u16; 5],
 }
 
 impl DocsApp {
@@ -1228,8 +1231,8 @@ impl DocsApp {
         Self {
             exit: false,
             active_tab: DocsTab::About,
-            scroll_offsets: [0; 4],
-            content_heights: [0; 4],
+            scroll_offsets: [0; 5],
+            content_heights: [0; 5],
         }
     }
 
@@ -1302,7 +1305,7 @@ impl DocsApp {
         let instructions = Line::from(vec![
             Span::raw(" "),
             Span::styled(
-                "Tab/1-4",
+                "Tab/1-5",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -1366,6 +1369,7 @@ impl DocsApp {
             DocsTab::About => super::help::about(),
             DocsTab::ViewMode => super::help::view_mode(),
             DocsTab::AnalyzeMode => super::help::analyze_mode(),
+            DocsTab::Formats => super::help::formats(),
             DocsTab::Preferences => super::help::preferences(),
         }
     }
@@ -1409,7 +1413,8 @@ impl DocsApp {
             KeyCode::Char('1') => self.active_tab = DocsTab::About,
             KeyCode::Char('2') => self.active_tab = DocsTab::ViewMode,
             KeyCode::Char('3') => self.active_tab = DocsTab::AnalyzeMode,
-            KeyCode::Char('4') => self.active_tab = DocsTab::Preferences,
+            KeyCode::Char('4') => self.active_tab = DocsTab::Formats,
+            KeyCode::Char('5') => self.active_tab = DocsTab::Preferences,
             _ => {}
         }
     }
