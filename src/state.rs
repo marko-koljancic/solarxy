@@ -12,8 +12,8 @@ use crate::cgi::ssao::SsaoState;
 use crate::cgi::visualization::VisualizationState;
 use crate::cgi::texture;
 use crate::preferences::{
-    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode,
-    ViewMode,
+    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, ToneMode,
+    UvMode, ViewMode,
 };
 use cgmath::prelude::*;
 use std::path::PathBuf;
@@ -286,6 +286,7 @@ pub struct State {
     bloom_enabled: bool,
     ssao: SsaoState,
     ssao_enabled: bool,
+    tone_mode: ToneMode,
     ibl: IblState,
     ibl_fallback: IblState,
     brdf_lut: BrdfLut,
@@ -546,9 +547,10 @@ impl State {
             &bloom_sampler,
         );
 
-        let composite_params_data: [u8; 16] = build_composite_params(
+        let composite_params_data: [u8; 20] = build_composite_params(
             preferences.display.bloom_enabled,
             preferences.display.ssao_enabled,
+            preferences.display.tone_mode,
         );
         let composite_params_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -613,6 +615,7 @@ impl State {
             bloom_enabled: preferences.display.bloom_enabled,
             ssao,
             ssao_enabled: preferences.display.ssao_enabled,
+            tone_mode: preferences.display.tone_mode,
             ibl,
             ibl_fallback,
             brdf_lut,
@@ -903,7 +906,12 @@ impl State {
                 }
             }
             KeyCode::KeyT => {
-                if let Some(scene) = &mut self.scene {
+                if self.modifiers.shift_key() {
+                    self.tone_mode = self.tone_mode.next();
+                    self.write_composite_params();
+                    let msg = format!("Tone: {}", self.tone_mode);
+                    self.hud.set_toast(&msg, [0.0, 0.4, 0.0, 1.0]);
+                } else if let Some(scene) = &mut self.scene {
                     scene.cam.reset_to_bounds_axis(
                         &scene.model.bounds,
                         cgmath::Vector3::unit_y(),
@@ -1116,6 +1124,7 @@ impl State {
         self.preferences.rendering.wireframe_line_weight = self.line_weight;
         self.preferences.lighting.lock = self.lights_locked;
         self.preferences.display.ibl_mode = self.ibl_mode;
+        self.preferences.display.tone_mode = self.tone_mode;
 
         match preferences::save(&self.preferences) {
             Ok(()) => self
@@ -1352,6 +1361,7 @@ impl State {
             &self.line_weight.to_string(),
             &self.ibl_mode.to_string(),
             self.ssao_enabled,
+            &self.tone_mode.to_string(),
         );
 
         let capture_buffer = if self.capture_requested {
@@ -1621,7 +1631,7 @@ impl State {
     }
 
     fn write_composite_params(&self) {
-        let buf = build_composite_params(self.bloom_enabled, self.ssao_enabled);
+        let buf = build_composite_params(self.bloom_enabled, self.ssao_enabled, self.tone_mode);
         self.queue
             .write_buffer(&self.composite_params_buffer, 0, &buf);
     }
@@ -2083,14 +2093,19 @@ fn create_bloom_sample_bind_group(
 
 const SSAO_STRENGTH: f32 = 0.8;
 
-fn build_composite_params(bloom_enabled: bool, ssao_enabled: bool) -> [u8; 16] {
-    let mut buf = [0u8; 16];
+fn build_composite_params(
+    bloom_enabled: bool,
+    ssao_enabled: bool,
+    tone_mode: ToneMode,
+) -> [u8; 20] {
+    let mut buf = [0u8; 20];
     buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
     let bloom_flag: u32 = if bloom_enabled { 1 } else { 0 };
     buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
     let ssao_flag: u32 = if ssao_enabled { 1 } else { 0 };
     buf[8..12].copy_from_slice(&ssao_flag.to_le_bytes());
     buf[12..16].copy_from_slice(&SSAO_STRENGTH.to_le_bytes());
+    buf[16..20].copy_from_slice(&tone_mode.as_u32().to_le_bytes());
     buf
 }
 

@@ -21,11 +21,35 @@ struct CompositeParams {
     bloom_enabled: u32,
     ssao_enabled: u32,
     ssao_strength: f32,
+    tone_mode: u32,
 }
 @group(1) @binding(0) var<uniform> composite: CompositeParams;
 
 @group(2) @binding(0) var ssao_texture: texture_2d<f32>;
 @group(2) @binding(1) var ssao_sampler: sampler;
+
+fn tone_none(c: vec3<f32>) -> vec3<f32> {
+    return clamp(c, vec3(0.0), vec3(1.0));
+}
+
+const EXPOSURE: f32 = 1.0;
+
+fn tone_linear(c: vec3<f32>) -> vec3<f32> {
+    return clamp(c * EXPOSURE, vec3(0.0), vec3(1.0));
+}
+
+fn tone_reinhard(c: vec3<f32>) -> vec3<f32> {
+    return c / (c + vec3(1.0));
+}
+
+fn tone_aces(x: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3(0.0), vec3(1.0));
+}
 
 @fragment
 fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -38,6 +62,12 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
         let ao = textureSample(ssao_texture, ssao_sampler, in.uv).r;
         color = color * mix(1.0, ao, composite.ssao_strength);
     }
-    let mapped = color / (color + vec3<f32>(1.0));
+    var mapped: vec3<f32>;
+    switch composite.tone_mode {
+        case 1u: { mapped = tone_linear(color); }
+        case 2u: { mapped = tone_reinhard(color); }
+        case 3u: { mapped = tone_aces(color); }
+        default: { mapped = tone_none(color); }
+    }
     return vec4<f32>(mapped, 1.0);
 }

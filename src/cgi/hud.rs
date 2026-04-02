@@ -164,6 +164,7 @@ impl HudRenderer {
         line_weight: &str,
         ibl_mode: &str,
         ssao_enabled: bool,
+        tone_mode: &str,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -226,6 +227,9 @@ impl HudRenderer {
             }
             if !ssao_enabled {
                 lines.push("SSAO: Off".to_string());
+            }
+            if tone_mode != "ACES Filmic" {
+                lines.push(format!("Tone: {}", tone_mode));
             }
             lines
         } else {
@@ -334,7 +338,7 @@ impl HudRenderer {
         }
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+A SSAO  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+A SSAO  Shift+T Tone  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
         } else {
             "? Hints"
         };

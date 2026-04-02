@@ -197,6 +197,46 @@ impl std::fmt::Display for IblMode {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ToneMode {
+    None,
+    Linear,
+    Reinhard,
+    #[default]
+    AcesFilmic,
+}
+
+impl ToneMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::None => Self::Linear,
+            Self::Linear => Self::Reinhard,
+            Self::Reinhard => Self::AcesFilmic,
+            Self::AcesFilmic => Self::None,
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Linear => 1,
+            Self::Reinhard => 2,
+            Self::AcesFilmic => 3,
+        }
+    }
+}
+
+impl std::fmt::Display for ToneMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None (clip)"),
+            Self::Linear => write!(f, "Linear"),
+            Self::Reinhard => write!(f, "Reinhard"),
+            Self::AcesFilmic => write!(f, "ACES Filmic"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     pub config_version: u32,
@@ -230,6 +270,8 @@ pub struct DisplayPrefs {
     pub ibl_mode: IblMode,
     #[serde(default = "default_true")]
     pub ssao_enabled: bool,
+    #[serde(default)]
+    pub tone_mode: ToneMode,
 }
 
 fn default_true() -> bool {
@@ -299,6 +341,7 @@ impl Default for DisplayPrefs {
             turntable_active: false,
             ibl_mode: IblMode::Full,
             ssao_enabled: false,
+            tone_mode: ToneMode::AcesFilmic,
         }
     }
 }
@@ -413,6 +456,7 @@ mod tests {
                 turntable_active: true,
                 ibl_mode: IblMode::Diffuse,
                 ssao_enabled: false,
+                tone_mode: ToneMode::Reinhard,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,

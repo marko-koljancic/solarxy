@@ -278,7 +278,7 @@ The CLI validates your input before proceeding. Here are the messages you may se
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera for consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera for consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays.
 
 ### Launching the Viewer
 
@@ -407,6 +407,21 @@ HDR bloom adds a soft glow around bright highlights, simulating how bright areas
 | Key | Action |
 | --- | --- |
 | **Shift+M** | Toggle bloom on and off |
+
+#### Tone Mapping
+
+Tone mapping controls how HDR color values are mapped to the displayable [0, 1] range. The default operator is ACES Filmic, which provides good contrast and color retention at high luminance. Cycle through operators with Shift+T.
+
+| Key | Action |
+| --- | --- |
+| **Shift+T** | Cycle tone mapping: None (clip) → Linear → Reinhard → ACES Filmic |
+
+| Operator | Description |
+| --- | --- |
+| **ACES Filmic** | Industry-standard filmic curve (Narkowicz approximation). Good contrast, saturated highlights. Default. |
+| **Reinhard** | Classic operator. Gentle rolloff, tends to desaturate bright highlights. |
+| **Linear** | Exposure multiply and clamp. No curve applied. |
+| **None (clip)** | Raw clamp to [0, 1]. Diagnostic mode — highlights clip hard. |
 
 #### MSAA (Multi-Sample Anti-Aliasing)
 
@@ -554,6 +569,7 @@ The HUD overlays real-time information on the viewer.
 - Bounds mode (if enabled)
 - IBL mode (if not Full)
 - SSAO (if disabled)
+- Tone mapping (if not ACES Filmic)
 
 **Bottom center:**
 - Keyboard hints bar (toggle with **?**)
@@ -565,7 +581,7 @@ The HUD overlays real-time information on the viewer.
 
 ### Saving Preferences from the Viewer
 
-Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, bloom, SSAO, UV mode, projection, turntable, wireframe weight, IBL mode, and lights lock state to the config file. These settings are restored the next time you launch Solarxy.
+Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, bloom, SSAO, tone mapping, UV mode, projection, turntable, wireframe weight, IBL mode, and lights lock state to the config file. These settings are restored the next time you launch Solarxy.
 
 ### Keyboard Shortcut Reference
 
@@ -583,6 +599,7 @@ Press **Shift+S** to save the current viewer state as your default preferences. 
 | **Shift+B** | Cycle bounding box display (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
 | **Shift+A** | Toggle SSAO |
+| **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | **G** | Toggle grid |
 | **A** | Toggle axis gizmo |
 | **V** | Toggle turntable auto-rotation |
@@ -849,6 +866,7 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 | Projection Mode | `projection_mode` | `"Perspective"`, `"Orthographic"` | `"Perspective"` |
 | Turntable Active | `turntable_active` | `true`, `false` | `false` |
 | IBL Mode | `ibl_mode` | `"Off"`, `"Diffuse"`, `"Full"` | `"Full"` |
+| Tone Mode | `tone_mode` | `"None"`, `"Linear"`, `"Reinhard"`, `"AcesFilmic"` | `"AcesFilmic"` |
 
 **Rendering settings** (`[rendering]` section):
 
@@ -1147,12 +1165,12 @@ Solarxy renders each frame through multiple passes:
 
 1. **Shadow pass** -- renders depth from the key light's perspective into a 2048x2048 shadow map.
 2. **GBuffer pass** (when SSAO is enabled) -- captures position and normal data for ambient occlusion calculation.
-3. **Main PBR pass** -- Cook-Torrance shading with normal mapping, 3 dynamic lights, shadow sampling, IBL contribution, and Reinhard tone mapping.
+3. **Main PBR pass** -- Cook-Torrance shading with normal mapping, 3 dynamic lights, shadow sampling, and IBL contribution.
 4. **Floor pass** -- renders a shadow-catching transparent floor beneath the model.
 5. **Wireframe and Ghosted overlays** -- rendered on top of the main pass when active.
 6. **Grid and normals visualization** -- rendered when enabled.
 7. **SSAO and Bloom post-processing** -- SSAO computes ambient occlusion from the GBuffer; Bloom extracts bright pixels and applies Gaussian blur.
-8. **Composite pass** -- combines all layers and renders the HUD text overlay.
+8. **Composite pass** -- combines all layers, applies the selected tone mapping operator, and renders the HUD text overlay.
 
 ### Keyboard Shortcut Cheat Sheet
 
@@ -1179,6 +1197,7 @@ A single reference table of every keyboard shortcut in view mode.
 | **Shift+B** | Cycle bounds (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
 | **Shift+A** | Toggle SSAO |
+| **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | **Shift+I** | Cycle IBL mode (Diffuse / Full) |
 | **Shift+L** | Toggle lights lock |
 | **Shift+S** | Save preferences |

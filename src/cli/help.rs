@@ -143,6 +143,10 @@ pub fn view_mode() -> Text<'static> {
         shortcut_line("A", "Toggle axis gizmo"),
         shortcut_line("V", "Toggle turntable auto-rotation"),
         shortcut_line("I", "Toggle IBL (image-based lighting)"),
+        shortcut_line(
+            "Shift+T",
+            "Cycle tone mapping (None > Linear > Reinhard > ACES Filmic)",
+        ),
         shortcut_line("Shift+I", "Cycle IBL mode (Diffuse / Full)"),
         blank(),
         blank(),
@@ -308,6 +312,7 @@ pub fn preferences() -> Text<'static> {
         settings_row("projection_mode", "Perspective"),
         settings_row("turntable_active", "false"),
         settings_row("ibl_mode", "Full"),
+        settings_row("tone_mode", "AcesFilmic"),
         settings_row("wireframe_line_weight", "Medium"),
         settings_row("msaa_sample_count", "4"),
         settings_row("lighting.lock", "false"),

@@ -9,8 +9,8 @@ use ratatui::{
 };
 use solarxy::format_number;
 use solarxy::preferences::{
-    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, UvMode,
-    ViewMode, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
+    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, ToneMode,
+    UvMode, ViewMode, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
 };
 
 use std::io;
@@ -746,7 +746,7 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
     }
 }
 
-const PREF_FIELD_COUNT: usize = 16;
+const PREF_FIELD_COUNT: usize = 17;
 
 pub struct PreferencesApp {
     exit: bool,
@@ -865,6 +865,7 @@ impl PreferencesApp {
             "Projection Mode",
             "Turntable Active",
             "IBL Mode",
+            "Tone Mode",
             "Wireframe Line Weight",
             "MSAA Sample Count",
             "Lighting Lock",
@@ -884,6 +885,7 @@ impl PreferencesApp {
             format!("{}", self.preferences.display.projection_mode),
             format!("{}", self.preferences.display.turntable_active),
             format!("{}", self.preferences.display.ibl_mode),
+            format!("{}", self.preferences.display.tone_mode),
             format!("{}", self.preferences.rendering.wireframe_line_weight),
             format!("{}", self.preferences.rendering.msaa_sample_count),
             format!("{}", self.preferences.lighting.lock),
@@ -903,6 +905,7 @@ impl PreferencesApp {
             format!("{}", self.original.display.projection_mode),
             format!("{}", self.original.display.turntable_active),
             format!("{}", self.original.display.ibl_mode),
+            format!("{}", self.original.display.tone_mode),
             format!("{}", self.original.rendering.wireframe_line_weight),
             format!("{}", self.original.rendering.msaa_sample_count),
             format!("{}", self.original.lighting.lock),
@@ -1050,13 +1053,20 @@ impl PreferencesApp {
                 };
             }
             11 => {
+                self.preferences.display.tone_mode = if forward {
+                    self.preferences.display.tone_mode.next()
+                } else {
+                    cycle_back_tone_mode(self.preferences.display.tone_mode)
+                };
+            }
+            12 => {
                 self.preferences.rendering.wireframe_line_weight = if forward {
                     self.preferences.rendering.wireframe_line_weight.next()
                 } else {
                     cycle_back_line_weight(self.preferences.rendering.wireframe_line_weight)
                 };
             }
-            12 => {
+            13 => {
                 self.preferences.rendering.msaa_sample_count = if forward {
                     match self.preferences.rendering.msaa_sample_count {
                         1 => 2,
@@ -1071,15 +1081,15 @@ impl PreferencesApp {
                     }
                 };
             }
-            13 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
-            14 => {
+            14 => self.preferences.lighting.lock = !self.preferences.lighting.lock,
+            15 => {
                 let step: i32 = if forward { 160 } else { -160 };
                 let new_val = (self.preferences.window.window_width as i32 + step)
                     .clamp(MIN_WINDOW_WIDTH as i32, MAX_WINDOW_WIDTH as i32)
                     as u32;
                 self.preferences.window.window_width = new_val;
             }
-            15 => {
+            16 => {
                 let step: i32 = if forward { 160 } else { -160 };
                 let new_val = (self.preferences.window.window_height as i32 + step)
                     .clamp(MIN_WINDOW_HEIGHT as i32, MAX_WINDOW_HEIGHT as i32)
@@ -1164,6 +1174,15 @@ fn cycle_back_projection_mode(mode: ProjectionMode) -> ProjectionMode {
     match mode {
         ProjectionMode::Perspective => ProjectionMode::Orthographic,
         ProjectionMode::Orthographic => ProjectionMode::Perspective,
+    }
+}
+
+fn cycle_back_tone_mode(mode: ToneMode) -> ToneMode {
+    match mode {
+        ToneMode::None => ToneMode::AcesFilmic,
+        ToneMode::Linear => ToneMode::None,
+        ToneMode::Reinhard => ToneMode::Linear,
+        ToneMode::AcesFilmic => ToneMode::Reinhard,
     }
 }
 

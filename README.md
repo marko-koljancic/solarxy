@@ -16,7 +16,7 @@ A lightweight, cross-platform 3D model viewer and validator built with Rust and 
 ## Features
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
-- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, alpha blending, 3-light system, 4x MSAA
+- **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, selectable tone mapping (Reinhard, ACES Filmic, Linear, None), alpha blending, 3-light system, 4x MSAA
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
 - **Report export** -- save analysis reports to file in text or JSON format
 - **Persistent preferences** -- configure display, rendering, and lighting settings via TUI or in-viewer shortcuts
@@ -82,7 +82,7 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
 
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
@@ -115,6 +115,7 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `Shift+I` | Cycle IBL mode (Diffuse / Full) |
 | `Shift+M` | Toggle bloom effect |
 | `Shift+A` | Toggle SSAO (screen-space ambient occlusion) |
+| `Shift+T` | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | `Shift+L` | Toggle lights lock |
 | `Shift+S` | Save preferences to disk |
 | `H` | Frame model (reset view) |
@@ -175,6 +176,7 @@ cargo r --release -- --mode preferences
 | Display | Projection Mode | Perspective / Orthographic |
 | Display | Turntable Active | on / off |
 | Display | IBL Mode | Off / Diffuse / Full |
+| Display | Tone Mode | None (clip) / Linear / Reinhard / ACES Filmic |
 | Rendering | Wireframe Line Weight | Light / Medium / Bold |
 | Rendering | MSAA Sample Count | 1 / 2 / 4 |
 | Lighting | Lighting Lock | on / off |
