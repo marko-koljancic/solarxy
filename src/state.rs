@@ -298,6 +298,7 @@ pub struct State {
     pending_load: Option<PendingLoad>,
     view_mode: ViewMode,
     prev_non_ghosted_mode: ViewMode,
+    ghosted_wireframe: bool,
     normals_mode: NormalsMode,
     background_mode: BackgroundMode,
     _gradient_buffer: wgpu::Buffer,
@@ -627,6 +628,7 @@ impl State {
             pending_load: None,
             view_mode: preferences.display.view_mode,
             prev_non_ghosted_mode: ViewMode::Shaded,
+            ghosted_wireframe: false,
             normals_mode: preferences.display.normals_mode,
             background_mode,
             _gradient_buffer: gradient_buffer,
@@ -962,7 +964,9 @@ impl State {
                         &format!("Line Weight: {}", self.line_weight),
                         [0.0, 0.4, 0.0, 1.0],
                     );
-                } else if self.view_mode != ViewMode::Ghosted {
+                } else if self.view_mode == ViewMode::Ghosted {
+                    self.ghosted_wireframe = !self.ghosted_wireframe;
+                } else {
                     self.view_mode = match self.view_mode {
                         ViewMode::Shaded => ViewMode::ShadedWireframe,
                         ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
@@ -976,6 +980,10 @@ impl State {
                     self.view_mode = self.prev_non_ghosted_mode;
                 } else {
                     self.prev_non_ghosted_mode = self.view_mode;
+                    self.ghosted_wireframe = matches!(
+                        self.view_mode,
+                        ViewMode::ShadedWireframe | ViewMode::WireframeOnly
+                    );
                     self.view_mode = ViewMode::Ghosted;
                 }
             }
@@ -1180,6 +1188,7 @@ impl State {
                 }
                 self.view_mode = self.preferences.display.view_mode;
                 self.prev_non_ghosted_mode = ViewMode::Shaded;
+                self.ghosted_wireframe = false;
                 self.normals_mode = self.preferences.display.normals_mode;
                 self.uv_mode = self.preferences.display.uv_mode;
                 self.turntable_active = self.preferences.display.turntable_active;
@@ -1280,6 +1289,8 @@ impl State {
 
         let mode_str = if self.uv_mode != UvMode::Off {
             format!("{} [UV: {}]", self.view_mode, self.uv_mode)
+        } else if self.view_mode == ViewMode::Ghosted && self.ghosted_wireframe {
+            "Ghosted+Wire".to_string()
         } else {
             self.view_mode.to_string()
         };
@@ -1805,9 +1816,7 @@ impl State {
                     self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
                 }
                 ViewMode::Ghosted => {
-                    if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
-                        || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
-                    {
+                    if self.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
@@ -1834,9 +1843,7 @@ impl State {
                     pass.set_bind_group(0, &scene.cam.bind_group, &[]);
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.draw_model_simple(&scene.model, 0..1);
-                    if self.prev_non_ghosted_mode == ViewMode::ShadedWireframe
-                        || self.prev_non_ghosted_mode == ViewMode::WireframeOnly
-                    {
+                    if self.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
