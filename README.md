@@ -9,6 +9,10 @@
 
 A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks.
 
+<p align="center">
+  <img src="docs/gif/solarxy.gif" width="100%">
+</p>
+
 ## Features
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB

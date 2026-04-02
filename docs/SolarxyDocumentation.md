@@ -4,6 +4,10 @@ A comprehensive guide to Solarxy -- a lightweight, cross-platform 3D model viewe
 
 [GitHub Repository](https://github.com/marko-koljancic/solarxy)
 
+<p align="center">
+  <img src="gif/solarxy.gif" width="100%">
+</p>
+
 ---
 
 ## Table of Contents
