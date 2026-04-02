@@ -288,7 +288,7 @@ impl Default for Preferences {
 impl Default for DisplayPrefs {
     fn default() -> Self {
         Self {
-            background: BackgroundMode::Gradient,
+            background: BackgroundMode::Black,
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             grid_visible: true,

@@ -39,7 +39,7 @@ fn vs_grid(model: VertexInput) -> VertexOutput {
 fn fs_grid(in: VertexOutput) -> @location(0) vec4<f32> {
     let dx = min(fract(in.world_xz.x / grid.cell_size), 1.0 - fract(in.world_xz.x / grid.cell_size));
     let dz = min(fract(in.world_xz.y / grid.cell_size), 1.0 - fract(in.world_xz.y / grid.cell_size));
-    let alpha = 1.0 - smoothstep(0.0, 0.02, min(dx, dz));
+    let alpha = 1.0 - smoothstep(0.0, 0.008, min(dx, dz));
     if alpha < 0.01 {
         discard;
     }
