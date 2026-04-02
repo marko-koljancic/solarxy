@@ -334,7 +334,7 @@ impl Default for DisplayPrefs {
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             grid_visible: true,
-            axis_gizmo_visible: false,
+            axis_gizmo_visible: true,
             bloom_enabled: true,
             uv_mode: UvMode::Off,
             projection_mode: ProjectionMode::Perspective,

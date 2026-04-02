@@ -231,7 +231,7 @@ pub fn load_texture(
 }
 
 pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::Mesh {
-    let y = -0.001_f32;
+    let y = bounds.min.y - 0.001;
     let he = bounds.diagonal() * 1.5;
 
     let vertices = [
