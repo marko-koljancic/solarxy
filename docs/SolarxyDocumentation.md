@@ -297,8 +297,7 @@ solarxy
 
 The viewer opens with an empty scene showing a centered message with the supported file extensions. Drop a model file onto the window to load it.
 
-<!-- TODO: Screenshot -- Empty viewer window showing the centered "Drop a 3D model to view" prompt with supported extensions listed, gradient background -->
-![Empty viewer with drag-and-drop prompt](docs/img/doc-viewer-empty.png)
+![Empty viewer with drag-and-drop prompt](docs/img-guide/doc-viewer-empty.png)
 
 *The viewer launched without a model, ready for drag-and-drop.*
 
@@ -332,8 +331,7 @@ Preset views automatically switch to orthographic projection and frame the model
 
 **Tip:** Press **H** if you ever lose sight of your model. It resets the camera to frame the entire bounding box.
 
-<!-- TODO: Screenshot -- Side-by-side comparison of the same model in perspective (left) and orthographic (right) projection -->
-![Perspective vs orthographic projection](docs/img/doc-perspective-vs-ortho.png)
+![Perspective vs orthographic projection](docs/img-guide/doc-perspective-vs-ortho.png)
 
 *The same model in perspective projection (left) and orthographic projection (right).*
 
@@ -350,8 +348,7 @@ Solarxy offers four view modes for different inspection needs.
 
 **W** cycles through Shaded, Shaded+Wire, and Wireframe in order. **S** switches directly to Shaded from any mode. **X** toggles Ghosted mode on and off -- when toggled off, it returns to your previous non-ghosted mode.
 
-<!-- TODO: Screenshot -- 2x2 grid showing the same model in all four view modes: Shaded (top-left), Shaded+Wire (top-right), Wireframe (bottom-left), Ghosted (bottom-right), each labeled -->
-![Four view modes](docs/img/doc-view-modes.png)
+![Four view modes](docs/img-guide/doc-view-modes.png)
 
 *All four view modes: Shaded, Shaded+Wire, Wireframe, and Ghosted.*
 
@@ -393,9 +390,6 @@ IBL provides ambient environment lighting that wraps around the model from all d
 
 The IBL environment is generated from the current background sky colors by default. You can replace it with a custom HDRI environment map by dragging an `.hdr` or `.exr` file onto the viewer window.
 
-<!-- TODO: Screenshot -- Same model shown twice side by side: IBL Off (left) and IBL Full (right), showing the difference in ambient lighting and reflections -->
-![IBL comparison](docs/img/doc-ibl-comparison.png)
-
 *The same model with IBL disabled (left) and IBL Full (right). Notice the ambient lighting and reflections on metallic surfaces.*
 
 #### SSAO (Screen-Space Ambient Occlusion)
@@ -434,8 +428,7 @@ Visualize surface normals as colored lines extending from the model's surface.
 
 This is useful for diagnosing shading artifacts caused by incorrect or flipped normals.
 
-<!-- TODO: Screenshot -- Model with Face+Vertex normals displayed as colored lines extending from surfaces -->
-![Normals visualization](docs/img/doc-normals.png)
+![Normals visualization](docs/img-guide/doc-normals.png)
 
 *Face and vertex normals rendered on a model surface.*
 
@@ -450,8 +443,7 @@ Visualize how UV coordinates are mapped onto the model's surface.
 - **Gradient** -- maps UV coordinates to colors (red = U axis, green = V axis). Useful for seeing the overall UV layout.
 - **Checker** -- projects a checkerboard pattern. Useful for spotting UV stretching, distortion, and seam placement.
 
-<!-- TODO: Screenshot -- Model with the checker UV overlay applied, showing checkerboard pattern on the surface to reveal UV mapping quality -->
-![UV checker overlay](docs/img/doc-uv-checker.png)
+![UV checker overlay](docs/img-guide/doc-uv-checker.png)
 
 *Checker UV overlay revealing the UV mapping distribution on a model.*
 
@@ -466,8 +458,7 @@ Visualize how UV coordinates are mapped onto the model's surface.
 
 When bounding boxes are visible, the HUD displays the model's extents (width, height, depth).
 
-<!-- TODO: Screenshot -- Multi-mesh model with per-mesh bounding boxes displayed, each in a different color -->
-![Per-mesh bounding boxes](docs/img/doc-bounds.png)
+![Per-mesh bounding boxes](docs/img-guide/doc-bounds.png)
 
 *Per-mesh bounding boxes on a multi-mesh model, each mesh outlined in a distinct color.*
 
@@ -669,8 +660,7 @@ solarxy -M analyze -m model.glb -f json | jq .validation
 
 A model path (`-m`) is required in analyze mode.
 
-<!-- TODO: Screenshot -- Analyze TUI showing the Overview tab with model name, mesh/material counts, total vertices/indices/triangles, and bounding box dimensions -->
-![Analyze mode Overview tab](docs/img/doc-analyze-overview.png)
+![Analyze mode Overview tab](docs/img-guide/doc-analyze-overview.png)
 
 *The Overview tab showing aggregate model statistics and bounding box dimensions.*
 
@@ -748,8 +738,7 @@ A list of all errors and warnings found in the model:
 
 If no issues are found, the tab shows "No issues found" in green.
 
-<!-- TODO: Screenshot -- Analyze TUI showing the Validation tab with a mix of errors and warnings, severity tags in color, scopes, and messages -->
-![Analyze mode Validation tab](docs/img/doc-analyze-validation.png)
+![Analyze mode Validation tab](docs/img-guide/doc-analyze-validation.png)
 
 *The Validation tab listing errors and warnings found during model analysis.*
 
@@ -835,8 +824,7 @@ solarxy -M preferences
 
 Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#preferences-tui-navigation) for key bindings.
 
-<!-- TODO: Screenshot -- Preferences TUI showing all 14 settings organized by category (Display, Rendering, Lighting) with current values, one setting highlighted -->
-![Preferences TUI](docs/img/doc-preferences.png)
+![Preferences TUI](docs/img-guide/doc-preferences.png)
 
 *The preferences editor showing all configurable settings with their current values.*
 
@@ -953,7 +941,7 @@ The docs TUI has four tabs:
 Navigation is the same as in analyze mode: **Tab** / **Shift+Tab** to switch tabs, **1**-**4** to jump to a tab, **j**/**k** or arrows to scroll, **g**/**G** to jump to top/bottom, **PgUp**/**PgDn** for page scrolling, **q** or **Esc** to quit.
 
 <!-- TODO: Screenshot -- Docs TUI showing the About tab with version info, modes list, and getting started examples -->
-![Docs mode](docs/img/doc-docs-mode.png)
+![Docs mode](docs/img-guide/doc-docs-mode.png)
 
 *The built-in documentation viewer showing the About tab.*
 
