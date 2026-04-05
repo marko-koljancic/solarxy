@@ -3,8 +3,6 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
-use crate::cgi::gui::EguiRenderer;
-
 use super::*;
 
 impl State {
@@ -86,17 +84,8 @@ impl State {
         let layouts = Arc::new(BindGroupLayouts::new(&device));
         let pipelines = Pipelines::new(&device, &config, &layouts, msaa_sample_count);
 
-        let mut hud = HudRenderer::new(
-            &device,
-            surface_format,
-            size.width,
-            size.height,
-            None,
-            window.scale_factor(),
-        );
-        hud.set_backend_info(backend_info.clone());
-
-        let gui = EguiRenderer::new(&device, surface_format, &window);
+        let mut gui = EguiRenderer::new(&device, surface_format, &window);
+        gui.set_backend_info(backend_info.clone());
 
         let gradient_uniform = GradientUniform {
             top_color: [0.35, 0.41, 0.47, 1.0],
@@ -264,7 +253,6 @@ impl State {
             },
             layouts,
             pipelines,
-            hud,
             gui,
             scene: None,
             pending_load: None,

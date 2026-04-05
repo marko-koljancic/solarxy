@@ -10,7 +10,6 @@ use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::composite::CompositeState;
 use crate::cgi::gui::EguiRenderer;
-use crate::cgi::hud::HudRenderer;
 use crate::cgi::ibl::{BrdfLut, IblState};
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::{self, Model};
@@ -351,7 +350,6 @@ pub struct State {
     pub(super) wire: WireframeResources,
     pub(super) layouts: Arc<BindGroupLayouts>,
     pub(super) pipelines: Pipelines,
-    pub(super) hud: HudRenderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
     pub(super) pending_load: Option<PendingLoad>,
@@ -378,7 +376,7 @@ impl State {
 
         let frame_ms = self.dt * 1000.0;
 
-        self.hud.clear_expired_toast();
+        self.gui.clear_expired_toast();
 
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -389,8 +387,6 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-
-        let has_model = self.scene.is_some();
 
         if let Some(scene) = &self.scene {
             self.render_shadow_pass(&mut encoder, scene);
@@ -423,93 +419,6 @@ impl State {
             &self.post.ssao,
         );
 
-        let (projection_str, normals_str) = if let Some(scene) = &self.scene {
-            (
-                scene.cam.camera.projection.to_string(),
-                self.display.normals_mode.to_string(),
-            )
-        } else {
-            (String::new(), String::new())
-        };
-
-        let mode_str = if self.display.uv_mode != UvMode::Off {
-            format!("{} [UV: {}]", self.display.view_mode, self.display.uv_mode)
-        } else if self.display.view_mode == ViewMode::Ghosted && self.display.ghosted_wireframe {
-            "Ghosted+Wire".to_string()
-        } else {
-            self.display.view_mode.to_string()
-        };
-
-        let bounds_info = match self.display.bounds_mode {
-            BoundsMode::Off => String::new(),
-            BoundsMode::WholeModel => {
-                if let Some(scene) = &self.scene {
-                    let s = scene.model.bounds.size();
-                    format!(
-                        "Extents: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}",
-                        s.x, s.y, s.z
-                    )
-                } else {
-                    String::new()
-                }
-            }
-            BoundsMode::PerMesh => {
-                if let Some(scene) = &self.scene {
-                    let mut lines = Vec::new();
-                    for (i, mesh) in scene.model.meshes.iter().enumerate() {
-                        let s = scene.model.mesh_bounds[i].size();
-                        let name = if mesh.name.len() > 20 {
-                            format!("{}\u{2026}", &mesh.name[..19])
-                        } else {
-                            mesh.name.clone()
-                        };
-                        lines.push(format!(
-                            "{}: {:.3} \u{00d7} {:.3} \u{00d7} {:.3}",
-                            name, s.x, s.y, s.z
-                        ));
-                    }
-                    lines.join("\n")
-                } else {
-                    String::new()
-                }
-            }
-        };
-
-        self.hud.render(
-            &self.device,
-            &mut encoder,
-            &view,
-            &self.queue,
-            self.config.width,
-            self.config.height,
-            &mode_str,
-            &projection_str,
-            &normals_str,
-            &self.display.background_mode.to_string(),
-            {
-                let eff = f64::from(self.display.background_mode.effective_luminance());
-                wgpu::Color {
-                    r: eff,
-                    g: eff,
-                    b: eff,
-                    a: 1.0,
-                }
-            },
-            frame_ms,
-            has_model,
-            self.display.show_grid,
-            self.display.lights_locked,
-            self.display.show_axis_gizmo,
-            self.display.show_local_axes,
-            &self.display.bounds_mode.to_string(),
-            &bounds_info,
-            &self.display.line_weight.to_string(),
-            &self.ibl_res.ibl_mode.to_string(),
-            self.post.ssao_enabled,
-            &self.post.tone_mode.to_string(),
-            self.post.exposure,
-        );
-
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
@@ -533,7 +442,7 @@ impl State {
             exposure: &mut self.post.exposure,
             ibl_mode: &mut self.ibl_res.ibl_mode,
         };
-        let changes = self.gui.render_with_sidebar(
+        let changes = self.gui.render_ui(
             &mut sidebar,
             &self.device,
             &self.queue,
@@ -541,6 +450,7 @@ impl State {
             &self.window,
             &output.texture,
             screen,
+            frame_ms,
         );
 
         if changes.background_changed {

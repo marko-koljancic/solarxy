@@ -38,6 +38,7 @@ pub fn load_model_any(
     upload_model(raw, file_path, device, queue, layout, edge_geometry_layout)
 }
 
+#[derive(Clone, Copy)]
 pub struct ModelStats {
     pub polys: usize,
     pub tris: usize,

@@ -18,10 +18,10 @@ impl State {
                         self.ibl_res.ibl_mode = IblMode::Full;
                         self.ibl_res.last_active_ibl_mode = IblMode::Full;
                         self.rebuild_light_bind_group();
-                        self.hud.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
+                        self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
                     }
                     Err(e) => {
-                        self.hud
+                        self.gui
                             .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
                     }
                 }
@@ -31,7 +31,7 @@ impl State {
 
         if !resources::is_supported_model_extension(&path) {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
-            self.hud.set_toast(
+            self.gui.set_toast(
                 &format!("Unsupported format: .{}", ext),
                 [0.6, 0.0, 0.0, 1.0],
             );
@@ -41,7 +41,7 @@ impl State {
         let model_path = match path.canonicalize() {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(e) => {
-                self.hud
+                self.gui
                     .set_toast(&format!("Invalid path: {}", e), [0.6, 0.0, 0.0, 1.0]);
                 return;
             }
@@ -55,7 +55,7 @@ impl State {
     }
 
     pub fn toggle_hints(&mut self) {
-        self.hud.toggle_hints();
+        self.gui.toggle_hints();
     }
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
@@ -100,7 +100,7 @@ impl State {
                     } else {
                         "Lights unlocked"
                     };
-                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 } else if let Some(scene) = &mut self.scene {
                     scene.cam.reset_to_bounds_axis(
                         &scene.model.bounds,
@@ -134,7 +134,7 @@ impl State {
                 if self.modifiers.shift_key() {
                     self.display.line_weight = self.display.line_weight.next();
                     self.update_wireframe_params();
-                    self.hud.set_toast(
+                    self.gui.set_toast(
                         &format!("Line Weight: {}", self.display.line_weight),
                         [0.0, 0.4, 0.0, 1.0],
                     );
@@ -181,7 +181,7 @@ impl State {
                     } else {
                         "Local Axes: Off"
                     };
-                    self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 } else {
                     self.display.show_axis_gizmo = !self.display.show_axis_gizmo;
                 }
@@ -244,7 +244,7 @@ impl State {
     fn toggle_tone_mode(&mut self) {
         self.post.tone_mode = self.post.tone_mode.next();
         self.write_composite_params();
-        self.hud.set_toast(
+        self.gui.set_toast(
             &format!("Tone: {}", self.post.tone_mode),
             [0.0, 0.4, 0.0, 1.0],
         );
@@ -258,7 +258,7 @@ impl State {
         } else {
             "SSAO: Off"
         };
-        self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
     }
 
     fn toggle_bloom(&mut self) {
@@ -269,14 +269,14 @@ impl State {
         } else {
             "Bloom: Off"
         };
-        self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
     }
 
     fn adjust_exposure(&mut self, increase: bool) {
         let step = if increase { 0.5 } else { -0.5 };
         self.post.exposure = (self.post.exposure + step).clamp(0.1, 10.0);
         self.write_composite_params();
-        self.hud.set_toast(
+        self.gui.set_toast(
             &format!("Exposure: {:.1}", self.post.exposure),
             [0.0, 0.4, 0.0, 1.0],
         );
@@ -304,7 +304,7 @@ impl State {
             IblMode::Diffuse => "IBL: Diffuse",
             IblMode::Full => "IBL: Full",
         };
-        self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
     }
 
     pub(super) fn apply_background_change(&mut self) {
@@ -343,7 +343,7 @@ impl State {
             BoundsMode::WholeModel => "Bounds: Whole Model",
             BoundsMode::PerMesh => "Bounds: Per Mesh",
         };
-        self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
     }
 
     fn save_preferences(&mut self) {
@@ -369,10 +369,10 @@ impl State {
 
         match preferences::save(&self.preferences) {
             Ok(()) => self
-                .hud
+                .gui
                 .set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]),
             Err(e) => self
-                .hud
+                .gui
                 .set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]),
         }
     }

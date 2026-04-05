@@ -12,8 +12,6 @@ pub mod geometry;
 #[cfg(feature = "viewer")]
 pub mod gui;
 #[cfg(feature = "viewer")]
-pub mod hud;
-#[cfg(feature = "viewer")]
 pub mod ibl;
 #[cfg(feature = "viewer")]
 pub mod light;

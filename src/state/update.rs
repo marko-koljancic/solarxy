@@ -63,7 +63,7 @@ impl State {
             .unwrap_or(&model_path)
             .to_string();
 
-        self.hud
+        self.gui
             .set_loading_message(&format!("Loading {}...", filename));
 
         let device = self.device.clone();
@@ -154,8 +154,6 @@ impl State {
                     .resize(&self.device, &self.layouts, &dummy_buf, width, height);
             }
             self.is_surface_configured = true;
-            self.hud.resize(width, height, &self.queue);
-            self.hud.set_scale_factor(self.window.scale_factor());
             self.update_wireframe_params();
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(width as f32 / height as f32);
@@ -184,10 +182,21 @@ impl State {
                     active_ibl,
                     &self.ibl_res.brdf_lut,
                 );
-                self.hud.update_stats(Some(&new_scene.stats));
-                self.hud
-                    .update_model_info(&pending.filename, new_scene.model.meshes.len());
-                self.hud.clear_loading_message();
+                let file_size = std::fs::metadata(&pending.path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                let bounds_size = new_scene.model.bounds.size();
+                self.gui.update_model_info(
+                    &pending.filename,
+                    &pending.path,
+                    file_size,
+                    new_scene.model.meshes.len(),
+                    new_scene.model.materials.len(),
+                    &new_scene.stats,
+                    [bounds_size.x, bounds_size.y, bounds_size.z],
+                    new_scene.model.has_uvs,
+                );
+                self.gui.clear_loading_message();
                 self.window
                     .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
@@ -216,14 +225,14 @@ impl State {
             }
             Some(Ok(Err(e))) => {
                 self.pending_load.take();
-                self.hud.clear_loading_message();
-                self.hud
+                self.gui.clear_loading_message();
+                self.gui
                     .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_load.take();
-                self.hud.clear_loading_message();
-                self.hud
+                self.gui.clear_loading_message();
+                self.gui
                     .set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
             }
             _ => {}
