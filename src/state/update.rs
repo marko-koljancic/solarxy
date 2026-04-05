@@ -235,7 +235,8 @@ impl State {
 
         if let Some(scene) = &mut self.scene {
             if self.display.turntable_active && !scene.cam.is_orbiting() {
-                scene.cam.inject_orbit_yaw(TURNTABLE_SPEED * self.dt);
+                let speed = self.display.turntable_rpm * std::f32::consts::TAU / 60.0;
+                scene.cam.inject_orbit_yaw(speed * self.dt);
             }
             scene.cam.update(&self.queue, self.dt);
 

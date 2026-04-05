@@ -10,6 +10,13 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    pub const ALL: &[Self] = &[
+        Self::Shaded,
+        Self::ShadedWireframe,
+        Self::WireframeOnly,
+        Self::Ghosted,
+    ];
+
     pub fn next(self) -> Self {
         match self {
             Self::Shaded => Self::ShadedWireframe,
@@ -39,6 +46,8 @@ pub enum LineWeight {
 }
 
 impl LineWeight {
+    pub const ALL: &[Self] = &[Self::Light, Self::Medium, Self::Bold];
+
     pub fn width_px(self) -> f32 {
         match self {
             Self::Light => 1.0,
@@ -75,6 +84,8 @@ pub enum NormalsMode {
 }
 
 impl NormalsMode {
+    pub const ALL: &[Self] = &[Self::Off, Self::Face, Self::Vertex, Self::FaceAndVertex];
+
     pub fn next(self) -> Self {
         match self {
             Self::Off => Self::Face,
@@ -105,6 +116,8 @@ pub enum BackgroundMode {
 }
 
 impl BackgroundMode {
+    pub const ALL: &[Self] = &[Self::White, Self::Gradient, Self::DarkGray, Self::Black];
+
     pub fn next(self) -> Self {
         match self {
             Self::White => Self::Gradient,
@@ -135,6 +148,8 @@ pub enum UvMode {
 }
 
 impl UvMode {
+    pub const ALL: &[Self] = &[Self::Off, Self::Gradient, Self::Checker];
+
     pub fn next(self) -> Self {
         match self {
             Self::Off => Self::Gradient,
@@ -187,6 +202,10 @@ pub enum IblMode {
     Full,
 }
 
+impl IblMode {
+    pub const ALL: &[Self] = &[Self::Off, Self::Diffuse, Self::Full];
+}
+
 impl std::fmt::Display for IblMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -207,6 +226,8 @@ pub enum ToneMode {
 }
 
 impl ToneMode {
+    pub const ALL: &[Self] = &[Self::None, Self::Linear, Self::Reinhard, Self::AcesFilmic];
+
     pub fn next(self) -> Self {
         match self {
             Self::None => Self::Linear,
@@ -276,10 +297,16 @@ pub struct DisplayPrefs {
     pub exposure: f32,
     #[serde(default)]
     pub local_axes_visible: bool,
+    #[serde(default = "default_turntable_rpm")]
+    pub turntable_rpm: f32,
 }
 
 fn default_exposure() -> f32 {
     1.0
+}
+
+fn default_turntable_rpm() -> f32 {
+    5.0
 }
 
 fn default_true() -> bool {
@@ -358,6 +385,7 @@ impl Default for DisplayPrefs {
             tone_mode: ToneMode::AcesFilmic,
             exposure: 1.0,
             local_axes_visible: false,
+            turntable_rpm: 5.0,
         }
     }
 }
@@ -475,6 +503,7 @@ mod tests {
                 tone_mode: ToneMode::Reinhard,
                 exposure: 1.5,
                 local_axes_visible: true,
+                turntable_rpm: 30.0,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,

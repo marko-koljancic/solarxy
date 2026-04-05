@@ -307,13 +307,25 @@ impl State {
         self.hud.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
     }
 
-    fn cycle_background(&mut self) {
-        self.display.background_mode = self.display.background_mode.next();
+    pub(super) fn apply_background_change(&mut self) {
         self.update_wireframe_params();
         self.update_grid_color();
         let (top, bottom) = self.display.background_mode.sky_colors();
         self.ibl_res.ibl = IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
         self.rebuild_light_bind_group();
+    }
+
+    pub(super) fn apply_composite_params(&self) {
+        self.write_composite_params();
+    }
+
+    pub(super) fn apply_ibl_change(&mut self) {
+        self.rebuild_light_bind_group();
+    }
+
+    fn cycle_background(&mut self) {
+        self.display.background_mode = self.display.background_mode.next();
+        self.apply_background_change();
     }
 
     fn cycle_bounds_mode(&mut self) {
@@ -345,6 +357,7 @@ impl State {
         self.preferences.display.ssao_enabled = self.post.ssao_enabled;
         self.preferences.display.uv_mode = self.display.uv_mode;
         self.preferences.display.turntable_active = self.display.turntable_active;
+        self.preferences.display.turntable_rpm = self.display.turntable_rpm;
         if let Some(scene) = &self.scene {
             self.preferences.display.projection_mode = scene.cam.camera.projection;
         }

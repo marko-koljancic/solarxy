@@ -112,6 +112,13 @@ impl ApplicationHandler<State> for App {
             return;
         };
 
+        if let WindowEvent::KeyboardInput { ref event, .. } = event
+            && event.state.is_pressed()
+            && event.physical_key == PhysicalKey::Code(winit::keyboard::KeyCode::Tab)
+        {
+            state.gui.sidebar_visible = !state.gui.sidebar_visible;
+        }
+
         let egui_consumed = state.gui.on_window_event(&state.window, &event);
 
         match event {

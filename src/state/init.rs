@@ -65,7 +65,7 @@ impl State {
             height: size.height,
             present_mode: surface_caps.present_modes[0],
             alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
+            view_formats: vec![surface_format.remove_srgb_suffix()],
             desired_maximum_frame_latency: 2,
         };
         let msaa_sample_count = preferences.rendering.msaa_sample_count;
@@ -251,6 +251,7 @@ impl State {
                 show_axis_gizmo: preferences.display.axis_gizmo_visible,
                 show_local_axes: preferences.display.local_axes_visible,
                 turntable_active: preferences.display.turntable_active,
+                turntable_rpm: preferences.display.turntable_rpm,
                 lights_locked: preferences.lighting.lock,
             },
             wire: WireframeResources {

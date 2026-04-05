@@ -30,10 +30,14 @@ use wgpu::util::DeviceExt;
 use winit::{keyboard::ModifiersState, window::Window};
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum BoundsMode {
+pub(crate) enum BoundsMode {
     Off,
     WholeModel,
     PerMesh,
+}
+
+impl BoundsMode {
+    pub const ALL: &[Self] = &[Self::Off, Self::WholeModel, Self::PerMesh];
 }
 
 impl std::fmt::Display for BoundsMode {
@@ -266,8 +270,6 @@ pub(super) struct PendingLoad {
     path: String,
 }
 
-const TURNTABLE_SPEED: f32 = std::f32::consts::PI / 6.0;
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct GradientUniform {
@@ -323,6 +325,7 @@ pub(super) struct DisplaySettings {
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
     pub turntable_active: bool,
+    pub turntable_rpm: f32,
     pub lights_locked: bool,
 }
 
@@ -366,6 +369,8 @@ pub struct State {
 
 impl State {
     pub fn render(&mut self) -> anyhow::Result<()> {
+        use crate::cgi::gui::SidebarState;
+
         self.window.request_redraw();
         if !self.is_surface_configured {
             return Ok(());
@@ -509,14 +514,46 @@ impl State {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
         };
-        self.gui.render(
+        let mut sidebar = SidebarState {
+            view_mode: &mut self.display.view_mode,
+            normals_mode: &mut self.display.normals_mode,
+            background_mode: &mut self.display.background_mode,
+            uv_mode: &mut self.display.uv_mode,
+            bounds_mode: &mut self.display.bounds_mode,
+            line_weight: &mut self.display.line_weight,
+            show_grid: &mut self.display.show_grid,
+            show_axis_gizmo: &mut self.display.show_axis_gizmo,
+            show_local_axes: &mut self.display.show_local_axes,
+            turntable_active: &mut self.display.turntable_active,
+            turntable_rpm: &mut self.display.turntable_rpm,
+            lights_locked: &mut self.display.lights_locked,
+            bloom_enabled: &mut self.post.bloom_enabled,
+            ssao_enabled: &mut self.post.ssao_enabled,
+            tone_mode: &mut self.post.tone_mode,
+            exposure: &mut self.post.exposure,
+            ibl_mode: &mut self.ibl_res.ibl_mode,
+        };
+        let changes = self.gui.render_with_sidebar(
+            &mut sidebar,
             &self.device,
             &self.queue,
             &mut encoder,
             &self.window,
-            &view,
+            &output.texture,
             screen,
         );
+
+        if changes.background_changed {
+            self.apply_background_change();
+        } else if changes.wireframe_params_changed {
+            self.update_wireframe_params();
+        }
+        if changes.composite_params_changed {
+            self.apply_composite_params();
+        }
+        if changes.ibl_changed {
+            self.apply_ibl_change();
+        }
 
         let capture_buffer = if self.capture_requested {
             self.capture_requested = false;
