@@ -1,12 +1,46 @@
+#![warn(clippy::pedantic)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::default_trait_access,
+    clippy::fn_params_excessive_bools,
+    clippy::many_single_char_names,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::module_name_repetitions,
+    clippy::must_use_candidate,
+    clippy::needless_pass_by_value,
+    clippy::pub_underscore_fields,
+    clippy::return_self_not_must_use,
+    clippy::similar_names,
+    clippy::struct_excessive_bools,
+    clippy::struct_field_names,
+    clippy::too_many_lines,
+    clippy::uninlined_format_args,
+    clippy::unreadable_literal,
+    clippy::used_underscore_binding,
+    clippy::wildcard_imports
+)]
+
 pub mod aabb;
+#[cfg(any(feature = "viewer", feature = "analyzer"))]
 pub mod cgi;
 pub mod preferences;
+#[cfg(feature = "viewer")]
 mod state;
 
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
+
+#[cfg(feature = "viewer")]
 use preferences::Preferences;
+#[cfg(feature = "viewer")]
 use state::State;
+#[cfg(feature = "viewer")]
 use std::sync::Arc;
+#[cfg(feature = "viewer")]
 use wgpu::SurfaceError;
+#[cfg(feature = "viewer")]
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -15,12 +49,14 @@ use winit::{
     window::Window,
 };
 
+#[cfg(feature = "viewer")]
 pub struct App {
     state: Option<State>,
     model_path: Option<String>,
     preferences: Preferences,
 }
 
+#[cfg(feature = "viewer")]
 impl App {
     pub fn new(model_path: Option<String>, preferences: Preferences) -> Self {
         Self {
@@ -31,6 +67,7 @@ impl App {
     }
 }
 
+#[cfg(feature = "viewer")]
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
@@ -42,7 +79,7 @@ impl ApplicationHandler<State> for App {
         let window = match event_loop.create_window(window_attributes) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                eprintln!("Failed to create window: {}", e);
+                tracing::error!("Failed to create window: {}", e);
                 event_loop.exit();
                 return;
             }
@@ -54,7 +91,7 @@ impl ApplicationHandler<State> for App {
         )) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
-                eprintln!("Failed to initialize renderer: {}", e);
+                tracing::error!("Failed to initialize renderer: {}", e);
                 event_loop.exit();
             }
         }
@@ -71,9 +108,8 @@ impl ApplicationHandler<State> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let state = match &mut self.state {
-            Some(canvas) => canvas,
-            None => return,
+        let Some(state) = &mut self.state else {
+            return;
         };
 
         match event {
@@ -85,7 +121,7 @@ impl ApplicationHandler<State> for App {
             WindowEvent::RedrawRequested => {
                 state.update();
                 match state.render() {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(e) => {
                         if let Some(surface_error) = e.downcast_ref::<SurfaceError>() {
                             match surface_error {
@@ -97,20 +133,20 @@ impl ApplicationHandler<State> for App {
                                     event_loop.exit();
                                 }
                                 SurfaceError::Timeout => {
-                                    eprintln!(
+                                    tracing::warn!(
                                         "Surface timeout when rendering: {:?}",
                                         surface_error
                                     );
                                 }
-                                other => {
-                                    eprintln!(
+                                SurfaceError::Other => {
+                                    tracing::error!(
                                         "Unhandled surface error when rendering: {:?}",
-                                        other
+                                        surface_error
                                     );
                                 }
                             }
                         } else {
-                            eprintln!("Unable to render: {:?}", e);
+                            tracing::error!("Unable to render: {:?}", e);
                         }
                     }
                 }
@@ -161,7 +197,7 @@ pub fn format_number(n: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
 
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i).is_multiple_of(3) {
+        if i > 0 && (chars.len() - i) % 3 == 0 {
             result.push(',');
         }
         result.push(*c);
@@ -170,6 +206,7 @@ pub fn format_number(n: usize) -> String {
     result
 }
 
+#[cfg(feature = "viewer")]
 pub fn run_viewer(model_path: Option<String>, preferences: Preferences) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = App::new(model_path, preferences);

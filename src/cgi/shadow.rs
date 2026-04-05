@@ -24,12 +24,14 @@ impl ShadowState {
         layouts: &BindGroupLayouts,
         lights_uniform: &LightsUniform,
         model: &Model,
+        shadow_map_size: u32,
     ) -> Self {
+        let shadow_map_size = shadow_map_size.clamp(512, 4096);
         let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shadow_texture"),
             size: wgpu::Extent3d {
-                width: 2048,
-                height: 2048,
+                width: shadow_map_size,
+                height: shadow_map_size,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,

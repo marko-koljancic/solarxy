@@ -20,12 +20,14 @@ pub(crate) struct IblState {
     pub(crate) prefiltered_sampler: wgpu::Sampler,
 }
 
+const F16_MAX: f32 = 65504.0;
+
 fn write_rgba16f(buf: &mut [u8], offset: usize, r: f32, g: f32, b: f32, a: f32) {
     let bytes = [
-        f16::from_f32(r).to_ne_bytes(),
-        f16::from_f32(g).to_ne_bytes(),
-        f16::from_f32(b).to_ne_bytes(),
-        f16::from_f32(a).to_ne_bytes(),
+        f16::from_f32(r.clamp(0.0, F16_MAX)).to_ne_bytes(),
+        f16::from_f32(g.clamp(0.0, F16_MAX)).to_ne_bytes(),
+        f16::from_f32(b.clamp(0.0, F16_MAX)).to_ne_bytes(),
+        f16::from_f32(a.clamp(0.0, F16_MAX)).to_ne_bytes(),
     ];
     buf[offset] = bytes[0][0];
     buf[offset + 1] = bytes[0][1];

@@ -22,6 +22,7 @@ struct CompositeParams {
     ssao_enabled: u32,
     ssao_strength: f32,
     tone_mode: u32,
+    exposure: f32,
 }
 @group(1) @binding(0) var<uniform> composite: CompositeParams;
 
@@ -32,10 +33,8 @@ fn tone_none(c: vec3<f32>) -> vec3<f32> {
     return clamp(c, vec3(0.0), vec3(1.0));
 }
 
-const EXPOSURE: f32 = 1.0;
-
 fn tone_linear(c: vec3<f32>) -> vec3<f32> {
-    return clamp(c * EXPOSURE, vec3(0.0), vec3(1.0));
+    return clamp(c, vec3(0.0), vec3(1.0));
 }
 
 fn tone_reinhard(c: vec3<f32>) -> vec3<f32> {
@@ -62,6 +61,7 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
         let ao = textureSample(ssao_texture, ssao_sampler, in.uv).r;
         color = color * mix(1.0, ao, composite.ssao_strength);
     }
+    color = color * composite.exposure;
     var mapped: vec3<f32>;
     switch composite.tone_mode {
         case 1u: { mapped = tone_linear(color); }

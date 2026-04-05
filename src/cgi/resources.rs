@@ -5,17 +5,14 @@ use wgpu::util::DeviceExt;
 use super::geometry::{self, RawImageData, RawMaterialData, RawModelData};
 use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
 
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
-
 pub fn is_supported_model_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            SUPPORTED_EXTENSIONS
+        .is_some_and(|ext| {
+            crate::SUPPORTED_EXTENSIONS
                 .iter()
                 .any(|s| ext.eq_ignore_ascii_case(s))
         })
-        .unwrap_or(false)
 }
 
 pub fn load_model_any(
@@ -47,6 +44,7 @@ pub struct ModelStats {
     pub verts: usize,
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn upload_model(
     raw: RawModelData,
     file_path: &str,
@@ -63,8 +61,8 @@ fn upload_model(
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
-            &mat.diffuse_texture_data,
-            &mat.diffuse_texture_path,
+            mat.diffuse_texture_data.as_ref(),
+            mat.diffuse_texture_path.as_ref(),
             false,
             &mat.name,
             "diffuse",
@@ -72,8 +70,8 @@ fn upload_model(
         let normal_texture = load_or_fallback_texture(
             device,
             queue,
-            &mat.normal_texture_data,
-            &mat.normal_texture_path,
+            mat.normal_texture_data.as_ref(),
+            mat.normal_texture_path.as_ref(),
             true,
             &mat.name,
             "normal",
@@ -82,8 +80,8 @@ fn upload_model(
         let emissive_texture = load_or_fallback_texture(
             device,
             queue,
-            &mat.emissive_texture_data,
-            &mat.emissive_texture_path,
+            mat.emissive_texture_data.as_ref(),
+            mat.emissive_texture_path.as_ref(),
             false,
             &mat.name,
             "emissive",
@@ -111,7 +109,7 @@ fn upload_model(
     }
 
     if gpu_materials.is_empty() {
-        let diffuse = create_default_texture_colored(device, queue, [226, 213, 195, 255]);
+        let diffuse = create_default_texture_colored(device, queue, [204, 204, 204, 255]);
         let normal = create_default_texture(device, queue, true);
         let orm = create_default_orm_texture(device, queue);
         let emissive = create_default_emissive_texture(device, queue);
@@ -195,7 +193,7 @@ fn upload_model(
     }
 
     let total_tris: usize = mesh_indices.iter().map(|idx| idx.len() / 3).sum();
-    let total_verts: usize = mesh_vertices.iter().map(|v| v.len()).sum();
+    let total_verts: usize = mesh_vertices.iter().map(std::vec::Vec::len).sum();
     let stats = ModelStats {
         polys: raw.polygon_count,
         tris: total_tris,
@@ -376,8 +374,8 @@ fn create_default_emissive_texture(device: &wgpu::Device, queue: &wgpu::Queue) -
 fn load_or_fallback_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    embedded: &Option<RawImageData>,
-    path: &Option<String>,
+    embedded: Option<&RawImageData>,
+    path: Option<&std::path::PathBuf>,
     is_linear: bool,
     mat_name: &str,
     kind: &str,
@@ -393,14 +391,15 @@ fn load_or_fallback_texture(
             is_linear,
         )
         .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to load embedded {kind} texture: {e}");
+            tracing::warn!("Failed to load embedded {kind} texture: {e}");
             create_default_texture(device, queue, is_linear)
         })
     } else {
         match path {
-            Some(p) if !p.is_empty() => {
-                load_texture(p, is_linear, device, queue).unwrap_or_else(|e| {
-                    eprintln!("Warning: Failed to load {kind} texture '{p}': {e}");
+            Some(p) => {
+                let p_str = p.to_string_lossy();
+                load_texture(&p_str, is_linear, device, queue).unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load {kind} texture '{}': {e}", p.display());
                     create_default_texture(device, queue, is_linear)
                 })
             }
@@ -428,8 +427,8 @@ fn load_or_create_orm(
         load_or_fallback_texture(
             device,
             queue,
-            &mat.metallic_roughness_texture_data,
-            &mat.metallic_roughness_texture_path,
+            mat.metallic_roughness_texture_data.as_ref(),
+            mat.metallic_roughness_texture_path.as_ref(),
             true,
             &mat.name,
             "orm",
@@ -452,7 +451,7 @@ fn load_or_create_orm(
 
         if let Some(ref occ_data) = mat.occlusion_texture_data {
             if let Some(composited) =
-                composite_orm_pixels(&mat.metallic_roughness_texture_data, occ_data)
+                composite_orm_pixels(mat.metallic_roughness_texture_data.as_ref(), occ_data)
             {
                 return texture::Texture::from_raw_rgba(
                     device,
@@ -472,7 +471,7 @@ fn load_or_create_orm(
 }
 
 fn composite_orm_pixels(
-    mr_data: &Option<RawImageData>,
+    mr_data: Option<&RawImageData>,
     occ_data: &RawImageData,
 ) -> Option<RawImageData> {
     let mr = mr_data.as_ref()?;

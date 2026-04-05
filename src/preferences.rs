@@ -272,6 +272,14 @@ pub struct DisplayPrefs {
     pub ssao_enabled: bool,
     #[serde(default)]
     pub tone_mode: ToneMode,
+    #[serde(default = "default_exposure")]
+    pub exposure: f32,
+    #[serde(default)]
+    pub local_axes_visible: bool,
+}
+
+fn default_exposure() -> f32 {
+    1.0
 }
 
 fn default_true() -> bool {
@@ -282,6 +290,12 @@ fn default_true() -> bool {
 pub struct RenderingPrefs {
     pub wireframe_line_weight: LineWeight,
     pub msaa_sample_count: u32,
+    #[serde(default = "default_shadow_map_size")]
+    pub shadow_map_size: u32,
+}
+
+fn default_shadow_map_size() -> u32 {
+    2048
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -342,6 +356,8 @@ impl Default for DisplayPrefs {
             ibl_mode: IblMode::Full,
             ssao_enabled: false,
             tone_mode: ToneMode::AcesFilmic,
+            exposure: 1.0,
+            local_axes_visible: false,
         }
     }
 }
@@ -351,6 +367,7 @@ impl Default for RenderingPrefs {
         Self {
             wireframe_line_weight: LineWeight::Medium,
             msaa_sample_count: 4,
+            shadow_map_size: 2048,
         }
     }
 }
@@ -364,23 +381,22 @@ pub fn config_path() -> Option<PathBuf> {
 pub fn load() -> Preferences {
     #[cfg(debug_assertions)]
     if let Some(ref path) = config_path() {
-        eprintln!("[debug] Config path: {}", path.display());
+        tracing::debug!("Config path: {}", path.display());
     }
 
     let Some(path) = config_path() else {
         return Preferences::default();
     };
 
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Preferences::default(),
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Preferences::default();
     };
 
     match toml::from_str::<Preferences>(&contents) {
         Ok(mut prefs) => {
             if !matches!(prefs.rendering.msaa_sample_count, 1 | 2 | 4) {
-                eprintln!(
-                    "Warning: invalid msaa_sample_count {} in config, falling back to 4",
+                tracing::warn!(
+                    "Invalid msaa_sample_count {} in config, falling back to 4",
                     prefs.rendering.msaa_sample_count
                 );
                 prefs.rendering.msaa_sample_count = 4;
@@ -396,7 +412,7 @@ pub fn load() -> Preferences {
             prefs
         }
         Err(e) => {
-            eprintln!("Warning: failed to parse {}: {}", path.display(), e);
+            tracing::warn!("Failed to parse {}: {}", path.display(), e);
             Preferences::default()
         }
     }
@@ -457,10 +473,13 @@ mod tests {
                 ibl_mode: IblMode::Diffuse,
                 ssao_enabled: false,
                 tone_mode: ToneMode::Reinhard,
+                exposure: 1.5,
+                local_axes_visible: true,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
                 msaa_sample_count: 2,
+                shadow_map_size: 2048,
             },
             lighting: LightingPrefs { lock: true },
             window: WindowPrefs {
@@ -483,15 +502,18 @@ mod tests {
             some_future_field = "hello"
 
             [display]
-            background = "Gradient"
+            background = "Black"
             view_mode = "Shaded"
             normals_mode = "Off"
             grid_visible = true
-            axis_gizmo_visible = false
+            axis_gizmo_visible = true
             bloom_enabled = true
             uv_mode = "Off"
             projection_mode = "Perspective"
             turntable_active = false
+            ibl_mode = "Full"
+            ssao_enabled = false
+            tone_mode = "AcesFilmic"
             future_toggle = true
 
             [rendering]

@@ -1,5 +1,6 @@
 use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::model::{self, Vertex};
+use crate::cgi::pipeline_builder::PipelineBuilder;
 use crate::cgi::texture;
 
 pub(crate) struct Instance {
@@ -97,6 +98,13 @@ pub(crate) struct Pipelines {
     pub(crate) ssao_blur_v: wgpu::RenderPipeline,
 }
 
+fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
+    vec![
+        model::ModelVertex::description(),
+        InstanceRaw::description(),
+    ]
+}
+
 impl Pipelines {
     pub(crate) fn new(
         device: &wgpu::Device,
@@ -106,56 +114,29 @@ impl Pipelines {
     ) -> Self {
         let hdr_format = texture::Texture::HDR_FORMAT;
 
-        let shadow_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Shadow Pipeline Layout"),
-                bind_group_layouts: &[&layouts.shadow_pass, &layouts.texture],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Shadow Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shadow.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Shadow Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_shadow"),
-                    buffers: &[
-                        model::ModelVertex::description(),
-                        InstanceRaw::description(),
-                    ],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_shadow"),
-                    targets: &[],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 2,
-                        slope_scale: 2.0,
-                        clamp: 0.0,
-                    },
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
+        let shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Shadow Pipeline Layout"),
+            bind_group_layouts: &[&layouts.shadow_pass, &layouts.texture],
+            push_constant_ranges: &[],
+        });
+        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Shadow Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shadow.wgsl").into()),
+        });
+        let shadow =
+            PipelineBuilder::new(device, "Shadow Pipeline", &shadow_layout, &shadow_shader)
+                .vertex_entry("vs_shadow")
+                .fragment_entry("fs_shadow")
+                .buffers(model_instance_buffers())
+                .cull_back()
+                .depth_format(wgpu::TextureFormat::Depth32Float)
+                .depth_compare(wgpu::CompareFunction::Less)
+                .depth_bias(wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                })
+                .build();
 
         let main_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Rendering Pipeline Layout"),
@@ -171,114 +152,42 @@ impl Pipelines {
             label: Some("Normal Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
         });
+        let main = PipelineBuilder::new(device, "Render Pipeline", &main_layout, &main_shader)
+            .buffers(model_instance_buffers())
+            .color_format(hdr_format)
+            .cull_back()
+            .depth_compare(wgpu::CompareFunction::Less)
+            .sample_count(sample_count)
+            .build();
 
-        let main = create_render_pipeline(
-            device,
-            &main_layout,
-            hdr_format,
-            Some(texture::Texture::DEPTH_FORMAT),
-            &[
-                model::ModelVertex::description(),
-                InstanceRaw::description(),
-            ],
-            &main_shader,
-            sample_count,
-        );
+        let alpha_blend =
+            PipelineBuilder::new(device, "Alpha Blend Pipeline", &main_layout, &main_shader)
+                .buffers(model_instance_buffers())
+                .color_format(hdr_format)
+                .blend_alpha()
+                .depth_write(false)
+                .sample_count(sample_count)
+                .build();
 
-        let alpha_blend = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Alpha Blend Pipeline"),
-            layout: Some(&main_layout),
-            vertex: wgpu::VertexState {
-                module: &main_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[
-                    model::ModelVertex::description(),
-                    InstanceRaw::description(),
-                ],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &main_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: hdr_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: texture::Texture::DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
+        let floor_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Floor Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.shadow_read],
+            push_constant_ranges: &[],
         });
-
-        let floor = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Floor Pipeline Layout"),
-                bind_group_layouts: &[&layouts.camera, &layouts.shadow_read],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Floor Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/floor.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Floor Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_floor"),
-                    buffers: &[model::ModelVertex::description()],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_floor"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: hdr_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
+        let floor_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Floor Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/floor.wgsl").into()),
+        });
+        let floor = PipelineBuilder::new(device, "Floor Pipeline", &floor_layout, &floor_shader)
+            .vertex_entry("vs_floor")
+            .fragment_entry("fs_floor")
+            .buffers(vec![model::ModelVertex::description()])
+            .color_format(hdr_format)
+            .blend_alpha()
+            .depth_write(false)
+            .depth_compare(wgpu::CompareFunction::Less)
+            .sample_count(sample_count)
+            .build();
 
         let ghosted_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Ghosted Pipeline Layout"),
@@ -289,19 +198,18 @@ impl Pipelines {
             label: Some("Ghosted Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ghosted.wgsl").into()),
         });
+        let ghosted_fill =
+            PipelineBuilder::new(device, "fs_ghosted_fill", &ghosted_layout, &ghosted_shader)
+                .vertex_entry("vs_ghosted")
+                .fragment_entry("fs_ghosted_fill")
+                .buffers(model_instance_buffers())
+                .color_format(hdr_format)
+                .blend_alpha()
+                .depth_write(false)
+                .depth_compare(wgpu::CompareFunction::Less)
+                .sample_count(sample_count)
+                .build();
 
-        let ghosted_fill = create_ghosted_pipeline(
-            device,
-            &ghosted_layout,
-            &ghosted_shader,
-            hdr_format,
-            "vs_ghosted",
-            "fs_ghosted_fill",
-            wgpu::PolygonMode::Fill,
-            false,
-            None,
-            sample_count,
-        );
         let edge_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Edge Wire Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge_wire.wgsl").into()),
@@ -315,189 +223,91 @@ impl Pipelines {
             ],
             push_constant_ranges: &[],
         });
-        let edge_wire = create_edge_wire_pipeline(
+        let edge_wire =
+            PipelineBuilder::new(device, "fs_edge_wire", &edge_wire_layout, &edge_wire_shader)
+                .vertex_entry("vs_edge_quad")
+                .fragment_entry("fs_edge_wire")
+                .buffers(vec![InstanceRaw::description()])
+                .color_format(hdr_format)
+                .depth_bias(wgpu::DepthBiasState {
+                    constant: -2,
+                    slope_scale: -2.0,
+                    clamp: 0.0,
+                })
+                .sample_count(sample_count)
+                .build();
+        let edge_wire_ghosted = PipelineBuilder::new(
             device,
-            &edge_wire_layout,
-            &edge_wire_shader,
-            hdr_format,
-            "fs_edge_wire",
-            true,
-            Some(wgpu::DepthBiasState {
-                constant: -2,
-                slope_scale: -2.0,
-                clamp: 0.0,
-            }),
-            sample_count,
-        );
-        let edge_wire_ghosted = create_edge_wire_pipeline(
-            device,
-            &edge_wire_layout,
-            &edge_wire_shader,
-            hdr_format,
             "fs_edge_wire_ghosted",
-            false,
-            None,
-            sample_count,
-        );
+            &edge_wire_layout,
+            &edge_wire_shader,
+        )
+        .vertex_entry("vs_edge_quad")
+        .fragment_entry("fs_edge_wire_ghosted")
+        .buffers(vec![InstanceRaw::description()])
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .sample_count(sample_count)
+        .build();
 
-        let grid = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Grid Pipeline Layout"),
-                bind_group_layouts: &[&layouts.grid],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Grid Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Grid Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_grid"),
-                    buffers: &[model::LineVertex::description()],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_grid"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: hdr_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
+        let grid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Grid Pipeline Layout"),
+            bind_group_layouts: &[&layouts.grid],
+            push_constant_ranges: &[],
+        });
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Grid Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid.wgsl").into()),
+        });
+        let grid = PipelineBuilder::new(device, "Grid Pipeline", &grid_layout, &grid_shader)
+            .vertex_entry("vs_grid")
+            .fragment_entry("fs_grid")
+            .buffers(vec![model::LineVertex::description()])
+            .color_format(hdr_format)
+            .blend_alpha()
+            .depth_write(false)
+            .depth_compare(wgpu::CompareFunction::Less)
+            .sample_count(sample_count)
+            .build();
 
-        let normals = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Normals Pipeline Layout"),
-                bind_group_layouts: &[&layouts.normals],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Normals Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/normals.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Normals Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_normals"),
-                    buffers: &[model::LineVertex::description()],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_normals"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: hdr_format,
-                        blend: Some(wgpu::BlendState {
-                            alpha: wgpu::BlendComponent::REPLACE,
-                            color: wgpu::BlendComponent::REPLACE,
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
+        let normals_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Normals Pipeline Layout"),
+            bind_group_layouts: &[&layouts.normals],
+            push_constant_ranges: &[],
+        });
+        let normals_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Normals Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/normals.wgsl").into()),
+        });
+        let normals =
+            PipelineBuilder::new(device, "Normals Pipeline", &normals_layout, &normals_shader)
+                .vertex_entry("vs_normals")
+                .fragment_entry("fs_normals")
+                .buffers(vec![model::LineVertex::description()])
+                .color_format(hdr_format)
+                .topology(wgpu::PrimitiveTopology::LineList)
+                .depth_write(false)
+                .sample_count(sample_count)
+                .build();
 
-        let background = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Background Pipeline Layout"),
-                bind_group_layouts: &[&layouts.background],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Background Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Background Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_background"),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_background"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: hdr_format,
-                        blend: Some(wgpu::BlendState {
-                            alpha: wgpu::BlendComponent::REPLACE,
-                            color: wgpu::BlendComponent::REPLACE,
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    cull_mode: None,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Always,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
+        let bg_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Background Pipeline Layout"),
+            bind_group_layouts: &[&layouts.background],
+            push_constant_ranges: &[],
+        });
+        let bg_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Background Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background.wgsl").into()),
+        });
+        let background =
+            PipelineBuilder::new(device, "Background Pipeline", &bg_layout, &bg_shader)
+                .vertex_entry("vs_background")
+                .fragment_entry("fs_background")
+                .color_format(hdr_format)
+                .depth_compare(wgpu::CompareFunction::Always)
+                .sample_count(sample_count)
+                .build();
 
         let uv_debug_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Debug Shader"),
@@ -508,249 +318,195 @@ impl Pipelines {
             bind_group_layouts: &[&layouts.camera],
             push_constant_ranges: &[],
         });
-        let uv_gradient = create_ghosted_pipeline(
+        let uv_gradient = PipelineBuilder::new(
             device,
-            &uv_camera_layout,
-            &uv_debug_shader,
-            hdr_format,
-            "vs_uv_debug",
             "fs_uv_gradient",
-            wgpu::PolygonMode::Fill,
-            true,
-            None,
-            sample_count,
-        );
-        let uv_no_uvs = create_ghosted_pipeline(
-            device,
             &uv_camera_layout,
             &uv_debug_shader,
-            hdr_format,
-            "vs_uv_debug",
-            "fs_uv_no_uvs",
-            wgpu::PolygonMode::Fill,
-            true,
-            None,
-            sample_count,
-        );
+        )
+        .vertex_entry("vs_uv_debug")
+        .fragment_entry("fs_uv_gradient")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .cull_back()
+        .depth_compare(wgpu::CompareFunction::Less)
+        .sample_count(sample_count)
+        .build();
+
+        let uv_no_uvs =
+            PipelineBuilder::new(device, "fs_uv_no_uvs", &uv_camera_layout, &uv_debug_shader)
+                .vertex_entry("vs_uv_debug")
+                .fragment_entry("fs_uv_no_uvs")
+                .buffers(model_instance_buffers())
+                .color_format(hdr_format)
+                .cull_back()
+                .depth_compare(wgpu::CompareFunction::Less)
+                .sample_count(sample_count)
+                .build();
+
         let uv_checker_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("UV Checker Pipeline Layout"),
             bind_group_layouts: &[&layouts.camera, &layouts.uv_checker],
             push_constant_ranges: &[],
         });
-        let uv_checker = create_ghosted_pipeline(
+        let uv_checker = PipelineBuilder::new(
             device,
+            "fs_uv_checker",
             &uv_checker_layout,
             &uv_debug_shader,
-            hdr_format,
-            "vs_uv_debug",
-            "fs_uv_checker",
-            wgpu::PolygonMode::Fill,
-            true,
-            None,
-            sample_count,
-        );
+        )
+        .vertex_entry("vs_uv_debug")
+        .fragment_entry("fs_uv_checker")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .cull_back()
+        .depth_compare(wgpu::CompareFunction::Less)
+        .sample_count(sample_count)
+        .build();
 
-        let gizmo = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Gizmo Pipeline Layout"),
-                bind_group_layouts: &[&layouts.camera],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Gizmo Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gizmo.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Gizmo Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_gizmo"),
-                    buffers: &[model::GizmoVertex::description()],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_gizmo"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: hdr_format,
-                        blend: Some(wgpu::BlendState {
-                            alpha: wgpu::BlendComponent::REPLACE,
-                            color: wgpu::BlendComponent::REPLACE,
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
+        let gizmo_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Gizmo Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera],
+            push_constant_ranges: &[],
+        });
+        let gizmo_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Gizmo Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gizmo.wgsl").into()),
+        });
+        let gizmo = PipelineBuilder::new(device, "Gizmo Pipeline", &gizmo_layout, &gizmo_shader)
+            .vertex_entry("vs_gizmo")
+            .fragment_entry("fs_gizmo")
+            .buffers(vec![model::GizmoVertex::description()])
+            .color_format(hdr_format)
+            .topology(wgpu::PrimitiveTopology::LineList)
+            .depth_write(false)
+            .sample_count(sample_count)
+            .build();
 
         let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Bloom Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
         });
+        let bloom_extract_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Bloom Extract Pipeline Layout"),
+            bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+            push_constant_ranges: &[],
+        });
+        let bloom_extract = PipelineBuilder::new(
+            device,
+            "Bloom Extract Pipeline",
+            &bloom_extract_layout,
+            &bloom_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_brightness_extract")
+        .color_format(hdr_format)
+        .no_blend()
+        .no_depth()
+        .build();
 
-        let bloom_extract = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Bloom Extract Pipeline Layout"),
-                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
-                push_constant_ranges: &[],
-            });
-            create_fullscreen_pipeline(
-                device,
-                &layout,
-                &bloom_shader,
-                "fs_brightness_extract",
-                hdr_format,
-                "Bloom Extract Pipeline",
-            )
-        };
+        let bloom_blur_h_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Bloom Blur H Pipeline Layout"),
+            bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+            push_constant_ranges: &[],
+        });
+        let bloom_blur_h = PipelineBuilder::new(
+            device,
+            "Bloom Blur H Pipeline",
+            &bloom_blur_h_layout,
+            &bloom_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_blur_horizontal")
+        .color_format(hdr_format)
+        .no_blend()
+        .no_depth()
+        .build();
 
-        let bloom_blur_h = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Bloom Blur H Pipeline Layout"),
-                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
-                push_constant_ranges: &[],
-            });
-            create_fullscreen_pipeline(
-                device,
-                &layout,
-                &bloom_shader,
-                "fs_blur_horizontal",
-                hdr_format,
-                "Bloom Blur H Pipeline",
-            )
-        };
+        let bloom_blur_v_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Bloom Blur V Pipeline Layout"),
+            bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
+            push_constant_ranges: &[],
+        });
+        let bloom_blur_v = PipelineBuilder::new(
+            device,
+            "Bloom Blur V Pipeline",
+            &bloom_blur_v_layout,
+            &bloom_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_blur_vertical")
+        .color_format(hdr_format)
+        .no_blend()
+        .no_depth()
+        .build();
 
-        let bloom_blur_v = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Bloom Blur V Pipeline Layout"),
-                bind_group_layouts: &[&layouts.bloom_texture, &layouts.bloom_params],
-                push_constant_ranges: &[],
-            });
-            create_fullscreen_pipeline(
-                device,
-                &layout,
-                &bloom_shader,
-                "fs_blur_vertical",
-                hdr_format,
-                "Bloom Blur V Pipeline",
-            )
-        };
+        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Composite Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
+        });
+        let composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Composite Pipeline Layout"),
+            bind_group_layouts: &[
+                &layouts.composite,
+                &layouts.composite_params,
+                &layouts.ssao_read,
+            ],
+            push_constant_ranges: &[],
+        });
+        let composite = PipelineBuilder::new(
+            device,
+            "Composite Pipeline",
+            &composite_layout,
+            &composite_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_composite")
+        .color_format(config.format)
+        .no_blend()
+        .no_depth()
+        .build();
 
-        let composite = {
-            let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Composite Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
-            });
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Composite Pipeline Layout"),
-                bind_group_layouts: &[
-                    &layouts.composite,
-                    &layouts.composite_params,
-                    &layouts.ssao_read,
-                ],
-                push_constant_ranges: &[],
-            });
-            create_fullscreen_pipeline(
-                device,
-                &layout,
-                &composite_shader,
-                "fs_composite",
-                config.format,
-                "Composite Pipeline",
-            )
-        };
-
-        let gbuffer = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("G-Buffer Pipeline Layout"),
-                bind_group_layouts: &[&layouts.camera],
-                push_constant_ranges: &[],
-            });
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("G-Buffer Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gbuffer.wgsl").into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("G-Buffer Pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_gbuffer"),
-                    buffers: &[
-                        model::ModelVertex::description(),
-                        InstanceRaw::description(),
-                    ],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_gbuffer"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: texture::Texture::HDR_FORMAT,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: texture::Texture::DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
+        let gbuffer_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("G-Buffer Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera],
+            push_constant_ranges: &[],
+        });
+        let gbuffer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("G-Buffer Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gbuffer.wgsl").into()),
+        });
+        let gbuffer = PipelineBuilder::new(
+            device,
+            "G-Buffer Pipeline",
+            &gbuffer_layout,
+            &gbuffer_shader,
+        )
+        .vertex_entry("vs_gbuffer")
+        .fragment_entry("fs_gbuffer")
+        .buffers(model_instance_buffers())
+        .color_format(texture::Texture::HDR_FORMAT)
+        .no_blend()
+        .cull_back()
+        .depth_compare(wgpu::CompareFunction::Less)
+        .build();
 
         let ssao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SSAO Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ssao.wgsl").into()),
         });
-        let ssao = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("SSAO Pipeline Layout"),
-                bind_group_layouts: &[&layouts.ssao],
-                push_constant_ranges: &[],
-            });
-            create_fullscreen_pipeline(
-                device,
-                &layout,
-                &ssao_shader,
-                "fs_ssao",
-                wgpu::TextureFormat::R8Unorm,
-                "SSAO Pipeline",
-            )
-        };
+        let ssao_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SSAO Pipeline Layout"),
+            bind_group_layouts: &[&layouts.ssao],
+            push_constant_ranges: &[],
+        });
+        let ssao = PipelineBuilder::new(device, "SSAO Pipeline", &ssao_layout, &ssao_shader)
+            .vertex_entry("vs_fullscreen")
+            .fragment_entry("fs_ssao")
+            .color_format(wgpu::TextureFormat::R8Unorm)
+            .no_blend()
+            .no_depth()
+            .build();
 
         let ssao_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SSAO Blur Shader"),
@@ -761,27 +517,35 @@ impl Pipelines {
             bind_group_layouts: &[&layouts.ssao_blur],
             push_constant_ranges: &[],
         });
-        let ssao_blur_h = create_fullscreen_pipeline(
+        let ssao_blur_h = PipelineBuilder::new(
             device,
-            &ssao_blur_layout,
-            &ssao_blur_shader,
-            "fs_blur_h",
-            wgpu::TextureFormat::R8Unorm,
             "SSAO Blur H Pipeline",
-        );
-        let ssao_blur_v = create_fullscreen_pipeline(
-            device,
             &ssao_blur_layout,
             &ssao_blur_shader,
-            "fs_blur_v",
-            wgpu::TextureFormat::R8Unorm,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_blur_h")
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .no_blend()
+        .no_depth()
+        .build();
+        let ssao_blur_v = PipelineBuilder::new(
+            device,
             "SSAO Blur V Pipeline",
-        );
+            &ssao_blur_layout,
+            &ssao_blur_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_blur_v")
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .no_blend()
+        .no_depth()
+        .build();
 
         Pipelines {
             main,
             alpha_blend,
-            shadow: shadow_pipeline,
+            shadow,
             floor,
             ghosted_fill,
             edge_wire,
@@ -803,233 +567,4 @@ impl Pipelines {
             ssao_blur_v,
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_ghosted_pipeline(
-    device: &wgpu::Device,
-    layout: &wgpu::PipelineLayout,
-    shader: &wgpu::ShaderModule,
-    format: wgpu::TextureFormat,
-    vertex_entry: &str,
-    fragment_entry: &str,
-    polygon_mode: wgpu::PolygonMode,
-    depth_write: bool,
-    depth_bias: Option<wgpu::DepthBiasState>,
-    sample_count: u32,
-) -> wgpu::RenderPipeline {
-    let cull_mode = if depth_write {
-        Some(wgpu::Face::Back)
-    } else {
-        None
-    };
-    let blend = if depth_write {
-        wgpu::BlendState {
-            alpha: wgpu::BlendComponent::REPLACE,
-            color: wgpu::BlendComponent::REPLACE,
-        }
-    } else {
-        wgpu::BlendState::ALPHA_BLENDING
-    };
-
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(fragment_entry),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some(vertex_entry),
-            buffers: &[
-                model::ModelVertex::description(),
-                InstanceRaw::description(),
-            ],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some(fragment_entry),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(blend),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode,
-            polygon_mode,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: texture::Texture::DEPTH_FORMAT,
-            depth_write_enabled: depth_write,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: depth_bias.unwrap_or_default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            count: sample_count,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-        cache: None,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_edge_wire_pipeline(
-    device: &wgpu::Device,
-    layout: &wgpu::PipelineLayout,
-    shader: &wgpu::ShaderModule,
-    format: wgpu::TextureFormat,
-    fragment_entry: &str,
-    depth_write: bool,
-    depth_bias: Option<wgpu::DepthBiasState>,
-    sample_count: u32,
-) -> wgpu::RenderPipeline {
-    let blend = if depth_write {
-        wgpu::BlendState {
-            alpha: wgpu::BlendComponent::REPLACE,
-            color: wgpu::BlendComponent::REPLACE,
-        }
-    } else {
-        wgpu::BlendState::ALPHA_BLENDING
-    };
-
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(fragment_entry),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs_edge_quad"),
-            buffers: &[InstanceRaw::description()],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some(fragment_entry),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(blend),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: texture::Texture::DEPTH_FORMAT,
-            depth_write_enabled: depth_write,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: depth_bias.unwrap_or_default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            count: sample_count,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-        cache: None,
-    })
-}
-
-fn create_fullscreen_pipeline(
-    device: &wgpu::Device,
-    layout: &wgpu::PipelineLayout,
-    shader: &wgpu::ShaderModule,
-    fragment_entry: &str,
-    format: wgpu::TextureFormat,
-    label: &str,
-) -> wgpu::RenderPipeline {
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(label),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs_fullscreen"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some(fragment_entry),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-        cache: None,
-    })
-}
-
-fn create_render_pipeline(
-    device: &wgpu::Device,
-    layout: &wgpu::PipelineLayout,
-    color_format: wgpu::TextureFormat,
-    depth_format: Option<wgpu::TextureFormat>,
-    vertex_layouts: &[wgpu::VertexBufferLayout],
-    shader: &wgpu::ShaderModule,
-    sample_count: u32,
-) -> wgpu::RenderPipeline {
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Render Pipeline"),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs_main"),
-            buffers: vertex_layouts,
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: color_format,
-                blend: Some(wgpu::BlendState {
-                    alpha: wgpu::BlendComponent::REPLACE,
-                    color: wgpu::BlendComponent::REPLACE,
-                }),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            ..Default::default()
-        },
-        depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
-            format,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            count: sample_count,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-        cache: None,
-    })
 }

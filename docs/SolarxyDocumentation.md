@@ -398,7 +398,7 @@ SSAO adds subtle contact shadows in crevices, folds, and where surfaces meet. It
 
 | Key | Action |
 | --- | --- |
-| **Shift+A** | Toggle SSAO on and off |
+| **Shift+O** | Toggle SSAO on and off |
 
 #### Bloom
 
@@ -420,8 +420,19 @@ Tone mapping controls how HDR color values are mapped to the displayable [0, 1] 
 | --- | --- |
 | **ACES Filmic** | Industry-standard filmic curve (Narkowicz approximation). Good contrast, saturated highlights. Default. |
 | **Reinhard** | Classic operator. Gentle rolloff, tends to desaturate bright highlights. |
-| **Linear** | Exposure multiply and clamp. No curve applied. |
+| **Linear** | Clamp to [0, 1]. No curve applied. |
 | **None (clip)** | Raw clamp to [0, 1]. Diagnostic mode — highlights clip hard. |
+
+#### Exposure
+
+Exposure scales the scene color before tone mapping is applied. Useful for adjusting the overall brightness when working with HDR environment maps that are much brighter or dimmer than the default lighting.
+
+| Key | Action |
+| --- | --- |
+| **E** | Increase exposure (+0.5) |
+| **Shift+E** | Decrease exposure (-0.5) |
+
+Range: 0.1 to 10.0. Default: 1.0. Saved with preferences.
 
 #### MSAA (Multi-Sample Anti-Aliasing)
 
@@ -566,10 +577,12 @@ The HUD overlays real-time information on the viewer.
 - Grid (if disabled)
 - Lights (if locked)
 - Axes (if enabled)
+- Local Axes (if enabled)
 - Bounds mode (if enabled)
 - IBL mode (if not Full)
 - SSAO (if disabled)
 - Tone mapping (if not ACES Filmic)
+- Exposure (if not 1.0)
 
 **Bottom center:**
 - Keyboard hints bar (toggle with **?**)
@@ -581,7 +594,7 @@ The HUD overlays real-time information on the viewer.
 
 ### Saving Preferences from the Viewer
 
-Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, bloom, SSAO, tone mapping, UV mode, projection, turntable, wireframe weight, IBL mode, and lights lock state to the config file. These settings are restored the next time you launch Solarxy.
+Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, local axes, bloom, SSAO, tone mapping, exposure, UV mode, projection, turntable, wireframe weight, IBL mode, and lights lock state to the config file. These settings are restored the next time you launch Solarxy.
 
 ### Keyboard Shortcut Reference
 
@@ -598,8 +611,10 @@ Press **Shift+S** to save the current viewer state as your default preferences. 
 | **B** | Cycle background (White / Gradient / Dark Gray / Black) |
 | **Shift+B** | Cycle bounding box display (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
-| **Shift+A** | Toggle SSAO |
+| **Shift+A** | Toggle local coordinate axes (model/mesh centers) |
+| **Shift+O** | Toggle SSAO |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
+| **E** / **Shift+E** | Increase / decrease exposure |
 | **G** | Toggle grid |
 | **A** | Toggle axis gizmo |
 | **V** | Toggle turntable auto-rotation |
@@ -860,6 +875,7 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 | Normals Mode | `normals_mode` | `"Off"`, `"Face"`, `"Vertex"`, `"FaceAndVertex"` | `"Off"` |
 | Grid Visible | `grid_visible` | `true`, `false` | `true` |
 | Axis Gizmo Visible | `axis_gizmo_visible` | `true`, `false` | `false` |
+| Local Axes Visible | `local_axes_visible` | `true`, `false` | `false` |
 | Bloom Enabled | `bloom_enabled` | `true`, `false` | `true` |
 | SSAO Enabled | `ssao_enabled` | `true`, `false` | `true` |
 | UV Mode | `uv_mode` | `"Off"`, `"Gradient"`, `"Checker"` | `"Off"` |
@@ -867,6 +883,7 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 | Turntable Active | `turntable_active` | `true`, `false` | `false` |
 | IBL Mode | `ibl_mode` | `"Off"`, `"Diffuse"`, `"Full"` | `"Full"` |
 | Tone Mode | `tone_mode` | `"None"`, `"Linear"`, `"Reinhard"`, `"AcesFilmic"` | `"AcesFilmic"` |
+| Exposure | `exposure` | `0.1` -- `10.0` | `1.0` |
 
 **Rendering settings** (`[rendering]` section):
 
@@ -986,7 +1003,7 @@ The model loads and the camera automatically frames it. You should see the model
 
 **Step 5 -- Change the background.** Press **B** to cycle backgrounds. Try Black for maximum contrast or White for a clean look.
 
-**Step 6 -- Toggle rendering features.** Press **I** to toggle IBL on and off -- notice how it affects ambient lighting. Press **Shift+A** to toggle SSAO, and **Shift+M** to toggle bloom.
+**Step 6 -- Toggle rendering features.** Press **I** to toggle IBL on and off -- notice how it affects ambient lighting. Press **Shift+O** to toggle SSAO, and **Shift+M** to toggle bloom. Press **Shift+A** to toggle local coordinate axes at model and mesh centers.
 
 **Step 7 -- Use preset views.** Press **T** for a top-down view, **F** for front, **L** for left, **R** for right. Press **H** to return to the default framing.
 
@@ -1028,7 +1045,7 @@ Configure Solarxy to start with your preferred settings every time.
 1. Launch the viewer: `solarxy -m model.obj`
 2. Set your preferred background with **B**.
 3. Set your preferred view mode with **W**.
-4. Toggle grid (**G**), axis gizmo (**A**), bloom (**Shift+M**), SSAO (**Shift+A**), and IBL (**I** / **Shift+I**) to your liking.
+4. Toggle grid (**G**), axis gizmo (**A**), local axes (**Shift+A**), bloom (**Shift+M**), SSAO (**Shift+O**), and IBL (**I** / **Shift+I**) to your liking.
 5. Press **Shift+S** to save. A toast confirms "Preferences saved".
 
 **Option B -- Use the preferences editor:**
@@ -1140,7 +1157,7 @@ You dropped a file type that Solarxy does not support. Only model files (`.obj`,
 If you experience slow frame rates or lag:
 
 - **Reduce MSAA** -- change `msaa_sample_count` from 4 to 2 or 1 in preferences. This is the most impactful change.
-- **Disable SSAO** -- press **Shift+A** in the viewer. SSAO requires an additional rendering pass.
+- **Disable SSAO** -- press **Shift+O** in the viewer. SSAO requires an additional rendering pass.
 - **Disable Bloom** -- press **Shift+M**. Bloom requires three additional full-screen passes.
 - **Disable IBL** -- press **I** to turn off image-based lighting.
 - Large models (millions of polygons) take longer to load. The viewer displays a loading message during this time. Once loaded, rendering performance depends on your GPU.
@@ -1196,7 +1213,8 @@ A single reference table of every keyboard shortcut in view mode.
 | **Shift+W** | Cycle wireframe weight (Light / Medium / Bold) |
 | **Shift+B** | Cycle bounds (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
-| **Shift+A** | Toggle SSAO |
+| **Shift+A** | Toggle local coordinate axes (model/mesh centers) |
+| **Shift+O** | Toggle SSAO |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | **Shift+I** | Cycle IBL mode (Diffuse / Full) |
 | **Shift+L** | Toggle lights lock |

@@ -57,4 +57,4 @@ cargo test                   # Run tests
 
 ## Formatting
 
-Uses `rustfmt.toml`: max width 120, 4-space indentation, Unix line endings, Rust 2024 edition, imports grouped by std/external/crate.
+Uses `rustfmt.toml`: max width 100, 4-space indentation, Unix line endings, Rust 2024 edition, imports grouped by std/external/crate.

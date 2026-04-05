@@ -159,12 +159,14 @@ impl HudRenderer {
         show_grid: bool,
         lights_locked: bool,
         show_axis_gizmo: bool,
+        show_local_axes: bool,
         bounds_mode: &str,
         bounds_info: &str,
         line_weight: &str,
         ibl_mode: &str,
         ssao_enabled: bool,
         tone_mode: &str,
+        exposure: f32,
     ) {
         let sf = self.scale_factor as f32;
         let font_size_main = 14.0 * sf;
@@ -219,6 +221,9 @@ impl HudRenderer {
             if show_axis_gizmo {
                 lines.push("Axes: On".to_string());
             }
+            if show_local_axes {
+                lines.push("Local Axes: On".to_string());
+            }
             if bounds_mode != "Off" {
                 lines.push(format!("Bounds: {}", bounds_mode));
             }
@@ -230,6 +235,9 @@ impl HudRenderer {
             }
             if tone_mode != "ACES Filmic" {
                 lines.push(format!("Tone: {}", tone_mode));
+            }
+            if (exposure - 1.0).abs() > 0.01 {
+                lines.push(format!("Exp: {:.1}", exposure));
             }
             lines
         } else {
@@ -338,7 +346,7 @@ impl HudRenderer {
         }
 
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+A SSAO  Shift+T Tone  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
+            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  I IBL  E/Shift+E Exposure\nShift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+A SSAO  Shift+T Tone  Shift+I IBL Mode  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  C Cap  H Frame  ? Hints"
         } else {
             "? Hints"
         };

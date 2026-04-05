@@ -10,8 +10,7 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
 
     let obj_dir = std::path::Path::new(file_path)
         .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
+        .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().to_string());
 
     let (models, obj_materials) = tobj::load_obj_buf(
         &mut obj_reader,
@@ -29,12 +28,10 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
 
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {
-        let diffuse_path = m.diffuse_texture.as_deref().map(|p| {
-            std::path::Path::new(&obj_dir)
-                .join(p)
-                .to_string_lossy()
-                .to_string()
-        });
+        let diffuse_path = m
+            .diffuse_texture
+            .as_deref()
+            .map(|p| std::path::Path::new(&obj_dir).join(p));
 
         let normal_path = m.normal_texture.as_deref().map(|p| {
             let cleaned = p
@@ -42,10 +39,7 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
                 .filter(|s| !s.starts_with('-'))
                 .collect::<Vec<_>>()
                 .join(" ");
-            std::path::Path::new(&obj_dir)
-                .join(cleaned)
-                .to_string_lossy()
-                .to_string()
+            std::path::Path::new(&obj_dir).join(cleaned)
         });
 
         let roughness_factor = m
@@ -81,6 +75,18 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             emissive_factor: [0.0, 0.0, 0.0],
             alpha_mode,
             alpha_cutoff,
+            ambient: m.ambient,
+            diffuse: m.diffuse,
+            specular: m.specular,
+            shininess: m.shininess,
+            dissolve: m.dissolve,
+            optical_density: m.optical_density,
+            ambient_texture_name: m.ambient_texture.clone(),
+            diffuse_texture_name: m.diffuse_texture.clone(),
+            specular_texture_name: m.specular_texture.clone(),
+            normal_texture_name: m.normal_texture.clone(),
+            shininess_texture_name: m.shininess_texture.clone(),
+            dissolve_texture_name: m.dissolve_texture.clone(),
         });
     }
 

@@ -124,7 +124,6 @@ pub struct AnalysisReport {
 
 impl fmt::Display for AnalysisReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Validation section (only if issues exist)
         if !self.validation.is_clean() {
             writeln!(f, "VALIDATION\n")?;
             for issue in &self.validation.issues {
@@ -133,7 +132,6 @@ impl fmt::Display for AnalysisReport {
             writeln!(f)?;
         }
 
-        // Model overview
         writeln!(f, "MODEL OVERVIEW\n")?;
         writeln!(f, "Model Name:       {}", self.model_name)?;
         writeln!(f, "Mesh Count:       {}", self.mesh_count)?;
@@ -176,7 +174,6 @@ impl fmt::Display for AnalysisReport {
             writeln!(f, "  Diagonal:   {:.3}", bounds.diagonal)?;
         }
 
-        // Mesh details
         if !self.meshes.is_empty() {
             writeln!(f, "\n\nMESH DETAILS\n")?;
             for (i, mesh) in self.meshes.iter().enumerate() {
@@ -225,7 +222,6 @@ impl fmt::Display for AnalysisReport {
             }
         }
 
-        // Material details
         if self.materials.is_empty() {
             writeln!(f, "\n\nMATERIALS\n")?;
             writeln!(f, "No materials found (.mtl file not provided or empty)")?;

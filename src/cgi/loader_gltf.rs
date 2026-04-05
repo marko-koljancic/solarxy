@@ -26,6 +26,18 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
             emissive_factor: [0.0, 0.0, 0.0],
             alpha_mode: 0,
             alpha_cutoff: 0.5,
+            ambient: None,
+            diffuse: None,
+            specular: None,
+            shininess: None,
+            dissolve: None,
+            optical_density: None,
+            ambient_texture_name: None,
+            diffuse_texture_name: None,
+            specular_texture_name: None,
+            normal_texture_name: None,
+            shininess_texture_name: None,
+            dissolve_texture_name: None,
         });
     }
 
@@ -84,6 +96,8 @@ fn extract_materials(
             };
             let alpha_cutoff = mat.alpha_cutoff().unwrap_or(0.5);
 
+            let base_color = pbr.base_color_factor();
+
             RawMaterialData {
                 name: mat.name().unwrap_or("gltf_material").to_string(),
                 diffuse_texture_path: diffuse_path,
@@ -101,6 +115,22 @@ fn extract_materials(
                 emissive_factor,
                 alpha_mode,
                 alpha_cutoff,
+                ambient: None,
+                diffuse: Some([base_color[0], base_color[1], base_color[2]]),
+                specular: None,
+                shininess: None,
+                dissolve: Some(base_color[3]),
+                optical_density: None,
+                ambient_texture_name: None,
+                diffuse_texture_name: pbr
+                    .base_color_texture()
+                    .map(|t| format!("texture_index:{}", t.texture().source().index())),
+                specular_texture_name: None,
+                normal_texture_name: mat
+                    .normal_texture()
+                    .map(|t| format!("texture_index:{}", t.texture().source().index())),
+                shininess_texture_name: None,
+                dissolve_texture_name: None,
             }
         })
         .collect()
@@ -110,7 +140,7 @@ fn resolve_texture(
     texture: &gltf::Texture,
     images: &[gltf::image::Data],
     parent_dir: &std::path::Path,
-) -> (Option<String>, Option<RawImageData>) {
+) -> (Option<std::path::PathBuf>, Option<RawImageData>) {
     let image = texture.source();
 
     match image.source() {
@@ -118,14 +148,14 @@ fn resolve_texture(
             if uri.starts_with("data:") {
                 (None, image_data_to_raw(&images[image.index()]))
             } else {
-                let full_path = parent_dir.join(uri).to_string_lossy().to_string();
-                (Some(full_path), None)
+                (Some(parent_dir.join(uri)), None)
             }
         }
         gltf::image::Source::View { .. } => (None, image_data_to_raw(&images[image.index()])),
     }
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
     let pixels = match img.format {
         gltf::image::Format::R8G8B8A8 => img.pixels.clone(),
@@ -236,8 +266,8 @@ fn collect_meshes_recursive(
     if let Some(mesh) = node.mesh() {
         for primitive in mesh.primitives() {
             if primitive.mode() != gltf::mesh::Mode::Triangles {
-                eprintln!(
-                    "Warning: Skipping non-triangle primitive in mesh '{}' (mode: {:?})",
+                tracing::warn!(
+                    "Skipping non-triangle primitive in mesh '{}' (mode: {:?})",
                     mesh.name().unwrap_or("unnamed"),
                     primitive.mode()
                 );

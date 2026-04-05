@@ -114,8 +114,10 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `I` | Toggle IBL (image-based lighting) |
 | `Shift+I` | Cycle IBL mode (Diffuse / Full) |
 | `Shift+M` | Toggle bloom effect |
-| `Shift+A` | Toggle SSAO (screen-space ambient occlusion) |
+| `Shift+A` | Toggle local coordinate axes (model/mesh centers) |
+| `Shift+O` | Toggle SSAO (screen-space ambient occlusion) |
 | `Shift+T` | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
+| `E` / `Shift+E` | Increase / decrease exposure |
 | `Shift+L` | Toggle lights lock |
 | `Shift+S` | Save preferences to disk |
 | `H` | Frame model (reset view) |
@@ -170,6 +172,7 @@ cargo r --release -- --mode preferences
 | Display | Normals Mode | Off / Face / Vertex / Face+Vertex |
 | Display | Grid Visible | on / off |
 | Display | Axis Gizmo Visible | on / off |
+| Display | Local Axes Visible | on / off |
 | Display | Bloom Enabled | on / off |
 | Display | SSAO Enabled | on / off |
 | Display | UV Mode | Off / Gradient / Checker |
@@ -177,6 +180,7 @@ cargo r --release -- --mode preferences
 | Display | Turntable Active | on / off |
 | Display | IBL Mode | Off / Diffuse / Full |
 | Display | Tone Mode | None (clip) / Linear / Reinhard / ACES Filmic |
+| Display | Exposure | 0.1 -- 10.0 (default 1.0) |
 | Rendering | Wireframe Line Weight | Light / Medium / Bold |
 | Rendering | MSAA Sample Count | 1 / 2 / 4 |
 | Lighting | Lighting Lock | on / off |

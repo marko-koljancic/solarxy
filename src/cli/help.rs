@@ -152,6 +152,7 @@ pub fn view_mode() -> Text<'static> {
             "Cycle tone mapping (None > Linear > Reinhard > ACES Filmic)",
         ),
         shortcut_line("Shift+I", "Cycle IBL mode (Diffuse / Full)"),
+        shortcut_line("E / Shift+E", "Increase / decrease exposure"),
         blank(),
         blank(),
         section_header("CAMERA"),

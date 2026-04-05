@@ -19,10 +19,12 @@ pub struct MaterialUniform {
     pub alpha_mode: u32,
 }
 
+const _: () = assert!(std::mem::size_of::<MaterialUniform>() == 32);
+
 impl Default for MaterialUniform {
     fn default() -> Self {
         Self {
-            roughness_factor: 0.5,
+            roughness_factor: 0.7,
             metallic_factor: 0.0,
             ao_strength: 1.0,
             alpha_cutoff: 0.5,

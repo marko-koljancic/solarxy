@@ -9,10 +9,10 @@ fn ply_prop_to_f32(prop: &Property) -> f32 {
         Property::Double(v) => v as f32,
         Property::Int(v) => v as f32,
         Property::UInt(v) => v as f32,
-        Property::Short(v) => v as f32,
-        Property::UShort(v) => v as f32,
-        Property::Char(v) => v as f32,
-        Property::UChar(v) => v as f32,
+        Property::Short(v) => f32::from(v),
+        Property::UShort(v) => f32::from(v),
+        Property::Char(v) => f32::from(v),
+        Property::UChar(v) => f32::from(v),
         _ => 0.0,
     }
 }
@@ -22,14 +22,14 @@ fn ply_prop_to_indices(prop: &Property) -> Vec<u32> {
         Property::ListInt(v) => v.iter().map(|&i| i as u32).collect(),
         Property::ListUInt(v) => v.clone(),
         Property::ListShort(v) => v.iter().map(|&i| i as u32).collect(),
-        Property::ListUShort(v) => v.iter().map(|&i| i as u32).collect(),
-        Property::ListUChar(v) => v.iter().map(|&i| i as u32).collect(),
+        Property::ListUShort(v) => v.iter().map(|&i| u32::from(i)).collect(),
+        Property::ListUChar(v) => v.iter().map(|&i| u32::from(i)).collect(),
         Property::ListChar(v) => v.iter().map(|&i| i as u32).collect(),
         _ => Vec::new(),
     }
 }
 
-pub fn find_companion_texture(ply_path: &str) -> Option<String> {
+pub fn find_companion_texture(ply_path: &str) -> Option<std::path::PathBuf> {
     let path = std::path::Path::new(ply_path);
     let parent = path.parent()?;
     let stem = path.file_stem()?.to_str()?;
@@ -39,7 +39,7 @@ pub fn find_companion_texture(ply_path: &str) -> Option<String> {
         for ext in &extensions {
             let candidate = parent.join(format!("{}{}.{}", stem, suffix, ext));
             if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
+                return Some(candidate);
             }
         }
     }
@@ -94,8 +94,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
             .iter()
             .map(|elem| {
                 [
-                    elem.get("u").map(ply_prop_to_f32).unwrap_or(0.0),
-                    elem.get("v").map(ply_prop_to_f32).unwrap_or(0.0),
+                    elem.get("u").map_or(0.0, ply_prop_to_f32),
+                    elem.get("v").map_or(0.0, ply_prop_to_f32),
                 ]
             })
             .collect()
@@ -110,23 +110,23 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
     let mut tex_coords_vec: Vec<[f32; 2]> = Vec::with_capacity(ply_vertices.len());
 
     for elem in ply_vertices {
-        let x = elem.get("x").map(ply_prop_to_f32).unwrap_or(0.0);
-        let y = elem.get("y").map(ply_prop_to_f32).unwrap_or(0.0);
-        let z = elem.get("z").map(ply_prop_to_f32).unwrap_or(0.0);
+        let x = elem.get("x").map_or(0.0, ply_prop_to_f32);
+        let y = elem.get("y").map_or(0.0, ply_prop_to_f32);
+        let z = elem.get("z").map_or(0.0, ply_prop_to_f32);
         positions.push([x, y, z]);
 
         if has_normals {
             normals_vec.push([
-                elem.get("nx").map(ply_prop_to_f32).unwrap_or(0.0),
-                elem.get("ny").map(ply_prop_to_f32).unwrap_or(0.0),
-                elem.get("nz").map(ply_prop_to_f32).unwrap_or(0.0),
+                elem.get("nx").map_or(0.0, ply_prop_to_f32),
+                elem.get("ny").map_or(0.0, ply_prop_to_f32),
+                elem.get("nz").map_or(0.0, ply_prop_to_f32),
             ]);
         }
 
         if let Some((u_key, v_key)) = uv_keys {
             tex_coords_vec.push([
-                elem.get(u_key).map(ply_prop_to_f32).unwrap_or(0.0),
-                elem.get(v_key).map(ply_prop_to_f32).unwrap_or(0.0),
+                elem.get(u_key).map_or(0.0, ply_prop_to_f32),
+                elem.get(v_key).map_or(0.0, ply_prop_to_f32),
             ]);
         }
     }
@@ -249,6 +249,18 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         emissive_factor: [0.0, 0.0, 0.0],
         alpha_mode: 0,
         alpha_cutoff: 0.5,
+        ambient: None,
+        diffuse: None,
+        specular: None,
+        shininess: None,
+        dissolve: None,
+        optical_density: None,
+        ambient_texture_name: None,
+        diffuse_texture_name: None,
+        specular_texture_name: None,
+        normal_texture_name: None,
+        shininess_texture_name: None,
+        dissolve_texture_name: None,
     });
 
     Ok(RawModelData {

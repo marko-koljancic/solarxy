@@ -9,9 +9,9 @@ pub struct AABB {
 impl AABB {
     pub fn center(&self) -> Point3<f32> {
         Point3::new(
-            (self.min.x + self.max.x) / 2.0,
-            (self.min.y + self.max.y) / 2.0,
-            (self.min.z + self.max.z) / 2.0,
+            f32::midpoint(self.min.x, self.max.x),
+            f32::midpoint(self.min.y, self.max.y),
+            f32::midpoint(self.min.z, self.max.z),
         )
     }
 

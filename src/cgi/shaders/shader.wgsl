@@ -74,8 +74,16 @@ fn vs_main(
     );
 
     let world_normal = normalize(normal_matrix * model.normal);
-    let world_tangent = normalize(normal_matrix * model.tangent);
-    let world_bitangent = normalize(normal_matrix * model.bitangent);
+    var world_tangent = normal_matrix * model.tangent;
+    var world_bitangent = normal_matrix * model.bitangent;
+    if length(world_tangent) < 1e-6 {
+        let up = select(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), abs(world_normal.y) < 0.999);
+        world_tangent = normalize(cross(up, world_normal));
+        world_bitangent = cross(world_normal, world_tangent);
+    } else {
+        world_tangent = normalize(world_tangent);
+        world_bitangent = normalize(world_bitangent);
+    }
     let tangent_matrix = transpose(mat3x3<f32>(
         world_tangent,
         world_bitangent,

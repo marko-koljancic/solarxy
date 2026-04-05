@@ -37,6 +37,8 @@ pub(crate) struct VisualizationState {
     pub(crate) bounds_whole_count: u32,
     pub(crate) bounds_per_mesh_buf: wgpu::Buffer,
     pub(crate) bounds_per_mesh_count: u32,
+    pub(crate) local_axes_vertex_buf: wgpu::Buffer,
+    pub(crate) local_axes_vertex_count: u32,
 }
 
 impl VisualizationState {
@@ -159,6 +161,27 @@ impl VisualizationState {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let mut local_axes_verts: Vec<model::GizmoVertex> = Vec::new();
+        let model_center = model.bounds.center();
+        let model_axis_len = model.bounds.diagonal() * 0.3;
+        local_axes_verts.extend(axes_at_center(
+            [model_center.x, model_center.y, model_center.z],
+            model_axis_len,
+        ));
+        if model.mesh_bounds.len() > 1 {
+            for mb in &model.mesh_bounds {
+                let c = mb.center();
+                let len = mb.diagonal() * 0.3;
+                local_axes_verts.extend(axes_at_center([c.x, c.y, c.z], len));
+            }
+        }
+        let local_axes_vertex_count = local_axes_verts.len() as u32;
+        let local_axes_vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Local Axes Buffer"),
+            contents: bytemuck::cast_slice(&local_axes_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let whole_verts = aabb_line_vertices(&model.bounds, [1.0, 0.65, 0.0]);
         let bounds_whole_count = whole_verts.len() as u32;
         let bounds_whole_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -205,8 +228,40 @@ impl VisualizationState {
             bounds_whole_count,
             bounds_per_mesh_buf,
             bounds_per_mesh_count,
+            local_axes_vertex_buf,
+            local_axes_vertex_count,
         }
     }
+}
+
+fn axes_at_center(center: [f32; 3], length: f32) -> [model::GizmoVertex; 6] {
+    let [cx, cy, cz] = center;
+    [
+        model::GizmoVertex {
+            position: [cx, cy, cz],
+            color: [1.0, 0.2, 0.2],
+        },
+        model::GizmoVertex {
+            position: [cx + length, cy, cz],
+            color: [1.0, 0.2, 0.2],
+        },
+        model::GizmoVertex {
+            position: [cx, cy, cz],
+            color: [0.2, 1.0, 0.2],
+        },
+        model::GizmoVertex {
+            position: [cx, cy + length, cz],
+            color: [0.2, 1.0, 0.2],
+        },
+        model::GizmoVertex {
+            position: [cx, cy, cz],
+            color: [0.3, 0.5, 1.0],
+        },
+        model::GizmoVertex {
+            position: [cx, cy, cz + length],
+            color: [0.3, 0.5, 1.0],
+        },
+    ]
 }
 
 fn aabb_line_vertices(aabb: &AABB, color: [f32; 3]) -> Vec<model::GizmoVertex> {
@@ -214,29 +269,29 @@ fn aabb_line_vertices(aabb: &AABB, color: [f32; 3]) -> Vec<model::GizmoVertex> {
     let mx = [aabb.max.x, aabb.max.y, aabb.max.z];
 
     let corners: [[f32; 3]; 8] = [
-        [mn[0], mn[1], mn[2]], // 0: min
-        [mx[0], mn[1], mn[2]], // 1
-        [mx[0], mn[1], mx[2]], // 2
-        [mn[0], mn[1], mx[2]], // 3
-        [mn[0], mx[1], mn[2]], // 4
-        [mx[0], mx[1], mn[2]], // 5
-        [mx[0], mx[1], mx[2]], // 6: max
-        [mn[0], mx[1], mx[2]], // 7
+        [mn[0], mn[1], mn[2]],
+        [mx[0], mn[1], mn[2]],
+        [mx[0], mn[1], mx[2]],
+        [mn[0], mn[1], mx[2]],
+        [mn[0], mx[1], mn[2]],
+        [mx[0], mx[1], mn[2]],
+        [mx[0], mx[1], mx[2]],
+        [mn[0], mx[1], mx[2]],
     ];
 
     let edges: [(usize, usize); 12] = [
         (0, 1),
         (1, 2),
         (2, 3),
-        (3, 0), // bottom
+        (3, 0),
         (4, 5),
         (5, 6),
         (6, 7),
-        (7, 4), // top
+        (7, 4),
         (0, 4),
         (1, 5),
         (2, 6),
-        (3, 7), // verticals
+        (3, 7),
     ];
 
     let mut verts = Vec::with_capacity(24);
@@ -255,14 +310,14 @@ fn aabb_line_vertices(aabb: &AABB, color: [f32; 3]) -> Vec<model::GizmoVertex> {
 
 fn bounds_color_palette() -> [[f32; 3]; 8] {
     [
-        [1.0, 0.4, 0.4],   // salmon
-        [0.3, 0.85, 0.4],  // green
-        [0.4, 0.6, 1.0],   // cornflower
-        [1.0, 0.85, 0.2],  // gold
-        [0.85, 0.4, 1.0],  // violet
-        [0.2, 0.9, 0.9],   // cyan
-        [1.0, 0.55, 0.75], // pink
-        [0.7, 0.9, 0.3],   // lime
+        [1.0, 0.4, 0.4],
+        [0.3, 0.85, 0.4],
+        [0.4, 0.6, 1.0],
+        [1.0, 0.85, 0.2],
+        [0.85, 0.4, 1.0],
+        [0.2, 0.9, 0.9],
+        [1.0, 0.55, 0.75],
+        [0.7, 0.9, 0.3],
     ]
 }
 

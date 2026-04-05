@@ -112,6 +112,12 @@ pub struct CameraUniform {
     _pad: [f32; 2],
 }
 
+impl Default for CameraUniform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CameraUniform {
     pub fn new() -> Self {
         use cgmath::SquareMatrix;

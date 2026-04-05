@@ -468,7 +468,7 @@ fn generate_noise() -> Vec<u8> {
     for i in 0..count as u32 {
         let mut h = i.wrapping_mul(0x9E37_79B9);
         h ^= h >> 16;
-        h = h.wrapping_mul(0x45D9_F3B);
+        h = h.wrapping_mul(0x045D_9F3B);
         h ^= h >> 16;
         let angle = (h as f32 / u32::MAX as f32) * 2.0 * std::f32::consts::PI;
         let x = angle.cos();
