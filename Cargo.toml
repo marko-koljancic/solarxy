@@ -1,7 +1,7 @@
 [package]
 name = "solarxy"
 description = "A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks."
-version = "0.3.1-alpha"
+version = "0.4.0-beta"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
