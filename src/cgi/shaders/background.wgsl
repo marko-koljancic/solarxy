@@ -1,6 +1,8 @@
 struct GradientColors {
     top: vec4<f32>,
     bottom: vec4<f32>,
+    uv_y_offset: f32,
+    uv_y_scale: f32,
 }
 @group(0) @binding(0) var<uniform> colors: GradientColors;
 
@@ -20,5 +22,6 @@ fn vs_background(@builtin(vertex_index) id: u32) -> VertexOutput {
 
 @fragment
 fn fs_background(in: VertexOutput) -> @location(0) vec4<f32> {
-    return mix(colors.top, colors.bottom, in.uv.y);
+    let t = colors.uv_y_offset + in.uv.y * colors.uv_y_scale;
+    return mix(colors.top, colors.bottom, t);
 }

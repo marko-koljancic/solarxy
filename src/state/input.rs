@@ -6,7 +6,7 @@ use crate::cgi::ibl::IblState;
 use crate::cgi::resources;
 use crate::preferences::{self, IblMode, NormalsMode, ProjectionMode, UvMode, ViewMode};
 
-use super::{BoundsMode, State};
+use super::{BoundsMode, State, ViewLayout};
 
 impl State {
     pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
@@ -222,6 +222,18 @@ impl State {
                     UvMode::Gradient => UvMode::Checker,
                     UvMode::Checker => UvMode::Off,
                 };
+            }
+            KeyCode::F1 => {
+                self.display.layout = ViewLayout::Single;
+                self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
+            }
+            KeyCode::F2 => {
+                self.display.layout = ViewLayout::SplitVertical;
+                self.gui.set_toast("Split Vertical", [0.0, 0.4, 0.0, 1.0]);
+            }
+            KeyCode::F3 => {
+                self.display.layout = ViewLayout::SplitHorizontal;
+                self.gui.set_toast("Split Horizontal", [0.0, 0.4, 0.0, 1.0]);
             }
             _ => {
                 if let Some(scene) = &mut self.scene {

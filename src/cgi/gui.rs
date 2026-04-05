@@ -275,6 +275,7 @@ impl EguiRenderer {
         surface_texture: &wgpu::Texture,
         screen: ScreenDescriptor,
         frame_ms: f32,
+        divider_rect: Option<egui::Rect>,
     ) -> SidebarChanges {
         let prev_bg = *sidebar.background_mode;
         let prev_line_weight = *sidebar.line_weight;
@@ -320,6 +321,10 @@ impl EguiRenderer {
                 hints_visible,
                 backend_info,
             );
+            if let Some(rect) = divider_rect {
+                let painter = ctx.layer_painter(egui::LayerId::background());
+                painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
+            }
         });
 
         self.stats_visible = stats_visible;
@@ -702,7 +707,8 @@ fn draw_hud_overlays(
              Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
              Shift+I IBL Mode\n\
              Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
-             C Cap  H Frame  Tab Panel  ? Hints"
+             C Cap  H Frame  Tab Panel  ? Hints\n\
+             F1 Single  F2 V-Split  F3 H-Split"
         } else {
             "? Hints"
         };
@@ -710,8 +716,7 @@ fn draw_hud_overlays(
             .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -8.0])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                let available = ui.available_width().min(900.0);
-                ui.set_max_width(available);
+                ui.set_max_width(ctx.screen_rect().width().min(900.0));
                 overlay_frame().show(ui, |ui| {
                     ui.label(
                         egui::RichText::new(hints)

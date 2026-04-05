@@ -90,6 +90,9 @@ impl State {
         let gradient_uniform = GradientUniform {
             top_color: [0.35, 0.41, 0.47, 1.0],
             bottom_color: [0.66, 0.70, 0.72, 1.0],
+            uv_y_offset: 0.0,
+            uv_y_scale: 1.0,
+            _pad: [0.0; 2],
         };
         let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Gradient Uniform"),
@@ -242,6 +245,7 @@ impl State {
                 turntable_active: preferences.display.turntable_active,
                 turntable_rpm: preferences.display.turntable_rpm,
                 lights_locked: preferences.lighting.lock,
+                layout: ViewLayout::default(),
             },
             wire: WireframeResources {
                 _gradient_buffer: gradient_buffer,

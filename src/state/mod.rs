@@ -49,6 +49,23 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Default)]
+pub(crate) enum ViewLayout {
+    #[default]
+    Single,
+    SplitVertical,
+    SplitHorizontal,
+}
+
+struct Pane {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    uv_y_offset: f32,
+    uv_y_scale: f32,
+}
+
 impl BackgroundMode {
     fn clear_color(self) -> wgpu::Color {
         match self {
@@ -274,6 +291,9 @@ pub(super) struct PendingLoad {
 struct GradientUniform {
     top_color: [f32; 4],
     bottom_color: [f32; 4],
+    uv_y_offset: f32,
+    uv_y_scale: f32,
+    _pad: [f32; 2],
 }
 
 #[repr(C)]
@@ -326,6 +346,7 @@ pub(super) struct DisplaySettings {
     pub turntable_active: bool,
     pub turntable_rpm: f32,
     pub lights_locked: bool,
+    pub layout: ViewLayout,
 }
 
 pub(super) struct WireframeResources {
@@ -366,6 +387,92 @@ pub struct State {
 }
 
 impl State {
+    fn compute_panes(&self) -> Vec<Pane> {
+        let w = self.config.width as f32;
+        let h = self.config.height as f32;
+        match self.display.layout {
+            ViewLayout::Single => vec![Pane {
+                x: 0.0,
+                y: 0.0,
+                width: w,
+                height: h,
+                uv_y_offset: 0.0,
+                uv_y_scale: 1.0,
+            }],
+            ViewLayout::SplitVertical => {
+                let half = (w * 0.5).floor();
+                vec![
+                    Pane {
+                        x: 0.0,
+                        y: 0.0,
+                        width: half - 1.0,
+                        height: h,
+                        uv_y_offset: 0.0,
+                        uv_y_scale: 1.0,
+                    },
+                    Pane {
+                        x: half + 1.0,
+                        y: 0.0,
+                        width: w - half - 1.0,
+                        height: h,
+                        uv_y_offset: 0.0,
+                        uv_y_scale: 1.0,
+                    },
+                ]
+            }
+            ViewLayout::SplitHorizontal => {
+                let half = (h * 0.5).floor();
+                vec![
+                    Pane {
+                        x: 0.0,
+                        y: 0.0,
+                        width: w,
+                        height: half - 1.0,
+                        uv_y_offset: 0.0,
+                        uv_y_scale: 0.5,
+                    },
+                    Pane {
+                        x: 0.0,
+                        y: half + 1.0,
+                        width: w,
+                        height: h - half - 1.0,
+                        uv_y_offset: 0.5,
+                        uv_y_scale: 0.5,
+                    },
+                ]
+            }
+        }
+    }
+
+    fn write_gradient_viewport(&self, uv_y_offset: f32, uv_y_scale: f32) {
+        let data = [uv_y_offset, uv_y_scale];
+        self.queue
+            .write_buffer(&self.wire._gradient_buffer, 32, bytemuck::cast_slice(&data));
+    }
+
+    fn compute_divider_rect(&self) -> Option<egui::Rect> {
+        let w = self.config.width as f32;
+        let h = self.config.height as f32;
+        let ppp = self.window.scale_factor() as f32;
+        match self.display.layout {
+            ViewLayout::Single => None,
+            ViewLayout::SplitVertical => {
+                let cx = (w * 0.5).floor();
+                Some(egui::Rect::from_min_size(
+                    egui::pos2((cx - 1.0) / ppp, 0.0),
+                    egui::vec2(2.0 / ppp, h / ppp),
+                ))
+            }
+            ViewLayout::SplitHorizontal => {
+                let cy = (h * 0.5).floor();
+                Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, (cy - 1.0) / ppp),
+                    egui::vec2(w / ppp, 2.0 / ppp),
+                ))
+            }
+        }
+    }
+
     pub fn render(&mut self) -> anyhow::Result<()> {
         use crate::cgi::gui::SidebarState;
 
@@ -388,36 +495,70 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
+        let panes = self.compute_panes();
+        let is_split = panes.len() > 1;
+
         if let Some(scene) = &self.scene {
             self.render_shadow_pass(&mut encoder, scene);
-            if self.post.ssao_enabled {
-                self.render_gbuffer_pass(&mut encoder, scene);
+        }
+
+        for (i, pane) in panes.iter().enumerate() {
+            let pane_aspect = pane.width / pane.height;
+
+            if let Some(scene) = &mut self.scene {
+                scene.cam.write_with_aspect(&self.queue, pane_aspect);
             }
-            self.render_main_pass(&mut encoder, scene);
-        } else {
-            self.render_empty_pass(&mut encoder);
-        }
 
-        if self.post.ssao_enabled {
-            self.render_ssao_passes(&mut encoder);
-        }
+            self.write_gradient_viewport(pane.uv_y_offset, pane.uv_y_scale);
 
-        if self.post.bloom_enabled {
-            self.post.bloom.render(
+            if let Some(scene) = &self.scene {
+                if self.post.ssao_enabled {
+                    self.render_gbuffer_pass(&mut encoder, scene);
+                }
+                self.render_main_pass(&mut encoder, scene);
+            } else {
+                self.render_empty_pass(&mut encoder);
+            }
+
+            if self.post.ssao_enabled {
+                self.render_ssao_passes(&mut encoder);
+            }
+
+            if self.post.bloom_enabled {
+                self.post.bloom.render(
+                    &mut encoder,
+                    &self.pipelines,
+                    &self.queue,
+                    self.config.width,
+                    self.config.height,
+                );
+            }
+
+            let viewport = if is_split {
+                Some([pane.x, pane.y, pane.width, pane.height])
+            } else {
+                None
+            };
+            self.post.composite.render(
                 &mut encoder,
                 &self.pipelines,
-                &self.queue,
-                self.config.width,
-                self.config.height,
+                &view,
+                self.post.ssao_enabled,
+                &self.post.ssao,
+                viewport,
+                i == 0,
             );
         }
-        self.post.composite.render(
-            &mut encoder,
-            &self.pipelines,
-            &view,
-            self.post.ssao_enabled,
-            &self.post.ssao,
-        );
+
+        if is_split {
+            let full_aspect = self.config.width as f32 / self.config.height as f32;
+            if let Some(scene) = &mut self.scene {
+                scene.cam.write_with_aspect(&self.queue, full_aspect);
+            }
+            self.write_gradient_viewport(0.0, 1.0);
+        }
+
+        let divider_rect = self.compute_divider_rect();
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
@@ -451,6 +592,7 @@ impl State {
             &output.texture,
             screen,
             frame_ms,
+            divider_rect,
         );
 
         if changes.background_changed {

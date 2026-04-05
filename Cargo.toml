@@ -8,11 +8,18 @@ license = "MIT"
 repository = "https://github.com/marko-koljancic/solarxy"
 
 [profile.release]
-strip = true
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
 
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
 
 [features]
 default = ["viewer", "analyzer", "tui"]

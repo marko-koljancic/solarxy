@@ -167,6 +167,14 @@ impl CameraState {
     pub fn inject_orbit_yaw(&mut self, yaw: f32) {
         self.controller.inject_orbit_yaw(yaw);
     }
+
+    pub fn write_with_aspect(&mut self, queue: &wgpu::Queue, aspect: f32) {
+        let saved = self.camera.aspect;
+        self.camera.aspect = aspect;
+        self.uniform.update_view_proj(&self.camera);
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        self.camera.aspect = saved;
+    }
 }
 
 fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {

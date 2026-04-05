@@ -72,6 +72,7 @@ impl CompositeState {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -79,14 +80,21 @@ impl CompositeState {
         view: &wgpu::TextureView,
         ssao_enabled: bool,
         ssao: &SsaoState,
+        viewport: Option<[f32; 4]>,
+        clear: bool,
     ) {
+        let load = if clear {
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+        } else {
+            wgpu::LoadOp::Load
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Composite Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load,
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
@@ -95,6 +103,9 @@ impl CompositeState {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
+        if let Some([x, y, w, h]) = viewport {
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+        }
         pass.set_pipeline(&pipelines.composite);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.params_bind_group, &[]);
