@@ -112,6 +112,8 @@ impl ApplicationHandler<State> for App {
             return;
         };
 
+        let egui_consumed = state.gui.on_window_event(&state.window, &event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
@@ -151,17 +153,22 @@ impl ApplicationHandler<State> for App {
                     }
                 }
             }
+
             WindowEvent::MouseInput {
                 state: btn_state,
                 button,
                 ..
-            } => {
+            } if !egui_consumed && !state.gui.wants_pointer_input() => {
                 state.handle_mouse_button(button, btn_state.is_pressed());
             }
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::CursorMoved { position, .. }
+                if !egui_consumed && !state.gui.wants_pointer_input() =>
+            {
                 state.handle_mouse_move(position.x as f32, position.y as f32);
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, .. }
+                if !egui_consumed && !state.gui.wants_pointer_input() =>
+            {
                 let scroll = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.01,
@@ -171,7 +178,9 @@ impl ApplicationHandler<State> for App {
             WindowEvent::ModifiersChanged(modifiers) => {
                 state.set_modifiers(modifiers.state());
             }
-            WindowEvent::KeyboardInput { ref event, .. } => {
+            WindowEvent::KeyboardInput { ref event, .. }
+                if !egui_consumed && !state.gui.wants_keyboard_input() =>
+            {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     state.handle_key(event_loop, code, event.state.is_pressed());
                 }

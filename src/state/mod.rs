@@ -9,6 +9,7 @@ use crate::cgi::bloom::BloomState;
 use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::composite::CompositeState;
+use crate::cgi::gui::EguiRenderer;
 use crate::cgi::hud::HudRenderer;
 use crate::cgi::ibl::{BrdfLut, IblState};
 use crate::cgi::light::{LightEntry, LightsUniform};
@@ -348,6 +349,7 @@ pub struct State {
     pub(super) layouts: Arc<BindGroupLayouts>,
     pub(super) pipelines: Pipelines,
     pub(super) hud: HudRenderer,
+    pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) capture_requested: bool,
@@ -501,6 +503,19 @@ impl State {
             self.post.ssao_enabled,
             &self.post.tone_mode.to_string(),
             self.post.exposure,
+        );
+
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: self.window.scale_factor() as f32,
+        };
+        self.gui.render(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &self.window,
+            &view,
+            screen,
         );
 
         let capture_buffer = if self.capture_requested {

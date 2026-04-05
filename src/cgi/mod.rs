@@ -10,6 +10,8 @@ pub mod camera_state;
 pub mod composite;
 pub mod geometry;
 #[cfg(feature = "viewer")]
+pub mod gui;
+#[cfg(feature = "viewer")]
 pub mod hud;
 #[cfg(feature = "viewer")]
 pub mod ibl;

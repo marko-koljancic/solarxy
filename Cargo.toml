@@ -3,7 +3,7 @@ name = "solarxy"
 description = "A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks."
 version = "0.4.0-beta"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.92"
 license = "MIT"
 repository = "https://github.com/marko-koljancic/solarxy"
 
@@ -21,6 +21,9 @@ viewer = [
     "dep:wgpu",
     "dep:winit",
     "dep:wgpu_text",
+    "dep:egui",
+    "dep:egui-wgpu",
+    "dep:egui-winit",
     "dep:pollster",
     "dep:image",
     "dep:bytemuck",
@@ -48,6 +51,9 @@ wgpu = { version = "27.0.1", optional = true }
 pollster = { version = "0.4.0", optional = true }
 bytemuck = { version = "1.24", features = ["derive"], optional = true }
 wgpu_text = { version = "27.0.1", optional = true }
+egui = { version = "0.33", optional = true }
+egui-wgpu = { version = "0.33", optional = true }
+egui-winit = { version = "0.33", optional = true }
 half = { version = "2.0", optional = true }
 exr = { version = "1.0", optional = true }
 
