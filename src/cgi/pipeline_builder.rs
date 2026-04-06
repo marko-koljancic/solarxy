@@ -1,14 +1,5 @@
 use crate::cgi::texture;
 
-/// A fluent builder for `wgpu::RenderPipeline` that captures the common
-/// patterns used across all pipelines in `SolarXY`.
-///
-/// Sensible defaults:
-/// - `TriangleList` topology
-/// - No cull mode
-/// - `REPLACE` blend (both color and alpha)
-/// - `LessEqual` depth compare with depth writes enabled
-/// - `sample_count = 1`
 pub(crate) struct PipelineBuilder<'a> {
     device: &'a wgpu::Device,
     label: &'a str,
@@ -77,6 +68,11 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn color_format(mut self, format: wgpu::TextureFormat) -> Self {
         self.color_format = Some(format);
+        self
+    }
+
+    pub fn blend(mut self, state: wgpu::BlendState) -> Self {
+        self.blend = Some(state);
         self
     }
 

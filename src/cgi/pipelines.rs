@@ -90,6 +90,8 @@ pub(crate) struct Pipelines {
     pub(crate) uv_map_checker: wgpu::RenderPipeline,
     pub(crate) uv_map_texture: wgpu::RenderPipeline,
     pub(crate) uv_map_wire: wgpu::RenderPipeline,
+    pub(crate) uv_overlap_count: wgpu::RenderPipeline,
+    pub(crate) uv_overlap_overlay: wgpu::RenderPipeline,
     pub(crate) gizmo: wgpu::RenderPipeline,
     pub(crate) bloom_extract: wgpu::RenderPipeline,
     pub(crate) bloom_blur_h: wgpu::RenderPipeline,
@@ -440,6 +442,57 @@ impl Pipelines {
         .sample_count(sample_count)
         .build();
 
+        let uv_overlap_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("UV Overlap Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/uv_overlap.wgsl").into()),
+        });
+        let additive_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let uv_overlap_count = PipelineBuilder::new(
+            device,
+            "UV Overlap Count Pipeline",
+            &uv_camera_layout,
+            &uv_overlap_shader,
+        )
+        .vertex_entry("vs_uv_count")
+        .fragment_entry("fs_uv_count")
+        .buffers(model_instance_buffers())
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .blend(additive_blend)
+        .no_depth()
+        .build();
+
+        let uv_overlap_overlay_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("UV Overlap Overlay Pipeline Layout"),
+                bind_group_layouts: &[&layouts.uv_overlap_read],
+                push_constant_ranges: &[],
+            });
+        let uv_overlap_overlay = PipelineBuilder::new(
+            device,
+            "UV Overlap Overlay Pipeline",
+            &uv_overlap_overlay_layout,
+            &uv_overlap_shader,
+        )
+        .vertex_entry("vs_overlap_fullscreen")
+        .fragment_entry("fs_uv_overlap")
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
         let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Bloom Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
@@ -616,6 +669,8 @@ impl Pipelines {
             uv_map_checker,
             uv_map_texture,
             uv_map_wire,
+            uv_overlap_count,
+            uv_overlap_overlay,
             gizmo,
             bloom_extract,
             bloom_blur_h,

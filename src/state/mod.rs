@@ -350,6 +350,7 @@ pub(super) struct PaneDisplaySettings {
     pub uv_bg: UvMapBackground,
     pub uv_offset: [f32; 2],
     pub uv_zoom: f32,
+    pub show_uv_overlap: bool,
 }
 
 pub(super) struct DisplaySettings {
@@ -366,6 +367,19 @@ pub(super) struct WireframeResources {
     pub wireframe_params_bind_group: wgpu::BindGroup,
     pub _checker_texture: texture::Texture,
     pub uv_checker_bind_group: wgpu::BindGroup,
+}
+
+pub(super) struct UvOverlapResources {
+    pub count_texture: wgpu::Texture,
+    pub count_view: wgpu::TextureView,
+    pub overlay_bind_group: wgpu::BindGroup,
+    pub sampler: wgpu::Sampler,
+    pub stats_texture: wgpu::Texture,
+    pub stats_view: wgpu::TextureView,
+    pub overlap_pct: Option<f32>,
+    pub stats_dirty: bool,
+    pub staging_buffer: Option<wgpu::Buffer>,
+    pub readback_pending: bool,
 }
 
 pub struct State {
@@ -387,6 +401,7 @@ pub struct State {
     pub(super) secondary_cam: Option<CameraState>,
     pub(super) uv_cam: UvCameraState,
     pub(super) uv_boundary_buf: wgpu::Buffer,
+    pub(super) uv_overlap: UvOverlapResources,
     pub(super) active_pane: usize,
     pub(super) cursor_pos: (f32, f32),
     pub(super) cameras_linked: bool,
@@ -513,6 +528,8 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
+        self.poll_overlap_stats();
+
         let panes = self.compute_panes();
         let is_split = panes.len() > 1;
 
@@ -568,6 +585,34 @@ impl State {
                             0,
                             bytemuck::bytes_of(&uv_wire),
                         );
+                        if pds.show_uv_overlap {
+                            self.render_uv_overlap_count_pass(
+                                &mut encoder,
+                                scene,
+                                &self.uv_cam.bind_group,
+                                &self.uv_overlap.count_view,
+                            );
+                            if self.uv_overlap.stats_dirty && !self.uv_overlap.readback_pending {
+                                self.uv_cam.write(&self.queue, [0.0, 0.0], 1.0, 1.0);
+                                self.render_uv_overlap_count_pass(
+                                    &mut encoder,
+                                    scene,
+                                    &self.uv_cam.bind_group,
+                                    &self.uv_overlap.stats_view,
+                                );
+                                request_overlap_readback_impl(
+                                    &self.device,
+                                    &mut self.uv_overlap,
+                                    &mut encoder,
+                                );
+                                self.uv_cam.write(
+                                    &self.queue,
+                                    pds.uv_offset,
+                                    pds.uv_zoom,
+                                    pane_aspect,
+                                );
+                            }
+                        }
                         self.render_uv_map_pass(&mut encoder, scene, &self.uv_cam.bind_group, &pds);
                     } else {
                         self.render_empty_pass(&mut encoder, &pds);
@@ -752,6 +797,8 @@ impl State {
             pane_mode: &mut pds.pane_mode,
             uv_bg: &mut pds.uv_bg,
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
+            show_uv_overlap: &mut pds.show_uv_overlap,
+            uv_overlap_pct: self.uv_overlap.overlap_pct,
         };
         let changes = self.gui.render_ui(
             &mut sidebar,
@@ -794,6 +841,85 @@ impl State {
         output.present();
         Ok(())
     }
+
+    fn poll_overlap_stats(&mut self) {
+        if !self.uv_overlap.readback_pending {
+            return;
+        }
+        let Some(buf) = self.uv_overlap.staging_buffer.take() else {
+            return;
+        };
+        let slice = buf.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        if rx.recv().is_ok_and(|r| r.is_ok()) {
+            let data = slice.get_mapped_range();
+            let mut total_nonzero = 0u64;
+            let mut overlap = 0u64;
+            for &byte in data.iter() {
+                if byte > 0 {
+                    total_nonzero += 1;
+                }
+                if byte > 1 {
+                    overlap += 1;
+                }
+            }
+            drop(data);
+            buf.unmap();
+            self.uv_overlap.overlap_pct = if total_nonzero > 0 {
+                Some(overlap as f32 / total_nonzero as f32 * 100.0)
+            } else {
+                Some(0.0)
+            };
+        }
+        self.uv_overlap.readback_pending = false;
+    }
+}
+
+fn request_overlap_readback_impl(
+    device: &wgpu::Device,
+    uv_overlap: &mut UvOverlapResources,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    const STATS_SIZE: u32 = 512;
+    let bytes_per_row = STATS_SIZE;
+    let buffer_size = u64::from(bytes_per_row * STATS_SIZE);
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("UV Overlap Readback"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &uv_overlap.stats_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(STATS_SIZE),
+            },
+        },
+        wgpu::Extent3d {
+            width: STATS_SIZE,
+            height: STATS_SIZE,
+            depth_or_array_layers: 1,
+        },
+    );
+    uv_overlap.staging_buffer = Some(staging);
+    uv_overlap.readback_pending = true;
+    uv_overlap.stats_dirty = false;
 }
 
 fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {

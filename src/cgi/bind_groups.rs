@@ -17,6 +17,7 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) ssao: wgpu::BindGroupLayout,
     pub(crate) ssao_blur: wgpu::BindGroupLayout,
     pub(crate) ssao_read: wgpu::BindGroupLayout,
+    pub(crate) uv_overlap_read: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -24,15 +25,15 @@ impl BindGroupLayouts {
         let texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("texture_binding_group_layout"),
             entries: &[
-                bgl_texture_entry(0),                               // diffuse texture
-                bgl_sampler_entry(1),                               // diffuse sampler
-                bgl_texture_entry(2),                               // normal texture
-                bgl_sampler_entry(3),                               // normal sampler
-                bgl_texture_entry(4),                               // ORM texture
-                bgl_sampler_entry(5),                               // ORM sampler
-                bgl_texture_entry(6),                               // emissive texture
-                bgl_sampler_entry(7),                               // emissive sampler
-                bgl_uniform_entry(8, wgpu::ShaderStages::FRAGMENT), // MaterialUniform
+                bgl_texture_entry(0),
+                bgl_sampler_entry(1),
+                bgl_texture_entry(2),
+                bgl_sampler_entry(3),
+                bgl_texture_entry(4),
+                bgl_sampler_entry(5),
+                bgl_texture_entry(6),
+                bgl_sampler_entry(7),
+                bgl_uniform_entry(8, wgpu::ShaderStages::FRAGMENT),
             ],
         });
         let camera = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -214,6 +215,10 @@ impl BindGroupLayouts {
             label: Some("ssao_read_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
+        let uv_overlap_read = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("uv_overlap_read_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -233,6 +238,7 @@ impl BindGroupLayouts {
             ssao,
             ssao_blur,
             ssao_read,
+            uv_overlap_read,
         }
     }
 }

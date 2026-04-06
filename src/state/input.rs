@@ -162,7 +162,19 @@ impl State {
                 });
             }
             KeyCode::KeyO => {
-                if self.modifiers.shift_key() {
+                if self.pane_settings[self.active_pane].pane_mode == PaneMode::UvMap {
+                    let pds = &mut self.pane_settings[self.active_pane];
+                    pds.show_uv_overlap = !pds.show_uv_overlap;
+                    if pds.show_uv_overlap {
+                        self.uv_overlap.stats_dirty = true;
+                    }
+                    let msg = if pds.show_uv_overlap {
+                        "Overlap: On"
+                    } else {
+                        "Overlap: Off"
+                    };
+                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                } else if self.modifiers.shift_key() {
                     self.toggle_ssao();
                 } else {
                     self.for_each_target_cam(|cam| {

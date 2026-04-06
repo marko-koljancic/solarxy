@@ -170,6 +170,28 @@ impl State {
             &self.post.bloom.ping_view,
             &self.post.bloom.sampler,
         );
+        let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
+        self.uv_overlap.count_texture = ct;
+        self.uv_overlap.count_view = cv;
+        self.uv_overlap.overlay_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("UV Overlap Overlay Bind Group"),
+                layout: &self.layouts.uv_overlap_read,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.uv_overlap.count_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.uv_overlap.sampler),
+                    },
+                ],
+            });
+        if self.pane_settings.iter().any(|p| p.show_uv_overlap) {
+            self.uv_overlap.stats_dirty = true;
+        }
+
         if let Some(scene) = &self.scene {
             self.post.ssao.resize(
                 &self.device,
@@ -262,6 +284,9 @@ impl State {
                 self.pane_settings[0].uv_bg = UvMapBackground::Dark;
                 self.pane_settings[0].uv_offset = [0.0, 0.0];
                 self.pane_settings[0].uv_zoom = 1.0;
+                self.pane_settings[0].show_uv_overlap = false;
+                self.uv_overlap.overlap_pct = None;
+                self.uv_overlap.stats_dirty = false;
                 self.display.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {

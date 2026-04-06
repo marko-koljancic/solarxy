@@ -297,6 +297,34 @@ pub fn create_bloom_texture(
     (texture, view)
 }
 
+pub fn create_overlap_count_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    copy_src: bool,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+    if copy_src {
+        usage |= wgpu::TextureUsages::COPY_SRC;
+    }
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("UV Overlap Count Texture"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
 pub(crate) struct SharedSamplers {
     pub linear_clamp: wgpu::Sampler,
     pub linear_repeat: wgpu::Sampler,

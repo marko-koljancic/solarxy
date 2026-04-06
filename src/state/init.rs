@@ -243,6 +243,35 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let (count_tex, count_view) =
+            texture::create_overlap_count_texture(&device, config.width, config.height, false);
+        let (stats_tex, stats_view) =
+            texture::create_overlap_count_texture(&device, 512, 512, true);
+        let overlap_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("UV Overlap Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let overlap_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UV Overlap Overlay Bind Group"),
+            layout: &layouts.uv_overlap_read,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&count_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&overlap_sampler),
+                },
+            ],
+        });
+
         let mut state = Self {
             surface,
             device,
@@ -293,6 +322,7 @@ impl State {
                     uv_bg: UvMapBackground::Dark,
                     uv_offset: [0.0, 0.0],
                     uv_zoom: 1.0,
+                    show_uv_overlap: false,
                 };
                 [pds.clone(), pds]
             },
@@ -317,6 +347,18 @@ impl State {
             secondary_cam: None,
             uv_cam,
             uv_boundary_buf,
+            uv_overlap: UvOverlapResources {
+                count_texture: count_tex,
+                count_view,
+                overlay_bind_group: overlap_bind_group,
+                sampler: overlap_sampler,
+                stats_texture: stats_tex,
+                stats_view,
+                overlap_pct: None,
+                stats_dirty: false,
+                staging_buffer: None,
+                readback_pending: false,
+            },
             active_pane: 0,
             cursor_pos: (0.0, 0.0),
             cameras_linked: true,

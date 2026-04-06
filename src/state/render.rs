@@ -467,6 +467,39 @@ impl State {
         }
     }
 
+    pub(super) fn render_uv_overlap_count_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &ModelScene,
+        uv_cam_bg: &wgpu::BindGroup,
+        count_view: &wgpu::TextureView,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("UV Overlap Count Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: count_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        pass.set_pipeline(&self.pipelines.uv_overlap_count);
+        pass.set_bind_group(0, uv_cam_bg, &[]);
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+        for mesh in &scene.model.meshes {
+            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+        }
+    }
+
     pub(super) fn render_uv_map_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -543,6 +576,12 @@ impl State {
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_vertex_buffer(0, self.uv_boundary_buf.slice(..));
         pass.draw(0..8, 0..1);
+
+        if pds.show_uv_overlap {
+            pass.set_pipeline(&self.pipelines.uv_overlap_overlay);
+            pass.set_bind_group(0, &self.uv_overlap.overlay_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 
     fn draw_normals<'a>(

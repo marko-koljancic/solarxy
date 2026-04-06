@@ -74,6 +74,8 @@ pub(crate) struct SidebarState<'a> {
     pub pane_mode: &'a mut PaneMode,
     pub uv_bg: &'a mut UvMapBackground,
     pub has_uvs: bool,
+    pub show_uv_overlap: &'a mut bool,
+    pub uv_overlap_pct: Option<f32>,
 }
 
 #[derive(Default)]
@@ -487,6 +489,14 @@ fn draw_sidebar(
                                 s.line_weight,
                                 LineWeight::ALL,
                             );
+                            checkbox_with_tooltip(ui, s.show_uv_overlap, "Overlap", "O");
+                            if *s.show_uv_overlap
+                                && let Some(pct) = s.uv_overlap_pct
+                            {
+                                ui.indent("overlap_stats", |ui| {
+                                    ui.label(format!("Overlap: {:.1}%", pct));
+                                });
+                            }
                             if ui.small_button("Back to 3D (3)").clicked() {
                                 *s.pane_mode = PaneMode::Scene3D;
                             }
