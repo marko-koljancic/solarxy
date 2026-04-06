@@ -64,6 +64,8 @@ pub(crate) struct SidebarState<'a> {
     pub tone_mode: &'a mut ToneMode,
     pub exposure: &'a mut f32,
     pub ibl_mode: &'a mut IblMode,
+    pub cameras_linked: &'a mut bool,
+    pub is_split: bool,
 }
 
 #[derive(Default)]
@@ -276,6 +278,7 @@ impl EguiRenderer {
         screen: ScreenDescriptor,
         frame_ms: f32,
         divider_rect: Option<egui::Rect>,
+        active_pane_rect: Option<egui::Rect>,
     ) -> SidebarChanges {
         let prev_bg = *sidebar.background_mode;
         let prev_line_weight = *sidebar.line_weight;
@@ -324,6 +327,21 @@ impl EguiRenderer {
             if let Some(rect) = divider_rect {
                 let painter = ctx.layer_painter(egui::LayerId::background());
                 painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
+            }
+            if let Some(rect) = active_pane_rect {
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("active_pane"),
+                ));
+                painter.rect_stroke(
+                    rect,
+                    0.0,
+                    egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(100, 160, 255, 120),
+                    ),
+                    egui::StrokeKind::Outside,
+                );
             }
         });
 
@@ -442,6 +460,9 @@ fn draw_sidebar(
                             BackgroundMode::ALL,
                         );
                         combo_with_tooltip(ui, "Bounds", "Shift+B", s.bounds_mode, BoundsMode::ALL);
+                        if s.is_split {
+                            ui.checkbox(s.cameras_linked, "Link cameras");
+                        }
                     });
 
                 ui.separator();

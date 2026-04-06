@@ -155,8 +155,12 @@ impl State {
             }
             self.is_surface_configured = true;
             self.update_wireframe_params();
+            let aspect = width as f32 / height as f32;
             if let Some(scene) = &mut self.scene {
-                scene.cam.resize(width as f32 / height as f32);
+                scene.cam.resize(aspect);
+            }
+            if let Some(cam) = &mut self.secondary_cam {
+                cam.resize(aspect);
             }
         }
     }
@@ -216,6 +220,18 @@ impl State {
                         .cam
                         .set_projection(self.preferences.display.projection_mode);
                 }
+
+                self.secondary_cam = None;
+                if self.display.layout != ViewLayout::Single
+                    && let Some(scene) = &self.scene
+                {
+                    self.secondary_cam = Some(
+                        scene
+                            .cam
+                            .clone_with_new_resources(&self.device, &self.layouts.camera),
+                    );
+                }
+
                 self.display.view_mode = self.preferences.display.view_mode;
                 self.display.prev_non_ghosted_mode = ViewMode::Shaded;
                 self.display.ghosted_wireframe = false;
@@ -242,29 +258,48 @@ impl State {
         self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
         self.last_frame_time = now;
 
+        self.active_pane = self.active_pane_index();
+
+        if self.display.turntable_active {
+            let speed = self.display.turntable_rpm * std::f32::consts::TAU / 60.0;
+            let yaw = speed * self.dt;
+            if let Some(scene) = &mut self.scene
+                && (self.active_pane == 0 || self.cameras_linked)
+                && !scene.cam.is_orbiting()
+            {
+                scene.cam.inject_orbit_yaw(yaw);
+            }
+            if (self.active_pane == 1 || self.cameras_linked)
+                && let Some(cam) = &mut self.secondary_cam
+                && !cam.is_orbiting()
+            {
+                cam.inject_orbit_yaw(yaw);
+            }
+        }
+
         if let Some(scene) = &mut self.scene {
-            if self.display.turntable_active && !scene.cam.is_orbiting() {
-                let speed = self.display.turntable_rpm * std::f32::consts::TAU / 60.0;
-                scene.cam.inject_orbit_yaw(speed * self.dt);
-            }
             scene.cam.update(&self.queue, self.dt);
+        }
+        if let Some(cam) = &mut self.secondary_cam {
+            cam.update(&self.queue, self.dt);
+        }
 
-            if !self.display.lights_locked {
-                scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
-                self.queue.write_buffer(
-                    &scene.light_buffer,
-                    0,
-                    bytemuck::cast_slice(&[scene.lights_uniform]),
-                );
-
-                let key_pos = scene.lights_uniform.lights[0].position;
-                scene.shadow.update_light_vp(
-                    &self.queue,
-                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                    scene.model.bounds.center(),
-                    scene.model.bounds.diagonal() / 2.0,
-                );
-            }
+        if let Some(scene) = &mut self.scene
+            && !self.display.lights_locked
+        {
+            scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
+            self.queue.write_buffer(
+                &scene.light_buffer,
+                0,
+                bytemuck::cast_slice(&[scene.lights_uniform]),
+            );
+            let key_pos = scene.lights_uniform.lights[0].position;
+            scene.shadow.update_light_vp(
+                &self.queue,
+                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                scene.model.bounds.center(),
+                scene.model.bounds.diagonal() / 2.0,
+            );
         }
     }
 }

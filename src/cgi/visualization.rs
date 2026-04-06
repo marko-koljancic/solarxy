@@ -28,9 +28,7 @@ pub(crate) struct VisualizationState {
     pub(crate) face_normals_count: u32,
     pub(crate) face_normals_bind_group: wgpu::BindGroup,
     pub(crate) vertex_normals_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
     face_normals_color_buf: wgpu::Buffer,
-    #[allow(dead_code)]
     vertex_normals_color_buf: wgpu::Buffer,
     pub(crate) axes_vertex_buf: wgpu::Buffer,
     pub(crate) bounds_whole_buf: wgpu::Buffer,
@@ -231,6 +229,56 @@ impl VisualizationState {
             local_axes_vertex_buf,
             local_axes_vertex_count,
         }
+    }
+
+    pub(crate) fn rebuild_camera_bind_groups(
+        &mut self,
+        device: &wgpu::Device,
+        layouts: &BindGroupLayouts,
+        camera_buffer: &wgpu::Buffer,
+    ) {
+        self.grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Grid Bind Group"),
+            layout: &layouts.grid,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.grid_uniform_buf.as_entire_binding(),
+                },
+            ],
+        });
+        self.face_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Face Normals Bind Group"),
+            layout: &layouts.normals,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.face_normals_color_buf.as_entire_binding(),
+                },
+            ],
+        });
+        self.vertex_normals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Vertex Normals Bind Group"),
+            layout: &layouts.normals,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.vertex_normals_color_buf.as_entire_binding(),
+                },
+            ],
+        });
     }
 }
 

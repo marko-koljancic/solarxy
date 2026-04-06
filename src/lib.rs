@@ -168,10 +168,11 @@ impl ApplicationHandler<State> for App {
             } if !egui_consumed && !state.gui.wants_pointer_input() => {
                 state.handle_mouse_button(button, btn_state.is_pressed());
             }
-            WindowEvent::CursorMoved { position, .. }
-                if !egui_consumed && !state.gui.wants_pointer_input() =>
-            {
-                state.handle_mouse_move(position.x as f32, position.y as f32);
+            WindowEvent::CursorMoved { position, .. } => {
+                state.cursor_pos = (position.x as f32, position.y as f32);
+                if !egui_consumed && !state.gui.wants_pointer_input() {
+                    state.handle_mouse_move(position.x as f32, position.y as f32);
+                }
             }
             WindowEvent::MouseWheel { delta, .. }
                 if !egui_consumed && !state.gui.wants_pointer_input() =>

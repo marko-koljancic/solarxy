@@ -2,6 +2,7 @@ use winit::event::MouseButton;
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
+use crate::cgi::camera_state::CameraState;
 use crate::cgi::ibl::IblState;
 use crate::cgi::resources;
 use crate::preferences::{self, IblMode, NormalsMode, ProjectionMode, UvMode, ViewMode};
@@ -9,6 +10,19 @@ use crate::preferences::{self, IblMode, NormalsMode, ProjectionMode, UvMode, Vie
 use super::{BoundsMode, State, ViewLayout};
 
 impl State {
+    fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
+        let (primary, secondary) = super::cam_routing(self.active_pane, self.cameras_linked);
+        if primary {
+            if let Some(scene) = &mut self.scene {
+                f(&mut scene.cam);
+            }
+        }
+        if secondary {
+            if let Some(cam) = &mut self.secondary_cam {
+                f(cam);
+            }
+        }
+    }
     pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             if ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr") {
@@ -60,36 +74,45 @@ impl State {
 
     pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if !is_pressed {
-            if let Some(scene) = &mut self.scene {
-                scene.cam.handle_key(code, is_pressed);
-            }
+            self.for_each_target_cam(|cam| {
+                cam.handle_key(code, is_pressed);
+            });
             return;
         }
         match code {
             KeyCode::Escape => event_loop.exit(),
             KeyCode::KeyH => {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.reset_to_bounds(&scene.model.bounds);
+                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                if let Some(bounds) = bounds {
+                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
                 }
             }
             KeyCode::KeyT => {
                 if self.modifiers.shift_key() {
                     self.toggle_tone_mode();
-                } else if let Some(scene) = &mut self.scene {
-                    scene.cam.reset_to_bounds_axis(
-                        &scene.model.bounds,
-                        cgmath::Vector3::unit_y(),
-                        -cgmath::Vector3::unit_z(),
-                    );
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| {
+                            cam.reset_to_bounds_axis(
+                                &bounds,
+                                cgmath::Vector3::unit_y(),
+                                -cgmath::Vector3::unit_z(),
+                            );
+                        });
+                    }
                 }
             }
             KeyCode::KeyF => {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.reset_to_bounds_axis(
-                        &scene.model.bounds,
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Vector3::unit_y(),
-                    );
+                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                if let Some(bounds) = bounds {
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyL => {
@@ -101,33 +124,43 @@ impl State {
                         "Lights unlocked"
                     };
                     self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
-                } else if let Some(scene) = &mut self.scene {
-                    scene.cam.reset_to_bounds_axis(
-                        &scene.model.bounds,
-                        -cgmath::Vector3::unit_x(),
-                        cgmath::Vector3::unit_y(),
-                    );
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| {
+                            cam.reset_to_bounds_axis(
+                                &bounds,
+                                -cgmath::Vector3::unit_x(),
+                                cgmath::Vector3::unit_y(),
+                            );
+                        });
+                    }
                 }
             }
             KeyCode::KeyR => {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.reset_to_bounds_axis(
-                        &scene.model.bounds,
-                        cgmath::Vector3::unit_x(),
-                        cgmath::Vector3::unit_y(),
-                    );
+                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                if let Some(bounds) = bounds {
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            cgmath::Vector3::unit_x(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyP => {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.set_projection(ProjectionMode::Perspective);
-                }
+                self.for_each_target_cam(|cam| {
+                    cam.set_projection(ProjectionMode::Perspective);
+                });
             }
             KeyCode::KeyO => {
                 if self.modifiers.shift_key() {
                     self.toggle_ssao();
-                } else if let Some(scene) = &mut self.scene {
-                    scene.cam.set_projection(ProjectionMode::Orthographic);
+                } else {
+                    self.for_each_target_cam(|cam| {
+                        cam.set_projection(ProjectionMode::Orthographic);
+                    });
                 }
             }
             KeyCode::KeyW => {
@@ -224,21 +257,61 @@ impl State {
                 };
             }
             KeyCode::F1 => {
+                if self.display.layout != ViewLayout::Single {
+                    if self.active_pane == 1 {
+                        if let Some(sec) = self.secondary_cam.take()
+                            && let Some(scene) = &mut self.scene
+                        {
+                            scene.cam = sec;
+                            self.post.ssao.rebuild_bind_groups(
+                                &self.device,
+                                &self.layouts,
+                                &scene.cam.buffer,
+                            );
+                            scene.vis.rebuild_camera_bind_groups(
+                                &self.device,
+                                &self.layouts,
+                                &scene.cam.buffer,
+                            );
+                        }
+                    } else {
+                        self.secondary_cam = None;
+                    }
+                }
+                self.active_pane = 0;
                 self.display.layout = ViewLayout::Single;
                 self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F2 => {
+                if self.display.layout == ViewLayout::Single
+                    && let Some(scene) = &self.scene
+                {
+                    self.secondary_cam = Some(
+                        scene
+                            .cam
+                            .clone_with_new_resources(&self.device, &self.layouts.camera),
+                    );
+                }
                 self.display.layout = ViewLayout::SplitVertical;
                 self.gui.set_toast("Split Vertical", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F3 => {
+                if self.display.layout == ViewLayout::Single
+                    && let Some(scene) = &self.scene
+                {
+                    self.secondary_cam = Some(
+                        scene
+                            .cam
+                            .clone_with_new_resources(&self.device, &self.layouts.camera),
+                    );
+                }
                 self.display.layout = ViewLayout::SplitHorizontal;
                 self.gui.set_toast("Split Horizontal", [0.0, 0.4, 0.0, 1.0]);
             }
             _ => {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.handle_key(code, is_pressed);
-                }
+                self.for_each_target_cam(|cam| {
+                    cam.handle_key(code, is_pressed);
+                });
             }
         }
     }
@@ -390,20 +463,14 @@ impl State {
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        if let Some(scene) = &mut self.scene {
-            scene.cam.handle_mouse_button(button, pressed);
-        }
+        self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        if let Some(scene) = &mut self.scene {
-            scene.cam.handle_mouse_move(x, y);
-        }
+        self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        if let Some(scene) = &mut self.scene {
-            scene.cam.handle_scroll(delta);
-        }
+        self.for_each_target_cam(|cam| cam.handle_scroll(delta));
     }
 }

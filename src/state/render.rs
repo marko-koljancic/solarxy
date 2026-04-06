@@ -1,5 +1,6 @@
 use cgmath::prelude::*;
 
+use crate::cgi::camera::Camera;
 use crate::cgi::model::{DrawMeshSimple, DrawModel};
 use crate::preferences::{BackgroundMode, NormalsMode, UvMode, ViewMode};
 
@@ -46,6 +47,7 @@ impl State {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
+        cam_bg: &wgpu::BindGroup,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("G-Buffer Pass"),
@@ -75,7 +77,7 @@ impl State {
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipelines.gbuffer);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
             let material = &scene.model.materials[mesh.material];
@@ -185,7 +187,13 @@ impl State {
         }
     }
 
-    pub(super) fn render_main_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
+    pub(super) fn render_main_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &ModelScene,
+        cam_bg: &wgpu::BindGroup,
+        cam: &Camera,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -218,19 +226,24 @@ impl State {
         if self.display.uv_mode == UvMode::Off {
             match self.display.view_mode {
                 ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                    self.draw_opaque_meshes(&mut pass, scene);
-                    self.draw_floor(&mut pass, scene);
+                    self.draw_opaque_meshes(&mut pass, scene, cam_bg);
+                    self.draw_floor(&mut pass, scene, cam_bg);
                     if self.display.view_mode == ViewMode::ShadedWireframe {
-                        self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
+                        self.draw_edge_wireframe(
+                            &mut pass,
+                            scene,
+                            &self.pipelines.edge_wire,
+                            cam_bg,
+                        );
                     }
-                    self.draw_blend_meshes(&mut pass, scene);
+                    self.draw_blend_meshes(&mut pass, scene, cam_bg, cam);
                 }
                 ViewMode::WireframeOnly => {
-                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
+                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire, cam_bg);
                 }
                 ViewMode::Ghosted => {
                     pass.set_pipeline(&self.pipelines.ghosted_fill);
-                    pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+                    pass.set_bind_group(0, cam_bg, &[]);
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.draw_model_simple(&scene.model, 0..1);
                     if self.display.ghosted_wireframe {
@@ -238,12 +251,13 @@ impl State {
                             &mut pass,
                             scene,
                             &self.pipelines.edge_wire_ghosted,
+                            cam_bg,
                         );
                     }
                 }
             }
         } else {
-            pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+            pass.set_bind_group(0, cam_bg, &[]);
             if scene.model.has_uvs {
                 match self.display.uv_mode {
                     UvMode::Gradient => {
@@ -263,7 +277,7 @@ impl State {
             match self.display.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
-                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire);
+                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire, cam_bg);
                 }
                 ViewMode::Ghosted => {
                     if self.display.ghosted_wireframe {
@@ -271,6 +285,7 @@ impl State {
                             &mut pass,
                             scene,
                             &self.pipelines.edge_wire_ghosted,
+                            cam_bg,
                         );
                     }
                 }
@@ -288,14 +303,19 @@ impl State {
             pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
         }
         self.draw_normals(&mut pass, scene);
-        self.draw_axes(&mut pass, scene);
-        self.draw_local_axes(&mut pass, scene);
-        self.draw_bounds(&mut pass, scene);
+        self.draw_axes(&mut pass, scene, cam_bg);
+        self.draw_local_axes(&mut pass, scene, cam_bg);
+        self.draw_bounds(&mut pass, scene, cam_bg);
     }
 
-    fn draw_opaque_meshes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_opaque_meshes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         pass.set_pipeline(&self.pipelines.main);
-        pass.set_bind_group(1, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
         for mesh in &scene.model.meshes {
@@ -307,9 +327,15 @@ impl State {
         }
     }
 
-    fn draw_blend_meshes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
-        let forward = (scene.cam.camera.target - scene.cam.camera.eye).normalize();
-        let eye = scene.cam.camera.eye;
+    fn draw_blend_meshes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+        cam: &Camera,
+    ) {
+        let forward = (cam.target - cam.eye).normalize();
+        let eye = cam.eye;
 
         let mut blend_list: Vec<(usize, f32)> = Vec::new();
         for (i, mesh) in scene.model.meshes.iter().enumerate() {
@@ -331,7 +357,7 @@ impl State {
             .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         pass.set_pipeline(&self.pipelines.alpha_blend);
-        pass.set_bind_group(1, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
         for (idx, _) in &blend_list {
@@ -346,9 +372,10 @@ impl State {
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
         pipeline: &'a wgpu::RenderPipeline,
+        cam_bg: &'a wgpu::BindGroup,
     ) {
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
@@ -359,9 +386,14 @@ impl State {
         }
     }
 
-    fn draw_floor<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_floor<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         pass.set_pipeline(&self.pipelines.floor);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &scene.shadow.sample_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(
@@ -371,32 +403,47 @@ impl State {
         pass.draw_indexed(0..scene.vis.floor_mesh.num_elements, 0, 0..1);
     }
 
-    fn draw_axes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_axes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         if !self.display.show_axis_gizmo {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(0, scene.vis.axes_vertex_buf.slice(..));
         pass.draw(0..6, 0..1);
     }
 
-    fn draw_local_axes<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_local_axes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         if !self.display.show_local_axes || scene.vis.local_axes_vertex_count == 0 {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(0, scene.vis.local_axes_vertex_buf.slice(..));
         pass.draw(0..scene.vis.local_axes_vertex_count, 0..1);
     }
 
-    fn draw_bounds<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
+    fn draw_bounds<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         if self.display.bounds_mode == BoundsMode::Off {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
-        pass.set_bind_group(0, &scene.cam.bind_group, &[]);
+        pass.set_bind_group(0, cam_bg, &[]);
         match self.display.bounds_mode {
             BoundsMode::Off => unreachable!(),
             BoundsMode::WholeModel => {

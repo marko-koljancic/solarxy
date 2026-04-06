@@ -373,6 +373,10 @@ pub struct State {
     pub(super) pipelines: Pipelines,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
+    pub(super) secondary_cam: Option<CameraState>,
+    pub(super) active_pane: usize,
+    pub(super) cursor_pos: (f32, f32),
+    pub(super) cameras_linked: bool,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) capture_requested: bool,
     pub(super) modifiers: ModifiersState,
@@ -444,6 +448,14 @@ impl State {
         }
     }
 
+    fn active_pane_index(&self) -> usize {
+        if self.display.layout == ViewLayout::Single {
+            return 0;
+        }
+        let panes = self.compute_panes();
+        hit_test_pane(&panes, self.cursor_pos)
+    }
+
     fn write_gradient_viewport(&self, uv_y_offset: f32, uv_y_scale: f32) {
         let data = [uv_y_offset, uv_y_scale];
         self.queue
@@ -498,24 +510,98 @@ impl State {
         let panes = self.compute_panes();
         let is_split = panes.len() > 1;
 
-        if let Some(scene) = &self.scene {
-            self.render_shadow_pass(&mut encoder, scene);
-        }
-
         for (i, pane) in panes.iter().enumerate() {
             let pane_aspect = pane.width / pane.height;
 
-            if let Some(scene) = &mut self.scene {
-                scene.cam.write_with_aspect(&self.queue, pane_aspect);
+            let cam_data = if i == 0 {
+                self.scene.as_ref().map(|s| s.cam.camera)
+            } else {
+                self.secondary_cam
+                    .as_ref()
+                    .map(|c| c.camera)
+                    .or(self.scene.as_ref().map(|s| s.cam.camera))
+            };
+            let Some(cam_data) = cam_data else {
+                self.write_gradient_viewport(pane.uv_y_offset, pane.uv_y_scale);
+                self.render_empty_pass(&mut encoder);
+                let viewport = if is_split {
+                    Some([pane.x, pane.y, pane.width, pane.height])
+                } else {
+                    None
+                };
+                self.post.composite.render(
+                    &mut encoder,
+                    &self.pipelines,
+                    &view,
+                    self.post.ssao_enabled,
+                    &self.post.ssao,
+                    viewport,
+                    i == 0,
+                );
+                continue;
+            };
+
+            if i == 0 {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.write_with_aspect(&self.queue, pane_aspect);
+                }
+            } else if let Some(sec) = &mut self.secondary_cam {
+                sec.write_with_aspect(&self.queue, pane_aspect);
+            }
+
+            if is_split && i == 1 {
+                if !self.display.lights_locked
+                    && let Some(scene) = &mut self.scene
+                {
+                    scene.lights_uniform = lights_from_camera(&cam_data, &scene.model.bounds);
+                    self.queue.write_buffer(
+                        &scene.light_buffer,
+                        0,
+                        bytemuck::cast_slice(&[scene.lights_uniform]),
+                    );
+                    let key_pos = scene.lights_uniform.lights[0].position;
+                    scene.shadow.update_light_vp(
+                        &self.queue,
+                        cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                        scene.model.bounds.center(),
+                        scene.model.bounds.diagonal() / 2.0,
+                    );
+                }
+                if let Some(sec) = &self.secondary_cam {
+                    self.post
+                        .ssao
+                        .rebuild_bind_groups(&self.device, &self.layouts, &sec.buffer);
+                }
+                if let Some(sec_buf) = self.secondary_cam.as_ref().map(|c| &c.buffer)
+                    && let Some(scene) = &mut self.scene
+                {
+                    scene
+                        .vis
+                        .rebuild_camera_bind_groups(&self.device, &self.layouts, sec_buf);
+                }
             }
 
             self.write_gradient_viewport(pane.uv_y_offset, pane.uv_y_scale);
 
-            if let Some(scene) = &self.scene {
+            if (i == 0 || !self.display.lights_locked)
+                && let Some(scene) = &self.scene
+            {
+                self.render_shadow_pass(&mut encoder, scene);
+            }
+
+            let cam_bg = if i == 0 {
+                self.scene.as_ref().map(|s| &s.cam.bind_group)
+            } else {
+                self.secondary_cam
+                    .as_ref()
+                    .map(|c| &c.bind_group)
+                    .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
+            };
+            if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
                 if self.post.ssao_enabled {
-                    self.render_gbuffer_pass(&mut encoder, scene);
+                    self.render_gbuffer_pass(&mut encoder, scene, cam_bg);
                 }
-                self.render_main_pass(&mut encoder, scene);
+                self.render_main_pass(&mut encoder, scene, cam_bg, &cam_data);
             } else {
                 self.render_empty_pass(&mut encoder);
             }
@@ -554,6 +640,14 @@ impl State {
             let full_aspect = self.config.width as f32 / self.config.height as f32;
             if let Some(scene) = &mut self.scene {
                 scene.cam.write_with_aspect(&self.queue, full_aspect);
+                self.post
+                    .ssao
+                    .rebuild_bind_groups(&self.device, &self.layouts, &scene.cam.buffer);
+                scene.vis.rebuild_camera_bind_groups(
+                    &self.device,
+                    &self.layouts,
+                    &scene.cam.buffer,
+                );
             }
             self.write_gradient_viewport(0.0, 1.0);
         }
@@ -564,6 +658,19 @@ impl State {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
         };
+
+        let active_pane_rect = if is_split {
+            let ppp = self.window.scale_factor() as f32;
+            panes.get(self.active_pane).map(|p| {
+                egui::Rect::from_min_size(
+                    egui::pos2(p.x / ppp, p.y / ppp),
+                    egui::vec2(p.width / ppp, p.height / ppp),
+                )
+            })
+        } else {
+            None
+        };
+
         let mut sidebar = SidebarState {
             view_mode: &mut self.display.view_mode,
             normals_mode: &mut self.display.normals_mode,
@@ -582,6 +689,8 @@ impl State {
             tone_mode: &mut self.post.tone_mode,
             exposure: &mut self.post.exposure,
             ibl_mode: &mut self.ibl_res.ibl_mode,
+            cameras_linked: &mut self.cameras_linked,
+            is_split,
         };
         let changes = self.gui.render_ui(
             &mut sidebar,
@@ -593,6 +702,7 @@ impl State {
             screen,
             frame_ms,
             divider_rect,
+            active_pane_rect,
         );
 
         if changes.background_changed {
@@ -666,5 +776,115 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
         ],
         sphere_scale: bounds.diagonal() * 0.04,
         _pad1: [0.0; 3],
+    }
+}
+
+fn hit_test_pane(panes: &[Pane], cursor: (f32, f32)) -> usize {
+    let (cx, cy) = cursor;
+    for (i, pane) in panes.iter().enumerate() {
+        if cx >= pane.x && cx < pane.x + pane.width && cy >= pane.y && cy < pane.y + pane.height {
+            return i;
+        }
+    }
+    0
+}
+
+fn cam_routing(active_pane: usize, cameras_linked: bool) -> (bool, bool) {
+    (
+        active_pane == 0 || cameras_linked,
+        active_pane == 1 || cameras_linked,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(x: f32, y: f32, width: f32, height: f32) -> Pane {
+        Pane {
+            x,
+            y,
+            width,
+            height,
+            uv_y_offset: 0.0,
+            uv_y_scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn hit_test_single_pane() {
+        let panes = [pane(0.0, 0.0, 1920.0, 1080.0)];
+        assert_eq!(hit_test_pane(&panes, (500.0, 500.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (0.0, 0.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (1919.0, 1079.0)), 0);
+    }
+
+    #[test]
+    fn hit_test_vertical_split() {
+        let half = 960.0_f32;
+        let panes = [
+            pane(0.0, 0.0, half - 1.0, 1080.0),
+            pane(half + 1.0, 0.0, 1920.0 - half - 1.0, 1080.0),
+        ];
+
+        assert_eq!(hit_test_pane(&panes, (100.0, 500.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (958.0, 500.0)), 0);
+
+        assert_eq!(hit_test_pane(&panes, (962.0, 500.0)), 1);
+        assert_eq!(hit_test_pane(&panes, (1500.0, 500.0)), 1);
+
+        assert_eq!(hit_test_pane(&panes, (960.0, 500.0)), 0);
+    }
+
+    #[test]
+    fn hit_test_horizontal_split() {
+        let half = 540.0_f32;
+        let panes = [
+            pane(0.0, 0.0, 1920.0, half - 1.0),
+            pane(0.0, half + 1.0, 1920.0, 1080.0 - half - 1.0),
+        ];
+
+        assert_eq!(hit_test_pane(&panes, (500.0, 100.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (500.0, 600.0)), 1);
+        assert_eq!(hit_test_pane(&panes, (500.0, 540.0)), 0);
+    }
+
+    #[test]
+    fn hit_test_cursor_outside_window() {
+        let panes = [pane(0.0, 0.0, 1920.0, 1080.0)];
+        assert_eq!(hit_test_pane(&panes, (-10.0, 500.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (2000.0, 500.0)), 0);
+    }
+
+    #[test]
+    fn hit_test_exact_boundaries() {
+        let panes = [pane(0.0, 0.0, 100.0, 100.0), pane(102.0, 0.0, 100.0, 100.0)];
+        assert_eq!(hit_test_pane(&panes, (0.0, 0.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (99.9, 50.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (100.0, 50.0)), 0);
+        assert_eq!(hit_test_pane(&panes, (102.0, 0.0)), 1);
+    }
+
+    #[test]
+    fn hit_test_empty_panes() {
+        let panes: [Pane; 0] = [];
+        assert_eq!(hit_test_pane(&panes, (500.0, 500.0)), 0);
+    }
+
+    #[test]
+    fn cam_routing_single_pane() {
+        assert_eq!(cam_routing(0, false), (true, false));
+    }
+
+    #[test]
+    fn cam_routing_split_unlinked() {
+        assert_eq!(cam_routing(0, false), (true, false));
+        assert_eq!(cam_routing(1, false), (false, true));
+    }
+
+    #[test]
+    fn cam_routing_split_linked() {
+        assert_eq!(cam_routing(0, true), (true, true));
+        assert_eq!(cam_routing(1, true), (true, true));
     }
 }
