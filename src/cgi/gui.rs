@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 use egui_wgpu::ScreenDescriptor;
 
 use crate::format_number;
-use crate::preferences::{BackgroundMode, IblMode, LineWeight, NormalsMode, ToneMode, UvMode, ViewMode};
+use crate::preferences::{
+    BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, ToneMode, UvMode, ViewMode,
+};
 use crate::state::BoundsMode;
 
 use super::resources::ModelStats;
@@ -56,6 +58,7 @@ pub(crate) struct SidebarState<'a> {
     pub show_grid: &'a mut bool,
     pub show_axis_gizmo: &'a mut bool,
     pub show_local_axes: &'a mut bool,
+    pub inspection_mode: &'a mut InspectionMode,
     pub turntable_active: &'a mut bool,
     pub turntable_rpm: &'a mut f32,
     pub lights_locked: &'a mut bool,
@@ -449,6 +452,13 @@ fn draw_sidebar(
                     .default_open(true)
                     .show(ui, |ui| {
                         combo_with_tooltip(ui, "Mode", "W", s.view_mode, ViewMode::ALL);
+                        combo_with_tooltip(
+                            ui,
+                            "Inspection",
+                            "1\u{2013}2",
+                            s.inspection_mode,
+                            InspectionMode::ALL,
+                        );
                         combo_with_tooltip(ui, "Normals", "N", s.normals_mode, NormalsMode::ALL);
                         combo_with_tooltip(ui, "UV", "U", s.uv_mode, UvMode::ALL);
                         combo_with_tooltip(ui, "Weight", "Shift+W", s.line_weight, LineWeight::ALL);
@@ -723,7 +733,7 @@ fn draw_hud_overlays(
 
     if hints_visible {
         let hints = if has_model {
-            "W Mode  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+            "W Mode  1-2 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
              I IBL  E/Shift+E Exposure\n\
              Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
              Shift+I IBL Mode\n\

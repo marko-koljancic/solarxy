@@ -20,7 +20,8 @@ use crate::cgi::ssao::SsaoState;
 use crate::cgi::texture::{self, SharedSamplers};
 use crate::cgi::visualization::VisualizationState;
 use crate::preferences::{
-    self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ToneMode, UvMode, ViewMode,
+    self, BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, Preferences, ToneMode,
+    UvMode, ViewMode,
 };
 use cgmath::Rotation3;
 use std::sync::{mpsc, Arc};
@@ -342,6 +343,7 @@ pub(super) struct PaneDisplaySettings {
     pub show_grid: bool,
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
+    pub inspection_mode: InspectionMode,
 }
 
 pub(super) struct DisplaySettings {
@@ -587,6 +589,16 @@ impl State {
                 );
             }
 
+            let cam_buf = if i == 0 {
+                self.scene.as_ref().map(|s| &s.cam.buffer)
+            } else {
+                self.secondary_cam.as_ref().map(|c| &c.buffer)
+            };
+            if let Some(buf) = cam_buf {
+                let mode = pds.inspection_mode.as_u32();
+                self.queue.write_buffer(buf, 280, bytemuck::bytes_of(&mode));
+            }
+
             if (i == 0 || !self.display.lights_locked)
                 && let Some(scene) = &self.scene
             {
@@ -671,6 +683,7 @@ impl State {
             show_grid: &mut pds.show_grid,
             show_axis_gizmo: &mut pds.show_axis_gizmo,
             show_local_axes: &mut pds.show_local_axes,
+            inspection_mode: &mut pds.inspection_mode,
             turntable_active: &mut self.display.turntable_active,
             turntable_rpm: &mut self.display.turntable_rpm,
             lights_locked: &mut self.display.lights_locked,

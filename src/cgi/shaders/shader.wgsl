@@ -6,7 +6,8 @@ struct Camera {
     inv_proj: mat4x4<f32>,
     near: f32,
     far: f32,
-    _pad: vec2<f32>,
+    inspection_mode: u32,
+    _pad: f32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -122,6 +123,7 @@ struct MaterialUniform {
     alpha_cutoff: f32,
     emissive: vec3<f32>,
     alpha_mode: u32,
+    material_index: u32,
 }
 @group(0) @binding(8) var<uniform> material: MaterialUniform;
 
@@ -184,6 +186,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     if material.alpha_mode == 1u && albedo_sample.a < material.alpha_cutoff {
         discard;
+    }
+
+    if camera.inspection_mode == 1u {
+        let id = f32(material.material_index) + 1.0;
+        let r = fract(sin(id * 43758.5453) * 1.0);
+        let g = fract(sin(id * 22578.1459) * 1.0);
+        let b = fract(sin(id * 19642.3721) * 1.0);
+        return vec4(r, g, b, albedo_sample.a);
     }
 
     let n_sample = textureSample(t_normal, s_normal, in.tex_coords);

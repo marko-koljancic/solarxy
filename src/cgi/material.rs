@@ -17,9 +17,11 @@ pub struct MaterialUniform {
     pub alpha_cutoff: f32,
     pub emissive: [f32; 3],
     pub alpha_mode: u32,
+    pub material_index: u32,
+    pub _pad: [f32; 3],
 }
 
-const _: () = assert!(std::mem::size_of::<MaterialUniform>() == 32);
+const _: () = assert!(std::mem::size_of::<MaterialUniform>() == 48);
 
 impl Default for MaterialUniform {
     fn default() -> Self {
@@ -30,6 +32,8 @@ impl Default for MaterialUniform {
             alpha_cutoff: 0.5,
             emissive: [0.0, 0.0, 0.0],
             alpha_mode: 0,
+            material_index: 0,
+            _pad: [0.0; 3],
         }
     }
 }

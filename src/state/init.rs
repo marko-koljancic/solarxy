@@ -244,6 +244,7 @@ impl State {
                     show_grid: preferences.display.grid_visible,
                     show_axis_gizmo: preferences.display.axis_gizmo_visible,
                     show_local_axes: preferences.display.local_axes_visible,
+                    inspection_mode: preferences.display.inspection_mode,
                 };
                 [pds.clone(), pds]
             },

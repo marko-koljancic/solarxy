@@ -110,7 +110,8 @@ pub struct CameraUniform {
     inv_proj: [[f32; 4]; 4],
     near: f32,
     far: f32,
-    _pad: [f32; 2],
+    inspection_mode: u32,
+    _pad: f32,
 }
 
 impl Default for CameraUniform {
@@ -131,7 +132,8 @@ impl CameraUniform {
             inv_proj: identity,
             near: 0.01,
             far: 100.0,
-            _pad: [0.0; 2],
+            inspection_mode: 0,
+            _pad: 0.0,
         }
     }
 

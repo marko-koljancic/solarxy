@@ -58,7 +58,7 @@ fn upload_model(
     let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) =
         geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
-    for mat in &raw.materials {
+    for (mat_idx, mat) in raw.materials.iter().enumerate() {
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
@@ -95,6 +95,8 @@ fn upload_model(
             alpha_cutoff: mat.alpha_cutoff,
             emissive: mat.emissive_factor,
             alpha_mode: mat.alpha_mode,
+            material_index: mat_idx as u32,
+            _pad: [0.0; 3],
         };
 
         gpu_materials.push(material::Material::new(

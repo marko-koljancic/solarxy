@@ -256,6 +256,7 @@ impl State {
                 self.pane_settings[0].ghosted_wireframe = false;
                 self.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
                 self.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
+                self.pane_settings[0].inspection_mode = InspectionMode::Shaded;
                 self.display.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {

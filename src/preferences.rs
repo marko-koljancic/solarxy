@@ -217,6 +217,33 @@ impl std::fmt::Display for IblMode {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum InspectionMode {
+    #[default]
+    Shaded,
+    MaterialId,
+}
+
+impl InspectionMode {
+    pub const ALL: &[Self] = &[Self::Shaded, Self::MaterialId];
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::Shaded => 0,
+            Self::MaterialId => 1,
+        }
+    }
+}
+
+impl std::fmt::Display for InspectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Shaded => write!(f, "Shaded"),
+            Self::MaterialId => write!(f, "Material ID"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ToneMode {
     None,
     Linear,
@@ -299,6 +326,8 @@ pub struct DisplayPrefs {
     pub local_axes_visible: bool,
     #[serde(default = "default_turntable_rpm")]
     pub turntable_rpm: f32,
+    #[serde(default)]
+    pub inspection_mode: InspectionMode,
 }
 
 fn default_exposure() -> f32 {
@@ -386,6 +415,7 @@ impl Default for DisplayPrefs {
             exposure: 1.0,
             local_axes_visible: false,
             turntable_rpm: 5.0,
+            inspection_mode: InspectionMode::Shaded,
         }
     }
 }
@@ -504,6 +534,7 @@ mod tests {
                 exposure: 1.5,
                 local_axes_visible: true,
                 turntable_rpm: 30.0,
+                inspection_mode: InspectionMode::MaterialId,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,
