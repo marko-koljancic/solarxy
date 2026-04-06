@@ -200,6 +200,49 @@ impl State {
             config.height,
         );
 
+        let uv_cam = crate::cgi::uv_camera::UvCameraState::new(&device, &layouts.camera);
+
+        let yellow = [1.0, 0.85, 0.0];
+        let boundary_verts: [crate::cgi::model::GizmoVertex; 8] = [
+            crate::cgi::model::GizmoVertex {
+                position: [0.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [1.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [1.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [1.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [1.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::cgi::model::GizmoVertex {
+                position: [0.0, 1.0, 0.0],
+                color: yellow,
+            },
+        ];
+        let uv_boundary_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("UV Boundary Buffer"),
+            contents: bytemuck::cast_slice(&boundary_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let mut state = Self {
             surface,
             device,
@@ -246,6 +289,10 @@ impl State {
                     show_local_axes: preferences.display.local_axes_visible,
                     inspection_mode: preferences.display.inspection_mode,
                     texel_density_target: preferences.display.texel_density_target,
+                    pane_mode: PaneMode::Scene3D,
+                    uv_bg: UvMapBackground::Dark,
+                    uv_offset: [0.0, 0.0],
+                    uv_zoom: 1.0,
                 };
                 [pds.clone(), pds]
             },
@@ -268,9 +315,14 @@ impl State {
             gui,
             scene: None,
             secondary_cam: None,
+            uv_cam,
+            uv_boundary_buf,
             active_pane: 0,
             cursor_pos: (0.0, 0.0),
             cameras_linked: true,
+            uv_last_mouse_pos: None,
+            uv_left_pressed: false,
+            uv_middle_pressed: false,
             pending_load: None,
             capture_requested: false,
             modifiers: ModifiersState::empty(),

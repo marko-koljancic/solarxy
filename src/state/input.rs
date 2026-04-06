@@ -5,22 +5,29 @@ use winit::keyboard::KeyCode;
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::ibl::IblState;
 use crate::cgi::resources;
-use crate::preferences::{self, IblMode, InspectionMode, NormalsMode, ProjectionMode, UvMode, ViewMode};
+use crate::preferences::{
+    self, IblMode, InspectionMode, NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
+};
 
 use super::{BoundsMode, State, ViewLayout};
 
 impl State {
     fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
         let (primary, secondary) = super::cam_routing(self.active_pane, self.cameras_linked);
-        if primary {
-            if let Some(scene) = &mut self.scene {
-                f(&mut scene.cam);
-            }
+        if primary
+            && self.pane_settings[0].pane_mode == PaneMode::Scene3D
+            && let Some(scene) = &mut self.scene
+        {
+            f(&mut scene.cam);
         }
-        if secondary {
-            if let Some(cam) = &mut self.secondary_cam {
-                f(cam);
-            }
+        if secondary
+            && self
+                .pane_settings
+                .get(1)
+                .is_some_and(|p| p.pane_mode == PaneMode::Scene3D)
+            && let Some(cam) = &mut self.secondary_cam
+        {
+            f(cam);
         }
     }
     pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
@@ -260,32 +267,56 @@ impl State {
             KeyCode::KeyV => self.display.turntable_active = !self.display.turntable_active,
             KeyCode::KeyU => {
                 let pds = &mut self.pane_settings[self.active_pane];
-                pds.uv_mode = match pds.uv_mode {
-                    UvMode::Off => UvMode::Gradient,
-                    UvMode::Gradient => UvMode::Checker,
-                    UvMode::Checker => UvMode::Off,
-                };
+                if pds.pane_mode == PaneMode::UvMap {
+                    pds.uv_bg = pds.uv_bg.next();
+                    self.gui.set_toast(
+                        &format!("UV Background: {}", pds.uv_bg),
+                        [0.0, 0.4, 0.0, 1.0],
+                    );
+                } else {
+                    pds.uv_mode = match pds.uv_mode {
+                        UvMode::Off => UvMode::Gradient,
+                        UvMode::Gradient => UvMode::Checker,
+                        UvMode::Checker => UvMode::Off,
+                    };
+                }
             }
             KeyCode::Digit1 => {
                 let pds = &mut self.pane_settings[self.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Shaded;
                 self.gui
                     .set_toast("Inspection: Shaded", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::Digit2 => {
                 let pds = &mut self.pane_settings[self.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::MaterialId;
                 self.gui
                     .set_toast("Inspection: Material ID", [0.0, 0.4, 0.0, 1.0]);
             }
+            KeyCode::Digit3 => {
+                let pds = &mut self.pane_settings[self.active_pane];
+                if pds.pane_mode == PaneMode::UvMap {
+                    pds.pane_mode = PaneMode::Scene3D;
+                    self.gui.set_toast("3D View", [0.0, 0.4, 0.0, 1.0]);
+                } else {
+                    pds.pane_mode = PaneMode::UvMap;
+                    pds.uv_offset = [0.0, 0.0];
+                    pds.uv_zoom = 1.0;
+                    self.gui.set_toast("UV Map", [0.0, 0.4, 0.0, 1.0]);
+                }
+            }
             KeyCode::Digit4 => {
                 let pds = &mut self.pane_settings[self.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::TexelDensity;
                 self.gui
                     .set_toast("Inspection: Texel Density", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::Digit5 => {
                 let pds = &mut self.pane_settings[self.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Depth;
                 self.gui
                     .set_toast("Inspection: Depth", [0.0, 0.4, 0.0, 1.0]);
@@ -324,6 +355,10 @@ impl State {
             KeyCode::F2 => {
                 if self.display.layout == ViewLayout::Single {
                     self.pane_settings[1] = self.pane_settings[0].clone();
+                    self.pane_settings[0].pane_mode = PaneMode::UvMap;
+                    self.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.pane_settings[0].uv_zoom = 1.0;
+                    self.pane_settings[1].pane_mode = PaneMode::Scene3D;
                     if let Some(scene) = &self.scene {
                         self.secondary_cam = Some(
                             scene
@@ -340,6 +375,10 @@ impl State {
             KeyCode::F3 => {
                 if self.display.layout == ViewLayout::Single {
                     self.pane_settings[1] = self.pane_settings[0].clone();
+                    self.pane_settings[0].pane_mode = PaneMode::UvMap;
+                    self.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.pane_settings[0].uv_zoom = 1.0;
+                    self.pane_settings[1].pane_mode = PaneMode::Scene3D;
                     if let Some(scene) = &self.scene {
                         self.secondary_cam = Some(
                             scene
@@ -513,14 +552,58 @@ impl State {
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
+        let ap = self.active_pane;
+        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
+            match button {
+                MouseButton::Left => {
+                    self.uv_left_pressed = pressed;
+                    if !pressed {
+                        self.uv_last_mouse_pos = None;
+                    }
+                }
+                MouseButton::Middle => {
+                    self.uv_middle_pressed = pressed;
+                    if !pressed {
+                        self.uv_last_mouse_pos = None;
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
+        }
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+        let ap = self.active_pane;
+        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
+            if let Some((lx, ly)) = self.uv_last_mouse_pos {
+                let dx = x - lx;
+                let dy = y - ly;
+                if self.uv_left_pressed || self.uv_middle_pressed {
+                    let panes = self.compute_panes();
+                    let pane_w = panes.get(ap).map_or(self.config.width as f32, |p| p.width);
+                    let pds = &mut self.pane_settings[ap];
+                    let scale = 1.2 / (pds.uv_zoom * pane_w);
+                    pds.uv_offset[0] -= dx * scale;
+                    pds.uv_offset[1] += dy * scale;
+                }
+            }
+            if self.uv_left_pressed || self.uv_middle_pressed {
+                self.uv_last_mouse_pos = Some((x, y));
+            }
+        } else {
+            self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+        }
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        self.for_each_target_cam(|cam| cam.handle_scroll(delta));
+        let ap = self.active_pane;
+        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
+            let pds = &mut self.pane_settings[ap];
+            pds.uv_zoom = (pds.uv_zoom * (1.0 + delta * 0.1)).clamp(0.1, 50.0);
+        } else {
+            self.for_each_target_cam(|cam| cam.handle_scroll(delta));
+        }
     }
 }

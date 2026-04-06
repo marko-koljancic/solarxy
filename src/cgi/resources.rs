@@ -178,6 +178,38 @@ fn upload_model(
             ],
         });
 
+        let uv_edge_data = if raw.meshes[i].tex_coords.is_some() {
+            let uv_padded: Vec<[f32; 4]> = vertices
+                .iter()
+                .map(|v| [v.tex_coords[0], 1.0 - v.tex_coords[1], 0.0, 0.0])
+                .collect();
+            let uv_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} UV Positions {}", file_path, i)),
+                contents: bytemuck::cast_slice(&uv_padded),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+            let uv_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("{:?} UV Edge Bind Group {}", file_path, i)),
+                layout: edge_geometry_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uv_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: edge_index_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+            Some(model::UvEdgeData {
+                uv_buffer,
+                bind_group: uv_bind_group,
+            })
+        } else {
+            None
+        };
+
         let material_index = raw.meshes[i].material_index.unwrap_or(0);
         gpu_meshes.push(model::Mesh {
             name: raw.meshes[i].name.clone(),
@@ -191,6 +223,7 @@ fn upload_model(
                 num_edges,
                 bind_group: edge_bind_group,
             }),
+            uv_edge_data,
         });
         gpu_mesh_bounds.push(per_mesh_bounds[i]);
     }
@@ -285,6 +318,7 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         num_elements: indices.len() as u32,
         material: 0,
         edge_data: None,
+        uv_edge_data: None,
     }
 }
 
@@ -315,6 +349,7 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
             num_elements: indices.len() as u32,
             material: 0,
             edge_data: None,
+            uv_edge_data: None,
         },
         cell_size,
     )

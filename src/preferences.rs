@@ -217,6 +217,43 @@ impl std::fmt::Display for IblMode {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum PaneMode {
+    #[default]
+    Scene3D,
+    UvMap,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum UvMapBackground {
+    #[default]
+    Dark,
+    Checker,
+    Texture,
+}
+
+impl UvMapBackground {
+    pub const ALL: &[Self] = &[Self::Dark, Self::Checker, Self::Texture];
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Dark => Self::Checker,
+            Self::Checker => Self::Texture,
+            Self::Texture => Self::Dark,
+        }
+    }
+}
+
+impl std::fmt::Display for UvMapBackground {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dark => write!(f, "Dark"),
+            Self::Checker => write!(f, "Checker"),
+            Self::Texture => write!(f, "Texture"),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum InspectionMode {
     #[default]
     Shaded,

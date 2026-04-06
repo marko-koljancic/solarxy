@@ -258,6 +258,10 @@ impl State {
                 self.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
                 self.pane_settings[0].inspection_mode = InspectionMode::Shaded;
                 self.pane_settings[0].texel_density_target = 1.0;
+                self.pane_settings[0].pane_mode = PaneMode::Scene3D;
+                self.pane_settings[0].uv_bg = UvMapBackground::Dark;
+                self.pane_settings[0].uv_offset = [0.0, 0.0];
+                self.pane_settings[0].uv_zoom = 1.0;
                 self.display.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {

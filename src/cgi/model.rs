@@ -115,6 +115,12 @@ pub struct EdgeData {
     pub bind_group: wgpu::BindGroup,
 }
 
+pub struct UvEdgeData {
+    #[allow(dead_code)]
+    pub uv_buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+}
+
 #[allow(dead_code)]
 pub struct Mesh {
     pub name: String,
@@ -123,6 +129,7 @@ pub struct Mesh {
     pub num_elements: u32,
     pub material: usize,
     pub edge_data: Option<EdgeData>,
+    pub uv_edge_data: Option<UvEdgeData>,
 }
 
 pub struct Model {

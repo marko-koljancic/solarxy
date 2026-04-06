@@ -137,6 +137,20 @@ impl CameraUniform {
         }
     }
 
+    pub fn set_uv_projection(&mut self, view_proj: [[f32; 4]; 4]) {
+        use cgmath::SquareMatrix;
+        self.view_position = [0.0; 4];
+        self.view_proj = view_proj;
+        let identity: [[f32; 4]; 4] = cgmath::Matrix4::identity().into();
+        self.view = identity;
+        self.proj = view_proj;
+        self.inv_proj = identity;
+        self.near = -1.0;
+        self.far = 1.0;
+        self.inspection_mode = 0;
+        self.texel_density_target = 1.0;
+    }
+
     pub fn update_view_proj(&mut self, camera: &Camera) {
         use cgmath::SquareMatrix;
         self.view_position = camera.eye.to_homogeneous().into();

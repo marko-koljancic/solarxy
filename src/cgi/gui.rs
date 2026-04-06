@@ -5,7 +5,8 @@ use egui_wgpu::ScreenDescriptor;
 
 use crate::format_number;
 use crate::preferences::{
-    BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, ToneMode, UvMode, ViewMode,
+    BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, PaneMode, ToneMode,
+    UvMapBackground, UvMode, ViewMode,
 };
 use crate::state::BoundsMode;
 
@@ -70,6 +71,9 @@ pub(crate) struct SidebarState<'a> {
     pub ibl_mode: &'a mut IblMode,
     pub cameras_linked: &'a mut bool,
     pub is_split: bool,
+    pub pane_mode: &'a mut PaneMode,
+    pub uv_bg: &'a mut UvMapBackground,
+    pub has_uvs: bool,
 }
 
 #[derive(Default)]
@@ -347,6 +351,21 @@ impl EguiRenderer {
                     egui::StrokeKind::Outside,
                 );
             }
+            if *sidebar.pane_mode == PaneMode::UvMap && !sidebar.has_uvs {
+                let screen_rect = ctx.input(egui::InputState::viewport_rect);
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("no_uv_overlay"),
+                ));
+                let center = active_pane_rect.unwrap_or(screen_rect).center();
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    "No UV data",
+                    egui::FontId::proportional(24.0),
+                    egui::Color32::from_gray(180),
+                );
+            }
         });
 
         self.stats_visible = stats_visible;
@@ -452,34 +471,73 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("View")
                     .default_open(true)
                     .show(ui, |ui| {
-                        combo_with_tooltip(ui, "Mode", "W", s.view_mode, ViewMode::ALL);
-                        combo_with_tooltip(
-                            ui,
-                            "Inspection",
-                            "1\u{2013}5",
-                            s.inspection_mode,
-                            InspectionMode::ALL,
-                        );
-                        if *s.inspection_mode == InspectionMode::TexelDensity {
-                            ui.indent("texel_density_indent", |ui| {
-                                ui.add(
-                                    egui::Slider::new(s.texel_density_target, 0.01..=10.0)
-                                        .logarithmic(true)
-                                        .text("Target"),
-                                );
-                            });
+                        if *s.pane_mode == PaneMode::UvMap {
+                            ui.label("UV Map");
+                            combo_with_tooltip(
+                                ui,
+                                "Background",
+                                "U",
+                                s.uv_bg,
+                                UvMapBackground::ALL,
+                            );
+                            combo_with_tooltip(
+                                ui,
+                                "Weight",
+                                "Shift+W",
+                                s.line_weight,
+                                LineWeight::ALL,
+                            );
+                            if ui.small_button("Back to 3D (3)").clicked() {
+                                *s.pane_mode = PaneMode::Scene3D;
+                            }
+                        } else {
+                            combo_with_tooltip(ui, "Mode", "W", s.view_mode, ViewMode::ALL);
+                            combo_with_tooltip(
+                                ui,
+                                "Inspection",
+                                "1\u{2013}5",
+                                s.inspection_mode,
+                                InspectionMode::ALL,
+                            );
+                            if *s.inspection_mode == InspectionMode::TexelDensity {
+                                ui.indent("texel_density_indent", |ui| {
+                                    ui.add(
+                                        egui::Slider::new(s.texel_density_target, 0.01..=10.0)
+                                            .logarithmic(true)
+                                            .text("Target"),
+                                    );
+                                });
+                            }
+                            combo_with_tooltip(
+                                ui,
+                                "Normals",
+                                "N",
+                                s.normals_mode,
+                                NormalsMode::ALL,
+                            );
+                            combo_with_tooltip(ui, "UV", "U", s.uv_mode, UvMode::ALL);
+                            combo_with_tooltip(
+                                ui,
+                                "Weight",
+                                "Shift+W",
+                                s.line_weight,
+                                LineWeight::ALL,
+                            );
+                            combo_with_tooltip(
+                                ui,
+                                "Background",
+                                "B",
+                                s.background_mode,
+                                BackgroundMode::ALL,
+                            );
+                            combo_with_tooltip(
+                                ui,
+                                "Bounds",
+                                "Shift+B",
+                                s.bounds_mode,
+                                BoundsMode::ALL,
+                            );
                         }
-                        combo_with_tooltip(ui, "Normals", "N", s.normals_mode, NormalsMode::ALL);
-                        combo_with_tooltip(ui, "UV", "U", s.uv_mode, UvMode::ALL);
-                        combo_with_tooltip(ui, "Weight", "Shift+W", s.line_weight, LineWeight::ALL);
-                        combo_with_tooltip(
-                            ui,
-                            "Background",
-                            "B",
-                            s.background_mode,
-                            BackgroundMode::ALL,
-                        );
-                        combo_with_tooltip(ui, "Bounds", "Shift+B", s.bounds_mode, BoundsMode::ALL);
                         if s.is_split {
                             ui.checkbox(s.cameras_linked, "Link cameras");
                         }
@@ -743,7 +801,7 @@ fn draw_hud_overlays(
 
     if hints_visible {
         let hints = if has_model {
-            "W Mode  1,2,4,5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+            "W Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
              I IBL  E/Shift+E Exposure\n\
              Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
              Shift+I IBL Mode\n\

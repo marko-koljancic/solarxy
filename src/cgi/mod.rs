@@ -36,4 +36,6 @@ pub mod ssao;
 #[cfg(feature = "viewer")]
 pub mod texture;
 #[cfg(feature = "viewer")]
+pub mod uv_camera;
+#[cfg(feature = "viewer")]
 pub mod visualization;

@@ -87,6 +87,9 @@ pub(crate) struct Pipelines {
     pub(crate) uv_gradient: wgpu::RenderPipeline,
     pub(crate) uv_checker: wgpu::RenderPipeline,
     pub(crate) uv_no_uvs: wgpu::RenderPipeline,
+    pub(crate) uv_map_checker: wgpu::RenderPipeline,
+    pub(crate) uv_map_texture: wgpu::RenderPipeline,
+    pub(crate) uv_map_wire: wgpu::RenderPipeline,
     pub(crate) gizmo: wgpu::RenderPipeline,
     pub(crate) bloom_extract: wgpu::RenderPipeline,
     pub(crate) bloom_blur_h: wgpu::RenderPipeline,
@@ -383,6 +386,60 @@ impl Pipelines {
             .sample_count(sample_count)
             .build();
 
+        let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("UV Map Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/uv_map.wgsl").into()),
+        });
+        let uv_map_checker = PipelineBuilder::new(
+            device,
+            "UV Map Checker Pipeline",
+            &uv_checker_layout,
+            &uv_map_shader,
+        )
+        .vertex_entry("vs_uv_fill")
+        .fragment_entry("fs_uv_checker")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
+        let uv_map_texture_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("UV Map Texture Pipeline Layout"),
+                bind_group_layouts: &[&layouts.camera, &layouts.texture],
+                push_constant_ranges: &[],
+            });
+        let uv_map_texture = PipelineBuilder::new(
+            device,
+            "UV Map Texture Pipeline",
+            &uv_map_texture_layout,
+            &uv_map_shader,
+        )
+        .vertex_entry("vs_uv_fill")
+        .fragment_entry("fs_uv_texture")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
+        let uv_map_wire = PipelineBuilder::new(
+            device,
+            "UV Map Wire Pipeline",
+            &edge_wire_layout,
+            &edge_wire_shader,
+        )
+        .vertex_entry("vs_uv_edge_quad")
+        .fragment_entry("fs_edge_wire")
+        .color_format(hdr_format)
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
         let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Bloom Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
@@ -556,6 +613,9 @@ impl Pipelines {
             uv_gradient,
             uv_checker,
             uv_no_uvs,
+            uv_map_checker,
+            uv_map_texture,
+            uv_map_wire,
             gizmo,
             bloom_extract,
             bloom_blur_h,

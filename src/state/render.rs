@@ -2,7 +2,7 @@ use cgmath::prelude::*;
 
 use crate::cgi::camera::Camera;
 use crate::cgi::model::{DrawMeshSimple, DrawModel};
-use crate::preferences::{BackgroundMode, NormalsMode, UvMode, ViewMode};
+use crate::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
 
 use super::BoundsMode;
 
@@ -465,6 +465,84 @@ impl State {
                 }
             }
         }
+    }
+
+    pub(super) fn render_uv_map_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &ModelScene,
+        uv_cam_bg: &wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
+    ) {
+        let clear_color = wgpu::Color {
+            r: 0.10,
+            g: 0.10,
+            b: 0.10,
+            a: 1.0,
+        };
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("UV Map Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.targets.msaa_hdr_view,
+                resolve_target: Some(&self.targets.hdr_resolve_view),
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Discard,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.targets.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+
+        match pds.uv_bg {
+            UvMapBackground::Dark => {}
+            UvMapBackground::Checker => {
+                pass.set_pipeline(&self.pipelines.uv_map_checker);
+                pass.set_bind_group(0, uv_cam_bg, &[]);
+                pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
+                pass.draw_model_simple(&scene.model, 0..1);
+            }
+            UvMapBackground::Texture => {
+                pass.set_pipeline(&self.pipelines.uv_map_texture);
+                pass.set_bind_group(0, uv_cam_bg, &[]);
+                for mesh in &scene.model.meshes {
+                    let material = &scene.model.materials[mesh.material];
+                    pass.set_bind_group(1, &material.bind_group, &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                }
+            }
+        }
+
+        pass.set_pipeline(&self.pipelines.uv_map_wire);
+        pass.set_bind_group(0, uv_cam_bg, &[]);
+        pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
+        for mesh in &scene.model.meshes {
+            if let Some(uv_edge) = &mesh.uv_edge_data
+                && let Some(edge) = &mesh.edge_data
+            {
+                pass.set_bind_group(2, &uv_edge.bind_group, &[]);
+                pass.draw(0..edge.num_edges * 6, 0..1);
+            }
+        }
+
+        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_bind_group(0, uv_cam_bg, &[]);
+        pass.set_vertex_buffer(0, self.uv_boundary_buf.slice(..));
+        pass.draw(0..8, 0..1);
     }
 
     fn draw_normals<'a>(
