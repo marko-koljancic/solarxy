@@ -149,6 +149,8 @@ pub(super) struct ModelScene {
     #[allow(dead_code)]
     pub(super) model_path: String,
     pub(super) stats: ModelStats,
+    pub(super) validation: crate::validation::ValidationReport,
+    pub(super) validation_mesh_cat: Vec<Option<usize>>,
 }
 
 fn create_light_bind_group(
@@ -217,7 +219,7 @@ impl ModelScene {
         brdf_lut: &BrdfLut,
         shadow_map_size: u32,
     ) -> anyhow::Result<Self> {
-        let (model, normals_geo, stats) = resources::load_model_any(
+        let (model, normals_geo, stats, viewer_validation) = resources::load_model_any(
             &model_path,
             device,
             queue,
@@ -265,6 +267,12 @@ impl ModelScene {
             initial_grid_color,
         );
 
+        let validation_mesh_cat = crate::validation::build_mesh_category_map(
+            &viewer_validation.report,
+            model.meshes.len(),
+            &viewer_validation.raw_to_gpu,
+        );
+
         Ok(ModelScene {
             model,
             cam,
@@ -276,6 +284,8 @@ impl ModelScene {
             vis,
             model_path,
             stats,
+            validation: viewer_validation.report,
+            validation_mesh_cat,
         })
     }
 }
@@ -351,6 +361,7 @@ pub(super) struct PaneDisplaySettings {
     pub uv_offset: [f32; 2],
     pub uv_zoom: f32,
     pub show_uv_overlap: bool,
+    pub show_validation: bool,
 }
 
 pub(super) struct DisplaySettings {
@@ -382,6 +393,12 @@ pub(super) struct UvOverlapResources {
     pub readback_pending: bool,
 }
 
+pub(super) struct ValidationColorResources {
+    pub bind_groups: Vec<wgpu::BindGroup>,
+    #[allow(dead_code)]
+    pub buffers: Vec<wgpu::Buffer>,
+}
+
 pub struct State {
     pub(super) surface: wgpu::Surface<'static>,
     pub(super) device: wgpu::Device,
@@ -402,6 +419,7 @@ pub struct State {
     pub(super) uv_cam: UvCameraState,
     pub(super) uv_boundary_buf: wgpu::Buffer,
     pub(super) uv_overlap: UvOverlapResources,
+    pub(super) validation_colors: ValidationColorResources,
     pub(super) active_pane: usize,
     pub(super) cursor_pos: (f32, f32),
     pub(super) cameras_linked: bool,
@@ -613,6 +631,20 @@ impl State {
                                 );
                             }
                         }
+                        if pds.uv_bg == UvMapBackground::Dark {
+                            let dark = GradientUniform {
+                                top_color: [0.10, 0.10, 0.10, 1.0],
+                                bottom_color: [0.10, 0.10, 0.10, 1.0],
+                                uv_y_offset: 0.0,
+                                uv_y_scale: 1.0,
+                                _pad: [0.0; 2],
+                            };
+                            self.queue.write_buffer(
+                                &self.wire._gradient_buffer,
+                                0,
+                                bytemuck::bytes_of(&dark),
+                            );
+                        }
                         self.render_uv_map_pass(&mut encoder, scene, &self.uv_cam.bind_group, &pds);
                     } else {
                         self.render_empty_pass(&mut encoder, &pds);
@@ -799,6 +831,8 @@ impl State {
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
             show_uv_overlap: &mut pds.show_uv_overlap,
             uv_overlap_pct: self.uv_overlap.overlap_pct,
+            show_validation: &mut pds.show_validation,
+            validation_report: self.scene.as_ref().map(|s| &s.validation),
         };
         let changes = self.gui.render_ui(
             &mut sidebar,

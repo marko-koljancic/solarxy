@@ -130,6 +130,8 @@ pub struct Mesh {
     pub material: usize,
     pub edge_data: Option<EdgeData>,
     pub uv_edge_data: Option<UvEdgeData>,
+    pub degen_index_buffer: Option<wgpu::Buffer>,
+    pub degen_num_elements: u32,
 }
 
 pub struct Model {

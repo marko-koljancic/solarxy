@@ -33,26 +33,12 @@ pub struct AnalyzerMaterial {
     pub dissolve_texture: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceFormat {
-    Obj,
-    Stl,
-    Ply,
-    Gltf,
-}
-
-impl SourceFormat {
-    pub fn supports_uvs(self) -> bool {
-        matches!(self, SourceFormat::Obj | SourceFormat::Gltf)
-    }
-}
-
 pub struct ModelAnalyzer {
     pub model_name: String,
     pub meshes: Vec<AnalyzerMesh>,
     pub materials: Vec<AnalyzerMaterial>,
     pub obj_dir: Option<PathBuf>,
-    pub source_format: SourceFormat,
+    base_validation: ValidationReport,
 }
 
 fn raw_to_analyzer(raw: &RawModelData) -> (Vec<AnalyzerMesh>, Vec<AnalyzerMaterial>) {
@@ -112,14 +98,11 @@ impl ModelAnalyzer {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let (raw, source_format) = match ext.as_str() {
-            "stl" => (solarxy::cgi::loader_stl::load_stl(path)?, SourceFormat::Stl),
-            "ply" => (solarxy::cgi::loader_ply::load_ply(path)?, SourceFormat::Ply),
-            "gltf" | "glb" => (
-                solarxy::cgi::loader_gltf::load_gltf(path)?,
-                SourceFormat::Gltf,
-            ),
-            _ => (solarxy::cgi::loader_obj::load_obj(path)?, SourceFormat::Obj),
+        let raw = match ext.as_str() {
+            "stl" => solarxy::cgi::loader_stl::load_stl(path)?,
+            "ply" => solarxy::cgi::loader_ply::load_ply(path)?,
+            "gltf" | "glb" => solarxy::cgi::loader_gltf::load_gltf(path)?,
+            _ => solarxy::cgi::loader_obj::load_obj(path)?,
         };
 
         let model_name = Path::new(path)
@@ -128,6 +111,7 @@ impl ModelAnalyzer {
             .unwrap_or(path)
             .to_string();
 
+        let base_validation = solarxy::validation::validate_raw_model(&raw, &ext).report;
         let (meshes, materials) = raw_to_analyzer(&raw);
 
         Ok(ModelAnalyzer {
@@ -135,12 +119,12 @@ impl ModelAnalyzer {
             meshes,
             materials,
             obj_dir: Path::new(path).parent().map(|p| p.to_path_buf()),
-            source_format,
+            base_validation,
         })
     }
 
     pub fn generate_report(&self) -> AnalysisReport {
-        let mut issues = Vec::new();
+        let mut issues = self.base_validation.issues.clone();
 
         let total_vertices: usize = self.meshes.iter().map(|m| m.positions.len() / 3).sum();
         let total_indices: usize = self.meshes.iter().map(|m| m.indices.len()).sum();
@@ -155,68 +139,10 @@ impl ModelAnalyzer {
                 let normal_count = mesh.normals.len() / 3;
                 let texcoord_count = mesh.texcoords.len() / 2;
 
-                if !mesh.normals.is_empty() && normal_count != vertex_count {
-                    issues.push(ValidationIssue {
-                        severity: Severity::Error,
-                        scope: IssueScope::Mesh(i),
-                        message: format!(
-                            "Normal count ({}) does not match vertex count ({})",
-                            normal_count, vertex_count
-                        ),
-                    });
-                }
-
-                if !mesh.texcoords.is_empty() && texcoord_count != vertex_count {
-                    issues.push(ValidationIssue {
-                        severity: Severity::Warning,
-                        scope: IssueScope::Mesh(i),
-                        message: format!(
-                            "Texture coordinate count ({}) does not match vertex count ({})",
-                            texcoord_count, vertex_count
-                        ),
-                    });
-                }
-
-                if mesh.texcoords.is_empty() && self.source_format.supports_uvs() {
-                    issues.push(ValidationIssue {
-                        severity: Severity::Warning,
-                        scope: IssueScope::Mesh(i),
-                        message: "No texture coordinates".to_string(),
-                    });
-                }
-
-                if index_count % 3 != 0 {
-                    issues.push(ValidationIssue {
-                        severity: Severity::Error,
-                        scope: IssueScope::Mesh(i),
-                        message: format!(
-                            "Index count ({}) is not divisible by 3 (non-triangulated)",
-                            index_count
-                        ),
-                    });
-                }
-
-                if mesh.indices.is_empty() {
-                    issues.push(ValidationIssue {
-                        severity: Severity::Error,
-                        scope: IssueScope::Mesh(i),
-                        message: "Empty index buffer".to_string(),
-                    });
-                }
-
                 let (material_name, material_id) = if let Some(mat_id) = mesh.material_id {
                     if mat_id < self.materials.len() {
                         (Some(self.materials[mat_id].name.clone()), Some(mat_id))
                     } else {
-                        issues.push(ValidationIssue {
-                            severity: Severity::Error,
-                            scope: IssueScope::Mesh(i),
-                            message: format!(
-                                "Material ID {} is out of range (only {} materials available)",
-                                mat_id,
-                                self.materials.len()
-                            ),
-                        });
                         (None, Some(mat_id))
                     }
                 } else {
@@ -310,6 +236,7 @@ fn check_texture(
         issues.push(ValidationIssue {
             severity: Severity::Error,
             scope: IssueScope::Material(mat_index),
+            kind: solarxy::validation::IssueKind::MissingTexture,
             message: format!("Texture file not found: '{}'", path),
         });
     }

@@ -101,6 +101,7 @@ pub(crate) struct Pipelines {
     pub(crate) ssao: wgpu::RenderPipeline,
     pub(crate) ssao_blur_h: wgpu::RenderPipeline,
     pub(crate) ssao_blur_v: wgpu::RenderPipeline,
+    pub(crate) validation_overlay: wgpu::RenderPipeline,
 }
 
 fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
@@ -214,6 +215,31 @@ impl Pipelines {
                 .depth_compare(wgpu::CompareFunction::Less)
                 .sample_count(sample_count)
                 .build();
+
+        let validation_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Validation Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.validation_color],
+            push_constant_ranges: &[],
+        });
+        let validation_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Validation Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/validation.wgsl").into()),
+        });
+        let validation_overlay = PipelineBuilder::new(
+            device,
+            "Validation Overlay",
+            &validation_layout,
+            &validation_shader,
+        )
+        .vertex_entry("vs_validation")
+        .fragment_entry("fs_validation")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::LessEqual)
+        .sample_count(sample_count)
+        .build();
 
         let edge_wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Edge Wire Shader"),
@@ -680,6 +706,7 @@ impl Pipelines {
             ssao,
             ssao_blur_h,
             ssao_blur_v,
+            validation_overlay,
         }
     }
 }

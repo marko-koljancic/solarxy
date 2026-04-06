@@ -311,6 +311,9 @@ impl State {
         self.draw_axes(&mut pass, scene, cam_bg, pds);
         self.draw_local_axes(&mut pass, scene, cam_bg, pds);
         self.draw_bounds(&mut pass, scene, cam_bg, pds);
+        if pds.show_validation {
+            self.draw_validation_overlay(&mut pass, scene, cam_bg);
+        }
     }
 
     fn draw_opaque_meshes<'a>(
@@ -467,6 +470,41 @@ impl State {
         }
     }
 
+    fn draw_validation_overlay<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        use crate::validation::IssueCategory;
+
+        pass.set_pipeline(&self.pipelines.validation_overlay);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+
+        for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if let Some(cat_idx) = scene.validation_mesh_cat[i] {
+                pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+            }
+        }
+
+        let degen_idx = IssueCategory::ALL
+            .iter()
+            .position(|c| *c == IssueCategory::DegenerateTriangles)
+            .unwrap_or(4);
+        for mesh in &scene.model.meshes {
+            if let Some(ref degen_buf) = mesh.degen_index_buffer {
+                pass.set_bind_group(1, &self.validation_colors.bind_groups[degen_idx], &[]);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(degen_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.degen_num_elements, 0, 0..1);
+            }
+        }
+    }
+
     pub(super) fn render_uv_overlap_count_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -540,7 +578,9 @@ impl State {
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         match pds.uv_bg {
-            UvMapBackground::Dark => {}
+            UvMapBackground::Dark => {
+                self.draw_background_gradient(&mut pass);
+            }
             UvMapBackground::Checker => {
                 pass.set_pipeline(&self.pipelines.uv_map_checker);
                 pass.set_bind_group(0, uv_cam_bg, &[]);

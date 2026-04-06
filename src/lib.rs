@@ -29,6 +29,8 @@ pub mod cgi;
 pub mod preferences;
 #[cfg(feature = "viewer")]
 mod state;
+#[cfg(any(feature = "viewer", feature = "analyzer"))]
+pub mod validation;
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
 

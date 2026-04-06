@@ -285,6 +285,7 @@ impl State {
                 self.pane_settings[0].uv_offset = [0.0, 0.0];
                 self.pane_settings[0].uv_zoom = 1.0;
                 self.pane_settings[0].show_uv_overlap = false;
+                self.pane_settings[0].show_validation = false;
                 self.uv_overlap.overlap_pct = None;
                 self.uv_overlap.stats_dirty = false;
                 self.display.turntable_active = self.preferences.display.turntable_active;

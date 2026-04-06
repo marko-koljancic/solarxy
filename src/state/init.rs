@@ -272,6 +272,34 @@ impl State {
             ],
         });
 
+        let validation_colors = {
+            use crate::validation::IssueCategory;
+            let mut buffers = Vec::new();
+            let mut bind_groups = Vec::new();
+            for cat in IssueCategory::ALL {
+                let color = cat.color();
+                let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Validation Color {:?}", cat)),
+                    contents: bytemuck::cast_slice(&color),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("Validation Color BG {:?}", cat)),
+                    layout: &layouts.validation_color,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buf.as_entire_binding(),
+                    }],
+                });
+                buffers.push(buf);
+                bind_groups.push(bg);
+            }
+            ValidationColorResources {
+                bind_groups,
+                buffers,
+            }
+        };
+
         let mut state = Self {
             surface,
             device,
@@ -323,6 +351,7 @@ impl State {
                     uv_offset: [0.0, 0.0],
                     uv_zoom: 1.0,
                     show_uv_overlap: false,
+                    show_validation: false,
                 };
                 [pds.clone(), pds]
             },
@@ -359,6 +388,7 @@ impl State {
                 staging_buffer: None,
                 readback_pending: false,
             },
+            validation_colors,
             active_pane: 0,
             cursor_pos: (0.0, 0.0),
             cameras_linked: true,

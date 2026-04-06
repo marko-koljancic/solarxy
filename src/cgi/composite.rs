@@ -105,6 +105,7 @@ impl CompositeState {
         });
         if let Some([x, y, w, h]) = viewport {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
+            pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         }
         pass.set_pipeline(&pipelines.composite);
         pass.set_bind_group(0, &self.bind_group, &[]);

@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 
 use super::geometry::{self, RawImageData, RawMaterialData, RawModelData};
 use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
+use crate::validation::ViewerValidation;
 
 pub fn is_supported_model_extension(path: &Path) -> bool {
     path.extension()
@@ -21,7 +22,12 @@ pub fn load_model_any(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     edge_geometry_layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
+) -> anyhow::Result<(
+    model::Model,
+    model::NormalsGeometry,
+    ModelStats,
+    ViewerValidation,
+)> {
     let ext = std::path::Path::new(file_path)
         .extension()
         .and_then(|e| e.to_str())
@@ -53,8 +59,20 @@ fn upload_model(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     edge_geometry_layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<(model::Model, model::NormalsGeometry, ModelStats)> {
+) -> anyhow::Result<(
+    model::Model,
+    model::NormalsGeometry,
+    ModelStats,
+    ViewerValidation,
+)> {
     let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
+
+    let file_ext = Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let viewer_validation = crate::validation::validate_raw_model(&raw, file_ext);
+
     let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) =
         geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
@@ -130,10 +148,12 @@ fn upload_model(
 
     let mut gpu_meshes = Vec::new();
     let mut gpu_mesh_bounds = Vec::new();
+    let mut raw_to_gpu: Vec<Option<usize>> = vec![None; raw.meshes.len()];
     for (i, (vertices, indices)) in mesh_vertices.iter().zip(mesh_indices.iter()).enumerate() {
         if vertices.is_empty() {
             continue;
         }
+        raw_to_gpu[i] = Some(gpu_meshes.len());
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{:?} Vertex Buffer {}", file_path, i)),
@@ -210,6 +230,26 @@ fn upload_model(
             None
         };
 
+        let degen_faces = &viewer_validation.degenerate_faces[i];
+        let (degen_index_buffer, degen_num_elements) = if degen_faces.is_empty() {
+            (None, 0)
+        } else {
+            let degen_indices: Vec<u32> = degen_faces
+                .iter()
+                .flat_map(|&fi| {
+                    let base = fi as usize * 3;
+                    [indices[base], indices[base + 1], indices[base + 2]]
+                })
+                .collect();
+            let num = degen_indices.len() as u32;
+            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} Degen Index Buffer {}", file_path, i)),
+                contents: bytemuck::cast_slice(&degen_indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+            (Some(buf), num)
+        };
+
         let material_index = raw.meshes[i].material_index.unwrap_or(0);
         gpu_meshes.push(model::Mesh {
             name: raw.meshes[i].name.clone(),
@@ -224,6 +264,8 @@ fn upload_model(
                 bind_group: edge_bind_group,
             }),
             uv_edge_data,
+            degen_index_buffer,
+            degen_num_elements,
         });
         gpu_mesh_bounds.push(per_mesh_bounds[i]);
     }
@@ -236,6 +278,9 @@ fn upload_model(
         verts: total_verts,
     };
 
+    let mut viewer_validation = viewer_validation;
+    viewer_validation.raw_to_gpu = raw_to_gpu;
+
     Ok((
         model::Model {
             meshes: gpu_meshes,
@@ -246,6 +291,7 @@ fn upload_model(
         },
         normals_geo,
         stats,
+        viewer_validation,
     ))
 }
 
@@ -319,6 +365,8 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         material: 0,
         edge_data: None,
         uv_edge_data: None,
+        degen_index_buffer: None,
+        degen_num_elements: 0,
     }
 }
 
@@ -350,6 +398,8 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
             material: 0,
             edge_data: None,
             uv_edge_data: None,
+            degen_index_buffer: None,
+            degen_num_elements: 0,
         },
         cell_size,
     )

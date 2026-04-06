@@ -1,71 +1,7 @@
 use std::fmt;
 
 use solarxy::format_number;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Severity {
-    Warning,
-    Error,
-}
-
-impl fmt::Display for Severity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Severity::Warning => write!(f, "[WARN]"),
-            Severity::Error => write!(f, "[ERROR]"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum IssueScope {
-    Mesh(usize),
-    Material(usize),
-    Model,
-}
-
-impl fmt::Display for IssueScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            IssueScope::Mesh(i) => write!(f, "Mesh [{}]", i),
-            IssueScope::Material(i) => write!(f, "Material [{}]", i),
-            IssueScope::Model => write!(f, "Model"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidationIssue {
-    pub severity: Severity,
-    pub scope: IssueScope,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ValidationReport {
-    pub issues: Vec<ValidationIssue>,
-}
-
-impl ValidationReport {
-    pub fn error_count(&self) -> usize {
-        self.issues
-            .iter()
-            .filter(|i| i.severity == Severity::Error)
-            .count()
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.issues
-            .iter()
-            .filter(|i| i.severity == Severity::Warning)
-            .count()
-    }
-
-    pub fn is_clean(&self) -> bool {
-        self.issues.is_empty()
-    }
-}
+pub use solarxy::validation::{IssueScope, Severity, ValidationIssue, ValidationReport};
 
 #[derive(Debug, Clone)]
 pub struct MeshSummary {

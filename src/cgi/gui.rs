@@ -76,6 +76,8 @@ pub(crate) struct SidebarState<'a> {
     pub has_uvs: bool,
     pub show_uv_overlap: &'a mut bool,
     pub uv_overlap_pct: Option<f32>,
+    pub show_validation: &'a mut bool,
+    pub validation_report: Option<&'a crate::validation::ValidationReport>,
 }
 
 #[derive(Default)]
@@ -575,6 +577,42 @@ fn draw_sidebar(
                     });
 
                 ui.separator();
+
+                if let Some(report) = s.validation_report {
+                    egui::CollapsingHeader::new("Validation")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.checkbox(s.show_validation, "Show overlay");
+                            if report.is_clean() {
+                                ui.label("No issues found");
+                            } else {
+                                ui.label(format!(
+                                    "{} error(s), {} warning(s)",
+                                    report.error_count(),
+                                    report.warning_count()
+                                ));
+                                for issue in &report.issues {
+                                    let color = crate::validation::issue_category(issue).color();
+                                    let egui_color = egui::Color32::from_rgba_unmultiplied(
+                                        (color[0] * 255.0) as u8,
+                                        (color[1] * 255.0) as u8,
+                                        (color[2] * 255.0) as u8,
+                                        255,
+                                    );
+                                    ui.horizontal(|ui| {
+                                        let (rect, _) = ui.allocate_exact_size(
+                                            egui::vec2(8.0, 8.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().circle_filled(rect.center(), 4.0, egui_color);
+                                        ui.label(format!("{} {}", issue.scope, issue.message));
+                                    });
+                                }
+                            }
+                        });
+
+                    ui.separator();
+                }
 
                 egui::CollapsingHeader::new("Post-Processing")
                     .default_open(true)

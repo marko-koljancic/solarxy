@@ -147,6 +147,7 @@ impl From<&ValidationIssue> for JsonIssue {
             IssueScope::Model => ("model", None),
             IssueScope::Mesh(idx) => ("mesh", Some(*idx)),
             IssueScope::Material(idx) => ("material", Some(*idx)),
+            IssueScope::Face(mesh_idx, _) => ("mesh", Some(*mesh_idx)),
         };
         Self {
             severity: match i.severity {
