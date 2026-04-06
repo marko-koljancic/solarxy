@@ -6,7 +6,7 @@ use crate::preferences::{BackgroundMode, NormalsMode, UvMode, ViewMode};
 
 use super::BoundsMode;
 
-use super::{ModelScene, State};
+use super::{ModelScene, PaneDisplaySettings, State};
 
 impl State {
     pub(super) fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
@@ -15,14 +15,18 @@ impl State {
         pass.draw(0..3, 0..1);
     }
 
-    pub(super) fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(super) fn render_empty_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pds: &PaneDisplaySettings,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.display.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -38,7 +42,7 @@ impl State {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        if self.display.background_mode == BackgroundMode::Gradient {
+        if pds.background_mode == BackgroundMode::Gradient {
             self.draw_background_gradient(&mut pass);
         }
     }
@@ -193,6 +197,7 @@ impl State {
         scene: &ModelScene,
         cam_bg: &wgpu::BindGroup,
         cam: &Camera,
+        pds: &PaneDisplaySettings,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -200,7 +205,7 @@ impl State {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.display.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -217,18 +222,18 @@ impl State {
             timestamp_writes: None,
         });
 
-        if self.display.background_mode == BackgroundMode::Gradient {
+        if pds.background_mode == BackgroundMode::Gradient {
             self.draw_background_gradient(&mut pass);
         }
 
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
-        if self.display.uv_mode == UvMode::Off {
-            match self.display.view_mode {
+        if pds.uv_mode == UvMode::Off {
+            match pds.view_mode {
                 ViewMode::Shaded | ViewMode::ShadedWireframe => {
                     self.draw_opaque_meshes(&mut pass, scene, cam_bg);
                     self.draw_floor(&mut pass, scene, cam_bg);
-                    if self.display.view_mode == ViewMode::ShadedWireframe {
+                    if pds.view_mode == ViewMode::ShadedWireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
@@ -246,7 +251,7 @@ impl State {
                     pass.set_bind_group(0, cam_bg, &[]);
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.draw_model_simple(&scene.model, 0..1);
-                    if self.display.ghosted_wireframe {
+                    if pds.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
@@ -259,7 +264,7 @@ impl State {
         } else {
             pass.set_bind_group(0, cam_bg, &[]);
             if scene.model.has_uvs {
-                match self.display.uv_mode {
+                match pds.uv_mode {
                     UvMode::Gradient => {
                         pass.set_pipeline(&self.pipelines.uv_gradient);
                     }
@@ -274,13 +279,13 @@ impl State {
             }
             pass.draw_model_simple(&scene.model, 0..1);
 
-            match self.display.view_mode {
+            match pds.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
                     self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire, cam_bg);
                 }
                 ViewMode::Ghosted => {
-                    if self.display.ghosted_wireframe {
+                    if pds.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
@@ -292,7 +297,7 @@ impl State {
             }
         }
 
-        if self.display.show_grid {
+        if pds.show_grid {
             pass.set_pipeline(&self.pipelines.grid);
             pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
@@ -302,10 +307,10 @@ impl State {
             );
             pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
         }
-        self.draw_normals(&mut pass, scene);
-        self.draw_axes(&mut pass, scene, cam_bg);
-        self.draw_local_axes(&mut pass, scene, cam_bg);
-        self.draw_bounds(&mut pass, scene, cam_bg);
+        self.draw_normals(&mut pass, scene, pds);
+        self.draw_axes(&mut pass, scene, cam_bg, pds);
+        self.draw_local_axes(&mut pass, scene, cam_bg, pds);
+        self.draw_bounds(&mut pass, scene, cam_bg, pds);
     }
 
     fn draw_opaque_meshes<'a>(
@@ -408,8 +413,9 @@ impl State {
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
         cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
     ) {
-        if !self.display.show_axis_gizmo {
+        if !pds.show_axis_gizmo {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
@@ -423,8 +429,9 @@ impl State {
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
         cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
     ) {
-        if !self.display.show_local_axes || scene.vis.local_axes_vertex_count == 0 {
+        if !pds.show_local_axes || scene.vis.local_axes_vertex_count == 0 {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
@@ -438,13 +445,14 @@ impl State {
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
         cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
     ) {
-        if self.display.bounds_mode == BoundsMode::Off {
+        if pds.bounds_mode == BoundsMode::Off {
             return;
         }
         pass.set_pipeline(&self.pipelines.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
-        match self.display.bounds_mode {
+        match pds.bounds_mode {
             BoundsMode::Off => unreachable!(),
             BoundsMode::WholeModel => {
                 pass.set_vertex_buffer(0, scene.vis.bounds_whole_buf.slice(..));
@@ -459,13 +467,18 @@ impl State {
         }
     }
 
-    fn draw_normals<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, scene: &'a ModelScene) {
-        if self.display.normals_mode == NormalsMode::Off {
+    fn draw_normals<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        scene: &'a ModelScene,
+        pds: &PaneDisplaySettings,
+    ) {
+        if pds.normals_mode == NormalsMode::Off {
             return;
         }
         pass.set_pipeline(&self.pipelines.normals);
         if matches!(
-            self.display.normals_mode,
+            pds.normals_mode,
             NormalsMode::Face | NormalsMode::FaceAndVertex
         ) && scene.vis.face_normals_count > 0
         {
@@ -474,7 +487,7 @@ impl State {
             pass.draw(0..scene.vis.face_normals_count, 0..1);
         }
         if matches!(
-            self.display.normals_mode,
+            pds.normals_mode,
             NormalsMode::Vertex | NormalsMode::FaceAndVertex
         ) && scene.vis.vertex_normals_count > 0
         {

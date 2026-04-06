@@ -42,11 +42,28 @@ impl State {
     }
 
     pub(super) fn update_wireframe_params(&self) {
+        self.write_wireframe_params_for(&self.pane_settings[0]);
+    }
+
+    pub(super) fn write_gradient_colors_for(&self, pds: &PaneDisplaySettings) {
+        let (top, bottom) = pds.background_mode.sky_colors();
+        let data = GradientUniform {
+            top_color: [top[0], top[1], top[2], 1.0],
+            bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
+            uv_y_offset: 0.0,
+            uv_y_scale: 1.0,
+            _pad: [0.0; 2],
+        };
+        self.queue
+            .write_buffer(&self.wire._gradient_buffer, 0, bytemuck::bytes_of(&data));
+    }
+
+    pub(super) fn write_wireframe_params_for(&self, pds: &PaneDisplaySettings) {
         let params = WireframeParams {
-            color: self.display.background_mode.wireframe_color(),
-            line_width: self.display.line_weight.width_px(),
-            screen_width: self.config.width as f32,
-            screen_height: self.config.height as f32,
+            color: pds.background_mode.wireframe_color(),
+            line_width: pds.line_weight.width_px(),
+            screen_width: self.target_width as f32,
+            screen_height: self.target_height as f32,
             _pad: 0.0,
         };
         self.queue.write_buffer(
@@ -70,7 +87,7 @@ impl State {
         let queue = self.queue.clone();
         let layouts = Arc::clone(&self.layouts);
         let config = self.config.clone();
-        let initial_grid_color = self.display.background_mode.grid_color();
+        let initial_grid_color = self.pane_settings[0].background_mode.grid_color();
         let shadow_map_size = self.preferences.rendering.shadow_map_size;
         let path = model_path.clone();
 
@@ -103,58 +120,11 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.targets.depth_texture = texture::Texture::create_depth_texture(
-                &self.device,
-                &self.config,
-                "depth_texture",
-                self.msaa_sample_count,
-            );
-            self.targets.msaa_hdr_view = texture::create_msaa_hdr_texture(
-                &self.device,
-                width,
-                height,
-                self.msaa_sample_count,
-            );
-            let (hdr_tex, hdr_view) =
-                texture::create_hdr_resolve_texture(&self.device, width, height);
-            self.targets._hdr_resolve_texture = hdr_tex;
-            self.targets.hdr_resolve_view = hdr_view;
-            self.post.bloom.resize(
-                &self.device,
-                &self.layouts,
-                &self.targets.hdr_resolve_view,
-                width,
-                height,
-            );
-            self.post.composite.resize(
-                &self.device,
-                &self.layouts,
-                &self.targets.hdr_resolve_view,
-                &self.post.bloom.ping_view,
-                &self.post.bloom.sampler,
-            );
-            if let Some(scene) = &self.scene {
-                self.post.ssao.resize(
-                    &self.device,
-                    &self.layouts,
-                    &scene.cam.buffer,
-                    width,
-                    height,
-                );
-            } else {
-                let dummy_buf = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Dummy Camera Buffer for SSAO resize"),
-                        contents: &[0u8; 288],
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
-                self.post
-                    .ssao
-                    .resize(&self.device, &self.layouts, &dummy_buf, width, height);
-            }
             self.is_surface_configured = true;
-            self.update_wireframe_params();
+
+            let (tw, th) = self.target_dimensions();
+            self.resize_render_targets(tw, th);
+
             let aspect = width as f32 / height as f32;
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(aspect);
@@ -165,11 +135,60 @@ impl State {
         }
     }
 
-    pub(super) fn update_grid_color(&self) {
+    pub(super) fn resize_render_targets(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        if width == self.target_width && height == self.target_height {
+            return;
+        }
+        self.target_width = width;
+        self.target_height = height;
+        self.targets.depth_texture = texture::Texture::create_depth_texture(
+            &self.device,
+            width,
+            height,
+            "depth_texture",
+            self.msaa_sample_count,
+        );
+        self.targets.msaa_hdr_view =
+            texture::create_msaa_hdr_texture(&self.device, width, height, self.msaa_sample_count);
+        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
+        self.targets._hdr_resolve_texture = hdr_tex;
+        self.targets.hdr_resolve_view = hdr_view;
+        self.post.bloom.resize(
+            &self.device,
+            &self.layouts,
+            &self.targets.hdr_resolve_view,
+            width,
+            height,
+        );
+        self.post.composite.resize(
+            &self.device,
+            &self.layouts,
+            &self.targets.hdr_resolve_view,
+            &self.post.bloom.ping_view,
+            &self.post.bloom.sampler,
+        );
         if let Some(scene) = &self.scene {
-            let color = self.display.background_mode.grid_color();
-            self.queue
-                .write_buffer(&scene.vis.grid_uniform_buf, 4, bytemuck::cast_slice(&color));
+            self.post.ssao.resize(
+                &self.device,
+                &self.layouts,
+                &scene.cam.buffer,
+                width,
+                height,
+            );
+        } else {
+            let dummy_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Dummy Camera Buffer for SSAO resize"),
+                    contents: &[0u8; 288],
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            self.post
+                .ssao
+                .resize(&self.device, &self.layouts, &dummy_buf, width, height);
         }
     }
 
@@ -232,11 +251,11 @@ impl State {
                     );
                 }
 
-                self.display.view_mode = self.preferences.display.view_mode;
-                self.display.prev_non_ghosted_mode = ViewMode::Shaded;
-                self.display.ghosted_wireframe = false;
-                self.display.normals_mode = self.preferences.display.normals_mode;
-                self.display.uv_mode = self.preferences.display.uv_mode;
+                self.pane_settings[0].view_mode = self.preferences.display.view_mode;
+                self.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
+                self.pane_settings[0].ghosted_wireframe = false;
+                self.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
+                self.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
                 self.display.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {

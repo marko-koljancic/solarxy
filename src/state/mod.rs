@@ -62,8 +62,6 @@ struct Pane {
     y: f32,
     width: f32,
     height: f32,
-    uv_y_offset: f32,
-    uv_y_scale: f32,
 }
 
 impl BackgroundMode {
@@ -331,7 +329,8 @@ pub(super) struct IblResources {
     pub last_active_ibl_mode: IblMode,
 }
 
-pub(super) struct DisplaySettings {
+#[derive(Clone)]
+pub(super) struct PaneDisplaySettings {
     pub view_mode: ViewMode,
     pub prev_non_ghosted_mode: ViewMode,
     pub ghosted_wireframe: bool,
@@ -343,6 +342,9 @@ pub(super) struct DisplaySettings {
     pub show_grid: bool,
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
+}
+
+pub(super) struct DisplaySettings {
     pub turntable_active: bool,
     pub turntable_rpm: f32,
     pub lights_locked: bool,
@@ -373,6 +375,7 @@ pub struct State {
     pub(super) pipelines: Pipelines,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
+    pub(super) pane_settings: [PaneDisplaySettings; 2],
     pub(super) secondary_cam: Option<CameraState>,
     pub(super) active_pane: usize,
     pub(super) cursor_pos: (f32, f32),
@@ -387,10 +390,16 @@ pub struct State {
     #[allow(unused)]
     pub(super) shared_samplers: SharedSamplers,
     pub(super) msaa_sample_count: u32,
+    pub(super) target_width: u32,
+    pub(super) target_height: u32,
     pub window: Arc<Window>,
 }
 
 impl State {
+    pub(super) fn target_dimensions(&self) -> (u32, u32) {
+        compute_target_dimensions(self.display.layout, self.config.width, self.config.height)
+    }
+
     fn compute_panes(&self) -> Vec<Pane> {
         let w = self.config.width as f32;
         let h = self.config.height as f32;
@@ -400,8 +409,6 @@ impl State {
                 y: 0.0,
                 width: w,
                 height: h,
-                uv_y_offset: 0.0,
-                uv_y_scale: 1.0,
             }],
             ViewLayout::SplitVertical => {
                 let half = (w * 0.5).floor();
@@ -411,16 +418,12 @@ impl State {
                         y: 0.0,
                         width: half - 1.0,
                         height: h,
-                        uv_y_offset: 0.0,
-                        uv_y_scale: 1.0,
                     },
                     Pane {
                         x: half + 1.0,
                         y: 0.0,
                         width: w - half - 1.0,
                         height: h,
-                        uv_y_offset: 0.0,
-                        uv_y_scale: 1.0,
                     },
                 ]
             }
@@ -432,16 +435,12 @@ impl State {
                         y: 0.0,
                         width: w,
                         height: half - 1.0,
-                        uv_y_offset: 0.0,
-                        uv_y_scale: 0.5,
                     },
                     Pane {
                         x: 0.0,
                         y: half + 1.0,
                         width: w,
                         height: h - half - 1.0,
-                        uv_y_offset: 0.5,
-                        uv_y_scale: 0.5,
                     },
                 ]
             }
@@ -454,12 +453,6 @@ impl State {
         }
         let panes = self.compute_panes();
         hit_test_pane(&panes, self.cursor_pos)
-    }
-
-    fn write_gradient_viewport(&self, uv_y_offset: f32, uv_y_scale: f32) {
-        let data = [uv_y_offset, uv_y_scale];
-        self.queue
-            .write_buffer(&self.wire._gradient_buffer, 32, bytemuck::cast_slice(&data));
     }
 
     fn compute_divider_rect(&self) -> Option<egui::Rect> {
@@ -521,9 +514,11 @@ impl State {
                     .map(|c| c.camera)
                     .or(self.scene.as_ref().map(|s| s.cam.camera))
             };
+
+            let pds = self.pane_settings[i.min(1)].clone();
+
             let Some(cam_data) = cam_data else {
-                self.write_gradient_viewport(pane.uv_y_offset, pane.uv_y_scale);
-                self.render_empty_pass(&mut encoder);
+                self.render_empty_pass(&mut encoder, &pds);
                 let viewport = if is_split {
                     Some([pane.x, pane.y, pane.width, pane.height])
                 } else {
@@ -581,7 +576,16 @@ impl State {
                 }
             }
 
-            self.write_gradient_viewport(pane.uv_y_offset, pane.uv_y_scale);
+            self.write_wireframe_params_for(&pds);
+            self.write_gradient_colors_for(&pds);
+            if let Some(scene) = &self.scene {
+                let color = pds.background_mode.grid_color();
+                self.queue.write_buffer(
+                    &scene.vis.grid_uniform_buf,
+                    4,
+                    bytemuck::cast_slice(&color),
+                );
+            }
 
             if (i == 0 || !self.display.lights_locked)
                 && let Some(scene) = &self.scene
@@ -601,9 +605,9 @@ impl State {
                 if self.post.ssao_enabled {
                     self.render_gbuffer_pass(&mut encoder, scene, cam_bg);
                 }
-                self.render_main_pass(&mut encoder, scene, cam_bg, &cam_data);
+                self.render_main_pass(&mut encoder, scene, cam_bg, &cam_data, &pds);
             } else {
-                self.render_empty_pass(&mut encoder);
+                self.render_empty_pass(&mut encoder, &pds);
             }
 
             if self.post.ssao_enabled {
@@ -615,8 +619,8 @@ impl State {
                     &mut encoder,
                     &self.pipelines,
                     &self.queue,
-                    self.config.width,
-                    self.config.height,
+                    self.target_width,
+                    self.target_height,
                 );
             }
 
@@ -634,22 +638,6 @@ impl State {
                 viewport,
                 i == 0,
             );
-        }
-
-        if is_split {
-            let full_aspect = self.config.width as f32 / self.config.height as f32;
-            if let Some(scene) = &mut self.scene {
-                scene.cam.write_with_aspect(&self.queue, full_aspect);
-                self.post
-                    .ssao
-                    .rebuild_bind_groups(&self.device, &self.layouts, &scene.cam.buffer);
-                scene.vis.rebuild_camera_bind_groups(
-                    &self.device,
-                    &self.layouts,
-                    &scene.cam.buffer,
-                );
-            }
-            self.write_gradient_viewport(0.0, 1.0);
         }
 
         let divider_rect = self.compute_divider_rect();
@@ -671,16 +659,18 @@ impl State {
             None
         };
 
+        let ap = self.active_pane;
+        let pds = &mut self.pane_settings[ap];
         let mut sidebar = SidebarState {
-            view_mode: &mut self.display.view_mode,
-            normals_mode: &mut self.display.normals_mode,
-            background_mode: &mut self.display.background_mode,
-            uv_mode: &mut self.display.uv_mode,
-            bounds_mode: &mut self.display.bounds_mode,
-            line_weight: &mut self.display.line_weight,
-            show_grid: &mut self.display.show_grid,
-            show_axis_gizmo: &mut self.display.show_axis_gizmo,
-            show_local_axes: &mut self.display.show_local_axes,
+            view_mode: &mut pds.view_mode,
+            normals_mode: &mut pds.normals_mode,
+            background_mode: &mut pds.background_mode,
+            uv_mode: &mut pds.uv_mode,
+            bounds_mode: &mut pds.bounds_mode,
+            line_weight: &mut pds.line_weight,
+            show_grid: &mut pds.show_grid,
+            show_axis_gizmo: &mut pds.show_axis_gizmo,
+            show_local_axes: &mut pds.show_local_axes,
             turntable_active: &mut self.display.turntable_active,
             turntable_rpm: &mut self.display.turntable_rpm,
             lights_locked: &mut self.display.lights_locked,
@@ -779,6 +769,20 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
     }
 }
 
+fn compute_target_dimensions(layout: ViewLayout, width: u32, height: u32) -> (u32, u32) {
+    match layout {
+        ViewLayout::Single => (width, height),
+        ViewLayout::SplitVertical => {
+            let half = (width as f32 * 0.5).floor() as u32;
+            (half.max(1), height)
+        }
+        ViewLayout::SplitHorizontal => {
+            let half = (height as f32 * 0.5).floor() as u32;
+            (width, half.max(1))
+        }
+    }
+}
+
 fn hit_test_pane(panes: &[Pane], cursor: (f32, f32)) -> usize {
     let (cx, cy) = cursor;
     for (i, pane) in panes.iter().enumerate() {
@@ -806,8 +810,6 @@ mod tests {
             y,
             width,
             height,
-            uv_y_offset: 0.0,
-            uv_y_scale: 1.0,
         }
     }
 
@@ -886,5 +888,49 @@ mod tests {
     fn cam_routing_split_linked() {
         assert_eq!(cam_routing(0, true), (true, true));
         assert_eq!(cam_routing(1, true), (true, true));
+    }
+
+    #[test]
+    fn target_dims_single() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::Single, 1920, 1080),
+            (1920, 1080)
+        );
+    }
+
+    #[test]
+    fn target_dims_vertical_split() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 1920, 1080),
+            (960, 1080)
+        );
+    }
+
+    #[test]
+    fn target_dims_horizontal_split() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitHorizontal, 1920, 1080),
+            (1920, 540)
+        );
+    }
+
+    #[test]
+    fn target_dims_odd_width() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 1921, 1080),
+            (960, 1080)
+        );
+    }
+
+    #[test]
+    fn target_dims_minimum() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 2, 2),
+            (1, 2)
+        );
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitHorizontal, 2, 2),
+            (2, 1)
+        );
     }
 }

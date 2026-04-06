@@ -69,7 +69,8 @@ impl State {
         let msaa_sample_count = preferences.rendering.msaa_sample_count;
         let depth_texture = texture::Texture::create_depth_texture(
             &device,
-            &config,
+            config.width,
+            config.height,
             "depth_texture",
             msaa_sample_count,
         );
@@ -150,7 +151,7 @@ impl State {
             false,
         )?;
         let uv_checker_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("UV Checker Bind Group"),
+            label: Some("UßV Checker Bind Group"),
             layout: &layouts.uv_checker,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -230,18 +231,23 @@ impl State {
                     other => other,
                 },
             },
+            pane_settings: {
+                let pds = PaneDisplaySettings {
+                    view_mode: preferences.display.view_mode,
+                    prev_non_ghosted_mode: ViewMode::Shaded,
+                    ghosted_wireframe: false,
+                    normals_mode: preferences.display.normals_mode,
+                    background_mode,
+                    uv_mode: preferences.display.uv_mode,
+                    bounds_mode: BoundsMode::Off,
+                    line_weight,
+                    show_grid: preferences.display.grid_visible,
+                    show_axis_gizmo: preferences.display.axis_gizmo_visible,
+                    show_local_axes: preferences.display.local_axes_visible,
+                };
+                [pds.clone(), pds]
+            },
             display: DisplaySettings {
-                view_mode: preferences.display.view_mode,
-                prev_non_ghosted_mode: ViewMode::Shaded,
-                ghosted_wireframe: false,
-                normals_mode: preferences.display.normals_mode,
-                background_mode,
-                uv_mode: preferences.display.uv_mode,
-                bounds_mode: BoundsMode::Off,
-                line_weight,
-                show_grid: preferences.display.grid_visible,
-                show_axis_gizmo: preferences.display.axis_gizmo_visible,
-                show_local_axes: preferences.display.local_axes_visible,
                 turntable_active: preferences.display.turntable_active,
                 turntable_rpm: preferences.display.turntable_rpm,
                 lights_locked: preferences.lighting.lock,
@@ -272,6 +278,8 @@ impl State {
             preferences,
             shared_samplers,
             msaa_sample_count,
+            target_width: size.width,
+            target_height: size.height,
             window,
         };
 

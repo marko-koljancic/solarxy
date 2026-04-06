@@ -157,13 +157,14 @@ impl Texture {
 
     pub fn create_depth_texture(
         device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
+        width: u32,
+        height: u32,
         label: &str,
         sample_count: u32,
     ) -> Self {
         let size = wgpu::Extent3d {
-            width: config.width.max(1),
-            height: config.height.max(1),
+            width: width.max(1),
+            height: height.max(1),
             depth_or_array_layers: 1,
         };
         let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;

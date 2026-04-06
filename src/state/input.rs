@@ -164,17 +164,20 @@ impl State {
                 }
             }
             KeyCode::KeyW => {
+                let pds = &mut self.pane_settings[self.active_pane];
                 if self.modifiers.shift_key() {
-                    self.display.line_weight = self.display.line_weight.next();
-                    self.update_wireframe_params();
+                    pds.line_weight = pds.line_weight.next();
                     self.gui.set_toast(
-                        &format!("Line Weight: {}", self.display.line_weight),
+                        &format!(
+                            "Line Weight: {}",
+                            self.pane_settings[self.active_pane].line_weight
+                        ),
                         [0.0, 0.4, 0.0, 1.0],
                     );
-                } else if self.display.view_mode == ViewMode::Ghosted {
-                    self.display.ghosted_wireframe = !self.display.ghosted_wireframe;
+                } else if pds.view_mode == ViewMode::Ghosted {
+                    pds.ghosted_wireframe = !pds.ghosted_wireframe;
                 } else {
-                    self.display.view_mode = match self.display.view_mode {
+                    pds.view_mode = match pds.view_mode {
                         ViewMode::Shaded => ViewMode::ShadedWireframe,
                         ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
                         ViewMode::WireframeOnly => ViewMode::Shaded,
@@ -183,22 +186,23 @@ impl State {
                 }
             }
             KeyCode::KeyX => {
-                if self.display.view_mode == ViewMode::Ghosted {
-                    self.display.view_mode = self.display.prev_non_ghosted_mode;
+                let pds = &mut self.pane_settings[self.active_pane];
+                if pds.view_mode == ViewMode::Ghosted {
+                    pds.view_mode = pds.prev_non_ghosted_mode;
                 } else {
-                    self.display.prev_non_ghosted_mode = self.display.view_mode;
-                    self.display.ghosted_wireframe = matches!(
-                        self.display.view_mode,
+                    pds.prev_non_ghosted_mode = pds.view_mode;
+                    pds.ghosted_wireframe = matches!(
+                        pds.view_mode,
                         ViewMode::ShadedWireframe | ViewMode::WireframeOnly
                     );
-                    self.display.view_mode = ViewMode::Ghosted;
+                    pds.view_mode = ViewMode::Ghosted;
                 }
             }
             KeyCode::KeyS => {
                 if self.modifiers.shift_key() {
                     self.save_preferences();
                 } else {
-                    self.display.view_mode = ViewMode::Shaded;
+                    self.pane_settings[self.active_pane].view_mode = ViewMode::Shaded;
                 }
             }
             KeyCode::KeyC => {
@@ -207,19 +211,23 @@ impl State {
                 }
             }
             KeyCode::KeyA => {
+                let pds = &mut self.pane_settings[self.active_pane];
                 if self.modifiers.shift_key() {
-                    self.display.show_local_axes = !self.display.show_local_axes;
-                    let msg = if self.display.show_local_axes {
+                    pds.show_local_axes = !pds.show_local_axes;
+                    let msg = if pds.show_local_axes {
                         "Local Axes: On"
                     } else {
                         "Local Axes: Off"
                     };
                     self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 } else {
-                    self.display.show_axis_gizmo = !self.display.show_axis_gizmo;
+                    pds.show_axis_gizmo = !pds.show_axis_gizmo;
                 }
             }
-            KeyCode::KeyG => self.display.show_grid = !self.display.show_grid,
+            KeyCode::KeyG => {
+                let pds = &mut self.pane_settings[self.active_pane];
+                pds.show_grid = !pds.show_grid;
+            }
             KeyCode::KeyI => self.toggle_ibl(),
             KeyCode::KeyB => {
                 if self.modifiers.shift_key() {
@@ -241,7 +249,8 @@ impl State {
                 }
             }
             KeyCode::KeyN => {
-                self.display.normals_mode = match self.display.normals_mode {
+                let pds = &mut self.pane_settings[self.active_pane];
+                pds.normals_mode = match pds.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
                     NormalsMode::Face => NormalsMode::Vertex,
                     NormalsMode::Vertex => NormalsMode::FaceAndVertex,
@@ -250,7 +259,8 @@ impl State {
             }
             KeyCode::KeyV => self.display.turntable_active = !self.display.turntable_active,
             KeyCode::KeyU => {
-                self.display.uv_mode = match self.display.uv_mode {
+                let pds = &mut self.pane_settings[self.active_pane];
+                pds.uv_mode = match pds.uv_mode {
                     UvMode::Off => UvMode::Gradient,
                     UvMode::Gradient => UvMode::Checker,
                     UvMode::Checker => UvMode::Off,
@@ -278,34 +288,45 @@ impl State {
                         self.secondary_cam = None;
                     }
                 }
+                if self.active_pane == 1 {
+                    self.pane_settings[0] = self.pane_settings[1].clone();
+                }
                 self.active_pane = 0;
                 self.display.layout = ViewLayout::Single;
+                let (tw, th) = self.target_dimensions();
+                self.resize_render_targets(tw, th);
                 self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F2 => {
-                if self.display.layout == ViewLayout::Single
-                    && let Some(scene) = &self.scene
-                {
-                    self.secondary_cam = Some(
-                        scene
-                            .cam
-                            .clone_with_new_resources(&self.device, &self.layouts.camera),
-                    );
+                if self.display.layout == ViewLayout::Single {
+                    self.pane_settings[1] = self.pane_settings[0].clone();
+                    if let Some(scene) = &self.scene {
+                        self.secondary_cam = Some(
+                            scene
+                                .cam
+                                .clone_with_new_resources(&self.device, &self.layouts.camera),
+                        );
+                    }
                 }
                 self.display.layout = ViewLayout::SplitVertical;
+                let (tw, th) = self.target_dimensions();
+                self.resize_render_targets(tw, th);
                 self.gui.set_toast("Split Vertical", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F3 => {
-                if self.display.layout == ViewLayout::Single
-                    && let Some(scene) = &self.scene
-                {
-                    self.secondary_cam = Some(
-                        scene
-                            .cam
-                            .clone_with_new_resources(&self.device, &self.layouts.camera),
-                    );
+                if self.display.layout == ViewLayout::Single {
+                    self.pane_settings[1] = self.pane_settings[0].clone();
+                    if let Some(scene) = &self.scene {
+                        self.secondary_cam = Some(
+                            scene
+                                .cam
+                                .clone_with_new_resources(&self.device, &self.layouts.camera),
+                        );
+                    }
                 }
                 self.display.layout = ViewLayout::SplitHorizontal;
+                let (tw, th) = self.target_dimensions();
+                self.resize_render_targets(tw, th);
                 self.gui.set_toast("Split Horizontal", [0.0, 0.4, 0.0, 1.0]);
             }
             _ => {
@@ -393,11 +414,11 @@ impl State {
     }
 
     pub(super) fn apply_background_change(&mut self) {
-        self.update_wireframe_params();
-        self.update_grid_color();
-        let (top, bottom) = self.display.background_mode.sky_colors();
-        self.ibl_res.ibl = IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
-        self.rebuild_light_bind_group();
+        if self.active_pane == 0 {
+            let (top, bottom) = self.pane_settings[0].background_mode.sky_colors();
+            self.ibl_res.ibl = IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+            self.rebuild_light_bind_group();
+        }
     }
 
     pub(super) fn apply_composite_params(&self) {
@@ -409,7 +430,8 @@ impl State {
     }
 
     fn cycle_background(&mut self) {
-        self.display.background_mode = self.display.background_mode.next();
+        let pds = &mut self.pane_settings[self.active_pane];
+        pds.background_mode = pds.background_mode.next();
         self.apply_background_change();
     }
 
@@ -418,12 +440,13 @@ impl State {
             .scene
             .as_ref()
             .is_some_and(|s| s.model.meshes.len() > 1);
-        self.display.bounds_mode = match self.display.bounds_mode {
+        let pds = &mut self.pane_settings[self.active_pane];
+        pds.bounds_mode = match pds.bounds_mode {
             BoundsMode::Off => BoundsMode::WholeModel,
             BoundsMode::WholeModel if is_multi => BoundsMode::PerMesh,
             BoundsMode::WholeModel | BoundsMode::PerMesh => BoundsMode::Off,
         };
-        let msg = match self.display.bounds_mode {
+        let msg = match pds.bounds_mode {
             BoundsMode::Off => "Bounds: Off",
             BoundsMode::WholeModel => "Bounds: Whole Model",
             BoundsMode::PerMesh => "Bounds: Per Mesh",
@@ -432,21 +455,22 @@ impl State {
     }
 
     fn save_preferences(&mut self) {
-        self.preferences.display.background = self.display.background_mode;
-        self.preferences.display.view_mode = self.display.view_mode;
-        self.preferences.display.normals_mode = self.display.normals_mode;
-        self.preferences.display.grid_visible = self.display.show_grid;
-        self.preferences.display.axis_gizmo_visible = self.display.show_axis_gizmo;
-        self.preferences.display.local_axes_visible = self.display.show_local_axes;
+        let pds = &self.pane_settings[0];
+        self.preferences.display.background = pds.background_mode;
+        self.preferences.display.view_mode = pds.view_mode;
+        self.preferences.display.normals_mode = pds.normals_mode;
+        self.preferences.display.grid_visible = pds.show_grid;
+        self.preferences.display.axis_gizmo_visible = pds.show_axis_gizmo;
+        self.preferences.display.local_axes_visible = pds.show_local_axes;
         self.preferences.display.bloom_enabled = self.post.bloom_enabled;
         self.preferences.display.ssao_enabled = self.post.ssao_enabled;
-        self.preferences.display.uv_mode = self.display.uv_mode;
+        self.preferences.display.uv_mode = pds.uv_mode;
         self.preferences.display.turntable_active = self.display.turntable_active;
         self.preferences.display.turntable_rpm = self.display.turntable_rpm;
         if let Some(scene) = &self.scene {
             self.preferences.display.projection_mode = scene.cam.camera.projection;
         }
-        self.preferences.rendering.wireframe_line_weight = self.display.line_weight;
+        self.preferences.rendering.wireframe_line_weight = pds.line_weight;
         self.preferences.lighting.lock = self.display.lights_locked;
         self.preferences.display.ibl_mode = self.ibl_res.ibl_mode;
         self.preferences.display.tone_mode = self.post.tone_mode;
