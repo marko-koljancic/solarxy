@@ -863,7 +863,7 @@ fn draw_hud_overlays(
             .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -8.0])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.set_max_width(ctx.screen_rect().width().min(900.0));
+                ui.set_max_width(ctx.content_rect().width().min(900.0));
                 overlay_frame().show(ui, |ui| {
                     ui.label(
                         egui::RichText::new(hints)

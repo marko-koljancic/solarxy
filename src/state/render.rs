@@ -42,9 +42,7 @@ impl State {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        if pds.background_mode == BackgroundMode::Gradient {
-            self.draw_background_gradient(&mut pass);
-        }
+        self.draw_background_gradient(&mut pass);
     }
 
     pub(super) fn render_gbuffer_pass(

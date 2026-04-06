@@ -540,18 +540,17 @@ impl State {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
         self.poll_overlap_stats();
 
         let panes = self.compute_panes();
         let is_split = panes.len() > 1;
 
         for (i, pane) in panes.iter().enumerate() {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Pane Encoder"),
+                });
             let pane_aspect = pane.width / pane.height;
 
             let cam_data = if i == 0 {
@@ -581,6 +580,7 @@ impl State {
                     viewport,
                     i == 0,
                 );
+                self.queue.submit(std::iter::once(encoder.finish()));
                 continue;
             };
 
@@ -781,7 +781,14 @@ impl State {
                 viewport,
                 i == 0,
             );
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("UI Encoder"),
+            });
 
         let divider_rect = self.compute_divider_rect();
 
