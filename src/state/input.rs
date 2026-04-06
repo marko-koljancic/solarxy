@@ -123,7 +123,17 @@ impl State {
                 }
             }
             KeyCode::KeyL => {
-                if self.modifiers.shift_key() {
+                if self.modifiers.control_key() {
+                    if self.display.layout != ViewLayout::Single {
+                        self.cameras_linked = !self.cameras_linked;
+                        let msg = if self.cameras_linked {
+                            "Cameras linked"
+                        } else {
+                            "Cameras independent"
+                        };
+                        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    }
+                } else if self.modifiers.shift_key() {
                     self.display.lights_locked = !self.display.lights_locked;
                     let msg = if self.display.lights_locked {
                         "Lights locked"
@@ -276,7 +286,20 @@ impl State {
                     NormalsMode::FaceAndVertex => NormalsMode::Off,
                 };
             }
-            KeyCode::KeyV => self.display.turntable_active = !self.display.turntable_active,
+            KeyCode::KeyV => {
+                if self.modifiers.shift_key() {
+                    let pds = &mut self.pane_settings[self.active_pane];
+                    pds.show_validation = !pds.show_validation;
+                    let msg = if pds.show_validation {
+                        "Validation on"
+                    } else {
+                        "Validation off"
+                    };
+                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                } else {
+                    self.display.turntable_active = !self.display.turntable_active;
+                }
+            }
             KeyCode::KeyU => {
                 let pds = &mut self.pane_settings[self.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {

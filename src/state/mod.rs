@@ -811,6 +811,31 @@ impl State {
 
         let ap = self.active_pane;
         let pds = &mut self.pane_settings[ap];
+
+        let hud_pane_label = {
+            let pane_mode_str = match pds.pane_mode {
+                PaneMode::Scene3D => "Scene3D",
+                PaneMode::UvMap => "UV Map",
+            };
+            if is_split {
+                let mode_detail = if pds.pane_mode == PaneMode::Scene3D {
+                    format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
+                } else {
+                    pane_mode_str.to_string()
+                };
+                format!("Pane {} \u{00b7} {}", ap + 1, mode_detail)
+            } else if pds.pane_mode == PaneMode::Scene3D {
+                format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
+            } else {
+                pane_mode_str.to_string()
+            }
+        };
+        let hud_cameras_linked = if is_split {
+            Some(self.cameras_linked)
+        } else {
+            None
+        };
+
         let mut sidebar = SidebarState {
             view_mode: &mut pds.view_mode,
             normals_mode: &mut pds.normals_mode,
@@ -840,6 +865,8 @@ impl State {
             uv_overlap_pct: self.uv_overlap.overlap_pct,
             show_validation: &mut pds.show_validation,
             validation_report: self.scene.as_ref().map(|s| &s.validation),
+            hud_pane_label,
+            hud_cameras_linked,
         };
         let changes = self.gui.render_ui(
             &mut sidebar,

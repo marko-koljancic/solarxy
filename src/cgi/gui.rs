@@ -78,6 +78,8 @@ pub(crate) struct SidebarState<'a> {
     pub uv_overlap_pct: Option<f32>,
     pub show_validation: &'a mut bool,
     pub validation_report: Option<&'a crate::validation::ValidationReport>,
+    pub hud_pane_label: String,
+    pub hud_cameras_linked: Option<bool>,
 }
 
 #[derive(Default)]
@@ -320,6 +322,12 @@ impl EguiRenderer {
         let toast = self.toast.as_ref();
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
+        let pane_label = sidebar.hud_pane_label.clone();
+        let cameras_linked = sidebar.hud_cameras_linked;
+        let validation_counts = sidebar
+            .validation_report
+            .map(|r| (r.error_count(), r.warning_count()))
+            .unwrap_or((0, 0));
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             draw_sidebar(ctx, sidebar, sidebar_visible, &mut stats_visible, has_model);
@@ -335,6 +343,9 @@ impl EguiRenderer {
                 has_model,
                 hints_visible,
                 backend_info,
+                &pane_label,
+                cameras_linked,
+                validation_counts,
             );
             if let Some(rect) = divider_rect {
                 let painter = ctx.layer_painter(egui::LayerId::background());
@@ -551,7 +562,7 @@ fn draw_sidebar(
                             );
                         }
                         if s.is_split {
-                            ui.checkbox(s.cameras_linked, "Link cameras");
+                            checkbox_with_tooltip(ui, s.cameras_linked, "Link cameras", "Ctrl+L");
                         }
                     });
 
@@ -582,7 +593,7 @@ fn draw_sidebar(
                     egui::CollapsingHeader::new("Validation")
                         .default_open(false)
                         .show(ui, |ui| {
-                            ui.checkbox(s.show_validation, "Show overlay");
+                            checkbox_with_tooltip(ui, s.show_validation, "Show overlay", "Shift+V");
                             if report.is_clean() {
                                 ui.label("No issues found");
                             } else {
@@ -779,6 +790,9 @@ fn draw_hud_overlays(
     has_model: bool,
     hints_visible: bool,
     backend_info: &str,
+    pane_label: &str,
+    cameras_linked: Option<bool>,
+    validation_counts: (usize, usize),
 ) {
     egui::Area::new(egui::Id::new("fps_overlay"))
         .anchor(egui::Align2::RIGHT_TOP, [-8.0, 8.0])
@@ -796,6 +810,49 @@ fn draw_hud_overlays(
                             .small()
                             .color(egui::Color32::from_white_alpha(160)),
                     );
+                }
+                if has_model && !pane_label.is_empty() {
+                    ui.label(
+                        egui::RichText::new(pane_label)
+                            .small()
+                            .color(egui::Color32::from_white_alpha(180)),
+                    );
+                }
+                if let Some(linked) = cameras_linked {
+                    let text = if linked {
+                        "Cameras: Linked"
+                    } else {
+                        "Cameras: Independent"
+                    };
+                    ui.label(
+                        egui::RichText::new(text)
+                            .small()
+                            .color(egui::Color32::from_white_alpha(140)),
+                    );
+                }
+                let (errors, warnings) = validation_counts;
+                if errors > 0 || warnings > 0 {
+                    let mut parts = Vec::new();
+                    if errors > 0 {
+                        parts.push(format!(
+                            "\u{2715} {} error{}",
+                            errors,
+                            if errors == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if warnings > 0 {
+                        parts.push(format!(
+                            "\u{26a0} {} warning{}",
+                            warnings,
+                            if warnings == 1 { "" } else { "s" }
+                        ));
+                    }
+                    let color = if errors > 0 {
+                        egui::Color32::from_rgb(255, 100, 100)
+                    } else {
+                        egui::Color32::from_rgb(255, 200, 80)
+                    };
+                    ui.label(egui::RichText::new(parts.join("  ")).small().color(color));
                 }
             });
         });
@@ -852,10 +909,10 @@ fn draw_hud_overlays(
             "W Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
              I IBL  E/Shift+E Exposure\n\
              Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
-             Shift+I IBL Mode\n\
+             Shift+I IBL Mode  Shift+V Valid\n\
              Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
              C Cap  H Frame  Tab Panel  ? Hints\n\
-             F1 Single  F2 V-Split  F3 H-Split"
+             F1 Single  F2 V-Split  F3 H-Split  Ctrl+L Link"
         } else {
             "? Hints"
         };
