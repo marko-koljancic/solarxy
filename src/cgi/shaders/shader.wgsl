@@ -7,7 +7,7 @@ struct Camera {
     near: f32,
     far: f32,
     inspection_mode: u32,
-    _pad: f32,
+    texel_density_target: f32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -193,7 +193,42 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let r = fract(sin(id * 43758.5453) * 1.0);
         let g = fract(sin(id * 22578.1459) * 1.0);
         let b = fract(sin(id * 19642.3721) * 1.0);
-        return vec4(r, g, b, albedo_sample.a);
+        return vec4(r, g, b, 1.0);
+    }
+
+    if camera.inspection_mode == 2u {
+        let ddx = dpdx(in.tex_coords);
+        let ddy = dpdy(in.tex_coords);
+        let density = length(ddx) * length(ddy);
+
+        if density == 0.0 {
+            return vec4(0.5, 0.5, 0.5, 1.0);
+        }
+
+        let td_target = max(camera.texel_density_target, 0.001);
+        let t = clamp(log2(density / td_target) / 2.0, -1.0, 1.0);
+
+        var color: vec3<f32>;
+        if t < 0.0 {
+            color = mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), -t);
+        } else {
+            color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);
+        }
+        return vec4(color, 1.0);
+    }
+
+    if camera.inspection_mode == 3u {
+        let z = in.clip_position.z;
+        var linear_z: f32;
+        if camera.proj[3][3] == 0.0 {
+            linear_z = camera.near * camera.far
+                / (camera.far - z * (camera.far - camera.near));
+        } else {
+            linear_z = camera.near + z * (camera.far - camera.near);
+        }
+        let normalized = 1.0
+            - saturate((linear_z - camera.near) / (camera.far - camera.near));
+        return vec4(vec3(normalized), 1.0);
     }
 
     let n_sample = textureSample(t_normal, s_normal, in.tex_coords);

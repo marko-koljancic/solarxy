@@ -111,7 +111,7 @@ pub struct CameraUniform {
     near: f32,
     far: f32,
     inspection_mode: u32,
-    _pad: f32,
+    texel_density_target: f32,
 }
 
 impl Default for CameraUniform {
@@ -133,7 +133,7 @@ impl CameraUniform {
             near: 0.01,
             far: 100.0,
             inspection_mode: 0,
-            _pad: 0.0,
+            texel_density_target: 1.0,
         }
     }
 

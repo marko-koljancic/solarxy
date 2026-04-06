@@ -245,6 +245,7 @@ impl State {
                     show_axis_gizmo: preferences.display.axis_gizmo_visible,
                     show_local_axes: preferences.display.local_axes_visible,
                     inspection_mode: preferences.display.inspection_mode,
+                    texel_density_target: preferences.display.texel_density_target,
                 };
                 [pds.clone(), pds]
             },

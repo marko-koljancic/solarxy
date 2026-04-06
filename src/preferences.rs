@@ -221,15 +221,24 @@ pub enum InspectionMode {
     #[default]
     Shaded,
     MaterialId,
+    TexelDensity,
+    Depth,
 }
 
 impl InspectionMode {
-    pub const ALL: &[Self] = &[Self::Shaded, Self::MaterialId];
+    pub const ALL: &[Self] = &[
+        Self::Shaded,
+        Self::MaterialId,
+        Self::TexelDensity,
+        Self::Depth,
+    ];
 
     pub fn as_u32(self) -> u32 {
         match self {
             Self::Shaded => 0,
             Self::MaterialId => 1,
+            Self::TexelDensity => 2,
+            Self::Depth => 3,
         }
     }
 }
@@ -239,6 +248,8 @@ impl std::fmt::Display for InspectionMode {
         match self {
             Self::Shaded => write!(f, "Shaded"),
             Self::MaterialId => write!(f, "Material ID"),
+            Self::TexelDensity => write!(f, "Texel Density"),
+            Self::Depth => write!(f, "Depth"),
         }
     }
 }
@@ -328,9 +339,15 @@ pub struct DisplayPrefs {
     pub turntable_rpm: f32,
     #[serde(default)]
     pub inspection_mode: InspectionMode,
+    #[serde(default = "default_texel_density_target")]
+    pub texel_density_target: f32,
 }
 
 fn default_exposure() -> f32 {
+    1.0
+}
+
+fn default_texel_density_target() -> f32 {
     1.0
 }
 
@@ -416,6 +433,7 @@ impl Default for DisplayPrefs {
             local_axes_visible: false,
             turntable_rpm: 5.0,
             inspection_mode: InspectionMode::Shaded,
+            texel_density_target: 1.0,
         }
     }
 }
@@ -534,7 +552,8 @@ mod tests {
                 exposure: 1.5,
                 local_axes_visible: true,
                 turntable_rpm: 30.0,
-                inspection_mode: InspectionMode::MaterialId,
+                inspection_mode: InspectionMode::TexelDensity,
+                texel_density_target: 2.5,
             },
             rendering: RenderingPrefs {
                 wireframe_line_weight: LineWeight::Bold,

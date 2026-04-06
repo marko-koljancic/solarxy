@@ -344,6 +344,7 @@ pub(super) struct PaneDisplaySettings {
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
     pub inspection_mode: InspectionMode,
+    pub texel_density_target: f32,
 }
 
 pub(super) struct DisplaySettings {
@@ -595,8 +596,12 @@ impl State {
                 self.secondary_cam.as_ref().map(|c| &c.buffer)
             };
             if let Some(buf) = cam_buf {
-                let mode = pds.inspection_mode.as_u32();
-                self.queue.write_buffer(buf, 280, bytemuck::bytes_of(&mode));
+                let data: [u32; 2] = [
+                    pds.inspection_mode.as_u32(),
+                    pds.texel_density_target.to_bits(),
+                ];
+                self.queue
+                    .write_buffer(buf, 280, bytemuck::cast_slice(&data));
             }
 
             if (i == 0 || !self.display.lights_locked)
@@ -684,6 +689,7 @@ impl State {
             show_axis_gizmo: &mut pds.show_axis_gizmo,
             show_local_axes: &mut pds.show_local_axes,
             inspection_mode: &mut pds.inspection_mode,
+            texel_density_target: &mut pds.texel_density_target,
             turntable_active: &mut self.display.turntable_active,
             turntable_rpm: &mut self.display.turntable_rpm,
             lights_locked: &mut self.display.lights_locked,

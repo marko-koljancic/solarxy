@@ -278,6 +278,18 @@ impl State {
                 self.gui
                     .set_toast("Inspection: Material ID", [0.0, 0.4, 0.0, 1.0]);
             }
+            KeyCode::Digit4 => {
+                let pds = &mut self.pane_settings[self.active_pane];
+                pds.inspection_mode = InspectionMode::TexelDensity;
+                self.gui
+                    .set_toast("Inspection: Texel Density", [0.0, 0.4, 0.0, 1.0]);
+            }
+            KeyCode::Digit5 => {
+                let pds = &mut self.pane_settings[self.active_pane];
+                pds.inspection_mode = InspectionMode::Depth;
+                self.gui
+                    .set_toast("Inspection: Depth", [0.0, 0.4, 0.0, 1.0]);
+            }
             KeyCode::F1 => {
                 if self.display.layout != ViewLayout::Single {
                     if self.active_pane == 1 {
@@ -488,6 +500,7 @@ impl State {
         self.preferences.display.tone_mode = self.post.tone_mode;
         self.preferences.display.exposure = self.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
+        self.preferences.display.texel_density_target = pds.texel_density_target;
 
         match preferences::save(&self.preferences) {
             Ok(()) => self

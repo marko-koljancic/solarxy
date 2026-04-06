@@ -59,6 +59,7 @@ pub(crate) struct SidebarState<'a> {
     pub show_axis_gizmo: &'a mut bool,
     pub show_local_axes: &'a mut bool,
     pub inspection_mode: &'a mut InspectionMode,
+    pub texel_density_target: &'a mut f32,
     pub turntable_active: &'a mut bool,
     pub turntable_rpm: &'a mut f32,
     pub lights_locked: &'a mut bool,
@@ -455,10 +456,19 @@ fn draw_sidebar(
                         combo_with_tooltip(
                             ui,
                             "Inspection",
-                            "1\u{2013}2",
+                            "1\u{2013}5",
                             s.inspection_mode,
                             InspectionMode::ALL,
                         );
+                        if *s.inspection_mode == InspectionMode::TexelDensity {
+                            ui.indent("texel_density_indent", |ui| {
+                                ui.add(
+                                    egui::Slider::new(s.texel_density_target, 0.01..=10.0)
+                                        .logarithmic(true)
+                                        .text("Target"),
+                                );
+                            });
+                        }
                         combo_with_tooltip(ui, "Normals", "N", s.normals_mode, NormalsMode::ALL);
                         combo_with_tooltip(ui, "UV", "U", s.uv_mode, UvMode::ALL);
                         combo_with_tooltip(ui, "Weight", "Shift+W", s.line_weight, LineWeight::ALL);
@@ -733,7 +743,7 @@ fn draw_hud_overlays(
 
     if hints_visible {
         let hints = if has_model {
-            "W Mode  1-2 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+            "W Mode  1,2,4,5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
              I IBL  E/Shift+E Exposure\n\
              Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
              Shift+I IBL Mode\n\
