@@ -121,6 +121,9 @@ impl Default for CameraUniform {
 }
 
 impl CameraUniform {
+    pub const SIZE: usize = std::mem::size_of::<Self>();
+    pub const INSPECTION_OFFSET: u64 = std::mem::offset_of!(Self, inspection_mode) as u64;
+
     pub fn new() -> Self {
         use cgmath::SquareMatrix;
         let identity: [[f32; 4]; 4] = cgmath::Matrix4::identity().into();

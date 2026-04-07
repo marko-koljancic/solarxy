@@ -29,7 +29,7 @@ impl CompositeState {
         let params_data = build_params(bloom_enabled, ssao_enabled, tone_mode, exposure);
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Composite Params Uniform"),
-            contents: &params_data,
+            contents: bytemuck::bytes_of(&params_data),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -126,9 +126,20 @@ impl CompositeState {
         tone_mode: ToneMode,
         exposure: f32,
     ) {
-        let buf = build_params(bloom_enabled, ssao_enabled, tone_mode, exposure);
-        queue.write_buffer(&self.params_buffer, 0, &buf);
+        let params = build_params(bloom_enabled, ssao_enabled, tone_mode, exposure);
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CompositeParams {
+    bloom_strength: f32,
+    bloom_enabled: u32,
+    ssao_enabled: u32,
+    ssao_strength: f32,
+    tone_mode: u32,
+    exposure: f32,
 }
 
 fn build_params(
@@ -136,17 +147,15 @@ fn build_params(
     ssao_enabled: bool,
     tone_mode: ToneMode,
     exposure: f32,
-) -> [u8; 24] {
-    let mut buf = [0u8; 24];
-    buf[0..4].copy_from_slice(&BLOOM_STRENGTH.to_le_bytes());
-    let bloom_flag: u32 = u32::from(bloom_enabled);
-    buf[4..8].copy_from_slice(&bloom_flag.to_le_bytes());
-    let ssao_flag: u32 = u32::from(ssao_enabled);
-    buf[8..12].copy_from_slice(&ssao_flag.to_le_bytes());
-    buf[12..16].copy_from_slice(&SSAO_STRENGTH.to_le_bytes());
-    buf[16..20].copy_from_slice(&tone_mode.as_u32().to_le_bytes());
-    buf[20..24].copy_from_slice(&exposure.to_le_bytes());
-    buf
+) -> CompositeParams {
+    CompositeParams {
+        bloom_strength: BLOOM_STRENGTH,
+        bloom_enabled: u32::from(bloom_enabled),
+        ssao_enabled: u32::from(ssao_enabled),
+        ssao_strength: SSAO_STRENGTH,
+        tone_mode: tone_mode.as_u32(),
+        exposure,
+    }
 }
 
 fn create_bind_group(

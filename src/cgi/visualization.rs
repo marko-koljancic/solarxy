@@ -17,6 +17,10 @@ pub(crate) struct GridUniform {
     pub(crate) color: [f32; 3],
 }
 
+impl GridUniform {
+    pub const COLOR_OFFSET: u64 = std::mem::offset_of!(Self, color) as u64;
+}
+
 pub(crate) struct VisualizationState {
     pub(crate) grid_mesh: model::Mesh,
     pub(crate) grid_bind_group: wgpu::BindGroup,

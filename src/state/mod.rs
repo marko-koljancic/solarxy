@@ -13,7 +13,7 @@ pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, Vi
 
 use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::bloom::BloomState;
-use crate::cgi::camera::Camera;
+use crate::cgi::camera::{Camera, CameraUniform};
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::composite::CompositeState;
 use crate::cgi::gui::EguiRenderer;
@@ -25,7 +25,7 @@ use crate::cgi::resources::{self, ModelStats};
 use crate::cgi::shadow::ShadowState;
 use crate::cgi::ssao::SsaoState;
 use crate::cgi::texture::{self, SharedSamplers};
-use crate::cgi::visualization::VisualizationState;
+use crate::cgi::visualization::{GridUniform, VisualizationState};
 use crate::preferences::{
     self, BackgroundMode, IblMode, InspectionMode, PaneMode, Preferences, UvMapBackground, ViewMode,
 };
@@ -593,8 +593,11 @@ impl State {
         self.write_gradient_colors_for(pds);
         if let Some(scene) = &self.scene {
             let color = pds.background_mode.grid_color();
-            self.queue
-                .write_buffer(&scene.vis.grid_uniform_buf, 4, bytemuck::cast_slice(&color));
+            self.queue.write_buffer(
+                &scene.vis.grid_uniform_buf,
+                GridUniform::COLOR_OFFSET,
+                bytemuck::cast_slice(&color),
+            );
         }
 
         let cam_buf = if i == 0 {
@@ -607,8 +610,11 @@ impl State {
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
             ];
-            self.queue
-                .write_buffer(buf, 280, bytemuck::cast_slice(&data));
+            self.queue.write_buffer(
+                buf,
+                CameraUniform::INSPECTION_OFFSET,
+                bytemuck::cast_slice(&data),
+            );
         }
     }
 

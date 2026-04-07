@@ -214,7 +214,7 @@ impl State {
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Dummy Camera Buffer for SSAO resize"),
-                    contents: &[0u8; 288],
+                    contents: &[0u8; CameraUniform::SIZE],
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
             self.renderer.post.ssao.resize(

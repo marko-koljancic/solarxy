@@ -188,7 +188,7 @@ impl State {
 
         let dummy_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dummy Camera Buffer for SSAO"),
-            contents: &[0u8; 288],
+            contents: &[0u8; CameraUniform::SIZE],
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let ssao = SsaoState::new(
