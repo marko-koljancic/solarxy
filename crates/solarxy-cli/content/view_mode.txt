@@ -10,21 +10,21 @@ The model path is optional — you can also drop a file onto the window.
 
 ## DISPLAY
 
-[W]  Cycle view mode (Shaded > Shaded+Wire > Wireframe > Shaded)
-[S]  Switch to Shaded mode
-[X]  Toggle Ghosted mode
+[W]        Cycle view mode (Shaded > Shaded+Wire > Wireframe > Shaded)
+[S]        Switch to Shaded mode
+[X]        Toggle Ghosted mode
 [Shift+W]  Cycle wireframe line weight (Light > Medium > Bold)
-[N]  Cycle normals display (Off > Face > Vertex > Face+Vertex)
-[U]  Cycle UV overlay (Off > Gradient > Checker)
-[B]  Cycle background (White > Gradient > Dark Gray > Black)
+[N]        Cycle normals display (Off > Face > Vertex > Face+Vertex)
+[U]        Cycle UV overlay (Off > Gradient > Checker)
+[B]        Cycle background (White > Gradient > Dark Gray > Black)
 [Shift+B]  Cycle bounding box display (Off > Model > Per Mesh)
 [Shift+M]  Toggle bloom
 [Shift+O]  Toggle SSAO (screen-space ambient occlusion)
-[G]  Toggle grid
-[A]  Toggle axis gizmo
+[G]        Toggle grid
+[A]        Toggle axis gizmo
 [Shift+A]  Toggle local axes (model/mesh centers)
-[V]  Toggle turntable auto-rotation
-[I]  Toggle IBL (image-based lighting)
+[V]        Toggle turntable auto-rotation
+[I]        Toggle IBL (image-based lighting)
 [Shift+T]  Cycle tone mapping (None > Linear > Reinhard > ACES Filmic)
 [Shift+I]  Cycle IBL mode (Diffuse / Full)
 [E / Shift+E]  Increase / decrease exposure
@@ -81,13 +81,13 @@ UV overlap regions are highlighted in semi-transparent red.
 
 ## OTHER
 
-[C]  Capture screenshot (PNG)
+[C]        Capture screenshot (PNG)
 [Shift+S]  Save current settings as preferences
 [Shift+L]  Toggle lights lock (lights follow camera)
 [Shift+V]  Toggle validation overlay
-[Tab]  Toggle sidebar panel
-[?]  Toggle keyboard hints overlay
-[Esc]  Exit viewer
+[Tab]      Toggle sidebar panel
+[?]        Toggle keyboard hints overlay
+[Esc]      Exit viewer
 
 
 ## MOUSE
