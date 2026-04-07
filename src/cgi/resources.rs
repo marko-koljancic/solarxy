@@ -537,21 +537,20 @@ fn load_or_create_orm(
             return mr_tex;
         }
 
-        if let Some(ref occ_data) = mat.occlusion_texture_data {
-            if let Some(composited) =
+        if let Some(ref occ_data) = mat.occlusion_texture_data
+            && let Some(composited) =
                 composite_orm_pixels(mat.metallic_roughness_texture_data.as_ref(), occ_data)
-            {
-                return texture::Texture::from_raw_rgba(
-                    device,
-                    queue,
-                    &composited.pixels,
-                    composited.width,
-                    composited.height,
-                    Some(&mat.name),
-                    true,
-                )
-                .unwrap_or(mr_tex);
-            }
+        {
+            return texture::Texture::from_raw_rgba(
+                device,
+                queue,
+                &composited.pixels,
+                composited.width,
+                composited.height,
+                Some(&mat.name),
+                true,
+            )
+            .unwrap_or(mr_tex);
         }
     }
 

@@ -40,7 +40,7 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct PaneDisplaySettings {
     pub view_mode: ViewMode,
     pub prev_non_ghosted_mode: ViewMode,

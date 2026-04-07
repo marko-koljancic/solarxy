@@ -385,7 +385,7 @@ impl State {
                         show_uv_overlap: false,
                         show_validation: false,
                     };
-                    [pds.clone(), pds]
+                    [pds, pds]
                 },
                 display: DisplaySettings {
                     turntable_active: preferences.display.turntable_active,

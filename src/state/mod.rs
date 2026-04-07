@@ -3,7 +3,7 @@ mod init;
 mod input;
 pub(crate) mod renderer;
 mod update;
-mod view_state;
+pub(crate) mod view_state;
 
 pub(super) use renderer::{
     GradientUniform, IblResources, PostProcessing, Renderer, RenderTargets, UvOverlapResources,
@@ -438,7 +438,7 @@ impl State {
                 .or(self.scene.as_ref().map(|s| s.cam.camera))
         };
 
-        let pds = self.view.pane_settings[i.min(1)].clone();
+        let pds = self.view.pane_settings[i.min(1)];
 
         let Some(cam_data) = cam_data else {
             self.renderer.render_empty_pass(&mut encoder, &pds);
@@ -685,7 +685,7 @@ impl State {
         is_split: bool,
         frame_ms: f32,
     ) {
-        use crate::cgi::gui::SidebarState;
+        use crate::cgi::gui::{GuiSnapshot, HudInfo};
 
         let mut encoder = self
             .device
@@ -713,9 +713,9 @@ impl State {
         };
 
         let ap = self.view.active_pane;
-        let pds = &mut self.view.pane_settings[ap];
+        let pds = &self.view.pane_settings[ap];
 
-        let hud_pane_label = {
+        let pane_label = {
             let pane_mode_str = match pds.pane_mode {
                 PaneMode::Scene3D => "Scene3D",
                 PaneMode::UvMap => "UV Map",
@@ -733,46 +733,31 @@ impl State {
                 pane_mode_str.to_string()
             }
         };
-        let hud_cameras_linked = if is_split {
-            Some(self.view.cameras_linked)
-        } else {
-            None
-        };
 
-        let mut sidebar = SidebarState {
-            view_mode: &mut pds.view_mode,
-            normals_mode: &mut pds.normals_mode,
-            background_mode: &mut pds.background_mode,
-            uv_mode: &mut pds.uv_mode,
-            bounds_mode: &mut pds.bounds_mode,
-            line_weight: &mut pds.line_weight,
-            show_grid: &mut pds.show_grid,
-            show_axis_gizmo: &mut pds.show_axis_gizmo,
-            show_local_axes: &mut pds.show_local_axes,
-            inspection_mode: &mut pds.inspection_mode,
-            texel_density_target: &mut pds.texel_density_target,
-            turntable_active: &mut self.view.display.turntable_active,
-            turntable_rpm: &mut self.view.display.turntable_rpm,
-            lights_locked: &mut self.view.display.lights_locked,
-            bloom_enabled: &mut self.renderer.post.bloom_enabled,
-            ssao_enabled: &mut self.renderer.post.ssao_enabled,
-            tone_mode: &mut self.renderer.post.tone_mode,
-            exposure: &mut self.renderer.post.exposure,
-            ibl_mode: &mut self.renderer.ibl_res.ibl_mode,
-            cameras_linked: &mut self.view.cameras_linked,
+        let snap_before = GuiSnapshot::from_state(
+            pds,
+            &self.view.display,
+            &self.renderer.post,
+            self.renderer.ibl_res.ibl_mode,
+            self.view.cameras_linked,
             is_split,
-            pane_mode: &mut pds.pane_mode,
-            uv_bg: &mut pds.uv_bg,
+        );
+        let hud = HudInfo {
+            pane_label,
+            cameras_linked: if is_split {
+                Some(self.view.cameras_linked)
+            } else {
+                None
+            },
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
-            show_uv_overlap: &mut pds.show_uv_overlap,
             uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
-            show_validation: &mut pds.show_validation,
-            validation_report: self.scene.as_ref().map(|s| &s.validation),
-            hud_pane_label,
-            hud_cameras_linked,
         };
-        let changes = self.gui.render_ui(
-            &mut sidebar,
+        let validation_report = self.scene.as_ref().map(|s| &s.validation);
+
+        let snap_after = self.gui.render_ui(
+            snap_before,
+            &hud,
+            validation_report,
             &self.device,
             &self.queue,
             &mut encoder,
@@ -783,6 +768,13 @@ impl State {
             divider_rect,
             active_pane_rect,
         );
+
+        let changes = snap_after.diff(&snap_before);
+        snap_after.write_back_pane(&mut self.view.pane_settings[ap]);
+        snap_after.write_back_display(&mut self.view.display);
+        snap_after.write_back_post(&mut self.renderer.post);
+        self.renderer.ibl_res.ibl_mode = snap_after.ibl_mode;
+        self.view.cameras_linked = snap_after.cameras_linked;
 
         if changes.background_changed {
             self.apply_background_change();

@@ -8,7 +8,8 @@ use crate::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, PaneMode, ToneMode,
     UvMapBackground, UvMode, ViewMode,
 };
-use crate::state::BoundsMode;
+use crate::state::renderer::PostProcessing;
+use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
 
 use super::resources::ModelStats;
 
@@ -49,45 +50,132 @@ pub struct EguiRenderer {
     stats_visible: bool,
 }
 
-pub(crate) struct SidebarState<'a> {
-    pub view_mode: &'a mut ViewMode,
-    pub normals_mode: &'a mut NormalsMode,
-    pub background_mode: &'a mut BackgroundMode,
-    pub uv_mode: &'a mut UvMode,
-    pub bounds_mode: &'a mut BoundsMode,
-    pub line_weight: &'a mut LineWeight,
-    pub show_grid: &'a mut bool,
-    pub show_axis_gizmo: &'a mut bool,
-    pub show_local_axes: &'a mut bool,
-    pub inspection_mode: &'a mut InspectionMode,
-    pub texel_density_target: &'a mut f32,
-    pub turntable_active: &'a mut bool,
-    pub turntable_rpm: &'a mut f32,
-    pub lights_locked: &'a mut bool,
-    pub bloom_enabled: &'a mut bool,
-    pub ssao_enabled: &'a mut bool,
-    pub tone_mode: &'a mut ToneMode,
-    pub exposure: &'a mut f32,
-    pub ibl_mode: &'a mut IblMode,
-    pub cameras_linked: &'a mut bool,
-    pub is_split: bool,
-    pub pane_mode: &'a mut PaneMode,
-    pub uv_bg: &'a mut UvMapBackground,
-    pub has_uvs: bool,
-    pub show_uv_overlap: &'a mut bool,
-    pub uv_overlap_pct: Option<f32>,
-    pub show_validation: &'a mut bool,
-    pub validation_report: Option<&'a crate::validation::ValidationReport>,
-    pub hud_pane_label: String,
-    pub hud_cameras_linked: Option<bool>,
-}
-
 #[derive(Default)]
 pub struct SidebarChanges {
     pub background_changed: bool,
     pub wireframe_params_changed: bool,
     pub composite_params_changed: bool,
     pub ibl_changed: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct GuiSnapshot {
+    pub view_mode: ViewMode,
+    pub normals_mode: NormalsMode,
+    pub background_mode: BackgroundMode,
+    pub uv_mode: UvMode,
+    pub bounds_mode: BoundsMode,
+    pub line_weight: LineWeight,
+    pub show_grid: bool,
+    pub show_axis_gizmo: bool,
+    pub show_local_axes: bool,
+    pub inspection_mode: InspectionMode,
+    pub texel_density_target: f32,
+    pub pane_mode: PaneMode,
+    pub uv_bg: UvMapBackground,
+    pub show_uv_overlap: bool,
+    pub show_validation: bool,
+    pub turntable_active: bool,
+    pub turntable_rpm: f32,
+    pub lights_locked: bool,
+    pub bloom_enabled: bool,
+    pub ssao_enabled: bool,
+    pub tone_mode: ToneMode,
+    pub exposure: f32,
+    pub ibl_mode: IblMode,
+    pub cameras_linked: bool,
+    pub is_split: bool,
+}
+
+impl GuiSnapshot {
+    pub fn from_state(
+        pds: &PaneDisplaySettings,
+        display: &DisplaySettings,
+        post: &PostProcessing,
+        ibl_mode: IblMode,
+        cameras_linked: bool,
+        is_split: bool,
+    ) -> Self {
+        Self {
+            view_mode: pds.view_mode,
+            normals_mode: pds.normals_mode,
+            background_mode: pds.background_mode,
+            uv_mode: pds.uv_mode,
+            bounds_mode: pds.bounds_mode,
+            line_weight: pds.line_weight,
+            show_grid: pds.show_grid,
+            show_axis_gizmo: pds.show_axis_gizmo,
+            show_local_axes: pds.show_local_axes,
+            inspection_mode: pds.inspection_mode,
+            texel_density_target: pds.texel_density_target,
+            pane_mode: pds.pane_mode,
+            uv_bg: pds.uv_bg,
+            show_uv_overlap: pds.show_uv_overlap,
+            show_validation: pds.show_validation,
+            turntable_active: display.turntable_active,
+            turntable_rpm: display.turntable_rpm,
+            lights_locked: display.lights_locked,
+            bloom_enabled: post.bloom_enabled,
+            ssao_enabled: post.ssao_enabled,
+            tone_mode: post.tone_mode,
+            exposure: post.exposure,
+            ibl_mode,
+            cameras_linked,
+            is_split,
+        }
+    }
+
+    pub fn diff(&self, prev: &Self) -> SidebarChanges {
+        let bg_changed = self.background_mode != prev.background_mode;
+        let lw_changed = self.line_weight != prev.line_weight;
+        SidebarChanges {
+            background_changed: bg_changed,
+            wireframe_params_changed: lw_changed && !bg_changed,
+            composite_params_changed: self.bloom_enabled != prev.bloom_enabled
+                || self.ssao_enabled != prev.ssao_enabled
+                || self.tone_mode != prev.tone_mode
+                || (self.exposure - prev.exposure).abs() > f32::EPSILON,
+            ibl_changed: self.ibl_mode != prev.ibl_mode,
+        }
+    }
+
+    pub fn write_back_pane(&self, pds: &mut PaneDisplaySettings) {
+        pds.view_mode = self.view_mode;
+        pds.normals_mode = self.normals_mode;
+        pds.background_mode = self.background_mode;
+        pds.uv_mode = self.uv_mode;
+        pds.bounds_mode = self.bounds_mode;
+        pds.line_weight = self.line_weight;
+        pds.show_grid = self.show_grid;
+        pds.show_axis_gizmo = self.show_axis_gizmo;
+        pds.show_local_axes = self.show_local_axes;
+        pds.inspection_mode = self.inspection_mode;
+        pds.texel_density_target = self.texel_density_target;
+        pds.pane_mode = self.pane_mode;
+        pds.uv_bg = self.uv_bg;
+        pds.show_uv_overlap = self.show_uv_overlap;
+        pds.show_validation = self.show_validation;
+    }
+
+    pub fn write_back_display(&self, display: &mut DisplaySettings) {
+        display.turntable_active = self.turntable_active;
+        display.turntable_rpm = self.turntable_rpm;
+        display.lights_locked = self.lights_locked;
+    }
+
+    pub fn write_back_post(&self, post: &mut PostProcessing) {
+        post.bloom_enabled = self.bloom_enabled;
+        post.ssao_enabled = self.ssao_enabled;
+        post.tone_mode = self.tone_mode;
+        post.exposure = self.exposure;
+    }
+}
+
+pub(crate) struct HudInfo {
+    pub pane_label: String,
+    pub cameras_linked: Option<bool>,
+    pub has_uvs: bool,
+    pub uv_overlap_pct: Option<f32>,
 }
 
 fn apply_theme(ctx: &egui::Context) {
@@ -283,7 +371,9 @@ impl EguiRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_ui(
         &mut self,
-        sidebar: &mut SidebarState,
+        mut snap: GuiSnapshot,
+        hud: &HudInfo,
+        validation_report: Option<&crate::validation::ValidationReport>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -293,15 +383,7 @@ impl EguiRenderer {
         frame_ms: f32,
         divider_rect: Option<egui::Rect>,
         active_pane_rect: Option<egui::Rect>,
-    ) -> SidebarChanges {
-        let prev_bg = *sidebar.background_mode;
-        let prev_line_weight = *sidebar.line_weight;
-        let prev_bloom = *sidebar.bloom_enabled;
-        let prev_ssao = *sidebar.ssao_enabled;
-        let prev_tone = *sidebar.tone_mode;
-        let prev_exposure = *sidebar.exposure;
-        let prev_ibl = *sidebar.ibl_mode;
-
+    ) -> GuiSnapshot {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
         }
@@ -322,15 +404,21 @@ impl EguiRenderer {
         let toast = self.toast.as_ref();
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
-        let pane_label = sidebar.hud_pane_label.clone();
-        let cameras_linked = sidebar.hud_cameras_linked;
-        let validation_counts = sidebar
-            .validation_report
-            .map(|r| (r.error_count(), r.warning_count()))
-            .unwrap_or((0, 0));
+        let pane_label = &hud.pane_label;
+        let cameras_linked = hud.cameras_linked;
+        let validation_counts =
+            validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
         let full_output = self.ctx.run(raw_input, |ctx| {
-            draw_sidebar(ctx, sidebar, sidebar_visible, &mut stats_visible, has_model);
+            draw_sidebar(
+                ctx,
+                &mut snap,
+                sidebar_visible,
+                &mut stats_visible,
+                has_model,
+                hud.uv_overlap_pct,
+                validation_report,
+            );
             if let Some(info) = model_info {
                 draw_stats_window(ctx, info, &mut stats_visible);
             }
@@ -343,7 +431,7 @@ impl EguiRenderer {
                 has_model,
                 hints_visible,
                 backend_info,
-                &pane_label,
+                pane_label,
                 cameras_linked,
                 validation_counts,
             );
@@ -366,7 +454,7 @@ impl EguiRenderer {
                     egui::StrokeKind::Outside,
                 );
             }
-            if *sidebar.pane_mode == PaneMode::UvMap && !sidebar.has_uvs {
+            if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);
                 let painter = ctx.layer_painter(egui::LayerId::new(
                     egui::Order::Foreground,
@@ -428,17 +516,7 @@ impl EguiRenderer {
             self.renderer.free_texture(id);
         }
 
-        let bg_changed = *sidebar.background_mode != prev_bg;
-        let lw_changed = *sidebar.line_weight != prev_line_weight;
-        SidebarChanges {
-            background_changed: bg_changed,
-            wireframe_params_changed: lw_changed && !bg_changed,
-            composite_params_changed: *sidebar.bloom_enabled != prev_bloom
-                || *sidebar.ssao_enabled != prev_ssao
-                || *sidebar.tone_mode != prev_tone
-                || (*sidebar.exposure - prev_exposure).abs() > f32::EPSILON,
-            ibl_changed: *sidebar.ibl_mode != prev_ibl,
-        }
+        snap
     }
 }
 
@@ -469,10 +547,12 @@ fn checkbox_with_tooltip(ui: &mut egui::Ui, value: &mut bool, label: &str, short
 
 fn draw_sidebar(
     ctx: &egui::Context,
-    s: &mut SidebarState,
+    s: &mut GuiSnapshot,
     visible: bool,
     stats_visible: &mut bool,
     has_model: bool,
+    uv_overlap_pct: Option<f32>,
+    validation_report: Option<&crate::validation::ValidationReport>,
 ) {
     egui::SidePanel::left("sidebar")
         .resizable(false)
@@ -486,46 +566,46 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("View")
                     .default_open(true)
                     .show(ui, |ui| {
-                        if *s.pane_mode == PaneMode::UvMap {
+                        if s.pane_mode == PaneMode::UvMap {
                             ui.label("UV Map");
                             combo_with_tooltip(
                                 ui,
                                 "Background",
                                 "U",
-                                s.uv_bg,
+                                &mut s.uv_bg,
                                 UvMapBackground::ALL,
                             );
                             combo_with_tooltip(
                                 ui,
                                 "Weight",
                                 "Shift+W",
-                                s.line_weight,
+                                &mut s.line_weight,
                                 LineWeight::ALL,
                             );
-                            checkbox_with_tooltip(ui, s.show_uv_overlap, "Overlap", "O");
-                            if *s.show_uv_overlap
-                                && let Some(pct) = s.uv_overlap_pct
+                            checkbox_with_tooltip(ui, &mut s.show_uv_overlap, "Overlap", "O");
+                            if s.show_uv_overlap
+                                && let Some(pct) = uv_overlap_pct
                             {
                                 ui.indent("overlap_stats", |ui| {
                                     ui.label(format!("Overlap: {:.1}%", pct));
                                 });
                             }
                             if ui.small_button("Back to 3D (3)").clicked() {
-                                *s.pane_mode = PaneMode::Scene3D;
+                                s.pane_mode = PaneMode::Scene3D;
                             }
                         } else {
-                            combo_with_tooltip(ui, "Mode", "W", s.view_mode, ViewMode::ALL);
+                            combo_with_tooltip(ui, "Mode", "W", &mut s.view_mode, ViewMode::ALL);
                             combo_with_tooltip(
                                 ui,
                                 "Inspection",
                                 "1\u{2013}5",
-                                s.inspection_mode,
+                                &mut s.inspection_mode,
                                 InspectionMode::ALL,
                             );
-                            if *s.inspection_mode == InspectionMode::TexelDensity {
+                            if s.inspection_mode == InspectionMode::TexelDensity {
                                 ui.indent("texel_density_indent", |ui| {
                                     ui.add(
-                                        egui::Slider::new(s.texel_density_target, 0.01..=10.0)
+                                        egui::Slider::new(&mut s.texel_density_target, 0.01..=10.0)
                                             .logarithmic(true)
                                             .text("Target"),
                                     );
@@ -535,34 +615,39 @@ fn draw_sidebar(
                                 ui,
                                 "Normals",
                                 "N",
-                                s.normals_mode,
+                                &mut s.normals_mode,
                                 NormalsMode::ALL,
                             );
-                            combo_with_tooltip(ui, "UV", "U", s.uv_mode, UvMode::ALL);
+                            combo_with_tooltip(ui, "UV", "U", &mut s.uv_mode, UvMode::ALL);
                             combo_with_tooltip(
                                 ui,
                                 "Weight",
                                 "Shift+W",
-                                s.line_weight,
+                                &mut s.line_weight,
                                 LineWeight::ALL,
                             );
                             combo_with_tooltip(
                                 ui,
                                 "Background",
                                 "B",
-                                s.background_mode,
+                                &mut s.background_mode,
                                 BackgroundMode::ALL,
                             );
                             combo_with_tooltip(
                                 ui,
                                 "Bounds",
                                 "Shift+B",
-                                s.bounds_mode,
+                                &mut s.bounds_mode,
                                 BoundsMode::ALL,
                             );
                         }
                         if s.is_split {
-                            checkbox_with_tooltip(ui, s.cameras_linked, "Link cameras", "Ctrl+L");
+                            checkbox_with_tooltip(
+                                ui,
+                                &mut s.cameras_linked,
+                                "Link cameras",
+                                "Ctrl+L",
+                            );
                         }
                     });
 
@@ -571,15 +656,15 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("Display")
                     .default_open(true)
                     .show(ui, |ui| {
-                        checkbox_with_tooltip(ui, s.show_grid, "Grid", "G");
-                        checkbox_with_tooltip(ui, s.show_axis_gizmo, "Axis Gizmo", "A");
-                        checkbox_with_tooltip(ui, s.show_local_axes, "Local Axes", "Shift+A");
-                        checkbox_with_tooltip(ui, s.lights_locked, "Lock Lights", "Shift+L");
-                        checkbox_with_tooltip(ui, s.turntable_active, "Turntable", "V");
-                        if *s.turntable_active {
+                        checkbox_with_tooltip(ui, &mut s.show_grid, "Grid", "G");
+                        checkbox_with_tooltip(ui, &mut s.show_axis_gizmo, "Axis Gizmo", "A");
+                        checkbox_with_tooltip(ui, &mut s.show_local_axes, "Local Axes", "Shift+A");
+                        checkbox_with_tooltip(ui, &mut s.lights_locked, "Lock Lights", "Shift+L");
+                        checkbox_with_tooltip(ui, &mut s.turntable_active, "Turntable", "V");
+                        if s.turntable_active {
                             ui.indent("turntable_indent", |ui| {
                                 ui.add(
-                                    egui::Slider::new(s.turntable_rpm, 1.0..=60.0)
+                                    egui::Slider::new(&mut s.turntable_rpm, 1.0..=60.0)
                                         .text("RPM")
                                         .logarithmic(true),
                                 );
@@ -589,11 +674,16 @@ fn draw_sidebar(
 
                 ui.separator();
 
-                if let Some(report) = s.validation_report {
+                if let Some(report) = validation_report {
                     egui::CollapsingHeader::new("Validation")
                         .default_open(false)
                         .show(ui, |ui| {
-                            checkbox_with_tooltip(ui, s.show_validation, "Show overlay", "Shift+V");
+                            checkbox_with_tooltip(
+                                ui,
+                                &mut s.show_validation,
+                                "Show overlay",
+                                "Shift+V",
+                            );
                             if report.is_clean() {
                                 ui.label("No issues found");
                             } else {
@@ -628,12 +718,18 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("Post-Processing")
                     .default_open(true)
                     .show(ui, |ui| {
-                        checkbox_with_tooltip(ui, s.bloom_enabled, "Bloom", "Shift+M");
-                        checkbox_with_tooltip(ui, s.ssao_enabled, "SSAO", "Shift+O");
-                        combo_with_tooltip(ui, "Tone Map", "Shift+T", s.tone_mode, ToneMode::ALL);
+                        checkbox_with_tooltip(ui, &mut s.bloom_enabled, "Bloom", "Shift+M");
+                        checkbox_with_tooltip(ui, &mut s.ssao_enabled, "SSAO", "Shift+O");
+                        combo_with_tooltip(
+                            ui,
+                            "Tone Map",
+                            "Shift+T",
+                            &mut s.tone_mode,
+                            ToneMode::ALL,
+                        );
                         ui.horizontal(|ui| {
                             ui.add(
-                                egui::Slider::new(s.exposure, 0.1..=10.0)
+                                egui::Slider::new(&mut s.exposure, 0.1..=10.0)
                                     .text("Exposure")
                                     .logarithmic(true),
                             );
@@ -647,7 +743,7 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("Lighting")
                     .default_open(true)
                     .show(ui, |ui| {
-                        combo_with_tooltip(ui, "IBL", "I / Shift+I", s.ibl_mode, IblMode::ALL);
+                        combo_with_tooltip(ui, "IBL", "I / Shift+I", &mut s.ibl_mode, IblMode::ALL);
                     });
 
                 ui.separator();

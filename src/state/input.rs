@@ -33,23 +33,23 @@ impl State {
         }
     }
     pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr") {
-                match IblState::from_hdri(&self.device, &self.queue, &path) {
-                    Ok(new_ibl) => {
-                        self.renderer.ibl_res.ibl = new_ibl;
-                        self.renderer.ibl_res.ibl_mode = IblMode::Full;
-                        self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
-                        self.rebuild_light_bind_group();
-                        self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
-                    }
-                    Err(e) => {
-                        self.gui
-                            .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
-                    }
+        if let Some(ext) = path.extension().and_then(|e| e.to_str())
+            && (ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr"))
+        {
+            match IblState::from_hdri(&self.device, &self.queue, &path) {
+                Ok(new_ibl) => {
+                    self.renderer.ibl_res.ibl = new_ibl;
+                    self.renderer.ibl_res.ibl_mode = IblMode::Full;
+                    self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
+                    self.rebuild_light_bind_group();
+                    self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
                 }
-                return;
+                Err(e) => {
+                    self.gui
+                        .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                }
             }
+            return;
         }
 
         if !resources::is_supported_model_extension(&path) {
@@ -381,7 +381,7 @@ impl State {
                     }
                 }
                 if self.view.active_pane == 1 {
-                    self.view.pane_settings[0] = self.view.pane_settings[1].clone();
+                    self.view.pane_settings[0] = self.view.pane_settings[1];
                 }
                 self.view.active_pane = 0;
                 self.view.display.layout = ViewLayout::Single;
@@ -391,7 +391,7 @@ impl State {
             }
             KeyCode::F2 => {
                 if self.view.display.layout == ViewLayout::Single {
-                    self.view.pane_settings[1] = self.view.pane_settings[0].clone();
+                    self.view.pane_settings[1] = self.view.pane_settings[0];
                     self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
                     self.view.pane_settings[0].uv_offset = [0.0, 0.0];
                     self.view.pane_settings[0].uv_zoom = 1.0;
@@ -411,7 +411,7 @@ impl State {
             }
             KeyCode::F3 => {
                 if self.view.display.layout == ViewLayout::Single {
-                    self.view.pane_settings[1] = self.view.pane_settings[0].clone();
+                    self.view.pane_settings[1] = self.view.pane_settings[0];
                     self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
                     self.view.pane_settings[0].uv_offset = [0.0, 0.0];
                     self.view.pane_settings[0].uv_zoom = 1.0;
