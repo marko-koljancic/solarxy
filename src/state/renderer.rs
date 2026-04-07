@@ -17,7 +17,7 @@ use crate::cgi::ssao::SsaoState;
 use crate::cgi::texture;
 use crate::preferences::{IblMode, ToneMode};
 
-use super::{BoundsMode, ModelScene, PaneDisplaySettings};
+use super::{BackgroundModeExt, BoundsMode, ModelScene, PaneDisplaySettings};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]

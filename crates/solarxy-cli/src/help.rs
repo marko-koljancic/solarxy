@@ -5,6 +5,13 @@ use ratatui::{
 
 use super::tui::{kv_line, section_header};
 
+pub struct AppInfo {
+    pub version: &'static str,
+    pub description: &'static str,
+    pub repository: &'static str,
+    pub license: &'static str,
+}
+
 fn blank() -> Line<'static> {
     Line::raw("")
 }
@@ -29,21 +36,16 @@ fn prose(text: &str) -> Line<'static> {
     ))
 }
 
-pub fn about() -> Text<'static> {
-    let version = env!("CARGO_PKG_VERSION");
-    let description = env!("CARGO_PKG_DESCRIPTION");
-    let repository = env!("CARGO_PKG_REPOSITORY");
-    let license = env!("CARGO_PKG_LICENSE");
-
+pub fn about(info: &AppInfo) -> Text<'static> {
     Text::from(vec![
         blank(),
         section_header("SOLARXY"),
         blank(),
-        kv_line("Version", version),
-        prose(description),
+        kv_line("Version", info.version),
+        prose(info.description),
         blank(),
-        kv_line("Repository", repository),
-        kv_line("License", license),
+        kv_line("Repository", info.repository),
+        kv_line("License", info.license),
         kv_line("Contact", "https://koljam.com"),
         blank(),
         blank(),

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use solarxy::SUPPORTED_EXTENSIONS;
+use solarxy_core::SUPPORTED_EXTENSIONS;
 
 pub fn is_valid_model_path(path: &str) -> Result<PathBuf, String> {
     let path_buf = PathBuf::from(path);

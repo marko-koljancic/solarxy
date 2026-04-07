@@ -10,7 +10,7 @@ use ratatui::{
 
 use std::io;
 
-use super::help;
+use super::help::{self, AppInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocsTab {
@@ -50,19 +50,28 @@ pub struct DocsApp {
     active_tab: DocsTab,
     scroll_offsets: [u16; 5],
     content_heights: [u16; 5],
+    app_info: AppInfo,
 }
 
 impl DocsApp {
-    pub fn new() -> Self {
+    pub fn new(app_info: AppInfo) -> Self {
         Self {
             exit: false,
             active_tab: DocsTab::About,
             scroll_offsets: [0; 5],
             content_heights: [0; 5],
+            app_info,
         }
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    pub fn run(mut self) -> io::Result<()> {
+        let mut terminal = ratatui::init();
+        let result = self.run_inner(&mut terminal);
+        ratatui::restore();
+        result
+    }
+
+    fn run_inner(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -192,7 +201,7 @@ impl DocsApp {
 
     fn tab_content(&self) -> Text<'static> {
         match self.active_tab {
-            DocsTab::About => help::about(),
+            DocsTab::About => help::about(&self.app_info),
             DocsTab::ViewMode => help::view_mode(),
             DocsTab::AnalyzeMode => help::analyze_mode(),
             DocsTab::Formats => help::formats(),

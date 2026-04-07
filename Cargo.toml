@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/solarxy-core", "crates/solarxy-formats"]
+members = [".", "crates/solarxy-core", "crates/solarxy-formats", "crates/solarxy-cli"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -45,13 +45,14 @@ viewer = [
     "dep:exr",
 ]
 analyzer = ["dep:solarxy-formats"]
-tui = ["dep:ratatui", "dep:crossterm"]
+tui = ["solarxy-cli/tui"]
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 anyhow = { workspace = true }
 cgmath = { workspace = true }
 solarxy-core = { path = "crates/solarxy-core" }
+solarxy-cli = { path = "crates/solarxy-cli", default-features = false }
 solarxy-formats = { path = "crates/solarxy-formats", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -70,9 +71,6 @@ egui-winit = { version = "0.33", optional = true }
 half = { version = "2.0", optional = true }
 exr = { version = "1.0", optional = true }
 
-
-crossterm = { version = "0.28.1", optional = true }
-ratatui = { version = "0.29.0", optional = true }
 
 [dependencies.image]
 version = "0.25.9"

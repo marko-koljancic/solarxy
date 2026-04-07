@@ -42,7 +42,15 @@ struct Pane {
     height: f32,
 }
 
-impl BackgroundMode {
+pub(super) trait BackgroundModeExt {
+    fn clear_color(self) -> wgpu::Color;
+    fn wireframe_color(self) -> [f32; 4];
+    fn sky_colors(self) -> ([f32; 3], [f32; 3]);
+    fn grid_color(self) -> [f32; 3];
+    fn effective_luminance(self) -> f32;
+}
+
+impl BackgroundModeExt for BackgroundMode {
     fn clear_color(self) -> wgpu::Color {
         match self {
             Self::White => wgpu::Color {

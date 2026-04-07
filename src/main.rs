@@ -7,19 +7,26 @@ use clap::Parser;
 
 #[cfg(feature = "analyzer")]
 use crate::calc::analyze::ModelAnalyzer;
-use crate::cli::parser::{Args, OperationMode};
+use solarxy_cli::parser::{Args, OperationMode};
 #[cfg(any(feature = "analyzer", feature = "viewer"))]
-use crate::cli::parser::OutputFormat;
+use solarxy_cli::parser::OutputFormat;
 #[cfg(all(feature = "tui", feature = "analyzer"))]
-use crate::cli::tui_analysis::TerminalApp;
+use solarxy_cli::tui_analysis::TerminalApp;
 #[cfg(feature = "tui")]
-use crate::cli::tui_docs::DocsApp;
+use solarxy_cli::tui_docs::DocsApp;
 #[cfg(feature = "tui")]
-use crate::cli::tui_preferences::PreferencesApp;
+use solarxy_cli::tui_preferences::PreferencesApp;
 
 #[cfg(feature = "analyzer")]
 mod calc;
-mod cli;
+
+#[cfg(feature = "tui")]
+const APP_INFO: solarxy_cli::help::AppInfo = solarxy_cli::help::AppInfo {
+    version: env!("CARGO_PKG_VERSION"),
+    description: env!("CARGO_PKG_DESCRIPTION"),
+    repository: env!("CARGO_PKG_REPOSITORY"),
+    license: env!("CARGO_PKG_LICENSE"),
+};
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -53,7 +60,7 @@ fn main() -> anyhow::Result<()> {
         })
         .transpose()?;
 
-    let preferences = solarxy::preferences::load();
+    let preferences = solarxy_core::preferences::load();
 
     match args.mode {
         OperationMode::View => {
@@ -83,7 +90,7 @@ fn main() -> anyhow::Result<()> {
                 let report = analyzer.generate_report();
 
                 let output = match args.format {
-                    OutputFormat::Json => calc::json::report_to_json(&report),
+                    OutputFormat::Json => solarxy_core::json::report_to_json(&report),
                     OutputFormat::Text => report.to_string(),
                 };
 
@@ -102,10 +109,8 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     #[cfg(feature = "tui")]
                     {
-                        let mut terminal = ratatui::init();
-                        let app_result = TerminalApp::new(report, model_path).run(&mut terminal);
-                        ratatui::restore();
-                        Ok(app_result?)
+                        TerminalApp::new(report, model_path).run()?;
+                        Ok(())
                     }
                     #[cfg(not(feature = "tui"))]
                     {
@@ -125,10 +130,8 @@ fn main() -> anyhow::Result<()> {
         OperationMode::Preferences => {
             #[cfg(feature = "tui")]
             {
-                let mut terminal = ratatui::init();
-                let app_result = PreferencesApp::new(preferences).run(&mut terminal);
-                ratatui::restore();
-                Ok(app_result?)
+                PreferencesApp::new(preferences).run()?;
+                Ok(())
             }
             #[cfg(not(feature = "tui"))]
             {
@@ -141,10 +144,8 @@ fn main() -> anyhow::Result<()> {
         OperationMode::Docs => {
             #[cfg(feature = "tui")]
             {
-                let mut terminal = ratatui::init();
-                let app_result = DocsApp::new().run(&mut terminal);
-                ratatui::restore();
-                Ok(app_result?)
+                DocsApp::new(APP_INFO).run()?;
+                Ok(())
             }
             #[cfg(not(feature = "tui"))]
             {

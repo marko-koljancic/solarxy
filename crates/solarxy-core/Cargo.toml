@@ -6,5 +6,14 @@ rust-version = "1.92"
 license = "MIT"
 description = "Core data types, geometry algorithms, and validation for 3D model analysis"
 
+[features]
+default = ["config"]
+config = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing"]
+
 [dependencies]
 cgmath = { workspace = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+toml = { version = "0.8", optional = true }
+dirs = { version = "6.0", optional = true }
+tracing = { version = "0.1", optional = true }

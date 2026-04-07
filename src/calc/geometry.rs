@@ -2,7 +2,7 @@ use cgmath::Point3;
 use solarxy::aabb::AABB;
 
 use super::analyze::AnalyzerMesh;
-use super::report::BoundsSummary;
+use solarxy_core::report::BoundsSummary;
 
 pub fn compute_bounds(meshes: &[AnalyzerMesh]) -> Option<BoundsSummary> {
     let mut min = [f32::INFINITY; 3];

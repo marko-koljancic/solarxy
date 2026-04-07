@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::report::{
+use crate::report::{
     AnalysisReport, BoundsSummary, IssueScope, MaterialSummary, MeshSummary, Severity,
     TextureEntry, ValidationIssue, ValidationReport,
 };

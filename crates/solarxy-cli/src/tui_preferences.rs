@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Paragraph},
     DefaultTerminal, Frame,
 };
-use solarxy::preferences::{
+use solarxy_core::preferences::{
     self, BackgroundMode, IblMode, LineWeight, NormalsMode, Preferences, ProjectionMode, ToneMode,
     UvMode, ViewMode, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
 };
@@ -36,7 +36,14 @@ impl PreferencesApp {
         }
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    pub fn run(mut self) -> io::Result<()> {
+        let mut terminal = ratatui::init();
+        let result = self.run_inner(&mut terminal);
+        ratatui::restore();
+        result
+    }
+
+    fn run_inner(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;

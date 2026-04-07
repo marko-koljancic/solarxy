@@ -9,7 +9,7 @@ use crate::preferences::{
     self, IblMode, InspectionMode, NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
 
-use super::{BoundsMode, State, ViewLayout};
+use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
 
 impl State {
     fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {

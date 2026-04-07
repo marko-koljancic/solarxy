@@ -4,7 +4,7 @@ use anyhow::Result;
 use solarxy::cgi::geometry::RawModelData;
 
 use super::geometry::compute_bounds;
-use super::report::{
+use solarxy_core::report::{
     AnalysisReport, IssueScope, MaterialSummary, MeshSummary, Severity, TextureEntry,
     ValidationIssue, ValidationReport,
 };

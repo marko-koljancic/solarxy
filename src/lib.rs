@@ -34,22 +34,8 @@ mod state;
 #[cfg(any(feature = "viewer", feature = "analyzer"))]
 pub mod validation;
 
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
+pub use solarxy_core::format_number;
+pub use solarxy_core::SUPPORTED_EXTENSIONS;
 
 #[cfg(feature = "viewer")]
 pub use app::run_viewer;
-
-pub fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(*c);
-    }
-
-    result
-}

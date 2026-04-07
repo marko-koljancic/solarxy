@@ -2775,7 +2775,6 @@ dependencies = [
  "bytemuck",
  "cgmath",
  "clap",
- "crossterm",
  "dirs",
  "egui",
  "egui-wgpu",
@@ -2786,9 +2785,9 @@ dependencies = [
  "half",
  "image",
  "pollster",
- "ratatui",
  "serde",
  "serde_json",
+ "solarxy-cli",
  "solarxy-core",
  "solarxy-formats",
  "toml",
@@ -2799,10 +2798,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-cli"
+version = "0.4.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "ratatui",
+ "serde_json",
+ "solarxy-core",
+]
+
+[[package]]
 name = "solarxy-core"
 version = "0.4.0"
 dependencies = [
  "cgmath",
+ "dirs",
+ "serde",
+ "serde_json",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

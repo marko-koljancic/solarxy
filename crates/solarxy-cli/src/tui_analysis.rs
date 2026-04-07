@@ -7,12 +7,12 @@ use ratatui::{
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap},
     DefaultTerminal, Frame,
 };
-use solarxy::format_number;
+use solarxy_core::format_number;
 
 use std::io;
 
-use crate::calc::json::report_to_json;
-use crate::calc::report::{AnalysisReport, Severity};
+use solarxy_core::json::report_to_json;
+use solarxy_core::report::{AnalysisReport, Severity};
 
 use super::tui::{kv_line, section_header};
 
@@ -68,7 +68,14 @@ impl TerminalApp {
         }
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    pub fn run(mut self) -> io::Result<()> {
+        let mut terminal = ratatui::init();
+        let result = self.run_inner(&mut terminal);
+        ratatui::restore();
+        result
+    }
+
+    fn run_inner(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;

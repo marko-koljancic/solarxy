@@ -25,6 +25,12 @@
 
 pub mod aabb;
 pub mod geometry;
+#[cfg(feature = "config")]
+pub mod json;
+#[cfg(feature = "config")]
+pub mod preferences;
+#[cfg(feature = "config")]
+pub mod report;
 pub mod validation;
 
 pub use aabb::AABB;
@@ -32,3 +38,20 @@ pub use geometry::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
 pub use validation::{
     IssueKind, IssueScope, Severity, ValidationIssue, ValidationReport, ValidationResult,
 };
+
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];
+
+pub fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let chars: Vec<char> = s.chars().collect();
+
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(*c);
+    }
+
+    result
+}

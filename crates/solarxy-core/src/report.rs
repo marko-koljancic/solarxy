@@ -1,7 +1,7 @@
 use std::fmt;
 
-use solarxy::format_number;
-pub use solarxy::validation::{IssueScope, Severity, ValidationIssue, ValidationReport};
+use crate::format_number;
+pub use crate::validation::{IssueScope, Severity, ValidationIssue, ValidationReport};
 
 #[derive(Debug, Clone)]
 pub struct MeshSummary {
@@ -146,7 +146,7 @@ impl fmt::Display for AnalysisReport {
 
                 match (&mesh.material_name, mesh.material_id) {
                     (Some(name), Some(id)) => {
-                        writeln!(f, "  Material:        '{}' (ID: {})", name, id)?
+                        writeln!(f, "  Material:        '{}' (ID: {})", name, id)?;
                     }
                     (None, Some(id)) => writeln!(f, "  Material:        Invalid ID: {}", id)?,
                     _ => writeln!(f, "  Material:        None")?,
