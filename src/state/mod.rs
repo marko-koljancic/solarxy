@@ -442,105 +442,14 @@ impl State {
 
         let Some(cam_data) = cam_data else {
             self.renderer.render_empty_pass(&mut encoder, &pds);
-            let viewport = if is_split {
-                Some([pane.x, pane.y, pane.width, pane.height])
-            } else {
-                None
-            };
-            self.renderer.post.composite.render(
-                &mut encoder,
-                &self.renderer.pipelines,
-                surface_view,
-                self.renderer.post.ssao_enabled,
-                &self.renderer.post.ssao,
-                viewport,
-                i == 0,
-            );
-            self.queue.submit(std::iter::once(encoder.finish()));
+            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false);
             return;
         };
 
         let is_uv_map = pds.pane_mode == PaneMode::UvMap;
 
         if is_uv_map {
-            if let Some(scene) = &self.scene {
-                if scene.model.has_uvs {
-                    self.renderer.uv_cam.write(
-                        &self.queue,
-                        pds.uv_offset,
-                        pds.uv_zoom,
-                        pane_aspect,
-                    );
-                    let uv_wire = WireframeParams {
-                        color: [0.8, 0.8, 0.8, 1.0],
-                        line_width: pds.line_weight.width_px(),
-                        screen_width: self.renderer.target_width as f32,
-                        screen_height: self.renderer.target_height as f32,
-                        _pad: 0.0,
-                    };
-                    self.queue.write_buffer(
-                        &self.renderer.wire.wireframe_params_buffer,
-                        0,
-                        bytemuck::bytes_of(&uv_wire),
-                    );
-                    if pds.show_uv_overlap {
-                        self.renderer.render_uv_overlap_count_pass(
-                            &mut encoder,
-                            scene,
-                            &self.renderer.uv_cam.bind_group,
-                            &self.renderer.uv_overlap.count_view,
-                        );
-                        if self.renderer.uv_overlap.stats_dirty
-                            && !self.renderer.uv_overlap.readback_pending
-                        {
-                            self.renderer
-                                .uv_cam
-                                .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
-                            self.renderer.render_uv_overlap_count_pass(
-                                &mut encoder,
-                                scene,
-                                &self.renderer.uv_cam.bind_group,
-                                &self.renderer.uv_overlap.stats_view,
-                            );
-                            request_overlap_readback_impl(
-                                &self.device,
-                                &mut self.renderer.uv_overlap,
-                                &mut encoder,
-                            );
-                            self.renderer.uv_cam.write(
-                                &self.queue,
-                                pds.uv_offset,
-                                pds.uv_zoom,
-                                pane_aspect,
-                            );
-                        }
-                    }
-                    if pds.uv_bg == UvMapBackground::Dark {
-                        let dark = GradientUniform {
-                            top_color: [0.10, 0.10, 0.10, 1.0],
-                            bottom_color: [0.10, 0.10, 0.10, 1.0],
-                            uv_y_offset: 0.0,
-                            uv_y_scale: 1.0,
-                            _pad: [0.0; 2],
-                        };
-                        self.queue.write_buffer(
-                            &self.renderer.wire._gradient_buffer,
-                            0,
-                            bytemuck::bytes_of(&dark),
-                        );
-                    }
-                    self.renderer.render_uv_map_pass(
-                        &mut encoder,
-                        scene,
-                        &self.renderer.uv_cam.bind_group,
-                        &pds,
-                    );
-                } else {
-                    self.renderer.render_empty_pass(&mut encoder, &pds);
-                }
-            } else {
-                self.renderer.render_empty_pass(&mut encoder, &pds);
-            }
+            self.render_uv_map_pane(&mut encoder, pane_aspect, &pds);
         } else {
             if i == 0 {
                 if let Some(scene) = &mut self.scene {
@@ -551,107 +460,25 @@ impl State {
             }
 
             if is_split && i == 1 {
-                if !self.view.display.lights_locked
-                    && let Some(scene) = &mut self.scene
-                {
-                    scene.lights_uniform = lights_from_camera(&cam_data, &scene.model.bounds);
-                    self.queue.write_buffer(
-                        &scene.light_buffer,
-                        0,
-                        bytemuck::cast_slice(&[scene.lights_uniform]),
-                    );
-                    let key_pos = scene.lights_uniform.lights[0].position;
-                    scene.shadow.update_light_vp(
-                        &self.queue,
-                        cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                        scene.model.bounds.center(),
-                        scene.model.bounds.diagonal() / 2.0,
-                    );
-                }
-                if let Some(sec) = &self.view.secondary_cam {
-                    self.renderer.post.ssao.rebuild_bind_groups(
-                        &self.device,
-                        &self.renderer.layouts,
-                        &sec.buffer,
-                    );
-                }
-                if let Some(sec_buf) = self.view.secondary_cam.as_ref().map(|c| &c.buffer)
-                    && let Some(scene) = &mut self.scene
-                {
-                    scene.vis.rebuild_camera_bind_groups(
-                        &self.device,
-                        &self.renderer.layouts,
-                        sec_buf,
-                    );
-                }
+                self.setup_split_secondary(&cam_data);
             }
 
-            self.write_wireframe_params_for(&pds);
-            self.write_gradient_colors_for(&pds);
-            if let Some(scene) = &self.scene {
-                let color = pds.background_mode.grid_color();
-                self.queue.write_buffer(
-                    &scene.vis.grid_uniform_buf,
-                    4,
-                    bytemuck::cast_slice(&color),
-                );
-            }
-
-            let cam_buf = if i == 0 {
-                self.scene.as_ref().map(|s| &s.cam.buffer)
-            } else {
-                self.view.secondary_cam.as_ref().map(|c| &c.buffer)
-            };
-            if let Some(buf) = cam_buf {
-                let data: [u32; 2] = [
-                    pds.inspection_mode.as_u32(),
-                    pds.texel_density_target.to_bits(),
-                ];
-                self.queue
-                    .write_buffer(buf, 280, bytemuck::cast_slice(&data));
-            }
-
-            if (i == 0 || !self.view.display.lights_locked)
-                && let Some(scene) = &self.scene
-            {
-                self.renderer.render_shadow_pass(&mut encoder, scene);
-            }
-
-            let cam_bg = if i == 0 {
-                self.scene.as_ref().map(|s| &s.cam.bind_group)
-            } else {
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .map(|c| &c.bind_group)
-                    .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-            };
-            if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
-                if self.renderer.post.ssao_enabled {
-                    self.renderer
-                        .render_gbuffer_pass(&mut encoder, scene, cam_bg);
-                }
-                self.renderer
-                    .render_main_pass(&mut encoder, scene, cam_bg, &cam_data, &pds);
-            } else {
-                self.renderer.render_empty_pass(&mut encoder, &pds);
-            }
-
-            if self.renderer.post.ssao_enabled {
-                self.renderer.render_ssao_passes(&mut encoder);
-            }
-
-            if self.renderer.post.bloom_enabled {
-                self.renderer.post.bloom.render(
-                    &mut encoder,
-                    &self.renderer.pipelines,
-                    &self.queue,
-                    self.renderer.target_width,
-                    self.renderer.target_height,
-                );
-            }
+            self.write_3d_pane_uniforms(i, &pds);
+            self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
         }
 
+        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map);
+    }
+
+    fn composite_and_submit(
+        &self,
+        mut encoder: wgpu::CommandEncoder,
+        surface_view: &wgpu::TextureView,
+        i: usize,
+        pane: &Pane,
+        is_split: bool,
+        is_uv_map: bool,
+    ) {
         let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map;
         let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map;
         self.renderer.post.composite.write_params(
@@ -676,6 +503,194 @@ impl State {
             i == 0,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    fn render_uv_map_pane(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        pane_aspect: f32,
+        pds: &PaneDisplaySettings,
+    ) {
+        if let Some(scene) = &self.scene {
+            if scene.model.has_uvs {
+                self.renderer
+                    .uv_cam
+                    .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
+                let uv_wire = WireframeParams {
+                    color: [0.8, 0.8, 0.8, 1.0],
+                    line_width: pds.line_weight.width_px(),
+                    screen_width: self.renderer.target_width as f32,
+                    screen_height: self.renderer.target_height as f32,
+                    _pad: 0.0,
+                };
+                self.queue.write_buffer(
+                    &self.renderer.wire.wireframe_params_buffer,
+                    0,
+                    bytemuck::bytes_of(&uv_wire),
+                );
+                if pds.show_uv_overlap {
+                    self.renderer.render_uv_overlap_count_pass(
+                        encoder,
+                        scene,
+                        &self.renderer.uv_cam.bind_group,
+                        &self.renderer.uv_overlap.count_view,
+                    );
+                    if self.renderer.uv_overlap.stats_dirty
+                        && !self.renderer.uv_overlap.readback_pending
+                    {
+                        self.renderer
+                            .uv_cam
+                            .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
+                        self.renderer.render_uv_overlap_count_pass(
+                            encoder,
+                            scene,
+                            &self.renderer.uv_cam.bind_group,
+                            &self.renderer.uv_overlap.stats_view,
+                        );
+                        request_overlap_readback_impl(
+                            &self.device,
+                            &mut self.renderer.uv_overlap,
+                            encoder,
+                        );
+                        self.renderer.uv_cam.write(
+                            &self.queue,
+                            pds.uv_offset,
+                            pds.uv_zoom,
+                            pane_aspect,
+                        );
+                    }
+                }
+                if pds.uv_bg == UvMapBackground::Dark {
+                    let dark = GradientUniform {
+                        top_color: [0.10, 0.10, 0.10, 1.0],
+                        bottom_color: [0.10, 0.10, 0.10, 1.0],
+                        uv_y_offset: 0.0,
+                        uv_y_scale: 1.0,
+                        _pad: [0.0; 2],
+                    };
+                    self.queue.write_buffer(
+                        &self.renderer.wire._gradient_buffer,
+                        0,
+                        bytemuck::bytes_of(&dark),
+                    );
+                }
+                self.renderer.render_uv_map_pass(
+                    encoder,
+                    scene,
+                    &self.renderer.uv_cam.bind_group,
+                    pds,
+                );
+            } else {
+                self.renderer.render_empty_pass(encoder, pds);
+            }
+        } else {
+            self.renderer.render_empty_pass(encoder, pds);
+        }
+    }
+
+    fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
+        self.write_wireframe_params_for(pds);
+        self.write_gradient_colors_for(pds);
+        if let Some(scene) = &self.scene {
+            let color = pds.background_mode.grid_color();
+            self.queue
+                .write_buffer(&scene.vis.grid_uniform_buf, 4, bytemuck::cast_slice(&color));
+        }
+
+        let cam_buf = if i == 0 {
+            self.scene.as_ref().map(|s| &s.cam.buffer)
+        } else {
+            self.view.secondary_cam.as_ref().map(|c| &c.buffer)
+        };
+        if let Some(buf) = cam_buf {
+            let data: [u32; 2] = [
+                pds.inspection_mode.as_u32(),
+                pds.texel_density_target.to_bits(),
+            ];
+            self.queue
+                .write_buffer(buf, 280, bytemuck::cast_slice(&data));
+        }
+    }
+
+    fn render_3d_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        i: usize,
+        cam_data: &Camera,
+        pds: &PaneDisplaySettings,
+    ) {
+        if (i == 0 || !self.view.display.lights_locked)
+            && let Some(scene) = &self.scene
+        {
+            self.renderer.render_shadow_pass(encoder, scene);
+        }
+
+        let cam_bg = if i == 0 {
+            self.scene.as_ref().map(|s| &s.cam.bind_group)
+        } else {
+            self.view
+                .secondary_cam
+                .as_ref()
+                .map(|c| &c.bind_group)
+                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
+        };
+        if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
+            if self.renderer.post.ssao_enabled {
+                self.renderer.render_gbuffer_pass(encoder, scene, cam_bg);
+            }
+            self.renderer
+                .render_main_pass(encoder, scene, cam_bg, cam_data, pds);
+        } else {
+            self.renderer.render_empty_pass(encoder, pds);
+        }
+
+        if self.renderer.post.ssao_enabled {
+            self.renderer.render_ssao_passes(encoder);
+        }
+
+        if self.renderer.post.bloom_enabled {
+            self.renderer.post.bloom.render(
+                encoder,
+                &self.renderer.pipelines,
+                &self.queue,
+                self.renderer.target_width,
+                self.renderer.target_height,
+            );
+        }
+    }
+
+    fn setup_split_secondary(&mut self, cam_data: &Camera) {
+        if !self.view.display.lights_locked
+            && let Some(scene) = &mut self.scene
+        {
+            scene.lights_uniform = lights_from_camera(cam_data, &scene.model.bounds);
+            self.queue.write_buffer(
+                &scene.light_buffer,
+                0,
+                bytemuck::cast_slice(&[scene.lights_uniform]),
+            );
+            let key_pos = scene.lights_uniform.lights[0].position;
+            scene.shadow.update_light_vp(
+                &self.queue,
+                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                scene.model.bounds.center(),
+                scene.model.bounds.diagonal() / 2.0,
+            );
+        }
+        if let Some(sec) = &self.view.secondary_cam {
+            self.renderer.post.ssao.rebuild_bind_groups(
+                &self.device,
+                &self.renderer.layouts,
+                &sec.buffer,
+            );
+        }
+        if let Some(sec_buf) = self.view.secondary_cam.as_ref().map(|c| &c.buffer)
+            && let Some(scene) = &mut self.scene
+        {
+            scene
+                .vis
+                .rebuild_camera_bind_groups(&self.device, &self.renderer.layouts, sec_buf);
+        }
     }
 
     fn render_gui_overlay(
