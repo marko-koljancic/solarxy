@@ -6,43 +6,43 @@ use super::*;
 
 impl State {
     fn active_ibl(&self) -> &IblState {
-        match self.ibl_res.ibl_mode {
-            IblMode::Off => &self.ibl_res.ibl_fallback,
-            IblMode::Diffuse | IblMode::Full => &self.ibl_res.ibl,
+        match self.renderer.ibl_res.ibl_mode {
+            IblMode::Off => &self.renderer.ibl_res.ibl_fallback,
+            IblMode::Diffuse | IblMode::Full => &self.renderer.ibl_res.ibl,
         }
     }
 
     pub(super) fn rebuild_light_bind_group(&mut self) {
         if let Some(scene) = &mut self.scene {
-            scene.light_bind_group = match self.ibl_res.ibl_mode {
+            scene.light_bind_group = match self.renderer.ibl_res.ibl_mode {
                 IblMode::Off => create_light_bind_group(
                     &self.device,
-                    &self.layouts,
+                    &self.renderer.layouts,
                     &scene.light_buffer,
-                    &self.ibl_res.ibl_fallback,
-                    &self.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ibl_fallback,
+                    &self.renderer.ibl_res.brdf_lut,
                 ),
                 IblMode::Diffuse => create_light_bind_group_selective(
                     &self.device,
-                    &self.layouts,
+                    &self.renderer.layouts,
                     &scene.light_buffer,
-                    &self.ibl_res.ibl,
-                    &self.ibl_res.ibl_fallback,
-                    &self.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ibl,
+                    &self.renderer.ibl_res.ibl_fallback,
+                    &self.renderer.ibl_res.brdf_lut,
                 ),
                 IblMode::Full => create_light_bind_group(
                     &self.device,
-                    &self.layouts,
+                    &self.renderer.layouts,
                     &scene.light_buffer,
-                    &self.ibl_res.ibl,
-                    &self.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ibl,
+                    &self.renderer.ibl_res.brdf_lut,
                 ),
             };
         }
     }
 
     pub(super) fn update_wireframe_params(&self) {
-        self.write_wireframe_params_for(&self.pane_settings[0]);
+        self.write_wireframe_params_for(&self.view.pane_settings[0]);
     }
 
     pub(super) fn write_gradient_colors_for(&self, pds: &PaneDisplaySettings) {
@@ -54,20 +54,23 @@ impl State {
             uv_y_scale: 1.0,
             _pad: [0.0; 2],
         };
-        self.queue
-            .write_buffer(&self.wire._gradient_buffer, 0, bytemuck::bytes_of(&data));
+        self.queue.write_buffer(
+            &self.renderer.wire._gradient_buffer,
+            0,
+            bytemuck::bytes_of(&data),
+        );
     }
 
     pub(super) fn write_wireframe_params_for(&self, pds: &PaneDisplaySettings) {
         let params = WireframeParams {
             color: pds.background_mode.wireframe_color(),
             line_width: pds.line_weight.width_px(),
-            screen_width: self.target_width as f32,
-            screen_height: self.target_height as f32,
+            screen_width: self.renderer.target_width as f32,
+            screen_height: self.renderer.target_height as f32,
             _pad: 0.0,
         };
         self.queue.write_buffer(
-            &self.wire.wireframe_params_buffer,
+            &self.renderer.wire.wireframe_params_buffer,
             0,
             bytemuck::bytes_of(&params),
         );
@@ -85,9 +88,9 @@ impl State {
 
         let device = self.device.clone();
         let queue = self.queue.clone();
-        let layouts = Arc::clone(&self.layouts);
+        let layouts = Arc::clone(&self.renderer.layouts);
         let config = self.config.clone();
-        let initial_grid_color = self.pane_settings[0].background_mode.grid_color();
+        let initial_grid_color = self.view.pane_settings[0].background_mode.grid_color();
         let shadow_map_size = self.preferences.rendering.shadow_map_size;
         let path = model_path.clone();
 
@@ -129,7 +132,7 @@ impl State {
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(aspect);
             }
-            if let Some(cam) = &mut self.secondary_cam {
+            if let Some(cam) = &mut self.view.secondary_cam {
                 cam.resize(aspect);
             }
         }
@@ -139,63 +142,69 @@ impl State {
         if width == 0 || height == 0 {
             return;
         }
-        if width == self.target_width && height == self.target_height {
+        if width == self.renderer.target_width && height == self.renderer.target_height {
             return;
         }
-        self.target_width = width;
-        self.target_height = height;
-        self.targets.depth_texture = texture::Texture::create_depth_texture(
+        self.renderer.target_width = width;
+        self.renderer.target_height = height;
+        self.renderer.targets.depth_texture = texture::Texture::create_depth_texture(
             &self.device,
             width,
             height,
             "depth_texture",
-            self.msaa_sample_count,
+            self.renderer.msaa_sample_count,
         );
-        self.targets.msaa_hdr_view =
-            texture::create_msaa_hdr_texture(&self.device, width, height, self.msaa_sample_count);
-        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
-        self.targets._hdr_resolve_texture = hdr_tex;
-        self.targets.hdr_resolve_view = hdr_view;
-        self.post.bloom.resize(
+        self.renderer.targets.msaa_hdr_view = texture::create_msaa_hdr_texture(
             &self.device,
-            &self.layouts,
-            &self.targets.hdr_resolve_view,
+            width,
+            height,
+            self.renderer.msaa_sample_count,
+        );
+        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
+        self.renderer.targets._hdr_resolve_texture = hdr_tex;
+        self.renderer.targets.hdr_resolve_view = hdr_view;
+        self.renderer.post.bloom.resize(
+            &self.device,
+            &self.renderer.layouts,
+            &self.renderer.targets.hdr_resolve_view,
             width,
             height,
         );
-        self.post.composite.resize(
+        self.renderer.post.composite.resize(
             &self.device,
-            &self.layouts,
-            &self.targets.hdr_resolve_view,
-            &self.post.bloom.ping_view,
-            &self.post.bloom.sampler,
+            &self.renderer.layouts,
+            &self.renderer.targets.hdr_resolve_view,
+            &self.renderer.post.bloom.ping_view,
+            &self.renderer.post.bloom.sampler,
         );
         let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
-        self.uv_overlap.count_texture = ct;
-        self.uv_overlap.count_view = cv;
-        self.uv_overlap.overlay_bind_group =
+        self.renderer.uv_overlap.count_texture = ct;
+        self.renderer.uv_overlap.count_view = cv;
+        self.renderer.uv_overlap.overlay_bind_group =
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("UV Overlap Overlay Bind Group"),
-                layout: &self.layouts.uv_overlap_read,
+                layout: &self.renderer.layouts.uv_overlap_read,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.uv_overlap.count_view),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.renderer.uv_overlap.count_view,
+                        ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.uv_overlap.sampler),
+                        resource: wgpu::BindingResource::Sampler(&self.renderer.uv_overlap.sampler),
                     },
                 ],
             });
-        if self.pane_settings.iter().any(|p| p.show_uv_overlap) {
-            self.uv_overlap.stats_dirty = true;
+        if self.view.pane_settings.iter().any(|p| p.show_uv_overlap) {
+            self.renderer.uv_overlap.stats_dirty = true;
         }
 
         if let Some(scene) = &self.scene {
-            self.post.ssao.resize(
+            self.renderer.post.ssao.resize(
                 &self.device,
-                &self.layouts,
+                &self.renderer.layouts,
                 &scene.cam.buffer,
                 width,
                 height,
@@ -208,9 +217,13 @@ impl State {
                     contents: &[0u8; 288],
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
-            self.post
-                .ssao
-                .resize(&self.device, &self.layouts, &dummy_buf, width, height);
+            self.renderer.post.ssao.resize(
+                &self.device,
+                &self.renderer.layouts,
+                &dummy_buf,
+                width,
+                height,
+            );
         }
     }
 
@@ -222,10 +235,10 @@ impl State {
                 let active_ibl = self.active_ibl();
                 new_scene.light_bind_group = create_light_bind_group(
                     &self.device,
-                    &self.layouts,
+                    &self.renderer.layouts,
                     &new_scene.light_buffer,
                     active_ibl,
-                    &self.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.brdf_lut,
                 );
                 let file_size = std::fs::metadata(&pending.path)
                     .map(|m| m.len())
@@ -247,9 +260,9 @@ impl State {
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
                 self.scene = Some(new_scene);
                 if let Some(scene) = &self.scene {
-                    self.post.ssao.rebuild_bind_groups(
+                    self.renderer.post.ssao.rebuild_bind_groups(
                         &self.device,
-                        &self.layouts,
+                        &self.renderer.layouts,
                         &scene.cam.buffer,
                     );
                 }
@@ -262,33 +275,33 @@ impl State {
                         .set_projection(self.preferences.display.projection_mode);
                 }
 
-                self.secondary_cam = None;
-                if self.display.layout != ViewLayout::Single
+                self.view.secondary_cam = None;
+                if self.view.display.layout != ViewLayout::Single
                     && let Some(scene) = &self.scene
                 {
-                    self.secondary_cam = Some(
+                    self.view.secondary_cam = Some(
                         scene
                             .cam
-                            .clone_with_new_resources(&self.device, &self.layouts.camera),
+                            .clone_with_new_resources(&self.device, &self.renderer.layouts.camera),
                     );
                 }
 
-                self.pane_settings[0].view_mode = self.preferences.display.view_mode;
-                self.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
-                self.pane_settings[0].ghosted_wireframe = false;
-                self.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
-                self.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
-                self.pane_settings[0].inspection_mode = InspectionMode::Shaded;
-                self.pane_settings[0].texel_density_target = 1.0;
-                self.pane_settings[0].pane_mode = PaneMode::Scene3D;
-                self.pane_settings[0].uv_bg = UvMapBackground::Dark;
-                self.pane_settings[0].uv_offset = [0.0, 0.0];
-                self.pane_settings[0].uv_zoom = 1.0;
-                self.pane_settings[0].show_uv_overlap = false;
-                self.pane_settings[0].show_validation = false;
-                self.uv_overlap.overlap_pct = None;
-                self.uv_overlap.stats_dirty = false;
-                self.display.turntable_active = self.preferences.display.turntable_active;
+                self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
+                self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
+                self.view.pane_settings[0].ghosted_wireframe = false;
+                self.view.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
+                self.view.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
+                self.view.pane_settings[0].inspection_mode = InspectionMode::Shaded;
+                self.view.pane_settings[0].texel_density_target = 1.0;
+                self.view.pane_settings[0].pane_mode = PaneMode::Scene3D;
+                self.view.pane_settings[0].uv_bg = UvMapBackground::Dark;
+                self.view.pane_settings[0].uv_offset = [0.0, 0.0];
+                self.view.pane_settings[0].uv_zoom = 1.0;
+                self.view.pane_settings[0].show_uv_overlap = false;
+                self.view.pane_settings[0].show_validation = false;
+                self.renderer.uv_overlap.overlap_pct = None;
+                self.renderer.uv_overlap.stats_dirty = false;
+                self.view.display.turntable_active = self.preferences.display.turntable_active;
             }
             Some(Ok(Err(e))) => {
                 self.pending_load.take();
@@ -309,19 +322,19 @@ impl State {
         self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
         self.last_frame_time = now;
 
-        self.active_pane = self.active_pane_index();
+        self.view.active_pane = self.active_pane_index();
 
-        if self.display.turntable_active {
-            let speed = self.display.turntable_rpm * std::f32::consts::TAU / 60.0;
+        if self.view.display.turntable_active {
+            let speed = self.view.display.turntable_rpm * std::f32::consts::TAU / 60.0;
             let yaw = speed * self.dt;
             if let Some(scene) = &mut self.scene
-                && (self.active_pane == 0 || self.cameras_linked)
+                && (self.view.active_pane == 0 || self.view.cameras_linked)
                 && !scene.cam.is_orbiting()
             {
                 scene.cam.inject_orbit_yaw(yaw);
             }
-            if (self.active_pane == 1 || self.cameras_linked)
-                && let Some(cam) = &mut self.secondary_cam
+            if (self.view.active_pane == 1 || self.view.cameras_linked)
+                && let Some(cam) = &mut self.view.secondary_cam
                 && !cam.is_orbiting()
             {
                 cam.inject_orbit_yaw(yaw);
@@ -331,12 +344,12 @@ impl State {
         if let Some(scene) = &mut self.scene {
             scene.cam.update(&self.queue, self.dt);
         }
-        if let Some(cam) = &mut self.secondary_cam {
+        if let Some(cam) = &mut self.view.secondary_cam {
             cam.update(&self.queue, self.dt);
         }
 
         if let Some(scene) = &mut self.scene
-            && !self.display.lights_locked
+            && !self.view.display.lights_locked
         {
             scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
             self.queue.write_buffer(

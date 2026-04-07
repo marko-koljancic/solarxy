@@ -1,14 +1,20 @@
 mod capture;
 mod init;
 mod input;
-mod render;
+pub(crate) mod renderer;
 mod update;
+mod view_state;
+
+pub(super) use renderer::{
+    GradientUniform, IblResources, PostProcessing, Renderer, RenderTargets, UvOverlapResources,
+    ValidationColorResources, WireframeParams, WireframeResources,
+};
+pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
 use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::bloom::BloomState;
 use crate::cgi::camera::Camera;
 use crate::cgi::camera_state::CameraState;
-use crate::cgi::uv_camera::UvCameraState;
 use crate::cgi::composite::CompositeState;
 use crate::cgi::gui::EguiRenderer;
 use crate::cgi::ibl::{BrdfLut, IblState};
@@ -21,43 +27,13 @@ use crate::cgi::ssao::SsaoState;
 use crate::cgi::texture::{self, SharedSamplers};
 use crate::cgi::visualization::VisualizationState;
 use crate::preferences::{
-    self, BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, PaneMode, Preferences,
-    ToneMode, UvMapBackground, UvMode, ViewMode,
+    self, BackgroundMode, IblMode, InspectionMode, PaneMode, Preferences, UvMapBackground, ViewMode,
 };
 use cgmath::Rotation3;
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{keyboard::ModifiersState, window::Window};
-
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum BoundsMode {
-    Off,
-    WholeModel,
-    PerMesh,
-}
-
-impl BoundsMode {
-    pub const ALL: &[Self] = &[Self::Off, Self::WholeModel, Self::PerMesh];
-}
-
-impl std::fmt::Display for BoundsMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BoundsMode::Off => write!(f, "Off"),
-            BoundsMode::WholeModel => write!(f, "Model"),
-            BoundsMode::PerMesh => write!(f, "Per Mesh"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Default)]
-pub(crate) enum ViewLayout {
-    #[default]
-    Single,
-    SplitVertical,
-    SplitHorizontal,
-}
 
 struct Pane {
     x: f32,
@@ -296,107 +272,12 @@ pub(super) struct PendingLoad {
     path: String,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GradientUniform {
-    top_color: [f32; 4],
-    bottom_color: [f32; 4],
-    uv_y_offset: f32,
-    uv_y_scale: f32,
-    _pad: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct WireframeParams {
-    color: [f32; 4],
-    line_width: f32,
-    screen_width: f32,
-    screen_height: f32,
-    _pad: f32,
-}
-
-pub(super) struct RenderTargets {
-    pub depth_texture: texture::Texture,
-    pub msaa_hdr_view: wgpu::TextureView,
-    pub _hdr_resolve_texture: wgpu::Texture,
-    pub hdr_resolve_view: wgpu::TextureView,
-}
-
-pub(super) struct PostProcessing {
-    pub bloom: BloomState,
-    pub bloom_enabled: bool,
-    pub ssao: SsaoState,
-    pub ssao_enabled: bool,
-    pub composite: CompositeState,
-    pub tone_mode: ToneMode,
-    pub exposure: f32,
-}
-
-pub(super) struct IblResources {
-    pub ibl: IblState,
-    pub ibl_fallback: IblState,
-    pub brdf_lut: BrdfLut,
-    pub ibl_mode: IblMode,
-    pub last_active_ibl_mode: IblMode,
-}
-
-#[derive(Clone)]
-pub(super) struct PaneDisplaySettings {
-    pub view_mode: ViewMode,
-    pub prev_non_ghosted_mode: ViewMode,
-    pub ghosted_wireframe: bool,
-    pub normals_mode: NormalsMode,
-    pub background_mode: BackgroundMode,
-    pub uv_mode: UvMode,
-    pub bounds_mode: BoundsMode,
-    pub line_weight: LineWeight,
-    pub show_grid: bool,
-    pub show_axis_gizmo: bool,
-    pub show_local_axes: bool,
-    pub inspection_mode: InspectionMode,
-    pub texel_density_target: f32,
-    pub pane_mode: PaneMode,
-    pub uv_bg: UvMapBackground,
-    pub uv_offset: [f32; 2],
-    pub uv_zoom: f32,
-    pub show_uv_overlap: bool,
-    pub show_validation: bool,
-}
-
-pub(super) struct DisplaySettings {
-    pub turntable_active: bool,
-    pub turntable_rpm: f32,
-    pub lights_locked: bool,
-    pub layout: ViewLayout,
-}
-
-pub(super) struct WireframeResources {
-    pub _gradient_buffer: wgpu::Buffer,
-    pub gradient_bind_group: wgpu::BindGroup,
-    pub wireframe_params_buffer: wgpu::Buffer,
-    pub wireframe_params_bind_group: wgpu::BindGroup,
-    pub _checker_texture: texture::Texture,
-    pub uv_checker_bind_group: wgpu::BindGroup,
-}
-
-pub(super) struct UvOverlapResources {
-    pub count_texture: wgpu::Texture,
-    pub count_view: wgpu::TextureView,
-    pub overlay_bind_group: wgpu::BindGroup,
-    pub sampler: wgpu::Sampler,
-    pub stats_texture: wgpu::Texture,
-    pub stats_view: wgpu::TextureView,
-    pub overlap_pct: Option<f32>,
-    pub stats_dirty: bool,
-    pub staging_buffer: Option<wgpu::Buffer>,
-    pub readback_pending: bool,
-}
-
-pub(super) struct ValidationColorResources {
-    pub bind_groups: Vec<wgpu::BindGroup>,
-    #[allow(dead_code)]
-    pub buffers: Vec<wgpu::Buffer>,
+pub(super) struct InputState {
+    pub(super) cursor_pos: (f32, f32),
+    pub(super) modifiers: ModifiersState,
+    pub(super) uv_last_mouse_pos: Option<(f32, f32)>,
+    pub(super) uv_left_pressed: bool,
+    pub(super) uv_middle_pressed: bool,
 }
 
 pub struct State {
@@ -405,51 +286,33 @@ pub struct State {
     pub(super) queue: wgpu::Queue,
     pub(super) config: wgpu::SurfaceConfiguration,
     pub(super) is_surface_configured: bool,
-    pub(super) targets: RenderTargets,
-    pub(super) post: PostProcessing,
-    pub(super) ibl_res: IblResources,
-    pub(super) display: DisplaySettings,
-    pub(super) wire: WireframeResources,
-    pub(super) layouts: Arc<BindGroupLayouts>,
-    pub(super) pipelines: Pipelines,
+    pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
-    pub(super) pane_settings: [PaneDisplaySettings; 2],
-    pub(super) secondary_cam: Option<CameraState>,
-    pub(super) uv_cam: UvCameraState,
-    pub(super) uv_boundary_buf: wgpu::Buffer,
-    pub(super) uv_overlap: UvOverlapResources,
-    pub(super) validation_colors: ValidationColorResources,
-    pub(super) active_pane: usize,
-    pub(super) cursor_pos: (f32, f32),
-    pub(super) cameras_linked: bool,
-    pub(super) uv_last_mouse_pos: Option<(f32, f32)>,
-    pub(super) uv_left_pressed: bool,
-    pub(super) uv_middle_pressed: bool,
+    pub(super) view: ViewState,
+    pub(super) input: InputState,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) capture_requested: bool,
-    pub(super) modifiers: ModifiersState,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
     pub(super) _backend_info: String,
     pub(super) preferences: Preferences,
-    #[allow(unused)]
-    pub(super) shared_samplers: SharedSamplers,
-    pub(super) msaa_sample_count: u32,
-    pub(super) target_width: u32,
-    pub(super) target_height: u32,
     pub window: Arc<Window>,
 }
 
 impl State {
     pub(super) fn target_dimensions(&self) -> (u32, u32) {
-        compute_target_dimensions(self.display.layout, self.config.width, self.config.height)
+        compute_target_dimensions(
+            self.view.display.layout,
+            self.config.width,
+            self.config.height,
+        )
     }
 
     fn compute_panes(&self) -> Vec<Pane> {
         let w = self.config.width as f32;
         let h = self.config.height as f32;
-        match self.display.layout {
+        match self.view.display.layout {
             ViewLayout::Single => vec![Pane {
                 x: 0.0,
                 y: 0.0,
@@ -494,18 +357,18 @@ impl State {
     }
 
     fn active_pane_index(&self) -> usize {
-        if self.display.layout == ViewLayout::Single {
+        if self.view.display.layout == ViewLayout::Single {
             return 0;
         }
         let panes = self.compute_panes();
-        hit_test_pane(&panes, self.cursor_pos)
+        hit_test_pane(&panes, self.input.cursor_pos)
     }
 
     fn compute_divider_rect(&self) -> Option<egui::Rect> {
         let w = self.config.width as f32;
         let h = self.config.height as f32;
         let ppp = self.window.scale_factor() as f32;
-        match self.display.layout {
+        match self.view.display.layout {
             ViewLayout::Single => None,
             ViewLayout::SplitVertical => {
                 let cx = (w * 0.5).floor();
@@ -525,19 +388,16 @@ impl State {
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
-        use crate::cgi::gui::SidebarState;
-
         self.window.request_redraw();
         if !self.is_surface_configured {
             return Ok(());
         }
 
         let frame_ms = self.dt * 1000.0;
-
         self.gui.clear_expired_toast();
 
         let output = self.surface.get_current_texture()?;
-        let view = output
+        let surface_view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.poll_overlap_stats();
@@ -546,243 +406,286 @@ impl State {
         let is_split = panes.len() > 1;
 
         for (i, pane) in panes.iter().enumerate() {
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Pane Encoder"),
-                });
-            let pane_aspect = pane.width / pane.height;
+            self.render_pane(i, pane, &surface_view, is_split);
+        }
 
-            let cam_data = if i == 0 {
-                self.scene.as_ref().map(|s| s.cam.camera)
-            } else {
-                self.secondary_cam
-                    .as_ref()
-                    .map(|c| c.camera)
-                    .or(self.scene.as_ref().map(|s| s.cam.camera))
-            };
+        self.render_gui_overlay(&output, &panes, is_split, frame_ms);
+        output.present();
+        Ok(())
+    }
 
-            let pds = self.pane_settings[i.min(1)].clone();
+    fn render_pane(
+        &mut self,
+        i: usize,
+        pane: &Pane,
+        surface_view: &wgpu::TextureView,
+        is_split: bool,
+    ) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Pane Encoder"),
+            });
+        let pane_aspect = pane.width / pane.height;
 
-            let Some(cam_data) = cam_data else {
-                self.render_empty_pass(&mut encoder, &pds);
-                let viewport = if is_split {
-                    Some([pane.x, pane.y, pane.width, pane.height])
-                } else {
-                    None
-                };
-                self.post.composite.render(
-                    &mut encoder,
-                    &self.pipelines,
-                    &view,
-                    self.post.ssao_enabled,
-                    &self.post.ssao,
-                    viewport,
-                    i == 0,
-                );
-                self.queue.submit(std::iter::once(encoder.finish()));
-                continue;
-            };
+        let cam_data = if i == 0 {
+            self.scene.as_ref().map(|s| s.cam.camera)
+        } else {
+            self.view
+                .secondary_cam
+                .as_ref()
+                .map(|c| c.camera)
+                .or(self.scene.as_ref().map(|s| s.cam.camera))
+        };
 
-            let is_uv_map = pds.pane_mode == PaneMode::UvMap;
+        let pds = self.view.pane_settings[i.min(1)].clone();
 
-            if is_uv_map {
-                if let Some(scene) = &self.scene {
-                    if scene.model.has_uvs {
-                        self.uv_cam
-                            .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
-                        let uv_wire = WireframeParams {
-                            color: [0.8, 0.8, 0.8, 1.0],
-                            line_width: pds.line_weight.width_px(),
-                            screen_width: self.target_width as f32,
-                            screen_height: self.target_height as f32,
-                            _pad: 0.0,
-                        };
-                        self.queue.write_buffer(
-                            &self.wire.wireframe_params_buffer,
-                            0,
-                            bytemuck::bytes_of(&uv_wire),
-                        );
-                        if pds.show_uv_overlap {
-                            self.render_uv_overlap_count_pass(
-                                &mut encoder,
-                                scene,
-                                &self.uv_cam.bind_group,
-                                &self.uv_overlap.count_view,
-                            );
-                            if self.uv_overlap.stats_dirty && !self.uv_overlap.readback_pending {
-                                self.uv_cam.write(&self.queue, [0.0, 0.0], 1.0, 1.0);
-                                self.render_uv_overlap_count_pass(
-                                    &mut encoder,
-                                    scene,
-                                    &self.uv_cam.bind_group,
-                                    &self.uv_overlap.stats_view,
-                                );
-                                request_overlap_readback_impl(
-                                    &self.device,
-                                    &mut self.uv_overlap,
-                                    &mut encoder,
-                                );
-                                self.uv_cam.write(
-                                    &self.queue,
-                                    pds.uv_offset,
-                                    pds.uv_zoom,
-                                    pane_aspect,
-                                );
-                            }
-                        }
-                        if pds.uv_bg == UvMapBackground::Dark {
-                            let dark = GradientUniform {
-                                top_color: [0.10, 0.10, 0.10, 1.0],
-                                bottom_color: [0.10, 0.10, 0.10, 1.0],
-                                uv_y_offset: 0.0,
-                                uv_y_scale: 1.0,
-                                _pad: [0.0; 2],
-                            };
-                            self.queue.write_buffer(
-                                &self.wire._gradient_buffer,
-                                0,
-                                bytemuck::bytes_of(&dark),
-                            );
-                        }
-                        self.render_uv_map_pass(&mut encoder, scene, &self.uv_cam.bind_group, &pds);
-                    } else {
-                        self.render_empty_pass(&mut encoder, &pds);
-                    }
-                } else {
-                    self.render_empty_pass(&mut encoder, &pds);
-                }
-            } else {
-                if i == 0 {
-                    if let Some(scene) = &mut self.scene {
-                        scene.cam.write_with_aspect(&self.queue, pane_aspect);
-                    }
-                } else if let Some(sec) = &mut self.secondary_cam {
-                    sec.write_with_aspect(&self.queue, pane_aspect);
-                }
-
-                if is_split && i == 1 {
-                    if !self.display.lights_locked
-                        && let Some(scene) = &mut self.scene
-                    {
-                        scene.lights_uniform = lights_from_camera(&cam_data, &scene.model.bounds);
-                        self.queue.write_buffer(
-                            &scene.light_buffer,
-                            0,
-                            bytemuck::cast_slice(&[scene.lights_uniform]),
-                        );
-                        let key_pos = scene.lights_uniform.lights[0].position;
-                        scene.shadow.update_light_vp(
-                            &self.queue,
-                            cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                            scene.model.bounds.center(),
-                            scene.model.bounds.diagonal() / 2.0,
-                        );
-                    }
-                    if let Some(sec) = &self.secondary_cam {
-                        self.post.ssao.rebuild_bind_groups(
-                            &self.device,
-                            &self.layouts,
-                            &sec.buffer,
-                        );
-                    }
-                    if let Some(sec_buf) = self.secondary_cam.as_ref().map(|c| &c.buffer)
-                        && let Some(scene) = &mut self.scene
-                    {
-                        scene
-                            .vis
-                            .rebuild_camera_bind_groups(&self.device, &self.layouts, sec_buf);
-                    }
-                }
-
-                self.write_wireframe_params_for(&pds);
-                self.write_gradient_colors_for(&pds);
-                if let Some(scene) = &self.scene {
-                    let color = pds.background_mode.grid_color();
-                    self.queue.write_buffer(
-                        &scene.vis.grid_uniform_buf,
-                        4,
-                        bytemuck::cast_slice(&color),
-                    );
-                }
-
-                let cam_buf = if i == 0 {
-                    self.scene.as_ref().map(|s| &s.cam.buffer)
-                } else {
-                    self.secondary_cam.as_ref().map(|c| &c.buffer)
-                };
-                if let Some(buf) = cam_buf {
-                    let data: [u32; 2] = [
-                        pds.inspection_mode.as_u32(),
-                        pds.texel_density_target.to_bits(),
-                    ];
-                    self.queue
-                        .write_buffer(buf, 280, bytemuck::cast_slice(&data));
-                }
-
-                if (i == 0 || !self.display.lights_locked)
-                    && let Some(scene) = &self.scene
-                {
-                    self.render_shadow_pass(&mut encoder, scene);
-                }
-
-                let cam_bg = if i == 0 {
-                    self.scene.as_ref().map(|s| &s.cam.bind_group)
-                } else {
-                    self.secondary_cam
-                        .as_ref()
-                        .map(|c| &c.bind_group)
-                        .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-                };
-                if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
-                    if self.post.ssao_enabled {
-                        self.render_gbuffer_pass(&mut encoder, scene, cam_bg);
-                    }
-                    self.render_main_pass(&mut encoder, scene, cam_bg, &cam_data, &pds);
-                } else {
-                    self.render_empty_pass(&mut encoder, &pds);
-                }
-
-                if self.post.ssao_enabled {
-                    self.render_ssao_passes(&mut encoder);
-                }
-
-                if self.post.bloom_enabled {
-                    self.post.bloom.render(
-                        &mut encoder,
-                        &self.pipelines,
-                        &self.queue,
-                        self.target_width,
-                        self.target_height,
-                    );
-                }
-            }
-
-            let pane_bloom = self.post.bloom_enabled && !is_uv_map;
-            let pane_ssao = self.post.ssao_enabled && !is_uv_map;
-            self.post.composite.write_params(
-                &self.queue,
-                pane_bloom,
-                pane_ssao,
-                self.post.tone_mode,
-                self.post.exposure,
-            );
+        let Some(cam_data) = cam_data else {
+            self.renderer.render_empty_pass(&mut encoder, &pds);
             let viewport = if is_split {
                 Some([pane.x, pane.y, pane.width, pane.height])
             } else {
                 None
             };
-            self.post.composite.render(
+            self.renderer.post.composite.render(
                 &mut encoder,
-                &self.pipelines,
-                &view,
-                pane_ssao,
-                &self.post.ssao,
+                &self.renderer.pipelines,
+                surface_view,
+                self.renderer.post.ssao_enabled,
+                &self.renderer.post.ssao,
                 viewport,
                 i == 0,
             );
             self.queue.submit(std::iter::once(encoder.finish()));
+            return;
+        };
+
+        let is_uv_map = pds.pane_mode == PaneMode::UvMap;
+
+        if is_uv_map {
+            if let Some(scene) = &self.scene {
+                if scene.model.has_uvs {
+                    self.renderer.uv_cam.write(
+                        &self.queue,
+                        pds.uv_offset,
+                        pds.uv_zoom,
+                        pane_aspect,
+                    );
+                    let uv_wire = WireframeParams {
+                        color: [0.8, 0.8, 0.8, 1.0],
+                        line_width: pds.line_weight.width_px(),
+                        screen_width: self.renderer.target_width as f32,
+                        screen_height: self.renderer.target_height as f32,
+                        _pad: 0.0,
+                    };
+                    self.queue.write_buffer(
+                        &self.renderer.wire.wireframe_params_buffer,
+                        0,
+                        bytemuck::bytes_of(&uv_wire),
+                    );
+                    if pds.show_uv_overlap {
+                        self.renderer.render_uv_overlap_count_pass(
+                            &mut encoder,
+                            scene,
+                            &self.renderer.uv_cam.bind_group,
+                            &self.renderer.uv_overlap.count_view,
+                        );
+                        if self.renderer.uv_overlap.stats_dirty
+                            && !self.renderer.uv_overlap.readback_pending
+                        {
+                            self.renderer
+                                .uv_cam
+                                .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
+                            self.renderer.render_uv_overlap_count_pass(
+                                &mut encoder,
+                                scene,
+                                &self.renderer.uv_cam.bind_group,
+                                &self.renderer.uv_overlap.stats_view,
+                            );
+                            request_overlap_readback_impl(
+                                &self.device,
+                                &mut self.renderer.uv_overlap,
+                                &mut encoder,
+                            );
+                            self.renderer.uv_cam.write(
+                                &self.queue,
+                                pds.uv_offset,
+                                pds.uv_zoom,
+                                pane_aspect,
+                            );
+                        }
+                    }
+                    if pds.uv_bg == UvMapBackground::Dark {
+                        let dark = GradientUniform {
+                            top_color: [0.10, 0.10, 0.10, 1.0],
+                            bottom_color: [0.10, 0.10, 0.10, 1.0],
+                            uv_y_offset: 0.0,
+                            uv_y_scale: 1.0,
+                            _pad: [0.0; 2],
+                        };
+                        self.queue.write_buffer(
+                            &self.renderer.wire._gradient_buffer,
+                            0,
+                            bytemuck::bytes_of(&dark),
+                        );
+                    }
+                    self.renderer.render_uv_map_pass(
+                        &mut encoder,
+                        scene,
+                        &self.renderer.uv_cam.bind_group,
+                        &pds,
+                    );
+                } else {
+                    self.renderer.render_empty_pass(&mut encoder, &pds);
+                }
+            } else {
+                self.renderer.render_empty_pass(&mut encoder, &pds);
+            }
+        } else {
+            if i == 0 {
+                if let Some(scene) = &mut self.scene {
+                    scene.cam.write_with_aspect(&self.queue, pane_aspect);
+                }
+            } else if let Some(sec) = &mut self.view.secondary_cam {
+                sec.write_with_aspect(&self.queue, pane_aspect);
+            }
+
+            if is_split && i == 1 {
+                if !self.view.display.lights_locked
+                    && let Some(scene) = &mut self.scene
+                {
+                    scene.lights_uniform = lights_from_camera(&cam_data, &scene.model.bounds);
+                    self.queue.write_buffer(
+                        &scene.light_buffer,
+                        0,
+                        bytemuck::cast_slice(&[scene.lights_uniform]),
+                    );
+                    let key_pos = scene.lights_uniform.lights[0].position;
+                    scene.shadow.update_light_vp(
+                        &self.queue,
+                        cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                        scene.model.bounds.center(),
+                        scene.model.bounds.diagonal() / 2.0,
+                    );
+                }
+                if let Some(sec) = &self.view.secondary_cam {
+                    self.renderer.post.ssao.rebuild_bind_groups(
+                        &self.device,
+                        &self.renderer.layouts,
+                        &sec.buffer,
+                    );
+                }
+                if let Some(sec_buf) = self.view.secondary_cam.as_ref().map(|c| &c.buffer)
+                    && let Some(scene) = &mut self.scene
+                {
+                    scene.vis.rebuild_camera_bind_groups(
+                        &self.device,
+                        &self.renderer.layouts,
+                        sec_buf,
+                    );
+                }
+            }
+
+            self.write_wireframe_params_for(&pds);
+            self.write_gradient_colors_for(&pds);
+            if let Some(scene) = &self.scene {
+                let color = pds.background_mode.grid_color();
+                self.queue.write_buffer(
+                    &scene.vis.grid_uniform_buf,
+                    4,
+                    bytemuck::cast_slice(&color),
+                );
+            }
+
+            let cam_buf = if i == 0 {
+                self.scene.as_ref().map(|s| &s.cam.buffer)
+            } else {
+                self.view.secondary_cam.as_ref().map(|c| &c.buffer)
+            };
+            if let Some(buf) = cam_buf {
+                let data: [u32; 2] = [
+                    pds.inspection_mode.as_u32(),
+                    pds.texel_density_target.to_bits(),
+                ];
+                self.queue
+                    .write_buffer(buf, 280, bytemuck::cast_slice(&data));
+            }
+
+            if (i == 0 || !self.view.display.lights_locked)
+                && let Some(scene) = &self.scene
+            {
+                self.renderer.render_shadow_pass(&mut encoder, scene);
+            }
+
+            let cam_bg = if i == 0 {
+                self.scene.as_ref().map(|s| &s.cam.bind_group)
+            } else {
+                self.view
+                    .secondary_cam
+                    .as_ref()
+                    .map(|c| &c.bind_group)
+                    .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
+            };
+            if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
+                if self.renderer.post.ssao_enabled {
+                    self.renderer
+                        .render_gbuffer_pass(&mut encoder, scene, cam_bg);
+                }
+                self.renderer
+                    .render_main_pass(&mut encoder, scene, cam_bg, &cam_data, &pds);
+            } else {
+                self.renderer.render_empty_pass(&mut encoder, &pds);
+            }
+
+            if self.renderer.post.ssao_enabled {
+                self.renderer.render_ssao_passes(&mut encoder);
+            }
+
+            if self.renderer.post.bloom_enabled {
+                self.renderer.post.bloom.render(
+                    &mut encoder,
+                    &self.renderer.pipelines,
+                    &self.queue,
+                    self.renderer.target_width,
+                    self.renderer.target_height,
+                );
+            }
         }
+
+        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map;
+        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map;
+        self.renderer.post.composite.write_params(
+            &self.queue,
+            pane_bloom,
+            pane_ssao,
+            self.renderer.post.tone_mode,
+            self.renderer.post.exposure,
+        );
+        let viewport = if is_split {
+            Some([pane.x, pane.y, pane.width, pane.height])
+        } else {
+            None
+        };
+        self.renderer.post.composite.render(
+            &mut encoder,
+            &self.renderer.pipelines,
+            surface_view,
+            pane_ssao,
+            &self.renderer.post.ssao,
+            viewport,
+            i == 0,
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    fn render_gui_overlay(
+        &mut self,
+        output: &wgpu::SurfaceTexture,
+        panes: &[Pane],
+        is_split: bool,
+        frame_ms: f32,
+    ) {
+        use crate::cgi::gui::SidebarState;
 
         let mut encoder = self
             .device
@@ -799,7 +702,7 @@ impl State {
 
         let active_pane_rect = if is_split {
             let ppp = self.window.scale_factor() as f32;
-            panes.get(self.active_pane).map(|p| {
+            panes.get(self.view.active_pane).map(|p| {
                 egui::Rect::from_min_size(
                     egui::pos2(p.x / ppp, p.y / ppp),
                     egui::vec2(p.width / ppp, p.height / ppp),
@@ -809,8 +712,8 @@ impl State {
             None
         };
 
-        let ap = self.active_pane;
-        let pds = &mut self.pane_settings[ap];
+        let ap = self.view.active_pane;
+        let pds = &mut self.view.pane_settings[ap];
 
         let hud_pane_label = {
             let pane_mode_str = match pds.pane_mode {
@@ -831,7 +734,7 @@ impl State {
             }
         };
         let hud_cameras_linked = if is_split {
-            Some(self.cameras_linked)
+            Some(self.view.cameras_linked)
         } else {
             None
         };
@@ -848,21 +751,21 @@ impl State {
             show_local_axes: &mut pds.show_local_axes,
             inspection_mode: &mut pds.inspection_mode,
             texel_density_target: &mut pds.texel_density_target,
-            turntable_active: &mut self.display.turntable_active,
-            turntable_rpm: &mut self.display.turntable_rpm,
-            lights_locked: &mut self.display.lights_locked,
-            bloom_enabled: &mut self.post.bloom_enabled,
-            ssao_enabled: &mut self.post.ssao_enabled,
-            tone_mode: &mut self.post.tone_mode,
-            exposure: &mut self.post.exposure,
-            ibl_mode: &mut self.ibl_res.ibl_mode,
-            cameras_linked: &mut self.cameras_linked,
+            turntable_active: &mut self.view.display.turntable_active,
+            turntable_rpm: &mut self.view.display.turntable_rpm,
+            lights_locked: &mut self.view.display.lights_locked,
+            bloom_enabled: &mut self.renderer.post.bloom_enabled,
+            ssao_enabled: &mut self.renderer.post.ssao_enabled,
+            tone_mode: &mut self.renderer.post.tone_mode,
+            exposure: &mut self.renderer.post.exposure,
+            ibl_mode: &mut self.renderer.ibl_res.ibl_mode,
+            cameras_linked: &mut self.view.cameras_linked,
             is_split,
             pane_mode: &mut pds.pane_mode,
             uv_bg: &mut pds.uv_bg,
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
             show_uv_overlap: &mut pds.show_uv_overlap,
-            uv_overlap_pct: self.uv_overlap.overlap_pct,
+            uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
             show_validation: &mut pds.show_validation,
             validation_report: self.scene.as_ref().map(|s| &s.validation),
             hud_pane_label,
@@ -905,16 +808,13 @@ impl State {
         if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
             self.save_capture(buffer, padded_row_bytes, width, height);
         }
-
-        output.present();
-        Ok(())
     }
 
     fn poll_overlap_stats(&mut self) {
-        if !self.uv_overlap.readback_pending {
+        if !self.renderer.uv_overlap.readback_pending {
             return;
         }
-        let Some(buf) = self.uv_overlap.staging_buffer.take() else {
+        let Some(buf) = self.renderer.uv_overlap.staging_buffer.take() else {
             return;
         };
         let slice = buf.slice(..);
@@ -940,13 +840,13 @@ impl State {
             }
             drop(data);
             buf.unmap();
-            self.uv_overlap.overlap_pct = if total_nonzero > 0 {
+            self.renderer.uv_overlap.overlap_pct = if total_nonzero > 0 {
                 Some(overlap as f32 / total_nonzero as f32 * 100.0)
             } else {
                 Some(0.0)
             };
         }
-        self.uv_overlap.readback_pending = false;
+        self.renderer.uv_overlap.readback_pending = false;
     }
 }
 

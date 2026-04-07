@@ -1,14 +1,116 @@
+use std::sync::Arc;
+
 use cgmath::prelude::*;
 
+use crate::cgi::bind_groups::BindGroupLayouts;
 use crate::cgi::camera::Camera;
 use crate::cgi::model::{DrawMeshSimple, DrawModel};
+use crate::cgi::pipelines::Pipelines;
+use crate::cgi::texture::SharedSamplers;
+use crate::cgi::uv_camera::UvCameraState;
 use crate::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
 
-use super::BoundsMode;
+use crate::cgi::bloom::BloomState;
+use crate::cgi::composite::CompositeState;
+use crate::cgi::ibl::{BrdfLut, IblState};
+use crate::cgi::ssao::SsaoState;
+use crate::cgi::texture;
+use crate::preferences::{IblMode, ToneMode};
 
-use super::{ModelScene, PaneDisplaySettings, State};
+use super::{BoundsMode, ModelScene, PaneDisplaySettings};
 
-impl State {
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct GradientUniform {
+    pub top_color: [f32; 4],
+    pub bottom_color: [f32; 4],
+    pub uv_y_offset: f32,
+    pub uv_y_scale: f32,
+    pub _pad: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct WireframeParams {
+    pub color: [f32; 4],
+    pub line_width: f32,
+    pub screen_width: f32,
+    pub screen_height: f32,
+    pub _pad: f32,
+}
+
+pub(crate) struct RenderTargets {
+    pub depth_texture: texture::Texture,
+    pub msaa_hdr_view: wgpu::TextureView,
+    pub _hdr_resolve_texture: wgpu::Texture,
+    pub hdr_resolve_view: wgpu::TextureView,
+}
+
+pub(crate) struct PostProcessing {
+    pub bloom: BloomState,
+    pub bloom_enabled: bool,
+    pub ssao: SsaoState,
+    pub ssao_enabled: bool,
+    pub composite: CompositeState,
+    pub tone_mode: ToneMode,
+    pub exposure: f32,
+}
+
+pub(crate) struct IblResources {
+    pub ibl: IblState,
+    pub ibl_fallback: IblState,
+    pub brdf_lut: BrdfLut,
+    pub ibl_mode: IblMode,
+    pub last_active_ibl_mode: IblMode,
+}
+
+pub(crate) struct WireframeResources {
+    pub _gradient_buffer: wgpu::Buffer,
+    pub gradient_bind_group: wgpu::BindGroup,
+    pub wireframe_params_buffer: wgpu::Buffer,
+    pub wireframe_params_bind_group: wgpu::BindGroup,
+    pub _checker_texture: texture::Texture,
+    pub uv_checker_bind_group: wgpu::BindGroup,
+}
+
+pub(crate) struct UvOverlapResources {
+    pub count_texture: wgpu::Texture,
+    pub count_view: wgpu::TextureView,
+    pub overlay_bind_group: wgpu::BindGroup,
+    pub sampler: wgpu::Sampler,
+    pub stats_texture: wgpu::Texture,
+    pub stats_view: wgpu::TextureView,
+    pub overlap_pct: Option<f32>,
+    pub stats_dirty: bool,
+    pub staging_buffer: Option<wgpu::Buffer>,
+    pub readback_pending: bool,
+}
+
+pub(crate) struct ValidationColorResources {
+    pub bind_groups: Vec<wgpu::BindGroup>,
+    #[allow(dead_code)]
+    pub buffers: Vec<wgpu::Buffer>,
+}
+
+pub(crate) struct Renderer {
+    pub(super) targets: RenderTargets,
+    pub(super) post: PostProcessing,
+    pub(super) ibl_res: IblResources,
+    pub(super) wire: WireframeResources,
+    pub(super) layouts: Arc<BindGroupLayouts>,
+    pub(super) pipelines: Pipelines,
+    pub(super) uv_cam: UvCameraState,
+    pub(super) uv_boundary_buf: wgpu::Buffer,
+    pub(super) uv_overlap: UvOverlapResources,
+    pub(super) validation_colors: ValidationColorResources,
+    #[allow(unused)]
+    pub(super) shared_samplers: SharedSamplers,
+    pub(super) msaa_sample_count: u32,
+    pub(super) target_width: u32,
+    pub(super) target_height: u32,
+}
+
+impl Renderer {
     pub(super) fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.pipelines.background);
         pass.set_bind_group(0, &self.wire.gradient_bind_group, &[]);

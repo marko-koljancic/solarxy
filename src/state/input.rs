@@ -13,19 +13,21 @@ use super::{BoundsMode, State, ViewLayout};
 
 impl State {
     fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
-        let (primary, secondary) = super::cam_routing(self.active_pane, self.cameras_linked);
+        let (primary, secondary) =
+            super::cam_routing(self.view.active_pane, self.view.cameras_linked);
         if primary
-            && self.pane_settings[0].pane_mode == PaneMode::Scene3D
+            && self.view.pane_settings[0].pane_mode == PaneMode::Scene3D
             && let Some(scene) = &mut self.scene
         {
             f(&mut scene.cam);
         }
         if secondary
             && self
+                .view
                 .pane_settings
                 .get(1)
                 .is_some_and(|p| p.pane_mode == PaneMode::Scene3D)
-            && let Some(cam) = &mut self.secondary_cam
+            && let Some(cam) = &mut self.view.secondary_cam
         {
             f(cam);
         }
@@ -35,9 +37,9 @@ impl State {
             if ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr") {
                 match IblState::from_hdri(&self.device, &self.queue, &path) {
                     Ok(new_ibl) => {
-                        self.ibl_res.ibl = new_ibl;
-                        self.ibl_res.ibl_mode = IblMode::Full;
-                        self.ibl_res.last_active_ibl_mode = IblMode::Full;
+                        self.renderer.ibl_res.ibl = new_ibl;
+                        self.renderer.ibl_res.ibl_mode = IblMode::Full;
+                        self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
                         self.rebuild_light_bind_group();
                         self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
                     }
@@ -72,7 +74,7 @@ impl State {
     }
 
     pub fn set_modifiers(&mut self, modifiers: winit::keyboard::ModifiersState) {
-        self.modifiers = modifiers;
+        self.input.modifiers = modifiers;
     }
 
     pub fn toggle_hints(&mut self) {
@@ -95,7 +97,7 @@ impl State {
                 }
             }
             KeyCode::KeyT => {
-                if self.modifiers.shift_key() {
+                if self.input.modifiers.shift_key() {
                     self.toggle_tone_mode();
                 } else {
                     let bounds = self.scene.as_ref().map(|s| s.model.bounds);
@@ -123,19 +125,19 @@ impl State {
                 }
             }
             KeyCode::KeyL => {
-                if self.modifiers.control_key() {
-                    if self.display.layout != ViewLayout::Single {
-                        self.cameras_linked = !self.cameras_linked;
-                        let msg = if self.cameras_linked {
+                if self.input.modifiers.control_key() {
+                    if self.view.display.layout != ViewLayout::Single {
+                        self.view.cameras_linked = !self.view.cameras_linked;
+                        let msg = if self.view.cameras_linked {
                             "Cameras linked"
                         } else {
                             "Cameras independent"
                         };
                         self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                     }
-                } else if self.modifiers.shift_key() {
-                    self.display.lights_locked = !self.display.lights_locked;
-                    let msg = if self.display.lights_locked {
+                } else if self.input.modifiers.shift_key() {
+                    self.view.display.lights_locked = !self.view.display.lights_locked;
+                    let msg = if self.view.display.lights_locked {
                         "Lights locked"
                     } else {
                         "Lights unlocked"
@@ -172,11 +174,11 @@ impl State {
                 });
             }
             KeyCode::KeyO => {
-                if self.pane_settings[self.active_pane].pane_mode == PaneMode::UvMap {
-                    let pds = &mut self.pane_settings[self.active_pane];
+                if self.view.pane_settings[self.view.active_pane].pane_mode == PaneMode::UvMap {
+                    let pds = &mut self.view.pane_settings[self.view.active_pane];
                     pds.show_uv_overlap = !pds.show_uv_overlap;
                     if pds.show_uv_overlap {
-                        self.uv_overlap.stats_dirty = true;
+                        self.renderer.uv_overlap.stats_dirty = true;
                     }
                     let msg = if pds.show_uv_overlap {
                         "Overlap: On"
@@ -184,7 +186,7 @@ impl State {
                         "Overlap: Off"
                     };
                     self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
-                } else if self.modifiers.shift_key() {
+                } else if self.input.modifiers.shift_key() {
                     self.toggle_ssao();
                 } else {
                     self.for_each_target_cam(|cam| {
@@ -193,13 +195,13 @@ impl State {
                 }
             }
             KeyCode::KeyW => {
-                let pds = &mut self.pane_settings[self.active_pane];
-                if self.modifiers.shift_key() {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                if self.input.modifiers.shift_key() {
                     pds.line_weight = pds.line_weight.next();
                     self.gui.set_toast(
                         &format!(
                             "Line Weight: {}",
-                            self.pane_settings[self.active_pane].line_weight
+                            self.view.pane_settings[self.view.active_pane].line_weight
                         ),
                         [0.0, 0.4, 0.0, 1.0],
                     );
@@ -215,7 +217,7 @@ impl State {
                 }
             }
             KeyCode::KeyX => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.view_mode == ViewMode::Ghosted {
                     pds.view_mode = pds.prev_non_ghosted_mode;
                 } else {
@@ -228,10 +230,10 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
-                if self.modifiers.shift_key() {
+                if self.input.modifiers.shift_key() {
                     self.save_preferences();
                 } else {
-                    self.pane_settings[self.active_pane].view_mode = ViewMode::Shaded;
+                    self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
                 }
             }
             KeyCode::KeyC => {
@@ -240,8 +242,8 @@ impl State {
                 }
             }
             KeyCode::KeyA => {
-                let pds = &mut self.pane_settings[self.active_pane];
-                if self.modifiers.shift_key() {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                if self.input.modifiers.shift_key() {
                     pds.show_local_axes = !pds.show_local_axes;
                     let msg = if pds.show_local_axes {
                         "Local Axes: On"
@@ -254,31 +256,31 @@ impl State {
                 }
             }
             KeyCode::KeyG => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.show_grid = !pds.show_grid;
             }
             KeyCode::KeyI => self.toggle_ibl(),
             KeyCode::KeyB => {
-                if self.modifiers.shift_key() {
+                if self.input.modifiers.shift_key() {
                     self.cycle_bounds_mode();
                 } else {
                     self.cycle_background();
                 }
             }
             KeyCode::KeyM => {
-                if self.modifiers.shift_key() {
+                if self.input.modifiers.shift_key() {
                     self.toggle_bloom();
                 }
             }
             KeyCode::KeyE => {
-                if self.modifiers.shift_key() {
+                if self.input.modifiers.shift_key() {
                     self.adjust_exposure(false);
                 } else {
                     self.adjust_exposure(true);
                 }
             }
             KeyCode::KeyN => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.normals_mode = match pds.normals_mode {
                     NormalsMode::Off => NormalsMode::Face,
                     NormalsMode::Face => NormalsMode::Vertex,
@@ -287,8 +289,8 @@ impl State {
                 };
             }
             KeyCode::KeyV => {
-                if self.modifiers.shift_key() {
-                    let pds = &mut self.pane_settings[self.active_pane];
+                if self.input.modifiers.shift_key() {
+                    let pds = &mut self.view.pane_settings[self.view.active_pane];
                     pds.show_validation = !pds.show_validation;
                     let msg = if pds.show_validation {
                         "Validation on"
@@ -297,11 +299,11 @@ impl State {
                     };
                     self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
                 } else {
-                    self.display.turntable_active = !self.display.turntable_active;
+                    self.view.display.turntable_active = !self.view.display.turntable_active;
                 }
             }
             KeyCode::KeyU => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.uv_bg = pds.uv_bg.next();
                     self.gui.set_toast(
@@ -317,21 +319,21 @@ impl State {
                 }
             }
             KeyCode::Digit1 => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Shaded;
                 self.gui
                     .set_toast("Inspection: Shaded", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::Digit2 => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::MaterialId;
                 self.gui
                     .set_toast("Inspection: Material ID", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::Digit3 => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.pane_mode = PaneMode::Scene3D;
                     self.gui.set_toast("3D View", [0.0, 0.4, 0.0, 1.0]);
@@ -343,86 +345,86 @@ impl State {
                 }
             }
             KeyCode::Digit4 => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::TexelDensity;
                 self.gui
                     .set_toast("Inspection: Texel Density", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::Digit5 => {
-                let pds = &mut self.pane_settings[self.active_pane];
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Depth;
                 self.gui
                     .set_toast("Inspection: Depth", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F1 => {
-                if self.display.layout != ViewLayout::Single {
-                    if self.active_pane == 1 {
-                        if let Some(sec) = self.secondary_cam.take()
+                if self.view.display.layout != ViewLayout::Single {
+                    if self.view.active_pane == 1 {
+                        if let Some(sec) = self.view.secondary_cam.take()
                             && let Some(scene) = &mut self.scene
                         {
                             scene.cam = sec;
-                            self.post.ssao.rebuild_bind_groups(
+                            self.renderer.post.ssao.rebuild_bind_groups(
                                 &self.device,
-                                &self.layouts,
+                                &self.renderer.layouts,
                                 &scene.cam.buffer,
                             );
                             scene.vis.rebuild_camera_bind_groups(
                                 &self.device,
-                                &self.layouts,
+                                &self.renderer.layouts,
                                 &scene.cam.buffer,
                             );
                         }
                     } else {
-                        self.secondary_cam = None;
+                        self.view.secondary_cam = None;
                     }
                 }
-                if self.active_pane == 1 {
-                    self.pane_settings[0] = self.pane_settings[1].clone();
+                if self.view.active_pane == 1 {
+                    self.view.pane_settings[0] = self.view.pane_settings[1].clone();
                 }
-                self.active_pane = 0;
-                self.display.layout = ViewLayout::Single;
+                self.view.active_pane = 0;
+                self.view.display.layout = ViewLayout::Single;
                 let (tw, th) = self.target_dimensions();
                 self.resize_render_targets(tw, th);
                 self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F2 => {
-                if self.display.layout == ViewLayout::Single {
-                    self.pane_settings[1] = self.pane_settings[0].clone();
-                    self.pane_settings[0].pane_mode = PaneMode::UvMap;
-                    self.pane_settings[0].uv_offset = [0.0, 0.0];
-                    self.pane_settings[0].uv_zoom = 1.0;
-                    self.pane_settings[1].pane_mode = PaneMode::Scene3D;
+                if self.view.display.layout == ViewLayout::Single {
+                    self.view.pane_settings[1] = self.view.pane_settings[0].clone();
+                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
+                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.view.pane_settings[0].uv_zoom = 1.0;
+                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
                     if let Some(scene) = &self.scene {
-                        self.secondary_cam = Some(
-                            scene
-                                .cam
-                                .clone_with_new_resources(&self.device, &self.layouts.camera),
-                        );
+                        self.view.secondary_cam =
+                            Some(scene.cam.clone_with_new_resources(
+                                &self.device,
+                                &self.renderer.layouts.camera,
+                            ));
                     }
                 }
-                self.display.layout = ViewLayout::SplitVertical;
+                self.view.display.layout = ViewLayout::SplitVertical;
                 let (tw, th) = self.target_dimensions();
                 self.resize_render_targets(tw, th);
                 self.gui.set_toast("Split Vertical", [0.0, 0.4, 0.0, 1.0]);
             }
             KeyCode::F3 => {
-                if self.display.layout == ViewLayout::Single {
-                    self.pane_settings[1] = self.pane_settings[0].clone();
-                    self.pane_settings[0].pane_mode = PaneMode::UvMap;
-                    self.pane_settings[0].uv_offset = [0.0, 0.0];
-                    self.pane_settings[0].uv_zoom = 1.0;
-                    self.pane_settings[1].pane_mode = PaneMode::Scene3D;
+                if self.view.display.layout == ViewLayout::Single {
+                    self.view.pane_settings[1] = self.view.pane_settings[0].clone();
+                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
+                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.view.pane_settings[0].uv_zoom = 1.0;
+                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
                     if let Some(scene) = &self.scene {
-                        self.secondary_cam = Some(
-                            scene
-                                .cam
-                                .clone_with_new_resources(&self.device, &self.layouts.camera),
-                        );
+                        self.view.secondary_cam =
+                            Some(scene.cam.clone_with_new_resources(
+                                &self.device,
+                                &self.renderer.layouts.camera,
+                            ));
                     }
                 }
-                self.display.layout = ViewLayout::SplitHorizontal;
+                self.view.display.layout = ViewLayout::SplitHorizontal;
                 let (tw, th) = self.target_dimensions();
                 self.resize_render_targets(tw, th);
                 self.gui.set_toast("Split Horizontal", [0.0, 0.4, 0.0, 1.0]);
@@ -436,28 +438,28 @@ impl State {
     }
 
     fn write_composite_params(&self) {
-        self.post.composite.write_params(
+        self.renderer.post.composite.write_params(
             &self.queue,
-            self.post.bloom_enabled,
-            self.post.ssao_enabled,
-            self.post.tone_mode,
-            self.post.exposure,
+            self.renderer.post.bloom_enabled,
+            self.renderer.post.ssao_enabled,
+            self.renderer.post.tone_mode,
+            self.renderer.post.exposure,
         );
     }
 
     fn toggle_tone_mode(&mut self) {
-        self.post.tone_mode = self.post.tone_mode.next();
+        self.renderer.post.tone_mode = self.renderer.post.tone_mode.next();
         self.write_composite_params();
         self.gui.set_toast(
-            &format!("Tone: {}", self.post.tone_mode),
+            &format!("Tone: {}", self.renderer.post.tone_mode),
             [0.0, 0.4, 0.0, 1.0],
         );
     }
 
     fn toggle_ssao(&mut self) {
-        self.post.ssao_enabled = !self.post.ssao_enabled;
+        self.renderer.post.ssao_enabled = !self.renderer.post.ssao_enabled;
         self.write_composite_params();
-        let msg = if self.post.ssao_enabled {
+        let msg = if self.renderer.post.ssao_enabled {
             "SSAO: On"
         } else {
             "SSAO: Off"
@@ -466,9 +468,9 @@ impl State {
     }
 
     fn toggle_bloom(&mut self) {
-        self.post.bloom_enabled = !self.post.bloom_enabled;
+        self.renderer.post.bloom_enabled = !self.renderer.post.bloom_enabled;
         self.write_composite_params();
-        let msg = if self.post.bloom_enabled {
+        let msg = if self.renderer.post.bloom_enabled {
             "Bloom: On"
         } else {
             "Bloom: Off"
@@ -478,32 +480,32 @@ impl State {
 
     fn adjust_exposure(&mut self, increase: bool) {
         let step = if increase { 0.5 } else { -0.5 };
-        self.post.exposure = (self.post.exposure + step).clamp(0.1, 10.0);
+        self.renderer.post.exposure = (self.renderer.post.exposure + step).clamp(0.1, 10.0);
         self.write_composite_params();
         self.gui.set_toast(
-            &format!("Exposure: {:.1}", self.post.exposure),
+            &format!("Exposure: {:.1}", self.renderer.post.exposure),
             [0.0, 0.4, 0.0, 1.0],
         );
     }
 
     fn toggle_ibl(&mut self) {
-        if self.modifiers.shift_key() {
-            if self.ibl_res.ibl_mode != IblMode::Off {
-                self.ibl_res.ibl_mode = match self.ibl_res.ibl_mode {
+        if self.input.modifiers.shift_key() {
+            if self.renderer.ibl_res.ibl_mode != IblMode::Off {
+                self.renderer.ibl_res.ibl_mode = match self.renderer.ibl_res.ibl_mode {
                     IblMode::Diffuse => IblMode::Full,
                     IblMode::Full => IblMode::Diffuse,
                     IblMode::Off => unreachable!(),
                 };
-                self.ibl_res.last_active_ibl_mode = self.ibl_res.ibl_mode;
+                self.renderer.ibl_res.last_active_ibl_mode = self.renderer.ibl_res.ibl_mode;
             }
-        } else if self.ibl_res.ibl_mode == IblMode::Off {
-            self.ibl_res.ibl_mode = self.ibl_res.last_active_ibl_mode;
+        } else if self.renderer.ibl_res.ibl_mode == IblMode::Off {
+            self.renderer.ibl_res.ibl_mode = self.renderer.ibl_res.last_active_ibl_mode;
         } else {
-            self.ibl_res.last_active_ibl_mode = self.ibl_res.ibl_mode;
-            self.ibl_res.ibl_mode = IblMode::Off;
+            self.renderer.ibl_res.last_active_ibl_mode = self.renderer.ibl_res.ibl_mode;
+            self.renderer.ibl_res.ibl_mode = IblMode::Off;
         }
         self.rebuild_light_bind_group();
-        let msg = match self.ibl_res.ibl_mode {
+        let msg = match self.renderer.ibl_res.ibl_mode {
             IblMode::Off => "IBL: Off",
             IblMode::Diffuse => "IBL: Diffuse",
             IblMode::Full => "IBL: Full",
@@ -512,9 +514,10 @@ impl State {
     }
 
     pub(super) fn apply_background_change(&mut self) {
-        if self.active_pane == 0 {
-            let (top, bottom) = self.pane_settings[0].background_mode.sky_colors();
-            self.ibl_res.ibl = IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        if self.view.active_pane == 0 {
+            let (top, bottom) = self.view.pane_settings[0].background_mode.sky_colors();
+            self.renderer.ibl_res.ibl =
+                IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
             self.rebuild_light_bind_group();
         }
     }
@@ -528,7 +531,7 @@ impl State {
     }
 
     fn cycle_background(&mut self) {
-        let pds = &mut self.pane_settings[self.active_pane];
+        let pds = &mut self.view.pane_settings[self.view.active_pane];
         pds.background_mode = pds.background_mode.next();
         self.apply_background_change();
     }
@@ -538,7 +541,7 @@ impl State {
             .scene
             .as_ref()
             .is_some_and(|s| s.model.meshes.len() > 1);
-        let pds = &mut self.pane_settings[self.active_pane];
+        let pds = &mut self.view.pane_settings[self.view.active_pane];
         pds.bounds_mode = match pds.bounds_mode {
             BoundsMode::Off => BoundsMode::WholeModel,
             BoundsMode::WholeModel if is_multi => BoundsMode::PerMesh,
@@ -553,26 +556,26 @@ impl State {
     }
 
     fn save_preferences(&mut self) {
-        let pds = &self.pane_settings[0];
+        let pds = &self.view.pane_settings[0];
         self.preferences.display.background = pds.background_mode;
         self.preferences.display.view_mode = pds.view_mode;
         self.preferences.display.normals_mode = pds.normals_mode;
         self.preferences.display.grid_visible = pds.show_grid;
         self.preferences.display.axis_gizmo_visible = pds.show_axis_gizmo;
         self.preferences.display.local_axes_visible = pds.show_local_axes;
-        self.preferences.display.bloom_enabled = self.post.bloom_enabled;
-        self.preferences.display.ssao_enabled = self.post.ssao_enabled;
+        self.preferences.display.bloom_enabled = self.renderer.post.bloom_enabled;
+        self.preferences.display.ssao_enabled = self.renderer.post.ssao_enabled;
         self.preferences.display.uv_mode = pds.uv_mode;
-        self.preferences.display.turntable_active = self.display.turntable_active;
-        self.preferences.display.turntable_rpm = self.display.turntable_rpm;
+        self.preferences.display.turntable_active = self.view.display.turntable_active;
+        self.preferences.display.turntable_rpm = self.view.display.turntable_rpm;
         if let Some(scene) = &self.scene {
             self.preferences.display.projection_mode = scene.cam.camera.projection;
         }
         self.preferences.rendering.wireframe_line_weight = pds.line_weight;
-        self.preferences.lighting.lock = self.display.lights_locked;
-        self.preferences.display.ibl_mode = self.ibl_res.ibl_mode;
-        self.preferences.display.tone_mode = self.post.tone_mode;
-        self.preferences.display.exposure = self.post.exposure;
+        self.preferences.lighting.lock = self.view.display.lights_locked;
+        self.preferences.display.ibl_mode = self.renderer.ibl_res.ibl_mode;
+        self.preferences.display.tone_mode = self.renderer.post.tone_mode;
+        self.preferences.display.exposure = self.renderer.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
         self.preferences.display.texel_density_target = pds.texel_density_target;
 
@@ -587,19 +590,19 @@ impl State {
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-        let ap = self.active_pane;
-        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
+        let ap = self.view.active_pane;
+        if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
             match button {
                 MouseButton::Left => {
-                    self.uv_left_pressed = pressed;
+                    self.input.uv_left_pressed = pressed;
                     if !pressed {
-                        self.uv_last_mouse_pos = None;
+                        self.input.uv_last_mouse_pos = None;
                     }
                 }
                 MouseButton::Middle => {
-                    self.uv_middle_pressed = pressed;
+                    self.input.uv_middle_pressed = pressed;
                     if !pressed {
-                        self.uv_last_mouse_pos = None;
+                        self.input.uv_last_mouse_pos = None;
                     }
                 }
                 _ => {}
@@ -610,22 +613,22 @@ impl State {
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        let ap = self.active_pane;
-        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
-            if let Some((lx, ly)) = self.uv_last_mouse_pos {
+        let ap = self.view.active_pane;
+        if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
+            if let Some((lx, ly)) = self.input.uv_last_mouse_pos {
                 let dx = x - lx;
                 let dy = y - ly;
-                if self.uv_left_pressed || self.uv_middle_pressed {
+                if self.input.uv_left_pressed || self.input.uv_middle_pressed {
                     let panes = self.compute_panes();
                     let pane_w = panes.get(ap).map_or(self.config.width as f32, |p| p.width);
-                    let pds = &mut self.pane_settings[ap];
+                    let pds = &mut self.view.pane_settings[ap];
                     let scale = 1.2 / (pds.uv_zoom * pane_w);
                     pds.uv_offset[0] -= dx * scale;
                     pds.uv_offset[1] += dy * scale;
                 }
             }
-            if self.uv_left_pressed || self.uv_middle_pressed {
-                self.uv_last_mouse_pos = Some((x, y));
+            if self.input.uv_left_pressed || self.input.uv_middle_pressed {
+                self.input.uv_last_mouse_pos = Some((x, y));
             }
         } else {
             self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
@@ -633,9 +636,9 @@ impl State {
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        let ap = self.active_pane;
-        if self.pane_settings[ap].pane_mode == PaneMode::UvMap {
-            let pds = &mut self.pane_settings[ap];
+        let ap = self.view.active_pane;
+        if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
+            let pds = &mut self.view.pane_settings[ap];
             pds.uv_zoom = (pds.uv_zoom * (1.0 + delta * 0.1)).clamp(0.1, 50.0);
         } else {
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
