@@ -36,6 +36,11 @@ A comprehensive guide to Solarxy -- a lightweight, cross-platform 3D model viewe
   - [Rendering Features](#rendering-features)
   - [Visualization Tools](#visualization-tools)
   - [Background and Appearance](#background-and-appearance)
+  - [Sidebar Panel](#sidebar-panel)
+  - [Split Viewport](#split-viewport)
+  - [Inspection Modes](#inspection-modes)
+  - [UV Map Mode](#uv-map-mode)
+  - [Validation Overlay](#validation-overlay)
   - [Drag and Drop](#drag-and-drop)
   - [Screenshots](#screenshots)
   - [Heads-Up Display](#heads-up-display)
@@ -122,7 +127,7 @@ Extract the archive and run the `solarxy` binary directly. No installation step 
 
 If you prefer to build from source or need a platform not covered by the pre-built binaries:
 
-1. Install the Rust toolchain from [rustup.rs](https://rustup.rs) (minimum supported Rust version: **1.85**).
+1. Install the Rust toolchain from [rustup.rs](https://rustup.rs) (minimum supported Rust version: **1.92**).
 2. Clone the repository:
    ```bash
    git clone https://github.com/marko-koljancic/solarxy.git
@@ -533,6 +538,143 @@ The background affects the overall feel of the scene. Changing the background al
 
 Turntable mode continuously rotates the model around the Y axis. Useful for presentations or getting a quick all-around view. Turntable pauses while you orbit manually with the mouse and resumes when you release.
 
+### Sidebar Panel
+
+Press **Tab** to toggle an interactive sidebar on the left side of the viewer. The sidebar slides in with an animation and is hidden by default.
+
+The sidebar contains collapsible sections with interactive controls:
+
+**View section:**
+- View mode dropdown (synced with **W** key)
+- Inspection mode dropdown (synced with **1**-**5** keys)
+- Texel Density target slider (shown when Texel Density inspection is active, logarithmic 0.01--10.0)
+- Normals mode dropdown (synced with **N**)
+- UV mode dropdown (synced with **U**)
+- Wireframe line weight dropdown (synced with **Shift+W**)
+- Background mode dropdown (synced with **B**)
+- Bounds mode dropdown (synced with **Shift+B**)
+- Camera linking checkbox (split mode only, synced with **Ctrl+L**)
+
+**UV Map controls** (shown when active pane is in UV Map mode):
+- UV background dropdown (Dark / Checker / Texture)
+- Line weight dropdown
+- Overlap toggle checkbox
+- Overlap coverage percentage (when overlap is enabled)
+- "Back to 3D" button
+
+**Display section:**
+- Grid checkbox (synced with **G**)
+- Axis gizmo checkbox (synced with **A**)
+- Local axes checkbox (synced with **Shift+A**)
+- Lights lock checkbox (synced with **Shift+L**)
+- Turntable checkbox (synced with **V**)
+- Turntable RPM slider (shown when turntable is active, logarithmic 1.0--60.0)
+
+**Validation section** (collapsed by default, shown when a model is loaded):
+- Show overlay checkbox (synced with **Shift+V**)
+- List of validation issues with color-coded severity indicators
+
+**Post-Processing section:**
+- Bloom checkbox (synced with **Shift+M**)
+- SSAO checkbox (synced with **Shift+O**)
+- Tone mapping dropdown (synced with **Shift+T**)
+- Exposure slider (synced with **E** / **Shift+E**, logarithmic 0.1--10.0)
+
+**Lighting section:**
+- IBL mode dropdown (synced with **I** / **Shift+I**)
+
+**Model Stats:**
+- Toggle checkbox at the bottom (shown when a model is loaded)
+
+All sidebar controls are bidirectionally synced with keyboard shortcuts -- changing a value in the sidebar updates the viewer immediately, and pressing a keyboard shortcut updates the sidebar to match. Each control shows a tooltip with its corresponding keyboard shortcut.
+
+<!-- TODO: screenshot -- egui sidebar with display controls -->
+
+### Split Viewport
+
+Solarxy supports split-pane layouts for simultaneous multi-angle or multi-mode inspection.
+
+| Key | Layout |
+| --- | --- |
+| **F1** | Single viewport (default) |
+| **F2** | Vertical split -- left pane shows UV Map, right pane shows 3D |
+| **F3** | Horizontal split -- top pane shows UV Map, bottom pane shows 3D |
+
+Each pane has its own independent settings:
+
+- **Camera** -- orbit, pan, and zoom independently per pane
+- **View mode** -- Shaded, Wireframe, Ghosted, etc.
+- **Inspection mode** -- Shaded, Material ID, Texel Density, Depth
+- **Display toggles** -- grid, axes, normals, UV overlay, background, bounds
+- **Pane mode** -- 3D Scene or UV Map
+
+The **active pane** is determined by cursor position and highlighted with a blue border. Mouse input (orbit, pan, zoom) applies only to the active pane. Keyboard shortcuts for display and inspection modes also apply to the active pane only.
+
+**Camera linking:** Press **Ctrl+L** to link or unlink cameras between panes. When linked, orbiting in one pane orbits both. A toast notification confirms the state change.
+
+Panes are separated by a 2-pixel divider. The divider is highlighted in blue on the active pane side.
+
+<!-- TODO: screenshot -- split viewport (F2 vertical layout, UV Map left + Shaded right) -->
+
+### Inspection Modes
+
+Inspection modes provide specialized visualizations for debugging 3D assets. They are activated via number keys and apply to the active pane.
+
+| Key | Mode | Description |
+| --- | --- | --- |
+| **1** | Shaded | Full PBR rendering (default) |
+| **2** | Material ID | Flat color per material slot -- each material gets a unique, deterministic color via hash function. No lighting is applied. Useful for verifying material assignments. |
+| **3** | UV Map | Toggles the pane between 3D view and 2D UV-space rendering. See [UV Map Mode](#uv-map-mode). |
+| **4** | Texel Density | Heat map showing UV density distribution. Blue = under-density (UV islands too large for the surface), green = target density, red = over-density (UV islands too small). The target density is adjustable via a logarithmic slider in the sidebar (0.01--10.0). Models without UVs show solid gray. |
+| **5** | Depth | Linearized depth buffer visualization. White = near plane, black = far plane. Works correctly with both perspective and orthographic projections. Useful for diagnosing Z-fighting and clipping plane issues. |
+
+Inspection modes compose independently with view modes (**W**/**X**). For example, you can view Material ID in wireframe mode, or Texel Density with ghosted transparency.
+
+In split mode, each pane can use a different inspection mode simultaneously -- for example, Material ID on the left and Shaded on the right.
+
+<!-- TODO: screenshot -- inspection modes (Material ID, Texel Density, Depth) -->
+
+### UV Map Mode
+
+Press **3** to toggle the active pane between 3D scene rendering and 2D UV-space rendering. In UV Map mode, the vertex shader projects mesh vertices using their UV coordinates instead of world-space positions, showing the UV layout as a flat 2D view.
+
+**Controls in UV Map mode:**
+
+| Key | Action |
+| --- | --- |
+| **U** | Cycle UV background: Dark / Checker / Texture |
+| **O** | Toggle UV overlap display |
+| **Shift+W** | Cycle wireframe line weight |
+| **3** | Return to 3D view |
+
+**Mouse:** Left or middle drag to pan, scroll to zoom. The UV camera is orthographic -- no orbit.
+
+**UV overlap detection:** Press **O** to highlight overlapping UV regions. Solarxy uses a two-pass algorithm: the first pass renders all triangles in UV space and counts per-pixel coverage; the second pass highlights pixels covered by more than one triangle in semi-transparent red (35% alpha). The overlap coverage percentage is shown in the sidebar.
+
+The recommended split workflow is **F2** (vertical split) with UV Map on the left and Shaded on the right, allowing you to inspect UV layout alongside the 3D model.
+
+### Validation Overlay
+
+The validation overlay renders validation warnings as color-coded semi-transparent highlights directly on the 3D model.
+
+**Toggle:** Press **Shift+V** or use the checkbox in the sidebar's Validation section.
+
+Each validation issue category has a distinct color:
+
+| Category | Color | Alpha |
+| --- | --- | --- |
+| General Error | Red | 35% |
+| Invalid Material Reference | Orange | 35% |
+| Normal Count Mismatch | Cyan | 35% |
+| Missing UVs | Magenta | 35% |
+| Degenerate Triangles | Yellow | 35% |
+
+When a mesh has multiple issues, the highest-severity issue is displayed. Degenerate triangles are rendered using a separate index buffer containing only the zero-area faces, so individual bad triangles are highlighted rather than the entire mesh.
+
+The sidebar's Validation section lists all issues with colored indicator dots, counts of errors and warnings, and the overlay toggle.
+
+Validation runs automatically when a model is loaded. The HUD and sidebar display issue counts.
+
 ### Drag and Drop
 
 Drop files directly onto the viewer window.
@@ -594,7 +736,7 @@ The HUD overlays real-time information on the viewer.
 
 ### Saving Preferences from the Viewer
 
-Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, local axes, bloom, SSAO, tone mapping, exposure, UV mode, projection, turntable, wireframe weight, IBL mode, and lights lock state to the config file. These settings are restored the next time you launch Solarxy.
+Press **Shift+S** to save the current viewer state as your default preferences. This writes the current background, view mode, normals mode, grid, axis gizmo, local axes, bloom, SSAO, tone mapping, exposure, UV mode, projection, turntable, turntable RPM, wireframe weight, IBL mode, lights lock, inspection mode, and texel density target to the config file. These settings are restored the next time you launch Solarxy.
 
 ### Keyboard Shortcut Reference
 
@@ -611,15 +753,42 @@ Press **Shift+S** to save the current viewer state as your default preferences. 
 | **B** | Cycle background (White / Gradient / Dark Gray / Black) |
 | **Shift+B** | Cycle bounding box display (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
-| **Shift+A** | Toggle local coordinate axes (model/mesh centers) |
 | **Shift+O** | Toggle SSAO |
+| **Shift+A** | Toggle local axes (model/mesh centers) |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | **E** / **Shift+E** | Increase / decrease exposure |
 | **G** | Toggle grid |
 | **A** | Toggle axis gizmo |
 | **V** | Toggle turntable auto-rotation |
+| **Shift+V** | Toggle validation overlay |
 | **I** | Toggle IBL |
 | **Shift+I** | Cycle IBL mode (Diffuse / Full) |
+
+**Inspection Modes:**
+
+| Key | Action |
+| --- | --- |
+| **1** | Shaded inspection (default PBR) |
+| **2** | Material ID inspection |
+| **3** | Toggle UV Map / 3D view |
+| **4** | Texel Density inspection |
+| **5** | Depth inspection |
+
+**Split Viewport:**
+
+| Key | Action |
+| --- | --- |
+| **F1** | Single viewport |
+| **F2** | Vertical split (left: UV Map, right: 3D) |
+| **F3** | Horizontal split (top: UV Map, bottom: 3D) |
+| **Ctrl+L** | Toggle camera linking between panes |
+
+**UV Map Mode:**
+
+| Key | Action |
+| --- | --- |
+| **U** | Cycle UV background (Dark / Checker / Texture) |
+| **O** | Toggle UV overlap display |
 
 **Camera:**
 
@@ -646,6 +815,7 @@ Press **Shift+S** to save the current viewer state as your default preferences. 
 
 | Key | Action |
 | --- | --- |
+| **Tab** | Toggle sidebar panel |
 | **C** | Capture screenshot (PNG) |
 | **Shift+S** | Save current settings as preferences |
 | **Shift+L** | Toggle lights lock |
@@ -827,6 +997,9 @@ Export JSON from the TUI by pressing **J**, or from the CLI with `-f json`. When
 | Empty index buffer | Error | Mesh | All formats | Empty index buffer |
 | Invalid material reference | Error | Mesh | OBJ, glTF | Material ID N is out of range (only M materials available) |
 | Missing texture file | Error | Material | OBJ | Texture file not found: 'path' |
+| Degenerate triangles | Warning | Mesh | All formats | N degenerate triangle(s) detected (near-zero area) |
+
+Degenerate triangles are detected using cross-product area with an epsilon threshold of `diagonal² × 1e-10`, where diagonal is the model's bounding box diagonal. This catches near-zero-area faces that can cause shading artifacts, shadow mapping issues, and wasted GPU work.
 
 **Note:** STL and PLY files do not trigger the "Missing UVs" warning since these formats do not typically include UV coordinates.
 
@@ -884,6 +1057,10 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 | IBL Mode | `ibl_mode` | `"Off"`, `"Diffuse"`, `"Full"` | `"Full"` |
 | Tone Mode | `tone_mode` | `"None"`, `"Linear"`, `"Reinhard"`, `"AcesFilmic"` | `"AcesFilmic"` |
 | Exposure | `exposure` | `0.1` -- `10.0` | `1.0` |
+| Local Axes Visible | `local_axes_visible` | `true`, `false` | `false` |
+| Turntable RPM | `turntable_rpm` | `1.0` -- `60.0` | `5.0` |
+| Inspection Mode | `inspection_mode` | `"Shaded"`, `"MaterialId"`, `"TexelDensity"`, `"Depth"` | `"Shaded"` |
+| Texel Density Target | `texel_density_target` | `0.01` -- `10.0` | `1.0` |
 
 **Rendering settings** (`[rendering]` section):
 
@@ -911,12 +1088,18 @@ view_mode = "Shaded"
 normals_mode = "Off"
 grid_visible = true
 axis_gizmo_visible = false
+local_axes_visible = false
 bloom_enabled = true
 ssao_enabled = true
 uv_mode = "Off"
 projection_mode = "Perspective"
 turntable_active = false
+turntable_rpm = 5.0
 ibl_mode = "Full"
+tone_mode = "AcesFilmic"
+exposure = 1.0
+inspection_mode = "Shaded"
+texel_density_target = 1.0
 
 [rendering]
 wireframe_line_weight = "Medium"
@@ -964,16 +1147,17 @@ Solarxy includes a built-in documentation viewer accessible entirely offline.
 solarxy -M docs
 ```
 
-The docs TUI has four tabs:
+The docs TUI has five tabs:
 
 | Tab | Content |
 | --- | --- |
 | **1 -- About** | Version, description, repository, license, modes overview, getting started examples, CLI options |
-| **2 -- View Mode** | All display shortcuts, camera controls, mouse controls, drag-and-drop, view mode descriptions |
-| **3 -- Analyze Mode** | Usage examples, TUI navigation, report tabs overview |
+| **2 -- View Mode** | Display shortcuts, camera controls, inspection modes, split viewport, UV Map, sidebar panel, mouse controls, drag-and-drop |
+| **3 -- Analyze Mode** | Usage examples, TUI navigation, report tabs overview, validation checks |
 | **4 -- Preferences** | Config file locations, editing methods, complete settings table with defaults, TUI navigation |
+| **5 -- Formats** | Supported file formats and format-specific notes |
 
-Navigation is the same as in analyze mode: **Tab** / **Shift+Tab** to switch tabs, **1**-**4** to jump to a tab, **j**/**k** or arrows to scroll, **g**/**G** to jump to top/bottom, **PgUp**/**PgDn** for page scrolling, **q** or **Esc** to quit.
+Navigation is the same as in analyze mode: **Tab** / **Shift+Tab** to switch tabs, **1**-**5** to jump to a tab, **j**/**k** or arrows to scroll, **g**/**G** to jump to top/bottom, **PgUp**/**PgDn** for page scrolling, **q** or **Esc** to quit.
 
 ![Docs mode](img-guide/doc-docs-mode.png)
 
@@ -1178,16 +1362,19 @@ Solarxy recreates the file with defaults the next time you save preferences.
 
 ### Rendering Pipeline
 
-Solarxy renders each frame through multiple passes:
+Solarxy renders each frame through multiple passes. In split viewport mode, passes 1--8 execute independently per pane with separate cameras, viewport rects, and scissor rects.
 
 1. **Shadow pass** -- renders depth from the key light's perspective into a 2048x2048 shadow map.
 2. **GBuffer pass** (when SSAO is enabled) -- captures position and normal data for ambient occlusion calculation.
-3. **Main PBR pass** -- Cook-Torrance shading with normal mapping, 3 dynamic lights, shadow sampling, and IBL contribution.
+3. **Main PBR pass** -- Cook-Torrance shading with normal mapping, 3 dynamic lights, shadow sampling, IBL contribution, and inspection mode switch (Material ID, Texel Density, Depth).
 4. **Floor pass** -- renders a shadow-catching transparent floor beneath the model.
 5. **Wireframe and Ghosted overlays** -- rendered on top of the main pass when active.
 6. **Grid and normals visualization** -- rendered when enabled.
-7. **SSAO and Bloom post-processing** -- SSAO computes ambient occlusion from the GBuffer; Bloom extracts bright pixels and applies Gaussian blur.
-8. **Composite pass** -- combines all layers, applies the selected tone mapping operator, and renders the HUD text overlay.
+7. **Validation overlay** (when enabled) -- renders color-coded semi-transparent highlights on meshes with issues, plus degenerate triangle highlights.
+8. **SSAO and Bloom post-processing** -- SSAO computes ambient occlusion from the GBuffer; Bloom extracts bright pixels and applies Gaussian blur.
+9. **Composite pass** -- per-pane compositing with viewport/scissor rect setup, tone mapping, and final output to the surface texture.
+10. **UV Map pass** (for UV Map panes) -- dedicated pipeline with UV-space vertex shader, UV overlap count pass, and overlap overlay.
+11. **GUI overlay** -- egui sidebar, divider, model stats, HUD text, and toast notifications. Rendered at full window resolution after all pane rendering.
 
 ### Keyboard Shortcut Cheat Sheet
 
@@ -1199,26 +1386,38 @@ A single reference table of every keyboard shortcut in view mode.
 | **S** | Shaded mode |
 | **X** | Toggle Ghosted |
 | **N** | Cycle normals (Off / Face / Vertex / Face+Vertex) |
-| **U** | Cycle UV overlay (Off / Gradient / Checker) |
+| **U** | Cycle UV overlay (Off / Gradient / Checker); cycle UV background in UV Map |
 | **B** | Cycle background (White / Gradient / Dark Gray / Black) |
 | **G** | Toggle grid |
 | **A** | Toggle axis gizmo |
 | **V** | Toggle turntable |
 | **I** | Toggle IBL |
 | **P** | Perspective projection |
-| **O** | Orthographic projection |
+| **O** | Orthographic projection; toggle UV overlap (UV Map) |
 | **H** | Frame model (home) |
 | **T** / **F** / **L** / **R** | Top / Front / Left / Right view |
 | **C** | Capture screenshot |
+| **1** | Shaded inspection mode |
+| **2** | Material ID inspection mode |
+| **3** | Toggle UV Map / 3D view |
+| **4** | Texel Density inspection mode |
+| **5** | Depth inspection mode |
+| **F1** | Single viewport |
+| **F2** | Vertical split (left: UV Map, right: 3D) |
+| **F3** | Horizontal split (top: UV Map, bottom: 3D) |
+| **Tab** | Toggle sidebar panel |
 | **Shift+W** | Cycle wireframe weight (Light / Medium / Bold) |
 | **Shift+B** | Cycle bounds (Off / Model / Per Mesh) |
 | **Shift+M** | Toggle bloom |
-| **Shift+A** | Toggle local coordinate axes (model/mesh centers) |
 | **Shift+O** | Toggle SSAO |
+| **Shift+A** | Toggle local axes (model/mesh centers) |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | **Shift+I** | Cycle IBL mode (Diffuse / Full) |
 | **Shift+L** | Toggle lights lock |
 | **Shift+S** | Save preferences |
+| **Shift+V** | Toggle validation overlay |
+| **Ctrl+L** | Toggle camera linking (split mode only) |
+| **E** / **Shift+E** | Increase / decrease exposure |
 | **?** | Toggle keybinding hints |
 | **Esc** | Exit |
 
@@ -1242,4 +1441,10 @@ A single reference table of every keyboard shortcut in view mode.
 
 **SSAO (Screen-Space Ambient Occlusion)** -- A post-processing technique that darkens areas where surfaces are close together (creases, corners, contact points), enhancing the perception of depth.
 
+**Texel Density** -- A measure of how much texture resolution is applied to a surface, expressed as the ratio of texture pixels (texels) to screen pixels. Uniform texel density means consistent texture sharpness across a model. Solarxy visualizes this as a heat map using screen-space UV derivatives.
+
 **Turntable** -- An automatic rotation mode that spins the model continuously around the vertical axis, useful for presentations and quick all-around inspection.
+
+**UV Overlap** -- A condition where multiple triangles share the same UV-space coordinates, causing texture pixels to be shared between different parts of a mesh. This is usually unintentional and leads to texture baking errors. Solarxy detects overlap by counting per-pixel UV-space coverage and highlighting areas where coverage exceeds one.
+
+**Validation Overlay** -- A rendering pass that highlights geometry with validation issues directly on the 3D model using color-coded semi-transparent overlays. Each issue category (errors, missing UVs, degenerate triangles, etc.) has a distinct color.

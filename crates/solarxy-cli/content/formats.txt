@@ -1,0 +1,30 @@
+
+## SUPPORTED FORMATS
+
+[OBJ  .obj]  Meshes, materials (.mtl), textures, UVs
+[STL  .stl]  Geometry only — no materials, no UVs
+[PLY  .ply]  Flexible attributes; optional normals and UVs
+[glTF .gltf/.glb]  PBR materials, normal maps, embedded textures
+
+
+## FORMAT NOTES
+
+Drag a supported file onto the viewer window to load it at any time.
+The -m / --model flag accepts any of the extensions above.
+
+[OBJ]  Most complete: full material pipeline with .mtl
+              sidecar, texture paths, UV mapping. PBR via
+              Pr (roughness) and Pm (metallic) extensions.
+
+[STL]  Geometry only. A flat clay material is applied
+              automatically. No UV debug overlay is available
+              (no UV data).
+
+[PLY]  Attribute support varies by file. Normals and UVs
+              are used when present; missing attributes fall
+              back gracefully. Companion texture auto-detection
+              searches for matching images.
+
+[glTF]  Preferred format for PBR content. Full metallic-
+              roughness workflow, normal maps, occlusion,
+              emissive. Embedded textures (GLB) are supported.

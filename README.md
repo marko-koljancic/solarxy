@@ -1,13 +1,13 @@
 # solarxy
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)
+![Rust](https://img.shields.io/badge/Rust-1.92%2B-orange.svg)
 ![Release](https://github.com/marko-koljancic/solarxy/actions/workflows/release.yml/badge.svg)
 ![GitHub Release](https://img.shields.io/github/v/release/marko-koljancic/solarxy)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 [![Docs](https://img.shields.io/badge/Docs-Documentation-green)](docs/SolarxyDocumentation.md)
 
-A lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks.
+A lightweight, cross-platform 3D model viewer and visual debugger built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer with split viewports and inspection overlays, or analyze them from the terminal with built-in validation checks.
 
 <p align="center">
   <img src="docs/gif/solarxy.gif" width="100%">
@@ -17,10 +17,14 @@ A lightweight, cross-platform 3D model viewer and validator built with Rust and 
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
 - **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, selectable tone mapping (Reinhard, ACES Filmic, Linear, None), alpha blending, 3-light system, 4x MSAA
+- **Split viewport** -- side-by-side or stacked panes with independent cameras and display settings per pane
+- **Inspection modes** -- Material ID, Texel Density heat map, Depth visualization, UV Map with overlap detection
+- **Validation overlay** -- color-coded 3D visualization of validation issues (degenerate triangles, missing UVs, bad material refs)
+- **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
 - **Report export** -- save analysis reports to file in text or JSON format
 - **Persistent preferences** -- configure display, rendering, and lighting settings via TUI or in-viewer shortcuts
-- **Drag-and-drop** -- drop model files directly into the viewer window
+- **Drag-and-drop** -- drop model files or HDR/EXR environment maps directly into the viewer window
 
 ## Supported Formats
 
@@ -82,11 +86,45 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 ## View Mode
 
-The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays. A heads-up display shows polygon, triangle, and vertex counts alongside the current render mode, projection, and frame rate.
+The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays.
 
+<!-- TODO: screenshot — updated view mode with egui sidebar -->
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
 </p>
+
+### Sidebar Panel
+
+Press `Tab` to toggle an interactive sidebar with collapsible sections for view mode, inspection, display toggles, validation, post-processing, and lighting controls. All controls are bidirectionally synced with keyboard shortcuts.
+
+<!-- TODO: screenshot — egui sidebar with display controls -->
+
+### Split Viewport
+
+| Key | Layout |
+|---|---|
+| `F1` | Single viewport (default) |
+| `F2` | Vertical split (left: UV Map, right: 3D) |
+| `F3` | Horizontal split (top: UV Map, bottom: 3D) |
+| `Ctrl+L` | Toggle camera linking between panes |
+
+Each pane has independent camera, view mode, inspection mode, and display settings. The active pane is determined by cursor position.
+
+<!-- TODO: screenshot — split viewport (F2 vertical layout, UV Map left + Shaded right) -->
+
+### Inspection Modes
+
+| Key | Mode | Description |
+|---|---|---|
+| `1` | Shaded | Full PBR rendering (default) |
+| `2` | Material ID | Flat color per material slot |
+| `3` | UV Map | 2D UV-space view with overlap detection |
+| `4` | Texel Density | Blue/green/red heat map of UV density |
+| `5` | Depth | Linearized depth (white = near, black = far) |
+
+Inspection modes apply per pane in split view and compose independently with view modes (W/X).
+
+<!-- TODO: screenshot — inspection modes (Material ID, Texel Density, Depth) -->
 
 ### Camera Controls
 
@@ -97,6 +135,8 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | Scroll wheel | Zoom |
 
 ### Keyboard Shortcuts
+
+#### Display
 
 | Key | Action |
 |---|---|
@@ -114,16 +154,29 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 | `I` | Toggle IBL (image-based lighting) |
 | `Shift+I` | Cycle IBL mode (Diffuse / Full) |
 | `Shift+M` | Toggle bloom effect |
-| `Shift+A` | Toggle local coordinate axes (model/mesh centers) |
+| `Shift+A` | Toggle local axes (model/mesh centers) |
 | `Shift+O` | Toggle SSAO (screen-space ambient occlusion) |
 | `Shift+T` | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
 | `E` / `Shift+E` | Increase / decrease exposure |
+| `Shift+V` | Toggle validation overlay |
 | `Shift+L` | Toggle lights lock |
-| `Shift+S` | Save preferences to disk |
+
+#### Camera & Navigation
+
+| Key | Action |
+|---|---|
 | `H` | Frame model (reset view) |
 | `T` `F` `L` `R` | Top / Front / Left / Right view |
 | `P` | Perspective projection |
 | `O` | Orthographic projection |
+| `Arrow keys` | Camera movement |
+
+#### Other
+
+| Key | Action |
+|---|---|
+| `Tab` | Toggle sidebar panel |
+| `Shift+S` | Save preferences to disk |
 | `C` | Save screenshot (PNG) |
 | `?` | Toggle keybinding hints |
 | `Esc` | Exit |
@@ -178,9 +231,12 @@ cargo r --release -- --mode preferences
 | Display | UV Mode | Off / Gradient / Checker |
 | Display | Projection Mode | Perspective / Orthographic |
 | Display | Turntable Active | on / off |
+| Display | Turntable RPM | 1.0 -- 60.0 (default 5.0) |
 | Display | IBL Mode | Off / Diffuse / Full |
 | Display | Tone Mode | None (clip) / Linear / Reinhard / ACES Filmic |
 | Display | Exposure | 0.1 -- 10.0 (default 1.0) |
+| Display | Inspection Mode | Shaded / Material ID / Texel Density / Depth |
+| Display | Texel Density Target | 0.01 -- 10.0 (default 1.0) |
 | Rendering | Wireframe Line Weight | Light / Medium / Bold |
 | Rendering | MSAA Sample Count | 1 / 2 / 4 |
 | Lighting | Lighting Lock | on / off |
@@ -232,12 +288,25 @@ The analyzer runs the following checks and reports errors or warnings:
 - Empty index buffers
 - Invalid material references
 - Missing texture files
+- Degenerate triangles (near-zero-area faces)
+
+## Workspace Structure
+
+SolarXY is built as a Rust workspace with three library crates:
+
+| Crate | Description |
+|---|---|
+| [`solarxy-core`](crates/solarxy-core/) | Core data types, geometry algorithms, validation, preferences |
+| [`solarxy-formats`](crates/solarxy-formats/) | 3D model format loaders (OBJ, STL, PLY, glTF/GLB) |
+| [`solarxy-cli`](crates/solarxy-cli/) | CLI parsing (clap) and TUI interfaces (ratatui) |
 
 ## Tech Stack
 
-**Core:** Rust 2024 Edition, wgpu, winit, WGSL shaders
+**Core:** Rust 2024 Edition, wgpu 27, winit, WGSL shaders
 
-**Libraries:** clap, ratatui, crossterm, tobj, stl_io, ply-rs-bw, gltf, wgpu_text, cgmath, image
+**UI:** egui 0.33, ratatui, crossterm, clap
+
+**Libraries:** tobj, stl_io, ply-rs-bw, gltf, cgmath, image
 
 ## Contributing
 

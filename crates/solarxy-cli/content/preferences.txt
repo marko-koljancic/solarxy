@@ -1,0 +1,60 @@
+
+## PREFERENCES
+
+Solarxy stores display and rendering preferences in a TOML config file.
+These are loaded at startup and applied to the viewer.
+
+
+## CONFIG FILE LOCATION
+
+::macOS ~/Library/Application Support/solarxy/config.toml
+::Linux ~/.config/solarxy/config.toml
+::Windows C:\Users\<User>\AppData\Roaming\solarxy\config.toml
+
+
+## EDITING PREFERENCES
+
+Interactive TUI editor:
+
+    solarxy -M preferences
+
+Or save from the viewer with Shift+S — this writes the current display
+state (view mode, background, grid, etc.) to the config file.
+
+You can also edit the TOML file directly in any text editor.
+
+
+## SETTINGS AND DEFAULTS
+
+==
+==background Gradient
+==view_mode Shaded
+==normals_mode Off
+==grid_visible true
+==axis_gizmo_visible false
+==local_axes_visible false
+==bloom_enabled true
+==ssao_enabled true
+==uv_mode Off
+==projection_mode Perspective
+==turntable_active false
+==turntable_rpm 5.0
+==ibl_mode Full
+==tone_mode AcesFilmic
+==exposure 1.0
+==inspection_mode Shaded
+==texel_density_target 1.0
+==wireframe_line_weight Medium
+==msaa_sample_count 4
+==lighting.lock false
+
+
+## TUI NAVIGATION
+
+[j / k]  Move selection down / up
+[Enter / Space]  Cycle setting forward
+[l / Right]  Cycle setting forward
+[h / Left]  Cycle setting backward
+[s]  Save preferences to disk
+[r]  Reset all to defaults (unsaved)
+[q / Esc]  Quit

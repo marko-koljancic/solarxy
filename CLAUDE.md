@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SolarXY is a cross-platform 3D model viewer and validator built in Rust with wgpu (WebGPU). It has two modes: a real-time graphical viewer with PBR rendering, and a CLI/TUI model analyzer.
+SolarXY is a cross-platform 3D model viewer, visual debugger, and validator built in Rust with wgpu (WebGPU). It has four modes: a real-time graphical viewer with PBR rendering, a CLI/TUI model analyzer, a preferences editor, and a built-in documentation viewer.
 
 ## Build & Run Commands
 
@@ -20,40 +20,66 @@ cargo test                   # Run tests
 
 ## Architecture
 
-**Dual-mode binary:**
+**4-crate workspace:**
+- `solarxy` (root) — main binary with viewer, GPU rendering, egui UI
+- `solarxy-core` — pure data types, geometry, validation, preferences (no GPU deps)
+- `solarxy-formats` — format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`
+- `solarxy-cli` — CLI parsing (clap) and TUI interfaces (ratatui)
+
+**Main binary structure:**
 - `main.rs` — CLI entry point, dispatches to viewer or analyzer based on `--mode`
-- `lib.rs` — Viewer entry (`run_viewer()`) using winit's `ApplicationHandler`
+- `app.rs` — winit `ApplicationHandler`, event loop, egui sidebar toggle (Tab key)
+- `state/` — application state:
+  - `mod.rs` — main State struct, pane computation, render orchestration
+  - `renderer.rs` — per-pane GPU rendering (3D passes + UV Map + validation overlay)
+  - `view_state.rs` — `PaneDisplaySettings`, `ViewLayout`, `DisplaySettings`
+  - `input.rs` — all keyboard and mouse input handling (ground truth for key bindings)
+  - `update.rs` — state updates per frame
+  - `init.rs` — initialization
+  - `capture.rs` — screenshot capture
 
-**Core modules:**
-- `state.rs` — Central rendering state. Owns the wgpu device/queue/surface, all render pipelines, camera, lights, loaded model, and view mode state. This is the largest file and the heart of the renderer.
-- `cgi/` — Rendering subsystem:
-  - `camera.rs` — Orbit camera with mouse controls, auto-framing from AABB
-  - `light.rs` — 3-light system (key/fill/rim) that follows the camera
-  - `model.rs` — OBJ model loading, vertex structures (`ModelVertex`, `LineVertex`), AABB computation, normals geometry
-  - `material.rs` / `texture.rs` — Material and texture GPU resource management
-  - `resources.rs` — File I/O and resource loading (models, textures)
-  - `shaders/` — WGSL shader files (7 shaders, see below)
-- `cli/` — Command-line parsing (clap) and TUI (ratatui)
-- `calc/` — Model analysis and reporting
+**Rendering subsystem (`cgi/`):**
+- `gui.rs` — egui integration (sidebar, divider, model stats, theme)
+- `camera.rs` / `camera_state.rs` — orbit camera, per-pane camera management
+- `pipelines.rs` — all wgpu render pipelines
+- `composite.rs` — per-pane compositing with viewport/scissor rects and tone mapping
+- `ibl.rs` — image-based lighting (diffuse + specular)
+- `ssao.rs` — screen-space ambient occlusion
+- `bloom.rs` — HDR bloom post-process
+- `shadow.rs` — shadow mapping
+- `uv_camera.rs` — 2D UV-space orthographic camera
+- `visualization.rs` — grid, axes, bounds rendering
+- `model.rs` — GPU model, vertex structures, AABB, normals geometry
+- `material.rs` / `texture.rs` — material and texture GPU resources
+- `resources.rs` — file I/O and resource loading
+- `shaders/` — WGSL shader files
 
-**Render pipeline (multi-pass):**
+**Render pipeline (multi-pass, per pane in split mode):**
 1. Shadow pass (`shadow.wgsl`) — depth-only from key light's perspective
-2. Main pass (`shader.wgsl`) — Cook-Torrance PBR with normal mapping, 3 dynamic lights, shadow sampling, Reinhard tone mapping
-3. Floor pass (`floor.wgsl`) — shadow-catching transparent floor
-4. Wireframe/ghosted overlays (`ghosted.wgsl`)
-5. Grid (`grid.wgsl`) and normals (`normals.wgsl`) visualization
-6. Light spheres (`light.wgsl`) — instance-rendered light position indicators
+2. GBuffer pass (if SSAO) — position + normal data
+3. Main pass (`shader.wgsl`) — PBR + inspection mode switch (Material ID, Texel Density, Depth)
+4. Floor pass (`floor.wgsl`) — shadow-catching transparent floor
+5. Wireframe/ghosted overlays (`ghosted.wgsl`)
+6. Grid (`grid.wgsl`) and normals (`normals.wgsl`) visualization
+7. Validation overlay (`validation.wgsl`) — color-coded issue highlights
+8. SSAO + Bloom post-processing
+9. Composite pass — tone mapping, viewport/scissor rect
+10. UV Map passes (UV panes) — UV-space rendering + overlap detection
+11. egui overlay — sidebar, HUD, model stats, toast notifications
 
-**View modes** (cycle with W): Shaded, ShadedWireframe, WireframeOnly, Ghosted
-**Normals modes** (cycle with N): Off, Face, Vertex, FaceAndVertex
+**Split viewport:** F1 (single), F2 (vertical), F3 (horizontal). Per-pane cameras, inspection modes, display settings. Active pane by cursor position.
+
+**Inspection modes** (number keys 1-5): Shaded, Material ID, UV Map, Texel Density, Depth
 
 ## Key Patterns
 
-- wgpu bind groups for GPU resource access; pipelines are created at init and reused
+- wgpu bind groups for GPU resource access; pipelines created at init and reused
 - `Vertex` trait defines buffer layouts for different vertex types
 - Camera auto-frames model on load using AABB bounds
-- Resources are loaded async with pollster blocking
-- `build.rs` copies `res/` to the build output directory
+- Resources loaded async with pollster blocking
+- Per-pane rendering with independent command encoders, viewport rects, and scissor rects
+- egui sidebar bidirectionally synced with keyboard shortcuts
+- help.rs uses `include_str!` to embed content from `crates/solarxy-cli/content/*.txt`
 
 ## Formatting
 
