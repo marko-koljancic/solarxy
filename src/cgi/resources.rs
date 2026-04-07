@@ -3,7 +3,7 @@ use std::path::Path;
 use wgpu::util::DeviceExt;
 
 use super::geometry::{self, RawImageData, RawMaterialData, RawModelData};
-use super::{loader_gltf, loader_obj, loader_ply, loader_stl, material, model, texture};
+use super::{material, model, texture};
 use crate::validation::ViewerValidation;
 
 pub fn is_supported_model_extension(path: &Path) -> bool {
@@ -28,18 +28,7 @@ pub fn load_model_any(
     ModelStats,
     ViewerValidation,
 )> {
-    let ext = std::path::Path::new(file_path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    let raw = match ext.as_str() {
-        "stl" => loader_stl::load_stl(file_path)?,
-        "ply" => loader_ply::load_ply(file_path)?,
-        "gltf" | "glb" => loader_gltf::load_gltf(file_path)?,
-        _ => loader_obj::load_obj(file_path)?,
-    };
+    let raw = solarxy_formats::load_model(file_path)?;
 
     upload_model(raw, file_path, device, queue, layout, edge_geometry_layout)
 }

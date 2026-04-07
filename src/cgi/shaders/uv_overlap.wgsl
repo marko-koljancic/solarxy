@@ -1,7 +1,3 @@
-// ── Count pass ────────────────────────────────────────────────────────
-// Renders UV-space triangles to an R8Unorm texture with additive blend.
-// Each triangle adds 1/255 per pixel; overlap → value > 1/255.
-
 struct Camera {
     view_pos: vec4<f32>,
     view_proj: mat4x4<f32>,
@@ -43,10 +39,6 @@ fn vs_uv_count(model: VertexInput, instance: InstanceInput) -> @builtin(position
 fn fs_uv_count() -> @location(0) vec4<f32> {
     return vec4(1.0 / 255.0, 0.0, 0.0, 0.0);
 }
-
-// ── Overlay pass ─────────────────────────────────────────────────────
-// Fullscreen triangle that samples the count texture and outputs
-// semi-transparent red where more than one triangle overlaps.
 
 struct OverlayVertex {
     @builtin(position) position: vec4<f32>,

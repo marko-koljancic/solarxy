@@ -1,6 +1,6 @@
 use std::io::BufReader;
 
-use super::geometry::{RawMeshData, RawModelData};
+use solarxy_core::{RawMeshData, RawModelData};
 
 pub fn load_stl(file_path: &str) -> anyhow::Result<RawModelData> {
     let file = std::fs::File::open(file_path)?;

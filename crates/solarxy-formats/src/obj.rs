@@ -1,7 +1,7 @@
 use std::io::{BufReader, Cursor};
 use tobj::LoadError;
 
-use super::geometry::{RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{RawMaterialData, RawMeshData, RawModelData};
 
 pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
     let obj_text = std::fs::read_to_string(file_path)?;

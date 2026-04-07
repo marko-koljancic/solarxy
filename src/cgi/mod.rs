@@ -15,10 +15,6 @@ pub mod gui;
 pub mod ibl;
 #[cfg(feature = "viewer")]
 pub mod light;
-pub mod loader_gltf;
-pub mod loader_obj;
-pub mod loader_ply;
-pub mod loader_stl;
 #[cfg(feature = "viewer")]
 pub mod material;
 #[cfg(feature = "viewer")]

@@ -375,12 +375,10 @@ mod tests {
     fn perspective_projection_not_degenerate() {
         let cam = default_camera();
         let proj = cam.build_proj_matrix();
-        // Perspective matrix should have non-zero diagonal
         let m: [[f32; 4]; 4] = proj.into();
         assert!(m[0][0].abs() > 0.0);
         assert!(m[1][1].abs() > 0.0);
         assert!(m[2][2].abs() > 0.0);
-        // Aspect ratio affects X vs Y scaling: m[1][1] / m[0][0] ≈ aspect
         let ratio = m[1][1] / m[0][0];
         assert!((ratio - cam.aspect).abs() < 1e-5);
     }
@@ -391,19 +389,16 @@ mod tests {
         cam.projection = ProjectionMode::Orthographic;
         let proj = cam.build_proj_matrix();
         let m: [[f32; 4]; 4] = proj.into();
-        // Ortho matrix has m[0][0] = 2/(right-left), m[1][1] = 2/(top-bottom)
         assert!(m[0][0].abs() > 0.0);
         assert!(m[1][1].abs() > 0.0);
-        // No perspective division: m[3][3] should be 1.0
         assert!((m[3][3] - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn view_matrix_look_at_origin() {
-        let cam = default_camera(); // eye at (0,0,3) looking at origin
+        let cam = default_camera();
         let view = cam.build_view_matrix();
         let m: [[f32; 4]; 4] = view.into();
-        // Camera looking down -Z: the translation component should move origin to (0,0,-3)
         assert!((m[3][2] - (-3.0)).abs() < 1e-5);
     }
 
@@ -414,12 +409,10 @@ mod tests {
             max: cgmath::Point3::new(1.0, 1.0, 1.0),
         };
         let cam = camera_from_bounds(&bounds, 16.0 / 9.0);
-        // Camera should be looking at the center
         let center = bounds.center();
         assert!((cam.target.x - center.x).abs() < 1e-5);
         assert!((cam.target.y - center.y).abs() < 1e-5);
         assert!((cam.target.z - center.z).abs() < 1e-5);
-        // Eye should be at a reasonable distance (not at target)
         let dist = ((cam.eye.x - cam.target.x).powi(2)
             + (cam.eye.y - cam.target.y).powi(2)
             + (cam.eye.z - cam.target.z).powi(2))
@@ -435,10 +428,8 @@ mod tests {
         };
         let cam_wide = camera_from_bounds(&bounds, 2.0);
         let cam_tall = camera_from_bounds(&bounds, 0.5);
-        // Both should target the same center
         assert!((cam_wide.target.x - cam_tall.target.x).abs() < 1e-5);
         assert!((cam_wide.target.y - cam_tall.target.y).abs() < 1e-5);
-        // Aspects should be preserved
         assert!((cam_wide.aspect - 2.0).abs() < 1e-5);
         assert!((cam_tall.aspect - 0.5).abs() < 1e-5);
     }

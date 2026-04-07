@@ -46,8 +46,6 @@ fn vs_uv_fill(model: VertexInput, instance: InstanceInput) -> FillOutput {
 @group(1) @binding(0) var tex_input: texture_2d<f32>;
 @group(1) @binding(1) var tex_input_sampler: sampler;
 
-// Separate entry points for checker and texture modes.
-// Identical code — different pipelines bind different data at group 1.
 @fragment
 fn fs_uv_checker(in: FillOutput) -> @location(0) vec4<f32> {
     return textureSample(tex_input, tex_input_sampler, in.tex_coords);

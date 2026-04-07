@@ -2783,21 +2783,40 @@ dependencies = [
  "exr",
  "fs_extra",
  "glob",
- "gltf",
  "half",
  "image",
- "ply-rs-bw",
  "pollster",
  "ratatui",
  "serde",
  "serde_json",
- "stl_io",
- "tobj",
+ "solarxy-core",
+ "solarxy-formats",
  "toml",
  "tracing",
  "tracing-subscriber",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "solarxy-core"
+version = "0.4.0"
+dependencies = [
+ "cgmath",
+]
+
+[[package]]
+name = "solarxy-formats"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "cgmath",
+ "gltf",
+ "ply-rs-bw",
+ "solarxy-core",
+ "stl_io",
+ "tobj",
+ "tracing",
 ]
 
 [[package]]

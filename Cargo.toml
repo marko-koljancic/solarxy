@@ -1,3 +1,11 @@
+[workspace]
+members = [".", "crates/solarxy-core", "crates/solarxy-formats"]
+resolver = "2"
+
+[workspace.dependencies]
+cgmath = "0.18"
+anyhow = "1.0.100"
+
 [package]
 name = "solarxy"
 description = "A lightweight, cross-platform, high-performance computer graphics 3D model viewer and validator built with Rust and wgpu. Inspect 3D models in a real-time graphical viewer or analyze them from the terminal with built-in validation checks."
@@ -36,13 +44,15 @@ viewer = [
     "dep:half",
     "dep:exr",
 ]
-analyzer = ["dep:tobj", "dep:stl_io", "dep:ply-rs-bw", "dep:gltf"]
+analyzer = ["dep:solarxy-formats"]
 tui = ["dep:ratatui", "dep:crossterm"]
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
-anyhow = "1.0.100"
-cgmath = "0.18"
+anyhow = { workspace = true }
+cgmath = { workspace = true }
+solarxy-core = { path = "crates/solarxy-core" }
+solarxy-formats = { path = "crates/solarxy-formats", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
@@ -60,10 +70,6 @@ egui-winit = { version = "0.33", optional = true }
 half = { version = "2.0", optional = true }
 exr = { version = "1.0", optional = true }
 
-tobj = { version = "4.0.3", default-features = false, optional = true }
-stl_io = { version = "0.7", optional = true }
-ply-rs-bw = { version = "3.0.3", optional = true }
-gltf = { version = "1.4", optional = true }
 
 crossterm = { version = "0.28.1", optional = true }
 ratatui = { version = "0.29.0", optional = true }

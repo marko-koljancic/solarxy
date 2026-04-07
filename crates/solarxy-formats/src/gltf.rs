@@ -1,9 +1,9 @@
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
-use super::geometry::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
 pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
-    let (document, buffers, images) = gltf::import(file_path)?;
+    let (document, buffers, images) = ::gltf::import(file_path)?;
 
     let mut materials = extract_materials(&document, &images, file_path);
     let (meshes, polygon_count) = extract_meshes(&document, &buffers);
@@ -49,8 +49,8 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
 }
 
 fn extract_materials(
-    document: &gltf::Document,
-    images: &[gltf::image::Data],
+    document: &::gltf::Document,
+    images: &[::gltf::image::Data],
     file_path: &str,
 ) -> Vec<RawMaterialData> {
     let parent_dir = std::path::Path::new(file_path)
@@ -90,9 +90,9 @@ fn extract_materials(
             let emissive_factor = mat.emissive_factor();
 
             let alpha_mode = match mat.alpha_mode() {
-                gltf::material::AlphaMode::Opaque => 0,
-                gltf::material::AlphaMode::Mask => 1,
-                gltf::material::AlphaMode::Blend => 2,
+                ::gltf::material::AlphaMode::Opaque => 0,
+                ::gltf::material::AlphaMode::Mask => 1,
+                ::gltf::material::AlphaMode::Blend => 2,
             };
             let alpha_cutoff = mat.alpha_cutoff().unwrap_or(0.5);
 
@@ -137,60 +137,60 @@ fn extract_materials(
 }
 
 fn resolve_texture(
-    texture: &gltf::Texture,
-    images: &[gltf::image::Data],
+    texture: &::gltf::Texture,
+    images: &[::gltf::image::Data],
     parent_dir: &std::path::Path,
 ) -> (Option<std::path::PathBuf>, Option<RawImageData>) {
     let image = texture.source();
 
     match image.source() {
-        gltf::image::Source::Uri { uri, .. } => {
+        ::gltf::image::Source::Uri { uri, .. } => {
             if uri.starts_with("data:") {
                 (None, image_data_to_raw(&images[image.index()]))
             } else {
                 (Some(parent_dir.join(uri)), None)
             }
         }
-        gltf::image::Source::View { .. } => (None, image_data_to_raw(&images[image.index()])),
+        ::gltf::image::Source::View { .. } => (None, image_data_to_raw(&images[image.index()])),
     }
 }
 
 #[allow(clippy::unnecessary_wraps)]
-fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
+fn image_data_to_raw(img: &::gltf::image::Data) -> Option<RawImageData> {
     let pixels = match img.format {
-        gltf::image::Format::R8G8B8A8 => img.pixels.clone(),
-        gltf::image::Format::R8G8B8 => img
+        ::gltf::image::Format::R8G8B8A8 => img.pixels.clone(),
+        ::gltf::image::Format::R8G8B8 => img
             .pixels
             .chunks_exact(3)
             .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
             .collect(),
-        gltf::image::Format::R16G16B16A16 => img
+        ::gltf::image::Format::R16G16B16A16 => img
             .pixels
             .chunks_exact(8)
             .flat_map(|c| [c[0], c[2], c[4], c[6]])
             .collect(),
-        gltf::image::Format::R16G16B16 => img
+        ::gltf::image::Format::R16G16B16 => img
             .pixels
             .chunks_exact(6)
             .flat_map(|c| [c[0], c[2], c[4], 255])
             .collect(),
-        gltf::image::Format::R8 => img.pixels.iter().flat_map(|&r| [r, r, r, 255]).collect(),
-        gltf::image::Format::R16 => img
+        ::gltf::image::Format::R8 => img.pixels.iter().flat_map(|&r| [r, r, r, 255]).collect(),
+        ::gltf::image::Format::R16 => img
             .pixels
             .chunks_exact(2)
             .flat_map(|c| [c[0], c[0], c[0], 255])
             .collect(),
-        gltf::image::Format::R8G8 => img
+        ::gltf::image::Format::R8G8 => img
             .pixels
             .chunks_exact(2)
             .flat_map(|rg| [rg[0], rg[1], 0, 255])
             .collect(),
-        gltf::image::Format::R16G16 => img
+        ::gltf::image::Format::R16G16 => img
             .pixels
             .chunks_exact(4)
             .flat_map(|c| [c[0], c[2], 0, 255])
             .collect(),
-        gltf::image::Format::R32G32B32A32FLOAT => img
+        ::gltf::image::Format::R32G32B32A32FLOAT => img
             .pixels
             .chunks_exact(16)
             .flat_map(|c| {
@@ -206,7 +206,7 @@ fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
                 ]
             })
             .collect(),
-        gltf::image::Format::R32G32B32FLOAT => img
+        ::gltf::image::Format::R32G32B32FLOAT => img
             .pixels
             .chunks_exact(12)
             .flat_map(|c| {
@@ -231,8 +231,8 @@ fn image_data_to_raw(img: &gltf::image::Data) -> Option<RawImageData> {
 }
 
 fn extract_meshes(
-    document: &gltf::Document,
-    buffers: &[gltf::buffer::Data],
+    document: &::gltf::Document,
+    buffers: &[::gltf::buffer::Data],
 ) -> (Vec<RawMeshData>, usize) {
     let mut meshes = Vec::new();
     let mut total_polygons = 0usize;
@@ -253,9 +253,9 @@ fn extract_meshes(
 }
 
 fn collect_meshes_recursive(
-    node: &gltf::Node,
+    node: &::gltf::Node,
     parent_transform: Matrix4<f32>,
-    buffers: &[gltf::buffer::Data],
+    buffers: &[::gltf::buffer::Data],
     meshes: &mut Vec<RawMeshData>,
     total_polygons: &mut usize,
 ) {
@@ -265,7 +265,7 @@ fn collect_meshes_recursive(
 
     if let Some(mesh) = node.mesh() {
         for primitive in mesh.primitives() {
-            if primitive.mode() != gltf::mesh::Mode::Triangles {
+            if primitive.mode() != ::gltf::mesh::Mode::Triangles {
                 tracing::warn!(
                     "Skipping non-triangle primitive in mesh '{}' (mode: {:?})",
                     mesh.name().unwrap_or("unnamed"),

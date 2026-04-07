@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use solarxy::cgi::loader_obj;
-use solarxy::cgi::loader_ply;
-use solarxy::cgi::loader_stl;
+use solarxy_formats::obj;
+use solarxy_formats::ply;
+use solarxy_formats::stl;
 
 fn fixture(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -16,7 +16,7 @@ fn fixture(name: &str) -> String {
 
 #[test]
 fn load_obj_triangle() {
-    let raw = loader_obj::load_obj(&fixture("triangle.obj")).unwrap();
+    let raw = obj::load_obj(&fixture("triangle.obj")).unwrap();
     assert_eq!(raw.meshes.len(), 1);
     assert_eq!(raw.meshes[0].positions.len(), 3);
     assert_eq!(raw.meshes[0].indices.len(), 3);
@@ -25,7 +25,7 @@ fn load_obj_triangle() {
 
 #[test]
 fn load_stl_triangle() {
-    let raw = loader_stl::load_stl(&fixture("triangle.stl")).unwrap();
+    let raw = stl::load_stl(&fixture("triangle.stl")).unwrap();
     assert_eq!(raw.meshes.len(), 1);
     assert_eq!(raw.meshes[0].positions.len(), 3);
     assert_eq!(raw.meshes[0].indices.len(), 3);
@@ -33,7 +33,7 @@ fn load_stl_triangle() {
 
 #[test]
 fn load_ply_triangle() {
-    let raw = loader_ply::load_ply(&fixture("triangle.ply")).unwrap();
+    let raw = ply::load_ply(&fixture("triangle.ply")).unwrap();
     assert_eq!(raw.meshes.len(), 1);
     assert_eq!(raw.meshes[0].positions.len(), 3);
     assert_eq!(raw.meshes[0].indices.len(), 3);
@@ -41,17 +41,17 @@ fn load_ply_triangle() {
 
 #[test]
 fn load_obj_nonexistent() {
-    assert!(loader_obj::load_obj("/nonexistent/model.obj").is_err());
+    assert!(obj::load_obj("/nonexistent/model.obj").is_err());
 }
 
 #[test]
 fn load_stl_nonexistent() {
-    assert!(loader_stl::load_stl("/nonexistent/model.stl").is_err());
+    assert!(stl::load_stl("/nonexistent/model.stl").is_err());
 }
 
 #[test]
 fn load_ply_nonexistent() {
-    assert!(loader_ply::load_ply("/nonexistent/model.ply").is_err());
+    assert!(ply::load_ply("/nonexistent/model.ply").is_err());
 }
 
 #[cfg(feature = "viewer")]

@@ -98,12 +98,7 @@ impl ModelAnalyzer {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let raw = match ext.as_str() {
-            "stl" => solarxy::cgi::loader_stl::load_stl(path)?,
-            "ply" => solarxy::cgi::loader_ply::load_ply(path)?,
-            "gltf" | "glb" => solarxy::cgi::loader_gltf::load_gltf(path)?,
-            _ => solarxy::cgi::loader_obj::load_obj(path)?,
-        };
+        let raw = solarxy_formats::load_model(path)?;
 
         let model_name = Path::new(path)
             .file_name()
@@ -111,7 +106,7 @@ impl ModelAnalyzer {
             .unwrap_or(path)
             .to_string();
 
-        let base_validation = solarxy::validation::validate_raw_model(&raw, &ext).report;
+        let base_validation = solarxy_core::validation::validate_raw_model(&raw, &ext).report;
         let (meshes, materials) = raw_to_analyzer(&raw);
 
         Ok(ModelAnalyzer {

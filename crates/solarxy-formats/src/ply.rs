@@ -1,7 +1,7 @@
 use std::io::BufReader;
 use ply_rs_bw::ply::Property;
 
-use super::geometry::{RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
     match *prop {

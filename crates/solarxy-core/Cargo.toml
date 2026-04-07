@@ -1,0 +1,10 @@
+[package]
+name = "solarxy-core"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+description = "Core data types, geometry algorithms, and validation for 3D model analysis"
+
+[dependencies]
+cgmath = { workspace = true }
