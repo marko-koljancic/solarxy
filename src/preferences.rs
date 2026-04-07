@@ -1,6 +1,59 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+macro_rules! cycle_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $display:expr ),+ $(,)?
+        }
+        ; cycle
+    ) => {
+        cycle_enum!(@base $(#[$meta])* $vis enum $name {
+            $( $(#[$vmeta])* $variant => $display ),+
+        });
+        impl $name {
+            pub fn next(self) -> Self {
+                let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+                Self::ALL[(i + 1) % Self::ALL.len()]
+            }
+        }
+    };
+
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $display:expr ),+ $(,)?
+        }
+    ) => {
+        cycle_enum!(@base $(#[$meta])* $vis enum $name {
+            $( $(#[$vmeta])* $variant => $display ),+
+        });
+    };
+
+    (@base
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $display:expr ),+
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $name { $( $(#[$vmeta])* $variant ),+ }
+
+        impl $name {
+            pub const ALL: &[Self] = &[$( Self::$variant ),+];
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $( Self::$variant => write!(f, $display) ),+
+                }
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ViewMode {
     Shaded,
@@ -38,16 +91,17 @@ impl std::fmt::Display for ViewMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum LineWeight {
-    Light,
-    Medium,
-    Bold,
+cycle_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum LineWeight {
+        Light => "Light",
+        Medium => "Medium",
+        Bold => "Bold",
+    }
+    ; cycle
 }
 
 impl LineWeight {
-    pub const ALL: &[Self] = &[Self::Light, Self::Medium, Self::Bold];
-
     pub fn width_px(self) -> f32 {
         match self {
             Self::Light => 1.0,
@@ -55,118 +109,39 @@ impl LineWeight {
             Self::Bold => 3.0,
         }
     }
+}
 
-    pub fn next(self) -> Self {
-        match self {
-            Self::Light => Self::Medium,
-            Self::Medium => Self::Bold,
-            Self::Bold => Self::Light,
-        }
+cycle_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum NormalsMode {
+        Off => "Off",
+        Face => "Face",
+        Vertex => "Vertex",
+        FaceAndVertex => "Face+Vertex",
     }
+    ; cycle
 }
 
-impl std::fmt::Display for LineWeight {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Light => write!(f, "Light"),
-            Self::Medium => write!(f, "Medium"),
-            Self::Bold => write!(f, "Bold"),
-        }
+cycle_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum BackgroundMode {
+        White => "White",
+        Gradient => "Gradient",
+        DarkGray => "Dark",
+        Black => "Black",
     }
+    ; cycle
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum NormalsMode {
-    Off,
-    Face,
-    Vertex,
-    FaceAndVertex,
-}
-
-impl NormalsMode {
-    pub const ALL: &[Self] = &[Self::Off, Self::Face, Self::Vertex, Self::FaceAndVertex];
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::Face,
-            Self::Face => Self::Vertex,
-            Self::Vertex => Self::FaceAndVertex,
-            Self::FaceAndVertex => Self::Off,
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum UvMode {
+        #[default]
+        Off => "Off",
+        Gradient => "Gradient",
+        Checker => "Checker",
     }
-}
-
-impl std::fmt::Display for NormalsMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Off => write!(f, "Off"),
-            Self::Face => write!(f, "Face"),
-            Self::Vertex => write!(f, "Vertex"),
-            Self::FaceAndVertex => write!(f, "Face+Vertex"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum BackgroundMode {
-    White,
-    Gradient,
-    DarkGray,
-    Black,
-}
-
-impl BackgroundMode {
-    pub const ALL: &[Self] = &[Self::White, Self::Gradient, Self::DarkGray, Self::Black];
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::White => Self::Gradient,
-            Self::Gradient => Self::DarkGray,
-            Self::DarkGray => Self::Black,
-            Self::Black => Self::White,
-        }
-    }
-}
-
-impl std::fmt::Display for BackgroundMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::White => write!(f, "White"),
-            Self::Gradient => write!(f, "Gradient"),
-            Self::DarkGray => write!(f, "Dark"),
-            Self::Black => write!(f, "Black"),
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum UvMode {
-    #[default]
-    Off,
-    Gradient,
-    Checker,
-}
-
-impl UvMode {
-    pub const ALL: &[Self] = &[Self::Off, Self::Gradient, Self::Checker];
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::Gradient,
-            Self::Gradient => Self::Checker,
-            Self::Checker => Self::Off,
-        }
-    }
-}
-
-impl std::fmt::Display for UvMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Off => write!(f, "Off"),
-            Self::Gradient => write!(f, "Gradient"),
-            Self::Checker => write!(f, "Checker"),
-        }
-    }
+    ; cycle
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -194,25 +169,13 @@ impl std::fmt::Display for ProjectionMode {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IblMode {
-    Off,
-    Diffuse,
-    #[default]
-    Full,
-}
-
-impl IblMode {
-    pub const ALL: &[Self] = &[Self::Off, Self::Diffuse, Self::Full];
-}
-
-impl std::fmt::Display for IblMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Off => write!(f, "Off"),
-            Self::Diffuse => write!(f, "Diffuse"),
-            Self::Full => write!(f, "Full"),
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum IblMode {
+        Off => "Off",
+        Diffuse => "Diffuse",
+        #[default]
+        Full => "Full",
     }
 }
 
@@ -223,53 +186,29 @@ pub enum PaneMode {
     UvMap,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum UvMapBackground {
-    #[default]
-    Dark,
-    Checker,
-    Texture,
-}
-
-impl UvMapBackground {
-    pub const ALL: &[Self] = &[Self::Dark, Self::Checker, Self::Texture];
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Dark => Self::Checker,
-            Self::Checker => Self::Texture,
-            Self::Texture => Self::Dark,
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum UvMapBackground {
+        #[default]
+        Dark => "Dark",
+        Checker => "Checker",
+        Texture => "Texture",
     }
+    ; cycle
 }
 
-impl std::fmt::Display for UvMapBackground {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Dark => write!(f, "Dark"),
-            Self::Checker => write!(f, "Checker"),
-            Self::Texture => write!(f, "Texture"),
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum InspectionMode {
+        #[default]
+        Shaded => "Shaded",
+        MaterialId => "Material ID",
+        TexelDensity => "Texel Density",
+        Depth => "Depth",
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum InspectionMode {
-    #[default]
-    Shaded,
-    MaterialId,
-    TexelDensity,
-    Depth,
 }
 
 impl InspectionMode {
-    pub const ALL: &[Self] = &[
-        Self::Shaded,
-        Self::MaterialId,
-        Self::TexelDensity,
-        Self::Depth,
-    ];
-
     pub fn as_u32(self) -> u32 {
         match self {
             Self::Shaded => 0,
@@ -280,55 +219,25 @@ impl InspectionMode {
     }
 }
 
-impl std::fmt::Display for InspectionMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Shaded => write!(f, "Shaded"),
-            Self::MaterialId => write!(f, "Material ID"),
-            Self::TexelDensity => write!(f, "Texel Density"),
-            Self::Depth => write!(f, "Depth"),
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum ToneMode {
+        None => "None (clip)",
+        Linear => "Linear",
+        Reinhard => "Reinhard",
+        #[default]
+        AcesFilmic => "ACES Filmic",
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum ToneMode {
-    None,
-    Linear,
-    Reinhard,
-    #[default]
-    AcesFilmic,
+    ; cycle
 }
 
 impl ToneMode {
-    pub const ALL: &[Self] = &[Self::None, Self::Linear, Self::Reinhard, Self::AcesFilmic];
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::None => Self::Linear,
-            Self::Linear => Self::Reinhard,
-            Self::Reinhard => Self::AcesFilmic,
-            Self::AcesFilmic => Self::None,
-        }
-    }
-
     pub fn as_u32(self) -> u32 {
         match self {
             Self::None => 0,
             Self::Linear => 1,
             Self::Reinhard => 2,
             Self::AcesFilmic => 3,
-        }
-    }
-}
-
-impl std::fmt::Display for ToneMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, "None (clip)"),
-            Self::Linear => write!(f, "Linear"),
-            Self::Reinhard => write!(f, "Reinhard"),
-            Self::AcesFilmic => write!(f, "ACES Filmic"),
         }
     }
 }
