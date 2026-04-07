@@ -24,7 +24,6 @@ pub enum IssueScope {
     Mesh(usize),
     Material(usize),
     Model,
-    /// (`mesh_index`, `degenerate_face_count`) — actual face indices in `ViewerValidation.degenerate_faces`
     Face(usize, usize),
 }
 
@@ -89,7 +88,6 @@ impl ValidationReport {
 pub struct ViewerValidation {
     pub report: ValidationReport,
     pub degenerate_faces: Vec<Vec<u32>>,
-    /// Maps raw mesh index → GPU mesh index. Populated by `upload_model()`.
     pub raw_to_gpu: Vec<Option<usize>>,
 }
 
@@ -157,7 +155,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
         let vertex_count = mesh.positions.len();
         let index_count = mesh.indices.len();
 
-        // Normal count mismatch
         if let Some(ref normals) = mesh.normals
             && normals.len() != vertex_count
         {
@@ -173,7 +170,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // UV count mismatch
         if let Some(ref tex_coords) = mesh.tex_coords
             && tex_coords.len() != vertex_count
         {
@@ -189,7 +185,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // Missing UVs
         if mesh.tex_coords.is_none() && supports_uvs(file_ext) {
             issues.push(ValidationIssue {
                 severity: Severity::Warning,
@@ -199,7 +194,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // Non-triangulated
         if index_count % 3 != 0 {
             issues.push(ValidationIssue {
                 severity: Severity::Error,
@@ -212,7 +206,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // Empty indices
         if mesh.indices.is_empty() {
             issues.push(ValidationIssue {
                 severity: Severity::Error,
@@ -222,7 +215,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // Bad material ref
         if let Some(mat_id) = mesh.material_index
             && mat_id >= raw.materials.len()
         {
@@ -238,7 +230,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
             });
         }
 
-        // Degenerate triangles
         let degen = detect_degenerate_triangles(&mesh.positions, &mesh.indices, degen_epsilon);
         if !degen.is_empty() {
             issues.push(ValidationIssue {
@@ -258,7 +249,6 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ViewerValidatio
     }
 }
 
-/// Issue category for color mapping in the viewer overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IssueCategory {
     Error,
@@ -288,7 +278,6 @@ impl IssueCategory {
     ];
 }
 
-/// Classify a validation issue into a color category.
 pub fn issue_category(issue: &ValidationIssue) -> IssueCategory {
     match issue.kind {
         IssueKind::InvalidMaterialRef => IssueCategory::InvalidMaterial,
@@ -299,9 +288,6 @@ pub fn issue_category(issue: &ValidationIssue) -> IssueCategory {
     }
 }
 
-/// Build a per-GPU-mesh category index map from validation issues.
-/// Returns `Option<usize>` where `usize` is the index into `IssueCategory::ALL`.
-/// `raw_to_gpu` maps raw mesh index → GPU mesh index (None if mesh was skipped).
 pub fn build_mesh_category_map(
     report: &ValidationReport,
     gpu_mesh_count: usize,
@@ -313,7 +299,7 @@ pub fn build_mesh_category_map(
     for issue in &report.issues {
         let raw_idx = match &issue.scope {
             IssueScope::Mesh(i) => *i,
-            _ => continue, // Face issues handled separately
+            _ => continue,
         };
         let Some(Some(gpu_idx)) = raw_to_gpu.get(raw_idx) else {
             continue;
@@ -334,4 +320,254 @@ pub fn build_mesh_category_map(
     }
 
     categories
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cgi::geometry::{RawMeshData, RawModelData};
+
+    fn single_triangle_raw() -> RawModelData {
+        RawModelData {
+            meshes: vec![RawMeshData {
+                name: "test".to_string(),
+                positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                indices: vec![0, 1, 2],
+                normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
+                tex_coords: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+                material_index: None,
+            }],
+            materials: vec![],
+            polygon_count: 1,
+        }
+    }
+
+    #[test]
+    fn clean_model_no_issues() {
+        let raw = single_triangle_raw();
+        let result = validate_raw_model(&raw, "obj");
+        assert!(result.report.is_clean());
+        assert_eq!(result.report.error_count(), 0);
+        assert_eq!(result.report.warning_count(), 0);
+    }
+
+    #[test]
+    fn normal_count_mismatch() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].normals = Some(vec![[0.0, 0.0, 1.0]; 2]);
+        let result = validate_raw_model(&raw, "obj");
+        assert_eq!(result.report.error_count(), 1);
+        let issue = &result.report.issues[0];
+        assert_eq!(issue.severity, Severity::Error);
+        assert_eq!(issue.kind, IssueKind::NormalMismatch);
+    }
+
+    #[test]
+    fn uv_count_mismatch() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = Some(vec![[0.0, 0.0]; 2]);
+        let result = validate_raw_model(&raw, "obj");
+        let uv_issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::UvMismatch)
+            .collect();
+        assert_eq!(uv_issues.len(), 1);
+        assert_eq!(uv_issues[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn missing_uvs_obj() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = None;
+        let result = validate_raw_model(&raw, "obj");
+        let missing: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::MissingUvs)
+            .collect();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn missing_uvs_stl_no_warning() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = None;
+        let result = validate_raw_model(&raw, "stl");
+        let missing: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::MissingUvs)
+            .collect();
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn non_triangulated() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].indices = vec![0, 1];
+        raw.meshes[0].normals = Some(vec![[0.0, 0.0, 1.0]; 3]);
+        let result = validate_raw_model(&raw, "obj");
+        let issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::NonTriangulated)
+            .collect();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn empty_indices() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].indices = vec![];
+        let result = validate_raw_model(&raw, "obj");
+        let issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::EmptyIndices)
+            .collect();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn invalid_material_ref() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].material_index = Some(5);
+        let result = validate_raw_model(&raw, "obj");
+        let issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::InvalidMaterialRef)
+            .collect();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn degenerate_triangles() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let result = validate_raw_model(&raw, "obj");
+        let issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::DegenerateTriangles)
+            .collect();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].severity, Severity::Warning);
+        assert_eq!(result.degenerate_faces[0], vec![0]);
+    }
+
+    #[test]
+    fn multiple_issues_single_mesh() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].normals = Some(vec![[0.0, 0.0, 1.0]; 2]);
+        raw.meshes[0].tex_coords = None;
+        raw.meshes[0].material_index = Some(99);
+        let result = validate_raw_model(&raw, "obj");
+        assert!(result.report.error_count() >= 2);
+        assert!(result.report.warning_count() >= 1);
+    }
+
+    #[test]
+    fn issue_category_mapping() {
+        let cases = [
+            (
+                IssueKind::InvalidMaterialRef,
+                IssueCategory::InvalidMaterial,
+            ),
+            (IssueKind::NormalMismatch, IssueCategory::NormalMismatch),
+            (IssueKind::MissingUvs, IssueCategory::MissingUvs),
+            (IssueKind::UvMismatch, IssueCategory::MissingUvs),
+            (
+                IssueKind::DegenerateTriangles,
+                IssueCategory::DegenerateTriangles,
+            ),
+            (IssueKind::NonTriangulated, IssueCategory::Error),
+            (IssueKind::EmptyIndices, IssueCategory::Error),
+            (IssueKind::MissingTexture, IssueCategory::Error),
+        ];
+        for (kind, expected_cat) in cases {
+            let issue = ValidationIssue {
+                severity: Severity::Warning,
+                scope: IssueScope::Mesh(0),
+                kind,
+                message: String::new(),
+            };
+            assert_eq!(
+                issue_category(&issue),
+                expected_cat,
+                "failed for {:?}",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn build_mesh_category_map_priorities() {
+        let report = ValidationReport {
+            issues: vec![
+                ValidationIssue {
+                    severity: Severity::Warning,
+                    scope: IssueScope::Mesh(0),
+                    kind: IssueKind::MissingUvs,
+                    message: String::new(),
+                },
+                ValidationIssue {
+                    severity: Severity::Error,
+                    scope: IssueScope::Mesh(0),
+                    kind: IssueKind::NormalMismatch,
+                    message: String::new(),
+                },
+            ],
+        };
+        let raw_to_gpu = vec![Some(0)];
+        let cats = build_mesh_category_map(&report, 1, &raw_to_gpu);
+        let cat = cats[0].unwrap();
+        let expected = IssueCategory::ALL
+            .iter()
+            .position(|c| *c == IssueCategory::NormalMismatch)
+            .unwrap();
+        assert_eq!(cat, expected);
+    }
+
+    #[test]
+    fn report_counts() {
+        let report = ValidationReport {
+            issues: vec![
+                ValidationIssue {
+                    severity: Severity::Error,
+                    scope: IssueScope::Model,
+                    kind: IssueKind::EmptyIndices,
+                    message: String::new(),
+                },
+                ValidationIssue {
+                    severity: Severity::Warning,
+                    scope: IssueScope::Model,
+                    kind: IssueKind::MissingUvs,
+                    message: String::new(),
+                },
+                ValidationIssue {
+                    severity: Severity::Error,
+                    scope: IssueScope::Model,
+                    kind: IssueKind::NonTriangulated,
+                    message: String::new(),
+                },
+            ],
+        };
+        assert_eq!(report.error_count(), 2);
+        assert_eq!(report.warning_count(), 1);
+        assert!(!report.is_clean());
+        assert!(ValidationReport::default().is_clean());
+    }
 }
