@@ -52,6 +52,23 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.update {
+        #[cfg(feature = "updater")]
+        {
+            use axoupdater::AxoUpdater;
+            let mut updater = AxoUpdater::new_for("solarxy");
+            updater.load_receipt()?;
+            if updater.run_sync()?.is_some() {
+                println!("solarxy has been updated successfully.");
+            } else {
+                println!("solarxy is already up to date.");
+            }
+            return Ok(());
+        }
+        #[cfg(not(feature = "updater"))]
+        anyhow::bail!("Updater not available: compile with the 'updater' feature to use --update");
+    }
+
     let model_path = args
         .model_path
         .map(|p| -> anyhow::Result<String> {

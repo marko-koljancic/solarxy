@@ -48,6 +48,14 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 cargo build --release
 ```
 
+### Updating
+
+If installed via the shell or PowerShell installer, update with:
+
+```bash
+solarxy --update
+```
+
 ### Usage
 
 View a model (default mode):

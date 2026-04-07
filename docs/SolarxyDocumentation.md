@@ -18,6 +18,7 @@ A comprehensive guide to Solarxy -- a lightweight, cross-platform 3D model viewe
   - [Building from Source](#building-from-source)
   - [Verifying the Installation](#verifying-the-installation)
   - [System Requirements](#system-requirements)
+  - [Updating](#updating)
 - [Supported File Formats](#supported-file-formats)
   - [Format Comparison](#format-comparison)
   - [OBJ (Wavefront)](#obj-wavefront)
@@ -159,6 +160,23 @@ This prints the version, description, repository URL, license, and contact infor
 - macOS: Metal is used automatically on all supported Macs.
 - Windows: DirectX 12 or Vulkan.
 - Linux: Vulkan. Ensure your GPU drivers are up to date.
+
+### Updating
+
+If you installed Solarxy via the shell or PowerShell installer, you can update to the latest version directly from the command line:
+
+```bash
+solarxy --update
+```
+
+This checks for a newer release on GitHub and installs it automatically.
+
+If you built from source, pull the latest changes and rebuild:
+
+```bash
+git pull
+cargo build --release
+```
 
 ---
 

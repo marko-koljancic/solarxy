@@ -31,8 +31,10 @@ pub struct Args {
         help = "Write analysis report to file (requires analyze mode)"
     )]
     pub output: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, help = "Print version and project info")]
     pub about: bool,
+    #[arg(long, help = "Check for updates and self-update")]
+    pub update: bool,
 }
 
 #[derive(Clone, Default, clap::ValueEnum, PartialEq)]
