@@ -433,4 +433,193 @@ mod tests {
         assert!(!report.is_clean());
         assert!(ValidationReport::default().is_clean());
     }
+
+    #[test]
+    fn supports_uvs_by_format() {
+        assert!(supports_uvs("obj"));
+        assert!(supports_uvs("gltf"));
+        assert!(supports_uvs("glb"));
+        assert!(supports_uvs("OBJ"));
+        assert!(!supports_uvs("stl"));
+        assert!(!supports_uvs("ply"));
+        assert!(!supports_uvs("fbx"));
+    }
+
+    #[test]
+    fn compute_diagonal_single_point() {
+        let raw = RawModelData {
+            meshes: vec![RawMeshData {
+                name: "pt".to_string(),
+                positions: vec![[5.0, 5.0, 5.0]],
+                indices: vec![0, 0, 0],
+                normals: None,
+                tex_coords: None,
+                material_index: None,
+            }],
+            materials: vec![],
+            polygon_count: 0,
+        };
+        assert!((compute_diagonal(&raw)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn compute_diagonal_unit_cube() {
+        let raw = RawModelData {
+            meshes: vec![RawMeshData {
+                name: "cube".to_string(),
+                positions: vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+                indices: vec![0, 1, 0],
+                normals: None,
+                tex_coords: None,
+                material_index: None,
+            }],
+            materials: vec![],
+            polygon_count: 0,
+        };
+        assert!((compute_diagonal(&raw) - 3.0_f32.sqrt()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn compute_diagonal_no_vertices() {
+        let raw = RawModelData {
+            meshes: vec![],
+            materials: vec![],
+            polygon_count: 0,
+        };
+        assert!((compute_diagonal(&raw) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn degenerate_triangle_collinear() {
+        let positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let indices = vec![0, 1, 2];
+        let result = detect_degenerate_triangles(&positions, &indices, 1e-6);
+        assert_eq!(result, vec![0]);
+    }
+
+    #[test]
+    fn degenerate_triangle_coincident() {
+        let positions = vec![[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]];
+        let indices = vec![0, 1, 2];
+        let result = detect_degenerate_triangles(&positions, &indices, 1e-6);
+        assert_eq!(result, vec![0]);
+    }
+
+    #[test]
+    fn degenerate_large_model_epsilon_scaling() {
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [0.0, 1000.0, 0.0],
+            [500.0, 500.0, 0.0],
+            [500.1, 500.0, 0.0],
+            [500.0, 500.1, 0.0],
+        ];
+        let indices = vec![0, 1, 2, 3, 4, 5];
+        let diagonal = (1000.0_f32 * 1000.0 + 1000.0 * 1000.0_f32).sqrt();
+        let epsilon = diagonal * diagonal * 1e-10;
+        let result = detect_degenerate_triangles(&positions, &indices, epsilon);
+        assert!(
+            result.is_empty(),
+            "Small valid triangle should not be flagged"
+        );
+    }
+
+    #[test]
+    fn multi_mesh_validation() {
+        let raw = RawModelData {
+            meshes: vec![
+                RawMeshData {
+                    name: "clean".to_string(),
+                    positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    indices: vec![0, 1, 2],
+                    normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
+                    tex_coords: Some(vec![[0.0, 0.0]; 3]),
+                    material_index: None,
+                },
+                RawMeshData {
+                    name: "broken".to_string(),
+                    positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    indices: vec![],
+                    normals: Some(vec![[0.0, 0.0, 1.0]; 2]),
+                    tex_coords: None,
+                    material_index: None,
+                },
+            ],
+            materials: vec![],
+            polygon_count: 1,
+        };
+        let result = validate_raw_model(&raw, "obj");
+        let mesh1_issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| matches!(i.scope, IssueScope::Mesh(1)))
+            .collect();
+        assert!(!mesh1_issues.is_empty());
+
+        let mesh0_issues: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| matches!(i.scope, IssueScope::Mesh(0)))
+            .collect();
+        assert!(mesh0_issues.is_empty());
+    }
+
+    #[test]
+    fn invalid_material_ref_at_boundary() {
+        use crate::geometry::RawMaterialData;
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].material_index = Some(1);
+        raw.materials.push(RawMaterialData {
+            name: "mat0".to_string(),
+            diffuse_texture_path: None,
+            normal_texture_path: None,
+            diffuse_texture_data: None,
+            normal_texture_data: None,
+            metallic_roughness_texture_path: None,
+            metallic_roughness_texture_data: None,
+            occlusion_texture_path: None,
+            occlusion_texture_data: None,
+            emissive_texture_path: None,
+            emissive_texture_data: None,
+            roughness_factor: 0.5,
+            metallic_factor: 0.0,
+            emissive_factor: [0.0; 3],
+            alpha_mode: 0,
+            alpha_cutoff: 0.5,
+            ambient: None,
+            diffuse: None,
+            specular: None,
+            shininess: None,
+            dissolve: None,
+            optical_density: None,
+            ambient_texture_name: None,
+            diffuse_texture_name: None,
+            specular_texture_name: None,
+            normal_texture_name: None,
+            shininess_texture_name: None,
+            dissolve_texture_name: None,
+        });
+
+        let result = validate_raw_model(&raw, "obj");
+        let invalid: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::InvalidMaterialRef)
+            .collect();
+        assert_eq!(invalid.len(), 1);
+
+        raw.meshes[0].material_index = Some(0);
+        let result = validate_raw_model(&raw, "obj");
+        let invalid: Vec<_> = result
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::InvalidMaterialRef)
+            .collect();
+        assert!(invalid.is_empty());
+    }
 }

@@ -216,3 +216,136 @@ impl fmt::Display for AnalysisReport {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::validation::{IssueKind, ValidationIssue};
+
+    fn empty_report() -> AnalysisReport {
+        AnalysisReport {
+            model_name: "test.obj".to_owned(),
+            mesh_count: 0,
+            material_count: 0,
+            total_vertices: 0,
+            total_indices: 0,
+            total_triangles: 0,
+            bounds: None,
+            meshes: vec![],
+            materials: vec![],
+            validation: ValidationReport::default(),
+        }
+    }
+
+    fn mesh_summary(
+        vertex_count: usize,
+        normal_count: usize,
+        texcoord_count: usize,
+    ) -> MeshSummary {
+        MeshSummary {
+            index: 0,
+            vertex_count,
+            index_count: 36,
+            triangle_count: 12,
+            normal_count,
+            texcoord_count,
+            material_name: None,
+            material_id: None,
+        }
+    }
+
+    #[test]
+    fn display_contains_model_overview() {
+        let output = format!("{}", empty_report());
+        assert!(output.contains("MODEL OVERVIEW"));
+    }
+
+    #[test]
+    fn display_validation_before_overview() {
+        let mut r = empty_report();
+        r.validation.issues.push(ValidationIssue {
+            severity: Severity::Error,
+            scope: IssueScope::Model,
+            kind: IssueKind::EmptyIndices,
+            message: "test".to_owned(),
+        });
+        let output = format!("{}", r);
+        let val_pos = output.find("VALIDATION").unwrap();
+        let overview_pos = output.find("MODEL OVERVIEW").unwrap();
+        assert!(val_pos < overview_pos);
+    }
+
+    #[test]
+    fn display_clean_no_validation() {
+        let output = format!("{}", empty_report());
+        assert!(!output.contains("VALIDATION"));
+    }
+
+    #[test]
+    fn display_bounds_formatting() {
+        let mut r = empty_report();
+        r.bounds = Some(BoundsSummary {
+            min: [0.0, 0.0, 0.0],
+            max: [1.0, 2.0, 3.0],
+            size: [1.0, 2.0, 3.0],
+            center: [0.5, 1.0, 1.5],
+            diagonal: 3.742,
+        });
+        let output = format!("{}", r);
+        assert!(output.contains("[0.000, 0.000, 0.000]"));
+        assert!(output.contains("[1.000, 2.000, 3.000]"));
+        assert!(output.contains("3.742"));
+    }
+
+    #[test]
+    fn display_normal_checkmark() {
+        let mut r = empty_report();
+        r.meshes.push(mesh_summary(100, 100, 100));
+        let output = format!("{}", r);
+        assert!(output.contains("\u{2713}"));
+    }
+
+    #[test]
+    fn display_normal_warning() {
+        let mut r = empty_report();
+        r.meshes.push(mesh_summary(100, 50, 100));
+        let output = format!("{}", r);
+        assert!(output.contains("\u{26a0}"));
+    }
+
+    #[test]
+    fn display_texcoord_zero_cross() {
+        let mut r = empty_report();
+        r.meshes.push(mesh_summary(100, 100, 0));
+        let output = format!("{}", r);
+        assert!(output.contains("\u{2717}"));
+    }
+
+    #[test]
+    fn display_no_materials() {
+        let output = format!("{}", empty_report());
+        assert!(output.contains("No materials found"));
+    }
+
+    #[test]
+    fn display_missing_texture() {
+        let mut r = empty_report();
+        r.materials.push(MaterialSummary {
+            index: 0,
+            name: "mat".to_owned(),
+            ambient: [0.0; 3],
+            diffuse: [0.5; 3],
+            specular: [1.0; 3],
+            shininess: None,
+            dissolve: None,
+            optical_density: None,
+            textures: vec![TextureEntry {
+                slot: "diffuse".to_owned(),
+                path: "missing.png".to_owned(),
+                exists: false,
+            }],
+        });
+        let output = format!("{}", r);
+        assert!(output.contains("[MISSING]"));
+    }
+}

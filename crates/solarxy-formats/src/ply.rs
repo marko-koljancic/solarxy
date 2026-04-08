@@ -276,3 +276,71 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         polygon_count,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ply_prop_to_f32_float() {
+        assert!((ply_prop_to_f32(&Property::Float(1.5)) - 1.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ply_prop_to_f32_double() {
+        assert!((ply_prop_to_f32(&Property::Double(2.5)) - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ply_prop_to_f32_int() {
+        assert!((ply_prop_to_f32(&Property::Int(42)) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ply_prop_to_f32_uchar() {
+        assert!((ply_prop_to_f32(&Property::UChar(255)) - 255.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ply_prop_to_f32_list_returns_zero() {
+        let prop = Property::ListInt(vec![1, 2, 3]);
+        assert!((ply_prop_to_f32(&prop)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ply_prop_to_indices_list_int() {
+        let prop = Property::ListInt(vec![0, 1, 2]);
+        assert_eq!(ply_prop_to_indices(&prop), vec![0u32, 1, 2]);
+    }
+
+    #[test]
+    fn ply_prop_to_indices_list_uint() {
+        let prop = Property::ListUInt(vec![3, 4, 5]);
+        assert_eq!(ply_prop_to_indices(&prop), vec![3u32, 4, 5]);
+    }
+
+    #[test]
+    fn ply_prop_to_indices_list_uchar() {
+        let prop = Property::ListUChar(vec![0, 1]);
+        assert_eq!(ply_prop_to_indices(&prop), vec![0u32, 1]);
+    }
+
+    #[test]
+    fn ply_prop_to_indices_scalar_empty() {
+        let prop = Property::Float(1.0);
+        assert!(ply_prop_to_indices(&prop).is_empty());
+    }
+
+    #[test]
+    fn ply_prop_to_indices_negative_int_wraps() {
+        let prop = Property::ListInt(vec![-1]);
+        let result = ply_prop_to_indices(&prop);
+        assert_eq!(result, vec![u32::MAX]);
+    }
+
+    #[test]
+    fn ply_prop_to_f32_short_and_ushort() {
+        assert!((ply_prop_to_f32(&Property::Short(-100)) - (-100.0)).abs() < f32::EPSILON);
+        assert!((ply_prop_to_f32(&Property::UShort(60000)) - 60000.0).abs() < f32::EPSILON);
+    }
+}

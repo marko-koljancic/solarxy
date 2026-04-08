@@ -213,3 +213,177 @@ pub fn report_to_json(report: &AnalysisReport) -> String {
     let json_report = JsonReport::from(report);
     serde_json::to_string_pretty(&json_report).expect("Failed to serialize report to JSON")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::validation::{IssueKind, Severity, ValidationIssue};
+
+    fn empty_report() -> AnalysisReport {
+        AnalysisReport {
+            model_name: "test.obj".to_owned(),
+            mesh_count: 0,
+            material_count: 0,
+            total_vertices: 0,
+            total_indices: 0,
+            total_triangles: 0,
+            bounds: None,
+            meshes: vec![],
+            materials: vec![],
+            validation: ValidationReport::default(),
+        }
+    }
+
+    fn make_issue(severity: Severity, scope: IssueScope, kind: IssueKind) -> ValidationIssue {
+        ValidationIssue {
+            severity,
+            scope,
+            kind,
+            message: "test".to_owned(),
+        }
+    }
+
+    #[test]
+    fn json_mesh_all_fields() {
+        let m = MeshSummary {
+            index: 2,
+            vertex_count: 100,
+            index_count: 300,
+            triangle_count: 100,
+            normal_count: 80,
+            texcoord_count: 50,
+            material_name: Some("wood".to_owned()),
+            material_id: Some(1),
+        };
+        let jm = JsonMesh::from(&m);
+        assert_eq!(jm.index, 2);
+        assert_eq!(jm.vertex_count, 100);
+        assert_eq!(jm.index_count, 300);
+        assert_eq!(jm.triangle_count, 100);
+        assert_eq!(jm.normal_count, 80);
+        assert_eq!(jm.texcoord_count, 50);
+        assert_eq!(jm.material_name.as_deref(), Some("wood"));
+        assert_eq!(jm.material_id, Some(1));
+    }
+
+    #[test]
+    fn json_material_with_nested_textures() {
+        let m = MaterialSummary {
+            index: 0,
+            name: "metal".to_owned(),
+            ambient: [0.1, 0.1, 0.1],
+            diffuse: [0.8, 0.8, 0.8],
+            specular: [1.0, 1.0, 1.0],
+            shininess: Some(32.0),
+            dissolve: None,
+            optical_density: None,
+            textures: vec![TextureEntry {
+                slot: "normal".to_owned(),
+                path: "n.png".to_owned(),
+                exists: false,
+            }],
+        };
+        let jm = JsonMaterial::from(&m);
+        assert_eq!(jm.name, "metal");
+        assert!((jm.ambient.r - 0.1).abs() < f32::EPSILON);
+        assert!((jm.diffuse.r - 0.8).abs() < f32::EPSILON);
+        assert!((jm.specular.r - 1.0).abs() < f32::EPSILON);
+        assert!((jm.shininess.unwrap() - 32.0).abs() < f32::EPSILON);
+        assert!(jm.dissolve.is_none());
+        assert!(jm.optical_density.is_none());
+        assert_eq!(jm.textures.len(), 1);
+        assert_eq!(jm.textures[0].slot, "normal");
+        assert!(!jm.textures[0].exists);
+    }
+
+    #[test]
+    fn json_issue_scope_mapping() {
+        let ji = JsonIssue::from(&make_issue(
+            Severity::Error,
+            IssueScope::Model,
+            IssueKind::EmptyIndices,
+        ));
+        assert_eq!(ji.scope, "model");
+        assert!(ji.scope_index.is_none());
+        assert_eq!(ji.severity, "error");
+
+        let ji = JsonIssue::from(&make_issue(
+            Severity::Warning,
+            IssueScope::Mesh(3),
+            IssueKind::NormalMismatch,
+        ));
+        assert_eq!(ji.scope, "mesh");
+        assert_eq!(ji.scope_index, Some(3));
+        assert_eq!(ji.severity, "warning");
+
+        let ji = JsonIssue::from(&make_issue(
+            Severity::Warning,
+            IssueScope::Material(1),
+            IssueKind::MissingTexture,
+        ));
+        assert_eq!(ji.scope, "material");
+        assert_eq!(ji.scope_index, Some(1));
+
+        let ji = JsonIssue::from(&make_issue(
+            Severity::Warning,
+            IssueScope::Face(2, 5),
+            IssueKind::DegenerateTriangles,
+        ));
+        assert_eq!(ji.scope, "mesh");
+        assert_eq!(ji.scope_index, Some(2));
+    }
+
+    #[test]
+    fn json_validation_counts() {
+        let v = ValidationReport {
+            issues: vec![
+                make_issue(Severity::Error, IssueScope::Model, IssueKind::EmptyIndices),
+                make_issue(
+                    Severity::Warning,
+                    IssueScope::Mesh(0),
+                    IssueKind::NormalMismatch,
+                ),
+                make_issue(
+                    Severity::Error,
+                    IssueScope::Model,
+                    IssueKind::NonTriangulated,
+                ),
+            ],
+        };
+        let jv = JsonValidation::from(&v);
+        assert_eq!(jv.error_count, 2);
+        assert_eq!(jv.warning_count, 1);
+        assert_eq!(jv.issues.len(), 3);
+    }
+
+    #[test]
+    fn json_report_roundtrip() {
+        let mut report = empty_report();
+        report.mesh_count = 1;
+        report.meshes.push(MeshSummary {
+            index: 0,
+            vertex_count: 3,
+            index_count: 3,
+            triangle_count: 1,
+            normal_count: 3,
+            texcoord_count: 0,
+            material_name: None,
+            material_id: None,
+        });
+        report.bounds = Some(BoundsSummary {
+            min: [0.0, 0.0, 0.0],
+            max: [1.0, 2.0, 3.0],
+            size: [1.0, 2.0, 3.0],
+            center: [0.5, 1.0, 1.5],
+            diagonal: 3.742,
+        });
+        let json_str = report_to_json(&report);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Should be valid JSON");
+        assert_eq!(parsed["model_name"], "test.obj");
+        assert_eq!(parsed["mesh_count"], 1);
+        assert_eq!(parsed["meshes"][0]["vertex_count"], 3);
+        assert!((parsed["bounds"]["diagonal"].as_f64().unwrap() - 3.742).abs() < 1e-3);
+        assert_eq!(parsed["validation"]["error_count"], 0);
+    }
+}

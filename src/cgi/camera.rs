@@ -443,4 +443,87 @@ mod tests {
         assert!((cam_wide.aspect - 2.0).abs() < 1e-5);
         assert!((cam_tall.aspect - 0.5).abs() < 1e-5);
     }
+
+    fn unit_cube_bounds() -> AABB {
+        AABB {
+            min: cgmath::Point3::new(0.0, 0.0, 0.0),
+            max: cgmath::Point3::new(1.0, 1.0, 1.0),
+        }
+    }
+
+    #[test]
+    fn camera_from_bounds_axis_placement() {
+        let bounds = unit_cube_bounds();
+        let center = bounds.center();
+
+        let cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::new(0.0, 0.0, 1.0),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+        );
+        assert!(cam.eye.z > center.z, "eye should be in front of center");
+        assert!((cam.eye.x - center.x).abs() < 1e-5, "no X offset");
+        assert!((cam.eye.y - center.y).abs() < 1e-5, "no Y offset");
+        assert!((cam.target.x - center.x).abs() < 1e-5);
+        assert!((cam.target.y - center.y).abs() < 1e-5);
+
+        let cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+            cgmath::Vector3::new(0.0, 0.0, -1.0),
+        );
+        assert!(cam.eye.y > center.y, "eye should be above center");
+        assert!((cam.eye.x - center.x).abs() < 1e-5, "no X offset");
+
+        let cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::new(1.0, 0.0, 0.0),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+        );
+        assert!(cam.eye.x > center.x, "eye should be right of center");
+        assert!((cam.eye.y - center.y).abs() < 1e-5, "no Y offset");
+    }
+
+    #[test]
+    fn camera_from_bounds_axis_uses_orthographic() {
+        let bounds = unit_cube_bounds();
+        let cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::new(0.0, 0.0, 1.0),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+        );
+        assert!(
+            matches!(cam.projection, ProjectionMode::Orthographic),
+            "axis camera should use Orthographic"
+        );
+        assert!(cam.ortho_scale > 0.0);
+        assert!(cam.znear > 0.0);
+        assert!(cam.zfar > cam.znear);
+    }
+
+    #[test]
+    fn camera_from_bounds_zero_volume() {
+        let bounds = AABB {
+            min: cgmath::Point3::new(5.0, 5.0, 5.0),
+            max: cgmath::Point3::new(5.0, 5.0, 5.0),
+        };
+        let cam = camera_from_bounds(&bounds, 1.0);
+        assert!(cam.eye.x.is_finite());
+        assert!(cam.eye.y.is_finite());
+        assert!(cam.eye.z.is_finite());
+        assert!(cam.znear > 0.0);
+
+        let cam2 = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::new(0.0, 0.0, 1.0),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+        );
+        assert!(cam2.eye.z.is_finite());
+        assert!(cam2.ortho_scale.is_finite());
+    }
 }

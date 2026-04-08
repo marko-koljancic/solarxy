@@ -85,3 +85,32 @@ fn format_extension_detection() {
     }
     assert!(!is_supported_model_extension(Path::new("no_extension")));
 }
+
+#[test]
+fn obj_triangle_position_values() {
+    let raw = obj::load_obj(&fixture("triangle.obj")).unwrap();
+    let pos = &raw.meshes[0].positions;
+    assert_eq!(pos.len(), 3);
+    assert_eq!(pos[0], [0.0, 0.0, 0.0]);
+    assert_eq!(pos[1], [1.0, 0.0, 0.0]);
+    assert_eq!(pos[2], [0.0, 1.0, 0.0]);
+}
+
+#[test]
+fn stl_triangle_normals_none() {
+    let raw = stl::load_stl(&fixture("triangle.stl")).unwrap();
+    assert!(
+        raw.meshes[0].normals.is_none(),
+        "STL raw data should not include normals"
+    );
+}
+
+#[test]
+fn ply_triangle_default_material() {
+    let raw = ply::load_ply(&fixture("triangle.ply")).unwrap();
+    assert!(
+        !raw.materials.is_empty(),
+        "PLY should create a default material"
+    );
+    assert_eq!(raw.meshes[0].material_index, Some(0));
+}

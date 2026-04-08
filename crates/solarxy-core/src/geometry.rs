@@ -310,4 +310,106 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn extract_edges_single_triangle() {
+        let indices = vec![0u32, 1, 2];
+        let edges = extract_edges(&indices);
+        assert_eq!(edges.len(), 6);
+        let edge_set: HashSet<(u32, u32)> = edges
+            .chunks(2)
+            .map(|e| (e[0].min(e[1]), e[0].max(e[1])))
+            .collect();
+        assert!(edge_set.contains(&(0, 1)));
+        assert!(edge_set.contains(&(1, 2)));
+        assert!(edge_set.contains(&(0, 2)));
+    }
+
+    #[test]
+    fn extract_edges_shared_dedup() {
+        let indices = vec![0, 1, 2, 1, 2, 3];
+        let edges = extract_edges(&indices);
+        let edge_set: HashSet<(u32, u32)> = edges
+            .chunks(2)
+            .map(|e| (e[0].min(e[1]), e[0].max(e[1])))
+            .collect();
+        assert_eq!(edge_set.len(), 5);
+    }
+
+    #[test]
+    fn extract_edges_empty() {
+        let edges = extract_edges(&[]);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn compute_tangent_from_normal_orthogonality() {
+        let normals = vec![
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.577, 0.577, 0.577],
+        ];
+        let (tangents, bitangents) = compute_tangent_from_normal(&normals);
+        for (i, n) in normals.iter().enumerate() {
+            let t = &tangents[i];
+            let b = &bitangents[i];
+            let dot_tn = t[0] * n[0] + t[1] * n[1] + t[2] * n[2];
+            let dot_bn = b[0] * n[0] + b[1] * n[1] + b[2] * n[2];
+            assert!(dot_tn.abs() < 1e-3, "tangent not perpendicular to normal");
+            assert!(dot_bn.abs() < 1e-3, "bitangent not perpendicular to normal");
+        }
+    }
+
+    #[test]
+    fn compute_tangent_from_normal_up_facing() {
+        let normals = vec![[0.0, 1.0, 0.0]];
+        let (tangents, bitangents) = compute_tangent_from_normal(&normals);
+        let t_mag =
+            (tangents[0][0].powi(2) + tangents[0][1].powi(2) + tangents[0][2].powi(2)).sqrt();
+        let b_mag =
+            (bitangents[0][0].powi(2) + bitangents[0][1].powi(2) + bitangents[0][2].powi(2)).sqrt();
+        assert!((t_mag - 1.0).abs() < 1e-6, "tangent should be unit length");
+        assert!(
+            (b_mag - 1.0).abs() < 1e-6,
+            "bitangent should be unit length"
+        );
+    }
+
+    #[test]
+    fn compute_bounds_empty() {
+        let bounds = compute_bounds(&[]);
+        assert!((bounds.min.x - (-1.0)).abs() < 1e-6);
+        assert!((bounds.max.x - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn compute_normals_shared_vertex() {
+        let positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let indices = [0, 1, 2, 0, 1, 3];
+        let normals = compute_normals(&positions, &indices);
+        let n0 = cgmath::Vector3::from(normals[0]);
+        assert!(
+            n0.magnitude() > 0.99,
+            "shared vertex normal should be normalized"
+        );
+        assert!(normals[0][2] < 0.95, "should be tilted from pure Z");
+    }
+
+    #[test]
+    fn compute_tangent_basis_degenerate_uvs() {
+        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let normals = [[0.0, 0.0, 1.0]; 3];
+        let tex_coords = [[0.5, 0.5]; 3];
+        let indices = [0u32, 1, 2];
+        let (tangents, bitangents) =
+            compute_tangent_basis(&positions, &normals, &tex_coords, &indices);
+        assert_eq!(tangents.len(), 3);
+        assert_eq!(bitangents.len(), 3);
+    }
 }

@@ -70,8 +70,7 @@ impl CameraState {
                 lerp_f32(self.camera.ortho_scale, transition.dest_ortho_scale, factor);
 
             let eye_done = (self.camera.eye - transition.dest_eye).magnitude2() < 0.01;
-            let target_done =
-                (self.camera.target - transition.dest_target).magnitude2() < 0.01;
+            let target_done = (self.camera.target - transition.dest_target).magnitude2() < 0.01;
             if eye_done && target_done {
                 self.camera.eye = transition.dest_eye;
                 self.camera.target = transition.dest_target;
@@ -227,4 +226,40 @@ fn lerp_vec3(a: cgmath::Vector3<f32>, b: cgmath::Vector3<f32>, t: f32) -> cgmath
         lerp_f32(a.y, b.y, t),
         lerp_f32(a.z, b.z, t),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lerp_f32_interpolates_with_nonzero_endpoints() {
+        assert!((lerp_f32(10.0, 30.0, 0.0) - 10.0).abs() < f32::EPSILON);
+        assert!((lerp_f32(10.0, 30.0, 1.0) - 30.0).abs() < f32::EPSILON);
+        assert!((lerp_f32(10.0, 30.0, 0.5) - 20.0).abs() < f32::EPSILON);
+        assert!((lerp_f32(10.0, 30.0, 0.25) - 15.0).abs() < f32::EPSILON);
+        assert!((lerp_f32(-5.0, 5.0, 0.5)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn lerp_point3_and_vec3_with_nonzero_endpoints() {
+        let a = cgmath::Point3::new(2.0, 4.0, 6.0);
+        let b = cgmath::Point3::new(12.0, 24.0, 36.0);
+
+        let at0 = lerp_point3(a, b, 0.0);
+        assert!((at0.x - 2.0).abs() < f32::EPSILON);
+        assert!((at0.y - 4.0).abs() < f32::EPSILON);
+        assert!((at0.z - 6.0).abs() < f32::EPSILON);
+
+        let mid = lerp_point3(a, b, 0.5);
+        assert!((mid.x - 7.0).abs() < f32::EPSILON);
+        assert!((mid.y - 14.0).abs() < f32::EPSILON);
+        assert!((mid.z - 21.0).abs() < f32::EPSILON);
+
+        let va = cgmath::Vector3::new(2.0, 4.0, 6.0);
+        let vb = cgmath::Vector3::new(12.0, 24.0, 36.0);
+        let vmid = lerp_vec3(va, vb, 0.5);
+        assert!((vmid.x - 7.0).abs() < f32::EPSILON);
+        assert!((vmid.y - 14.0).abs() < f32::EPSILON);
+    }
 }

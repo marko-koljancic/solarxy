@@ -49,3 +49,72 @@ impl AABB {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_cube() -> AABB {
+        AABB {
+            min: Point3::new(0.0, 0.0, 0.0),
+            max: Point3::new(1.0, 1.0, 1.0),
+        }
+    }
+
+    #[test]
+    fn size_and_derived_metrics() {
+        let aabb = AABB {
+            min: Point3::new(-2.0, 0.0, 3.0),
+            max: Point3::new(4.0, 6.0, 9.0),
+        };
+        let s = aabb.size();
+        assert!((s.x - 6.0).abs() < f32::EPSILON);
+        assert!((s.y - 6.0).abs() < f32::EPSILON);
+        assert!((s.z - 6.0).abs() < f32::EPSILON);
+
+        let he = aabb.half_extents();
+        assert!((he.x - 3.0).abs() < f32::EPSILON);
+        assert!((he.y - 3.0).abs() < f32::EPSILON);
+
+        let c = aabb.center();
+        assert!((c.x - 1.0).abs() < f32::EPSILON);
+        assert!((c.y - 3.0).abs() < f32::EPSILON);
+        assert!((c.z - 6.0).abs() < f32::EPSILON);
+
+        let d = aabb.diagonal();
+        let expected = (6.0_f32 * 6.0 + 6.0 * 6.0 + 6.0 * 6.0).sqrt();
+        assert!((d - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn zero_volume_aabb() {
+        let aabb = AABB {
+            min: Point3::new(3.0, 4.0, 5.0),
+            max: Point3::new(3.0, 4.0, 5.0),
+        };
+        assert!((aabb.diagonal()).abs() < f32::EPSILON);
+        assert!((aabb.size().x).abs() < f32::EPSILON);
+        assert_eq!(aabb.center(), Point3::new(3.0, 4.0, 5.0));
+    }
+
+    #[test]
+    fn corners_ordering() {
+        let c = unit_cube().corners();
+        assert_eq!(c[0], Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(c[1], Point3::new(1.0, 0.0, 0.0));
+        assert_eq!(c[2], Point3::new(0.0, 1.0, 0.0));
+        assert_eq!(c[3], Point3::new(1.0, 1.0, 0.0));
+        assert_eq!(c[4], Point3::new(0.0, 0.0, 1.0));
+        assert_eq!(c[5], Point3::new(1.0, 0.0, 1.0));
+        assert_eq!(c[6], Point3::new(0.0, 1.0, 1.0));
+        assert_eq!(c[7], Point3::new(1.0, 1.0, 1.0));
+
+        let aabb = AABB {
+            min: Point3::new(-3.0, -2.0, -1.0),
+            max: Point3::new(4.0, 5.0, 6.0),
+        };
+        let c2 = aabb.corners();
+        assert_eq!(c2[0], aabb.min);
+        assert_eq!(c2[7], aabb.max);
+    }
+}
