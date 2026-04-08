@@ -205,24 +205,29 @@ fn apply_theme(ctx: &egui::Context) {
 
     style.text_styles.insert(
         egui::TextStyle::Body,
-        egui::FontId::new(13.0, egui::FontFamily::Proportional),
+        egui::FontId::new(12.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Button,
-        egui::FontId::new(13.0, egui::FontFamily::Proportional),
+        egui::FontId::new(12.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Heading,
-        egui::FontId::new(16.0, egui::FontFamily::Proportional),
+        egui::FontId::new(14.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Small,
-        egui::FontId::new(11.0, egui::FontFamily::Proportional),
+        egui::FontId::new(10.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Monospace,
-        egui::FontId::new(13.0, egui::FontFamily::Monospace),
+        egui::FontId::new(12.0, egui::FontFamily::Monospace),
     );
+
+    style.spacing.item_spacing = egui::vec2(6.0, 2.0);
+    style.spacing.button_padding = egui::vec2(4.0, 1.0);
+    style.spacing.indent = 16.0;
+    style.spacing.window_margin = egui::Margin::same(4);
 
     ctx.set_style(style);
 }
@@ -456,18 +461,26 @@ impl EguiRenderer {
             }
             if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);
-                let painter = ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new("no_uv_overlay"),
-                ));
-                let center = active_pane_rect.unwrap_or(screen_rect).center();
-                painter.text(
-                    center,
-                    egui::Align2::CENTER_CENTER,
-                    "No UV data",
-                    egui::FontId::proportional(24.0),
-                    egui::Color32::from_gray(180),
-                );
+                let pane_center =
+                    active_pane_rect.unwrap_or(screen_rect).center();
+                let offset = pane_center - screen_rect.center();
+                egui::Area::new(egui::Id::new("no_uv_overlay"))
+                    .anchor(
+                        egui::Align2::CENTER_CENTER,
+                        [offset.x, offset.y],
+                    )
+                    .order(egui::Order::Foreground)
+                    .show(ctx, |ui| {
+                        overlay_frame().show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("No UV data")
+                                    .size(16.0)
+                                    .color(egui::Color32::from_rgb(
+                                        128, 179, 255,
+                                    )),
+                            );
+                        });
+                    });
             }
         });
 
@@ -559,9 +572,7 @@ fn draw_sidebar(
         .default_width(220.0)
         .show_animated(ctx, visible, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(4.0);
-                ui.heading("Solarxy");
-                ui.separator();
+                ui.add_space(2.0);
 
                 egui::CollapsingHeader::new("View")
                     .default_open(true)
@@ -779,7 +790,7 @@ fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
         .show(ctx, |ui| {
             egui::Grid::new("stats_file")
                 .num_columns(2)
-                .spacing([12.0, 4.0])
+                .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     ui.label("File");
                     ui.label(&info.filename);
@@ -803,7 +814,7 @@ fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
 
             egui::Grid::new("stats_geo")
                 .num_columns(2)
-                .spacing([12.0, 4.0])
+                .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     ui.label("Polygons");
                     ui.label(format_number(info.stats.polys));
@@ -832,7 +843,7 @@ fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
             let [w, h, d] = info.bounds_size;
             egui::Grid::new("stats_bounds")
                 .num_columns(2)
-                .spacing([12.0, 4.0])
+                .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     ui.label("W \u{00d7} H \u{00d7} D");
                     ui.label(format!("{w:.3} \u{00d7} {h:.3} \u{00d7} {d:.3}"));
@@ -844,7 +855,7 @@ fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
 
             egui::Grid::new("stats_uv")
                 .num_columns(2)
-                .spacing([12.0, 4.0])
+                .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     ui.label("UV Mapping");
                     ui.label(if info.has_uvs { "Yes" } else { "No" });
@@ -860,7 +871,7 @@ fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
 
             egui::Grid::new("stats_val")
                 .num_columns(2)
-                .spacing([12.0, 4.0])
+                .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     ui.label("Status");
                     ui.label("N/A");
