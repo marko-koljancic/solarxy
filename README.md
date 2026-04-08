@@ -19,6 +19,7 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 - **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, selectable tone mapping (Reinhard, ACES Filmic, Linear, None), alpha blending, 3-light system, 4x MSAA
 - **Split viewport** -- side-by-side or stacked panes with independent cameras and display settings per pane
 - **Inspection modes** -- Material ID, Texel Density heat map, Depth visualization, UV Map with overlap detection
+- **Material overrides** -- Clay Light, Clay Dark, Chrome (IBL-only reflective black), and Silhouette (flat black) for surface inspection
 - **Validation overlay** -- color-coded 3D visualization of validation issues (degenerate triangles, missing UVs, bad material refs)
 - **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
@@ -161,7 +162,9 @@ Inspection modes apply per pane in split view and compose independently with vie
 | `Shift+B` | Cycle bounds display (Off / Whole Model / Per Mesh) |
 | `I` | Toggle IBL (image-based lighting) |
 | `Shift+I` | Cycle IBL mode (Diffuse / Full) |
-| `Shift+M` | Toggle bloom effect |
+| `M` | Toggle clay material override (Textured / Clay Light) |
+| `Shift+M` | Cycle material override (Textured / Clay Light / Clay Dark / Chrome / Silhouette) |
+| `Shift+D` | Toggle bloom effect |
 | `Shift+A` | Toggle local axes (model/mesh centers) |
 | `Shift+O` | Toggle SSAO (screen-space ambient occlusion) |
 | `Shift+T` | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |

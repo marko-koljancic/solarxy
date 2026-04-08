@@ -18,7 +18,9 @@ The model path is optional — you can also drop a file onto the window.
 [U]        Cycle UV overlay (Off > Gradient > Checker)
 [B]        Cycle background (White > Gradient > Dark Gray > Black)
 [Shift+B]  Cycle bounding box display (Off > Model > Per Mesh)
-[Shift+M]  Toggle bloom
+[M]        Toggle clay material override (Textured <> Clay Light)
+[Shift+M]  Cycle material override (Textured > Clay Light > Clay Dark > Chrome > Silhouette)
+[Shift+D]  Toggle bloom
 [Shift+O]  Toggle SSAO (screen-space ambient occlusion)
 [G]        Toggle grid
 [A]        Toggle axis gizmo
@@ -117,7 +119,7 @@ Drop an .hdr or .exr file to use it as an IBL environment map.
 Press Tab to toggle the sidebar. It provides interactive controls
 grouped into collapsible sections:
 
-[View]  View mode, inspection mode, normals, UV, background, bounds
+[View]  View mode, inspection mode, material override, normals, UV, background, bounds
 [Display]  Grid, axes, turntable, lights lock
 [Validation]  Show/hide validation overlay, issue list
 [Post-Processing]  Bloom, SSAO, tone mapping, exposure

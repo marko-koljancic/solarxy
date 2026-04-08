@@ -5,8 +5,8 @@ use egui_wgpu::ScreenDescriptor;
 
 use crate::format_number;
 use crate::preferences::{
-    BackgroundMode, IblMode, InspectionMode, LineWeight, NormalsMode, PaneMode, ToneMode,
-    UvMapBackground, UvMode, ViewMode,
+    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    ToneMode, UvMapBackground, UvMode, ViewMode,
 };
 use crate::state::renderer::PostProcessing;
 use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
@@ -70,6 +70,7 @@ pub(crate) struct GuiSnapshot {
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
     pub inspection_mode: InspectionMode,
+    pub material_override: MaterialOverride,
     pub texel_density_target: f32,
     pub pane_mode: PaneMode,
     pub uv_bg: UvMapBackground,
@@ -107,6 +108,7 @@ impl GuiSnapshot {
             show_axis_gizmo: pds.show_axis_gizmo,
             show_local_axes: pds.show_local_axes,
             inspection_mode: pds.inspection_mode,
+            material_override: pds.material_override,
             texel_density_target: pds.texel_density_target,
             pane_mode: pds.pane_mode,
             uv_bg: pds.uv_bg,
@@ -150,6 +152,7 @@ impl GuiSnapshot {
         pds.show_axis_gizmo = self.show_axis_gizmo;
         pds.show_local_axes = self.show_local_axes;
         pds.inspection_mode = self.inspection_mode;
+        pds.material_override = self.material_override;
         pds.texel_density_target = self.texel_density_target;
         pds.pane_mode = self.pane_mode;
         pds.uv_bg = self.uv_bg;
@@ -461,23 +464,17 @@ impl EguiRenderer {
             }
             if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);
-                let pane_center =
-                    active_pane_rect.unwrap_or(screen_rect).center();
+                let pane_center = active_pane_rect.unwrap_or(screen_rect).center();
                 let offset = pane_center - screen_rect.center();
                 egui::Area::new(egui::Id::new("no_uv_overlay"))
-                    .anchor(
-                        egui::Align2::CENTER_CENTER,
-                        [offset.x, offset.y],
-                    )
+                    .anchor(egui::Align2::CENTER_CENTER, [offset.x, offset.y])
                     .order(egui::Order::Foreground)
                     .show(ctx, |ui| {
                         overlay_frame().show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new("No UV data")
                                     .size(16.0)
-                                    .color(egui::Color32::from_rgb(
-                                        128, 179, 255,
-                                    )),
+                                    .color(egui::Color32::from_rgb(128, 179, 255)),
                             );
                         });
                     });
@@ -624,6 +621,13 @@ fn draw_sidebar(
                             }
                             combo_with_tooltip(
                                 ui,
+                                "Material",
+                                "M",
+                                &mut s.material_override,
+                                MaterialOverride::ALL,
+                            );
+                            combo_with_tooltip(
+                                ui,
                                 "Normals",
                                 "N",
                                 &mut s.normals_mode,
@@ -729,7 +733,7 @@ fn draw_sidebar(
                 egui::CollapsingHeader::new("Post-Processing")
                     .default_open(true)
                     .show(ui, |ui| {
-                        checkbox_with_tooltip(ui, &mut s.bloom_enabled, "Bloom", "Shift+M");
+                        checkbox_with_tooltip(ui, &mut s.bloom_enabled, "Bloom", "Shift+D");
                         checkbox_with_tooltip(ui, &mut s.ssao_enabled, "SSAO", "Shift+O");
                         combo_with_tooltip(
                             ui,
@@ -1013,9 +1017,9 @@ fn draw_hud_overlays(
 
     if hints_visible {
         let hints = if has_model {
-            "W Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+            "M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
              I IBL  E/Shift+E Exposure\n\
-             Shift+W Weight  Shift+B Bounds  Shift+M Bloom  Shift+O SSAO  Shift+T Tone  \
+             Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
              Shift+I IBL Mode  Shift+V Valid\n\
              Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
              C Cap  H Frame  Tab Panel  ? Hints\n\

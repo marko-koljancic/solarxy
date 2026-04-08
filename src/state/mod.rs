@@ -27,7 +27,8 @@ use crate::cgi::ssao::SsaoState;
 use crate::cgi::texture::{self, SharedSamplers};
 use crate::cgi::visualization::{GridUniform, VisualizationState};
 use crate::preferences::{
-    self, BackgroundMode, IblMode, InspectionMode, PaneMode, Preferences, UvMapBackground, ViewMode,
+    self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences,
+    UvMapBackground, ViewMode,
 };
 use cgmath::Rotation3;
 use std::sync::{mpsc, Arc};
@@ -614,9 +615,10 @@ impl State {
             self.view.secondary_cam.as_ref().map(|c| &c.buffer)
         };
         if let Some(buf) = cam_buf {
-            let data: [u32; 2] = [
+            let data: [u32; 3] = [
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
+                pds.material_override.as_u32(),
             ];
             self.queue.write_buffer(
                 buf,
@@ -749,7 +751,7 @@ impl State {
                 PaneMode::Scene3D => "Scene3D",
                 PaneMode::UvMap => "UV Map",
             };
-            if is_split {
+            let mut label = if is_split {
                 let mode_detail = if pds.pane_mode == PaneMode::Scene3D {
                     format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
                 } else {
@@ -760,7 +762,11 @@ impl State {
                 format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
             } else {
                 pane_mode_str.to_string()
+            };
+            if pds.material_override != MaterialOverride::None {
+                label = format!("{} \u{00b7} {}", label, pds.material_override);
             }
+            label
         };
 
         let snap_before = GuiSnapshot::from_state(

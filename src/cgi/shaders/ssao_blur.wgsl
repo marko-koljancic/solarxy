@@ -24,7 +24,9 @@ struct Camera {
     inv_proj: mat4x4<f32>,
     near: f32,
     far: f32,
-    _pad: vec2<f32>,
+    inspection_mode: u32,
+    texel_density_target: f32,
+    material_override: u32,
 }
 @group(0) @binding(3) var<uniform> camera: Camera;
 

@@ -221,6 +221,31 @@ impl InspectionMode {
 
 cycle_enum! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    pub enum MaterialOverride {
+        #[default]
+        None => "Textured",
+        Clay => "Clay Light",
+        ClayDark => "Clay Dark",
+        Chrome => "Chrome",
+        Silhouette => "Silhouette",
+    }
+    ; cycle
+}
+
+impl MaterialOverride {
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Clay => 1,
+            Self::ClayDark => 2,
+            Self::Chrome => 3,
+            Self::Silhouette => 4,
+        }
+    }
+}
+
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
     pub enum ToneMode {
         None => "None (clip)",
         Linear => "Linear",

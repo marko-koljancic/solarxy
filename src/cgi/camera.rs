@@ -112,6 +112,8 @@ pub struct CameraUniform {
     far: f32,
     inspection_mode: u32,
     texel_density_target: f32,
+    material_override: u32,
+    _pad: [u32; 3],
 }
 
 impl Default for CameraUniform {
@@ -137,6 +139,8 @@ impl CameraUniform {
             far: 100.0,
             inspection_mode: 0,
             texel_density_target: 1.0,
+            material_override: 0,
+            _pad: [0; 3],
         }
     }
 
@@ -152,6 +156,7 @@ impl CameraUniform {
         self.far = 1.0;
         self.inspection_mode = 0;
         self.texel_density_target = 1.0;
+        self.material_override = 0;
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {

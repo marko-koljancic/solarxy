@@ -6,7 +6,8 @@ use crate::cgi::camera_state::CameraState;
 use crate::cgi::ibl::IblState;
 use crate::cgi::resources;
 use crate::preferences::{
-    self, IblMode, InspectionMode, NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
+    self, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode, ProjectionMode, UvMode,
+    ViewMode,
 };
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
@@ -268,6 +269,20 @@ impl State {
                 }
             }
             KeyCode::KeyM => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                if self.input.modifiers.shift_key() {
+                    pds.material_override = pds.material_override.next();
+                } else {
+                    pds.material_override = if pds.material_override == MaterialOverride::None {
+                        MaterialOverride::Clay
+                    } else {
+                        MaterialOverride::None
+                    };
+                }
+                let msg = format!("Material: {}", pds.material_override);
+                self.gui.set_toast(&msg, [0.0, 0.4, 0.0, 1.0]);
+            }
+            KeyCode::KeyD => {
                 if self.input.modifiers.shift_key() {
                     self.toggle_bloom();
                 }

@@ -392,6 +392,27 @@ Three lights provide consistent, studio-style illumination:
 
 By default, all three lights follow the camera as you orbit. Toggle **Shift+L** to lock the lights in place -- they remain stationary while you orbit, letting you see how light falls from a fixed direction.
 
+#### Material Override
+
+Material overrides replace all texture and material properties with a uniform diagnostic material, letting you inspect surface geometry, topology, and lighting response without visual noise from authored textures.
+
+| Key | Action |
+| --- | --- |
+| **M** | Toggle between Textured and Clay Light |
+| **Shift+M** | Cycle: Textured → Clay Light → Clay Dark → Chrome → Silhouette |
+
+| Mode | Albedo | Roughness | Metallic | Notes |
+| --- | --- | --- | --- | --- |
+| **Textured** | Authored | Authored | Authored | Normal rendering (default) |
+| **Clay Light** | 0.8 (light gray) | 0.7 | 0.0 | Neutral matte clay -- same as default STL appearance |
+| **Clay Dark** | 0.025 (near-black) | 1.0 | 0.0 | Dark matte -- reveals subtle surface curvature |
+| **Chrome** | 0.05 (black) | 0.03 | 1.0 | Reflective black metal, IBL-only (no direct lights) |
+| **Silhouette** | 0.0 (black) | -- | -- | Flat black, completely unlit -- pure shape outline |
+
+All override modes disable texture sampling (diffuse, normal, metallic-roughness, occlusion, emissive) and use geometric normals instead of normal maps. Chrome mode disables the 3-light system and relies solely on IBL environment reflections for smooth, artifact-free specular response. Silhouette mode bypasses the entire PBR pipeline.
+
+Material override is per-pane in split viewport mode and is also available from the sidebar Material dropdown. The active override name appears in the HUD pane label.
+
 #### Shadow Mapping
 
 The key light casts real-time shadows using a 2048x2048 shadow map. Shadows fall onto the model's own surfaces and onto a shadow-catching floor beneath the model.
@@ -429,7 +450,7 @@ HDR bloom adds a soft glow around bright highlights, simulating how bright areas
 
 | Key | Action |
 | --- | --- |
-| **Shift+M** | Toggle bloom on and off |
+| **Shift+D** | Toggle bloom on and off |
 
 #### Tone Mapping
 
@@ -565,6 +586,7 @@ The sidebar contains collapsible sections with interactive controls:
 **View section:**
 - View mode dropdown (synced with **W** key)
 - Inspection mode dropdown (synced with **1**-**5** keys)
+- Material override dropdown (synced with **M** / **Shift+M**)
 - Texel Density target slider (shown when Texel Density inspection is active, logarithmic 0.01--10.0)
 - Normals mode dropdown (synced with **N**)
 - UV mode dropdown (synced with **U**)
@@ -593,7 +615,7 @@ The sidebar contains collapsible sections with interactive controls:
 - List of validation issues with color-coded severity indicators
 
 **Post-Processing section:**
-- Bloom checkbox (synced with **Shift+M**)
+- Bloom checkbox (synced with **Shift+D**)
 - SSAO checkbox (synced with **Shift+O**)
 - Tone mapping dropdown (synced with **Shift+T**)
 - Exposure slider (synced with **E** / **Shift+E**, logarithmic 0.1--10.0)
@@ -770,7 +792,9 @@ Press **Shift+S** to save the current viewer state as your default preferences. 
 | **U** | Cycle UV overlay (Off / Gradient / Checker) |
 | **B** | Cycle background (White / Gradient / Dark Gray / Black) |
 | **Shift+B** | Cycle bounding box display (Off / Model / Per Mesh) |
-| **Shift+M** | Toggle bloom |
+| **M** | Toggle clay material override (Textured / Clay Light) |
+| **Shift+M** | Cycle material override (Textured / Clay Light / Clay Dark / Chrome / Silhouette) |
+| **Shift+D** | Toggle bloom |
 | **Shift+O** | Toggle SSAO |
 | **Shift+A** | Toggle local axes (model/mesh centers) |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |
@@ -1205,7 +1229,7 @@ The model loads and the camera automatically frames it. You should see the model
 
 **Step 5 -- Change the background.** Press **B** to cycle backgrounds. Try Black for maximum contrast or White for a clean look.
 
-**Step 6 -- Toggle rendering features.** Press **I** to toggle IBL on and off -- notice how it affects ambient lighting. Press **Shift+O** to toggle SSAO, and **Shift+M** to toggle bloom. Press **Shift+A** to toggle local coordinate axes at model and mesh centers.
+**Step 6 -- Toggle rendering features.** Press **I** to toggle IBL on and off -- notice how it affects ambient lighting. Press **Shift+O** to toggle SSAO, and **Shift+D** to toggle bloom. Press **M** to toggle Clay Light material override, and **Shift+M** to cycle through all material overrides. Press **Shift+A** to toggle local coordinate axes at model and mesh centers.
 
 **Step 7 -- Use preset views.** Press **T** for a top-down view, **F** for front, **L** for left, **R** for right. Press **H** to return to the default framing.
 
@@ -1247,7 +1271,7 @@ Configure Solarxy to start with your preferred settings every time.
 1. Launch the viewer: `solarxy -m model.obj`
 2. Set your preferred background with **B**.
 3. Set your preferred view mode with **W**.
-4. Toggle grid (**G**), axis gizmo (**A**), local axes (**Shift+A**), bloom (**Shift+M**), SSAO (**Shift+O**), and IBL (**I** / **Shift+I**) to your liking.
+4. Toggle grid (**G**), axis gizmo (**A**), local axes (**Shift+A**), bloom (**Shift+D**), SSAO (**Shift+O**), and IBL (**I** / **Shift+I**) to your liking.
 5. Press **Shift+S** to save. A toast confirms "Preferences saved".
 
 **Option B -- Use the preferences editor:**
@@ -1360,7 +1384,7 @@ If you experience slow frame rates or lag:
 
 - **Reduce MSAA** -- change `msaa_sample_count` from 4 to 2 or 1 in preferences. This is the most impactful change.
 - **Disable SSAO** -- press **Shift+O** in the viewer. SSAO requires an additional rendering pass.
-- **Disable Bloom** -- press **Shift+M**. Bloom requires three additional full-screen passes.
+- **Disable Bloom** -- press **Shift+D**. Bloom requires three additional full-screen passes.
 - **Disable IBL** -- press **I** to turn off image-based lighting.
 - Large models (millions of polygons) take longer to load. The viewer displays a loading message during this time. Once loaded, rendering performance depends on your GPU.
 
@@ -1426,7 +1450,9 @@ A single reference table of every keyboard shortcut in view mode.
 | **Tab** | Toggle sidebar panel |
 | **Shift+W** | Cycle wireframe weight (Light / Medium / Bold) |
 | **Shift+B** | Cycle bounds (Off / Model / Per Mesh) |
-| **Shift+M** | Toggle bloom |
+| **M** | Toggle clay material override (Textured / Clay Light) |
+| **Shift+M** | Cycle material override (Textured / Clay Light / Clay Dark / Chrome / Silhouette) |
+| **Shift+D** | Toggle bloom |
 | **Shift+O** | Toggle SSAO |
 | **Shift+A** | Toggle local axes (model/mesh centers) |
 | **Shift+T** | Cycle tone mapping (None / Linear / Reinhard / ACES Filmic) |

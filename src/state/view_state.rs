@@ -1,7 +1,7 @@
 use crate::cgi::camera_state::CameraState;
 use crate::preferences::{
-    BackgroundMode, InspectionMode, LineWeight, NormalsMode, PaneMode, UvMapBackground, UvMode,
-    ViewMode,
+    BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    UvMapBackground, UvMode, ViewMode,
 };
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -54,6 +54,7 @@ pub(crate) struct PaneDisplaySettings {
     pub show_axis_gizmo: bool,
     pub show_local_axes: bool,
     pub inspection_mode: InspectionMode,
+    pub material_override: MaterialOverride,
     pub texel_density_target: f32,
     pub pane_mode: PaneMode,
     pub uv_bg: UvMapBackground,

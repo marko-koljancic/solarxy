@@ -8,6 +8,7 @@ struct Camera {
     far: f32,
     inspection_mode: u32,
     texel_density_target: f32,
+    material_override: u32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -231,18 +232,42 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4(vec3(normalized), 1.0);
     }
 
-    let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
-    let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
-    let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
+    if camera.material_override == 4u {
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
 
-    let albedo = albedo_sample.xyz;
-
-    let ao = mix(1.0, orm_sample.r, material.ao_strength);
-    let roughness = material.roughness_factor * orm_sample.g;
-    let metallic = material.metallic_factor * orm_sample.b;
+    var albedo: vec3<f32>;
+    var roughness: f32;
+    var metallic: f32;
+    var ao: f32;
+    var emissive_color: vec3<f32>;
+    var N: vec3<f32>;
 
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
-    let N = normalize(n_sample.xyz * 2.0 - 1.0);
+
+    if camera.material_override == 0u {
+        let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
+        let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
+        let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
+
+        albedo = albedo_sample.xyz;
+        ao = mix(1.0, orm_sample.r, material.ao_strength);
+        roughness = material.roughness_factor * orm_sample.g;
+        metallic = material.metallic_factor * orm_sample.b;
+        N = normalize(n_sample.xyz * 2.0 - 1.0);
+        emissive_color = material.emissive * emissive_sample.rgb;
+    } else {
+        switch camera.material_override {
+            case 1u: { albedo = vec3(0.8); roughness = 0.7; metallic = 0.0; }
+            case 2u: { albedo = vec3(0.025); roughness = 1.0; metallic = 0.0; }
+            case 3u: { albedo = vec3(0.05); roughness = 0.03; metallic = 1.0; }
+            default: { albedo = vec3(0.8); roughness = 0.7; metallic = 0.0; }
+        }
+        ao = 1.0;
+        emissive_color = vec3(0.0);
+        N = vec3(0.0, 0.0, 1.0);
+    }
+
     let V = normalize(in.tangent_view_position - in.tangent_position);
 
     let N_world = normalize(in.world_normal);
@@ -271,19 +296,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var radiance_acc = vec3(0.0);
 
-    {
-        let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
-        let scale = lights.lights[0].intensity * 3.0 * shadow;
-        radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
+    if camera.material_override != 3u {
+        {
+            let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
+            let scale = lights.lights[0].intensity * 3.0 * shadow;
+            radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
+        }
+
+        for (var i = 1u; i < 3u; i++) {
+            let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
+            let scale = lights.lights[i].intensity * 3.0;
+            radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
+        }
     }
 
-    for (var i = 1u; i < 3u; i++) {
-        let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
-        let scale = lights.lights[i].intensity * 3.0;
-        radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
-    }
-
-    let emissive = material.emissive * emissive_sample.rgb;
-    let color = ambient + radiance_acc + emissive;
-    return vec4(color, albedo_sample.a);
+    let color = ambient + radiance_acc + emissive_color;
+    let alpha = select(albedo_sample.a, 1.0, camera.material_override != 0u);
+    return vec4(color, alpha);
 }
