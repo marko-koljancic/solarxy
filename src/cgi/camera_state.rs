@@ -69,8 +69,9 @@ impl CameraState {
             self.camera.ortho_scale =
                 lerp_f32(self.camera.ortho_scale, transition.dest_ortho_scale, factor);
 
-            let eye_done = (self.camera.eye - transition.dest_eye).magnitude2() < 0.000001;
-            let target_done = (self.camera.target - transition.dest_target).magnitude2() < 0.000001;
+            let eye_done = (self.camera.eye - transition.dest_eye).magnitude2() < 0.01;
+            let target_done =
+                (self.camera.target - transition.dest_target).magnitude2() < 0.01;
             if eye_done && target_done {
                 self.camera.eye = transition.dest_eye;
                 self.camera.target = transition.dest_target;

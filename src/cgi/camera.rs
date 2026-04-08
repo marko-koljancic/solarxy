@@ -335,7 +335,8 @@ impl CameraController {
                     let fwd_norm = fwd.normalize();
                     let dist = fwd.magnitude();
                     let min_dist = 0.01;
-                    let new_dist = (dist - self.zoom_delta * self.speed * 5.0).max(min_dist);
+                    let zoom_factor = (-self.zoom_delta * self.speed * 0.5_f32).exp();
+                    let new_dist = (dist * zoom_factor).max(min_dist);
                     camera.eye = camera.target - fwd_norm * new_dist;
                 }
                 ProjectionMode::Orthographic => {
