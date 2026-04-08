@@ -9,6 +9,8 @@ struct Camera {
     inspection_mode: u32,
     texel_density_target: f32,
     material_override: u32,
+    depth_near: f32,
+    depth_far: f32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -228,7 +230,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             linear_z = camera.near + z * (camera.far - camera.near);
         }
         let normalized = 1.0
-            - saturate((linear_z - camera.near) / (camera.far - camera.near));
+            - saturate((linear_z - camera.depth_near) / (camera.depth_far - camera.depth_near));
         return vec4(vec3(normalized), 1.0);
     }
 

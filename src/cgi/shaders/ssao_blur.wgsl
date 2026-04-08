@@ -27,6 +27,8 @@ struct Camera {
     inspection_mode: u32,
     texel_density_target: f32,
     material_override: u32,
+    depth_near: f32,
+    depth_far: f32,
 }
 @group(0) @binding(3) var<uniform> camera: Camera;
 

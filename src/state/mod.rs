@@ -609,16 +609,31 @@ impl State {
             );
         }
 
-        let cam_buf = if i == 0 {
-            self.scene.as_ref().map(|s| &s.cam.buffer)
+        let (cam_buf, depth_bounds) = if i == 0 {
+            (
+                self.scene.as_ref().map(|s| &s.cam.buffer),
+                self.scene
+                    .as_ref()
+                    .map(|s| Self::compute_depth_bounds(&s.cam.camera, &s.model.bounds)),
+            )
         } else {
-            self.view.secondary_cam.as_ref().map(|c| &c.buffer)
+            (
+                self.view.secondary_cam.as_ref().map(|c| &c.buffer),
+                self.view
+                    .secondary_cam
+                    .as_ref()
+                    .zip(self.scene.as_ref())
+                    .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds)),
+            )
         };
         if let Some(buf) = cam_buf {
-            let data: [u32; 3] = [
+            let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
+            let data: [u32; 5] = [
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
                 pds.material_override.as_u32(),
+                depth_near.to_bits(),
+                depth_far.to_bits(),
             ];
             self.queue.write_buffer(
                 buf,
@@ -626,6 +641,26 @@ impl State {
                 bytemuck::cast_slice(&data),
             );
         }
+    }
+
+    fn compute_depth_bounds(
+        camera: &crate::cgi::camera::Camera,
+        bounds: &crate::aabb::AABB,
+    ) -> (f32, f32) {
+        let view = camera.build_view_matrix();
+        let mut z_min = f32::INFINITY;
+        let mut z_max = f32::NEG_INFINITY;
+        for corner in &bounds.corners() {
+            let vp = view * corner.to_homogeneous();
+            let z = -vp.z;
+            z_min = z_min.min(z);
+            z_max = z_max.max(z);
+        }
+        z_min = z_min.max(0.001);
+        if z_max <= z_min {
+            z_max = z_min + 1.0;
+        }
+        (z_min, z_max)
     }
 
     fn render_3d_passes(

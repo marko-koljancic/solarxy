@@ -34,4 +34,18 @@ impl AABB {
             self.max.z - self.min.z,
         )
     }
+
+    pub fn corners(&self) -> [Point3<f32>; 8] {
+        let (mn, mx) = (self.min, self.max);
+        [
+            Point3::new(mn.x, mn.y, mn.z),
+            Point3::new(mx.x, mn.y, mn.z),
+            Point3::new(mn.x, mx.y, mn.z),
+            Point3::new(mx.x, mx.y, mn.z),
+            Point3::new(mn.x, mn.y, mx.z),
+            Point3::new(mx.x, mn.y, mx.z),
+            Point3::new(mn.x, mx.y, mx.z),
+            Point3::new(mx.x, mx.y, mx.z),
+        ]
+    }
 }

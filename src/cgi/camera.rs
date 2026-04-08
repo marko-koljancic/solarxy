@@ -113,7 +113,9 @@ pub struct CameraUniform {
     inspection_mode: u32,
     texel_density_target: f32,
     material_override: u32,
-    _pad: [u32; 3],
+    depth_near: f32,
+    depth_far: f32,
+    _pad: u32,
 }
 
 impl Default for CameraUniform {
@@ -140,7 +142,9 @@ impl CameraUniform {
             inspection_mode: 0,
             texel_density_target: 1.0,
             material_override: 0,
-            _pad: [0; 3],
+            depth_near: 0.01,
+            depth_far: 100.0,
+            _pad: 0,
         }
     }
 
