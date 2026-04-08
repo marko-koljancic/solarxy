@@ -107,7 +107,7 @@ fn main() -> anyhow::Result<()> {
                 let report = analyzer.generate_report();
 
                 let output = match args.format {
-                    OutputFormat::Json => solarxy_core::json::report_to_json(&report),
+                    OutputFormat::Json => solarxy_core::json::report_to_json(&report)?,
                     OutputFormat::Text => report.to_string(),
                 };
 

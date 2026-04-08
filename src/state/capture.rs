@@ -55,14 +55,14 @@ impl State {
         let slice = buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
-            tx.send(result).unwrap();
+            let _ = tx.send(result);
         });
         let _ = self.device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: None,
         });
 
-        if rx.recv().unwrap().is_err() {
+        if !matches!(rx.recv(), Ok(Ok(()))) {
             tracing::error!("Failed to map capture buffer");
             return;
         }
@@ -96,8 +96,10 @@ impl State {
             .as_secs();
         let filename = format!("solarxy_{now}.png");
 
-        let img = image::RgbaImage::from_raw(width, height, pixels)
-            .expect("Failed to create image from pixel data");
+        let Some(img) = image::RgbaImage::from_raw(width, height, pixels) else {
+            tracing::error!("Failed to create image from pixel data");
+            return;
+        };
         if let Err(e) = img.save(&filename) {
             tracing::error!("Failed to save screenshot: {}", e);
         } else {

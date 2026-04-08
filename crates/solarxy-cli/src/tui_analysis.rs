@@ -393,7 +393,13 @@ impl TerminalApp {
     }
 
     fn export_json_report(&mut self, path: &str) {
-        let json = report_to_json(&self.report);
+        let json = match report_to_json(&self.report) {
+            Ok(j) => j,
+            Err(e) => {
+                self.status_message = Some((format!("JSON serialization failed: {e}"), false));
+                return;
+            }
+        };
         match std::fs::write(path, json) {
             Ok(_) => self.status_message = Some((format!("JSON report saved to {}", path), true)),
             Err(e) => self.status_message = Some((format!("JSON export failed: {}", e), false)),

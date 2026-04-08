@@ -365,14 +365,13 @@ impl Renderer {
             pass.set_bind_group(0, cam_bg, &[]);
             if scene.model.has_uvs {
                 match pds.uv_mode {
-                    UvMode::Gradient => {
-                        pass.set_pipeline(&self.pipelines.uv_gradient);
-                    }
                     UvMode::Checker => {
                         pass.set_pipeline(&self.pipelines.uv_checker);
                         pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
                     }
-                    UvMode::Off => unreachable!(),
+                    UvMode::Gradient | UvMode::Off => {
+                        pass.set_pipeline(&self.pipelines.uv_gradient);
+                    }
                 }
             } else {
                 pass.set_pipeline(&self.pipelines.uv_no_uvs);
@@ -556,7 +555,7 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
         match pds.bounds_mode {
-            BoundsMode::Off => unreachable!(),
+            BoundsMode::Off => {}
             BoundsMode::WholeModel => {
                 pass.set_vertex_buffer(0, scene.vis.bounds_whole_buf.slice(..));
                 pass.draw(0..scene.vis.bounds_whole_count, 0..1);

@@ -88,9 +88,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
     let has_multi_tex = multi_tex_verts.is_some_and(|v| !v.is_empty())
         && multi_tex_faces.is_some_and(|f| !f.is_empty());
 
-    let multi_tex_uvs: Vec<[f32; 2]> = if has_multi_tex {
-        multi_tex_verts
-            .unwrap()
+    let multi_tex_uvs: Vec<[f32; 2]> = match multi_tex_verts.filter(|v| !v.is_empty()) {
+        Some(verts) if has_multi_tex => verts
             .iter()
             .map(|elem| {
                 [
@@ -98,9 +97,8 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
                     elem.get("v").map_or(0.0, ply_prop_to_f32),
                 ]
             })
-            .collect()
-    } else {
-        Vec::new()
+            .collect(),
+        _ => Vec::new(),
     };
 
     let has_uvs = has_uvs || has_multi_tex;
@@ -134,8 +132,7 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
     let polygon_count = ply_faces.len();
 
     let mut indices: Vec<u32> = Vec::new();
-    if has_multi_tex {
-        let mt_faces = multi_tex_faces.unwrap();
+    if let Some(mt_faces) = multi_tex_faces.filter(|_| has_multi_tex) {
         let geo_faces: Vec<Vec<u32>> = ply_faces
             .iter()
             .map(|face| {

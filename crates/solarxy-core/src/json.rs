@@ -209,9 +209,9 @@ impl From<&AnalysisReport> for JsonReport {
     }
 }
 
-pub fn report_to_json(report: &AnalysisReport) -> String {
+pub fn report_to_json(report: &AnalysisReport) -> Result<String, serde_json::Error> {
     let json_report = JsonReport::from(report);
-    serde_json::to_string_pretty(&json_report).expect("Failed to serialize report to JSON")
+    serde_json::to_string_pretty(&json_report)
 }
 
 #[cfg(test)]
@@ -377,7 +377,7 @@ mod tests {
             center: [0.5, 1.0, 1.5],
             diagonal: 3.742,
         });
-        let json_str = report_to_json(&report);
+        let json_str = report_to_json(&report).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&json_str).expect("Should be valid JSON");
         assert_eq!(parsed["model_name"], "test.obj");

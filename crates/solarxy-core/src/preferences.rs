@@ -488,7 +488,9 @@ pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
     files.retain(|p| p != path);
     files.insert(0, path.to_string());
     files.truncate(MAX_RECENT_FILES);
-    let _ = save(prefs);
+    if let Err(e) = save(prefs) {
+        tracing::warn!("Failed to save recent files: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -635,13 +637,13 @@ mod tests {
 
     #[test]
     fn window_prefs_clamped() {
-        let toml_str = r#"
+        let toml_str = r"
             config_version = 1
 
             [window]
             window_width = 100
             window_height = 99999
-        "#;
+        ";
         let mut parsed: Preferences = toml::from_str(toml_str).unwrap();
         parsed.window.window_width = parsed
             .window

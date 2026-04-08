@@ -212,8 +212,7 @@ impl State {
                     pds.view_mode = match pds.view_mode {
                         ViewMode::Shaded => ViewMode::ShadedWireframe,
                         ViewMode::ShadedWireframe => ViewMode::WireframeOnly,
-                        ViewMode::WireframeOnly => ViewMode::Shaded,
-                        ViewMode::Ghosted => unreachable!(),
+                        ViewMode::WireframeOnly | ViewMode::Ghosted => ViewMode::Shaded,
                     };
                 }
             }
@@ -508,8 +507,7 @@ impl State {
             if self.renderer.ibl_res.ibl_mode != IblMode::Off {
                 self.renderer.ibl_res.ibl_mode = match self.renderer.ibl_res.ibl_mode {
                     IblMode::Diffuse => IblMode::Full,
-                    IblMode::Full => IblMode::Diffuse,
-                    IblMode::Off => unreachable!(),
+                    IblMode::Full | IblMode::Off => IblMode::Diffuse,
                 };
                 self.renderer.ibl_res.last_active_ibl_mode = self.renderer.ibl_res.ibl_mode;
             }
