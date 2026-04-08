@@ -905,8 +905,14 @@ fn draw_hud_overlays(
     cameras_linked: Option<bool>,
     validation_counts: (usize, usize),
 ) {
+    let screen = ctx.content_rect();
+    let default_pos = egui::pos2(screen.right() - 8.0, screen.top() + 8.0);
     egui::Area::new(egui::Id::new("fps_overlay"))
-        .anchor(egui::Align2::RIGHT_TOP, [-8.0, 8.0])
+        .default_pos(default_pos)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .movable(true)
+        .interactable(true)
+        .constrain(true)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             overlay_frame().show(ui, |ui| {
