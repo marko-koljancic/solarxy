@@ -186,19 +186,7 @@ impl State {
             preferences.display.exposure,
         );
 
-        let dummy_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Dummy Camera Buffer for SSAO"),
-            contents: &[0u8; CameraUniform::SIZE],
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let ssao = SsaoState::new(
-            &device,
-            &queue,
-            &layouts,
-            &dummy_camera_buffer,
-            config.width,
-            config.height,
-        );
+        let ssao = SsaoState::new(&device, &queue, &layouts, config.width, config.height);
 
         let uv_cam = crate::cgi::uv_camera::UvCameraState::new(&device, &layouts.camera);
 

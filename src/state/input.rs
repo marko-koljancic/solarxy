@@ -379,16 +379,6 @@ impl State {
                             && let Some(scene) = &mut self.scene
                         {
                             scene.cam = sec;
-                            self.renderer.post.ssao.rebuild_bind_groups(
-                                &self.device,
-                                &self.renderer.layouts,
-                                &scene.cam.buffer,
-                            );
-                            scene.vis.rebuild_camera_bind_groups(
-                                &self.device,
-                                &self.renderer.layouts,
-                                &scene.cam.buffer,
-                            );
                         }
                     } else {
                         self.view.secondary_cam = None;

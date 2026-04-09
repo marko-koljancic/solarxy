@@ -284,7 +284,7 @@ impl Pipelines {
 
         let grid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Grid Pipeline Layout"),
-            bind_group_layouts: &[&layouts.grid],
+            bind_group_layouts: &[&layouts.camera, &layouts.grid_params],
             push_constant_ranges: &[],
         });
         let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -304,7 +304,7 @@ impl Pipelines {
 
         let normals_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Normals Pipeline Layout"),
-            bind_group_layouts: &[&layouts.normals],
+            bind_group_layouts: &[&layouts.camera, &layouts.normals_params],
             push_constant_ranges: &[],
         });
         let normals_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -633,7 +633,7 @@ impl Pipelines {
         });
         let ssao_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SSAO Pipeline Layout"),
-            bind_group_layouts: &[&layouts.ssao],
+            bind_group_layouts: &[&layouts.ssao, &layouts.camera],
             push_constant_ranges: &[],
         });
         let ssao = PipelineBuilder::new(device, "SSAO Pipeline", &ssao_layout, &ssao_shader)
@@ -650,7 +650,7 @@ impl Pipelines {
         });
         let ssao_blur_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SSAO Blur Pipeline Layout"),
-            bind_group_layouts: &[&layouts.ssao_blur],
+            bind_group_layouts: &[&layouts.ssao_blur, &layouts.camera],
             push_constant_ranges: &[],
         });
         let ssao_blur_h = PipelineBuilder::new(

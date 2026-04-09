@@ -4,8 +4,8 @@ pub(crate) struct BindGroupLayouts {
     pub(crate) light: wgpu::BindGroupLayout,
     pub(crate) shadow_pass: wgpu::BindGroupLayout,
     pub(crate) shadow_read: wgpu::BindGroupLayout,
-    pub(crate) grid: wgpu::BindGroupLayout,
-    pub(crate) normals: wgpu::BindGroupLayout,
+    pub(crate) grid_params: wgpu::BindGroupLayout,
+    pub(crate) normals_params: wgpu::BindGroupLayout,
     pub(crate) background: wgpu::BindGroupLayout,
     pub(crate) uv_checker: wgpu::BindGroupLayout,
     pub(crate) bloom_texture: wgpu::BindGroupLayout,
@@ -100,19 +100,13 @@ impl BindGroupLayouts {
                 },
             ],
         });
-        let grid = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("grid_bind_group_layout"),
-            entries: &[
-                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-                bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
-            ],
+        let grid_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("grid_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
-        let normals = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("normals_bind_group_layout"),
-            entries: &[
-                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
-                bgl_uniform_entry(1, wgpu::ShaderStages::FRAGMENT),
-            ],
+        let normals_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("normals_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
         let background = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("background_bind_group_layout"),
@@ -191,7 +185,6 @@ impl BindGroupLayouts {
                 bgl_texture_entry(2),
                 bgl_sampler_entry(3),
                 bgl_uniform_entry(4, wgpu::ShaderStages::FRAGMENT),
-                bgl_uniform_entry(5, wgpu::ShaderStages::FRAGMENT),
             ],
         });
         let ssao_blur = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -209,7 +202,6 @@ impl BindGroupLayouts {
                     count: None,
                 },
                 bgl_sampler_entry(2),
-                bgl_uniform_entry(3, wgpu::ShaderStages::FRAGMENT),
             ],
         });
         let ssao_read = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -230,8 +222,8 @@ impl BindGroupLayouts {
             light,
             shadow_pass,
             shadow_read,
-            grid,
-            normals,
+            grid_params,
+            normals_params,
             background,
             uv_checker,
             bloom_texture,

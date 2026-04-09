@@ -20,7 +20,7 @@ struct GridUniform {
     color_g: f32,
     color_b: f32,
 }
-@group(0) @binding(1) var<uniform> grid: GridUniform;
+@group(1) @binding(0) var<uniform> grid: GridUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,

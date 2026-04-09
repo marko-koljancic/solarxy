@@ -17,7 +17,7 @@ struct Camera {
 struct NormalsColor {
     color: vec4<f32>,
 }
-@group(0) @binding(1) var<uniform> normals_color: NormalsColor;
+@group(1) @binding(0) var<uniform> normals_color: NormalsColor;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,

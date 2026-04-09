@@ -37,7 +37,6 @@ impl SsaoState {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layouts: &BindGroupLayouts,
-        camera_buffer: &wgpu::Buffer,
         width: u32,
         height: u32,
     ) -> Self {
@@ -146,7 +145,6 @@ impl SsaoState {
             &gbuffer_normal_view,
             &noise_view,
             &sampler,
-            camera_buffer,
             &kernel_buffer,
         );
         let blur_h_bind_group = create_blur_bind_group(
@@ -155,7 +153,6 @@ impl SsaoState {
             &ssao_raw_view,
             &gbuffer_depth_view,
             &sampler,
-            camera_buffer,
             "SSAO Blur H",
         );
         let blur_v_bind_group = create_blur_bind_group(
@@ -164,7 +161,6 @@ impl SsaoState {
             &ssao_blur_view,
             &gbuffer_depth_view,
             &sampler,
-            camera_buffer,
             "SSAO Blur V",
         );
         let read_bind_group =
@@ -201,7 +197,6 @@ impl SsaoState {
         &mut self,
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
-        camera_buffer: &wgpu::Buffer,
         width: u32,
         height: u32,
     ) {
@@ -225,14 +220,13 @@ impl SsaoState {
         self.ssao_output_texture = ot;
         self.ssao_output_view = ov;
 
-        self.rebuild_bind_groups(device, layouts, camera_buffer);
+        self.rebuild_bind_groups(device, layouts);
     }
 
     pub(crate) fn rebuild_bind_groups(
         &mut self,
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
-        camera_buffer: &wgpu::Buffer,
     ) {
         self.ssao_bind_group = create_ssao_bind_group(
             device,
@@ -241,7 +235,6 @@ impl SsaoState {
             &self.gbuffer_normal_view,
             &self.noise_view,
             &self.sampler,
-            camera_buffer,
             &self.kernel_buffer,
         );
         self.blur_h_bind_group = create_blur_bind_group(
@@ -250,7 +243,6 @@ impl SsaoState {
             &self.ssao_raw_view,
             &self.gbuffer_depth_view,
             &self.sampler,
-            camera_buffer,
             "SSAO Blur H",
         );
         self.blur_v_bind_group = create_blur_bind_group(
@@ -259,7 +251,6 @@ impl SsaoState {
             &self.ssao_blur_view,
             &self.gbuffer_depth_view,
             &self.sampler,
-            camera_buffer,
             "SSAO Blur V",
         );
         self.read_bind_group = create_read_bind_group(
@@ -343,7 +334,6 @@ fn create_ao_texture(
     (texture, view)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn create_ssao_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -351,7 +341,6 @@ fn create_ssao_bind_group(
     normal_view: &wgpu::TextureView,
     noise_view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
-    camera_buffer: &wgpu::Buffer,
     kernel_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -376,10 +365,6 @@ fn create_ssao_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: camera_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
                 resource: kernel_buffer.as_entire_binding(),
             },
         ],
@@ -392,7 +377,6 @@ fn create_blur_bind_group(
     ao_view: &wgpu::TextureView,
     depth_view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
-    camera_buffer: &wgpu::Buffer,
     label: &str,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -410,10 +394,6 @@ fn create_blur_bind_group(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: camera_buffer.as_entire_binding(),
             },
         ],
     })

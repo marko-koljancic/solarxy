@@ -31,12 +31,12 @@ struct Camera {
     depth_near: f32,
     depth_far: f32,
 }
-@group(0) @binding(4) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 struct SsaoKernel {
     samples: array<vec4<f32>, 64>,
 }
-@group(0) @binding(5) var<uniform> kernel: SsaoKernel;
+@group(0) @binding(4) var<uniform> kernel: SsaoKernel;
 
 const RADIUS: f32 = 0.15;
 const BIAS: f32 = 0.04;
