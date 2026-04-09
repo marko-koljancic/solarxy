@@ -194,7 +194,11 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_ssao_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(super) fn render_ssao_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        cam_bg: &wgpu::BindGroup,
+    ) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("SSAO Pass"),
@@ -213,6 +217,7 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipelines.ssao);
             pass.set_bind_group(0, &self.post.ssao.ssao_bind_group, &[]);
+            pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
         }
         {
@@ -233,6 +238,7 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipelines.ssao_blur_h);
             pass.set_bind_group(0, &self.post.ssao.blur_h_bind_group, &[]);
+            pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
         }
         {
@@ -253,6 +259,7 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipelines.ssao_blur_v);
             pass.set_bind_group(0, &self.post.ssao.blur_v_bind_group, &[]);
+            pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
         }
     }
@@ -398,7 +405,8 @@ impl Renderer {
 
         if pds.show_grid {
             pass.set_pipeline(&self.pipelines.grid);
-            pass.set_bind_group(0, &scene.vis.grid_bind_group, &[]);
+            pass.set_bind_group(0, cam_bg, &[]);
+            pass.set_bind_group(1, &scene.vis.grid_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(
                 scene.vis.grid_mesh.index_buffer.slice(..),
@@ -406,7 +414,7 @@ impl Renderer {
             );
             pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
         }
-        self.draw_normals(&mut pass, scene, pds);
+        self.draw_normals(&mut pass, scene, cam_bg, pds);
         self.draw_axes(&mut pass, scene, cam_bg, pds);
         self.draw_local_axes(&mut pass, scene, cam_bg, pds);
         self.draw_bounds(&mut pass, scene, cam_bg, pds);
@@ -727,18 +735,20 @@ impl Renderer {
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
+        cam_bg: &'a wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
         if pds.normals_mode == NormalsMode::Off {
             return;
         }
         pass.set_pipeline(&self.pipelines.normals);
+        pass.set_bind_group(0, cam_bg, &[]);
         if matches!(
             pds.normals_mode,
             NormalsMode::Face | NormalsMode::FaceAndVertex
         ) && scene.vis.face_normals_count > 0
         {
-            pass.set_bind_group(0, &scene.vis.face_normals_bind_group, &[]);
+            pass.set_bind_group(1, &scene.vis.face_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
             pass.draw(0..scene.vis.face_normals_count, 0..1);
         }
@@ -747,7 +757,7 @@ impl Renderer {
             NormalsMode::Vertex | NormalsMode::FaceAndVertex
         ) && scene.vis.vertex_normals_count > 0
         {
-            pass.set_bind_group(0, &scene.vis.vertex_normals_bind_group, &[]);
+            pass.set_bind_group(1, &scene.vis.vertex_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));
             pass.draw(0..scene.vis.vertex_normals_count, 0..1);
         }

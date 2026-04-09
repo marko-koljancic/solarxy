@@ -28,11 +28,11 @@ pub enum IssueCategory {
 impl IssueCategory {
     pub fn color(self) -> [f32; 4] {
         match self {
-            Self::Error => [1.0, 0.0, 0.0, 0.35],
-            Self::InvalidMaterial => [1.0, 0.5, 0.0, 0.35],
-            Self::NormalMismatch => [0.0, 0.8, 1.0, 0.35],
-            Self::MissingUvs => [1.0, 0.4, 0.6, 0.35],
-            Self::DegenerateTriangles => [1.0, 0.9, 0.0, 0.35],
+            Self::Error => [1.0, 0.0, 0.0, 0.4],
+            Self::InvalidMaterial => [1.0, 0.45, 0.0, 0.4],
+            Self::NormalMismatch => [0.0, 0.85, 1.0, 0.4],
+            Self::MissingUvs => [1.0, 0.0, 0.8, 0.4],
+            Self::DegenerateTriangles => [1.0, 0.9, 0.0, 0.4],
         }
     }
 

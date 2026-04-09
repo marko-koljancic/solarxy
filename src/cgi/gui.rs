@@ -696,7 +696,7 @@ fn draw_sidebar(
                             checkbox_with_tooltip(
                                 ui,
                                 &mut s.show_validation,
-                                "Show overlay",
+                                "Highlight issues on mesh",
                                 "Shift+V",
                             );
                             if report.is_clean() {

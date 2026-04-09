@@ -243,14 +243,8 @@ impl ModelScene {
             create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl, brdf_lut);
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, &model, shadow_map_size);
-        let vis = VisualizationState::new(
-            device,
-            layouts,
-            &model,
-            &normals_geo,
-            &cam.buffer,
-            initial_grid_color,
-        );
+        let vis =
+            VisualizationState::new(device, layouts, &model, &normals_geo, initial_grid_color);
 
         let validation_mesh_cat = crate::validation::build_mesh_category_map(
             &viewer_validation.report,
@@ -695,8 +689,10 @@ impl State {
             self.renderer.render_empty_pass(encoder, pds);
         }
 
-        if self.renderer.post.ssao_enabled {
-            self.renderer.render_ssao_passes(encoder);
+        if self.renderer.post.ssao_enabled
+            && let Some(cam_bg) = cam_bg
+        {
+            self.renderer.render_ssao_passes(encoder, cam_bg);
         }
 
         if self.renderer.post.bloom_enabled {
@@ -727,20 +723,6 @@ impl State {
                 scene.model.bounds.center(),
                 scene.model.bounds.diagonal() / 2.0,
             );
-        }
-        if let Some(sec) = &self.view.secondary_cam {
-            self.renderer.post.ssao.rebuild_bind_groups(
-                &self.device,
-                &self.renderer.layouts,
-                &sec.buffer,
-            );
-        }
-        if let Some(sec_buf) = self.view.secondary_cam.as_ref().map(|c| &c.buffer)
-            && let Some(scene) = &mut self.scene
-        {
-            scene
-                .vis
-                .rebuild_camera_bind_groups(&self.device, &self.renderer.layouts, sec_buf);
         }
     }
 

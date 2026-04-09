@@ -30,7 +30,7 @@ struct Camera {
     depth_near: f32,
     depth_far: f32,
 }
-@group(0) @binding(3) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 const BLUR_RADIUS: i32 = 6;
 const DEPTH_THRESHOLD: f32 = 0.1;

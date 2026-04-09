@@ -1,7 +1,5 @@
 use std::sync::mpsc;
 
-use wgpu::util::DeviceExt;
-
 use super::*;
 
 impl State {
@@ -201,30 +199,10 @@ impl State {
             self.renderer.uv_overlap.stats_dirty = true;
         }
 
-        if let Some(scene) = &self.scene {
-            self.renderer.post.ssao.resize(
-                &self.device,
-                &self.renderer.layouts,
-                &scene.cam.buffer,
-                width,
-                height,
-            );
-        } else {
-            let dummy_buf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Dummy Camera Buffer for SSAO resize"),
-                    contents: &[0u8; CameraUniform::SIZE],
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-            self.renderer.post.ssao.resize(
-                &self.device,
-                &self.renderer.layouts,
-                &dummy_buf,
-                width,
-                height,
-            );
-        }
+        self.renderer
+            .post
+            .ssao
+            .resize(&self.device, &self.renderer.layouts, width, height);
     }
 
     pub fn update(&mut self) {
@@ -259,13 +237,6 @@ impl State {
                     .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
                 self.scene = Some(new_scene);
-                if let Some(scene) = &self.scene {
-                    self.renderer.post.ssao.rebuild_bind_groups(
-                        &self.device,
-                        &self.renderer.layouts,
-                        &scene.cam.buffer,
-                    );
-                }
                 if let Some(scene) = &mut self.scene {
                     scene
                         .cam

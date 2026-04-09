@@ -31,19 +31,19 @@ struct Camera {
     depth_near: f32,
     depth_far: f32,
 }
-@group(0) @binding(4) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 struct SsaoKernel {
     samples: array<vec4<f32>, 64>,
 }
-@group(0) @binding(5) var<uniform> kernel: SsaoKernel;
+@group(0) @binding(4) var<uniform> kernel: SsaoKernel;
 
-const RADIUS: f32 = 0.15;
-const BIAS: f32 = 0.04;
+const RADIUS_FACTOR: f32 = 0.04;
+const BIAS_FACTOR: f32 = 0.1;
 const KERNEL_SIZE: u32 = 64u;
 
 fn reconstruct_view_pos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
-    let ndc = vec4<f32>(uv * 2.0 - 1.0, depth, 1.0);
+    let ndc = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
     let view_pos = camera.inv_proj * ndc;
     return view_pos.xyz / view_pos.w;
 }
@@ -52,7 +52,7 @@ fn reconstruct_view_pos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal_tex_size = vec2<f32>(textureDimensions(normal_texture));
     let depth_tex_size = vec2<f32>(textureDimensions(depth_texture));
-    let noise_size = vec2<f32>(textureDimensions(noise_texture));
+    let noise_size_i = vec2<i32>(textureDimensions(noise_texture));
 
     let depth_coords = vec2<i32>(in.uv * depth_tex_size);
     let depth = textureLoad(depth_texture, depth_coords, 0);
@@ -65,19 +65,34 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_normal = textureSample(normal_texture, tex_sampler, in.uv).xyz * 2.0 - 1.0;
     let view_normal = normalize((camera.view * vec4<f32>(world_normal, 0.0)).xyz);
 
-    let noise_uv = in.uv * normal_tex_size / noise_size;
-    let random_vec = textureSample(noise_texture, tex_sampler, noise_uv).xy;
-    let random_vec3 = vec3<f32>(random_vec, 0.0);
+    let pixel_coord = vec2<i32>(in.uv * normal_tex_size);
+    let noise_coord = vec2<i32>(
+        pixel_coord.x - (pixel_coord.x / noise_size_i.x) * noise_size_i.x,
+        pixel_coord.y - (pixel_coord.y / noise_size_i.y) * noise_size_i.y,
+    );
+    let random_vec = textureLoad(noise_texture, noise_coord, 0).xy;
 
-    let tangent = normalize(random_vec3 - view_normal * dot(random_vec3, view_normal));
-    let bitangent = cross(view_normal, tangent);
+    let ref_up = select(
+        vec3<f32>(0.0, 1.0, 0.0),
+        vec3<f32>(1.0, 0.0, 0.0),
+        abs(view_normal.y) > 0.95,
+    );
+    let t0 = normalize(cross(ref_up, view_normal));
+    let b0 = cross(view_normal, t0);
+    let rc = random_vec.x;
+    let rs = random_vec.y;
+    let tangent = t0 * rc + b0 * rs;
+    let bitangent = -t0 * rs + b0 * rc;
     let tbn = mat3x3<f32>(tangent, bitangent, view_normal);
+
+    let radius = RADIUS_FACTOR * abs(frag_pos.z);
+    let bias = BIAS_FACTOR * radius;
 
     let depth_max = vec2<i32>(depth_tex_size) - 1;
     var occlusion = 0.0;
     for (var i = 0u; i < KERNEL_SIZE; i++) {
         let sample_dir = tbn * kernel.samples[i].xyz;
-        let sample_pos = frag_pos + sample_dir * RADIUS;
+        let sample_pos = frag_pos + sample_dir * radius;
 
         let proj = camera.proj * vec4<f32>(sample_pos, 1.0);
         var sample_uv = proj.xy / proj.w;
@@ -88,8 +103,8 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
         let sample_depth = textureLoad(depth_texture, sample_coords, 0);
         let sample_view_pos = reconstruct_view_pos(sample_uv, sample_depth);
 
-        let range_check = smoothstep(0.0, 1.0, RADIUS / abs(frag_pos.z - sample_view_pos.z));
-        if sample_view_pos.z >= sample_pos.z + BIAS {
+        let range_check = smoothstep(0.0, 1.0, radius / abs(frag_pos.z - sample_view_pos.z));
+        if sample_view_pos.z >= sample_pos.z + bias {
             occlusion += range_check;
         }
     }
