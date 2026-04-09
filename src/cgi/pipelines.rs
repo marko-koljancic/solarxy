@@ -225,6 +225,7 @@ impl Pipelines {
             label: Some("Validation Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/validation.wgsl").into()),
         });
+
         let validation_overlay = PipelineBuilder::new(
             device,
             "Validation Overlay",
@@ -238,6 +239,11 @@ impl Pipelines {
         .blend_alpha()
         .depth_write(false)
         .depth_compare(wgpu::CompareFunction::LessEqual)
+        .depth_bias(wgpu::DepthBiasState {
+            constant: -4,
+            slope_scale: -1.0,
+            clamp: 0.0,
+        })
         .sample_count(sample_count)
         .build();
 
