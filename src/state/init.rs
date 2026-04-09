@@ -381,6 +381,8 @@ impl State {
                     turntable_rpm: preferences.display.turntable_rpm,
                     lights_locked: preferences.lighting.lock,
                     layout: ViewLayout::default(),
+                    roughness_scale: 1.0,
+                    metallic_scale: 1.0,
                 },
                 secondary_cam: None,
                 active_pane: 0,

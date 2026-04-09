@@ -89,8 +89,27 @@ RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default lev
 
 **Inspection modes** (number keys 1-5): Shaded, Material ID, UV Map, Texel Density, Depth
 
+**Material overrides** (`Shift+M` / sidebar): `MaterialOverride::{None, Clay, ClayDark, Chrome, Silhouette}` → `camera.material_override` (0-4). These are stylized, not physical, and short-circuit parts of `fs_main` in `shader.wgsl`:
+- Silhouette (4u) early-returns solid black
+- Chrome (3u) skips all three direct lights so it only samples the prefiltered environment
+- Clay Light/Dark (1u/2u) use a directionless ambient — the L0 spherical-harmonic coefficient of the active IBL's irradiance map (`IblState::irradiance_average`, computed CPU-side in all three constructors and pushed to the GPU via `LightsUniform.ibl_avg_{r,g,b}`) — and route direct lights through `lambert_direct` to suppress the cook_torrance specular lobe
+
 ## Key Patterns
 
+### GPU uniform buffers are hand-laid-out
+CPU structs (`CameraUniform` in `cgi/camera.rs`, `LightsUniform` in `cgi/light.rs`, and most `*Uniform` structs under `cgi/`) are `#[repr(C)]` with explicit `_pad` fields chosen to hit WGSL's 16-byte struct-size alignment. Several have `const _: () = assert!(std::mem::size_of::<T>() == N);` at the crate root — when extending a uniform, preserve the assert (repack the padding) or update it in lockstep with the shader side. Corresponding WGSL `struct` declarations in `cgi/shaders/*.wgsl` must match the Rust layout, but can declare a **prefix** of the CPU struct and simply omit trailing fields they don't read (wgpu enforces size at the binding, not shape). Practical consequence: you can add a field to `CameraUniform` and only update `shader.wgsl` — the other 13+ shaders that only read `material_override` continue to work unchanged.
+
+Bind group layouts use `min_binding_size: None` (`bind_groups.rs`), so growing a uniform buffer is a no-op for layouts — but the Rust struct size must still match the WGSL side of the consuming shader.
+
+### IBL update flows through one chokepoint
+`IblState` has three constructors (`fallback`, `from_sky_colors`, `from_hdri`) — any IBL-derived CPU data (e.g. the L0 ambient) must be computed in **all three**. `rebuild_light_bind_group` in `state/update.rs` is the single chokepoint triggered on HDRI drop, IblMode toggle (`I` / `Shift+I`), and background change. Scene-wide IBL-derived uniforms are pushed to the GPU with a partial `queue.write_buffer` there so Clay modes etc. update instantly without waiting for the next camera-driven frame (which may not fire at all under Lock Lights).
+
+### State plumbing shape
+- `lights_from_camera` in `state/mod.rs` is called from 3 sites (init, `setup_split_secondary`, per-frame in `update.rs`); adding a parameter means updating all three.
+- Sidebar ↔ state sync goes through `GuiSnapshot::{from_state, write_back_pane/display/post}` in `cgi/gui.rs` — adding a sidebar control means adding a field to `GuiSnapshot` **and** wiring it through both `from_state` and the matching `write_back_*`.
+- `PaneDisplaySettings` is per-pane, `DisplaySettings` is global. Choose deliberately when adding new knobs — per-pane lets split-view compare modes, global is simpler and avoids per-pane write fanout.
+
+### Other
 - wgpu bind groups for GPU resource access; pipelines created at init and reused
 - `Vertex` trait defines buffer layouts for different vertex types
 - Camera auto-frames model on load using AABB bounds

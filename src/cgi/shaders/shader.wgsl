@@ -11,6 +11,8 @@ struct Camera {
     material_override: u32,
     depth_near: f32,
     depth_far: f32,
+    roughness_scale: f32,
+    metallic_scale: f32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -137,6 +139,10 @@ struct LightEntry {
 }
 struct LightsUniform {
     lights: array<LightEntry, 3>,
+    sphere_scale: f32,
+    ibl_avg_r: f32,
+    ibl_avg_g: f32,
+    ibl_avg_b: f32,
 }
 @group(2) @binding(0)
 var<uniform> lights: LightsUniform;
@@ -181,6 +187,11 @@ fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, ro
     let diffuse = kD * albedo / PI;
 
     return (diffuse + specular) * NdotL;
+}
+
+fn lambert_direct(N: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
+    let NdotL = max(dot(N, L), 0.0);
+    return (albedo / PI) * NdotL;
 }
 
 @fragment
@@ -254,8 +265,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         albedo = albedo_sample.xyz;
         ao = mix(1.0, orm_sample.r, material.ao_strength);
-        roughness = material.roughness_factor * orm_sample.g;
-        metallic = material.metallic_factor * orm_sample.b;
+        roughness = clamp(
+            material.roughness_factor * orm_sample.g * camera.roughness_scale,
+            0.04,
+            1.0,
+        );
+        metallic = clamp(
+            material.metallic_factor * orm_sample.b * camera.metallic_scale,
+            0.0,
+            1.0,
+        );
         N = normalize(n_sample.xyz * 2.0 - 1.0);
         emissive_color = material.emissive * emissive_sample.rgb;
     } else {
@@ -279,7 +298,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let F_ibl = F_schlick(NdotV_ibl, F0);
     let kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
     let irradiance = textureSampleLevel(t_ibl, s_ibl, N_world, 0.0).rgb;
-    let diffuse_ibl = irradiance * albedo * kD_ibl;
+    let diffuse_ibl_pbr = irradiance * albedo * kD_ibl;
 
     let R = reflect(-V_world, N_world);
     let MAX_REFLECTION_LOD = 5.0;
@@ -287,7 +306,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let prefiltered_color = textureSampleLevel(t_prefiltered, s_prefiltered, R, mip_level).rgb;
     let brdf_uv = vec2(max(dot(N_world, V_world), 0.0), roughness);
     let brdf = textureSample(t_brdf_lut, s_brdf_lut, brdf_uv).rg;
-    let specular_ibl = prefiltered_color * (F0 * brdf.x + brdf.y);
+    let specular_ibl_pbr = prefiltered_color * (F0 * brdf.x + brdf.y);
+
+    let is_clay = camera.material_override == 1u || camera.material_override == 2u;
+    let ibl_ambient = vec3<f32>(lights.ibl_avg_r, lights.ibl_avg_g, lights.ibl_avg_b);
+    let diffuse_ibl = select(diffuse_ibl_pbr, ibl_ambient * albedo, is_clay);
+    let specular_ibl = select(specular_ibl_pbr, vec3<f32>(0.0), is_clay);
 
     let ambient = (diffuse_ibl + specular_ibl) * ao;
 
@@ -302,13 +326,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         {
             let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
             let scale = lights.lights[0].intensity * 3.0 * shadow;
-            radiance_acc += lights.lights[0].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
+            let brdf = select(
+                cook_torrance(N, V, L, albedo, roughness, metallic),
+                lambert_direct(N, L, albedo),
+                is_clay,
+            );
+            radiance_acc += lights.lights[0].color * brdf * scale;
         }
 
         for (var i = 1u; i < 3u; i++) {
             let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
             let scale = lights.lights[i].intensity * 3.0;
-            radiance_acc += lights.lights[i].color * cook_torrance(N, V, L, albedo, roughness, metallic) * scale;
+            let brdf = select(
+                cook_torrance(N, V, L, albedo, roughness, metallic),
+                lambert_direct(N, L, albedo),
+                is_clay,
+            );
+            radiance_acc += lights.lights[i].color * brdf * scale;
         }
     }
 

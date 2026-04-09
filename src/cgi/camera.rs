@@ -115,7 +115,9 @@ pub struct CameraUniform {
     material_override: u32,
     depth_near: f32,
     depth_far: f32,
-    _pad: u32,
+    roughness_scale: f32,
+    metallic_scale: f32,
+    _pad: [f32; 3],
 }
 
 impl Default for CameraUniform {
@@ -123,6 +125,11 @@ impl Default for CameraUniform {
         Self::new()
     }
 }
+
+const _: () = assert!(
+    std::mem::size_of::<CameraUniform>().is_multiple_of(16),
+    "CameraUniform must be 16-byte aligned for WGSL uniform buffer layout",
+);
 
 impl CameraUniform {
     pub const SIZE: usize = std::mem::size_of::<Self>();
@@ -144,7 +151,9 @@ impl CameraUniform {
             material_override: 0,
             depth_near: 0.01,
             depth_far: 100.0,
-            _pad: 0,
+            roughness_scale: 1.0,
+            metallic_scale: 1.0,
+            _pad: [0.0; 3],
         }
     }
 

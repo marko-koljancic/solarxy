@@ -12,7 +12,9 @@ pub struct LightEntry {
 pub struct LightsUniform {
     pub lights: [LightEntry; 3],
     pub sphere_scale: f32,
-    pub _pad1: [f32; 3],
+    pub ibl_avg_r: f32,
+    pub ibl_avg_g: f32,
+    pub ibl_avg_b: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<LightEntry>() == 32);

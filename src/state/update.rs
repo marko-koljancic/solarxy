@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use super::*;
 
 impl State {
-    fn active_ibl(&self) -> &IblState {
+    pub(super) fn active_ibl(&self) -> &IblState {
         match self.renderer.ibl_res.ibl_mode {
             IblMode::Off => &self.renderer.ibl_res.ibl_fallback,
             IblMode::Diffuse | IblMode::Full => &self.renderer.ibl_res.ibl,
@@ -11,6 +11,7 @@ impl State {
     }
 
     pub(super) fn rebuild_light_bind_group(&mut self) {
+        let ibl_avg = self.active_ibl().irradiance_average;
         if let Some(scene) = &mut self.scene {
             scene.light_bind_group = match self.renderer.ibl_res.ibl_mode {
                 IblMode::Off => create_light_bind_group(
@@ -36,6 +37,13 @@ impl State {
                     &self.renderer.ibl_res.brdf_lut,
                 ),
             };
+
+            scene.lights_uniform.ibl_avg_r = ibl_avg[0];
+            scene.lights_uniform.ibl_avg_g = ibl_avg[1];
+            scene.lights_uniform.ibl_avg_b = ibl_avg[2];
+            let offset = std::mem::offset_of!(LightsUniform, ibl_avg_r) as u64;
+            self.queue
+                .write_buffer(&scene.light_buffer, offset, bytemuck::cast_slice(&ibl_avg));
         }
     }
 
@@ -319,22 +327,24 @@ impl State {
             cam.update(&self.queue, self.dt);
         }
 
-        if let Some(scene) = &mut self.scene
-            && !self.view.display.lights_locked
-        {
-            scene.lights_uniform = lights_from_camera(&scene.cam.camera, &scene.model.bounds);
-            self.queue.write_buffer(
-                &scene.light_buffer,
-                0,
-                bytemuck::cast_slice(&[scene.lights_uniform]),
-            );
-            let key_pos = scene.lights_uniform.lights[0].position;
-            scene.shadow.update_light_vp(
-                &self.queue,
-                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                scene.model.bounds.center(),
-                scene.model.bounds.diagonal() / 2.0,
-            );
+        if !self.view.display.lights_locked {
+            let ibl_avg = self.active_ibl().irradiance_average;
+            if let Some(scene) = &mut self.scene {
+                scene.lights_uniform =
+                    lights_from_camera(&scene.cam.camera, &scene.model.bounds, ibl_avg);
+                self.queue.write_buffer(
+                    &scene.light_buffer,
+                    0,
+                    bytemuck::cast_slice(&[scene.lights_uniform]),
+                );
+                let key_pos = scene.lights_uniform.lights[0].position;
+                scene.shadow.update_light_vp(
+                    &self.queue,
+                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                    scene.model.bounds.center(),
+                    scene.model.bounds.diagonal() / 2.0,
+                );
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ pub(crate) struct IblState {
     pub(crate) prefiltered_texture: wgpu::Texture,
     pub(crate) prefiltered_view: wgpu::TextureView,
     pub(crate) prefiltered_sampler: wgpu::Sampler,
+    pub(crate) irradiance_average: [f32; 3],
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -150,7 +151,12 @@ impl IblState {
             write_cubemap_face(queue, &prefiltered_texture, face, 0, 1, &black_pixel);
         }
 
-        Self::from_parts(device, irradiance_texture, prefiltered_texture)
+        Self::from_parts(
+            device,
+            irradiance_texture,
+            prefiltered_texture,
+            [0.2, 0.2, 0.2],
+        )
     }
 
     pub(crate) fn from_sky_colors(
@@ -161,8 +167,18 @@ impl IblState {
     ) -> Self {
         let irradiance_texture = generate_irradiance_sky(device, queue, top, bottom);
         let prefiltered_texture = generate_prefiltered_sky(device, queue, top, bottom);
+        let irradiance_average = [
+            (top[0] + bottom[0]) * 0.5,
+            (top[1] + bottom[1]) * 0.5,
+            (top[2] + bottom[2]) * 0.5,
+        ];
 
-        Self::from_parts(device, irradiance_texture, prefiltered_texture)
+        Self::from_parts(
+            device,
+            irradiance_texture,
+            prefiltered_texture,
+            irradiance_average,
+        )
     }
 
     pub(crate) fn from_hdri(
@@ -183,6 +199,7 @@ impl IblState {
         };
 
         let irradiance = convolve_equirect(width, height, &pixels);
+        let irradiance_average = compute_irradiance_average(&irradiance);
         let irradiance_texture = irradiance_faces_to_texture(device, queue, &irradiance);
         let prefiltered_texture =
             generate_prefiltered_equirect(device, queue, width, height, &pixels);
@@ -191,6 +208,7 @@ impl IblState {
             device,
             irradiance_texture,
             prefiltered_texture,
+            irradiance_average,
         ))
     }
 
@@ -198,6 +216,7 @@ impl IblState {
         device: &wgpu::Device,
         irradiance_texture: wgpu::Texture,
         prefiltered_texture: wgpu::Texture,
+        irradiance_average: [f32; 3],
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -239,8 +258,28 @@ impl IblState {
             prefiltered_texture,
             prefiltered_view,
             prefiltered_sampler,
+            irradiance_average,
         }
     }
+}
+
+fn compute_irradiance_average(faces: &[Vec<[f32; 3]>; 6]) -> [f32; 3] {
+    let mut sum = [0.0_f64; 3];
+    let mut count: u32 = 0;
+    for face in faces {
+        for px in face {
+            sum[0] += f64::from(px[0]);
+            sum[1] += f64::from(px[1]);
+            sum[2] += f64::from(px[2]);
+            count += 1;
+        }
+    }
+    let inv = 1.0 / f64::from(count.max(1));
+    [
+        (sum[0] * inv) as f32,
+        (sum[1] * inv) as f32,
+        (sum[2] * inv) as f32,
+    ]
 }
 
 fn create_cubemap(device: &wgpu::Device, label: &str, size: u32, mip_levels: u32) -> wgpu::Texture {

@@ -232,13 +232,17 @@ impl ModelScene {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let lights_uniform = lights_from_camera(&cam.camera, &model.bounds);
+        let placeholder_ibl = IblState::fallback(device, queue);
+        let lights_uniform = lights_from_camera(
+            &cam.camera,
+            &model.bounds,
+            placeholder_ibl.irradiance_average,
+        );
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light VB"),
             contents: bytemuck::cast_slice(&[lights_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let placeholder_ibl = IblState::fallback(device, queue);
         let light_bind_group =
             create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl, brdf_lut);
 
@@ -622,12 +626,14 @@ impl State {
         };
         if let Some(buf) = cam_buf {
             let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
-            let data: [u32; 5] = [
+            let data: [u32; 7] = [
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
                 pds.material_override.as_u32(),
                 depth_near.to_bits(),
                 depth_far.to_bits(),
+                self.view.display.roughness_scale.to_bits(),
+                self.view.display.metallic_scale.to_bits(),
             ];
             self.queue.write_buffer(
                 buf,
@@ -707,22 +713,23 @@ impl State {
     }
 
     fn setup_split_secondary(&mut self, cam_data: &Camera) {
-        if !self.view.display.lights_locked
-            && let Some(scene) = &mut self.scene
-        {
-            scene.lights_uniform = lights_from_camera(cam_data, &scene.model.bounds);
-            self.queue.write_buffer(
-                &scene.light_buffer,
-                0,
-                bytemuck::cast_slice(&[scene.lights_uniform]),
-            );
-            let key_pos = scene.lights_uniform.lights[0].position;
-            scene.shadow.update_light_vp(
-                &self.queue,
-                cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                scene.model.bounds.center(),
-                scene.model.bounds.diagonal() / 2.0,
-            );
+        if !self.view.display.lights_locked {
+            let ibl_avg = self.active_ibl().irradiance_average;
+            if let Some(scene) = &mut self.scene {
+                scene.lights_uniform = lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);
+                self.queue.write_buffer(
+                    &scene.light_buffer,
+                    0,
+                    bytemuck::cast_slice(&[scene.lights_uniform]),
+                );
+                let key_pos = scene.lights_uniform.lights[0].position;
+                scene.shadow.update_light_vp(
+                    &self.queue,
+                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
+                    scene.model.bounds.center(),
+                    scene.model.bounds.diagonal() / 2.0,
+                );
+            }
         }
     }
 
@@ -934,7 +941,7 @@ fn request_overlap_readback_impl(
     uv_overlap.stats_dirty = false;
 }
 
-fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
+fn lights_from_camera(camera: &Camera, bounds: &model::AABB, ibl_avg: [f32; 3]) -> LightsUniform {
     use cgmath::InnerSpace;
 
     let target = camera.target;
@@ -974,7 +981,9 @@ fn lights_from_camera(camera: &Camera, bounds: &model::AABB) -> LightsUniform {
             },
         ],
         sphere_scale: bounds.diagonal() * 0.04,
-        _pad1: [0.0; 3],
+        ibl_avg_r: ibl_avg[0],
+        ibl_avg_g: ibl_avg[1],
+        ibl_avg_b: ibl_avg[2],
     }
 }
 

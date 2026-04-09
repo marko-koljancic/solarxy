@@ -17,6 +17,8 @@ pub(crate) struct DisplaySettings {
     pub turntable_rpm: f32,
     pub lights_locked: bool,
     pub layout: ViewLayout,
+    pub roughness_scale: f32,
+    pub metallic_scale: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]

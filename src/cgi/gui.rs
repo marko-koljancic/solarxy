@@ -79,6 +79,8 @@ pub(crate) struct GuiSnapshot {
     pub turntable_active: bool,
     pub turntable_rpm: f32,
     pub lights_locked: bool,
+    pub roughness_scale: f32,
+    pub metallic_scale: f32,
     pub bloom_enabled: bool,
     pub ssao_enabled: bool,
     pub tone_mode: ToneMode,
@@ -117,6 +119,8 @@ impl GuiSnapshot {
             turntable_active: display.turntable_active,
             turntable_rpm: display.turntable_rpm,
             lights_locked: display.lights_locked,
+            roughness_scale: display.roughness_scale,
+            metallic_scale: display.metallic_scale,
             bloom_enabled: post.bloom_enabled,
             ssao_enabled: post.ssao_enabled,
             tone_mode: post.tone_mode,
@@ -164,6 +168,8 @@ impl GuiSnapshot {
         display.turntable_active = self.turntable_active;
         display.turntable_rpm = self.turntable_rpm;
         display.lights_locked = self.lights_locked;
+        display.roughness_scale = self.roughness_scale;
+        display.metallic_scale = self.metallic_scale;
     }
 
     pub fn write_back_post(&self, post: &mut PostProcessing) {
@@ -751,6 +757,30 @@ fn draw_sidebar(
                         })
                         .response
                         .on_hover_text("E / Shift+E");
+                    });
+
+                ui.separator();
+
+                egui::CollapsingHeader::new("Material")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(s.material_override == MaterialOverride::None, |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut s.roughness_scale, 0.0..=2.0)
+                                    .text("Roughness Scale"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut s.metallic_scale, 0.0..=2.0)
+                                    .text("Metallic Scale"),
+                            );
+                            if ui.small_button("Reset").clicked() {
+                                s.roughness_scale = 1.0;
+                                s.metallic_scale = 1.0;
+                            }
+                        });
+                        if s.material_override != MaterialOverride::None {
+                            ui.label("(disabled in override modes)");
+                        }
                     });
 
                 ui.separator();
