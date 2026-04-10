@@ -16,6 +16,7 @@ pub struct App {
     state: Option<State>,
     model_path: Option<String>,
     preferences: Preferences,
+    frame_count: u64,
 }
 
 impl App {
@@ -24,6 +25,7 @@ impl App {
             state: None,
             model_path,
             preferences,
+            frame_count: 0,
         }
     }
 }
@@ -88,6 +90,7 @@ impl ApplicationHandler<State> for App {
                 state.handle_dropped_file(path);
             }
             WindowEvent::RedrawRequested => {
+                self.frame_count = self.frame_count.wrapping_add(1);
                 state.update();
                 match state.render() {
                     Ok(()) => {}
@@ -108,10 +111,14 @@ impl ApplicationHandler<State> for App {
                                     );
                                 }
                                 SurfaceError::Other => {
-                                    tracing::error!(
-                                        "Unhandled surface error when rendering: {:?}",
-                                        surface_error
-                                    );
+                                    let size = state.window.inner_size();
+                                    state.resize(size.width, size.height);
+                                    if self.frame_count % 60 == 1 {
+                                        tracing::warn!(
+                                            "Surface error (recovering via reconfigure): {:?}",
+                                            surface_error
+                                        );
+                                    }
                                 }
                             }
                         } else {

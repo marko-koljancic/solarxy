@@ -37,19 +37,14 @@ impl State {
         if let Some(ext) = path.extension().and_then(|e| e.to_str())
             && (ext.eq_ignore_ascii_case("hdr") || ext.eq_ignore_ascii_case("exr"))
         {
-            match IblState::from_hdri(&self.device, &self.queue, &path) {
-                Ok(new_ibl) => {
-                    self.renderer.ibl_res.ibl = new_ibl;
-                    self.renderer.ibl_res.ibl_mode = IblMode::Full;
-                    self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
-                    self.rebuild_light_bind_group();
-                    self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
-                }
-                Err(e) => {
-                    self.gui
-                        .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
-                }
-            }
+            let device = self.device.clone();
+            let queue = self.queue.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(IblState::from_hdri(&device, &queue, &path));
+            });
+            self.gui.set_loading_message("Loading HDRI...");
+            self.pending_hdri = Some(rx);
             return;
         }
 

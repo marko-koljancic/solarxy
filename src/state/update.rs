@@ -214,6 +214,32 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        let hdri_poll = self.pending_hdri.as_ref().map(|r| r.try_recv());
+        match hdri_poll {
+            Some(Ok(Ok(new_ibl))) => {
+                self.pending_hdri.take();
+                self.renderer.ibl_res.ibl = new_ibl;
+                self.renderer.ibl_res.ibl_mode = IblMode::Full;
+                self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
+                self.rebuild_light_bind_group();
+                self.gui.clear_loading_message();
+                self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
+            }
+            Some(Ok(Err(e))) => {
+                self.pending_hdri.take();
+                self.gui.clear_loading_message();
+                self.gui
+                    .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
+            }
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.pending_hdri.take();
+                self.gui.clear_loading_message();
+                self.gui
+                    .set_toast("HDRI load thread crashed", [0.6, 0.0, 0.0, 1.0]);
+            }
+            _ => {}
+        }
+
         let poll = self.pending_load.as_ref().map(|p| p.receiver.try_recv());
         match poll {
             Some(Ok(Ok(mut new_scene))) => {

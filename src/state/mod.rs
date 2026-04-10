@@ -299,6 +299,7 @@ pub struct State {
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) pending_load: Option<PendingLoad>,
+    pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
     pub(super) capture_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,

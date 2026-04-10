@@ -398,6 +398,7 @@ impl State {
                 modifiers: ModifiersState::empty(),
             },
             pending_load: None,
+            pending_hdri: None,
             capture_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,
