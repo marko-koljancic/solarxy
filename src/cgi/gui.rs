@@ -766,11 +766,11 @@ fn draw_sidebar(
                     .show(ui, |ui| {
                         ui.add_enabled_ui(s.material_override == MaterialOverride::None, |ui| {
                             ui.add(
-                                egui::Slider::new(&mut s.roughness_scale, 0.0..=2.0)
+                                egui::Slider::new(&mut s.roughness_scale, 0.0..=1.0)
                                     .text("Roughness Scale"),
                             );
                             ui.add(
-                                egui::Slider::new(&mut s.metallic_scale, 0.0..=2.0)
+                                egui::Slider::new(&mut s.metallic_scale, 0.0..=1.0)
                                     .text("Metallic Scale"),
                             );
                             if ui.small_button("Reset").clicked() {

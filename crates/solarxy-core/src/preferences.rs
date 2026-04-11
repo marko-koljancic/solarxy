@@ -388,7 +388,7 @@ impl Default for Preferences {
 impl Default for DisplayPrefs {
     fn default() -> Self {
         Self {
-            background: BackgroundMode::Black,
+            background: BackgroundMode::Gradient,
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             grid_visible: true,
@@ -398,7 +398,7 @@ impl Default for DisplayPrefs {
             projection_mode: ProjectionMode::Perspective,
             turntable_active: false,
             ibl_mode: IblMode::Full,
-            ssao_enabled: false,
+            ssao_enabled: true,
             tone_mode: ToneMode::AcesFilmic,
             exposure: 1.0,
             local_axes_visible: false,
@@ -412,7 +412,7 @@ impl Default for DisplayPrefs {
 impl Default for RenderingPrefs {
     fn default() -> Self {
         Self {
-            wireframe_line_weight: LineWeight::Medium,
+            wireframe_line_weight: LineWeight::Light,
             msaa_sample_count: 4,
             shadow_map_size: 2048,
         }
