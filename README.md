@@ -97,7 +97,6 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays.
 
-<!-- TODO: screenshot — updated view mode with egui sidebar -->
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
 </p>
@@ -106,7 +105,10 @@ The viewer renders models with physically-based shading (Cook-Torrance BRDF), no
 
 Press `Tab` to toggle an interactive sidebar with collapsible sections for view mode, inspection, display toggles, validation, post-processing, and lighting controls. All controls are bidirectionally synced with keyboard shortcuts.
 
-<!-- TODO: screenshot — egui sidebar with display controls -->
+<p align="center">
+  <img src="docs/img/solarxy-view-split-3d.png" width="100%">
+</p>
+
 
 ### Split Viewport
 
@@ -119,7 +121,10 @@ Press `Tab` to toggle an interactive sidebar with collapsible sections for view 
 
 Each pane has independent camera, view mode, inspection mode, and display settings. The active pane is determined by cursor position.
 
-<!-- TODO: screenshot — split viewport (F2 vertical layout, UV Map left + Shaded right) -->
+<p align="center">
+  <img src="docs/img/solarxy-view-split-UV.png" width="100%">
+</p>
+
 
 ### Inspection Modes
 
@@ -133,7 +138,9 @@ Each pane has independent camera, view mode, inspection mode, and display settin
 
 Inspection modes apply per pane in split view and compose independently with view modes (W/X).
 
-<!-- TODO: screenshot — inspection modes (Material ID, Texel Density, Depth) -->
+<p align="center">
+  <img src="docs/img/solarxy-view-inspect.png" width="100%">
+</p>
 
 ### Camera Controls
 

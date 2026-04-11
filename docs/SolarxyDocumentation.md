@@ -629,7 +629,7 @@ The sidebar contains collapsible sections with interactive controls:
 All sidebar controls are bidirectionally synced with keyboard shortcuts -- changing a value in the sidebar updates the viewer immediately, and pressing a keyboard shortcut updates the sidebar to match. Each control shows a tooltip with its corresponding keyboard shortcut.
 
 <!-- TODO: screenshot -- egui sidebar with display controls -->
-
+docs-view-with-sidebar.png
 ### Split Viewport
 
 Solarxy supports split-pane layouts for simultaneous multi-angle or multi-mode inspection.
