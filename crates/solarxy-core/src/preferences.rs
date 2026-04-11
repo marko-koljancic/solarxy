@@ -559,30 +559,30 @@ mod tests {
             normals_mode = "Off"
             grid_visible = true
             axis_gizmo_visible = true
-            bloom_enabled = true
-            uv_mode = "Off"
-            projection_mode = "Perspective"
-            turntable_active = false
-            ibl_mode = "Full"
-            ssao_enabled = false
-            tone_mode = "AcesFilmic"
+            bloom_enabled = false
             future_toggle = true
 
             [rendering]
             wireframe_line_weight = "Medium"
-            msaa_sample_count = 4
+            msaa_sample_count = 8
+            future_quality = 9001
 
             [lighting]
-            lock = false
-
-            [history]
-            recent_files = []
+            lock = true
 
             [some_future_section]
             key = "value"
         "#;
         let parsed: Preferences = toml::from_str(toml_str).unwrap();
-        assert_eq!(parsed, Preferences::default());
+        assert_eq!(parsed.display.background, BackgroundMode::Black);
+        assert!(!parsed.display.bloom_enabled);
+        assert_eq!(parsed.rendering.wireframe_line_weight, LineWeight::Medium);
+        assert_eq!(parsed.rendering.msaa_sample_count, 8);
+        assert!(parsed.lighting.lock);
+        assert_eq!(parsed.display.ssao_enabled, true);
+        assert_eq!(parsed.display.exposure, 1.0);
+        assert_eq!(parsed.window, WindowPrefs::default());
+        assert_eq!(parsed.history, HistoryPrefs::default());
     }
 
     #[test]

@@ -148,6 +148,7 @@ struct LightsUniform {
 var<uniform> lights: LightsUniform;
 
 const PI: f32 = 3.14159265358979;
+const SHADOW_BIAS: f32 = -0.002;
 
 fn D_GGX(NdotH: f32, roughness: f32) -> f32 {
     let a = roughness * roughness;
@@ -318,7 +319,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;
     let in_map = all(uv >= vec2(0.0)) && all(uv <= vec2(1.0));
-    let shadow = select(1.0, textureSampleCompare(shadow_map, shadow_sampler, uv, proj.z - 0.002), in_map);
+    let shadow = select(1.0, textureSampleCompare(shadow_map, shadow_sampler, uv, proj.z + SHADOW_BIAS), in_map);
 
     var radiance_acc = vec3(0.0);
 

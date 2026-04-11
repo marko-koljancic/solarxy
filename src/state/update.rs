@@ -214,7 +214,10 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        let hdri_poll = self.pending_hdri.as_ref().map(|r| r.try_recv());
+        let hdri_poll = self
+            .pending_hdri
+            .as_ref()
+            .map(std::sync::mpsc::Receiver::try_recv);
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {
                 self.pending_hdri.take();
