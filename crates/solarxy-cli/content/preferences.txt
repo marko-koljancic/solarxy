@@ -31,7 +31,7 @@ You can also edit the TOML file directly in any text editor.
 ==view_mode Shaded
 ==normals_mode Off
 ==grid_visible true
-==axis_gizmo_visible false
+==axis_gizmo_visible true
 ==local_axes_visible false
 ==bloom_enabled true
 ==ssao_enabled true
@@ -44,7 +44,7 @@ You can also edit the TOML file directly in any text editor.
 ==exposure 1.0
 ==inspection_mode Shaded
 ==texel_density_target 1.0
-==wireframe_line_weight Medium
+==wireframe_line_weight Light
 ==msaa_sample_count 4
 ==lighting.lock false
 

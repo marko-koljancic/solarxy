@@ -215,7 +215,7 @@ The analyzer opens a terminal UI with four tabs: **Overview**, **Meshes**, **Mat
 
 ## Preferences
 
-Solarxy persists display, rendering, and lighting settings in a TOML configuration file at `~/.config/solarxy/config.toml`. Preferences are loaded automatically on startup and can be managed in three ways: through the dedicated preferences editor, with keyboard shortcuts in the viewer, or by editing the config file directly.
+Solarxy persists display, rendering, and lighting settings in a TOML configuration file at a platform-specific location: `~/.config/solarxy/config.toml` on Linux, `~/Library/Application Support/solarxy/config.toml` on macOS, and `%APPDATA%\solarxy\config.toml` on Windows. Preferences are loaded automatically on startup and can be managed in three ways: through the dedicated preferences editor, with keyboard shortcuts in the viewer, or by editing the config file directly.
 
 Launch the preferences editor:
 
@@ -267,7 +267,7 @@ Settings can also be changed on the fly in the viewer using keyboard shortcuts a
 
 ## Docs Mode
 
-The built-in documentation viewer provides an interactive, four-tab reference covering all modes, keyboard shortcuts, CLI options, and preferences -- accessible offline without leaving the terminal.
+The built-in documentation viewer provides an interactive, five-tab reference covering all modes, keyboard shortcuts, CLI options, supported formats, and preferences -- accessible offline without leaving the terminal.
 
 ```bash
 cargo r --release -- --mode docs
@@ -282,7 +282,7 @@ cargo r --release -- --mode docs
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` | Next / previous tab |
-| `1` `2` `3` `4` | Jump to tab |
+| `1` `2` `3` `4` `5` | Jump to tab |
 | `j` / `k`, arrows | Scroll up / down |
 | `g` / `G` | Jump to top / bottom |
 | `PgUp` / `PgDn` | Page scroll |

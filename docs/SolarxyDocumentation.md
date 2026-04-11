@@ -1089,7 +1089,7 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 | View Mode | `view_mode` | `"Shaded"`, `"ShadedWireframe"`, `"WireframeOnly"`, `"Ghosted"` | `"Shaded"` |
 | Normals Mode | `normals_mode` | `"Off"`, `"Face"`, `"Vertex"`, `"FaceAndVertex"` | `"Off"` |
 | Grid Visible | `grid_visible` | `true`, `false` | `true` |
-| Axis Gizmo Visible | `axis_gizmo_visible` | `true`, `false` | `false` |
+| Axis Gizmo Visible | `axis_gizmo_visible` | `true`, `false` | `true` |
 | Local Axes Visible | `local_axes_visible` | `true`, `false` | `false` |
 | Bloom Enabled | `bloom_enabled` | `true`, `false` | `true` |
 | SSAO Enabled | `ssao_enabled` | `true`, `false` | `true` |
@@ -1108,7 +1108,7 @@ Navigate settings, cycle values, and save. See [Preferences TUI Navigation](#pre
 
 | Setting | TOML Key | Values | Default |
 | --- | --- | --- | --- |
-| Wireframe Line Weight | `wireframe_line_weight` | `"Light"`, `"Medium"`, `"Bold"` | `"Medium"` |
+| Wireframe Line Weight | `wireframe_line_weight` | `"Light"`, `"Medium"`, `"Bold"` | `"Light"` |
 | MSAA Sample Count | `msaa_sample_count` | `1`, `2`, `4` | `4` |
 
 **Lighting settings** (`[lighting]` section):
@@ -1129,7 +1129,7 @@ background = "Gradient"
 view_mode = "Shaded"
 normals_mode = "Off"
 grid_visible = true
-axis_gizmo_visible = false
+axis_gizmo_visible = true
 local_axes_visible = false
 bloom_enabled = true
 ssao_enabled = true
@@ -1144,7 +1144,7 @@ inspection_mode = "Shaded"
 texel_density_target = 1.0
 
 [rendering]
-wireframe_line_weight = "Medium"
+wireframe_line_weight = "Light"
 msaa_sample_count = 4
 
 [lighting]
