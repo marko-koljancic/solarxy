@@ -74,16 +74,17 @@ RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default lev
 
 **Render pipeline (multi-pass, per pane in split mode):**
 1. Shadow pass (`shadow.wgsl`) — depth-only from key light's perspective
-2. GBuffer pass (if SSAO) — position + normal data
-3. Main pass (`shader.wgsl`) — PBR + inspection mode switch (Material ID, Texel Density, Depth)
-4. Floor pass (`floor.wgsl`) — shadow-catching transparent floor
-5. Wireframe/ghosted overlays (`ghosted.wgsl`)
-6. Grid (`grid.wgsl`) and normals (`normals.wgsl`) visualization
-7. Validation overlay (`validation.wgsl`) — color-coded issue highlights
-8. SSAO + Bloom post-processing
-9. Composite pass — tone mapping, viewport/scissor rect
-10. UV Map passes (UV panes) — UV-space rendering + overlap detection
-11. egui overlay — sidebar, HUD, model stats, toast notifications
+2. GBuffer pass (`gbuffer.wgsl`, if SSAO) — position + normal data
+3. Background pass (`background.wgsl`) — skybox / solid background
+4. Main pass (`shader.wgsl`) — PBR + inspection mode switch (Material ID, Texel Density, Depth)
+5. Floor pass (`floor.wgsl`) — shadow-catching transparent floor
+6. Wireframe/ghosted overlays (`ghosted.wgsl`) and edge wireframe (`edge_wire.wgsl`, distinct pipeline)
+7. Grid (`grid.wgsl`), normals (`normals.wgsl`), and axis gizmo (`gizmo.wgsl`) visualization
+8. Validation overlay (`validation.wgsl`) — color-coded issue highlights
+9. SSAO (`ssao.wgsl` + `ssao_blur.wgsl`) + Bloom (`bloom.wgsl`) post-processing
+10. Composite pass (`composite.wgsl`) — tone mapping, viewport/scissor rect
+11. UV Map passes (UV panes) — checker/texture/wire variants (`uv_map.wgsl`), debug overlay (`uv_debug.wgsl`), and overlap detection (`uv_overlap.wgsl`)
+12. egui overlay — sidebar, HUD, model stats, toast notifications
 
 **Split viewport:** F1 (single), F2 (vertical), F3 (horizontal). Per-pane cameras, inspection modes, display settings. Active pane by cursor position.
 

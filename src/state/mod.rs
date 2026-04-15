@@ -301,6 +301,7 @@ pub struct State {
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
     pub(super) capture_requested: bool,
+    pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
     pub(super) _backend_info: String,
@@ -450,7 +451,7 @@ impl State {
 
         let Some(cam_data) = cam_data else {
             self.renderer.render_empty_pass(&mut encoder, &pds);
-            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false);
+            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false, false);
             return;
         };
 
@@ -475,9 +476,10 @@ impl State {
             self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
         }
 
-        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map);
+        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn composite_and_submit(
         &self,
         mut encoder: wgpu::CommandEncoder,
@@ -486,9 +488,10 @@ impl State {
         pane: &Pane,
         is_split: bool,
         is_uv_map: bool,
+        scene_present: bool,
     ) {
-        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map;
-        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map;
+        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
+        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
         self.renderer.post.composite.write_params(
             &self.queue,
             pane_bloom,
@@ -772,21 +775,18 @@ impl State {
         let pds = &self.view.pane_settings[ap];
 
         let pane_label = {
-            let pane_mode_str = match pds.pane_mode {
-                PaneMode::Scene3D => "Scene3D",
-                PaneMode::UvMap => "UV Map",
-            };
+            let pane_mode_str = pds.pane_mode.to_string();
             let mut label = if is_split {
                 let mode_detail = if pds.pane_mode == PaneMode::Scene3D {
                     format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
                 } else {
-                    pane_mode_str.to_string()
+                    pane_mode_str
                 };
                 format!("Pane {} \u{00b7} {}", ap + 1, mode_detail)
             } else if pds.pane_mode == PaneMode::Scene3D {
                 format!("{} \u{00b7} {}", pane_mode_str, pds.view_mode)
             } else {
-                pane_mode_str.to_string()
+                pane_mode_str
             };
             if pds.material_override != MaterialOverride::None {
                 label = format!("{} \u{00b7} {}", label, pds.material_override);
@@ -794,6 +794,19 @@ impl State {
             label
         };
 
+        let projection_mode = {
+            let pref = self.preferences.display.projection_mode;
+            if ap == 1 {
+                self.view
+                    .secondary_cam
+                    .as_ref()
+                    .map_or(pref, |c| c.camera.projection)
+            } else {
+                self.scene
+                    .as_ref()
+                    .map_or(pref, |s| s.cam.camera.projection)
+            }
+        };
         let snap_before = GuiSnapshot::from_state(
             pds,
             &self.view.display,
@@ -801,6 +814,7 @@ impl State {
             self.renderer.ibl_res.ibl_mode,
             self.view.cameras_linked,
             is_split,
+            projection_mode,
         );
         let hud = HudInfo {
             pane_label,
@@ -814,7 +828,8 @@ impl State {
         };
         let validation_report = self.scene.as_ref().map(|s| &s.validation);
 
-        let snap_after = self.gui.render_ui(
+        let recent_files = self.preferences.history.recent_files.clone();
+        let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
             validation_report,
@@ -827,6 +842,7 @@ impl State {
             frame_ms,
             divider_rect,
             active_pane_rect,
+            &recent_files,
         );
 
         let changes = snap_after.diff(&snap_before);
@@ -847,6 +863,8 @@ impl State {
         if changes.ibl_changed {
             self.apply_ibl_change();
         }
+
+        self.handle_menu_actions(actions);
 
         let capture_buffer = if self.capture_requested {
             self.capture_requested = false;

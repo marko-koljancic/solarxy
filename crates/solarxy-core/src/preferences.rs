@@ -144,29 +144,14 @@ cycle_enum! {
     ; cycle
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum ProjectionMode {
-    #[default]
-    Perspective,
-    Orthographic,
-}
-
-impl ProjectionMode {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Perspective => Self::Orthographic,
-            Self::Orthographic => Self::Perspective,
-        }
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum ProjectionMode {
+        #[default]
+        Perspective => "Perspective",
+        Orthographic => "Orthographic",
     }
-}
-
-impl std::fmt::Display for ProjectionMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Perspective => write!(f, "Perspective"),
-            Self::Orthographic => write!(f, "Orthographic"),
-        }
-    }
+    ; cycle
 }
 
 cycle_enum! {
@@ -179,11 +164,14 @@ cycle_enum! {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum PaneMode {
-    #[default]
-    Scene3D,
-    UvMap,
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum PaneMode {
+        #[default]
+        Scene3D => "Scene 3D",
+        UvMap => "UV Map",
+    }
+    ; cycle
 }
 
 cycle_enum! {

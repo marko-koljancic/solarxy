@@ -5,7 +5,7 @@ use winit::{
     application::ApplicationHandler,
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{Key, PhysicalKey},
+    keyboard::{Key, KeyCode, PhysicalKey},
     window::Window,
 };
 
@@ -76,9 +76,32 @@ impl ApplicationHandler<State> for App {
 
         if let WindowEvent::KeyboardInput { ref event, .. } = event
             && event.state.is_pressed()
-            && event.physical_key == PhysicalKey::Code(winit::keyboard::KeyCode::Tab)
         {
-            state.gui.sidebar_visible = !state.gui.sidebar_visible;
+            let mods = state.input.modifiers;
+            let cmd_or_ctrl = if cfg!(target_os = "macos") {
+                mods.super_key()
+            } else {
+                mods.control_key()
+            };
+            match event.physical_key {
+                PhysicalKey::Code(KeyCode::Tab) => {
+                    state.gui.sidebar_visible = !state.gui.sidebar_visible;
+                }
+                PhysicalKey::Code(KeyCode::F10) => {
+                    state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
+                }
+                PhysicalKey::Code(KeyCode::F11) => {
+                    state.toggle_fullscreen();
+                }
+                PhysicalKey::Code(KeyCode::KeyO) if cmd_or_ctrl => {
+                    if mods.shift_key() {
+                        state.open_hdri_dialog();
+                    } else {
+                        state.open_model_dialog();
+                    }
+                }
+                _ => {}
+            }
         }
 
         let egui_consumed = state.gui.on_window_event(&state.window, &event);
@@ -92,6 +115,10 @@ impl ApplicationHandler<State> for App {
             WindowEvent::RedrawRequested => {
                 self.frame_count = self.frame_count.wrapping_add(1);
                 state.update();
+                if state.quit_requested {
+                    event_loop.exit();
+                    return;
+                }
                 match state.render() {
                     Ok(()) => {}
                     Err(e) => {

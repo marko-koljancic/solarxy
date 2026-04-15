@@ -6,12 +6,17 @@ use egui_wgpu::ScreenDescriptor;
 use crate::format_number;
 use crate::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ToneMode, UvMapBackground, UvMode, ViewMode,
+    ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
 };
 use crate::state::renderer::PostProcessing;
-use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
+use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout};
 
 use super::resources::ModelStats;
+
+#[cfg(target_os = "macos")]
+const MOD: &str = "\u{2318}";
+#[cfg(not(target_os = "macos"))]
+const MOD: &str = "Ctrl";
 
 struct Toast {
     message: String,
@@ -38,8 +43,14 @@ pub struct EguiRenderer {
     renderer: egui_wgpu::Renderer,
     egui_format: wgpu::TextureFormat,
     pub sidebar_visible: bool,
+    pub menu_bar_visible: bool,
 
     hints_visible: bool,
+    fps_hud_visible: bool,
+    console_visible: bool,
+    #[allow(dead_code)]
+    console_docked: bool,
+    about_open: bool,
     toast: Option<Toast>,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
@@ -48,6 +59,32 @@ pub struct EguiRenderer {
     backend_info: String,
 
     stats_visible: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct MenuActions {
+    pub open_model: bool,
+    pub open_hdri: bool,
+    pub close_model: bool,
+    pub quit: bool,
+    pub save_screenshot: bool,
+    pub save_preferences: bool,
+    pub open_recent: Option<String>,
+    pub open_config_file: bool,
+    pub set_layout: Option<ViewLayout>,
+    pub set_projection: Option<ProjectionMode>,
+    pub open_wiki: bool,
+    pub open_about: bool,
+}
+
+#[derive(Clone, Copy)]
+struct MenuBarVisibility {
+    sidebar_visible: bool,
+    menu_bar_visible: bool,
+    stats_visible: bool,
+    hints_visible: bool,
+    fps_hud_visible: bool,
+    console_visible: bool,
 }
 
 #[derive(Default)]
@@ -88,9 +125,11 @@ pub(crate) struct GuiSnapshot {
     pub ibl_mode: IblMode,
     pub cameras_linked: bool,
     pub is_split: bool,
+    pub projection_mode: ProjectionMode,
 }
 
 impl GuiSnapshot {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_state(
         pds: &PaneDisplaySettings,
         display: &DisplaySettings,
@@ -98,6 +137,7 @@ impl GuiSnapshot {
         ibl_mode: IblMode,
         cameras_linked: bool,
         is_split: bool,
+        projection_mode: ProjectionMode,
     ) -> Self {
         Self {
             view_mode: pds.view_mode,
@@ -128,6 +168,7 @@ impl GuiSnapshot {
             ibl_mode,
             cameras_linked,
             is_split,
+            projection_mode,
         }
     }
 
@@ -284,7 +325,12 @@ impl EguiRenderer {
             renderer,
             egui_format,
             sidebar_visible: false,
+            menu_bar_visible: true,
             hints_visible: true,
+            fps_hud_visible: false,
+            console_visible: false,
+            console_docked: true,
+            about_open: false,
             toast: None,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
@@ -292,6 +338,11 @@ impl EguiRenderer {
             backend_info: String::new(),
             stats_visible: false,
         }
+    }
+
+    pub fn clear_model_info(&mut self) {
+        self.model_info = None;
+        self.stats_visible = false;
     }
 
     pub fn on_window_event(
@@ -397,17 +448,15 @@ impl EguiRenderer {
         frame_ms: f32,
         divider_rect: Option<egui::Rect>,
         active_pane_rect: Option<egui::Rect>,
-    ) -> GuiSnapshot {
+        recent_files: &[String],
+    ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
         }
         self.frame_times.push_back(frame_ms);
 
         let raw_input = self.winit_state.take_egui_input(window);
-        let sidebar_visible = self.sidebar_visible;
-        let mut stats_visible = self.stats_visible;
         let has_model = self.model_info.is_some();
-        let hints_visible = self.hints_visible;
         let avg_ms = self.frame_times.iter().sum::<f32>() / self.frame_times.len().max(1) as f32;
         let fps = if avg_ms > 0.0 {
             (1000.0 / avg_ms) as u32
@@ -423,19 +472,39 @@ impl EguiRenderer {
         let validation_counts =
             validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
+        let mut actions = MenuActions::default();
+        let mut menu_vis = MenuBarVisibility {
+            sidebar_visible: self.sidebar_visible,
+            menu_bar_visible: self.menu_bar_visible,
+            stats_visible: self.stats_visible,
+            hints_visible: self.hints_visible,
+            fps_hud_visible: self.fps_hud_visible,
+            console_visible: self.console_visible,
+        };
+        let mut about_open = self.about_open;
+
         let full_output = self.ctx.run(raw_input, |ctx| {
+            if menu_vis.menu_bar_visible {
+                draw_menu_bar(
+                    ctx,
+                    &mut snap,
+                    &mut actions,
+                    &mut menu_vis,
+                    has_model,
+                    recent_files,
+                );
+            }
             draw_sidebar(
                 ctx,
                 &mut snap,
-                sidebar_visible,
-                &mut stats_visible,
-                has_model,
+                menu_vis.sidebar_visible,
                 hud.uv_overlap_pct,
                 validation_report,
             );
             if let Some(info) = model_info {
-                draw_stats_window(ctx, info, &mut stats_visible);
+                draw_stats_window(ctx, info, &mut menu_vis.stats_visible);
             }
+            draw_about_modal(ctx, &mut about_open);
             draw_hud_overlays(
                 ctx,
                 avg_ms,
@@ -443,7 +512,7 @@ impl EguiRenderer {
                 toast,
                 loading_message,
                 has_model,
-                hints_visible,
+                menu_vis.hints_visible,
                 backend_info,
                 pane_label,
                 cameras_linked,
@@ -487,7 +556,13 @@ impl EguiRenderer {
             }
         });
 
-        self.stats_visible = stats_visible;
+        self.sidebar_visible = menu_vis.sidebar_visible;
+        self.menu_bar_visible = menu_vis.menu_bar_visible;
+        self.stats_visible = menu_vis.stats_visible;
+        self.hints_visible = menu_vis.hints_visible;
+        self.fps_hud_visible = menu_vis.fps_hud_visible;
+        self.console_visible = menu_vis.console_visible;
+        self.about_open = about_open;
 
         self.winit_state
             .handle_platform_output(window, full_output.platform_output);
@@ -532,7 +607,11 @@ impl EguiRenderer {
             self.renderer.free_texture(id);
         }
 
-        snap
+        (snap, actions)
+    }
+
+    pub fn open_about(&mut self) {
+        self.about_open = true;
     }
 }
 
@@ -565,8 +644,6 @@ fn draw_sidebar(
     ctx: &egui::Context,
     s: &mut GuiSnapshot,
     visible: bool,
-    stats_visible: &mut bool,
-    has_model: bool,
     uv_overlap_pct: Option<f32>,
     validation_report: Option<&crate::validation::ValidationReport>,
 ) {
@@ -790,12 +867,6 @@ fn draw_sidebar(
                     .show(ui, |ui| {
                         combo_with_tooltip(ui, "IBL", "I / Shift+I", &mut s.ibl_mode, IblMode::ALL);
                     });
-
-                ui.separator();
-
-                if has_model {
-                    ui.checkbox(stats_visible, "Model Stats");
-                }
 
                 ui.add_space(8.0);
             });
@@ -1077,4 +1148,387 @@ fn draw_hud_overlays(
                 });
             });
     }
+}
+
+fn draw_menu_bar(
+    ctx: &egui::Context,
+    snap: &mut GuiSnapshot,
+    actions: &mut MenuActions,
+    vis: &mut MenuBarVisibility,
+    has_model: bool,
+    recent_files: &[String],
+) {
+    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui
+                    .add(egui::Button::new("Open Model\u{2026}").shortcut_text(format!("{MOD}+O")))
+                    .clicked()
+                {
+                    actions.open_model = true;
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new("Import HDRI\u{2026}")
+                            .shortcut_text(format!("{MOD}+Shift+O")),
+                    )
+                    .clicked()
+                {
+                    actions.open_hdri = true;
+                    ui.close();
+                }
+                if !recent_files.is_empty() {
+                    ui.separator();
+                    ui.menu_button("Recent Files", |ui| {
+                        for path in recent_files.iter().take(10) {
+                            let label = std::path::Path::new(path)
+                                .file_name()
+                                .and_then(|f| f.to_str())
+                                .unwrap_or(path);
+                            if ui.button(label).on_hover_text(path).clicked() {
+                                actions.open_recent = Some(path.clone());
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                ui.separator();
+                if ui
+                    .add(egui::Button::new("Save Screenshot").shortcut_text("C"))
+                    .clicked()
+                {
+                    actions.save_screenshot = true;
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Save Preferences").shortcut_text("Shift+S"))
+                    .clicked()
+                {
+                    actions.save_preferences = true;
+                    ui.close();
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(has_model, egui::Button::new("Close Model"))
+                    .clicked()
+                {
+                    actions.close_model = true;
+                    ui.close();
+                }
+                if ui.button("Quit").clicked() {
+                    actions.quit = true;
+                    ui.close();
+                }
+            });
+
+            ui.menu_button("Edit", |ui| {
+                ui.label(egui::RichText::new("Preferences").strong());
+                if let Some(path) = solarxy_core::preferences::config_path() {
+                    ui.label(
+                        egui::RichText::new(path.display().to_string())
+                            .small()
+                            .color(egui::Color32::from_white_alpha(140)),
+                    );
+                }
+                ui.separator();
+                if ui.button("Open Config File").clicked() {
+                    actions.open_config_file = true;
+                    ui.close();
+                }
+            });
+
+            ui.menu_button("View", |ui| {
+                // Shading (ViewMode)
+                ui.menu_button("Shading", |ui| {
+                    for mode in ViewMode::ALL {
+                        if ui
+                            .selectable_label(snap.view_mode == *mode, mode.to_string())
+                            .clicked()
+                        {
+                            snap.view_mode = *mode;
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("W");
+
+                ui.menu_button("Inspection", |ui| {
+                    for mode in InspectionMode::ALL {
+                        let selected =
+                            snap.pane_mode == PaneMode::Scene3D && snap.inspection_mode == *mode;
+                        let shortcut = match mode {
+                            InspectionMode::Shaded => "1",
+                            InspectionMode::MaterialId => "2",
+                            InspectionMode::TexelDensity => "4",
+                            InspectionMode::Depth => "5",
+                        };
+                        if ui
+                            .selectable_label(selected, mode.to_string())
+                            .on_hover_text(shortcut)
+                            .clicked()
+                        {
+                            snap.inspection_mode = *mode;
+                            snap.pane_mode = PaneMode::Scene3D;
+                            ui.close();
+                        }
+                    }
+                    let uv_selected = snap.pane_mode == PaneMode::UvMap;
+                    if ui
+                        .selectable_label(uv_selected, "UV Map")
+                        .on_hover_text("3")
+                        .clicked()
+                    {
+                        snap.pane_mode = PaneMode::UvMap;
+                        ui.close();
+                    }
+                });
+
+                ui.menu_button("Material Override", |ui| {
+                    for mode in MaterialOverride::ALL {
+                        if ui
+                            .selectable_label(snap.material_override == *mode, mode.to_string())
+                            .clicked()
+                        {
+                            snap.material_override = *mode;
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("M / Shift+M");
+
+                ui.separator();
+
+                ui.menu_button("Show", |ui| {
+                    ui.checkbox(&mut snap.show_grid, "Grid").on_hover_text("G");
+                    ui.checkbox(&mut snap.show_axis_gizmo, "Axis Gizmo")
+                        .on_hover_text("A");
+                    ui.checkbox(&mut snap.show_local_axes, "Local Axes")
+                        .on_hover_text("Shift+A");
+                    ui.checkbox(&mut snap.show_validation, "Validation Overlay")
+                        .on_hover_text("Shift+V");
+                    ui.separator();
+                    ui.menu_button("Normals", |ui| {
+                        for mode in NormalsMode::ALL {
+                            if ui
+                                .selectable_label(snap.normals_mode == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.normals_mode = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("N");
+                    ui.menu_button("UV Overlay", |ui| {
+                        for mode in UvMode::ALL {
+                            if ui
+                                .selectable_label(snap.uv_mode == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.uv_mode = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("U");
+                    ui.menu_button("Bounds", |ui| {
+                        for mode in BoundsMode::ALL {
+                            if ui
+                                .selectable_label(snap.bounds_mode == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.bounds_mode = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Shift+B");
+                    ui.menu_button("Wireframe Weight", |ui| {
+                        for mode in LineWeight::ALL {
+                            if ui
+                                .selectable_label(snap.line_weight == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.line_weight = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Shift+W");
+                });
+
+                ui.menu_button("Background", |ui| {
+                    for mode in BackgroundMode::ALL {
+                        if ui
+                            .selectable_label(snap.background_mode == *mode, mode.to_string())
+                            .clicked()
+                        {
+                            snap.background_mode = *mode;
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("B");
+
+                ui.separator();
+
+                ui.menu_button("Lighting", |ui| {
+                    ui.menu_button("IBL Mode", |ui| {
+                        for mode in IblMode::ALL {
+                            if ui
+                                .selectable_label(snap.ibl_mode == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.ibl_mode = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("I / Shift+I");
+                    ui.checkbox(&mut snap.lights_locked, "Lock Lights")
+                        .on_hover_text("Shift+L");
+                });
+
+                ui.menu_button("Post-Processing", |ui| {
+                    ui.checkbox(&mut snap.bloom_enabled, "Bloom")
+                        .on_hover_text("Shift+D");
+                    ui.checkbox(&mut snap.ssao_enabled, "SSAO")
+                        .on_hover_text("Shift+O");
+                    ui.menu_button("Tone Mapping", |ui| {
+                        for mode in ToneMode::ALL {
+                            if ui
+                                .selectable_label(snap.tone_mode == *mode, mode.to_string())
+                                .clicked()
+                            {
+                                snap.tone_mode = *mode;
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Shift+T");
+                });
+
+                ui.separator();
+
+                // Layout
+                ui.menu_button("Layout", |ui| {
+                    if ui
+                        .add(egui::Button::new("Single").shortcut_text("F1"))
+                        .clicked()
+                    {
+                        actions.set_layout = Some(ViewLayout::Single);
+                        ui.close();
+                    }
+                    if ui
+                        .add(egui::Button::new("Split Vertical").shortcut_text("F2"))
+                        .clicked()
+                    {
+                        actions.set_layout = Some(ViewLayout::SplitVertical);
+                        ui.close();
+                    }
+                    if ui
+                        .add(egui::Button::new("Split Horizontal").shortcut_text("F3"))
+                        .clicked()
+                    {
+                        actions.set_layout = Some(ViewLayout::SplitHorizontal);
+                        ui.close();
+                    }
+                });
+
+                // Projection
+                ui.menu_button("Projection", |ui| {
+                    for (mode, shortcut) in [
+                        (ProjectionMode::Perspective, "P"),
+                        (ProjectionMode::Orthographic, "O"),
+                    ] {
+                        if ui
+                            .selectable_label(snap.projection_mode == mode, mode.to_string())
+                            .on_hover_text(shortcut)
+                            .clicked()
+                        {
+                            actions.set_projection = Some(mode);
+                            ui.close();
+                        }
+                    }
+                });
+
+                if snap.is_split {
+                    ui.checkbox(&mut snap.cameras_linked, "Link Cameras")
+                        .on_hover_text(format!("{MOD}+L"));
+                }
+                ui.checkbox(&mut snap.turntable_active, "Turntable")
+                    .on_hover_text("V");
+
+                ui.separator();
+
+                // Panels / chrome toggles
+                ui.checkbox(&mut vis.sidebar_visible, "Sidebar")
+                    .on_hover_text("Tab");
+                ui.checkbox(&mut vis.menu_bar_visible, "Menu Bar")
+                    .on_hover_text("F10");
+                ui.add_enabled(
+                    has_model,
+                    egui::Checkbox::new(&mut vis.stats_visible, "Model Stats"),
+                );
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut vis.console_visible, "Console"),
+                )
+                .on_hover_text("Landing in Task 3 (console panel)");
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut vis.fps_hud_visible, "FPS HUD"),
+                )
+                .on_hover_text("Landing in Task 5 (HUD split)");
+                ui.checkbox(&mut vis.hints_visible, "Keyboard Shortcuts")
+                    .on_hover_text("?");
+            });
+
+            // ───────────── Help ─────────────
+            ui.menu_button("Help", |ui| {
+                if ui.button("Solarxy Wiki").clicked() {
+                    actions.open_wiki = true;
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("About Solarxy").clicked() {
+                    actions.open_about = true;
+                    ui.close();
+                }
+            });
+        });
+    });
+}
+
+fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
+    if !*open {
+        return;
+    }
+    egui::Window::new("About Solarxy")
+        .open(open)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_width(320.0)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("Solarxy");
+                ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                ui.add_space(8.0);
+                ui.label(env!("CARGO_PKG_DESCRIPTION"));
+                ui.add_space(8.0);
+                ui.label(format!("License: {}", env!("CARGO_PKG_LICENSE")));
+                ui.hyperlink_to("Repository", env!("CARGO_PKG_REPOSITORY"));
+            });
+        });
 }

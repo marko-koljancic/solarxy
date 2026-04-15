@@ -77,7 +77,7 @@ impl State {
         self.gui.toggle_hints();
     }
 
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    pub fn handle_key(&mut self, _event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if !is_pressed {
             self.for_each_target_cam(|cam| {
                 cam.handle_key(code, is_pressed);
@@ -85,7 +85,6 @@ impl State {
             return;
         }
         match code {
-            KeyCode::Escape => event_loop.exit(),
             KeyCode::KeyH => {
                 let bounds = self.scene.as_ref().map(|s| s.model.bounds);
                 if let Some(bounds) = bounds {
@@ -121,7 +120,12 @@ impl State {
                 }
             }
             KeyCode::KeyL => {
-                if self.input.modifiers.control_key() {
+                let cmd_or_ctrl = if cfg!(target_os = "macos") {
+                    self.input.modifiers.super_key()
+                } else {
+                    self.input.modifiers.control_key()
+                };
+                if cmd_or_ctrl {
                     if self.view.display.layout != ViewLayout::Single {
                         self.view.cameras_linked = !self.view.cameras_linked;
                         let msg = if self.view.cameras_linked {
@@ -367,67 +371,9 @@ impl State {
                 self.gui
                     .set_toast("Inspection: Depth", [0.0, 0.4, 0.0, 1.0]);
             }
-            KeyCode::F1 => {
-                if self.view.display.layout != ViewLayout::Single {
-                    if self.view.active_pane == 1 {
-                        if let Some(sec) = self.view.secondary_cam.take()
-                            && let Some(scene) = &mut self.scene
-                        {
-                            scene.cam = sec;
-                        }
-                    } else {
-                        self.view.secondary_cam = None;
-                    }
-                }
-                if self.view.active_pane == 1 {
-                    self.view.pane_settings[0] = self.view.pane_settings[1];
-                }
-                self.view.active_pane = 0;
-                self.view.display.layout = ViewLayout::Single;
-                let (tw, th) = self.target_dimensions();
-                self.resize_render_targets(tw, th);
-                self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
-            }
-            KeyCode::F2 => {
-                if self.view.display.layout == ViewLayout::Single {
-                    self.view.pane_settings[1] = self.view.pane_settings[0];
-                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
-                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
-                    self.view.pane_settings[0].uv_zoom = 1.0;
-                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
-                    if let Some(scene) = &self.scene {
-                        self.view.secondary_cam =
-                            Some(scene.cam.clone_with_new_resources(
-                                &self.device,
-                                &self.renderer.layouts.camera,
-                            ));
-                    }
-                }
-                self.view.display.layout = ViewLayout::SplitVertical;
-                let (tw, th) = self.target_dimensions();
-                self.resize_render_targets(tw, th);
-                self.gui.set_toast("Split Vertical", [0.0, 0.4, 0.0, 1.0]);
-            }
-            KeyCode::F3 => {
-                if self.view.display.layout == ViewLayout::Single {
-                    self.view.pane_settings[1] = self.view.pane_settings[0];
-                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
-                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
-                    self.view.pane_settings[0].uv_zoom = 1.0;
-                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
-                    if let Some(scene) = &self.scene {
-                        self.view.secondary_cam =
-                            Some(scene.cam.clone_with_new_resources(
-                                &self.device,
-                                &self.renderer.layouts.camera,
-                            ));
-                    }
-                }
-                self.view.display.layout = ViewLayout::SplitHorizontal;
-                let (tw, th) = self.target_dimensions();
-                self.resize_render_targets(tw, th);
-                self.gui.set_toast("Split Horizontal", [0.0, 0.4, 0.0, 1.0]);
-            }
+            KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
+            KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
+            KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
             _ => {
                 self.for_each_target_cam(|cam| {
                     cam.handle_key(code, is_pressed);
@@ -640,6 +586,138 @@ impl State {
             pds.uv_zoom = (pds.uv_zoom * (1.0 + delta * 0.1)).clamp(0.1, 50.0);
         } else {
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
+        }
+    }
+
+    pub fn set_view_layout(&mut self, layout: ViewLayout) {
+        match layout {
+            ViewLayout::Single => {
+                if self.view.display.layout != ViewLayout::Single {
+                    if self.view.active_pane == 1 {
+                        if let Some(sec) = self.view.secondary_cam.take()
+                            && let Some(scene) = &mut self.scene
+                        {
+                            scene.cam = sec;
+                        }
+                    } else {
+                        self.view.secondary_cam = None;
+                    }
+                }
+                if self.view.active_pane == 1 {
+                    self.view.pane_settings[0] = self.view.pane_settings[1];
+                }
+                self.view.active_pane = 0;
+                self.view.display.layout = ViewLayout::Single;
+                self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
+            }
+            ViewLayout::SplitVertical | ViewLayout::SplitHorizontal => {
+                if self.view.display.layout == ViewLayout::Single {
+                    self.view.pane_settings[1] = self.view.pane_settings[0];
+                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
+                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.view.pane_settings[0].uv_zoom = 1.0;
+                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
+                    if let Some(scene) = &self.scene {
+                        self.view.secondary_cam =
+                            Some(scene.cam.clone_with_new_resources(
+                                &self.device,
+                                &self.renderer.layouts.camera,
+                            ));
+                    }
+                }
+                self.view.display.layout = layout;
+                let msg = if matches!(layout, ViewLayout::SplitVertical) {
+                    "Split Vertical"
+                } else {
+                    "Split Horizontal"
+                };
+                self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+            }
+        }
+        let (tw, th) = self.target_dimensions();
+        self.resize_render_targets(tw, th);
+    }
+
+    pub fn open_model_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("3D Models", &["obj", "stl", "ply", "gltf", "glb"])
+            .add_filter("All Files", &["*"])
+            .pick_file()
+        {
+            self.handle_dropped_file(path);
+        }
+    }
+
+    pub fn open_hdri_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("HDRI", &["hdr", "exr"])
+            .add_filter("All Files", &["*"])
+            .pick_file()
+        {
+            self.handle_dropped_file(path);
+        }
+    }
+
+    pub fn close_model(&mut self) {
+        self.scene = None;
+        self.gui.clear_model_info();
+        self.window.set_title("Solarxy");
+        self.renderer.uv_overlap.overlap_pct = None;
+        self.renderer.uv_overlap.stats_dirty = false;
+    }
+
+    pub fn toggle_fullscreen(&mut self) {
+        use winit::window::Fullscreen;
+        let new = if self.window.fullscreen().is_some() {
+            None
+        } else {
+            Some(Fullscreen::Borderless(None))
+        };
+        self.window.set_fullscreen(new);
+    }
+
+    pub(super) fn handle_menu_actions(&mut self, actions: crate::cgi::gui::MenuActions) {
+        if actions.open_model {
+            self.open_model_dialog();
+        }
+        if actions.open_hdri {
+            self.open_hdri_dialog();
+        }
+        if actions.save_screenshot {
+            self.capture_requested = true;
+        }
+        if actions.close_model {
+            self.close_model();
+        }
+        if actions.save_preferences {
+            self.save_preferences();
+        }
+        if let Some(path) = actions.open_recent {
+            self.spawn_load(path);
+        }
+        if actions.open_config_file
+            && let Some(path) = solarxy_core::preferences::config_path()
+            && let Err(e) = open::that(path)
+        {
+            tracing::warn!("Failed to open config file: {e}");
+        }
+        if actions.open_wiki {
+            let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/wiki");
+            if let Err(e) = open::that(url) {
+                tracing::warn!("Failed to open wiki URL: {e}");
+            }
+        }
+        if actions.open_about {
+            self.gui.open_about();
+        }
+        if let Some(layout) = actions.set_layout {
+            self.set_view_layout(layout);
+        }
+        if let Some(proj) = actions.set_projection {
+            self.for_each_target_cam(|cam| cam.set_projection(proj));
+        }
+        if actions.quit {
+            self.quit_requested = true;
         }
     }
 }
