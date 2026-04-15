@@ -28,6 +28,8 @@ pub mod aabb;
 mod app;
 #[cfg(any(feature = "viewer", feature = "analyzer"))]
 pub mod cgi;
+#[cfg(feature = "viewer")]
+pub mod console;
 pub mod preferences;
 #[cfg(feature = "viewer")]
 mod state;

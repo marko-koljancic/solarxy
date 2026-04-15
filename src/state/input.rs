@@ -524,12 +524,16 @@ impl State {
         self.preferences.display.texel_density_target = pds.texel_density_target;
 
         match preferences::save(&self.preferences) {
-            Ok(()) => self
-                .gui
-                .set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]),
-            Err(e) => self
-                .gui
-                .set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]),
+            Ok(()) => {
+                tracing::info!("Preferences saved");
+                self.gui
+                    .set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]);
+            }
+            Err(e) => {
+                tracing::error!("Failed to save preferences: {}", e);
+                self.gui
+                    .set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]);
+            }
         }
     }
 

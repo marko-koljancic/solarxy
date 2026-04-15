@@ -9,6 +9,7 @@ use winit::{
     window::Window,
 };
 
+use crate::console::LogBuffer;
 use crate::preferences::Preferences;
 use crate::state::State;
 
@@ -16,15 +17,21 @@ pub struct App {
     state: Option<State>,
     model_path: Option<String>,
     preferences: Preferences,
+    console_buffer: LogBuffer,
     frame_count: u64,
 }
 
 impl App {
-    pub fn new(model_path: Option<String>, preferences: Preferences) -> Self {
+    pub fn new(
+        model_path: Option<String>,
+        preferences: Preferences,
+        console_buffer: LogBuffer,
+    ) -> Self {
         Self {
             state: None,
             model_path,
             preferences,
+            console_buffer,
             frame_count: 0,
         }
     }
@@ -50,6 +57,7 @@ impl ApplicationHandler<State> for App {
             window,
             self.model_path.clone(),
             self.preferences.clone(),
+            self.console_buffer.clone(),
         )) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
@@ -59,8 +67,7 @@ impl ApplicationHandler<State> for App {
         }
     }
 
-    #[allow(unused_mut)]
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, mut event: State) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: State) {
         self.state = Some(event);
     }
 
@@ -84,7 +91,7 @@ impl ApplicationHandler<State> for App {
                 mods.control_key()
             };
             match event.physical_key {
-                PhysicalKey::Code(KeyCode::Tab) => {
+                PhysicalKey::Code(KeyCode::Tab) if !state.gui.wants_keyboard_input() => {
                     state.gui.sidebar_visible = !state.gui.sidebar_visible;
                 }
                 PhysicalKey::Code(KeyCode::F10) => {
@@ -99,6 +106,9 @@ impl ApplicationHandler<State> for App {
                     } else {
                         state.open_model_dialog();
                     }
+                }
+                PhysicalKey::Code(KeyCode::Backquote) if !state.gui.wants_keyboard_input() => {
+                    state.gui.console.visible = !state.gui.console.visible;
                 }
                 _ => {}
             }
@@ -202,9 +212,13 @@ impl ApplicationHandler<State> for App {
     }
 }
 
-pub fn run_viewer(model_path: Option<String>, preferences: Preferences) -> anyhow::Result<()> {
+pub fn run_viewer(
+    model_path: Option<String>,
+    preferences: Preferences,
+    console_buffer: LogBuffer,
+) -> anyhow::Result<()> {
     let event_loop = EventLoop::with_user_event().build()?;
-    let mut app = App::new(model_path, preferences);
+    let mut app = App::new(model_path, preferences, console_buffer);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

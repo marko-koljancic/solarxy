@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use egui_wgpu::ScreenDescriptor;
 
+use crate::console::{ConsoleState, LogBuffer};
 use crate::format_number;
 use crate::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
@@ -47,9 +48,7 @@ pub struct EguiRenderer {
 
     hints_visible: bool,
     fps_hud_visible: bool,
-    console_visible: bool,
-    #[allow(dead_code)]
-    console_docked: bool,
+    pub console: ConsoleState,
     about_open: bool,
     toast: Option<Toast>,
     loading_message: Option<String>,
@@ -307,6 +306,7 @@ impl EguiRenderer {
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         window: &winit::window::Window,
+        console_buffer: LogBuffer,
     ) -> Self {
         let egui_format = surface_format.remove_srgb_suffix();
         let ctx = egui::Context::default();
@@ -328,8 +328,7 @@ impl EguiRenderer {
             menu_bar_visible: true,
             hints_visible: true,
             fps_hud_visible: false,
-            console_visible: false,
-            console_docked: true,
+            console: ConsoleState::new(console_buffer),
             about_open: false,
             toast: None,
             loading_message: None,
@@ -479,9 +478,10 @@ impl EguiRenderer {
             stats_visible: self.stats_visible,
             hints_visible: self.hints_visible,
             fps_hud_visible: self.fps_hud_visible,
-            console_visible: self.console_visible,
+            console_visible: self.console.visible,
         };
         let mut about_open = self.about_open;
+        let console = &mut self.console;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if menu_vis.menu_bar_visible {
@@ -494,6 +494,9 @@ impl EguiRenderer {
                     recent_files,
                 );
             }
+            if console.docked {
+                draw_console_docked(ctx, console, &mut menu_vis.console_visible);
+            }
             draw_sidebar(
                 ctx,
                 &mut snap,
@@ -503,6 +506,9 @@ impl EguiRenderer {
             );
             if let Some(info) = model_info {
                 draw_stats_window(ctx, info, &mut menu_vis.stats_visible);
+            }
+            if !console.docked && menu_vis.console_visible {
+                draw_console_floating(ctx, console, &mut menu_vis.console_visible);
             }
             draw_about_modal(ctx, &mut about_open);
             draw_hud_overlays(
@@ -561,7 +567,7 @@ impl EguiRenderer {
         self.stats_visible = menu_vis.stats_visible;
         self.hints_visible = menu_vis.hints_visible;
         self.fps_hud_visible = menu_vis.fps_hud_visible;
-        self.console_visible = menu_vis.console_visible;
+        self.console.visible = menu_vis.console_visible;
         self.about_open = about_open;
 
         self.winit_state
@@ -1182,11 +1188,24 @@ fn draw_menu_bar(
                     ui.separator();
                     ui.menu_button("Recent Files", |ui| {
                         for path in recent_files.iter().take(10) {
-                            let label = std::path::Path::new(path)
+                            let raw = std::path::Path::new(path)
                                 .file_name()
                                 .and_then(|f| f.to_str())
                                 .unwrap_or(path);
-                            if ui.button(label).on_hover_text(path).clicked() {
+                            let label: String = if raw.chars().count() > 50 {
+                                let tail: String = raw
+                                    .chars()
+                                    .rev()
+                                    .take(47)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect();
+                                format!("\u{2026}{tail}")
+                            } else {
+                                raw.to_string()
+                            };
+                            if ui.button(&label).on_hover_text(path).clicked() {
                                 actions.open_recent = Some(path.clone());
                                 ui.close();
                             }
@@ -1476,11 +1495,8 @@ fn draw_menu_bar(
                     has_model,
                     egui::Checkbox::new(&mut vis.stats_visible, "Model Stats"),
                 );
-                ui.add_enabled(
-                    false,
-                    egui::Checkbox::new(&mut vis.console_visible, "Console"),
-                )
-                .on_hover_text("Landing in Task 3 (console panel)");
+                ui.checkbox(&mut vis.console_visible, "Console")
+                    .on_hover_text("`");
                 ui.add_enabled(
                     false,
                     egui::Checkbox::new(&mut vis.fps_hud_visible, "FPS HUD"),
@@ -1525,5 +1541,111 @@ fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
                 ui.label(format!("License: {}", env!("CARGO_PKG_LICENSE")));
                 ui.hyperlink_to("Repository", env!("CARGO_PKG_REPOSITORY"));
             });
+        });
+}
+
+fn draw_console_docked(ctx: &egui::Context, console: &mut ConsoleState, visible: &mut bool) {
+    egui::TopBottomPanel::bottom("console_panel")
+        .resizable(true)
+        .default_height(150.0)
+        .min_height(80.0)
+        .max_height(400.0)
+        .show_animated(ctx, *visible, |ui| {
+            draw_console_content(ui, console);
+        });
+}
+
+fn draw_console_floating(ctx: &egui::Context, console: &mut ConsoleState, visible: &mut bool) {
+    let mut open = *visible;
+    egui::Window::new("Console")
+        .open(&mut open)
+        .resizable(true)
+        .collapsible(true)
+        .default_size([520.0, 220.0])
+        .default_pos([240.0, 400.0])
+        .show(ctx, |ui| {
+            draw_console_content(ui, console);
+        });
+    *visible = open;
+}
+
+fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("console_filter")
+            .selected_text(console.min_level.as_str())
+            .width(72.0)
+            .show_ui(ui, |ui| {
+                for level in [
+                    tracing::Level::ERROR,
+                    tracing::Level::WARN,
+                    tracing::Level::INFO,
+                    tracing::Level::DEBUG,
+                ] {
+                    ui.selectable_value(&mut console.min_level, level, level.as_str());
+                }
+            });
+        if ui.small_button("Clear").clicked() {
+            console.clear();
+        }
+        ui.checkbox(&mut console.auto_scroll, "Auto-scroll");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let label = if console.docked {
+                "\u{2197} Detach"
+            } else {
+                "\u{2199} Dock"
+            };
+            if ui.small_button(label).clicked() {
+                console.docked = !console.docked;
+            }
+        });
+    });
+    ui.separator();
+
+    let min_level = console.min_level;
+    let auto_scroll = console.auto_scroll;
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .stick_to_bottom(auto_scroll)
+        .show(ui, |ui| {
+            if let Ok(buf) = console.buffer.lock() {
+                for entry in buf.iter() {
+                    if entry.level > min_level {
+                        continue;
+                    }
+                    let (level_color, msg_color) = match entry.level {
+                        tracing::Level::ERROR => (
+                            egui::Color32::from_rgb(255, 100, 100),
+                            egui::Color32::from_rgb(255, 150, 150),
+                        ),
+                        tracing::Level::WARN => (
+                            egui::Color32::from_rgb(255, 200, 80),
+                            egui::Color32::from_rgb(235, 210, 160),
+                        ),
+                        tracing::Level::INFO => (
+                            egui::Color32::from_white_alpha(180),
+                            egui::Color32::from_white_alpha(200),
+                        ),
+                        _ => (
+                            egui::Color32::from_white_alpha(110),
+                            egui::Color32::from_white_alpha(130),
+                        ),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(&entry.timestamp)
+                                .monospace()
+                                .small()
+                                .color(egui::Color32::from_white_alpha(110)),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("{:>5}", entry.level.as_str()))
+                                .monospace()
+                                .small()
+                                .color(level_color),
+                        );
+                        ui.label(egui::RichText::new(&entry.message).small().color(msg_color));
+                    });
+                }
+            }
         });
 }

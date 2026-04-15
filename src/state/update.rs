@@ -227,16 +227,19 @@ impl State {
                 self.rebuild_light_bind_group();
                 self.gui.clear_loading_message();
                 self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
+                tracing::info!("HDRI loaded");
             }
             Some(Ok(Err(e))) => {
                 self.pending_hdri.take();
                 self.gui.clear_loading_message();
+                tracing::error!("Failed to load HDRI: {}", e);
                 self.gui
                     .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_hdri.take();
                 self.gui.clear_loading_message();
+                tracing::error!("HDRI loading thread crashed");
                 self.gui
                     .set_toast("HDRI load thread crashed", [0.6, 0.0, 0.0, 1.0]);
             }
@@ -268,6 +271,13 @@ impl State {
                     &new_scene.stats,
                     [bounds_size.x, bounds_size.y, bounds_size.z],
                     new_scene.model.has_uvs,
+                );
+                tracing::info!(
+                    "Loaded {}: {} verts, {} tris, {} meshes",
+                    pending.filename,
+                    new_scene.stats.verts,
+                    new_scene.stats.tris,
+                    new_scene.model.meshes.len(),
                 );
                 self.gui.clear_loading_message();
                 self.window
@@ -314,12 +324,14 @@ impl State {
             Some(Ok(Err(e))) => {
                 self.pending_load.take();
                 self.gui.clear_loading_message();
+                tracing::error!("Failed to load model: {}", e);
                 self.gui
                     .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_load.take();
                 self.gui.clear_loading_message();
+                tracing::error!("Model loading thread crashed");
                 self.gui
                     .set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
             }

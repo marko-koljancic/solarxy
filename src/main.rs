@@ -29,6 +29,29 @@ const APP_INFO: solarxy_cli::help::AppInfo = solarxy_cli::help::AppInfo {
 };
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "viewer")]
+    let console_buffer = solarxy::console::new_log_buffer();
+
+    #[cfg(feature = "viewer")]
+    {
+        use tracing_subscriber::prelude::*;
+        let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+        let console_layer = solarxy::console::ConsoleLayer::new(console_buffer.clone(), offset)
+            .with_filter(
+                tracing_subscriber::EnvFilter::try_from_env("SOLARXY_CONSOLE_LOG")
+                    .unwrap_or_else(|_| "solarxy=debug,wgpu_hal=warn,wgpu_core=warn".into()),
+            );
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer().with_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "solarxy=info,wgpu_hal=error,wgpu_core=error".into()),
+                ),
+            )
+            .with(console_layer)
+            .init();
+    }
+    #[cfg(not(feature = "viewer"))]
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -88,7 +111,7 @@ fn main() -> anyhow::Result<()> {
                     tracing::error!("--format json requires --mode analyze");
                     std::process::exit(1);
                 }
-                solarxy::run_viewer(model_path, preferences)?;
+                solarxy::run_viewer(model_path, preferences, console_buffer)?;
                 Ok(())
             }
             #[cfg(not(feature = "viewer"))]

@@ -10,6 +10,7 @@ impl State {
         window: Arc<Window>,
         model_path: Option<String>,
         preferences: Preferences,
+        console_buffer: crate::console::LogBuffer,
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -85,7 +86,7 @@ impl State {
         let layouts = Arc::new(BindGroupLayouts::new(&device));
         let pipelines = Pipelines::new(&device, &config, &layouts, msaa_sample_count);
 
-        let mut gui = EguiRenderer::new(&device, surface_format, &window);
+        let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
         gui.set_backend_info(backend_info.clone());
 
         let gradient_uniform = GradientUniform {

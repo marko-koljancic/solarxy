@@ -103,6 +103,7 @@ impl State {
         if let Err(e) = img.save(&filename) {
             tracing::error!("Failed to save screenshot: {}", e);
         } else {
+            tracing::info!("Screenshot saved: {}", filename);
             self.gui.set_capture_message(filename);
         }
     }
