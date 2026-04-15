@@ -1239,7 +1239,6 @@ fn draw_menu_bar(
             });
 
             ui.menu_button("View", |ui| {
-                // Shading (ViewMode)
                 ui.menu_button("Shading", |ui| {
                     for mode in ViewMode::ALL {
                         if ui
@@ -1420,7 +1419,6 @@ fn draw_menu_bar(
 
                 ui.separator();
 
-                // Layout
                 ui.menu_button("Layout", |ui| {
                     if ui
                         .add(egui::Button::new("Single").shortcut_text("F1"))
@@ -1445,7 +1443,6 @@ fn draw_menu_bar(
                     }
                 });
 
-                // Projection
                 ui.menu_button("Projection", |ui| {
                     for (mode, shortcut) in [
                         (ProjectionMode::Perspective, "P"),
@@ -1471,7 +1468,6 @@ fn draw_menu_bar(
 
                 ui.separator();
 
-                // Panels / chrome toggles
                 ui.checkbox(&mut vis.sidebar_visible, "Sidebar")
                     .on_hover_text("Tab");
                 ui.checkbox(&mut vis.menu_bar_visible, "Menu Bar")
@@ -1494,7 +1490,6 @@ fn draw_menu_bar(
                     .on_hover_text("?");
             });
 
-            // ───────────── Help ─────────────
             ui.menu_button("Help", |ui| {
                 if ui.button("Solarxy Wiki").clicked() {
                     actions.open_wiki = true;
