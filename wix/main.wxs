@@ -131,7 +131,45 @@
                     </Directory>
                 </Directory>
             </Directory>
+
+            <!--
+              Start Menu subfolder for the application shortcut. Resolves to
+              C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Solarxy
+              because InstallScope is perMachine above. The shortcut itself
+              is defined in the DirectoryRef block below.
+            -->
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Solarxy'/>
+            </Directory>
         </Directory>
+
+        <!--
+          Start Menu shortcut. Targets the installed solarxy.exe via WiX's
+          file-id lookup ([#exe0]) so the path is always correct regardless
+          of install location. HKLM registry keypath because the MSI installs
+          perMachine — uninstall tracking must live somewhere an elevated
+          installer can write. RemoveFolder prunes the otherwise-empty
+          Solarxy subfolder on uninstall.
+        -->
+        <DirectoryRef Id='ApplicationProgramsFolder'>
+            <Component Id='ApplicationShortcut' Guid='9DB07499-19CD-4B2F-8B31-6F8C09D91491'>
+                <Shortcut Id='ApplicationStartMenuShortcut'
+                          Name='Solarxy'
+                          Description='3D model viewer and validator built with Rust and wgpu.'
+                          Target='[#exe0]'
+                          WorkingDirectory='Bin'
+                          Icon='ProductICO'/>
+                <RemoveFolder Id='CleanupApplicationProgramsFolder'
+                              Directory='ApplicationProgramsFolder'
+                              On='uninstall'/>
+                <RegistryValue Root='HKLM'
+                               Key='Software\Solarxy'
+                               Name='installed'
+                               Type='integer'
+                               Value='1'
+                               KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
 
         <Feature
             Id='Binaries'
@@ -150,6 +188,7 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='ApplicationShortcut'/>
 
             <Feature
                 Id='Environment'
