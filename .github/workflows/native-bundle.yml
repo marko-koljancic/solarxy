@@ -1,23 +1,25 @@
 name: Native Bundle
 
-# Runs after cargo-dist has published the GitHub Release. Builds DMG
-# (macOS), .deb (Debian / Ubuntu), and AppImage (x86_64 Linux), then
-# uploads them to the same release.
+# Builds DMG (macOS), .deb (Debian/Ubuntu), and AppImage (x86_64 Linux)
+# and uploads them to a GitHub Release.
 #
-# Why a separate workflow:
-#   - `github-build-setup` injects steps BEFORE cargo-dist builds binaries,
-#     so the binary isn't available when that hook runs.
-#   - `local-artifacts-jobs` produces artifacts in parallel to cargo-dist,
-#     but `dist host` only uploads what's in its own `dist-manifest.json`
-#     and ignores our bundle artifacts.
-#   - This workflow runs AFTER the release is public and uses `gh release
-#     upload` to add bundles directly. Trade-off: artifacts land ~3 min
-#     after the release appears. Acceptable for 0.5.0.
+# Invocation:
+#   - `workflow_call` — called by cargo-dist's release.yml as a reusable
+#     workflow via the `post-announce-jobs` hook (see dist-workspace.toml).
+#     Runs in the same workflow graph as the release, so the GITHUB_TOKEN
+#     chain restriction on `release: published` does not apply. The `plan`
+#     input carries cargo-dist's dist-manifest payload; we extract the tag
+#     from `announcement_tag`.
+#   - `workflow_dispatch` — manual run for ad-hoc uploads against an
+#     existing release tag. Kept for debugging / retries without retagging.
 
 on:
-  release:
-    types: [published]
-  # Manual trigger for testing, passing an existing release tag.
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -43,7 +45,7 @@ jobs:
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     env:
-      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+      TAG: ${{ github.event_name == 'workflow_call' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:

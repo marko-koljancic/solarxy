@@ -16,6 +16,12 @@ install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
 
+# Reusable workflow invoked after cargo-dist announces the release. Produces
+# DMG / .deb / AppImage bundles and uploads them to the same release. Runs
+# in-graph (same workflow run), so it inherits secrets and bypasses the
+# GITHUB_TOKEN chain restriction that kills `on: release: published`.
+post-announce-jobs = ["./native-bundle"]
+
 # wix/main.wxs is edited by hand to set the product icon from res/bundle/.
 # Tell dist not to fight us on subsequent `dist generate` runs.
 allow-dirty = ["msi"]

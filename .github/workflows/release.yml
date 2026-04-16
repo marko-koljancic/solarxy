@@ -294,3 +294,12 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+
+  custom-native-bundle:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/native-bundle.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
