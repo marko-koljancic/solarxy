@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Solarxy
+GenericName=3D Model Viewer
+Comment=3D model viewer and validator
+Exec=solarxy --model %f
+TryExec=solarxy
+Icon=solarxy
+Terminal=false
+Categories=Graphics;3DGraphics;Development;Viewer;
+MimeType=model/obj;model/stl;model/gltf-binary;model/gltf+json;application/sla;
+Keywords=3D;model;viewer;glTF;OBJ;STL;PLY;
+StartupNotify=true
+StartupWMClass=solarxy

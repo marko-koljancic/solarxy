@@ -1,0 +1,187 @@
+name: Native Bundle
+description: >
+  Build DMG (macOS), .deb (Debian/Ubuntu), and AppImage (x86_64 Linux) for
+  Solarxy from a pre-built binary. Invoked from cargo-dist's release.yml via
+  the `github-build-setup` injection configured in dist-workspace.toml.
+  Windows runners skip this step entirely — MSI is produced by cargo-dist
+  natively via `installers = ["msi"]`.
+
+inputs:
+  target:
+    description: Rust target triple (e.g. aarch64-apple-darwin).
+    required: true
+  version:
+    description: >
+      Version string. Accepted forms are `v0.5.0` or `0.5.0`; the leading `v`
+      (if present) is stripped before use in artifact filenames.
+    required: true
+  binary-path:
+    description: Path to the pre-built solarxy binary (relative to repo root).
+    required: true
+
+outputs:
+  paths:
+    description: Newline-separated list of emitted bundle files under bundle-out/.
+    value: ${{ steps.collect.outputs.paths }}
+
+runs:
+  using: composite
+  steps:
+    - name: Normalize version (strip leading v)
+      id: ver
+      shell: bash
+      run: |
+        v="${{ inputs.version }}"
+        v="${v#v}"
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+
+    # ---- macOS: hand-rolled .app + DMG -----------------------------------
+    # No cargo-bundle dep — the .app layout is trivial and upstream cargo-bundle
+    # on crates.io is unmaintained. Fork churn (Zed / others) is a risk we
+    # avoid by hand-building Info.plist + Contents/ ourselves.
+    - name: macOS — build .app and DMG
+      if: startsWith(inputs.target, 'aarch64-apple-darwin') || startsWith(inputs.target, 'x86_64-apple-darwin')
+      shell: bash
+      env:
+        V: ${{ steps.ver.outputs.version }}
+        TARGET: ${{ inputs.target }}
+        BINARY: ${{ inputs.binary-path }}
+      run: |
+        set -euo pipefail
+        brew install create-dmg
+
+        ARCH="${TARGET%%-*}"
+        STAGE="$(mktemp -d)/stage"
+        mkdir -p "$STAGE"
+
+        APP="$STAGE/Solarxy.app"
+        mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+        cp "$BINARY" "$APP/Contents/MacOS/solarxy"
+        chmod +x "$APP/Contents/MacOS/solarxy"
+        cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
+
+        cat > "$APP/Contents/Info.plist" <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>        <string>solarxy</string>
+            <key>CFBundleIdentifier</key>        <string>dev.koljam.solarxy</string>
+            <key>CFBundleName</key>              <string>Solarxy</string>
+            <key>CFBundleDisplayName</key>       <string>Solarxy</string>
+            <key>CFBundleShortVersionString</key><string>${V}</string>
+            <key>CFBundleVersion</key>           <string>${V}</string>
+            <key>CFBundleIconFile</key>          <string>Solarxy.icns</string>
+            <key>CFBundlePackageType</key>       <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>    <string>11.0</string>
+            <key>NSHighResolutionCapable</key>   <true/>
+            <key>LSApplicationCategoryType</key> <string>public.app-category.developer-tools</string>
+        </dict>
+        </plist>
+        PLIST
+
+        # Ad-hoc sign. Sufficient to launch after the Privacy & Security bypass;
+        # does NOT satisfy Gatekeeper on first-run (notarization needed for that,
+        # deferred to 0.7.0).
+        codesign --force --deep --sign - "$APP"
+
+        # Drag-to-Applications helpers
+        cp "res/bundle/macos/Install CLI.command" "$STAGE/"
+        cp "res/bundle/macos/README.txt" "$STAGE/"
+
+        mkdir -p bundle-out
+        OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"
+        create-dmg \
+          --volname "Solarxy ${V}" \
+          --window-size 600 340 \
+          --icon-size 96 \
+          --app-drop-link 450 185 \
+          --icon "Solarxy.app" 150 185 \
+          --hide-extension "Solarxy.app" \
+          --no-internet-enable \
+          "$OUT" \
+          "$STAGE/"
+
+    # ---- Linux: .deb (both architectures) --------------------------------
+    - name: Linux — install cargo-deb
+      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
+      shell: bash
+      run: cargo install cargo-deb --version 2.12.0 --locked
+
+    - name: Linux — build .deb
+      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        mkdir -p bundle-out
+        cargo deb --no-build --target "$TARGET" -o bundle-out/
+
+    # ---- Linux x86_64: AppImage ------------------------------------------
+    # aarch64 AppImage deferred to 0.6.0-07 (no stable appimagetool arm64 binary).
+    - name: Linux x86_64 — build AppImage
+      if: inputs.target == 'x86_64-unknown-linux-gnu'
+      shell: bash
+      env:
+        V: ${{ steps.ver.outputs.version }}
+        BINARY: ${{ inputs.binary-path }}
+      run: |
+        set -euo pipefail
+
+        APPDIR="$(mktemp -d)/AppDir"
+        mkdir -p "$APPDIR/usr/bin"
+        cp "$BINARY" "$APPDIR/usr/bin/solarxy"
+        chmod +x "$APPDIR/usr/bin/solarxy"
+        cp res/bundle/linux/solarxy.desktop "$APPDIR/"
+        cp res/bundle/solarxy.png "$APPDIR/"
+        cp res/bundle/linux/appimage/AppRun "$APPDIR/"
+        chmod +x "$APPDIR/AppRun"
+
+        # Pinned to continuous build — appimagetool has no tagged releases.
+        # Freshness risk is low since the binary is ~30 MB and the tool is
+        # extraordinarily stable.
+        wget -q -O appimagetool \
+          "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+        chmod +x appimagetool
+        mkdir -p bundle-out
+        # Runners often lack FUSE — extract-and-run avoids the FUSE dependency.
+        ./appimagetool --appimage-extract-and-run \
+          "$APPDIR" "bundle-out/Solarxy-${V}-x86_64.AppImage"
+
+    # ---- Collect output paths + upload ------------------------------------
+    - name: Collect output paths
+      id: collect
+      shell: bash
+      run: |
+        {
+          echo "paths<<EOF"
+          if [ -d bundle-out ]; then find bundle-out -type f; fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload bundles as workflow artifacts
+      if: hashFiles('bundle-out/*') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-bundles-${{ inputs.target }}
+        path: bundle-out/*
+        if-no-files-found: error
+        retention-days: 7
+
+# ---- FALLBACK (commented) -----------------------------------------------
+# If `create-dmg` breaks in the future, uncomment the block below and delete
+# the `create-dmg`-based step above. This uses only macOS's built-in
+# `hdiutil`, which is rock-solid but produces a plain, unstyled DMG.
+#
+#    - name: macOS — fallback DMG via hdiutil
+#      if: startsWith(inputs.target, 'aarch64-apple-darwin') || startsWith(inputs.target, 'x86_64-apple-darwin')
+#      shell: bash
+#      env:
+#        V: ${{ steps.ver.outputs.version }}
+#        TARGET: ${{ inputs.target }}
+#      run: |
+#        set -euo pipefail
+#        ARCH="${TARGET%%-*}"
+#        hdiutil create -volname "Solarxy ${V}" -srcfolder "$STAGE" \
+#          -ov -format UDZO "bundle-out/Solarxy-${V}-${ARCH}.dmg"

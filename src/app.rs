@@ -37,10 +37,23 @@ impl App {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn load_window_icon() -> Option<winit::window::Icon> {
+    let bytes = include_bytes!("../res/bundle/solarxy-256.png");
+    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()
+}
+#[cfg(target_os = "macos")]
+fn load_window_icon() -> Option<winit::window::Icon> {
+    None
+}
+
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
             .with_title("Solarxy")
+            .with_window_icon(load_window_icon())
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.preferences.window.window_width,
                 self.preferences.window.window_height,

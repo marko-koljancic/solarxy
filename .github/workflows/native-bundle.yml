@@ -1,0 +1,75 @@
+name: Native Bundle
+
+# Runs after cargo-dist has published the GitHub Release. Builds DMG
+# (macOS), .deb (Debian / Ubuntu), and AppImage (x86_64 Linux), then
+# uploads them to the same release.
+#
+# Why a separate workflow:
+#   - `github-build-setup` injects steps BEFORE cargo-dist builds binaries,
+#     so the binary isn't available when that hook runs.
+#   - `local-artifacts-jobs` produces artifacts in parallel to cargo-dist,
+#     but `dist host` only uploads what's in its own `dist-manifest.json`
+#     and ignores our bundle artifacts.
+#   - This workflow runs AFTER the release is public and uses `gh release
+#     upload` to add bundles directly. Trade-off: artifacts land ~3 min
+#     after the release appears. Acceptable for 0.5.0.
+
+on:
+  release:
+    types: [published]
+  # Manual trigger for testing, passing an existing release tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v0.5.0). Artifacts upload to that release.
+        required: true
+
+permissions:
+  contents: write        # gh release upload
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14            # Apple Silicon
+          - target: x86_64-apple-darwin
+            runner: macos-13            # Intel — last Intel runner on GH-hosted
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup default stable && rustup target add ${{ matrix.target }}
+
+      # --release (not --profile dist) so cargo-deb's `assets = ["target/release/..."]`
+      # path resolves correctly. cargo-deb auto-adjusts to `target/<triple>/release/`
+      # when `--target` is passed. The binary quality delta (thin-LTO vs fat-LTO)
+      # is negligible inside a .app / .deb / .AppImage payload.
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Bundle via composite action
+        id: bundle
+        uses: ./.github/actions/native-bundle
+        with:
+          target: ${{ matrix.target }}
+          version: ${{ env.TAG }}
+          binary-path: target/${{ matrix.target }}/release/solarxy
+
+      - name: Upload bundles to release
+        if: hashFiles('bundle-out/*') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$TAG" bundle-out/* --clobber

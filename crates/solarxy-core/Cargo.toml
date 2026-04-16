@@ -1,9 +1,11 @@
 [package]
 name = "solarxy-core"
-version = "0.4.2"
-edition = "2024"
-rust-version = "1.92"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Core data types, geometry algorithms, and validation for 3D model analysis"
 
 [features]
