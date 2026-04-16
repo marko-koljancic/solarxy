@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0-rc.3"
+version = "0.5.0-rc.4"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -155,3 +155,22 @@ upgrade-guid = "F201EA19-A29E-4B9E-A3CE-85CEB9BAF9CE"
 path-guid = "4D645CA7-A471-43A2-9F97-B55DAA382886"
 license = false
 eula = false
+
+# ---- RPM (Fedora / RHEL 9+ / openSUSE) -----------------------------------
+# Consumed by cargo-generate-rpm. Mirrors [package.metadata.deb] so the rpm
+# and deb lay down the same files on disk. Vulkan is dlopen'd at runtime —
+# rpm's auto-req can't see it, so declare the dep explicitly.
+# vulkan-loader is the universal package name across Fedora, RHEL 9+, and
+# openSUSE Leap 15.5+.
+[package.metadata.generate-rpm]
+summary = "3D model viewer and validator (Rust + wgpu)"
+assets = [
+    { source = "target/release/solarxy", dest = "/usr/bin/solarxy", mode = "755" },
+    { source = "res/bundle/linux/solarxy.desktop", dest = "/usr/share/applications/solarxy.desktop", mode = "644" },
+    { source = "res/bundle/solarxy.png", dest = "/usr/share/icons/hicolor/256x256/apps/solarxy.png", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/solarxy/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/doc/solarxy/LICENSE", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+vulkan-loader = "*"

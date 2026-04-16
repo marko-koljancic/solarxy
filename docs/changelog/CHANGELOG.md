@@ -59,6 +59,8 @@ native installers on every major platform. No user-visible rendering changes.
   - macOS: `.dmg` — drag to Applications with Install CLI.command helper
   - Windows: `.msi` — Start Menu entry, PATH registration
   - Ubuntu / Debian (x64, ARM64): `.deb` — desktop menu integration
+  - Fedora / RHEL 9+ / openSUSE (x64, ARM64): `.rpm` — same assets as the
+    `.deb`, pulls `vulkan-loader` at install time
   - Distro-agnostic Linux (x64): `.AppImage`
 
 ### Changed

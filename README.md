@@ -48,6 +48,8 @@ Pre-built native installers are published on each tagged release at
 | Windows x64 | `solarxy-x86_64-pc-windows-msvc.msi` | Double-click, follow the wizard. Click through SmartScreen (see below). |
 | Ubuntu / Debian (x64) | `solarxy_0.5.0-1_amd64.deb` | `sudo apt install ./solarxy_0.5.0-1_amd64.deb` |
 | Ubuntu / Debian (ARM64) | `solarxy_0.5.0-1_arm64.deb` | Same as above. |
+| Fedora / RHEL 9+ / openSUSE (x64) | `solarxy-0.5.0-1.x86_64.rpm` | `sudo dnf install ./solarxy-0.5.0-1.x86_64.rpm` (pulls `vulkan-loader`). |
+| Fedora / RHEL 9+ / openSUSE (ARM64) | `solarxy-0.5.0-1.aarch64.rpm` | Same as above. |
 | Linux distro-agnostic | `Solarxy-0.5.0-x86_64.AppImage` | `chmod +x` then run. Requires glibc 2.28+. |
 
 ### First launch on macOS

@@ -144,9 +144,9 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml` and 
 
 **Prerelease version format matters for MSI**: use dot-separated semver prereleases (e.g. `0.5.0-rc.1`, not `0.5.0-rc1`). WiX requires an `A.B.C.D` integer form and cargo-dist can only map the dotted form (`rc.1` → trailing `.1`). The single-identifier form fails the build at the MSI stage.
 
-**Native bundles** (macOS `.dmg`, Linux `.deb` + `.AppImage`) are produced by a separate workflow, `.github/workflows/native-bundle.yml`, which triggers on `release: published` and uploads to the same release via `gh release upload`. The heavy lifting is in the composite action at `.github/actions/native-bundle/action.yml`:
+**Native bundles** (macOS `.dmg`, Linux `.deb` + `.rpm` + `.AppImage`) are produced by a separate reusable workflow, `.github/workflows/native-bundle.yml`, invoked from cargo-dist's generated `release.yml` via the `post-announce-jobs` hook in `dist-workspace.toml`. Running in-graph (not on `release: published`) is deliberate — the `release` event is not fired for releases created by `GITHUB_TOKEN`-authenticated actions, so a standalone workflow would never trigger. The heavy lifting is in the composite action at `.github/actions/native-bundle/action.yml`:
 - macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg` (see comment in `dist-workspace.toml` for why this is *not* inside cargo-dist).
-- Linux: `cargo-deb` for `.deb`; `appimagetool` for x86_64 AppImage. aarch64 AppImage is deferred (0.6.0).
+- Linux: `cargo-deb` for `.deb`; `cargo-generate-rpm` for `.rpm` (reads `[package.metadata.generate-rpm]` in Cargo.toml, mirroring the deb asset layout); `appimagetool` for x86_64 AppImage. aarch64 AppImage is deferred (0.6.0).
 
 **Local dev smoke**:
 - `scripts/build_local_dmg.sh` — mirrors the CI macOS bundle path end-to-end.

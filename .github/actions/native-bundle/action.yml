@@ -122,6 +122,31 @@ runs:
         mkdir -p bundle-out
         cargo deb --no-build --target "$TARGET" -o bundle-out/
 
+    # ---- Linux: .rpm (both architectures) --------------------------------
+    # cargo-generate-rpm is the actively-maintained cargo-deb analogue;
+    # reads [package.metadata.generate-rpm] the same way cargo-deb reads
+    # [package.metadata.deb]. Version is pinned --locked to avoid silent
+    # drift between RCs; bump deliberately.
+    - name: Linux — install cargo-generate-rpm
+      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
+      shell: bash
+      run: cargo install cargo-generate-rpm --version 0.20.0 --locked
+
+    - name: Linux — build .rpm
+      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        mkdir -p bundle-out
+        # --target makes cargo-generate-rpm resolve asset sources under
+        # target/<triple>/release/... instead of target/release/..., matching
+        # the actual binary location after the cross build. --output writes
+        # directly into bundle-out so the collect step picks the rpm up
+        # without any rename.
+        cargo generate-rpm --target "$TARGET" --output bundle-out/
+
     # ---- Linux x86_64: AppImage ------------------------------------------
     # aarch64 AppImage deferred to 0.6.0-07 (no stable appimagetool arm64 binary).
     - name: Linux x86_64 — build AppImage
