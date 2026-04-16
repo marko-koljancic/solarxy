@@ -146,10 +146,12 @@
         <!--
           Start Menu shortcut. Targets the installed solarxy.exe via WiX's
           file-id lookup ([#exe0]) so the path is always correct regardless
-          of install location. HKLM registry keypath because the MSI installs
-          perMachine — uninstall tracking must live somewhere an elevated
-          installer can write. RemoveFolder prunes the otherwise-empty
-          Solarxy subfolder on uninstall.
+          of install location. HKCU registry keypath (not HKLM) is the WiX
+          convention even for perMachine installs — ICE43 enforces it. The
+          MSI writes the HKCU entry per-user on first run, which is how
+          Windows tracks per-user shortcut presence for self-healing.
+          RemoveFolder prunes the otherwise-empty Solarxy subfolder on
+          uninstall.
         -->
         <DirectoryRef Id='ApplicationProgramsFolder'>
             <Component Id='ApplicationShortcut' Guid='9DB07499-19CD-4B2F-8B31-6F8C09D91491'>
@@ -162,7 +164,7 @@
                 <RemoveFolder Id='CleanupApplicationProgramsFolder'
                               Directory='ApplicationProgramsFolder'
                               On='uninstall'/>
-                <RegistryValue Root='HKLM'
+                <RegistryValue Root='HKCU'
                                Key='Software\Solarxy'
                                Name='installed'
                                Type='integer'

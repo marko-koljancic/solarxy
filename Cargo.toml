@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0-rc.5"
+version = "0.5.0-rc.6"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
