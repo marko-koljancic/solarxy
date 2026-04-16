@@ -169,7 +169,7 @@
           Source lives under res/bundle/; regenerate via
           scripts/gen_placeholder_icons.sh.
         -->
-        <Icon Id='ProductICO' SourceFile='..\res\bundle\solarxy.ico'/>
+        <Icon Id='ProductICO' SourceFile='res\bundle\solarxy.ico'/>
         <Property Id='ARPPRODUCTICON' Value='ProductICO' />
 
         <Property Id='ARPHELPLINK' Value='https://github.com/marko-koljancic/solarxy'/>

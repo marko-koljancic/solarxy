@@ -51,13 +51,25 @@ RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default lev
   - `capture.rs` — screenshot capture
 - `validation.rs` — validation rule definitions used by the analyzer and viewer overlay
 - `preferences.rs` — viewer-side preferences glue (loads/saves via solarxy-core)
+- `console.rs` — in-app log console: `ConsoleState` (buffer, filter, docked/floating flags), `LogBuffer`, and a `tracing::Layer` that feeds `tracing` events into the egui console view
 - `aabb.rs` — axis-aligned bounding box helpers
 - `calc/` — non-GPU model math (only compiled with the `analyzer` feature):
   - `analyze.rs` — `ModelAnalyzer`, the analyze-mode entry point that loads via solarxy-formats and produces a `Report`
   - `geometry.rs` — geometry-derived stats used in reports and validation
 
 **Rendering subsystem (`cgi/`):**
-- `gui.rs` — egui integration (sidebar, divider, model stats, theme)
+- `gui/` — egui integration, decomposed into single-responsibility files:
+  - `mod.rs` — re-exports (`EguiRenderer`, `SidebarChanges`, `ToastSeverity`)
+  - `renderer.rs` — `EguiRenderer` frame orchestration
+  - `sidebar.rs` — collapsible panels (View, Inspect, Material, Debug, Rendering, Advanced)
+  - `menu.rs` — native-style menu bar (File / View / Analyze) with shortcut labels
+  - `snapshot.rs` — `GuiSnapshot` bidirectional sidebar↔state mirror; `SidebarChanges` flags; `HudInfo`
+  - `actions.rs` — `MenuActions` event flags; `MenuBarVisibility` panel toggles
+  - `overlays.rs` — toast notifications (`Toast`, `ToastSeverity`), FPS/frame-time HUD, loading indicator
+  - `stats.rs` — `ModelInfo` + `draw_stats_window()` (file + geometry details modal)
+  - `console_view.rs` — docked + floating log viewer with level filter
+  - `theme.rs` — dark theme, accent colors, font sizing
+  - `about.rs` — About modal
 - `camera.rs` / `camera_state.rs` — orbit camera, per-pane camera management
 - `pipelines.rs` — all wgpu render pipelines
 - `composite.rs` — per-pane compositing with viewport/scissor rects and tone mapping
@@ -107,7 +119,7 @@ Bind group layouts use `min_binding_size: None` (`bind_groups.rs`), so growing a
 
 ### State plumbing shape
 - `lights_from_camera` in `state/mod.rs` is called from 3 sites (init, `setup_split_secondary`, per-frame in `update.rs`); adding a parameter means updating all three.
-- Sidebar ↔ state sync goes through `GuiSnapshot::{from_state, write_back_pane/display/post}` in `cgi/gui.rs` — adding a sidebar control means adding a field to `GuiSnapshot` **and** wiring it through both `from_state` and the matching `write_back_*`.
+- Sidebar ↔ state sync goes through `GuiSnapshot::{from_state, write_back_pane/display/post}` in `cgi/gui/snapshot.rs` — adding a sidebar control means adding a field to `GuiSnapshot` **and** wiring it through both `from_state` and the matching `write_back_*`. `SidebarChanges` (same file) is the flag struct the sidebar returns to signal which groups the caller needs to react to.
 - `PaneDisplaySettings` is per-pane, `DisplaySettings` is global. Choose deliberately when adding new knobs — per-pane lets split-view compare modes, global is simpler and avoids per-pane write fanout.
 
 ### Other
@@ -123,3 +135,26 @@ Bind group layouts use `min_binding_size: None` (`bind_groups.rs`), so growing a
 ## Formatting
 
 Uses `rustfmt.toml`: max width 100, 4-space indentation, Unix line endings, Rust 2024 edition, imports grouped by std/external/crate.
+
+## Release & packaging
+
+Version is single-sourced in `[workspace.package]` in the root `Cargo.toml` and inherited by all four crates via `version.workspace = true`. Bumping the release version is a one-line edit.
+
+**Binary installers** (shell / PowerShell / MSI) are produced by `cargo-dist` 0.31.0. Config lives in `dist-workspace.toml`; the CI workflow is the generated `.github/workflows/release.yml`. `dist` regenerates `wix/main.wxs` on every run, but the product-icon edit is preserved via `allow-dirty = ["msi"]` — do not remove that.
+
+**Prerelease version format matters for MSI**: use dot-separated semver prereleases (e.g. `0.5.0-rc.1`, not `0.5.0-rc1`). WiX requires an `A.B.C.D` integer form and cargo-dist can only map the dotted form (`rc.1` → trailing `.1`). The single-identifier form fails the build at the MSI stage.
+
+**Native bundles** (macOS `.dmg`, Linux `.deb` + `.AppImage`) are produced by a separate workflow, `.github/workflows/native-bundle.yml`, which triggers on `release: published` and uploads to the same release via `gh release upload`. The heavy lifting is in the composite action at `.github/actions/native-bundle/action.yml`:
+- macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg` (see comment in `dist-workspace.toml` for why this is *not* inside cargo-dist).
+- Linux: `cargo-deb` for `.deb`; `appimagetool` for x86_64 AppImage. aarch64 AppImage is deferred (0.6.0).
+
+**Local dev smoke**:
+- `scripts/build_local_dmg.sh` — mirrors the CI macOS bundle path end-to-end.
+- `scripts/gen_placeholder_icons.sh` — regenerates every icon in `res/bundle/` (256/512/1024 PNG, `.icns`, multi-size `.ico`) from a Python-generated master PNG. Rerun after swapping in real icon art.
+
+**Bundle assets** live in `res/bundle/`:
+- Icons (`solarxy-{256,512,1024}.png`, `solarxy.png`, `solarxy.icns`, `solarxy.ico`)
+- `linux/solarxy.desktop`, `linux/appimage/AppRun`
+- `macos/Install CLI.command` (sudo symlink into `/usr/local/bin`), `macos/README.txt` (Gatekeeper walkthrough)
+
+**Changelog**: `docs/changelog/CHANGELOG.md` (Keep a Changelog format). Not at the repo root.
