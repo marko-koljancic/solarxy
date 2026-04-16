@@ -11,7 +11,7 @@ use super::about::draw_about_modal;
 use super::actions::{MenuActions, MenuBarVisibility};
 use super::console_view::{draw_console_docked, draw_console_floating};
 use super::menu::draw_menu_bar;
-use super::overlays::{Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
+use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::{ModelInfo, draw_stats_window};
@@ -33,8 +33,11 @@ pub struct EguiRenderer {
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
     backend_info: String,
-    pub stats_visible: bool,
-    pub stats_user_hidden: bool,
+    stats_visible: bool,
+    /// Sticky flag. Set when the user explicitly closes the stats panel
+    /// mid-session. Read by `notify_model_loaded` to suppress auto-open on
+    /// subsequent loads until the user re-enables stats via the View menu.
+    stats_user_hidden: bool,
 }
 
 impl EguiRenderer {
@@ -80,6 +83,16 @@ impl EguiRenderer {
         self.model_info = None;
         self.stats_visible = false;
         self.stats_user_hidden = false;
+    }
+
+    /// Callers must invoke this after a successful model load. Honours the
+    /// user's sticky hide preference — if they explicitly closed the stats
+    /// panel mid-session, subsequent loads keep it closed until they
+    /// re-enable it via the View menu.
+    pub fn notify_model_loaded(&mut self) {
+        if !self.stats_user_hidden {
+            self.stats_visible = true;
+        }
     }
 
     pub fn on_window_event(
@@ -251,21 +264,23 @@ impl EguiRenderer {
                 draw_console_floating(ctx, console, &mut menu_vis.console_visible);
             }
             draw_about_modal(ctx, &mut about_open);
-            draw_hud_overlays(
-                ctx,
+            let hud_ctx = HudCtx {
                 avg_ms,
                 fps,
                 toast,
-                &mut toast_dismissed,
                 loading_message,
                 has_model,
-                menu_vis.hints_visible,
-                menu_vis.fps_hud_visible,
+                hints_visible: menu_vis.hints_visible,
+                fps_hud_visible: menu_vis.fps_hud_visible,
                 backend_info,
                 pane_label,
                 cameras_linked,
                 validation_counts,
-            );
+            };
+            let hud_result = draw_hud_overlays(ctx, &hud_ctx);
+            if hud_result.toast_dismissed {
+                toast_dismissed = true;
+            }
             if let Some(rect) = divider_rect {
                 let painter = ctx.layer_painter(egui::LayerId::background());
                 painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
@@ -307,6 +322,11 @@ impl EguiRenderer {
         self.sidebar_visible = menu_vis.sidebar_visible;
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.stats_visible = menu_vis.stats_visible;
+        // Detect user-driven stats_visible transitions this frame and update
+        // the sticky hide flag accordingly. Catches both View-menu checkbox
+        // and stats-window-X-button paths uniformly (both write through
+        // menu_vis.stats_visible). System-driven opens from
+        // notify_model_loaded happen outside ctx.run and bypass this.
         if stats_visible_before && !self.stats_visible {
             self.stats_user_hidden = true;
         } else if !stats_visible_before && self.stats_visible {

@@ -1,9 +1,32 @@
 use std::time::{Duration, Instant};
 
-use super::MOD;
+#[cfg(target_os = "macos")]
+const HINTS_MODEL: &str = "\
+    M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+    I IBL  E/Shift+E Exposure\n\
+    Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
+    Shift+I IBL Mode  Shift+V Valid\n\
+    Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
+    C Cap  H Frame  Tab Panel  ? Hints\n\
+    F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  \u{2318}+L Link";
+#[cfg(not(target_os = "macos"))]
+const HINTS_MODEL: &str = "\
+    M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+    I IBL  E/Shift+E Exposure\n\
+    Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
+    Shift+I IBL Mode  Shift+V Valid\n\
+    Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
+    C Cap  H Frame  Tab Panel  ? Hints\n\
+    F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  Ctrl+L Link";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(target_os = "macos")]
+const HINTS_NO_MODEL: &str = "\u{2318}+O Open  \u{2318}+Shift+O HDRI  ? Hints";
+#[cfg(not(target_os = "macos"))]
+const HINTS_NO_MODEL: &str = "Ctrl+O Open  Ctrl+Shift+O HDRI  ? Hints";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ToastSeverity {
+    #[default]
     Info,
     Success,
     Warning,
@@ -15,6 +38,25 @@ pub(super) struct Toast {
     pub severity: ToastSeverity,
     pub created: Instant,
     pub duration: Duration,
+}
+
+pub(super) struct HudCtx<'a> {
+    pub avg_ms: f32,
+    pub fps: u32,
+    pub toast: Option<&'a Toast>,
+    pub loading_message: Option<&'a String>,
+    pub has_model: bool,
+    pub hints_visible: bool,
+    pub fps_hud_visible: bool,
+    pub backend_info: &'a str,
+    pub pane_label: &'a str,
+    pub cameras_linked: Option<bool>,
+    pub validation_counts: (usize, usize),
+}
+
+#[derive(Default)]
+pub(super) struct HudResult {
+    pub toast_dismissed: bool,
 }
 
 pub(super) fn overlay_frame() -> egui::Frame {
@@ -105,7 +147,6 @@ fn draw_fps_hud(
         });
 }
 
-/// Returns `true` if the user clicked the banner to dismiss it early.
 fn draw_toast(ctx: &egui::Context, toast: &Toast) -> bool {
     let (icon, icon_color) = match toast.severity {
         ToastSeverity::Error => ("\u{2715}", egui::Color32::from_rgb(255, 100, 100)),
@@ -151,42 +192,29 @@ fn draw_toast(ctx: &egui::Context, toast: &Toast) -> bool {
     dismissed
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn draw_hud_overlays(
-    ctx: &egui::Context,
-    avg_ms: f32,
-    fps: u32,
-    toast: Option<&Toast>,
-    toast_dismissed: &mut bool,
-    loading_message: Option<&String>,
-    has_model: bool,
-    hints_visible: bool,
-    fps_hud_visible: bool,
-    backend_info: &str,
-    pane_label: &str,
-    cameras_linked: Option<bool>,
-    validation_counts: (usize, usize),
-) {
-    if fps_hud_visible {
+pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult {
+    let mut result = HudResult::default();
+
+    if hud.fps_hud_visible {
         draw_fps_hud(
             ctx,
-            avg_ms,
-            fps,
-            backend_info,
-            pane_label,
-            cameras_linked,
-            has_model,
-            validation_counts,
+            hud.avg_ms,
+            hud.fps,
+            hud.backend_info,
+            hud.pane_label,
+            hud.cameras_linked,
+            hud.has_model,
+            hud.validation_counts,
         );
     }
 
-    if let Some(toast) = toast
+    if let Some(toast) = hud.toast
         && draw_toast(ctx, toast)
     {
-        *toast_dismissed = true;
+        result.toast_dismissed = true;
     }
 
-    if let Some(msg) = loading_message {
+    if let Some(msg) = hud.loading_message {
         egui::Area::new(egui::Id::new("loading_overlay"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .order(egui::Order::Foreground)
@@ -199,7 +227,7 @@ pub(super) fn draw_hud_overlays(
                     );
                 });
             });
-    } else if !has_model {
+    } else if !hud.has_model {
         egui::Area::new(egui::Id::new("drop_overlay"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .order(egui::Order::Foreground)
@@ -216,19 +244,11 @@ pub(super) fn draw_hud_overlays(
             });
     }
 
-    if hints_visible {
-        let hints = if has_model {
-            format!(
-                "M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
-                 I IBL  E/Shift+E Exposure\n\
-                 Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
-                 Shift+I IBL Mode  Shift+V Valid\n\
-                 Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
-                 C Cap  H Frame  Tab Panel  ? Hints\n\
-                 F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  {MOD}+L Link"
-            )
+    if hud.hints_visible {
+        let hints: &'static str = if hud.has_model {
+            HINTS_MODEL
         } else {
-            format!("{MOD}+O Open  {MOD}+Shift+O HDRI  ? Hints")
+            HINTS_NO_MODEL
         };
         egui::Area::new(egui::Id::new("hints_overlay"))
             .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -8.0])
@@ -237,11 +257,13 @@ pub(super) fn draw_hud_overlays(
                 ui.set_max_width(ctx.content_rect().width().min(900.0));
                 overlay_frame().show(ui, |ui| {
                     ui.label(
-                        egui::RichText::new(&hints)
+                        egui::RichText::new(hints)
                             .small()
                             .color(egui::Color32::from_white_alpha(160)),
                     );
                 });
             });
     }
+
+    result
 }

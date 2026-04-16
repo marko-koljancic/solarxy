@@ -283,9 +283,7 @@ impl State {
                 self.window
                     .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
-                if !self.gui.stats_user_hidden {
-                    self.gui.stats_visible = true;
-                }
+                self.gui.notify_model_loaded();
                 self.scene = Some(new_scene);
                 if let Some(scene) = &mut self.scene {
                     scene
