@@ -97,15 +97,17 @@ native installers on every major platform. No user-visible rendering changes.
 
 Installers are **unsigned** in 0.5.0:
 
-- **macOS** — Gatekeeper blocks first launch. Bypass: **System Settings →
-  Privacy & Security → Open Anyway**. Walkthrough in
-  [README.md](../../README.md#first-launch-on-macos) and the `README.txt` inside
-  the DMG.
+- **macOS** — Gatekeeper blocks first launch. Easiest bypass: double-click
+  **Install CLI.command** inside the DMG; it clears the quarantine attribute
+  on Solarxy.app. Manual route: **System Settings → Privacy & Security →
+  Open Anyway**. Walkthrough in
+  [README.md](../../README.md#first-launch-on-macos) and `READ ME FIRST.txt`
+  inside the DMG.
 - **Windows** — SmartScreen shows "Windows protected your PC". Click
   **More info → Run anyway**.
 
-Code signing (Apple Developer certificate + Azure Trusted Signing) is planned
-for 0.7.0.
+Code signing (Apple Developer certificate + Azure Trusted Signing) is on the
+roadmap.
 
 [Unreleased]: https://github.com/marko-koljancic/solarxy/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/marko-koljancic/solarxy/releases/tag/v0.5.0

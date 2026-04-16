@@ -155,6 +155,6 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml` and 
 **Bundle assets** live in `res/bundle/`:
 - Icons (`solarxy-{256,512,1024}.png`, `solarxy.png`, `solarxy.icns`, `solarxy.ico`)
 - `linux/solarxy.desktop`, `linux/appimage/AppRun`
-- `macos/Install CLI.command` (sudo symlink into `/usr/local/bin`), `macos/README.txt` (Gatekeeper walkthrough)
+- `macos/Install CLI.command` (clears Gatekeeper quarantine on `/Applications/Solarxy.app` + sudo symlink into `/usr/local/bin`), `macos/READ ME FIRST.txt` (Gatekeeper walkthrough; filename chosen for top-of-DMG sort)
 
 **Changelog**: `docs/changelog/CHANGELOG.md` (Keep a Changelog format). Not at the repo root.

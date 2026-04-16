@@ -77,7 +77,7 @@ codesign --force --deep --sign - "$APP"
 plutil -lint "$APP/Contents/Info.plist"
 
 cp "res/bundle/macos/Install CLI.command" "$STAGE/"
-cp "res/bundle/macos/README.txt" "$STAGE/"
+cp "res/bundle/macos/READ ME FIRST.txt" "$STAGE/"
 
 mkdir -p bundle-out
 OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"
@@ -89,6 +89,8 @@ create-dmg \
     --icon-size 96 \
     --app-drop-link 450 185 \
     --icon "Solarxy.app" 150 185 \
+    --icon "READ ME FIRST.txt" 300 70 \
+    --icon "Install CLI.command" 300 280 \
     --hide-extension "Solarxy.app" \
     --no-internet-enable \
     "$OUT" \

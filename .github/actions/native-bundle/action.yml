@@ -80,14 +80,16 @@ runs:
         </plist>
         PLIST
 
-        # Ad-hoc sign. Sufficient to launch after the Privacy & Security bypass;
-        # does NOT satisfy Gatekeeper on first-run (notarization needed for that,
-        # deferred to 0.7.0).
+        # Ad-hoc sign. Sufficient to launch after the Privacy & Security
+        # bypass; does NOT satisfy Gatekeeper on first-run. Full Developer ID
+        # signing + notarization is on the roadmap.
         codesign --force --deep --sign - "$APP"
 
-        # Drag-to-Applications helpers
+        # Drag-to-Applications helpers. The README filename is chosen to sort
+        # first alphabetically in the DMG Finder view, and create-dmg pins it
+        # to the top-center position so it's the first thing users see.
         cp "res/bundle/macos/Install CLI.command" "$STAGE/"
-        cp "res/bundle/macos/README.txt" "$STAGE/"
+        cp "res/bundle/macos/READ ME FIRST.txt" "$STAGE/"
 
         mkdir -p bundle-out
         OUT="bundle-out/Solarxy-${V}-${ARCH}.dmg"
@@ -97,6 +99,8 @@ runs:
           --icon-size 96 \
           --app-drop-link 450 185 \
           --icon "Solarxy.app" 150 185 \
+          --icon "READ ME FIRST.txt" 300 70 \
+          --icon "Install CLI.command" 300 280 \
           --hide-extension "Solarxy.app" \
           --no-internet-enable \
           "$OUT" \

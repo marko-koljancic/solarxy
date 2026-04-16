@@ -1,0 +1,61 @@
+Solarxy for macOS
+=================
+
+Quick start
+-----------
+1. Drag Solarxy.app to the Applications folder in this window.
+2. Double-click "Install CLI.command" (recommended).
+   - Clears macOS Gatekeeper on Solarxy.app so the next launch just works.
+   - Adds the `solarxy` command to your terminal PATH.
+   - You will be prompted for your sudo password for the second step.
+3. Open Applications > Solarxy, or run `solarxy --help` in a new
+   terminal. No more prompts.
+
+If you skip "Install CLI.command", the first launch of Solarxy.app is
+blocked by macOS Gatekeeper. See "Manual Gatekeeper bypass" below.
+
+Why the prompts?
+----------------
+Solarxy ships unsigned — not yet signed with an Apple Developer
+certificate. macOS flags files downloaded from the internet with a
+"quarantine" attribute, and Gatekeeper refuses to launch anything that
+carries the attribute and is not signed by a trusted certificate. The
+two paths out of this are (a) remove the attribute, or (b) explicitly
+tell macOS you trust the app. "Install CLI.command" does (a) for you.
+"Manual Gatekeeper bypass" below walks through (b).
+
+Code signing with a Developer ID certificate is on the roadmap and
+will remove these prompts once shipped.
+
+Manual Gatekeeper bypass (without Install CLI.command)
+------------------------------------------------------
+On macOS 15 (Sequoia), the first-launch dialog shows only "Done" and
+"Move to Trash" — there is no inline "Open Anyway" button. To allow
+Solarxy:
+
+   1. Double-click Solarxy.app. macOS shows "cannot be verified".
+      Click Done.
+   2. Open System Settings > Privacy & Security.
+   3. Scroll to the Security section. You will see a line like
+      "Solarxy was blocked to protect your Mac."
+      Click Open Anyway next to it.
+   4. Confirm with your password / Touch ID when prompted.
+   5. Launch Solarxy.app again. Click Open in the final confirmation
+      dialog.
+
+macOS remembers this choice. Subsequent launches do not prompt.
+
+"Install CLI.command" is blocked too?
+-------------------------------------
+Shell scripts from a DMG are quarantined the same way. Two options:
+
+   A. Right-click "Install CLI.command" and choose Open. macOS shows a
+      one-time confirmation dialog with an Open button — click it.
+   B. Follow the same System Settings flow as above: double-click once
+      to trigger the block, then use System Settings > Privacy &
+      Security > Open Anyway.
+
+License
+-------
+MIT. See the project repository at
+https://github.com/marko-koljancic/solarxy for source and license text.

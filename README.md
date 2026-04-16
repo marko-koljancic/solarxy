@@ -52,22 +52,24 @@ Pre-built native installers are published on each tagged release at
 
 ### First launch on macOS
 
-Solarxy 0.5.0 is shipped **unsigned** — macOS Gatekeeper blocks the first launch. To allow it:
+Solarxy 0.5.0 is shipped **unsigned** — macOS Gatekeeper blocks the first launch.
 
-1. Open **Solarxy.app** in Applications. macOS says "Solarxy cannot be opened because it cannot be verified." Click **Done**.
-2. Open **System Settings → Privacy & Security**.
-3. Scroll to **Security**. Click **Open Anyway** next to the Solarxy message.
-4. Confirm with your password.
+**Recommended:** double-click **Install CLI.command** inside the mounted DMG. It clears the quarantine attribute on `/Applications/Solarxy.app` (so Gatekeeper won't trigger on first launch) and symlinks `solarxy` into `/usr/local/bin/`. After the sudo prompt, open **Solarxy.app** in Applications — no further prompts.
+
+**Manual bypass** (if you skip the CLI installer): macOS 15 no longer shows an inline "Open Anyway" button in the first-launch dialog.
+
+1. Double-click **Solarxy.app**. macOS says "Solarxy cannot be opened because it cannot be verified." Click **Done**.
+2. Open **System Settings → Privacy & Security → Security**. Click **Open Anyway** next to the Solarxy line.
+3. Confirm with your password / Touch ID.
+4. Launch Solarxy.app again and click **Open** in the final confirmation dialog.
 
 macOS remembers the choice — subsequent launches do not prompt.
-
-To invoke `solarxy` from Terminal after the DMG install, double-click **Install CLI.command** inside the DMG. It symlinks `solarxy` into `/usr/local/bin/` after a sudo prompt.
 
 ### First launch on Windows
 
 The MSI is unsigned — Windows SmartScreen shows **"Windows protected your PC"** on first run. Click **More info** → **Run anyway**. Verify the SHA-256 checksum published alongside the MSI on the release page before proceeding if in doubt.
 
-Code signing (Apple Developer certificate + Azure Trusted Signing) is planned for 0.7.0.
+Code signing (Apple Developer certificate + Azure Trusted Signing) is on the roadmap.
 
 ### One-line installers (developers)
 
