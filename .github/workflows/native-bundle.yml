@@ -38,14 +38,18 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-14            # Apple Silicon
           - target: x86_64-apple-darwin
-            runner: macos-13            # Intel — last Intel runner on GH-hosted
+            runner: macos-15-intel      # Intel — matches cargo-dist's own matrix; macos-13 was retired
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     env:
-      TAG: ${{ github.event_name == 'workflow_call' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+      # Detect invocation mode by input presence: `github.event_name` in a
+      # reusable workflow reflects the CALLER's event (`push` for tag builds),
+      # not `workflow_call`, so we can't key off it. `&&` short-circuits so
+      # fromJson is only evaluated when inputs.plan is non-empty.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
