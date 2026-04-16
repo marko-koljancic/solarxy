@@ -226,7 +226,7 @@ impl State {
                 self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
                 self.rebuild_light_bind_group();
                 self.gui.clear_loading_message();
-                self.gui.set_toast("HDRI loaded", [0.0, 0.4, 0.0, 1.0]);
+                self.gui.set_toast("HDRI loaded", ToastSeverity::Success);
                 tracing::info!("HDRI loaded");
             }
             Some(Ok(Err(e))) => {
@@ -234,14 +234,14 @@ impl State {
                 self.gui.clear_loading_message();
                 tracing::error!("Failed to load HDRI: {}", e);
                 self.gui
-                    .set_toast(&format!("HDRI error: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast(&format!("HDRI error: {}", e), ToastSeverity::Error);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_hdri.take();
                 self.gui.clear_loading_message();
                 tracing::error!("HDRI loading thread crashed");
                 self.gui
-                    .set_toast("HDRI load thread crashed", [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast("HDRI load thread crashed", ToastSeverity::Error);
             }
             _ => {}
         }
@@ -283,6 +283,9 @@ impl State {
                 self.window
                     .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                 preferences::add_recent_file(&mut self.preferences, &pending.path);
+                if !self.gui.stats_user_hidden {
+                    self.gui.stats_visible = true;
+                }
                 self.scene = Some(new_scene);
                 if let Some(scene) = &mut self.scene {
                     scene
@@ -326,14 +329,14 @@ impl State {
                 self.gui.clear_loading_message();
                 tracing::error!("Failed to load model: {}", e);
                 self.gui
-                    .set_toast(&format!("Failed to load: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast(&format!("Failed to load: {}", e), ToastSeverity::Error);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_load.take();
                 self.gui.clear_loading_message();
                 tracing::error!("Model loading thread crashed");
                 self.gui
-                    .set_toast("Loading thread crashed", [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast("Loading thread crashed", ToastSeverity::Error);
             }
             _ => {}
         }

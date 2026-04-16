@@ -3,6 +3,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use crate::cgi::camera_state::CameraState;
+use crate::cgi::gui::ToastSeverity;
 use crate::cgi::ibl::IblState;
 use crate::cgi::resources;
 use crate::preferences::{
@@ -52,7 +53,7 @@ impl State {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("none");
             self.gui.set_toast(
                 &format!("Unsupported format: .{}", ext),
-                [0.6, 0.0, 0.0, 1.0],
+                ToastSeverity::Error,
             );
             return;
         }
@@ -61,7 +62,7 @@ impl State {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(e) => {
                 self.gui
-                    .set_toast(&format!("Invalid path: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast(&format!("Invalid path: {}", e), ToastSeverity::Error);
                 return;
             }
         };
@@ -133,7 +134,7 @@ impl State {
                         } else {
                             "Cameras independent"
                         };
-                        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                        self.gui.set_toast(msg, ToastSeverity::Success);
                     }
                 } else if self.input.modifiers.shift_key() {
                     self.view.display.lights_locked = !self.view.display.lights_locked;
@@ -142,7 +143,7 @@ impl State {
                     } else {
                         "Lights unlocked"
                     };
-                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
                     let bounds = self.scene.as_ref().map(|s| s.model.bounds);
                     if let Some(bounds) = bounds {
@@ -185,7 +186,7 @@ impl State {
                     } else {
                         "Overlap: Off"
                     };
-                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, ToastSeverity::Success);
                 } else if self.input.modifiers.shift_key() {
                     self.toggle_ssao();
                 } else {
@@ -203,7 +204,7 @@ impl State {
                             "Line Weight: {}",
                             self.view.pane_settings[self.view.active_pane].line_weight
                         ),
-                        [0.0, 0.4, 0.0, 1.0],
+                        ToastSeverity::Success,
                     );
                 } else if pds.view_mode == ViewMode::Ghosted {
                     pds.ghosted_wireframe = !pds.ghosted_wireframe;
@@ -249,7 +250,7 @@ impl State {
                     } else {
                         "Local Axes: Off"
                     };
-                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
                     pds.show_axis_gizmo = !pds.show_axis_gizmo;
                 }
@@ -278,7 +279,7 @@ impl State {
                     };
                 }
                 let msg = format!("Material: {}", pds.material_override);
-                self.gui.set_toast(&msg, [0.0, 0.4, 0.0, 1.0]);
+                self.gui.set_toast(&msg, ToastSeverity::Success);
             }
             KeyCode::KeyD => {
                 if self.input.modifiers.shift_key() {
@@ -310,7 +311,7 @@ impl State {
                     } else {
                         "Validation off"
                     };
-                    self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
                     self.view.display.turntable_active = !self.view.display.turntable_active;
                 }
@@ -321,7 +322,7 @@ impl State {
                     pds.uv_bg = pds.uv_bg.next();
                     self.gui.set_toast(
                         &format!("UV Background: {}", pds.uv_bg),
-                        [0.0, 0.4, 0.0, 1.0],
+                        ToastSeverity::Success,
                     );
                 } else {
                     pds.uv_mode = match pds.uv_mode {
@@ -336,25 +337,25 @@ impl State {
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Shaded;
                 self.gui
-                    .set_toast("Inspection: Shaded", [0.0, 0.4, 0.0, 1.0]);
+                    .set_toast("Inspection: Shaded", ToastSeverity::Success);
             }
             KeyCode::Digit2 => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::MaterialId;
                 self.gui
-                    .set_toast("Inspection: Material ID", [0.0, 0.4, 0.0, 1.0]);
+                    .set_toast("Inspection: Material ID", ToastSeverity::Success);
             }
             KeyCode::Digit3 => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 if pds.pane_mode == PaneMode::UvMap {
                     pds.pane_mode = PaneMode::Scene3D;
-                    self.gui.set_toast("3D View", [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast("3D View", ToastSeverity::Success);
                 } else {
                     pds.pane_mode = PaneMode::UvMap;
                     pds.uv_offset = [0.0, 0.0];
                     pds.uv_zoom = 1.0;
-                    self.gui.set_toast("UV Map", [0.0, 0.4, 0.0, 1.0]);
+                    self.gui.set_toast("UV Map", ToastSeverity::Success);
                 }
             }
             KeyCode::Digit4 => {
@@ -362,14 +363,14 @@ impl State {
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::TexelDensity;
                 self.gui
-                    .set_toast("Inspection: Texel Density", [0.0, 0.4, 0.0, 1.0]);
+                    .set_toast("Inspection: Texel Density", ToastSeverity::Success);
             }
             KeyCode::Digit5 => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
                 pds.pane_mode = PaneMode::Scene3D;
                 pds.inspection_mode = InspectionMode::Depth;
                 self.gui
-                    .set_toast("Inspection: Depth", [0.0, 0.4, 0.0, 1.0]);
+                    .set_toast("Inspection: Depth", ToastSeverity::Success);
             }
             KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
             KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
@@ -397,7 +398,7 @@ impl State {
         self.write_composite_params();
         self.gui.set_toast(
             &format!("Tone: {}", self.renderer.post.tone_mode),
-            [0.0, 0.4, 0.0, 1.0],
+            ToastSeverity::Success,
         );
     }
 
@@ -409,7 +410,7 @@ impl State {
         } else {
             "SSAO: Off"
         };
-        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
     fn toggle_bloom(&mut self) {
@@ -420,7 +421,7 @@ impl State {
         } else {
             "Bloom: Off"
         };
-        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
     fn adjust_exposure(&mut self, increase: bool) {
@@ -429,7 +430,7 @@ impl State {
         self.write_composite_params();
         self.gui.set_toast(
             &format!("Exposure: {:.1}", self.renderer.post.exposure),
-            [0.0, 0.4, 0.0, 1.0],
+            ToastSeverity::Success,
         );
     }
 
@@ -454,7 +455,7 @@ impl State {
             IblMode::Diffuse => "IBL: Diffuse",
             IblMode::Full => "IBL: Full",
         };
-        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
     pub(super) fn apply_background_change(&mut self) {
@@ -496,7 +497,7 @@ impl State {
             BoundsMode::WholeModel => "Bounds: Whole Model",
             BoundsMode::PerMesh => "Bounds: Per Mesh",
         };
-        self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
     fn save_preferences(&mut self) {
@@ -527,12 +528,12 @@ impl State {
             Ok(()) => {
                 tracing::info!("Preferences saved");
                 self.gui
-                    .set_toast("Preferences saved", [0.0, 0.4, 0.0, 1.0]);
+                    .set_toast("Preferences saved", ToastSeverity::Success);
             }
             Err(e) => {
                 tracing::error!("Failed to save preferences: {}", e);
                 self.gui
-                    .set_toast(&format!("Save failed: {}", e), [0.6, 0.0, 0.0, 1.0]);
+                    .set_toast(&format!("Save failed: {}", e), ToastSeverity::Error);
             }
         }
     }
@@ -612,7 +613,8 @@ impl State {
                 }
                 self.view.active_pane = 0;
                 self.view.display.layout = ViewLayout::Single;
-                self.gui.set_toast("Single Viewport", [0.0, 0.4, 0.0, 1.0]);
+                self.gui
+                    .set_toast("Single Viewport", ToastSeverity::Success);
             }
             ViewLayout::SplitVertical | ViewLayout::SplitHorizontal => {
                 if self.view.display.layout == ViewLayout::Single {
@@ -635,7 +637,7 @@ impl State {
                 } else {
                     "Split Horizontal"
                 };
-                self.gui.set_toast(msg, [0.0, 0.4, 0.0, 1.0]);
+                self.gui.set_toast(msg, ToastSeverity::Success);
             }
         }
         let (tw, th) = self.target_dimensions();

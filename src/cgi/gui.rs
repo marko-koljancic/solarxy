@@ -19,9 +19,17 @@ const MOD: &str = "\u{2318}";
 #[cfg(not(target_os = "macos"))]
 const MOD: &str = "Ctrl";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToastSeverity {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
 struct Toast {
     message: String,
-    color: [f32; 4],
+    severity: ToastSeverity,
     created: Instant,
     duration: Duration,
 }
@@ -45,7 +53,6 @@ pub struct EguiRenderer {
     egui_format: wgpu::TextureFormat,
     pub sidebar_visible: bool,
     pub menu_bar_visible: bool,
-
     hints_visible: bool,
     fps_hud_visible: bool,
     pub console: ConsoleState,
@@ -53,11 +60,10 @@ pub struct EguiRenderer {
     toast: Option<Toast>,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
-
     model_info: Option<ModelInfo>,
     backend_info: String,
-
-    stats_visible: bool,
+    pub stats_visible: bool,
+    pub stats_user_hidden: bool,
 }
 
 #[derive(Default)]
@@ -326,7 +332,7 @@ impl EguiRenderer {
             egui_format,
             sidebar_visible: false,
             menu_bar_visible: true,
-            hints_visible: true,
+            hints_visible: false,
             fps_hud_visible: false,
             console: ConsoleState::new(console_buffer),
             about_open: false,
@@ -336,12 +342,14 @@ impl EguiRenderer {
             model_info: None,
             backend_info: String::new(),
             stats_visible: false,
+            stats_user_hidden: false,
         }
     }
 
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
         self.stats_visible = false;
+        self.stats_user_hidden = false;
     }
 
     pub fn on_window_event(
@@ -360,10 +368,10 @@ impl EguiRenderer {
         self.ctx.wants_keyboard_input()
     }
 
-    pub fn set_toast(&mut self, msg: &str, color: [f32; 4]) {
+    pub fn set_toast(&mut self, msg: &str, severity: ToastSeverity) {
         self.toast = Some(Toast {
             message: msg.to_string(),
-            color,
+            severity,
             created: Instant::now(),
             duration: Duration::from_secs(3),
         });
@@ -372,7 +380,7 @@ impl EguiRenderer {
     pub fn set_capture_message(&mut self, filename: String) {
         self.toast = Some(Toast {
             message: format!("Saved {filename}"),
-            color: [0.0, 0.4, 0.0, 1.0],
+            severity: ToastSeverity::Success,
             created: Instant::now(),
             duration: Duration::from_secs(2),
         });
@@ -472,6 +480,7 @@ impl EguiRenderer {
             validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
         let mut actions = MenuActions::default();
+        let stats_visible_before = self.stats_visible;
         let mut menu_vis = MenuBarVisibility {
             sidebar_visible: self.sidebar_visible,
             menu_bar_visible: self.menu_bar_visible,
@@ -481,6 +490,7 @@ impl EguiRenderer {
             console_visible: self.console.visible,
         };
         let mut about_open = self.about_open;
+        let mut toast_dismissed = false;
         let console = &mut self.console;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
@@ -516,9 +526,11 @@ impl EguiRenderer {
                 avg_ms,
                 fps,
                 toast,
+                &mut toast_dismissed,
                 loading_message,
                 has_model,
                 menu_vis.hints_visible,
+                menu_vis.fps_hud_visible,
                 backend_info,
                 pane_label,
                 cameras_linked,
@@ -565,10 +577,18 @@ impl EguiRenderer {
         self.sidebar_visible = menu_vis.sidebar_visible;
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.stats_visible = menu_vis.stats_visible;
+        if stats_visible_before && !self.stats_visible {
+            self.stats_user_hidden = true;
+        } else if !stats_visible_before && self.stats_visible {
+            self.stats_user_hidden = false;
+        }
         self.hints_visible = menu_vis.hints_visible;
         self.fps_hud_visible = menu_vis.fps_hud_visible;
         self.console.visible = menu_vis.console_visible;
         self.about_open = about_open;
+        if toast_dismissed {
+            self.toast = None;
+        }
 
         self.winit_state
             .handle_platform_output(window, full_output.platform_output);
@@ -999,103 +1019,164 @@ fn overlay_frame() -> egui::Frame {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn draw_fps_hud(
+    ctx: &egui::Context,
+    avg_ms: f32,
+    fps: u32,
+    backend_info: &str,
+    pane_label: &str,
+    cameras_linked: Option<bool>,
+    has_model: bool,
+    validation_counts: (usize, usize),
+) {
+    let screen = ctx.content_rect();
+    let default_pos = egui::pos2(screen.right() - 8.0, screen.top() + 8.0);
+    egui::Window::new("fps_hud")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .movable(true)
+        .default_pos(default_pos)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .order(egui::Order::Foreground)
+        .frame(overlay_frame())
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new(format!("{avg_ms:.1} ms  {fps} fps"))
+                    .small()
+                    .color(egui::Color32::from_white_alpha(200)),
+            );
+            if !backend_info.is_empty() {
+                ui.label(
+                    egui::RichText::new(backend_info)
+                        .small()
+                        .color(egui::Color32::from_white_alpha(160)),
+                );
+            }
+            if has_model && !pane_label.is_empty() {
+                ui.label(
+                    egui::RichText::new(pane_label)
+                        .small()
+                        .color(egui::Color32::from_white_alpha(180)),
+                );
+            }
+            if let Some(linked) = cameras_linked {
+                let text = if linked {
+                    "Cameras: Linked"
+                } else {
+                    "Cameras: Independent"
+                };
+                ui.label(
+                    egui::RichText::new(text)
+                        .small()
+                        .color(egui::Color32::from_white_alpha(140)),
+                );
+            }
+            let (errors, warnings) = validation_counts;
+            if errors > 0 || warnings > 0 {
+                let mut parts = Vec::new();
+                if errors > 0 {
+                    parts.push(format!(
+                        "\u{2715} {} error{}",
+                        errors,
+                        if errors == 1 { "" } else { "s" }
+                    ));
+                }
+                if warnings > 0 {
+                    parts.push(format!(
+                        "\u{26a0} {} warning{}",
+                        warnings,
+                        if warnings == 1 { "" } else { "s" }
+                    ));
+                }
+                let color = if errors > 0 {
+                    egui::Color32::from_rgb(255, 100, 100)
+                } else {
+                    egui::Color32::from_rgb(255, 200, 80)
+                };
+                ui.label(egui::RichText::new(parts.join("  ")).small().color(color));
+            }
+        });
+}
+
+fn draw_toast(ctx: &egui::Context, toast: &Toast) -> bool {
+    let (icon, icon_color) = match toast.severity {
+        ToastSeverity::Error => ("\u{2715}", egui::Color32::from_rgb(255, 100, 100)),
+        ToastSeverity::Warning => ("\u{26A0}", egui::Color32::from_rgb(255, 200, 80)),
+        ToastSeverity::Success => ("\u{2713}", egui::Color32::from_rgb(100, 220, 120)),
+        ToastSeverity::Info => ("\u{2139}", egui::Color32::from_rgb(120, 180, 255)),
+    };
+
+    let content = ctx.content_rect();
+    let banner_width = (content.width() - 40.0).max(200.0);
+    let anchor_pos = egui::pos2(content.center().x, content.top() + 8.0);
+
+    let mut dismissed = false;
+    egui::Area::new(egui::Id::new("toast_banner"))
+        .fixed_pos(anchor_pos)
+        .pivot(egui::Align2::CENTER_TOP)
+        .order(egui::Order::Foreground)
+        .interactable(true)
+        .show(ctx, |ui| {
+            ui.set_width(banner_width);
+            let frame_resp = egui::Frame::NONE
+                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 40, 220))
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icon).color(icon_color).strong());
+                        ui.label(
+                            egui::RichText::new(&toast.message)
+                                .color(egui::Color32::from_white_alpha(220)),
+                        );
+                    });
+                })
+                .response
+                .interact(egui::Sense::click());
+            if frame_resp.hovered() {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if frame_resp.clicked() {
+                dismissed = true;
+            }
+        });
+    dismissed
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_hud_overlays(
     ctx: &egui::Context,
     avg_ms: f32,
     fps: u32,
     toast: Option<&Toast>,
+    toast_dismissed: &mut bool,
     loading_message: Option<&String>,
     has_model: bool,
     hints_visible: bool,
+    fps_hud_visible: bool,
     backend_info: &str,
     pane_label: &str,
     cameras_linked: Option<bool>,
     validation_counts: (usize, usize),
 ) {
-    let screen = ctx.content_rect();
-    let default_pos = egui::pos2(screen.right() - 8.0, screen.top() + 8.0);
-    egui::Area::new(egui::Id::new("fps_overlay"))
-        .default_pos(default_pos)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .movable(true)
-        .interactable(true)
-        .constrain(true)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            overlay_frame().show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(format!("{avg_ms:.1} ms  {fps} fps"))
-                        .small()
-                        .color(egui::Color32::from_white_alpha(200)),
-                );
-                if !backend_info.is_empty() {
-                    ui.label(
-                        egui::RichText::new(backend_info)
-                            .small()
-                            .color(egui::Color32::from_white_alpha(160)),
-                    );
-                }
-                if has_model && !pane_label.is_empty() {
-                    ui.label(
-                        egui::RichText::new(pane_label)
-                            .small()
-                            .color(egui::Color32::from_white_alpha(180)),
-                    );
-                }
-                if let Some(linked) = cameras_linked {
-                    let text = if linked {
-                        "Cameras: Linked"
-                    } else {
-                        "Cameras: Independent"
-                    };
-                    ui.label(
-                        egui::RichText::new(text)
-                            .small()
-                            .color(egui::Color32::from_white_alpha(140)),
-                    );
-                }
-                let (errors, warnings) = validation_counts;
-                if errors > 0 || warnings > 0 {
-                    let mut parts = Vec::new();
-                    if errors > 0 {
-                        parts.push(format!(
-                            "\u{2715} {} error{}",
-                            errors,
-                            if errors == 1 { "" } else { "s" }
-                        ));
-                    }
-                    if warnings > 0 {
-                        parts.push(format!(
-                            "\u{26a0} {} warning{}",
-                            warnings,
-                            if warnings == 1 { "" } else { "s" }
-                        ));
-                    }
-                    let color = if errors > 0 {
-                        egui::Color32::from_rgb(255, 100, 100)
-                    } else {
-                        egui::Color32::from_rgb(255, 200, 80)
-                    };
-                    ui.label(egui::RichText::new(parts.join("  ")).small().color(color));
-                }
-            });
-        });
-
-    if let Some(toast) = toast {
-        let color = egui::Color32::from_rgba_unmultiplied(
-            (toast.color[0] * 255.0) as u8,
-            (toast.color[1] * 255.0) as u8,
-            (toast.color[2] * 255.0) as u8,
-            (toast.color[3] * 255.0) as u8,
+    if fps_hud_visible {
+        draw_fps_hud(
+            ctx,
+            avg_ms,
+            fps,
+            backend_info,
+            pane_label,
+            cameras_linked,
+            has_model,
+            validation_counts,
         );
-        egui::Area::new(egui::Id::new("toast_overlay"))
-            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -48.0])
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                overlay_frame().show(ui, |ui| {
-                    ui.label(egui::RichText::new(&toast.message).color(color));
-                });
-            });
+    }
+
+    if let Some(toast) = toast
+        && draw_toast(ctx, toast)
+    {
+        *toast_dismissed = true;
     }
 
     if let Some(msg) = loading_message {
@@ -1130,15 +1211,17 @@ fn draw_hud_overlays(
 
     if hints_visible {
         let hints = if has_model {
-            "M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
-             I IBL  E/Shift+E Exposure\n\
-             Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
-             Shift+I IBL Mode  Shift+V Valid\n\
-             Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
-             C Cap  H Frame  Tab Panel  ? Hints\n\
-             F1 Single  F2 V-Split  F3 H-Split  Ctrl+L Link"
+            format!(
+                "M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
+                 I IBL  E/Shift+E Exposure\n\
+                 Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
+                 Shift+I IBL Mode  Shift+V Valid\n\
+                 Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
+                 C Cap  H Frame  Tab Panel  ? Hints\n\
+                 F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  {MOD}+L Link"
+            )
         } else {
-            "? Hints"
+            format!("{MOD}+O Open  {MOD}+Shift+O HDRI  ? Hints")
         };
         egui::Area::new(egui::Id::new("hints_overlay"))
             .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -8.0])
@@ -1147,7 +1230,7 @@ fn draw_hud_overlays(
                 ui.set_max_width(ctx.content_rect().width().min(900.0));
                 overlay_frame().show(ui, |ui| {
                     ui.label(
-                        egui::RichText::new(hints)
+                        egui::RichText::new(&hints)
                             .small()
                             .color(egui::Color32::from_white_alpha(160)),
                     );
@@ -1497,11 +1580,7 @@ fn draw_menu_bar(
                 );
                 ui.checkbox(&mut vis.console_visible, "Console")
                     .on_hover_text("`");
-                ui.add_enabled(
-                    false,
-                    egui::Checkbox::new(&mut vis.fps_hud_visible, "FPS HUD"),
-                )
-                .on_hover_text("Landing in Task 5 (HUD split)");
+                ui.checkbox(&mut vis.fps_hud_visible, "FPS HUD");
                 ui.checkbox(&mut vis.hints_visible, "Keyboard Shortcuts")
                     .on_hover_text("?");
             });
@@ -1523,6 +1602,10 @@ fn draw_menu_bar(
 
 fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
     if !*open {
+        return;
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        *open = false;
         return;
     }
     egui::Window::new("About Solarxy")

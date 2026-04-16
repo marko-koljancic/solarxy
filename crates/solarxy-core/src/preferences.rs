@@ -567,8 +567,8 @@ mod tests {
         assert_eq!(parsed.rendering.wireframe_line_weight, LineWeight::Medium);
         assert_eq!(parsed.rendering.msaa_sample_count, 8);
         assert!(parsed.lighting.lock);
-        assert_eq!(parsed.display.ssao_enabled, true);
-        assert_eq!(parsed.display.exposure, 1.0);
+        assert!(parsed.display.ssao_enabled);
+        assert!((parsed.display.exposure - 1.0).abs() < f32::EPSILON);
         assert_eq!(parsed.window, WindowPrefs::default());
         assert_eq!(parsed.history, HistoryPrefs::default());
     }

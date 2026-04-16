@@ -16,7 +16,7 @@ use crate::cgi::bloom::BloomState;
 use crate::cgi::camera::{Camera, CameraUniform};
 use crate::cgi::camera_state::CameraState;
 use crate::cgi::composite::CompositeState;
-use crate::cgi::gui::EguiRenderer;
+use crate::cgi::gui::{EguiRenderer, ToastSeverity};
 use crate::cgi::ibl::{BrdfLut, IblState};
 use crate::cgi::light::{LightEntry, LightsUniform};
 use crate::cgi::model::{self, Model};
