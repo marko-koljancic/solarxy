@@ -8,3 +8,16 @@ target
 .vscode
 .gpuconfig
 .claude
+
+# Native bundle / installer local smoke outputs (Phase B — v0.5.0+)
+/bundle-out/
+/AppDir/
+/appimagetool*.AppImage
+
+# WiX / MSI build artifacts (wix/main.wxs is tracked; these are per-build)
+/wix/*.wixobj
+/wix/*.wixpdb
+/wix/*.msi
+
+# Scratch release-notes drafts (final notes paste into GitHub Release UI)
+/release-notes-*.md

@@ -36,7 +36,63 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 | PLY | `.ply` | Flexible vertex attributes, optional normals and UVs |
 | glTF 2.0 | `.gltf`, `.glb` | PBR materials, normal maps, embedded textures |
 
-## Getting Started
+## Installation
+
+Pre-built native installers are published on each tagged release at
+[github.com/marko-koljancic/solarxy/releases](https://github.com/marko-koljancic/solarxy/releases).
+
+| Platform | Download | Install |
+|---|---|---|
+| macOS (Apple Silicon) | `Solarxy-0.5.0-aarch64.dmg` | Open, drag to **Applications**. See *First launch on macOS* below. |
+| macOS (Intel) | `Solarxy-0.5.0-x86_64.dmg` | Same as above. |
+| Windows x64 | `solarxy-x86_64-pc-windows-msvc.msi` | Double-click, follow the wizard. Click through SmartScreen (see below). |
+| Ubuntu / Debian (x64) | `solarxy_0.5.0-1_amd64.deb` | `sudo apt install ./solarxy_0.5.0-1_amd64.deb` |
+| Ubuntu / Debian (ARM64) | `solarxy_0.5.0-1_arm64.deb` | Same as above. |
+| Linux distro-agnostic | `Solarxy-0.5.0-x86_64.AppImage` | `chmod +x` then run. Requires glibc 2.28+. |
+
+### First launch on macOS
+
+Solarxy 0.5.0 is shipped **unsigned** — macOS Gatekeeper blocks the first launch. To allow it:
+
+1. Open **Solarxy.app** in Applications. macOS says "Solarxy cannot be opened because it cannot be verified." Click **Done**.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll to **Security**. Click **Open Anyway** next to the Solarxy message.
+4. Confirm with your password.
+
+macOS remembers the choice — subsequent launches do not prompt.
+
+To invoke `solarxy` from Terminal after the DMG install, double-click **Install CLI.command** inside the DMG. It symlinks `solarxy` into `/usr/local/bin/` after a sudo prompt.
+
+### First launch on Windows
+
+The MSI is unsigned — Windows SmartScreen shows **"Windows protected your PC"** on first run. Click **More info** → **Run anyway**. Verify the SHA-256 checksum published alongside the MSI on the release page before proceeding if in doubt.
+
+Code signing (Apple Developer certificate + Azure Trusted Signing) is planned for 0.7.0.
+
+### One-line installers (developers)
+
+For CI or scripted installs, the shell and PowerShell installers from cargo-dist place `solarxy` in `$CARGO_HOME/bin`:
+
+```bash
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-installer.sh | sh
+```
+
+```powershell
+# Windows
+powershell -c "irm https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-installer.ps1 | iex"
+```
+
+### Updating
+
+If installed via any of the installers above (native, shell, PowerShell, or MSI), update in-place with:
+
+```bash
+solarxy --update
+```
+
+## Build from source
 
 ### Prerequisites
 
@@ -47,14 +103,6 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 
 ```bash
 cargo build --release
-```
-
-### Updating
-
-If installed via the shell or PowerShell installer, update with:
-
-```bash
-solarxy --update
 ```
 
 ### Usage
@@ -97,6 +145,8 @@ cargo r --release -- --model path/to/model.glb --mode analyze --output report.tx
 
 The viewer renders models with physically-based shading (Cook-Torrance BRDF), normal mapping, real-time shadow mapping, image-based lighting (diffuse irradiance + specular reflections), screen-space ambient occlusion (SSAO), HDR bloom, selectable tone mapping (ACES Filmic, Reinhard, Linear, None), alpha blending, and 4x MSAA anti-aliasing. A 3-light system (key, fill, rim) follows the camera to provide consistent illumination. The scene includes a shadow-catching floor, an infinite grid, an axis gizmo, and optional bounding-box overlays.
 
+A top menu bar (**File**, **Edit**, **View**, **Help**) is visible by default — every viewport setting is reachable from the **View** menu in addition to its keyboard shortcut. Press `F10` to hide or show the menu bar, `F11` to toggle borderless fullscreen.
+
 <p align="center">
   <img src="docs/img/solarxy-view.png" width="100%">
 </p>
@@ -117,7 +167,7 @@ Press `Tab` to toggle an interactive sidebar with collapsible sections for view 
 | `F1` | Single viewport (default) |
 | `F2` | Vertical split (left: UV Map, right: 3D) |
 | `F3` | Horizontal split (top: UV Map, bottom: 3D) |
-| `Ctrl+L` | Toggle camera linking between panes |
+| `Ctrl/⌘+L` | Toggle camera linking between panes |
 
 Each pane has independent camera, view mode, inspection mode, and display settings. The active pane is determined by cursor position.
 
@@ -151,6 +201,15 @@ Inspection modes apply per pane in split view and compose independently with vie
 | Scroll wheel | Zoom |
 
 ### Keyboard Shortcuts
+
+#### File
+
+| Key | Action |
+|---|---|
+| `Ctrl/⌘+O` | Open model (native dialog) |
+| `Ctrl/⌘+Shift+O` | Import HDRI (native dialog) |
+| `C` | Save screenshot (PNG) |
+| `Shift+S` | Save preferences to disk |
 
 #### Display
 
@@ -189,15 +248,17 @@ Inspection modes apply per pane in split view and compose independently with vie
 | `O` | Orthographic projection |
 | `Arrow keys` | Camera movement |
 
-#### Other
+#### Interface
 
 | Key | Action |
 |---|---|
+| `F10` | Toggle menu bar |
+| `F11` | Toggle borderless fullscreen |
 | `Tab` | Toggle sidebar panel |
-| `Shift+S` | Save preferences to disk |
-| `C` | Save screenshot (PNG) |
-| `?` | Toggle keybinding hints |
-| `Esc` | Exit |
+| `` ` `` | Toggle console panel |
+| `?` | Toggle keyboard shortcuts overlay |
+
+> `Esc` no longer quits the app — use **File → Quit** from the menu bar or close the window. Open modals (About, settings dialogs) implement their own Esc-to-dismiss.
 
 ## Analyze Mode
 
