@@ -9,7 +9,7 @@ Solarxy is a cross-platform 3D model viewer, visual debugger, and validator buil
 - `solarxy` — GUI viewer (winit + egui + wgpu, PBR rendering).
 - `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI), `preferences` (TUI editor), `docs` (embedded docs TUI), and `view` which shells out to the GUI binary.
 
-The two are distributed separately (Flathub / Homebrew Cask / winget for GUI; shell / PowerShell / MSI / Homebrew formula for CLI). The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
+The two are distributed separately (Flathub / Homebrew Cask / winget MSI for GUI; shell / PowerShell installers + Homebrew formula for CLI — no CLI MSI, matching the Rust-CLI convention). The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
 
 ## Build & Run Commands
 
@@ -160,7 +160,7 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 
 **Prerelease version format matters for MSI**: use dot-separated semver prereleases (e.g. `0.5.0-rc.1`, not `0.5.0-rc1`). WiX requires an `A.B.C.D` integer form and cargo-dist can only map the dotted form (`rc.1` → trailing `.1`).
 
-**Binary installers (CLI only: `solarxy-cli`)** — shell / PowerShell / MSI — produced by `cargo-dist` 0.31.0. Config in `dist-workspace.toml`; CI in the generated `.github/workflows/release.yml`. `dist` regenerates `wix/main.wxs` on every run; the product-icon edit is preserved via `allow-dirty = ["msi"]`.
+**Binary installers (CLI: `solarxy-cli`)** — shell / PowerShell / portable `.zip` — produced by `cargo-dist` 0.31.0. No CLI MSI: CLI MSIs aren't idiomatic on Windows (ripgrep, fd, zoxide, eza, bat, delta, cargo-dist itself don't ship one), so `[package.metadata.wix]` on `crates/solarxy-cli/Cargo.toml` is intentionally absent. Config in `dist-workspace.toml`; CI in the generated `.github/workflows/release.yml`. `dist` regenerates the root `wix/main.wxs` (GUI MSI) on every run; the product-icon edit is preserved via `allow-dirty = ["msi"]`.
 
 **Native GUI bundles (`solarxy`)** — macOS `.dmg`, Linux `.deb` + `.rpm` + `.AppImage` — produced by `.github/workflows/native-bundle.yml`, invoked from cargo-dist's generated `release.yml` via the `post-announce-jobs` hook in `dist-workspace.toml`. In-graph (not `release: published`) is deliberate: `release` events don't fire for `GITHUB_TOKEN`-created releases. Heavy lifting is in the composite action `.github/actions/native-bundle/action.yml`:
 - macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg` (see the comment in `dist-workspace.toml` for why this is *not* inside cargo-dist).
@@ -168,7 +168,7 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 
 **Distribution channels:**
 - GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`), **winget** (`Koljam.Solarxy`, `packaging/winget/`). Plus raw bundles from GitHub Releases.
-- CLI: `cargo-dist` installers (shell / PowerShell / MSI), Homebrew formula (`solarxy-cli`).
+- CLI: `cargo-dist` installers (shell / PowerShell + portable `.zip`), Homebrew formula (`solarxy-cli`). No MSI — winget CLI manifest (portable type) deferred to 0.5.1.
 - `solarxy-cli --update` detects the install source via `solarxy_core::install_source::detect()`: Homebrew → `brew upgrade solarxy-cli`, Flatpak → `flatpak update dev.koljam.solarxy`, otherwise `axoupdater` self-update.
 
 **Local dev smoke:**

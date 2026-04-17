@@ -38,27 +38,17 @@ No user-visible behavior changes since rc.7.
   to fail with LGHT0103 ("file not found"). The CLI ships as its own
   MSI — consistent with the rc.7 "two separate distributions" model on
   every other platform.
-- **Windows CLI MSI** — added `[package.metadata.wix]` with stable
-  `upgrade-guid` and `path-guid` to `crates/solarxy-cli/Cargo.toml`.
-  Without explicit GUIDs, cargo-dist would regenerate them on every
-  build and Windows would not recognise subsequent installers as
-  upgrades of prior installs.
-- **Windows CLI MSI (WXS template)** — added
-  `crates/solarxy-cli/wix/main.wxs` (plus the matching
-  `install-source-msi.txt` marker). `[package.metadata.wix]` alone
-  told cargo-dist to build a CLI MSI, but `dist-workspace.toml` has
-  `allow-dirty = ["msi"]` (to protect the hand-edited GUI WXS), which
-  also suppresses auto-generation of the CLI template — so the CLI
-  MSI step failed with "There are no WXS files to create an
-  installer". The template ships `solarxy-cli.exe`, adds
-  `%ProgramFiles%\solarxy-cli\bin` to PATH, and drops an
-  `install-source` marker under `%ProgramData%\Solarxy-cli\` so
-  `solarxy-cli --update` can detect the MSI channel and route to
-  `winget upgrade` instead of running an axoupdater self-update that
-  UAC would block. `solarxy_core::install_source::marker_path()`
-  picks the `Solarxy-cli` subfolder when the running exe is
-  `solarxy-cli`; `classify_exe_path` also now matches
-  `\Program Files\solarxy-cli\` as a fallback.
+- **Windows CLI distribution** — CLI on Windows ships as cargo-dist's
+  shell / PowerShell installers (and a portable `.zip`) rather than an
+  MSI. `[package.metadata.wix]` on `crates/solarxy-cli/Cargo.toml` has
+  been removed along with the CLI WXS template: CLI MSIs are not
+  idiomatic on Windows (no well-known Rust CLI — ripgrep, fd, zoxide,
+  eza, bat, delta, cargo-dist itself — ships one), and the cargo-dist
+  + cargo-wix path was failing with a `candle` schema error with no
+  diagnostic output to shorten the guess loop. The GUI continues to
+  ship as an MSI where Start Menu + Add/Remove Programs integration
+  actually earns its keep. A winget `portable` manifest for the CLI
+  is deferred to 0.5.1.
 - **Auto-bump workflows** — added a prerelease guard to
   `flathub-bump.yml`, `homebrew-bump.yml`, and `winget-release.yml`.
   The three workflows previously fired on every `release: published`
