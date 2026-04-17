@@ -12,6 +12,10 @@
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
     clippy::needless_pass_by_value,
+    // `pub _pad` fields on GPU uniform structs are deliberate: they hit WGSL's
+    // 16-byte struct-size alignment and are written by `bytemuck` at the
+    // binding site, which clippy can't see. See CLAUDE.md for the pattern.
+    clippy::pub_underscore_fields,
     clippy::similar_names,
     clippy::struct_excessive_bools,
     clippy::struct_field_names,

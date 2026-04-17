@@ -168,6 +168,7 @@ impl CameraState {
         self.controller.inject_orbit_yaw(yaw);
     }
 
+    #[must_use]
     pub fn clone_with_new_resources(
         &self,
         device: &wgpu::Device,

@@ -15,6 +15,22 @@ Nothing yet.
 
 ---
 
+## [0.5.0-rc.8] — 2026-04-17
+
+Smoke-test RC for the post-rc.7 workspace restructuring. No user-visible
+changes since rc.7; cut to exercise the full installer matrix after the
+crate extraction.
+
+### Changed (internal)
+
+- Extracted `solarxy-renderer` and `solarxy-app` as dedicated crates from
+  the monolithic root (commit `3c4527b`). The root `solarxy` crate is now
+  a thin GUI entrypoint; all wgpu state lives in `solarxy-renderer` and
+  the winit `ApplicationHandler` + egui UI lives in `solarxy-app`. See
+  [CLAUDE.md](../../CLAUDE.md) for the updated 6-crate layout.
+
+---
+
 ## [0.5.0-rc.7] — 2026-04-17
 
 Packaging rearchitecture release. Closes three platform-specific install

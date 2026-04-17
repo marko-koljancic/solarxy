@@ -1,5 +1,6 @@
 use crate::texture;
 
+#[must_use]
 pub struct PipelineBuilder<'a> {
     device: &'a wgpu::Device,
     label: &'a str,
