@@ -32,3 +32,13 @@ dirs = "6.0"
 ratatui = { version = "0.29.0", optional = true }
 crossterm = { version = "0.28.1", optional = true }
 axoupdater = { version = "0.10", features = ["blocking"], optional = true }
+
+# ---- cargo-dist per-package overrides ------------------------------------
+# The workspace's dist-workspace.toml sets `installers = ["shell",
+# "powershell", "msi"]` for everything. CLI MSIs are not idiomatic on
+# Windows (ripgrep, fd, zoxide, eza, bat, delta, cargo-dist itself don't
+# ship one), so we override per-crate to skip msi for this binary. Users
+# install the CLI via the shell / PowerShell installer (or a portable
+# winget manifest — deferred to 0.5.1).
+[package.metadata.dist]
+installers = ["shell", "powershell"]
