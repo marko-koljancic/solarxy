@@ -67,9 +67,18 @@ fn marker_path() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let program_data = std::env::var_os("ProgramData")?;
+        // GUI MSI writes %ProgramData%\Solarxy\install-source; CLI MSI
+        // writes %ProgramData%\Solarxy-cli\install-source. Pick the
+        // folder matching whichever binary is currently running so each
+        // binary reads its own channel marker.
+        let is_cli = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .is_some_and(|n| n.eq_ignore_ascii_case("solarxy-cli"));
+        let folder = if is_cli { "Solarxy-cli" } else { "Solarxy" };
         Some(
             PathBuf::from(program_data)
-                .join("Solarxy")
+                .join(folder)
                 .join("install-source"),
         )
     }
@@ -103,7 +112,10 @@ fn classify_exe_path(exe: &Path) -> Option<InstallSource> {
         return Some(InstallSource::HomebrewFormula);
     }
 
-    if cfg!(target_os = "windows") && s.contains("\\Program Files\\Solarxy\\") {
+    if cfg!(target_os = "windows")
+        && (s.contains("\\Program Files\\Solarxy\\")
+            || s.contains("\\Program Files\\solarxy-cli\\"))
+    {
         return Some(InstallSource::Msi);
     }
 
