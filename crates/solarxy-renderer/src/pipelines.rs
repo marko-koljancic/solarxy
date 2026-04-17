@@ -1,15 +1,15 @@
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::model::{self, Vertex};
-use crate::cgi::pipeline_builder::PipelineBuilder;
-use crate::cgi::texture;
+use crate::bind_groups::BindGroupLayouts;
+use crate::model::{self, Vertex};
+use crate::pipeline_builder::PipelineBuilder;
+use crate::texture;
 
-pub(crate) struct Instance {
-    pub(crate) position: cgmath::Vector3<f32>,
-    pub(crate) rotation: cgmath::Quaternion<f32>,
+pub struct Instance {
+    pub position: cgmath::Vector3<f32>,
+    pub rotation: cgmath::Quaternion<f32>,
 }
 
 impl Instance {
-    pub(crate) fn to_raw(&self) -> InstanceRaw {
+    pub fn to_raw(&self) -> InstanceRaw {
         let model =
             cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation);
         InstanceRaw {
@@ -21,7 +21,7 @@ impl Instance {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct InstanceRaw {
+pub struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
 }
@@ -73,35 +73,35 @@ impl model::Vertex for InstanceRaw {
     }
 }
 
-pub(crate) struct Pipelines {
-    pub(crate) main: wgpu::RenderPipeline,
-    pub(crate) alpha_blend: wgpu::RenderPipeline,
-    pub(crate) shadow: wgpu::RenderPipeline,
-    pub(crate) floor: wgpu::RenderPipeline,
-    pub(crate) ghosted_fill: wgpu::RenderPipeline,
-    pub(crate) edge_wire: wgpu::RenderPipeline,
-    pub(crate) edge_wire_ghosted: wgpu::RenderPipeline,
-    pub(crate) grid: wgpu::RenderPipeline,
-    pub(crate) normals: wgpu::RenderPipeline,
-    pub(crate) background: wgpu::RenderPipeline,
-    pub(crate) uv_gradient: wgpu::RenderPipeline,
-    pub(crate) uv_checker: wgpu::RenderPipeline,
-    pub(crate) uv_no_uvs: wgpu::RenderPipeline,
-    pub(crate) uv_map_checker: wgpu::RenderPipeline,
-    pub(crate) uv_map_texture: wgpu::RenderPipeline,
-    pub(crate) uv_map_wire: wgpu::RenderPipeline,
-    pub(crate) uv_overlap_count: wgpu::RenderPipeline,
-    pub(crate) uv_overlap_overlay: wgpu::RenderPipeline,
-    pub(crate) gizmo: wgpu::RenderPipeline,
-    pub(crate) bloom_extract: wgpu::RenderPipeline,
-    pub(crate) bloom_blur_h: wgpu::RenderPipeline,
-    pub(crate) bloom_blur_v: wgpu::RenderPipeline,
-    pub(crate) composite: wgpu::RenderPipeline,
-    pub(crate) gbuffer: wgpu::RenderPipeline,
-    pub(crate) ssao: wgpu::RenderPipeline,
-    pub(crate) ssao_blur_h: wgpu::RenderPipeline,
-    pub(crate) ssao_blur_v: wgpu::RenderPipeline,
-    pub(crate) validation_overlay: wgpu::RenderPipeline,
+pub struct Pipelines {
+    pub main: wgpu::RenderPipeline,
+    pub alpha_blend: wgpu::RenderPipeline,
+    pub shadow: wgpu::RenderPipeline,
+    pub floor: wgpu::RenderPipeline,
+    pub ghosted_fill: wgpu::RenderPipeline,
+    pub edge_wire: wgpu::RenderPipeline,
+    pub edge_wire_ghosted: wgpu::RenderPipeline,
+    pub grid: wgpu::RenderPipeline,
+    pub normals: wgpu::RenderPipeline,
+    pub background: wgpu::RenderPipeline,
+    pub uv_gradient: wgpu::RenderPipeline,
+    pub uv_checker: wgpu::RenderPipeline,
+    pub uv_no_uvs: wgpu::RenderPipeline,
+    pub uv_map_checker: wgpu::RenderPipeline,
+    pub uv_map_texture: wgpu::RenderPipeline,
+    pub uv_map_wire: wgpu::RenderPipeline,
+    pub uv_overlap_count: wgpu::RenderPipeline,
+    pub uv_overlap_overlay: wgpu::RenderPipeline,
+    pub gizmo: wgpu::RenderPipeline,
+    pub bloom_extract: wgpu::RenderPipeline,
+    pub bloom_blur_h: wgpu::RenderPipeline,
+    pub bloom_blur_v: wgpu::RenderPipeline,
+    pub composite: wgpu::RenderPipeline,
+    pub gbuffer: wgpu::RenderPipeline,
+    pub ssao: wgpu::RenderPipeline,
+    pub ssao_blur_h: wgpu::RenderPipeline,
+    pub ssao_blur_v: wgpu::RenderPipeline,
+    pub validation_overlay: wgpu::RenderPipeline,
 }
 
 fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
@@ -112,7 +112,7 @@ fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
 }
 
 impl Pipelines {
-    pub(crate) fn new(
+    pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         layouts: &BindGroupLayouts,

@@ -1,6 +1,6 @@
-use crate::cgi::texture;
+use crate::texture;
 
-pub(crate) struct PipelineBuilder<'a> {
+pub struct PipelineBuilder<'a> {
     device: &'a wgpu::Device,
     label: &'a str,
     layout: &'a wgpu::PipelineLayout,

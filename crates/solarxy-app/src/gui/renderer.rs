@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use egui_wgpu::ScreenDescriptor;
 
-use crate::cgi::resources::ModelStats;
+use solarxy_renderer::resources::ModelStats;
 use crate::console::{ConsoleState, LogBuffer};
-use crate::preferences::PaneMode;
+use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
 use super::actions::{MenuActions, MenuBarVisibility};
@@ -36,9 +36,6 @@ pub struct EguiRenderer {
     model_info: Option<ModelInfo>,
     backend_info: String,
     stats_visible: bool,
-    /// Sticky flag. Set when the user explicitly closes the stats panel
-    /// mid-session. Read by `notify_model_loaded` to suppress auto-open on
-    /// subsequent loads until the user re-enables stats via the View menu.
     stats_user_hidden: bool,
 }
 
@@ -88,10 +85,6 @@ impl EguiRenderer {
         self.stats_user_hidden = false;
     }
 
-    /// Callers must invoke this after a successful model load. Honours the
-    /// user's sticky hide preference — if they explicitly closed the stats
-    /// panel mid-session, subsequent loads keep it closed until they
-    /// re-enable it via the View menu.
     pub fn notify_model_loaded(&mut self) {
         if !self.stats_user_hidden {
             self.stats_visible = true;
@@ -191,7 +184,7 @@ impl EguiRenderer {
         &mut self,
         mut snap: GuiSnapshot,
         hud: &HudInfo,
-        validation_report: Option<&crate::validation::ValidationReport>,
+        validation_report: Option<&solarxy_core::validation::ValidationReport>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -327,11 +320,6 @@ impl EguiRenderer {
         self.sidebar_visible = menu_vis.sidebar_visible;
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.stats_visible = menu_vis.stats_visible;
-        // Detect user-driven stats_visible transitions this frame and update
-        // the sticky hide flag accordingly. Catches both View-menu checkbox
-        // and stats-window-X-button paths uniformly (both write through
-        // menu_vis.stats_visible). System-driven opens from
-        // notify_model_loaded happen outside ctx.run and bypass this.
         if stats_visible_before && !self.stats_visible {
             self.stats_user_hidden = true;
         } else if !stats_visible_before && self.stats_visible {

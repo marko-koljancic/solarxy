@@ -325,7 +325,7 @@ pub fn create_overlap_count_texture(
     (texture, view)
 }
 
-pub(crate) struct SharedSamplers {
+pub struct SharedSamplers {
     pub linear_clamp: wgpu::Sampler,
     pub linear_repeat: wgpu::Sampler,
 }

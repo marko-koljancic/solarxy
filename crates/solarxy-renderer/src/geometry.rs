@@ -4,12 +4,9 @@ pub use solarxy_core::geometry::{
 };
 pub use solarxy_core::AABB;
 
-#[cfg(feature = "viewer")]
 use cgmath::InnerSpace;
-#[cfg(feature = "viewer")]
 use super::model::{self, ModelVertex, NormalsGeometry};
 
-#[cfg(feature = "viewer")]
 pub fn build_normals_geometry(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
@@ -59,7 +56,6 @@ pub fn build_normals_geometry(
     }
 }
 
-#[cfg(feature = "viewer")]
 type ProcessedModel = (
     Vec<Vec<ModelVertex>>,
     Vec<Vec<u32>>,
@@ -68,7 +64,6 @@ type ProcessedModel = (
     NormalsGeometry,
 );
 
-#[cfg(feature = "viewer")]
 pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let mut all_positions: Vec<[f32; 3]> = Vec::new();
     let mut all_normals: Vec<[f32; 3]> = Vec::new();
@@ -133,9 +128,9 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         all_normals.extend_from_slice(&normals);
 
         let bounds = compute_bounds(&mesh.positions);
+        let normals_geo =
+            build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
         mesh_bounds.push(bounds);
-        let bounds = mesh_bounds.last().unwrap();
-        let normals_geo = build_normals_geometry(&mesh.positions, &normals, &mesh.indices, bounds);
         all_vertex_lines.extend(normals_geo.vertex_lines);
         all_face_lines.extend(normals_geo.face_lines);
 

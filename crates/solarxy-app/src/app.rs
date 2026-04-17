@@ -10,7 +10,7 @@ use winit::{
 };
 
 use crate::console::LogBuffer;
-use crate::preferences::Preferences;
+use solarxy_core::preferences::Preferences;
 use crate::state::State;
 
 pub struct App {
@@ -39,7 +39,7 @@ impl App {
 
 #[cfg(not(target_os = "macos"))]
 fn load_window_icon() -> Option<winit::window::Icon> {
-    let bytes = include_bytes!("../res/bundle/solarxy-256.png");
+    let bytes = include_bytes!("../../../res/bundle/solarxy-256.png");
     let img = image::load_from_memory(bytes).ok()?.into_rgba8();
     let (w, h) = img.dimensions();
     winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()

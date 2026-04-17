@@ -74,12 +74,6 @@ pub(super) fn draw_update_modal(ctx: &egui::Context, state: &mut UpdateModalStat
                         ui.add_space(4.0);
                         ui.hyperlink_to(releases_url(), releases_url());
                     }
-                    UpdateHint::RunAxoupdater => {
-                        ui.label(
-                            "This installation supports self-update — \
-                             run `solarxy-cli --update` from a terminal.",
-                        );
-                    }
                 }
 
                 ui.add_space(10.0);

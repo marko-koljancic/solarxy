@@ -3,6 +3,14 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
+use solarxy_renderer::bind_groups::BindGroupLayouts;
+use solarxy_renderer::bloom::BloomState;
+use solarxy_renderer::composite::CompositeState;
+use solarxy_renderer::ibl::{BrdfLut, IblState};
+use solarxy_renderer::pipelines::Pipelines;
+use solarxy_renderer::ssao::SsaoState;
+use solarxy_renderer::texture::{self, SharedSamplers};
+
 use super::*;
 
 impl State {
@@ -147,7 +155,7 @@ impl State {
         let checker_texture = texture::Texture::from_bytes(
             &device,
             &queue,
-            include_bytes!("../../res/textures/uv-checker_1k.png"),
+            include_bytes!("../../../../res/textures/uv-checker_1k.png"),
             "uv_checker_texture",
             false,
         )?;
@@ -189,39 +197,39 @@ impl State {
 
         let ssao = SsaoState::new(&device, &queue, &layouts, config.width, config.height);
 
-        let uv_cam = crate::cgi::uv_camera::UvCameraState::new(&device, &layouts.camera);
+        let uv_cam = solarxy_renderer::uv_camera::UvCameraState::new(&device, &layouts.camera);
 
         let yellow = [1.0, 0.85, 0.0];
-        let boundary_verts: [crate::cgi::model::GizmoVertex; 8] = [
-            crate::cgi::model::GizmoVertex {
+        let boundary_verts: [solarxy_renderer::model::GizmoVertex; 8] = [
+            solarxy_renderer::model::GizmoVertex {
                 position: [0.0, 1.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [1.0, 1.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [1.0, 1.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [1.0, 0.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [1.0, 0.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [0.0, 0.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [0.0, 0.0, 0.0],
                 color: yellow,
             },
-            crate::cgi::model::GizmoVertex {
+            solarxy_renderer::model::GizmoVertex {
                 position: [0.0, 1.0, 0.0],
                 color: yellow,
             },
@@ -262,7 +270,7 @@ impl State {
         });
 
         let validation_colors = {
-            use crate::validation::IssueCategory;
+            use solarxy_renderer::validation::IssueCategory;
             let mut buffers = Vec::new();
             let mut bind_groups = Vec::new();
             for cat in IssueCategory::ALL {

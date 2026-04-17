@@ -56,7 +56,9 @@ pub(super) fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "lilex".to_owned(),
-        egui::FontData::from_static(include_bytes!("../../../res/Lilex/static/Lilex-Medium.ttf"))
+        egui::FontData::from_static(include_bytes!(
+            "../../../../res/Lilex/static/Lilex-Medium.ttf"
+        ))
             .into(),
     );
     fonts

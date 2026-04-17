@@ -3,6 +3,8 @@ members = [
     ".",
     "crates/solarxy-core",
     "crates/solarxy-formats",
+    "crates/solarxy-renderer",
+    "crates/solarxy-app",
     "crates/solarxy-cli",
 ]
 resolver = "2"
@@ -16,8 +18,31 @@ repository = "https://github.com/marko-koljancic/solarxy"
 authors = ["Marko Koljancic <marko.koljancic@gmail.com>"]
 
 [workspace.dependencies]
-cgmath = "0.18"
-anyhow = "1.0.100"
+cgmath    = "0.18"
+anyhow    = "1.0.100"
+thiserror = "2"
+
+[workspace.lints]
+# (placeholder for future workspace-wide lint config)
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+
+[profile.dist]
+inherits      = "release"
+lto           = "fat"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+
+# ---- Root binary ---------------------------------------------------------
+# This crate is bin-only after the v0.6.0 workspace split. Feature-gated
+# build matrix is gone; the GUI is always linked. CLI lives in
+# crates/solarxy-cli with its own [[bin]] target.
 
 [package]
 name = "solarxy"
@@ -29,90 +54,24 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-strip = "symbols"
-panic = "abort"
-
-[profile.dist]
-inherits = "release"
-lto = "fat"
-codegen-units = 1
-strip = "symbols"
-panic = "abort"
-
 [[bin]]
 name = "solarxy"
 path = "src/main.rs"
 
-[features]
-default = ["viewer", "analyzer"]
-viewer = [
-    "analyzer",
-    "dep:wgpu",
-    "dep:winit",
-    "dep:egui",
-    "dep:egui-wgpu",
-    "dep:egui-winit",
-    "dep:pollster",
-    "dep:image",
-    "dep:bytemuck",
-    "dep:half",
-    "dep:exr",
-    "dep:rfd",
-    "dep:open",
-    "dep:time",
-]
-analyzer = ["dep:solarxy-formats"]
-
 [dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
-anyhow = { workspace = true }
-cgmath = { workspace = true }
 solarxy-core = { path = "crates/solarxy-core" }
-solarxy-formats = { path = "crates/solarxy-formats", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
-dirs = "6.0"
-tracing = "0.1"
+solarxy-app  = { path = "crates/solarxy-app" }
+clap         = { version = "4.5.53", features = ["derive"] }
+anyhow       = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
-
-winit = { version = "0.30.12", optional = true }
-wgpu = { version = "27.0.1", optional = true }
-pollster = { version = "0.4.0", optional = true }
-bytemuck = { version = "1.24", features = ["derive"], optional = true }
-egui = { version = "0.33", optional = true }
-egui-wgpu = { version = "0.33", optional = true }
-egui-winit = { version = "0.33", optional = true }
-half = { version = "2.0", optional = true }
-exr = { version = "1.0", optional = true }
-rfd = { version = "0.15", optional = true }
-open = { version = "5", optional = true }
-time = { version = "0.3", features = ["local-offset", "formatting", "macros"], optional = true }
-
-
-[dependencies.image]
-version = "0.25.9"
-default-features = false
-features = ["png", "jpeg", "webp", "hdr"]
-optional = true
-
-[build-dependencies]
-anyhow = "1.0"
-fs_extra = "1.2"
-glob = "0.3"
+time         = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 
 # ---- Native installer metadata -------------------------------------------
 # `cargo-bundle` consumes [package.metadata.bundle] for macOS .app staging
 # (the actual .app + .dmg is hand-rolled in
 # .github/actions/native-bundle/action.yml). MSI metadata is in
 # [package.metadata.wix]. Linux GUI is shipped via Flathub (manifest under
-# packaging/flatpak/) and AppImage (built in native-bundle action). The
-# .deb and .rpm formats were dropped in v0.5.0-rc.7 — Flatpak handles the
-# Vulkan-driver problem that those formats leaked to the host system.
+# packaging/flatpak/) and AppImage (built in native-bundle action).
 
 [package.metadata.bundle]
 name = "Solarxy"

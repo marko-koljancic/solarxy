@@ -1,0 +1,33 @@
+[package]
+name = "solarxy-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "winit + egui app shell for the Solarxy viewer"
+
+[dependencies]
+solarxy-core     = { path = "../solarxy-core" }
+solarxy-formats  = { path = "../solarxy-formats" }
+solarxy-renderer = { path = "../solarxy-renderer" }
+winit            = "0.30.12"
+wgpu             = "27.0.1"
+egui             = "0.33"
+egui-wgpu        = "0.33"
+egui-winit       = "0.33"
+pollster         = "0.4.0"
+bytemuck         = { version = "1.24", features = ["derive"] }
+rfd              = "0.15"
+open             = "5"
+time             = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
+cgmath           = { workspace = true }
+anyhow           = { workspace = true }
+tracing          = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+
+[dependencies.image]
+version          = "0.25.9"
+default-features = false
+features         = ["png", "jpeg", "webp", "hdr"]

@@ -1,4 +1,4 @@
-use crate::preferences::{
+use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     ToneMode, UvMapBackground, UvMode, ViewMode,
 };
@@ -36,7 +36,7 @@ pub(super) fn draw_sidebar(
     s: &mut GuiSnapshot,
     visible: bool,
     uv_overlap_pct: Option<f32>,
-    validation_report: Option<&crate::validation::ValidationReport>,
+    validation_report: Option<&solarxy_core::validation::ValidationReport>,
 ) {
     egui::SidePanel::left("sidebar")
         .resizable(false)
@@ -182,7 +182,7 @@ pub(super) fn draw_sidebar(
                                     report.warning_count()
                                 ));
                                 for issue in &report.issues {
-                                    let color = crate::validation::issue_category(issue).color();
+                                    let color = solarxy_renderer::validation::issue_category(issue).color();
                                     let egui_color = egui::Color32::from_rgba_unmultiplied(
                                         (color[0] * 255.0) as u8,
                                         (color[1] * 255.0) as u8,

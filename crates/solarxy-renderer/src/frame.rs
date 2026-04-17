@@ -2,26 +2,27 @@ use std::sync::Arc;
 
 use cgmath::prelude::*;
 
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::camera::Camera;
-use crate::cgi::model::{DrawMeshSimple, DrawModel};
-use crate::cgi::pipelines::Pipelines;
-use crate::cgi::texture::SharedSamplers;
-use crate::cgi::uv_camera::UvCameraState;
-use crate::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
+use crate::bind_groups::BindGroupLayouts;
+use crate::camera::Camera;
+use crate::model::{DrawMeshSimple, DrawModel};
+use crate::pipelines::Pipelines;
+use crate::texture::SharedSamplers;
+use crate::uv_camera::UvCameraState;
+use solarxy_core::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
 
-use crate::cgi::bloom::BloomState;
-use crate::cgi::composite::CompositeState;
-use crate::cgi::ibl::{BrdfLut, IblState};
-use crate::cgi::ssao::SsaoState;
-use crate::cgi::texture;
-use crate::preferences::{IblMode, ToneMode};
+use crate::bloom::BloomState;
+use crate::composite::CompositeState;
+use crate::ibl::{BrdfLut, IblState};
+use crate::ssao::SsaoState;
+use crate::texture;
+use solarxy_core::preferences::{IblMode, ToneMode};
 
-use super::{BackgroundModeExt, BoundsMode, ModelScene, PaneDisplaySettings};
+use crate::scene::{BackgroundModeExt, ModelScene};
+use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct GradientUniform {
+pub struct GradientUniform {
     pub top_color: [f32; 4],
     pub bottom_color: [f32; 4],
     pub uv_y_offset: f32,
@@ -31,7 +32,7 @@ pub(crate) struct GradientUniform {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct WireframeParams {
+pub struct WireframeParams {
     pub color: [f32; 4],
     pub line_width: f32,
     pub screen_width: f32,
@@ -39,14 +40,14 @@ pub(crate) struct WireframeParams {
     pub _pad: f32,
 }
 
-pub(crate) struct RenderTargets {
+pub struct RenderTargets {
     pub depth_texture: texture::Texture,
     pub msaa_hdr_view: wgpu::TextureView,
     pub _hdr_resolve_texture: wgpu::Texture,
     pub hdr_resolve_view: wgpu::TextureView,
 }
 
-pub(crate) struct PostProcessing {
+pub struct PostProcessing {
     pub bloom: BloomState,
     pub bloom_enabled: bool,
     pub ssao: SsaoState,
@@ -56,7 +57,7 @@ pub(crate) struct PostProcessing {
     pub exposure: f32,
 }
 
-pub(crate) struct IblResources {
+pub struct IblResources {
     pub ibl: IblState,
     pub ibl_fallback: IblState,
     pub brdf_lut: BrdfLut,
@@ -64,7 +65,7 @@ pub(crate) struct IblResources {
     pub last_active_ibl_mode: IblMode,
 }
 
-pub(crate) struct WireframeResources {
+pub struct WireframeResources {
     pub _gradient_buffer: wgpu::Buffer,
     pub gradient_bind_group: wgpu::BindGroup,
     pub wireframe_params_buffer: wgpu::Buffer,
@@ -73,7 +74,7 @@ pub(crate) struct WireframeResources {
     pub uv_checker_bind_group: wgpu::BindGroup,
 }
 
-pub(crate) struct UvOverlapResources {
+pub struct UvOverlapResources {
     pub count_texture: wgpu::Texture,
     pub count_view: wgpu::TextureView,
     pub overlay_bind_group: wgpu::BindGroup,
@@ -86,38 +87,38 @@ pub(crate) struct UvOverlapResources {
     pub readback_pending: bool,
 }
 
-pub(crate) struct ValidationColorResources {
+pub struct ValidationColorResources {
     pub bind_groups: Vec<wgpu::BindGroup>,
     #[allow(dead_code)]
     pub buffers: Vec<wgpu::Buffer>,
 }
 
-pub(crate) struct Renderer {
-    pub(super) targets: RenderTargets,
-    pub(super) post: PostProcessing,
-    pub(super) ibl_res: IblResources,
-    pub(super) wire: WireframeResources,
-    pub(super) layouts: Arc<BindGroupLayouts>,
-    pub(super) pipelines: Pipelines,
-    pub(super) uv_cam: UvCameraState,
-    pub(super) uv_boundary_buf: wgpu::Buffer,
-    pub(super) uv_overlap: UvOverlapResources,
-    pub(super) validation_colors: ValidationColorResources,
+pub struct Renderer {
+    pub targets: RenderTargets,
+    pub post: PostProcessing,
+    pub ibl_res: IblResources,
+    pub wire: WireframeResources,
+    pub layouts: Arc<BindGroupLayouts>,
+    pub pipelines: Pipelines,
+    pub uv_cam: UvCameraState,
+    pub uv_boundary_buf: wgpu::Buffer,
+    pub uv_overlap: UvOverlapResources,
+    pub validation_colors: ValidationColorResources,
     #[allow(unused)]
-    pub(super) shared_samplers: SharedSamplers,
-    pub(super) msaa_sample_count: u32,
-    pub(super) target_width: u32,
-    pub(super) target_height: u32,
+    pub shared_samplers: SharedSamplers,
+    pub msaa_sample_count: u32,
+    pub target_width: u32,
+    pub target_height: u32,
 }
 
 impl Renderer {
-    pub(super) fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+    pub fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.pipelines.background);
         pass.set_bind_group(0, &self.wire.gradient_bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 
-    pub(super) fn render_empty_pass(
+    pub fn render_empty_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pds: &PaneDisplaySettings,
@@ -147,7 +148,7 @@ impl Renderer {
         self.draw_background_gradient(&mut pass);
     }
 
-    pub(super) fn render_gbuffer_pass(
+    pub fn render_gbuffer_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
@@ -194,7 +195,7 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_ssao_passes(
+    pub fn render_ssao_passes(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         cam_bg: &wgpu::BindGroup,
@@ -264,7 +265,7 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_shadow_pass(
+    pub fn render_shadow_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
@@ -298,7 +299,7 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_main_pass(
+    pub fn render_main_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
@@ -612,7 +613,7 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_uv_overlap_count_pass(
+    pub fn render_uv_overlap_count_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
@@ -645,7 +646,7 @@ impl Renderer {
         }
     }
 
-    pub(super) fn render_uv_map_pass(
+    pub fn render_uv_map_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,

@@ -1,13 +1,13 @@
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::bloom::BLOOM_STRENGTH;
-use crate::cgi::pipelines::Pipelines;
-use crate::cgi::ssao::SsaoState;
-use crate::preferences::ToneMode;
+use crate::bind_groups::BindGroupLayouts;
+use crate::bloom::BLOOM_STRENGTH;
+use crate::pipelines::Pipelines;
+use crate::ssao::SsaoState;
+use solarxy_core::preferences::ToneMode;
 use wgpu::util::DeviceExt;
 
 const SSAO_STRENGTH: f32 = 0.8;
 
-pub(crate) struct CompositeState {
+pub struct CompositeState {
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
     bind_group: wgpu::BindGroup,

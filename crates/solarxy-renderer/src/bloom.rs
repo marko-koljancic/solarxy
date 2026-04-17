@@ -1,16 +1,16 @@
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::pipelines::Pipelines;
-use crate::cgi::texture;
+use crate::bind_groups::BindGroupLayouts;
+use crate::pipelines::Pipelines;
+use crate::texture;
 
 const BLOOM_THRESHOLD: f32 = 0.8;
-pub(crate) const BLOOM_STRENGTH: f32 = 0.8;
+pub const BLOOM_STRENGTH: f32 = 0.8;
 
-pub(crate) struct BloomState {
+pub struct BloomState {
     _ping_texture: wgpu::Texture,
-    pub(crate) ping_view: wgpu::TextureView,
+    pub ping_view: wgpu::TextureView,
     _pong_texture: wgpu::Texture,
     pong_view: wgpu::TextureView,
-    pub(crate) sampler: wgpu::Sampler,
+    pub sampler: wgpu::Sampler,
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
     extract_bind_group: wgpu::BindGroup,

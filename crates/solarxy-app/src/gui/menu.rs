@@ -1,4 +1,4 @@
-use crate::preferences::{
+use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     ProjectionMode, ToneMode, UvMode, ViewMode,
 };

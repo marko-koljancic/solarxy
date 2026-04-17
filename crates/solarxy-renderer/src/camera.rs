@@ -1,6 +1,6 @@
 use winit::{event::MouseButton, keyboard::KeyCode};
 use super::model;
-use crate::preferences::ProjectionMode;
+use solarxy_core::preferences::ProjectionMode;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -374,7 +374,7 @@ impl CameraController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aabb::AABB;
+    use solarxy_core::AABB;
 
     fn default_camera() -> Camera {
         Camera {

@@ -1,5 +1,5 @@
-use crate::cgi::resources::ModelStats;
-use crate::format_number;
+use solarxy_renderer::resources::ModelStats;
+use solarxy_core::format_number;
 
 pub(super) struct ModelInfo {
     pub filename: String,

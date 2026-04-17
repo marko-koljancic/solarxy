@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-pub use crate::aabb::AABB;
+pub use solarxy_core::AABB;
 
 use super::material::Material;
 

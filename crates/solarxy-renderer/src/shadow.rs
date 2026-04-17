@@ -1,7 +1,7 @@
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::camera::OPENGL_TO_WGPU_MATRIX;
-use crate::cgi::light::LightsUniform;
-use crate::cgi::model::Model;
+use crate::bind_groups::BindGroupLayouts;
+use crate::camera::OPENGL_TO_WGPU_MATRIX;
+use crate::light::LightsUniform;
+use crate::model::Model;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -10,16 +10,16 @@ struct ShadowUniform {
     light_vp: [[f32; 4]; 4],
 }
 
-pub(crate) struct ShadowState {
-    pub(crate) texture_view: wgpu::TextureView,
-    pub(crate) pass_bind_group: wgpu::BindGroup,
-    pub(crate) sample_bind_group: wgpu::BindGroup,
+pub struct ShadowState {
+    pub texture_view: wgpu::TextureView,
+    pub pass_bind_group: wgpu::BindGroup,
+    pub sample_bind_group: wgpu::BindGroup,
     uniform: ShadowUniform,
     uniform_buffer: wgpu::Buffer,
 }
 
 impl ShadowState {
-    pub(crate) fn new(
+    pub fn new(
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
         lights_uniform: &LightsUniform,
@@ -107,7 +107,7 @@ impl ShadowState {
         }
     }
 
-    pub(crate) fn update_light_vp(
+    pub fn update_light_vp(
         &mut self,
         queue: &wgpu::Queue,
         light_pos: cgmath::Point3<f32>,
@@ -124,7 +124,7 @@ impl ShadowState {
     }
 }
 
-pub(crate) fn compute_light_vp(
+pub fn compute_light_vp(
     light_pos: cgmath::Point3<f32>,
     target: cgmath::Point3<f32>,
     extent: f32,

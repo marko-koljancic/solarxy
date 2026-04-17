@@ -246,97 +246,96 @@ impl State {
             _ => {}
         }
 
-        let poll = self.pending_load.as_ref().map(|p| p.receiver.try_recv());
-        match poll {
-            Some(Ok(Ok(mut new_scene))) => {
-                let pending = self.pending_load.take().unwrap();
-                let active_ibl = self.active_ibl();
-                new_scene.light_bind_group = create_light_bind_group(
-                    &self.device,
-                    &self.renderer.layouts,
-                    &new_scene.light_buffer,
-                    active_ibl,
-                    &self.renderer.ibl_res.brdf_lut,
-                );
-                let file_size = std::fs::metadata(&pending.path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                let bounds_size = new_scene.model.bounds.size();
-                self.gui.update_model_info(
-                    &pending.filename,
-                    &pending.path,
-                    file_size,
-                    new_scene.model.meshes.len(),
-                    new_scene.model.materials.len(),
-                    &new_scene.stats,
-                    [bounds_size.x, bounds_size.y, bounds_size.z],
-                    new_scene.model.has_uvs,
-                );
-                tracing::info!(
-                    "Loaded {}: {} verts, {} tris, {} meshes",
-                    pending.filename,
-                    new_scene.stats.verts,
-                    new_scene.stats.tris,
-                    new_scene.model.meshes.len(),
-                );
-                self.gui.clear_loading_message();
-                self.window
-                    .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
-                preferences::add_recent_file(&mut self.preferences, &pending.path);
-                self.gui.notify_model_loaded();
-                self.scene = Some(new_scene);
-                if let Some(scene) = &mut self.scene {
-                    scene
-                        .cam
-                        .resize(self.config.width as f32 / self.config.height as f32);
-                    scene
-                        .cam
-                        .set_projection(self.preferences.display.projection_mode);
-                }
-
-                self.view.secondary_cam = None;
-                if self.view.display.layout != ViewLayout::Single
-                    && let Some(scene) = &self.scene
-                {
-                    self.view.secondary_cam = Some(
+        if let Some(pending) = self.pending_load.take() {
+            match pending.receiver.try_recv() {
+                Ok(Ok(mut new_scene)) => {
+                    let active_ibl = self.active_ibl();
+                    new_scene.light_bind_group = create_light_bind_group(
+                        &self.device,
+                        &self.renderer.layouts,
+                        &new_scene.light_buffer,
+                        active_ibl,
+                        &self.renderer.ibl_res.brdf_lut,
+                    );
+                    let file_size = std::fs::metadata(&pending.path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    let bounds_size = new_scene.model.bounds.size();
+                    self.gui.update_model_info(
+                        &pending.filename,
+                        &pending.path,
+                        file_size,
+                        new_scene.model.meshes.len(),
+                        new_scene.model.materials.len(),
+                        &new_scene.stats,
+                        [bounds_size.x, bounds_size.y, bounds_size.z],
+                        new_scene.model.has_uvs,
+                    );
+                    tracing::info!(
+                        "Loaded {}: {} verts, {} tris, {} meshes",
+                        pending.filename,
+                        new_scene.stats.verts,
+                        new_scene.stats.tris,
+                        new_scene.model.meshes.len(),
+                    );
+                    self.gui.clear_loading_message();
+                    self.window
+                        .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
+                    preferences::add_recent_file(&mut self.preferences, &pending.path);
+                    self.gui.notify_model_loaded();
+                    self.scene = Some(new_scene);
+                    if let Some(scene) = &mut self.scene {
                         scene
                             .cam
-                            .clone_with_new_resources(&self.device, &self.renderer.layouts.camera),
-                    );
-                }
+                            .resize(self.config.width as f32 / self.config.height as f32);
+                        scene
+                            .cam
+                            .set_projection(self.preferences.display.projection_mode);
+                    }
 
-                self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
-                self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
-                self.view.pane_settings[0].ghosted_wireframe = false;
-                self.view.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
-                self.view.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
-                self.view.pane_settings[0].inspection_mode = InspectionMode::Shaded;
-                self.view.pane_settings[0].texel_density_target = 1.0;
-                self.view.pane_settings[0].pane_mode = PaneMode::Scene3D;
-                self.view.pane_settings[0].uv_bg = UvMapBackground::Dark;
-                self.view.pane_settings[0].uv_offset = [0.0, 0.0];
-                self.view.pane_settings[0].uv_zoom = 1.0;
-                self.view.pane_settings[0].show_uv_overlap = false;
-                self.view.pane_settings[0].show_validation = false;
-                self.renderer.uv_overlap.overlap_pct = None;
-                self.renderer.uv_overlap.stats_dirty = false;
-                self.view.display.turntable_active = self.preferences.display.turntable_active;
+                    self.view.secondary_cam = None;
+                    if self.view.display.layout != ViewLayout::Single
+                        && let Some(scene) = &self.scene
+                    {
+                        self.view.secondary_cam = Some(scene.cam.clone_with_new_resources(
+                            &self.device,
+                            &self.renderer.layouts.camera,
+                        ));
+                    }
+
+                    self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
+                    self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
+                    self.view.pane_settings[0].ghosted_wireframe = false;
+                    self.view.pane_settings[0].normals_mode = self.preferences.display.normals_mode;
+                    self.view.pane_settings[0].uv_mode = self.preferences.display.uv_mode;
+                    self.view.pane_settings[0].inspection_mode = InspectionMode::Shaded;
+                    self.view.pane_settings[0].texel_density_target = 1.0;
+                    self.view.pane_settings[0].pane_mode = PaneMode::Scene3D;
+                    self.view.pane_settings[0].uv_bg = UvMapBackground::Dark;
+                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
+                    self.view.pane_settings[0].uv_zoom = 1.0;
+                    self.view.pane_settings[0].show_uv_overlap = false;
+                    self.view.pane_settings[0].show_validation = false;
+                    self.renderer.uv_overlap.overlap_pct = None;
+                    self.renderer.uv_overlap.stats_dirty = false;
+                    self.view.display.turntable_active = self.preferences.display.turntable_active;
+                }
+                Ok(Err(e)) => {
+                    self.gui.clear_loading_message();
+                    tracing::error!("Failed to load model: {}", e);
+                    self.gui
+                        .set_toast(&format!("Failed to load: {}", e), ToastSeverity::Error);
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.pending_load = Some(pending);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.gui.clear_loading_message();
+                    tracing::error!("Model loading thread crashed");
+                    self.gui
+                        .set_toast("Loading thread crashed", ToastSeverity::Error);
+                }
             }
-            Some(Ok(Err(e))) => {
-                self.pending_load.take();
-                self.gui.clear_loading_message();
-                tracing::error!("Failed to load model: {}", e);
-                self.gui
-                    .set_toast(&format!("Failed to load: {}", e), ToastSeverity::Error);
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.pending_load.take();
-                self.gui.clear_loading_message();
-                tracing::error!("Model loading thread crashed");
-                self.gui
-                    .set_toast("Loading thread crashed", ToastSeverity::Error);
-            }
-            _ => {}
         }
 
         let now = Instant::now();

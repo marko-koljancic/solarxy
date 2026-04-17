@@ -1,8 +1,8 @@
-use crate::preferences::{
+use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
 };
-use crate::state::renderer::PostProcessing;
+use solarxy_renderer::frame::PostProcessing;
 use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
 
 #[derive(Default)]

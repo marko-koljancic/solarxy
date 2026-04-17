@@ -33,7 +33,7 @@ pub struct SsaoState {
 }
 
 impl SsaoState {
-    pub(crate) fn new(
+    pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layouts: &BindGroupLayouts,
@@ -193,7 +193,7 @@ impl SsaoState {
         }
     }
 
-    pub(crate) fn resize(
+    pub fn resize(
         &mut self,
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
@@ -223,7 +223,7 @@ impl SsaoState {
         self.rebuild_bind_groups(device, layouts);
     }
 
-    pub(crate) fn rebuild_bind_groups(
+    pub fn rebuild_bind_groups(
         &mut self,
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,

@@ -34,6 +34,8 @@ pub mod preferences;
 #[cfg(feature = "config")]
 pub mod report;
 pub mod validation;
+#[cfg(feature = "config")]
+pub mod view_config;
 
 pub use aabb::AABB;
 pub use geometry::{RawImageData, RawMaterialData, RawMeshData, RawModelData};

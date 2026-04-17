@@ -6,7 +6,7 @@ use winit::keyboard::KeyCode;
 use super::camera::{
     camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform,
 };
-use crate::preferences::ProjectionMode;
+use solarxy_core::preferences::ProjectionMode;
 use super::model::AABB;
 
 struct CameraTransition {

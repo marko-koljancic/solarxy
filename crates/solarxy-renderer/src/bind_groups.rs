@@ -1,28 +1,28 @@
-pub(crate) struct BindGroupLayouts {
-    pub(crate) texture: wgpu::BindGroupLayout,
-    pub(crate) camera: wgpu::BindGroupLayout,
-    pub(crate) light: wgpu::BindGroupLayout,
-    pub(crate) shadow_pass: wgpu::BindGroupLayout,
-    pub(crate) shadow_read: wgpu::BindGroupLayout,
-    pub(crate) grid_params: wgpu::BindGroupLayout,
-    pub(crate) normals_params: wgpu::BindGroupLayout,
-    pub(crate) background: wgpu::BindGroupLayout,
-    pub(crate) uv_checker: wgpu::BindGroupLayout,
-    pub(crate) bloom_texture: wgpu::BindGroupLayout,
-    pub(crate) bloom_params: wgpu::BindGroupLayout,
-    pub(crate) composite: wgpu::BindGroupLayout,
-    pub(crate) composite_params: wgpu::BindGroupLayout,
-    pub(crate) edge_geometry: wgpu::BindGroupLayout,
-    pub(crate) wireframe_params: wgpu::BindGroupLayout,
-    pub(crate) ssao: wgpu::BindGroupLayout,
-    pub(crate) ssao_blur: wgpu::BindGroupLayout,
-    pub(crate) ssao_read: wgpu::BindGroupLayout,
-    pub(crate) uv_overlap_read: wgpu::BindGroupLayout,
-    pub(crate) validation_color: wgpu::BindGroupLayout,
+pub struct BindGroupLayouts {
+    pub texture: wgpu::BindGroupLayout,
+    pub camera: wgpu::BindGroupLayout,
+    pub light: wgpu::BindGroupLayout,
+    pub shadow_pass: wgpu::BindGroupLayout,
+    pub shadow_read: wgpu::BindGroupLayout,
+    pub grid_params: wgpu::BindGroupLayout,
+    pub normals_params: wgpu::BindGroupLayout,
+    pub background: wgpu::BindGroupLayout,
+    pub uv_checker: wgpu::BindGroupLayout,
+    pub bloom_texture: wgpu::BindGroupLayout,
+    pub bloom_params: wgpu::BindGroupLayout,
+    pub composite: wgpu::BindGroupLayout,
+    pub composite_params: wgpu::BindGroupLayout,
+    pub edge_geometry: wgpu::BindGroupLayout,
+    pub wireframe_params: wgpu::BindGroupLayout,
+    pub ssao: wgpu::BindGroupLayout,
+    pub ssao_blur: wgpu::BindGroupLayout,
+    pub ssao_read: wgpu::BindGroupLayout,
+    pub uv_overlap_read: wgpu::BindGroupLayout,
+    pub validation_color: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
-    pub(crate) fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
         let texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("texture_binding_group_layout"),
             entries: &[

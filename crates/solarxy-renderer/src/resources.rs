@@ -10,7 +10,7 @@ pub fn is_supported_model_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| {
-            crate::SUPPORTED_EXTENSIONS
+            solarxy_core::SUPPORTED_EXTENSIONS
                 .iter()
                 .any(|s| ext.eq_ignore_ascii_case(s))
         })
@@ -74,7 +74,7 @@ fn upload_model(
             false,
             &mat.name,
             "diffuse",
-        );
+        )?;
         let normal_texture = load_or_fallback_texture(
             device,
             queue,
@@ -83,8 +83,8 @@ fn upload_model(
             true,
             &mat.name,
             "normal",
-        );
-        let orm_texture = load_or_create_orm(device, queue, mat);
+        )?;
+        let orm_texture = load_or_create_orm(device, queue, mat)?;
         let emissive_texture = load_or_fallback_texture(
             device,
             queue,
@@ -93,7 +93,7 @@ fn upload_model(
             false,
             &mat.name,
             "emissive",
-        );
+        )?;
 
         let uniform = material::MaterialUniform {
             roughness_factor: mat.roughness_factor,
@@ -119,10 +119,10 @@ fn upload_model(
     }
 
     if gpu_materials.is_empty() {
-        let diffuse = create_default_texture_colored(device, queue, [204, 204, 204, 255]);
-        let normal = create_default_texture(device, queue, true);
-        let orm = create_default_orm_texture(device, queue);
-        let emissive = create_default_emissive_texture(device, queue);
+        let diffuse = create_default_texture_colored(device, queue, [204, 204, 204, 255])?;
+        let normal = create_default_texture(device, queue, true)?;
+        let orm = create_default_orm_texture(device, queue)?;
+        let emissive = create_default_emissive_texture(device, queue)?;
         gpu_materials.push(material::Material::new(
             device,
             "clay_default",
@@ -398,18 +398,17 @@ fn create_default_texture_colored(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     rgba: [u8; 4],
-) -> texture::Texture {
+) -> anyhow::Result<texture::Texture> {
     let img =
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)
-        .expect("Failed to create default texture")
 }
 
 fn create_default_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     is_normal_map: bool,
-) -> texture::Texture {
+) -> anyhow::Result<texture::Texture> {
     let color = if is_normal_map {
         image::Rgba([128u8, 128, 255, 255])
     } else {
@@ -419,10 +418,12 @@ fn create_default_texture(
     let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, color));
 
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), is_normal_map)
-        .expect("Failed to create default texture")
 }
 
-fn create_default_orm_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> texture::Texture {
+fn create_default_orm_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> anyhow::Result<texture::Texture> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -432,10 +433,12 @@ fn create_default_orm_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> tex
         Some("default_orm"),
         true,
     )
-    .expect("Failed to create default ORM texture")
 }
 
-fn create_default_emissive_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> texture::Texture {
+fn create_default_emissive_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> anyhow::Result<texture::Texture> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -445,7 +448,6 @@ fn create_default_emissive_texture(device: &wgpu::Device, queue: &wgpu::Queue) -
         Some("default_emissive"),
         false,
     )
-    .expect("Failed to create default emissive texture")
 }
 
 fn load_or_fallback_texture(
@@ -456,7 +458,7 @@ fn load_or_fallback_texture(
     is_linear: bool,
     mat_name: &str,
     kind: &str,
-) -> texture::Texture {
+) -> anyhow::Result<texture::Texture> {
     if let Some(data) = embedded {
         texture::Texture::from_raw_rgba(
             device,
@@ -467,7 +469,7 @@ fn load_or_fallback_texture(
             Some(mat_name),
             is_linear,
         )
-        .unwrap_or_else(|e| {
+        .or_else(|e| {
             tracing::warn!("Failed to load embedded {kind} texture: {e}");
             create_default_texture(device, queue, is_linear)
         })
@@ -475,7 +477,7 @@ fn load_or_fallback_texture(
         match path {
             Some(p) => {
                 let p_str = p.to_string_lossy();
-                load_texture(&p_str, is_linear, device, queue).unwrap_or_else(|e| {
+                load_texture(&p_str, is_linear, device, queue).or_else(|e| {
                     tracing::warn!("Failed to load {kind} texture '{}': {e}", p.display());
                     create_default_texture(device, queue, is_linear)
                 })
@@ -497,7 +499,7 @@ fn load_or_create_orm(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     mat: &RawMaterialData,
-) -> texture::Texture {
+) -> anyhow::Result<texture::Texture> {
     let mr_tex = if mat.metallic_roughness_texture_data.is_some()
         || mat.metallic_roughness_texture_path.is_some()
     {
@@ -509,7 +511,7 @@ fn load_or_create_orm(
             true,
             &mat.name,
             "orm",
-        )
+        )?
     } else {
         return create_default_orm_texture(device, queue);
     };
@@ -523,14 +525,14 @@ fn load_or_create_orm(
             _ => false,
         };
         if same_image {
-            return mr_tex;
+            return Ok(mr_tex);
         }
 
         if let Some(ref occ_data) = mat.occlusion_texture_data
             && let Some(composited) =
                 composite_orm_pixels(mat.metallic_roughness_texture_data.as_ref(), occ_data)
         {
-            return texture::Texture::from_raw_rgba(
+            return Ok(texture::Texture::from_raw_rgba(
                 device,
                 queue,
                 &composited.pixels,
@@ -539,11 +541,11 @@ fn load_or_create_orm(
                 Some(&mat.name),
                 true,
             )
-            .unwrap_or(mr_tex);
+            .unwrap_or(mr_tex));
         }
     }
 
-    mr_tex
+    Ok(mr_tex)
 }
 
 fn composite_orm_pixels(

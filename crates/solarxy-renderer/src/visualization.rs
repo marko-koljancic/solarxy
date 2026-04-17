@@ -1,7 +1,7 @@
-use crate::aabb::AABB;
-use crate::cgi::bind_groups::BindGroupLayouts;
-use crate::cgi::model::{self, Model};
-use crate::cgi::resources;
+use solarxy_core::AABB;
+use crate::bind_groups::BindGroupLayouts;
+use crate::model::{self, Model};
+use crate::resources;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -12,37 +12,37 @@ struct NormalsColor {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct GridUniform {
-    pub(crate) cell_size: f32,
-    pub(crate) color: [f32; 3],
+pub struct GridUniform {
+    pub cell_size: f32,
+    pub color: [f32; 3],
 }
 
 impl GridUniform {
     pub const COLOR_OFFSET: u64 = std::mem::offset_of!(Self, color) as u64;
 }
 
-pub(crate) struct VisualizationState {
-    pub(crate) grid_mesh: model::Mesh,
-    pub(crate) grid_params_bind_group: wgpu::BindGroup,
-    pub(crate) grid_uniform_buf: wgpu::Buffer,
-    pub(crate) floor_mesh: model::Mesh,
-    pub(crate) vertex_normals_buf: wgpu::Buffer,
-    pub(crate) face_normals_buf: wgpu::Buffer,
-    pub(crate) vertex_normals_count: u32,
-    pub(crate) face_normals_count: u32,
-    pub(crate) face_normals_params_bind_group: wgpu::BindGroup,
-    pub(crate) vertex_normals_params_bind_group: wgpu::BindGroup,
-    pub(crate) axes_vertex_buf: wgpu::Buffer,
-    pub(crate) bounds_whole_buf: wgpu::Buffer,
-    pub(crate) bounds_whole_count: u32,
-    pub(crate) bounds_per_mesh_buf: wgpu::Buffer,
-    pub(crate) bounds_per_mesh_count: u32,
-    pub(crate) local_axes_vertex_buf: wgpu::Buffer,
-    pub(crate) local_axes_vertex_count: u32,
+pub struct VisualizationState {
+    pub grid_mesh: model::Mesh,
+    pub grid_params_bind_group: wgpu::BindGroup,
+    pub grid_uniform_buf: wgpu::Buffer,
+    pub floor_mesh: model::Mesh,
+    pub vertex_normals_buf: wgpu::Buffer,
+    pub face_normals_buf: wgpu::Buffer,
+    pub vertex_normals_count: u32,
+    pub face_normals_count: u32,
+    pub face_normals_params_bind_group: wgpu::BindGroup,
+    pub vertex_normals_params_bind_group: wgpu::BindGroup,
+    pub axes_vertex_buf: wgpu::Buffer,
+    pub bounds_whole_buf: wgpu::Buffer,
+    pub bounds_whole_count: u32,
+    pub bounds_per_mesh_buf: wgpu::Buffer,
+    pub bounds_per_mesh_count: u32,
+    pub local_axes_vertex_buf: wgpu::Buffer,
+    pub local_axes_vertex_count: u32,
 }
 
 impl VisualizationState {
-    pub(crate) fn new(
+    pub fn new(
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
         model: &Model,

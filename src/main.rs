@@ -34,7 +34,7 @@ struct GuiArgs {
 fn main() -> anyhow::Result<()> {
     let args = GuiArgs::parse();
 
-    let console_buffer = solarxy::console::new_log_buffer();
+    let console_buffer = solarxy_app::console::new_log_buffer();
     let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
 
     let stderr_filter =
@@ -49,8 +49,8 @@ fn main() -> anyhow::Result<()> {
             directive.into()
         });
 
-    let console_layer = solarxy::console::ConsoleLayer::new(console_buffer.clone(), offset)
-        .with_filter(
+    let console_layer =
+        solarxy_app::console::ConsoleLayer::new(console_buffer.clone(), offset).with_filter(
             tracing_subscriber::EnvFilter::try_from_env("SOLARXY_CONSOLE_LOG")
                 .unwrap_or_else(|_| "solarxy=debug,wgpu_hal=warn,wgpu_core=warn".into()),
         );
@@ -70,5 +70,5 @@ fn main() -> anyhow::Result<()> {
 
     let preferences = solarxy_core::preferences::load();
 
-    solarxy::run_viewer(model_path, preferences, console_buffer)
+    solarxy_app::run_viewer(model_path, preferences, console_buffer)
 }

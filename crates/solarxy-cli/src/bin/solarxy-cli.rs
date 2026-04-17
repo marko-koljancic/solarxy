@@ -1,5 +1,7 @@
 use std::fs;
 use std::io::{self, IsTerminal};
+use std::path::Path;
+use std::process::ExitCode;
 
 use anyhow::Context;
 use clap::Parser;
@@ -20,7 +22,7 @@ const APP_INFO: solarxy_cli::help::AppInfo = solarxy_cli::help::AppInfo {
     license: env!("CARGO_PKG_LICENSE"),
 };
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -42,11 +44,11 @@ fn main() -> anyhow::Result<()> {
         println!("Repository   {repository}");
         println!("License      {license}");
         println!("Contact      https://koljam.com");
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     if args.update {
-        return run_update();
+        return run_update().map(|()| ExitCode::SUCCESS);
     }
 
     let model_path = args
@@ -60,20 +62,23 @@ fn main() -> anyhow::Result<()> {
     let preferences = solarxy_core::preferences::load();
 
     match args.mode {
-        OperationMode::View => exec_gui(model_path.as_deref()),
-        OperationMode::Analyze => run_analyze(model_path, args.format, args.output),
+        OperationMode::View => Ok(exec_gui(model_path.as_deref())),
+        OperationMode::Analyze => {
+            run_analyze(model_path, &args.format, args.output.as_deref())
+                .map(|()| ExitCode::SUCCESS)
+        }
         OperationMode::Preferences => {
             PreferencesApp::new(preferences).run()?;
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
         OperationMode::Docs => {
             DocsApp::new(APP_INFO).run()?;
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
 
-fn exec_gui(model_path: Option<&str>) -> anyhow::Result<()> {
+fn exec_gui(model_path: Option<&str>) -> ExitCode {
     let gui_bin_name = if cfg!(target_os = "windows") {
         "solarxy.exe"
     } else {
@@ -95,10 +100,10 @@ fn exec_gui(model_path: Option<&str>) -> anyhow::Result<()> {
     }
 
     match cmd.status() {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => {
-            std::process::exit(status.code().unwrap_or(1));
-        }
+        Ok(status) => status
+            .code()
+            .and_then(|c| u8::try_from(c).ok())
+            .map_or(ExitCode::FAILURE, ExitCode::from),
         Err(e) => {
             eprintln!("Failed to launch solarxy GUI: {e}");
             eprintln!();
@@ -108,7 +113,7 @@ fn exec_gui(model_path: Option<&str>) -> anyhow::Result<()> {
             eprintln!("  Windows: winget install Koljam.Solarxy");
             eprintln!();
             eprintln!("Or download from https://github.com/marko-koljancic/solarxy/releases");
-            std::process::exit(127);
+            ExitCode::from(127)
         }
     }
 }
@@ -116,8 +121,8 @@ fn exec_gui(model_path: Option<&str>) -> anyhow::Result<()> {
 #[cfg(feature = "analyzer")]
 fn run_analyze(
     model_path: Option<String>,
-    format: OutputFormat,
-    output: Option<std::path::PathBuf>,
+    format: &OutputFormat,
+    output: Option<&Path>,
 ) -> anyhow::Result<()> {
     let model_path =
         model_path.ok_or_else(|| anyhow::anyhow!("Model path required for analyze mode"))?;
@@ -129,16 +134,16 @@ fn run_analyze(
         OutputFormat::Text => report.to_string(),
     };
 
-    if let Some(ref output_path) = output {
+    if let Some(output_path) = output {
         std::fs::write(output_path, &rendered).context("Failed to write report")?;
         tracing::info!("Report written to {}", output_path.display());
         Ok(())
-    } else if format == OutputFormat::Json && io::stdout().is_terminal() {
+    } else if *format == OutputFormat::Json && io::stdout().is_terminal() {
         let json_path = std::path::Path::new(&model_path).with_extension("json");
         std::fs::write(&json_path, &rendered).context("Failed to write JSON report")?;
         tracing::info!("Report written to {}", json_path.display());
         Ok(())
-    } else if format == OutputFormat::Json || !io::stdout().is_terminal() {
+    } else if *format == OutputFormat::Json || !io::stdout().is_terminal() {
         print!("{rendered}");
         Ok(())
     } else {
@@ -150,14 +155,15 @@ fn run_analyze(
 #[cfg(not(feature = "analyzer"))]
 fn run_analyze(
     _model_path: Option<String>,
-    _format: OutputFormat,
-    _output: Option<std::path::PathBuf>,
+    _format: &OutputFormat,
+    _output: Option<&Path>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Analyzer not available: rebuild solarxy-cli with the 'analyzer' feature")
 }
 
 #[cfg(feature = "updater")]
 fn run_update() -> anyhow::Result<()> {
+    use axoupdater::AxoUpdater;
     use solarxy_core::install_source::{InstallSource, detect};
 
     match detect() {
@@ -174,7 +180,6 @@ fn run_update() -> anyhow::Result<()> {
         _ => {}
     }
 
-    use axoupdater::AxoUpdater;
     let mut updater = AxoUpdater::new_for("solarxy-cli");
     updater.load_receipt()?;
     if updater.run_sync()?.is_some() {

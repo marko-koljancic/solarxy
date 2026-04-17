@@ -1,4 +1,4 @@
-use crate::preferences::ProjectionMode;
+use solarxy_core::preferences::ProjectionMode;
 use crate::state::view_state::ViewLayout;
 
 #[derive(Default)]

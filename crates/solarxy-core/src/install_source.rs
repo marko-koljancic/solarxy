@@ -1,12 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// Where this Solarxy binary was installed from.
-///
-/// Detected at first call and cached. Used by the GUI to pick the right
-/// "Check for Updates" UX (open Flathub page, show `winget upgrade` command,
-/// fall back to GitHub releases) and by the CLI to refuse self-update on
-/// package-managed installs that would otherwise be corrupted by axoupdater.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallSource {
     Flatpak,
@@ -25,7 +19,6 @@ pub enum UpdateHint {
     OpenUrl(String),
     ShowCommand(String),
     OpenReleasesPage,
-    RunAxoupdater,
 }
 
 const RELEASES_URL: &str = "https://github.com/marko-koljancic/solarxy/releases";

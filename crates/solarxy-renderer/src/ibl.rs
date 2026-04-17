@@ -2,23 +2,23 @@ use std::path::Path;
 
 use half::f16;
 
-pub(crate) struct BrdfLut {
+pub struct BrdfLut {
     #[allow(dead_code)]
-    pub(crate) texture: wgpu::Texture,
-    pub(crate) view: wgpu::TextureView,
-    pub(crate) sampler: wgpu::Sampler,
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
 }
 
-pub(crate) struct IblState {
+pub struct IblState {
     #[allow(dead_code)]
-    pub(crate) irradiance_texture: wgpu::Texture,
-    pub(crate) irradiance_view: wgpu::TextureView,
-    pub(crate) sampler: wgpu::Sampler,
+    pub irradiance_texture: wgpu::Texture,
+    pub irradiance_view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
     #[allow(dead_code)]
-    pub(crate) prefiltered_texture: wgpu::Texture,
-    pub(crate) prefiltered_view: wgpu::TextureView,
-    pub(crate) prefiltered_sampler: wgpu::Sampler,
-    pub(crate) irradiance_average: [f32; 3],
+    pub prefiltered_texture: wgpu::Texture,
+    pub prefiltered_view: wgpu::TextureView,
+    pub prefiltered_sampler: wgpu::Sampler,
+    pub irradiance_average: [f32; 3],
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -56,7 +56,7 @@ const BRDF_LUT_SIZE: u32 = 512;
 const BRDF_LUT_SAMPLES: u32 = 1024;
 
 impl BrdfLut {
-    pub(crate) fn generate(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn generate(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let texture = generate_brdf_lut(device, queue);
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL BRDF LUT View"),
@@ -77,7 +77,7 @@ impl BrdfLut {
         }
     }
 
-    pub(crate) fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("IBL Fallback BRDF LUT"),
             size: wgpu::Extent3d {
@@ -134,7 +134,7 @@ impl BrdfLut {
 }
 
 impl IblState {
-    pub(crate) fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut pixel_bytes = [0u8; 8];
         write_rgba16f(&mut pixel_bytes, 0, 0.2, 0.2, 0.2, 1.0);
 
@@ -159,7 +159,7 @@ impl IblState {
         )
     }
 
-    pub(crate) fn from_sky_colors(
+    pub fn from_sky_colors(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         top: [f32; 3],
@@ -181,7 +181,7 @@ impl IblState {
         )
     }
 
-    pub(crate) fn from_hdri(
+    pub fn from_hdri(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         path: &Path,
