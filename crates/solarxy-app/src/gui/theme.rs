@@ -59,7 +59,7 @@ pub(super) fn configure_fonts(ctx: &egui::Context) {
         egui::FontData::from_static(include_bytes!(
             "../../../../res/Lilex/static/Lilex-Medium.ttf"
         ))
-            .into(),
+        .into(),
     );
     fonts
         .families

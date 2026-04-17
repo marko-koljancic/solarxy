@@ -182,7 +182,8 @@ pub(super) fn draw_sidebar(
                                     report.warning_count()
                                 ));
                                 for issue in &report.issues {
-                                    let color = solarxy_renderer::validation::issue_category(issue).color();
+                                    let color =
+                                        solarxy_renderer::validation::issue_category(issue).color();
                                     let egui_color = egui::Color32::from_rgba_unmultiplied(
                                         (color[0] * 255.0) as u8,
                                         (color[1] * 255.0) as u8,

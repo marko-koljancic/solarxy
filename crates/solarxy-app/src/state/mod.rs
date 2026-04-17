@@ -7,9 +7,7 @@ mod render;
 mod update;
 pub(crate) mod view_state;
 
-pub(super) use view_state::{
-    BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState,
-};
+pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
 pub(super) use solarxy_renderer::frame::{
     GradientUniform, IblResources, PostProcessing, RenderTargets, Renderer, UvOverlapResources,
@@ -22,15 +20,11 @@ pub(super) use solarxy_renderer::scene::{
 
 pub(super) use crate::gui::{EguiRenderer, ToastSeverity};
 pub(super) use solarxy_core::preferences::{
-    self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
-    Preferences, ProjectionMode, UvMapBackground, UvMode, ViewMode,
+    self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
+    ViewMode,
 };
-pub(super) use solarxy_renderer::bind_groups::BindGroupLayouts;
-pub(super) use solarxy_renderer::camera::Camera;
-pub(super) use solarxy_renderer::camera_state::CameraState;
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
 pub(super) use solarxy_renderer::light::LightsUniform;
-pub(super) use solarxy_renderer::resources;
 pub(super) use solarxy_renderer::texture;
 
 use std::sync::{Arc, mpsc};
@@ -80,11 +74,7 @@ pub struct State {
     pub window: Arc<Window>,
 }
 
-pub(super) fn compute_target_dimensions(
-    layout: ViewLayout,
-    width: u32,
-    height: u32,
-) -> (u32, u32) {
+pub(super) fn compute_target_dimensions(layout: ViewLayout, width: u32, height: u32) -> (u32, u32) {
     match layout {
         ViewLayout::Single => (width, height),
         ViewLayout::SplitVertical => {
@@ -120,7 +110,12 @@ mod tests {
     use super::*;
 
     fn pane(x: f32, y: f32, width: f32, height: f32) -> Pane {
-        Pane { x, y, width, height }
+        Pane {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     #[test]
@@ -198,27 +193,45 @@ mod tests {
 
     #[test]
     fn target_dims_single() {
-        assert_eq!(compute_target_dimensions(ViewLayout::Single, 1920, 1080), (1920, 1080));
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::Single, 1920, 1080),
+            (1920, 1080)
+        );
     }
 
     #[test]
     fn target_dims_vertical_split() {
-        assert_eq!(compute_target_dimensions(ViewLayout::SplitVertical, 1920, 1080), (960, 1080));
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 1920, 1080),
+            (960, 1080)
+        );
     }
 
     #[test]
     fn target_dims_horizontal_split() {
-        assert_eq!(compute_target_dimensions(ViewLayout::SplitHorizontal, 1920, 1080), (1920, 540));
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitHorizontal, 1920, 1080),
+            (1920, 540)
+        );
     }
 
     #[test]
     fn target_dims_odd_width() {
-        assert_eq!(compute_target_dimensions(ViewLayout::SplitVertical, 1921, 1080), (960, 1080));
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 1921, 1080),
+            (960, 1080)
+        );
     }
 
     #[test]
     fn target_dims_minimum() {
-        assert_eq!(compute_target_dimensions(ViewLayout::SplitVertical, 2, 2), (1, 2));
-        assert_eq!(compute_target_dimensions(ViewLayout::SplitHorizontal, 2, 2), (2, 1));
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitVertical, 2, 2),
+            (1, 2)
+        );
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::SplitHorizontal, 2, 2),
+            (2, 1)
+        );
     }
 }

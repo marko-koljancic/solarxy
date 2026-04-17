@@ -17,7 +17,6 @@ cgmath      = { workspace = true }
 bytemuck    = { version = "1.24", features = ["derive"] }
 half        = "2.0"
 exr         = "1.0"
-thiserror   = { workspace = true }
 tracing     = "0.1"
 anyhow      = { workspace = true }
 

@@ -297,10 +297,11 @@ impl State {
                     if self.view.display.layout != ViewLayout::Single
                         && let Some(scene) = &self.scene
                     {
-                        self.view.secondary_cam = Some(scene.cam.clone_with_new_resources(
-                            &self.device,
-                            &self.renderer.layouts.camera,
-                        ));
+                        self.view.secondary_cam =
+                            Some(scene.cam.clone_with_new_resources(
+                                &self.device,
+                                &self.renderer.layouts.camera,
+                            ));
                     }
 
                     self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;

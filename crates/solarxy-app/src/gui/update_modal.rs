@@ -10,7 +10,11 @@ impl UpdateModalState {
     pub fn new() -> Self {
         let source = InstallSource::Unknown;
         let hint = update_hint(source);
-        Self { open: false, source, hint }
+        Self {
+            open: false,
+            source,
+            hint,
+        }
     }
 
     pub fn refresh(&mut self) {

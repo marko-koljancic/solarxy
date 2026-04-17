@@ -118,11 +118,7 @@ impl Renderer {
         pass.draw(0..3, 0..1);
     }
 
-    pub fn render_empty_pass(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        pds: &PaneDisplaySettings,
-    ) {
+    pub fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, pds: &PaneDisplaySettings) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -195,11 +191,7 @@ impl Renderer {
         }
     }
 
-    pub fn render_ssao_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        cam_bg: &wgpu::BindGroup,
-    ) {
+    pub fn render_ssao_passes(&self, encoder: &mut wgpu::CommandEncoder, cam_bg: &wgpu::BindGroup) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("SSAO Pass"),
@@ -265,11 +257,7 @@ impl Renderer {
         }
     }
 
-    pub fn render_shadow_pass(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
-    ) {
+    pub fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Shadow Pass"),
             color_attachments: &[],

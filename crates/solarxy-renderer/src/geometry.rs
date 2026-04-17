@@ -128,8 +128,7 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         all_normals.extend_from_slice(&normals);
 
         let bounds = compute_bounds(&mesh.positions);
-        let normals_geo =
-            build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
+        let normals_geo = build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
         mesh_bounds.push(bounds);
         all_vertex_lines.extend(normals_geo.vertex_lines);
         all_face_lines.extend(normals_geo.face_lines);

@@ -63,10 +63,8 @@ fn main() -> anyhow::Result<ExitCode> {
 
     match args.mode {
         OperationMode::View => Ok(exec_gui(model_path.as_deref())),
-        OperationMode::Analyze => {
-            run_analyze(model_path, &args.format, args.output.as_deref())
-                .map(|()| ExitCode::SUCCESS)
-        }
+        OperationMode::Analyze => run_analyze(model_path, &args.format, args.output.as_deref())
+            .map(|()| ExitCode::SUCCESS),
         OperationMode::Preferences => {
             PreferencesApp::new(preferences).run()?;
             Ok(ExitCode::SUCCESS)

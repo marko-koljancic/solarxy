@@ -223,11 +223,7 @@ impl SsaoState {
         self.rebuild_bind_groups(device, layouts);
     }
 
-    pub fn rebuild_bind_groups(
-        &mut self,
-        device: &wgpu::Device,
-        layouts: &BindGroupLayouts,
-    ) {
+    pub fn rebuild_bind_groups(&mut self, device: &wgpu::Device, layouts: &BindGroupLayouts) {
         self.ssao_bind_group = create_ssao_bind_group(
             device,
             &layouts.ssao,

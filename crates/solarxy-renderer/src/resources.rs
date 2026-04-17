@@ -16,6 +16,35 @@ pub fn is_supported_model_extension(path: &Path) -> bool {
         })
 }
 
+#[cfg(test)]
+mod extension_tests {
+    use super::is_supported_model_extension;
+    use std::path::Path;
+
+    #[test]
+    fn known_extensions_accepted_case_insensitively() {
+        for ext in ["obj", "stl", "ply", "gltf", "glb", "OBJ", "PLY"] {
+            let name = format!("model.{ext}");
+            assert!(
+                is_supported_model_extension(Path::new(&name)),
+                "{ext} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_or_missing_extensions_rejected() {
+        for ext in ["txt", "png", "rs", "json", "fbx"] {
+            let name = format!("model.{ext}");
+            assert!(
+                !is_supported_model_extension(Path::new(&name)),
+                "{ext} should be rejected"
+            );
+        }
+        assert!(!is_supported_model_extension(Path::new("no_extension")));
+    }
+}
+
 pub fn load_model_any(
     file_path: &str,
     device: &wgpu::Device,

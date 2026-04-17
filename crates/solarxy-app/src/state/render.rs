@@ -4,9 +4,7 @@ use solarxy_core::preferences::{MaterialOverride, PaneMode, UvMapBackground};
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{
-    BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera,
-};
+use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
     pub fn render(&mut self) -> anyhow::Result<()> {

@@ -49,8 +49,8 @@ fn main() -> anyhow::Result<()> {
             directive.into()
         });
 
-    let console_layer =
-        solarxy_app::console::ConsoleLayer::new(console_buffer.clone(), offset).with_filter(
+    let console_layer = solarxy_app::console::ConsoleLayer::new(console_buffer.clone(), offset)
+        .with_filter(
             tracing_subscriber::EnvFilter::try_from_env("SOLARXY_CONSOLE_LOG")
                 .unwrap_or_else(|_| "solarxy=debug,wgpu_hal=warn,wgpu_core=warn".into()),
         );

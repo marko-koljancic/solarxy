@@ -3884,7 +3884,6 @@ dependencies = [
  "pollster",
  "solarxy-core",
  "solarxy-formats",
- "thiserror 2.0.17",
  "tracing",
  "wgpu",
  "winit",

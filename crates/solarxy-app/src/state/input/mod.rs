@@ -560,5 +560,4 @@ impl State {
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
         }
     }
-
 }

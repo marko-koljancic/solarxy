@@ -28,7 +28,6 @@ pub mod bloom;
 pub mod camera;
 pub mod camera_state;
 pub mod composite;
-pub mod error;
 pub mod frame;
 pub mod geometry;
 pub mod ibl;
@@ -45,5 +44,3 @@ pub mod texture;
 pub mod uv_camera;
 pub mod validation;
 pub mod visualization;
-
-pub use error::{RendererError, RendererResult};

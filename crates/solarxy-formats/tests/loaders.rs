@@ -1,10 +1,6 @@
-#![cfg(feature = "analyzer")]
-
 use std::path::Path;
 
-use solarxy_formats::obj;
-use solarxy_formats::ply;
-use solarxy_formats::stl;
+use solarxy_formats::{obj, ply, stl};
 
 fn fixture(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,38 +48,6 @@ fn load_stl_nonexistent() {
 #[test]
 fn load_ply_nonexistent() {
     assert!(ply::load_ply("/nonexistent/model.ply").is_err());
-}
-
-#[cfg(feature = "viewer")]
-#[test]
-fn format_extension_detection() {
-    use solarxy::cgi::resources::is_supported_model_extension;
-
-    for ext in &["obj", "stl", "ply", "gltf", "glb"] {
-        let name = format!("model.{}", ext);
-        assert!(
-            is_supported_model_extension(Path::new(&name)),
-            "{} should be supported",
-            ext
-        );
-    }
-    for ext in &["OBJ", "STL", "PLY", "GLTF", "GLB"] {
-        let name = format!("model.{}", ext);
-        assert!(
-            is_supported_model_extension(Path::new(&name)),
-            "{} should be supported (case-insensitive)",
-            ext
-        );
-    }
-    for ext in &["txt", "png", "rs", "json", "fbx"] {
-        let name = format!("model.{}", ext);
-        assert!(
-            !is_supported_model_extension(Path::new(&name)),
-            "{} should not be supported",
-            ext
-        );
-    }
-    assert!(!is_supported_model_extension(Path::new("no_extension")));
 }
 
 #[test]

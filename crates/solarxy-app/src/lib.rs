@@ -21,11 +21,9 @@
     clippy::wildcard_imports
 )]
 
-mod aabb;
 mod app;
 pub mod console;
 pub mod gui;
-pub mod preferences;
 mod state;
 
 pub use app::run_viewer;
