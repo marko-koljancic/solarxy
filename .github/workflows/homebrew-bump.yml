@@ -29,7 +29,15 @@ concurrency:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    if: ${{ secrets.HOMEBREW_TAP_PAT != '' }}
+    # Skip on prerelease tags so an RC never lands on the tap's main branch
+    # (this workflow pushes directly to main — no PR — so a misfire is
+    # destructive). `workflow_dispatch` is always allowed for manual retries.
+    if: >-
+      ${{
+        secrets.HOMEBREW_TAP_PAT != '' &&
+        (github.event_name == 'workflow_dispatch' ||
+         github.event.release.prerelease == false)
+      }}
     steps:
       - name: Resolve version
         id: ver

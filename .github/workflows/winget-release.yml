@@ -26,7 +26,14 @@ concurrency:
 jobs:
   publish:
     runs-on: windows-latest
-    if: ${{ secrets.WINGET_PAT != '' }}
+    # Skip on prerelease tags so an RC never reaches microsoft/winget-pkgs.
+    # `workflow_dispatch` is always allowed for manual retries.
+    if: >-
+      ${{
+        secrets.WINGET_PAT != '' &&
+        (github.event_name == 'workflow_dispatch' ||
+         github.event.release.prerelease == false)
+      }}
     steps:
       - name: Submit to winget-pkgs
         uses: vedantmgoyal9/winget-releaser@v2

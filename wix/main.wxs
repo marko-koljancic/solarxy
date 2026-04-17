@@ -120,20 +120,25 @@
                                 Action='set'
                                 System='yes'/>
                         </Component>
+                        <!--
+                          GUI MSI ships `solarxy.exe` only. The CLI ships as
+                          a separate MSI (`solarxy-cli-*.msi`), auto-generated
+                          by cargo-dist from the `solarxy-cli` crate's [[bin]]
+                          target + [package.metadata.wix]. cargo-dist stages
+                          binaries per-package, so a cross-crate
+                          `solarxy-cli.exe` reference here causes `light.exe`
+                          to fail with LGHT0103 ("The system cannot find the
+                          file"). The binary split matches the distribution
+                          model on other platforms — Flathub ships the GUI,
+                          Homebrew formula ships the CLI — so users opt into
+                          each independently.
+                        -->
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
                                 Name='solarxy.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\solarxy.exe'
-                                KeyPath='yes'/>
-                        </Component>
-                        <Component Id='binary1' Guid='*'>
-                            <File
-                                Id='exe1'
-                                Name='solarxy-cli.exe'
-                                DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\solarxy-cli.exe'
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>
@@ -220,7 +225,6 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
-            <ComponentRef Id='binary1'/>
             <ComponentRef Id='InstallSourceMarker'/>
             <ComponentRef Id='ApplicationShortcut'/>
 

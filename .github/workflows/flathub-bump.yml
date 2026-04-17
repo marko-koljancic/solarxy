@@ -29,7 +29,14 @@ concurrency:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    if: ${{ secrets.FLATHUB_PAT != '' }}
+    # Skip on prerelease tags (rc.*, beta.*, etc.) so an RC never propagates
+    # to Flathub. `workflow_dispatch` is always allowed for manual retries.
+    if: >-
+      ${{
+        secrets.FLATHUB_PAT != '' &&
+        (github.event_name == 'workflow_dispatch' ||
+         github.event.release.prerelease == false)
+      }}
     steps:
       - name: Resolve tag and version
         id: ver

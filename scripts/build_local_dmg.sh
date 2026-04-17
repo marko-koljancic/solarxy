@@ -28,13 +28,19 @@ if [ -z "${TARGET:-}" ]; then
     esac
 fi
 : "${BINARY:=target/release/solarxy}"
+: "${CLI_BINARY:=target/release/solarxy-cli}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [ ! -x "$BINARY" ]; then
-    echo "Binary not found at $BINARY."
+    echo "GUI binary not found at $BINARY."
     echo "Run 'cargo build --release' first."
+    exit 1
+fi
+if [ ! -x "$CLI_BINARY" ]; then
+    echo "CLI binary not found at $CLI_BINARY."
+    echo "Run 'cargo build --release -p solarxy-cli' first."
     exit 1
 fi
 if ! command -v create-dmg >/dev/null 2>&1; then
@@ -51,6 +57,8 @@ APP="$STAGE/Solarxy.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/solarxy"
 chmod +x "$APP/Contents/MacOS/solarxy"
+cp "$CLI_BINARY" "$APP/Contents/MacOS/solarxy-cli"
+chmod +x "$APP/Contents/MacOS/solarxy-cli"
 cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

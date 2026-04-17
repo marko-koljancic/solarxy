@@ -17,9 +17,9 @@ Nothing yet.
 
 ## [0.5.0-rc.8] — 2026-04-17
 
-Smoke-test RC for the post-rc.7 workspace restructuring. No user-visible
-changes since rc.7; cut to exercise the full installer matrix after the
-crate extraction.
+Final pre-stable RC. Validates the rc.7 packaging rearchitecture and the
+post-rc.7 crate-extraction refactor against the complete installer matrix.
+No user-visible behavior changes since rc.7.
 
 ### Changed (internal)
 
@@ -28,6 +28,41 @@ crate extraction.
   a thin GUI entrypoint; all wgpu state lives in `solarxy-renderer` and
   the winit `ApplicationHandler` + egui UI lives in `solarxy-app`. See
   [CLAUDE.md](../../CLAUDE.md) for the updated 6-crate layout.
+
+### Fixed (release-pipeline)
+
+- **Windows GUI MSI** — removed the `solarxy-cli.exe` binary reference
+  from `wix/main.wxs`. cargo-dist 0.31.0 stages binaries per-package
+  when building each workspace MSI, so the GUI staging directory only
+  contained `solarxy.exe`; the cross-crate reference caused `light.exe`
+  to fail with LGHT0103 ("file not found"). The CLI ships as its own
+  MSI — consistent with the rc.7 "two separate distributions" model on
+  every other platform.
+- **Windows CLI MSI** — added `[package.metadata.wix]` with stable
+  `upgrade-guid` and `path-guid` to `crates/solarxy-cli/Cargo.toml`.
+  Without explicit GUIDs, cargo-dist would regenerate them on every
+  build and Windows would not recognise subsequent installers as
+  upgrades of prior installs. Known gap deferred to 0.5.1: the CLI MSI
+  still lacks an `install-source` marker, so `solarxy-cli --update` on
+  MSI-installed CLIs falls through to axoupdater instead of printing
+  `winget upgrade`.
+- **Auto-bump workflows** — added a prerelease guard to
+  `flathub-bump.yml`, `homebrew-bump.yml`, and `winget-release.yml`.
+  The three workflows previously fired on every `release: published`
+  event, which would have published any successful RC to Flathub,
+  Homebrew, and winget as though it were stable. The guard skips the
+  jobs when `github.event.release.prerelease == true`;
+  `workflow_dispatch` runs are still allowed for manual retries.
+- **Rust 1.94 clippy** — added `#[must_use]` to `PipelineBuilder` and
+  `CameraState::clone_with_new_resources`; allow-listed
+  `clippy::pub_underscore_fields` in `solarxy-renderer` for the GPU
+  `_pad` uniform alignment fields. The lints were promoted under
+  `#[warn(clippy::pedantic)]` in recent toolchains.
+- **Local DMG smoke script** — `scripts/build_local_dmg.sh` now embeds
+  both `solarxy` and `solarxy-cli` into the `.app`, matching the CI
+  action (`.github/actions/native-bundle/action.yml`). Previously the
+  local script produced a malformed `.app` (no CLI binary), causing
+  `Install CLI.command` to hard-fail during local smoke.
 
 ---
 
