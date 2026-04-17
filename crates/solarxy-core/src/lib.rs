@@ -26,6 +26,8 @@
 pub mod aabb;
 pub mod geometry;
 #[cfg(feature = "config")]
+pub mod install_source;
+#[cfg(feature = "config")]
 pub mod json;
 #[cfg(feature = "config")]
 pub mod preferences;

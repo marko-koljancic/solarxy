@@ -15,6 +15,79 @@ Nothing yet.
 
 ---
 
+## [0.5.0-rc.7] — 2026-04-17
+
+Packaging rearchitecture release. Closes three platform-specific install
+bugs (Windows console flicker, Fedora 42 Vulkan-driver gap, macOS
+Gatekeeper friction) by splitting the binary and replacing the .deb / .rpm
+output with Flathub + Homebrew distribution.
+
+### Changed (breaking, prerelease scope)
+
+- **Two binaries** instead of one: `solarxy` is the GUI, `solarxy-cli` is
+  the terminal companion (analyze / preferences / docs / self-update).
+  Existing `solarxy --mode analyze` invocations move to
+  `solarxy-cli --mode analyze`. The GUI no longer accepts `--mode`,
+  `--about`, `--update`, `--format`, or `--output` — only `--model`,
+  `--verbose`, `--log-level`.
+- **Windows GUI uses the Windows subsystem** in release builds — no more
+  console window appearing alongside the GUI when launched from Start
+  Menu. Debug builds keep the console for stderr / panic visibility.
+- **Linux GUI** moves to Flatpak (Flathub) as the primary distribution
+  channel. AppImage stays as a fallback. `.deb` and `.rpm` are no longer
+  produced by the release pipeline; community packagers can still build
+  them from source.
+- **macOS**: `.app` bundle now embeds both `solarxy` and `solarxy-cli`.
+  `Install CLI.command` symlinks `solarxy-cli` into `/usr/local/bin`
+  (was `solarxy`).
+
+### Added
+
+- **Homebrew tap** at `koljam/homebrew-solarxy` (separate repo). Cask for
+  the GUI (`brew install --cask koljam/solarxy/solarxy`) auto-strips
+  Gatekeeper quarantine via postflight. Formula for the CLI
+  (`brew install koljam/solarxy/solarxy-cli`) — cross-platform macOS +
+  Linux.
+- **Winget manifest** submitted on each release. Users on Windows can
+  install with `winget install Koljam.Solarxy` and update with
+  `winget upgrade Koljam.Solarxy`.
+- **Flathub manifest** under `packaging/flatpak/`. App ID
+  `dev.koljam.solarxy` matches the macOS bundle identifier. Auto-bump on
+  every release via `.github/workflows/flathub-bump.yml`.
+- **"Check for Updates" menu item** (Help → Check for Updates...). Reads
+  the install source (Flatpak / Cask / MSI / etc.) and shows the right
+  upgrade command — `brew upgrade --cask`, `winget upgrade`, or a link
+  to the Flathub page or GitHub releases. Replaces the silent
+  `axoupdater` self-update on the GUI.
+- **`solarxy-cli --update`** still self-updates via `axoupdater` for
+  shell-installer installs, but refuses to run on Homebrew-formula or
+  Flatpak installs (which it would corrupt) and prints the correct
+  package-manager command instead.
+- **Install-source detection** (`solarxy_core::install_source::detect`)
+  using `FLATPAK_ID` / `APPIMAGE` env vars, an `install-source` marker
+  file written by each installer, and exe-path heuristics.
+
+### Fixed
+
+- **Windows**: GUI no longer opens an extra terminal window when
+  launched from Start Menu (root cause: missing `windows_subsystem`
+  attribute on the GUI binary).
+- **Fedora 42**: GUI launches reliably via Flatpak, which ships its own
+  Vulkan driver in the Freedesktop runtime instead of relying on host
+  packages. The old `.rpm` only declared `vulkan-loader` and silently
+  failed when no GPU driver package was installed.
+- **macOS**: Homebrew Cask path bypasses the manual Gatekeeper dance
+  for new users. The DMG / Install CLI.command path remains for users
+  without Homebrew.
+
+### Removed
+
+- `[package.metadata.deb]` and `[package.metadata.generate-rpm]`
+  sections from the root `Cargo.toml`. The `cargo deb` and
+  `cargo generate-rpm` steps in the native-bundle action are gone too.
+
+---
+
 ## [0.5.0] — 2026-04-XX
 
 UI-revamp milestone: top menu bar, native file dialogs, in-app console, and

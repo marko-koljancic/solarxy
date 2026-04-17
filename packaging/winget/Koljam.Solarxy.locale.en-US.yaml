@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: Koljam.Solarxy
+PackageVersion: ${VERSION}
+PackageLocale: en-US
+Publisher: Marko Koljancic
+PublisherUrl: https://koljam.com
+PublisherSupportUrl: https://github.com/marko-koljancic/solarxy/issues
+PackageName: Solarxy
+PackageUrl: https://github.com/marko-koljancic/solarxy
+License: MIT
+LicenseUrl: https://github.com/marko-koljancic/solarxy/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Marko Koljancic
+ShortDescription: 3D model viewer and validator built with Rust and wgpu.
+Description: |-
+  Solarxy is a cross-platform 3D model viewer, visual debugger, and
+  validator built in Rust with wgpu. It loads OBJ, STL, PLY, and
+  glTF/GLB models with real-time PBR shading, multiple inspection modes
+  (material ID, UV map, texel density, depth), validation overlays, and
+  a companion CLI (solarxy-cli) for scripted analysis.
+Tags:
+  - 3d
+  - graphics
+  - obj
+  - stl
+  - gltf
+  - viewer
+  - rust
+  - wgpu
+ReleaseNotesUrl: https://github.com/marko-koljancic/solarxy/releases/tag/v${VERSION}
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

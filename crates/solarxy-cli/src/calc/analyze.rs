@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use solarxy::cgi::geometry::RawModelData;
+use solarxy_core::geometry::RawModelData;
 
 use super::geometry::compute_bounds;
 use solarxy_core::report::{
@@ -113,7 +113,7 @@ impl ModelAnalyzer {
             model_name,
             meshes,
             materials,
-            obj_dir: Path::new(path).parent().map(|p| p.to_path_buf()),
+            obj_dir: Path::new(path).parent().map(Path::to_path_buf),
             base_validation,
         })
     }
@@ -172,8 +172,13 @@ impl ModelAnalyzer {
                     ("Dissolve", &mat.dissolve_texture),
                 ];
                 for &(slot, tex_opt) in tex_fields {
-                    if let Some(entry) = check_texture(&self.obj_dir, tex_opt, slot, &mut issues, i)
-                    {
+                    if let Some(entry) = check_texture(
+                        self.obj_dir.as_ref(),
+                        tex_opt.as_ref(),
+                        slot,
+                        &mut issues,
+                        i,
+                    ) {
                         textures.push(entry);
                     }
                 }
@@ -210,13 +215,13 @@ impl ModelAnalyzer {
 }
 
 fn check_texture(
-    obj_dir: &Option<PathBuf>,
-    tex_path: &Option<String>,
+    obj_dir: Option<&PathBuf>,
+    tex_path: Option<&String>,
     slot: &str,
     issues: &mut Vec<ValidationIssue>,
     mat_index: usize,
 ) -> Option<TextureEntry> {
-    let path = tex_path.as_ref()?;
+    let path = tex_path?;
     if path.starts_with("texture_index:") {
         return Some(TextureEntry {
             slot: slot.to_string(),
@@ -231,7 +236,7 @@ fn check_texture(
         issues.push(ValidationIssue {
             severity: Severity::Error,
             scope: IssueScope::Material(mat_index),
-            kind: solarxy::validation::IssueKind::MissingTexture,
+            kind: solarxy_core::validation::IssueKind::MissingTexture,
             message: format!("Texture file not found: '{}'", path),
         });
     }

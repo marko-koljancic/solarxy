@@ -359,6 +359,10 @@ pub(super) fn draw_menu_bar(
                     actions.open_wiki = true;
                     ui.close();
                 }
+                if ui.button("Check for Updates\u{2026}").clicked() {
+                    actions.check_for_updates = true;
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button("About Solarxy").clicked() {
                     actions.open_about = true;

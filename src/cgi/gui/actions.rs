@@ -15,6 +15,7 @@ pub(crate) struct MenuActions {
     pub set_projection: Option<ProjectionMode>,
     pub open_wiki: bool,
     pub open_about: bool,
+    pub check_for_updates: bool,
 }
 
 #[derive(Clone, Copy)]

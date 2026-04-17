@@ -17,6 +17,8 @@
     clippy::wildcard_imports
 )]
 
+#[cfg(feature = "analyzer")]
+pub mod calc;
 #[cfg(feature = "tui")]
 pub mod help;
 pub mod parser;

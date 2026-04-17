@@ -128,6 +128,14 @@
                                 Source='$(var.CargoTargetBinDir)\solarxy.exe'
                                 KeyPath='yes'/>
                         </Component>
+                        <Component Id='binary1' Guid='*'>
+                            <File
+                                Id='exe1'
+                                Name='solarxy-cli.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\solarxy-cli.exe'
+                                KeyPath='yes'/>
+                        </Component>
                     </Directory>
                 </Directory>
             </Directory>
@@ -140,6 +148,28 @@
             -->
             <Directory Id='ProgramMenuFolder'>
                 <Directory Id='ApplicationProgramsFolder' Name='Solarxy'/>
+            </Directory>
+
+            <!--
+              install-source marker. Lets the GUI's "Check for Updates" dialog
+              identify that this binary was installed via MSI (vs winget /
+              Cask / Flatpak / cargo / etc.) and route users to
+              `winget upgrade` instead of attempting an axoupdater self-update
+              that would hit UAC and fail. Read by
+              solarxy_core::install_source::detect at runtime.
+            -->
+            <Directory Id='CommonAppDataFolder'>
+                <Directory Id='InstallSourceFolder' Name='Solarxy'>
+                    <Component Id='InstallSourceMarker' Guid='*'>
+                        <CreateFolder/>
+                        <File
+                            Id='install_source_marker'
+                            Name='install-source'
+                            DiskId='1'
+                            Source='wix\install-source-msi.txt'
+                            KeyPath='yes'/>
+                    </Component>
+                </Directory>
             </Directory>
         </Directory>
 
@@ -190,6 +220,8 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='binary1'/>
+            <ComponentRef Id='InstallSourceMarker'/>
             <ComponentRef Id='ApplicationShortcut'/>
 
             <Feature

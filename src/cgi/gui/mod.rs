@@ -8,6 +8,7 @@ mod sidebar;
 mod snapshot;
 mod stats;
 mod theme;
+mod update_modal;
 
 #[cfg(target_os = "macos")]
 const MOD: &str = "\u{2318}";

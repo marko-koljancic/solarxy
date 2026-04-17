@@ -1,5 +1,5 @@
 use cgmath::Point3;
-use solarxy::aabb::AABB;
+use solarxy_core::AABB;
 
 use super::analyze::AnalyzerMesh;
 use solarxy_core::report::BoundsSummary;

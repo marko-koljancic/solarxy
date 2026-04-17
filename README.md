@@ -38,25 +38,62 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 
 ## Installation
 
-Pre-built native installers are published on each tagged release at
-[github.com/marko-koljancic/solarxy/releases](https://github.com/marko-koljancic/solarxy/releases).
+Solarxy ships as **two binaries**: `solarxy` (the GUI viewer) and
+`solarxy-cli` (the terminal companion: analyze / preferences / docs /
+self-update). Pick the install path that fits your platform:
 
-| Platform | Download | Install |
+### Recommended (per-platform native channel)
+
+| Platform | Command | What you get |
 |---|---|---|
-| macOS (Apple Silicon) | `Solarxy-0.5.0-aarch64.dmg` | Open, drag to **Applications**. See *First launch on macOS* below. |
-| macOS (Intel) | `Solarxy-0.5.0-x86_64.dmg` | Same as above. |
-| Windows x64 | `solarxy-x86_64-pc-windows-msvc.msi` | Double-click, follow the wizard. Click through SmartScreen (see below). |
-| Ubuntu / Debian (x64) | `solarxy_0.5.0-1_amd64.deb` | `sudo apt install ./solarxy_0.5.0-1_amd64.deb` |
-| Ubuntu / Debian (ARM64) | `solarxy_0.5.0-1_arm64.deb` | Same as above. |
-| Fedora / RHEL 9+ / openSUSE (x64) | `solarxy-0.5.0-1.x86_64.rpm` | `sudo dnf install ./solarxy-0.5.0-1.x86_64.rpm` (pulls `vulkan-loader`). |
-| Fedora / RHEL 9+ / openSUSE (ARM64) | `solarxy-0.5.0-1.aarch64.rpm` | Same as above. |
-| Linux distro-agnostic | `Solarxy-0.5.0-x86_64.AppImage` | `chmod +x` then run. Requires glibc 2.28+. |
+| **macOS (any arch)** | `brew install --cask koljam/solarxy/solarxy` | GUI + CLI. Auto-strips Gatekeeper quarantine. |
+| **Linux (any distro)** | `flatpak install flathub dev.koljam.solarxy` | GUI via Flathub (auto-updates via GNOME Software / KDE Discover). |
+| **Windows** | `winget install Koljam.Solarxy` | MSI install of GUI + CLI. Adds Start Menu entry and PATH. |
+
+Each of these handles updates natively — no separate self-update step.
+
+### Direct download
+
+Pre-built artifacts are also published on each tagged release at
+[github.com/marko-koljancic/solarxy/releases](https://github.com/marko-koljancic/solarxy/releases):
+
+| Platform | File | Install |
+|---|---|---|
+| macOS (Apple Silicon) | `Solarxy-X.Y.Z-aarch64.dmg` | Open, drag to **Applications**. See *First launch on macOS* below. |
+| macOS (Intel) | `Solarxy-X.Y.Z-x86_64.dmg` | Same as above. |
+| Windows x64 | `solarxy-X.Y.Z-x86_64-pc-windows-msvc.msi` | Double-click. Click through SmartScreen (see below). |
+| Linux x86_64 | `Solarxy-X.Y.Z-x86_64.AppImage` | `chmod +x` and run. Bundles its own GL stack — works on Fedora 42 without extra packages. |
+
+### CLI-only
+
+For terminal-only workflows (CI, scripts, headless servers):
+
+```bash
+# Homebrew (macOS + Linux)
+brew install koljam/solarxy/solarxy-cli
+
+# Shell installer (macOS + Linux, places binary in ~/.cargo/bin)
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-cli-installer.sh | sh
+
+# PowerShell installer (Windows, when the MSI is overkill)
+powershell -c "irm https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-cli-installer.ps1 | iex"
+```
+
+`solarxy-cli` self-updates with `solarxy-cli --update` when installed
+via the shell / PowerShell installer. On Homebrew or Flatpak it instead
+prints the correct `brew upgrade` / `flatpak update` command — running
+`axoupdater` against a package-managed install would corrupt it.
 
 ### First launch on macOS
 
-Solarxy 0.5.0 is shipped **unsigned** — macOS Gatekeeper blocks the first launch.
+If you used the Homebrew Cask, Gatekeeper has already been cleared. Skip
+ahead to using the app.
 
-**Recommended:** double-click **Install CLI.command** inside the mounted DMG. It clears the quarantine attribute on `/Applications/Solarxy.app` (so Gatekeeper won't trigger on first launch) and symlinks `solarxy` into `/usr/local/bin/`. After the sudo prompt, open **Solarxy.app** in Applications — no further prompts.
+If you downloaded the `.dmg` directly, Solarxy is shipped **ad-hoc
+signed** — macOS Gatekeeper blocks the first launch.
+
+**Recommended:** double-click **Install CLI.command** inside the mounted DMG. It clears the quarantine attribute on `/Applications/Solarxy.app` (so Gatekeeper won't trigger on first launch) and symlinks `solarxy-cli` into `/usr/local/bin/`. After the sudo prompt, open **Solarxy.app** in Applications — no further prompts.
 
 **Manual bypass** (if you skip the CLI installer): macOS 15 no longer shows an inline "Open Anyway" button in the first-launch dialog.
 
@@ -73,28 +110,15 @@ The MSI is unsigned — Windows SmartScreen shows **"Windows protected your PC"*
 
 Code signing (Apple Developer certificate + Azure Trusted Signing) is on the roadmap.
 
-### One-line installers (developers)
-
-For CI or scripted installs, the shell and PowerShell installers from cargo-dist place `solarxy` in `$CARGO_HOME/bin`:
-
-```bash
-# macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-installer.sh | sh
-```
-
-```powershell
-# Windows
-powershell -c "irm https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-installer.ps1 | iex"
-```
-
 ### Updating
 
-If installed via any of the installers above (native, shell, PowerShell, or MSI), update in-place with:
+The GUI's **Help → Check for Updates...** menu detects how Solarxy was
+installed and shows you the right command (`brew upgrade`,
+`winget upgrade`, or a link to the Flathub / releases page).
 
-```bash
-solarxy --update
-```
+For the CLI, run `solarxy-cli --update` — it self-updates when installed
+via the shell installer, and prints the correct package-manager command
+otherwise.
 
 ## Build from source
 
@@ -111,39 +135,55 @@ cargo build --release
 
 ### Usage
 
-View a model (default mode):
+View a model (GUI):
 
 ```bash
-cargo r --release -- --model path/to/model.obj
+cargo r --release --bin solarxy -- --model path/to/model.obj
 ```
 
 Or launch the viewer and drag a file onto the window:
 
 ```bash
-cargo r --release
+cargo r --release --bin solarxy
 ```
 
 Analyze a model in the terminal:
 
 ```bash
-cargo r --release -- --model path/to/model.glb --mode analyze
+cargo r --release --bin solarxy-cli -- --model path/to/model.glb --mode analyze
 ```
 
 Analyze and save the report to a file:
 
 ```bash
-cargo r --release -- --model path/to/model.glb --mode analyze --output report.txt
+cargo r --release --bin solarxy-cli -- --model path/to/model.glb --mode analyze --output report.txt
 ```
 
 ## CLI Reference
 
+### `solarxy` (GUI)
+
 | Flag | Description | Default |
 |---|---|---|
-| `-m, --model <PATH>` | Path to model file (optional in view mode -- supports drag-and-drop) | -- |
+| `-m, --model <PATH>` | Path to a model file to open at launch (drag-and-drop also works) | -- |
+| `--verbose` | Equivalent to `--log-level solarxy=debug` | off |
+| `--log-level <DIRECTIVE>` | Tracing filter directive (e.g. `solarxy=debug,wgpu_hal=warn`) | inherit `RUST_LOG` |
+
+### `solarxy-cli` (TUI / terminal companion)
+
+| Flag | Description | Default |
+|---|---|---|
+| `-m, --model <PATH>` | Path to model file (required for `--mode analyze`) | -- |
 | `-M, --mode <MODE>` | `view`, `analyze`, `preferences`, or `docs` | `view` |
 | `-f, --format <FORMAT>` | Output format: `text` or `json` (analyze mode only) | `text` |
 | `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
 | `--about` | Show version and application info | -- |
+| `--update` | Self-update (shell-installer installs only; package-manager installs print the correct upgrade command) | -- |
+
+`solarxy-cli --mode view` exec's the sibling `solarxy` GUI binary if it
+exists in the same directory (the MSI and Cask both install both bins
+together). On a CLI-only Homebrew install, it prints platform-specific
+GUI install hints.
 
 ## View Mode
 

@@ -716,6 +716,9 @@ impl State {
         if actions.open_about {
             self.gui.open_about();
         }
+        if actions.check_for_updates {
+            self.gui.check_for_updates();
+        }
         if let Some(layout) = actions.set_layout {
             self.set_view_layout(layout);
         }

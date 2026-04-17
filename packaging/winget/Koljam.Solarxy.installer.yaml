@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+#
+# Templated installer manifest for the microsoft/winget-pkgs submission.
+# The release-bump workflow (.github/workflows/winget-release.yml) clones
+# this template, substitutes ${VERSION} and ${INSTALLER_SHA256}, and opens
+# a PR against microsoft/winget-pkgs.
+#
+# winget UX:
+#   winget install Koljam.Solarxy
+#   winget upgrade Koljam.Solarxy
+#
+# The MSI carries an install-source marker (wix/install-source-msi.txt)
+# that the GUI's "Check for Updates" reads to suggest the right command.
+
+PackageIdentifier: Koljam.Solarxy
+PackageVersion: ${VERSION}
+InstallerType: wix
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/marko-koljancic/solarxy/releases/download/v${VERSION}/solarxy-${VERSION}-x86_64-pc-windows-msvc.msi
+    InstallerSha256: ${INSTALLER_SHA256}
+    ProductCode: '{F201EA19-A29E-4B9E-A3CE-85CEB9BAF9CE}'
+ReleaseDate: ${RELEASE_DATE}
+ManifestType: installer
+ManifestVersion: 1.6.0

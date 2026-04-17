@@ -20,6 +20,7 @@ cargo clippy --all-targets                        # Lint
 cargo test                                        # Run all tests
 cargo test -p solarxy-core                        # Run tests for one crate
 cargo test -p solarxy-core validation::tests::    # Run a single test (filter by path)
+cargo test --test loaders                         # Integration tests in tests/loaders.rs (uses tests/fixtures/)
 RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default level: warn)
 ```
 
@@ -34,8 +35,8 @@ RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default lev
 - `solarxy-core` — pure data types, geometry, validation, preferences (no GPU deps)
 - `solarxy-formats` — format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`
 - `solarxy-cli` — CLI parsing (clap) and TUI interfaces (ratatui).
-  Public modules: `parser`, `help`, `tui_analysis`, `tui_docs`, `tui_preferences`
-  (TUI modules gated behind the `tui` feature; private `tui/` module holds shared
+  Public modules: `parser`, `help`, `validators`, `tui_analysis`, `tui_docs`, `tui_preferences`
+  (TUI modules gated behind the `tui` feature; private `tui.rs` holds shared
   ratatui widgets). Lints as `#![warn(clippy::pedantic)]` with a curated allow list.
 
 **Main binary structure:**
@@ -71,7 +72,11 @@ RUST_LOG=solarxy=debug cargo r --release -- ...   # Verbose logging (default lev
   - `theme.rs` — dark theme, accent colors, font sizing
   - `about.rs` — About modal
 - `camera.rs` / `camera_state.rs` — orbit camera, per-pane camera management
+- `light.rs` — `LightEntry` / `LightsUniform` (CPU side of the scene lights + IBL ambient)
+- `bind_groups.rs` — `BindGroupLayouts` struct, the single source of truth for every layout used by the pipelines
 - `pipelines.rs` — all wgpu render pipelines
+- `pipeline_builder.rs` — fluent `PipelineBuilder` helper used by `pipelines.rs` to cut down boilerplate
+- `geometry.rs` — thin wgpu-side re-exports of `solarxy_core::geometry` plus viewer-only helpers that depend on `ModelVertex`
 - `composite.rs` — per-pane compositing with viewport/scissor rects and tone mapping
 - `ibl.rs` — image-based lighting (diffuse + specular)
 - `ssao.rs` — screen-space ambient occlusion

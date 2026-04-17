@@ -6,13 +6,26 @@ Quick start
 1. Drag Solarxy.app to the Applications folder in this window.
 2. Double-click "Install CLI.command" (recommended).
    - Clears macOS Gatekeeper on Solarxy.app so the next launch just works.
-   - Adds the `solarxy` command to your terminal PATH.
+   - Adds the `solarxy-cli` command to your terminal PATH.
    - You will be prompted for your sudo password for the second step.
-3. Open Applications > Solarxy, or run `solarxy --help` in a new
+3. Open Applications > Solarxy, or run `solarxy-cli --help` in a new
    terminal. No more prompts.
+
+For the smoothest install, use Homebrew Cask instead:
+   brew install --cask koljam/solarxy/solarxy
+The cask handles Gatekeeper for you and installs both the GUI and the
+CLI in one step. The DMG remains the manual / no-Homebrew fallback.
 
 If you skip "Install CLI.command", the first launch of Solarxy.app is
 blocked by macOS Gatekeeper. See "Manual Gatekeeper bypass" below.
+
+Two binaries
+------------
+- `solarxy` (inside Solarxy.app)  the GUI viewer.
+- `solarxy-cli`                   the terminal companion (analyze,
+                                  preferences, docs, self-update).
+"Install CLI.command" symlinks `solarxy-cli` into /usr/local/bin so
+you can invoke it from any terminal.
 
 Why the prompts?
 ----------------

@@ -1,10 +1,12 @@
 name: Native Bundle
 description: >
-  Build DMG (macOS), .deb (Debian/Ubuntu), and AppImage (x86_64 Linux) for
-  Solarxy from a pre-built binary. Invoked from cargo-dist's release.yml via
-  the `github-build-setup` injection configured in dist-workspace.toml.
+  Build DMG (macOS) and AppImage (x86_64 Linux) for Solarxy from pre-built
+  binaries. Invoked from cargo-dist's release.yml via the
+  `github-build-setup` injection configured in dist-workspace.toml.
   Windows runners skip this step entirely — MSI is produced by cargo-dist
-  natively via `installers = ["msi"]`.
+  natively via `installers = ["msi"]`. The .deb and .rpm formats were
+  dropped in v0.5.0-rc.7 in favour of Flatpak (Flathub) for the GUI;
+  community packagers can still build native packages from source.
 
 inputs:
   target:
@@ -16,8 +18,16 @@ inputs:
       (if present) is stripped before use in artifact filenames.
     required: true
   binary-path:
-    description: Path to the pre-built solarxy binary (relative to repo root).
+    description: Path to the pre-built solarxy GUI binary (relative to repo root).
     required: true
+  cli-binary-path:
+    description: >
+      Optional path to the pre-built solarxy-cli binary. Defaults to the
+      sibling of `binary-path` named `solarxy-cli`. The macOS .app embeds
+      both so that Homebrew Cask can symlink the CLI on PATH and users get a
+      single integrated install.
+    required: false
+    default: ''
 
 outputs:
   paths:
@@ -46,9 +56,23 @@ runs:
         V: ${{ steps.ver.outputs.version }}
         TARGET: ${{ inputs.target }}
         BINARY: ${{ inputs.binary-path }}
+        CLI_BINARY_INPUT: ${{ inputs.cli-binary-path }}
       run: |
         set -euo pipefail
         brew install create-dmg
+
+        # Derive the CLI binary path from the GUI binary path if the caller
+        # didn't pass one explicitly. Both binaries live in the same target
+        # dir after a workspace build.
+        if [ -n "$CLI_BINARY_INPUT" ]; then
+          CLI_BINARY="$CLI_BINARY_INPUT"
+        else
+          CLI_BINARY="$(dirname "$BINARY")/solarxy-cli"
+        fi
+        if [ ! -f "$CLI_BINARY" ]; then
+          echo "::error::solarxy-cli binary not found at $CLI_BINARY"
+          exit 1
+        fi
 
         ARCH="${TARGET%%-*}"
         STAGE="$(mktemp -d)/stage"
@@ -58,6 +82,8 @@ runs:
         mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
         cp "$BINARY" "$APP/Contents/MacOS/solarxy"
         chmod +x "$APP/Contents/MacOS/solarxy"
+        cp "$CLI_BINARY" "$APP/Contents/MacOS/solarxy-cli"
+        chmod +x "$APP/Contents/MacOS/solarxy-cli"
         cp res/bundle/solarxy.icns "$APP/Contents/Resources/Solarxy.icns"
 
         cat > "$APP/Contents/Info.plist" <<PLIST
@@ -106,48 +132,11 @@ runs:
           "$OUT" \
           "$STAGE/"
 
-    # ---- Linux: .deb (both architectures) --------------------------------
-    - name: Linux — install cargo-deb
-      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
-      shell: bash
-      run: cargo install cargo-deb --version 2.12.0 --locked
-
-    - name: Linux — build .deb
-      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
-      shell: bash
-      env:
-        TARGET: ${{ inputs.target }}
-      run: |
-        set -euo pipefail
-        mkdir -p bundle-out
-        cargo deb --no-build --target "$TARGET" -o bundle-out/
-
-    # ---- Linux: .rpm (both architectures) --------------------------------
-    # cargo-generate-rpm is the actively-maintained cargo-deb analogue;
-    # reads [package.metadata.generate-rpm] the same way cargo-deb reads
-    # [package.metadata.deb]. Version is pinned --locked to avoid silent
-    # drift between RCs; bump deliberately.
-    - name: Linux — install cargo-generate-rpm
-      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
-      shell: bash
-      run: cargo install cargo-generate-rpm --version 0.20.0 --locked
-
-    - name: Linux — build .rpm
-      if: startsWith(inputs.target, 'x86_64-unknown-linux') || startsWith(inputs.target, 'aarch64-unknown-linux')
-      shell: bash
-      env:
-        TARGET: ${{ inputs.target }}
-      run: |
-        set -euo pipefail
-        mkdir -p bundle-out
-        # --target makes cargo-generate-rpm resolve asset sources under
-        # target/<triple>/release/... instead of target/release/..., matching
-        # the actual binary location after the cross build. --output writes
-        # directly into bundle-out so the collect step picks the rpm up
-        # without any rename.
-        cargo generate-rpm --target "$TARGET" --output bundle-out/
-
     # ---- Linux x86_64: AppImage ------------------------------------------
+    # Native .deb / .rpm were dropped in v0.5.0-rc.7. The Flatpak manifest
+    # under packaging/flatpak/ is the primary Linux GUI distribution path;
+    # AppImage stays as the no-Flatpak fallback because it ships its own
+    # GL stack. Community packagers can still build .deb/.rpm from source.
     # aarch64 AppImage deferred to 0.6.0-07 (no stable appimagetool arm64 binary).
     - name: Linux x86_64 — build AppImage
       if: inputs.target == 'x86_64-unknown-linux-gnu'

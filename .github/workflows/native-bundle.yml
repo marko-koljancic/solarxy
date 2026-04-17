@@ -1,7 +1,10 @@
 name: Native Bundle
 
-# Builds DMG (macOS), .deb (Debian/Ubuntu), and AppImage (x86_64 Linux)
-# and uploads them to a GitHub Release.
+# Builds DMG (macOS) and AppImage (x86_64 Linux), then uploads them to a
+# GitHub Release. Linux GUI is also published to Flathub via a separate
+# workflow (.github/workflows/flathub-bump.yml). MSI is built by
+# cargo-dist's own job and uploaded by it; this workflow does not touch it.
+# .deb / .rpm were dropped in v0.5.0-rc.7.
 #
 # Invocation:
 #   - `workflow_call` — called by cargo-dist's release.yml as a reusable
@@ -58,12 +61,12 @@ jobs:
       - name: Install Rust toolchain
         run: rustup default stable && rustup target add ${{ matrix.target }}
 
-      # --release (not --profile dist) so cargo-deb's `assets = ["target/release/..."]`
-      # path resolves correctly. cargo-deb auto-adjusts to `target/<triple>/release/`
-      # when `--target` is passed. The binary quality delta (thin-LTO vs fat-LTO)
-      # is negligible inside a .app / .deb / .AppImage payload.
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+      # --release (not --profile dist) for stable cross-target asset paths.
+      # The binary quality delta (thin-LTO vs fat-LTO) is negligible inside
+      # a .app / .AppImage payload. Both bins (`solarxy` and `solarxy-cli`)
+      # are built so the macOS .app can embed the CLI alongside the GUI.
+      - name: Build release binaries (GUI + CLI)
+        run: cargo build --release --workspace --target ${{ matrix.target }}
 
       - name: Bundle via composite action
         id: bundle
@@ -72,6 +75,7 @@ jobs:
           target: ${{ matrix.target }}
           version: ${{ env.TAG }}
           binary-path: target/${{ matrix.target }}/release/solarxy
+          cli-binary-path: target/${{ matrix.target }}/release/solarxy-cli
 
       - name: Upload bundles to release
         if: hashFiles('bundle-out/*') != ''

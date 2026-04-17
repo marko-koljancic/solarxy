@@ -16,6 +16,7 @@ use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::{ModelInfo, draw_stats_window};
 use super::theme::{apply_theme, configure_fonts};
+use super::update_modal::{UpdateModalState, draw_update_modal};
 
 pub struct EguiRenderer {
     ctx: egui::Context,
@@ -28,6 +29,7 @@ pub struct EguiRenderer {
     fps_hud_visible: bool,
     pub console: ConsoleState,
     about_open: bool,
+    update_modal: UpdateModalState,
     toast: Option<Toast>,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
@@ -69,6 +71,7 @@ impl EguiRenderer {
             fps_hud_visible: false,
             console: ConsoleState::new(console_buffer),
             about_open: false,
+            update_modal: UpdateModalState::new(),
             toast: None,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
@@ -235,6 +238,7 @@ impl EguiRenderer {
         let mut about_open = self.about_open;
         let mut toast_dismissed = false;
         let console = &mut self.console;
+        let update_modal = &mut self.update_modal;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if menu_vis.menu_bar_visible {
@@ -264,6 +268,7 @@ impl EguiRenderer {
                 draw_console_floating(ctx, console, &mut menu_vis.console_visible);
             }
             draw_about_modal(ctx, &mut about_open);
+            draw_update_modal(ctx, update_modal);
             let hud_ctx = HudCtx {
                 avg_ms,
                 fps,
@@ -388,5 +393,9 @@ impl EguiRenderer {
 
     pub fn open_about(&mut self) {
         self.about_open = true;
+    }
+
+    pub fn check_for_updates(&mut self) {
+        self.update_modal.refresh();
     }
 }

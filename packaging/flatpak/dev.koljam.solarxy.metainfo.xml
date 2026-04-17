@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.koljam.solarxy</id>
+  <name>Solarxy</name>
+  <summary>3D model viewer and validator</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <developer id="dev.koljam">
+    <name>Marko Koljancic</name>
+  </developer>
+
+  <description>
+    <p>
+      Solarxy is a cross-platform 3D model viewer and validator built in Rust
+      with wgpu. It loads OBJ, STL, PLY, and glTF/GLB models and renders them
+      with real-time PBR shading (Cook-Torrance, IBL, SSAO, bloom).
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Real-time PBR rendering with HDRI image-based lighting</li>
+      <li>Inspection modes: shaded, material ID, UV map, texel density, depth</li>
+      <li>Material overrides (clay, chrome, silhouette) for shape evaluation</li>
+      <li>Split viewport with independent or linked cameras</li>
+      <li>Validation overlay: degenerate triangles, missing UVs, normal mismatches</li>
+      <li>Companion CLI (solarxy-cli) for scripted analysis and CI integration</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">dev.koljam.solarxy.desktop</launchable>
+
+  <url type="homepage">https://github.com/marko-koljancic/solarxy</url>
+  <url type="bugtracker">https://github.com/marko-koljancic/solarxy/issues</url>
+  <url type="vcs-browser">https://github.com/marko-koljancic/solarxy</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Solarxy viewing the Stanford dragon</caption>
+      <image>https://raw.githubusercontent.com/marko-koljancic/solarxy/main/docs/screenshots/dragon.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1"/>
+
+  <categories>
+    <category>Graphics</category>
+    <category>3DGraphics</category>
+    <category>Development</category>
+  </categories>
+
+  <keywords>
+    <keyword>3D</keyword>
+    <keyword>model</keyword>
+    <keyword>viewer</keyword>
+    <keyword>glTF</keyword>
+    <keyword>OBJ</keyword>
+    <keyword>STL</keyword>
+    <keyword>PLY</keyword>
+  </keywords>
+
+  <provides>
+    <binary>solarxy</binary>
+  </provides>
+
+  <releases>
+    <release version="0.5.0-rc.7" date="2026-04-17">
+      <description>
+        <p>
+          Packaging rearchitecture: GUI binary now ships as a true Windows-subsystem
+          app (no console flicker on Start Menu launch), Linux GUI moves to Flatpak
+          (this build), CLI splits into a separate solarxy-cli binary distributable
+          via Homebrew tap, and macOS adds a Homebrew Cask path for one-step install
+          with automatic Gatekeeper bypass.
+        </p>
+      </description>
+    </release>
+  </releases>
+
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+</component>
