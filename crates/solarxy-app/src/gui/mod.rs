@@ -3,6 +3,7 @@ mod actions;
 mod console_view;
 mod menu;
 mod overlays;
+mod preferences_modal;
 mod renderer;
 mod sidebar;
 mod snapshot;

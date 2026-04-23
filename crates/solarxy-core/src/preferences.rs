@@ -1,6 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Declare an enum with `ALL: &[Self]`, `Display`, and (optionally) a `next()`
+/// method that cycles through variants.
+///
+/// Two forms:
+///
+/// ```ignore
+/// cycle_enum! {
+///     pub enum Foo { A => "A", B => "B" }
+/// }             // enum + ALL + Display
+///
+/// cycle_enum! {
+///     pub enum Bar { A => "A", B => "B" }
+///     ; cycle    // adds `fn next(self) -> Self`
+/// }
+/// ```
+///
+/// Safety invariant backing `next()`: `self` is always a variant of `Self`,
+/// `ALL` contains every variant by construction, so `position()` is always
+/// `Some`. The `unwrap_or(0)` fallback exists so that if `ALL` is ever edited
+/// incorrectly the result is the first variant rather than a panic.
 macro_rules! cycle_enum {
     (
         $(#[$meta:meta])*
@@ -255,6 +275,16 @@ impl ToneMode {
     }
 }
 
+cycle_enum! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum UpdaterChannel {
+        #[default]
+        Stable => "Stable",
+        Prerelease => "Prerelease",
+    }
+    ; cycle
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     pub config_version: u32,
@@ -268,6 +298,10 @@ pub struct Preferences {
     pub window: WindowPrefs,
     #[serde(default)]
     pub history: HistoryPrefs,
+    #[serde(default)]
+    pub ui: UiPrefs,
+    #[serde(default)]
+    pub updater: UpdaterPrefs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -360,6 +394,43 @@ pub struct HistoryPrefs {
     pub recent_files: Vec<String>,
 }
 
+pub const MAX_RECENT_FILES_CAP: usize = 50;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UiPrefs {
+    #[serde(default = "default_true")]
+    pub default_sidebar_visible: bool,
+    #[serde(default)]
+    pub default_fps_hud_visible: bool,
+    #[serde(default = "default_true")]
+    pub default_console_docked: bool,
+    #[serde(default = "default_max_recent_files")]
+    pub max_recent_files: usize,
+}
+
+fn default_max_recent_files() -> usize {
+    20
+}
+
+impl Default for UiPrefs {
+    fn default() -> Self {
+        Self {
+            default_sidebar_visible: true,
+            default_fps_hud_visible: false,
+            default_console_docked: true,
+            max_recent_files: default_max_recent_files(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdaterPrefs {
+    #[serde(default)]
+    pub check_on_launch: bool,
+    #[serde(default)]
+    pub channel: UpdaterChannel,
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -369,6 +440,8 @@ impl Default for Preferences {
             lighting: LightingPrefs::default(),
             window: WindowPrefs::default(),
             history: HistoryPrefs::default(),
+            ui: UiPrefs::default(),
+            updater: UpdaterPrefs::default(),
         }
     }
 }
@@ -407,8 +480,6 @@ impl Default for RenderingPrefs {
     }
 }
 
-const MAX_RECENT_FILES: usize = 20;
-
 pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("solarxy").join("config.toml"))
 }
@@ -444,6 +515,7 @@ pub fn load() -> Preferences {
                 .window
                 .window_height
                 .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
+            prefs.ui.max_recent_files = prefs.ui.max_recent_files.clamp(1, MAX_RECENT_FILES_CAP);
             prefs
         }
         Err(e) => {
@@ -472,10 +544,11 @@ pub fn save(prefs: &Preferences) -> Result<(), String> {
 }
 
 pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
+    let cap = prefs.ui.max_recent_files.max(1);
     let files = &mut prefs.history.recent_files;
     files.retain(|p| p != path);
     files.insert(0, path.to_string());
-    files.truncate(MAX_RECENT_FILES);
+    files.truncate(cap);
     if let Err(e) = save(prefs) {
         tracing::warn!("Failed to save recent files: {e}");
     }
@@ -529,6 +602,16 @@ mod tests {
             history: HistoryPrefs {
                 recent_files: vec!["/tmp/model.obj".to_string()],
             },
+            ui: UiPrefs {
+                default_sidebar_visible: false,
+                default_fps_hud_visible: true,
+                default_console_docked: false,
+                max_recent_files: 10,
+            },
+            updater: UpdaterPrefs {
+                check_on_launch: true,
+                channel: UpdaterChannel::Prerelease,
+            },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();
@@ -571,6 +654,8 @@ mod tests {
         assert!((parsed.display.exposure - 1.0).abs() < f32::EPSILON);
         assert_eq!(parsed.window, WindowPrefs::default());
         assert_eq!(parsed.history, HistoryPrefs::default());
+        assert_eq!(parsed.ui, UiPrefs::default());
+        assert_eq!(parsed.updater, UpdaterPrefs::default());
     }
 
     #[test]
@@ -591,6 +676,8 @@ mod tests {
         assert_eq!(parsed.lighting, LightingPrefs::default());
         assert_eq!(parsed.window, WindowPrefs::default());
         assert_eq!(parsed.history, HistoryPrefs::default());
+        assert_eq!(parsed.ui, UiPrefs::default());
+        assert_eq!(parsed.updater, UpdaterPrefs::default());
         assert_eq!(parsed.display.background, BackgroundMode::Black);
     }
 
@@ -603,24 +690,70 @@ mod tests {
     #[test]
     fn recent_files_dedup_and_truncate() {
         let mut prefs = Preferences::default();
-        for i in 0..25 {
+        let cap = prefs.ui.max_recent_files;
+        for i in 0..(cap + 5) {
             let files = &mut prefs.history.recent_files;
             let path = format!("/tmp/model_{}.obj", i);
             files.retain(|p| *p != path);
             files.insert(0, path);
-            files.truncate(MAX_RECENT_FILES);
+            files.truncate(cap);
         }
-        assert_eq!(prefs.history.recent_files.len(), MAX_RECENT_FILES);
-        assert_eq!(prefs.history.recent_files[0], "/tmp/model_24.obj");
+        assert_eq!(prefs.history.recent_files.len(), cap);
+        assert_eq!(
+            prefs.history.recent_files[0],
+            format!("/tmp/model_{}.obj", cap + 4)
+        );
 
         let files = &mut prefs.history.recent_files;
-        let dup = "/tmp/model_10.obj".to_string();
+        let dup = format!("/tmp/model_{}.obj", cap / 2);
         files.retain(|p| *p != dup);
         files.insert(0, dup.clone());
-        files.truncate(MAX_RECENT_FILES);
+        files.truncate(cap);
 
-        assert_eq!(prefs.history.recent_files.len(), MAX_RECENT_FILES);
-        assert_eq!(prefs.history.recent_files[0], "/tmp/model_10.obj");
+        assert_eq!(prefs.history.recent_files.len(), cap);
+        assert_eq!(prefs.history.recent_files[0], dup);
+    }
+
+    #[test]
+    fn ui_prefs_defaults_match_observed() {
+        let ui = UiPrefs::default();
+        assert!(ui.default_sidebar_visible);
+        assert!(!ui.default_fps_hud_visible);
+        assert!(ui.default_console_docked);
+        assert_eq!(ui.max_recent_files, 20);
+    }
+
+    #[test]
+    fn updater_prefs_defaults_are_conservative() {
+        let u = UpdaterPrefs::default();
+        assert!(!u.check_on_launch);
+        assert_eq!(u.channel, UpdaterChannel::Stable);
+    }
+
+    #[test]
+    fn updater_channel_cycles() {
+        assert_eq!(UpdaterChannel::Stable.next(), UpdaterChannel::Prerelease);
+        assert_eq!(UpdaterChannel::Prerelease.next(), UpdaterChannel::Stable);
+    }
+
+    #[test]
+    fn rc8_era_toml_upgrades_cleanly() {
+        // A TOML from before the ui/updater sections were added must still
+        // parse, with the new sections filled in from their Default impls.
+        let toml_str = r#"
+            config_version = 1
+
+            [display]
+            background = "Gradient"
+            view_mode = "Shaded"
+            normals_mode = "Off"
+            grid_visible = true
+            axis_gizmo_visible = true
+            bloom_enabled = true
+        "#;
+        let parsed: Preferences = toml::from_str(toml_str).unwrap();
+        assert_eq!(parsed.ui, UiPrefs::default());
+        assert_eq!(parsed.updater, UpdaterPrefs::default());
     }
 
     #[test]

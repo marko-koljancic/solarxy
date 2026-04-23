@@ -30,6 +30,8 @@ pub struct GradientUniform {
     pub _pad: [f32; 2],
 }
 
+const _: () = assert!(std::mem::size_of::<GradientUniform>() == 48);
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WireframeParams {
@@ -39,6 +41,8 @@ pub struct WireframeParams {
     pub screen_height: f32,
     pub _pad: f32,
 }
+
+const _: () = assert!(std::mem::size_of::<WireframeParams>() == 32);
 
 pub struct RenderTargets {
     pub depth_texture: texture::Texture,

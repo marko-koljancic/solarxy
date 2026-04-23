@@ -44,15 +44,9 @@ pub(super) fn draw_menu_bar(
                                 .file_name()
                                 .and_then(|f| f.to_str())
                                 .unwrap_or(path);
-                            let label: String = if raw.chars().count() > 50 {
-                                let tail: String = raw
-                                    .chars()
-                                    .rev()
-                                    .take(47)
-                                    .collect::<Vec<_>>()
-                                    .into_iter()
-                                    .rev()
-                                    .collect();
+                            let count = raw.chars().count();
+                            let label: String = if count > 50 {
+                                let tail: String = raw.chars().skip(count - 47).collect();
                                 format!("\u{2026}{tail}")
                             } else {
                                 raw.to_string()
@@ -94,7 +88,14 @@ pub(super) fn draw_menu_bar(
             });
 
             ui.menu_button("Edit", |ui| {
-                ui.label(egui::RichText::new("Preferences").strong());
+                if ui
+                    .add(egui::Button::new("Preferences\u{2026}").shortcut_text(format!("{MOD}+,")))
+                    .clicked()
+                {
+                    actions.open_preferences = true;
+                    ui.close();
+                }
+                ui.separator();
                 if let Some(path) = solarxy_core::preferences::config_path() {
                     ui.label(
                         egui::RichText::new(path.display().to_string())
@@ -102,7 +103,6 @@ pub(super) fn draw_menu_bar(
                             .color(egui::Color32::from_white_alpha(140)),
                     );
                 }
-                ui.separator();
                 if ui.button("Open Config File").clicked() {
                     actions.open_config_file = true;
                     ui.close();
@@ -352,6 +352,45 @@ pub(super) fn draw_menu_bar(
                 ui.checkbox(&mut vis.fps_hud_visible, "FPS HUD");
                 ui.checkbox(&mut vis.hints_visible, "Keyboard Shortcuts")
                     .on_hover_text("?");
+            });
+
+            ui.menu_button("Window", |ui| {
+                if ui
+                    .add(
+                        egui::Button::new("Sidebar")
+                            .selected(vis.sidebar_visible)
+                            .shortcut_text("Tab"),
+                    )
+                    .clicked()
+                {
+                    vis.sidebar_visible = !vis.sidebar_visible;
+                    ui.close();
+                }
+                if ui
+                    .add(
+                        egui::Button::new("Console")
+                            .selected(vis.console_visible)
+                            .shortcut_text("`"),
+                    )
+                    .clicked()
+                {
+                    vis.console_visible = !vis.console_visible;
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Model Stats").selected(vis.stats_visible))
+                    .clicked()
+                {
+                    vis.stats_visible = !vis.stats_visible;
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("FPS HUD").selected(vis.fps_hud_visible))
+                    .clicked()
+                {
+                    vis.fps_hud_visible = !vis.fps_hud_visible;
+                    ui.close();
+                }
             });
 
             ui.menu_button("Help", |ui| {

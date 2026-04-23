@@ -8,7 +8,6 @@ use clap::Parser;
 
 use solarxy_cli::parser::{Args, OperationMode, OutputFormat};
 use solarxy_cli::tui_docs::DocsApp;
-use solarxy_cli::tui_preferences::PreferencesApp;
 
 #[cfg(feature = "analyzer")]
 use solarxy_cli::calc::analyze::ModelAnalyzer;
@@ -59,21 +58,37 @@ fn main() -> anyhow::Result<ExitCode> {
         })
         .transpose()?;
 
-    let preferences = solarxy_core::preferences::load();
-
     match args.mode {
         OperationMode::View => Ok(exec_gui(model_path.as_deref())),
         OperationMode::Analyze => run_analyze(model_path, &args.format, args.output.as_deref())
             .map(|()| ExitCode::SUCCESS),
-        OperationMode::Preferences => {
-            PreferencesApp::new(preferences).run()?;
-            Ok(ExitCode::SUCCESS)
-        }
+        OperationMode::Preferences => Ok(preferences_migration_hint()),
         OperationMode::Docs => {
             DocsApp::new(APP_INFO).run()?;
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+// The interactive preferences TUI was removed in 0.5.0-rc.10. Preferences
+// are now managed through the GUI (Edit → Preferences…) or by editing the
+// TOML file directly. We keep the `--mode preferences` variant parseable so
+// scripts don't fail with a clap "unknown value" error; instead we print a
+// migration hint and exit non-zero.
+fn preferences_migration_hint() -> ExitCode {
+    let path = solarxy_core::preferences::config_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.config/solarxy/config.toml".to_string());
+    eprintln!("The interactive preferences TUI was removed in Solarxy 0.5.0.");
+    eprintln!();
+    eprintln!("Preferences are now managed:");
+    eprintln!("  - In the GUI — Edit \u{2192} Preferences\u{2026}  (or press Ctrl/Cmd+,)");
+    eprintln!("  - By editing the TOML file directly:");
+    eprintln!("      {path}");
+    eprintln!();
+    eprintln!("Most display / rendering / lighting settings can also be changed live");
+    eprintln!("from the viewer's sidebar and saved with Shift+S.");
+    ExitCode::FAILURE
 }
 
 fn exec_gui(model_path: Option<&str>) -> ExitCode {

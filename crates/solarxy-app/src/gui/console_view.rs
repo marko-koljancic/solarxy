@@ -52,6 +52,21 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
             console.clear();
         }
         ui.checkbox(&mut console.auto_scroll, "Auto-scroll");
+
+        ui.separator();
+        ui.label(egui::RichText::new("\u{1F50D}").small());
+        let search_resp = ui.add(
+            egui::TextEdit::singleline(&mut console.search)
+                .hint_text("filter messages")
+                .desired_width(160.0),
+        );
+        if !console.search.is_empty() && ui.small_button("\u{00D7}").clicked() {
+            console.search.clear();
+        }
+        if search_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            console.search.clear();
+        }
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let label = if console.docked {
                 "\u{2197} Detach"
@@ -67,6 +82,7 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
 
     let min_level = console.min_level;
     let auto_scroll = console.auto_scroll;
+    let search_lower = console.search.to_lowercase();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .stick_to_bottom(auto_scroll)
@@ -74,6 +90,11 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
             if let Ok(buf) = console.buffer.lock() {
                 for entry in buf.iter() {
                     if entry.level > min_level {
+                        continue;
+                    }
+                    if !search_lower.is_empty()
+                        && !entry.message.to_lowercase().contains(&search_lower)
+                    {
                         continue;
                     }
                     let (level_color, msg_color) = match entry.level {
@@ -94,7 +115,7 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
                             egui::Color32::from_white_alpha(130),
                         ),
                     };
-                    ui.horizontal(|ui| {
+                    let row = ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(&entry.timestamp)
                                 .monospace()
@@ -109,6 +130,24 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
                         );
                         ui.label(egui::RichText::new(&entry.message).small().color(msg_color));
                     });
+                    row.response
+                        .interact(egui::Sense::click())
+                        .context_menu(|ui| {
+                            if ui.button("Copy message").clicked() {
+                                ui.ctx().copy_text(entry.message.clone());
+                                ui.close();
+                            }
+                            if ui.button("Copy full line").clicked() {
+                                let full = format!(
+                                    "{} {:>5}  {}",
+                                    entry.timestamp,
+                                    entry.level.as_str(),
+                                    entry.message
+                                );
+                                ui.ctx().copy_text(full);
+                                ui.close();
+                            }
+                        });
                 }
             }
         });

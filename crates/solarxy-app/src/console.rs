@@ -9,7 +9,7 @@ use tracing_subscriber::Layer;
 
 const MAX_ENTRIES: usize = 500;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LogEntry {
     pub(crate) level: Level,
     pub(crate) message: String,
@@ -22,6 +22,7 @@ pub fn new_log_buffer() -> LogBuffer {
     Arc::new(Mutex::new(VecDeque::with_capacity(MAX_ENTRIES)))
 }
 
+#[derive(Debug)]
 pub struct ConsoleLayer {
     buffer: LogBuffer,
     offset: UtcOffset,
@@ -89,12 +90,14 @@ impl tracing::field::Visit for MessageVisitor {
     }
 }
 
+#[derive(Debug)]
 pub struct ConsoleState {
     pub(crate) buffer: LogBuffer,
     pub auto_scroll: bool,
     pub min_level: Level,
     pub visible: bool,
     pub docked: bool,
+    pub(crate) search: String,
 }
 
 impl ConsoleState {
@@ -105,6 +108,7 @@ impl ConsoleState {
             min_level: Level::INFO,
             visible: false,
             docked: true,
+            search: String::new(),
         }
     }
 

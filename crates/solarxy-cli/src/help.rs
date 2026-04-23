@@ -116,8 +116,10 @@ pub fn about(info: &AppInfo) -> Text<'static> {
             "Real-time 3D model viewer with PBR rendering (default)",
         ),
         shortcut_line("analyze", "CLI/TUI model analysis and validation report"),
-        shortcut_line("preferences", "Interactive settings editor (TUI)"),
         shortcut_line("docs", "This documentation viewer"),
+        blank(),
+        prose("  Preferences are managed in the GUI (Edit \u{2192} Preferences\u{2026})"),
+        prose("  or by editing ~/.config/solarxy/config.toml directly."),
         blank(),
         blank(),
         section_header("GETTING STARTED"),
@@ -138,10 +140,6 @@ pub fn about(info: &AppInfo) -> Text<'static> {
         prose(""),
         prose("    solarxy -M analyze -m model.obj -f json"),
         blank(),
-        prose("  Edit preferences:"),
-        prose(""),
-        prose("    solarxy -M preferences"),
-        blank(),
         prose("  Open this documentation:"),
         prose(""),
         prose("    solarxy -M docs"),
@@ -154,10 +152,7 @@ pub fn about(info: &AppInfo) -> Text<'static> {
         section_header("CLI OPTIONS"),
         blank(),
         shortcut_line("-m, --model", "Path to model file (optional in view mode)"),
-        shortcut_line(
-            "-M, --mode",
-            "Operation mode: view, analyze, preferences, docs",
-        ),
+        shortcut_line("-M, --mode", "Operation mode: view, analyze, docs"),
         shortcut_line(
             "-f, --format",
             "Output format: text or json (analyze mode only)",
@@ -171,16 +166,8 @@ pub fn about(info: &AppInfo) -> Text<'static> {
     ])
 }
 
-pub fn view_mode() -> Text<'static> {
-    parse_help_text(include_str!("../content/view_mode.txt"))
-}
-
 pub fn analyze_mode() -> Text<'static> {
     parse_help_text(include_str!("../content/analyze_mode.txt"))
-}
-
-pub fn preferences() -> Text<'static> {
-    parse_help_text(include_str!("../content/preferences.txt"))
 }
 
 pub fn formats() -> Text<'static> {

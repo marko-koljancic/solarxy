@@ -5,7 +5,7 @@ use crate::report::{
     TextureEntry, ValidationIssue, ValidationReport,
 };
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonVec3 {
     pub x: f32,
     pub y: f32,
@@ -22,7 +22,7 @@ impl From<&[f32; 3]> for JsonVec3 {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonColor3 {
     pub r: f32,
     pub g: f32,
@@ -39,7 +39,7 @@ impl From<&[f32; 3]> for JsonColor3 {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonBounds {
     pub min: JsonVec3,
     pub max: JsonVec3,
@@ -60,7 +60,7 @@ impl From<&BoundsSummary> for JsonBounds {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonMesh {
     pub index: usize,
     pub vertex_count: usize,
@@ -87,7 +87,7 @@ impl From<&MeshSummary> for JsonMesh {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonTexture {
     pub slot: String,
     pub path: String,
@@ -104,7 +104,7 @@ impl From<&TextureEntry> for JsonTexture {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonMaterial {
     pub index: usize,
     pub name: String,
@@ -133,7 +133,7 @@ impl From<&MaterialSummary> for JsonMaterial {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonIssue {
     pub severity: String,
     pub scope: String,
@@ -161,7 +161,7 @@ impl From<&ValidationIssue> for JsonIssue {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonValidation {
     pub error_count: usize,
     pub warning_count: usize,
@@ -178,7 +178,7 @@ impl From<&ValidationReport> for JsonValidation {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonReport {
     pub model_name: String,
     pub mesh_count: usize,

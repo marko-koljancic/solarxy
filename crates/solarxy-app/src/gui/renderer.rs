@@ -12,11 +12,13 @@ use super::actions::{MenuActions, MenuBarVisibility};
 use super::console_view::{draw_console_docked, draw_console_floating};
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
+use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::{ModelInfo, draw_stats_window};
 use super::theme::{apply_theme, configure_fonts};
 use super::update_modal::{UpdateModalState, draw_update_modal};
+use solarxy_core::preferences::Preferences;
 
 pub struct EguiRenderer {
     ctx: egui::Context,
@@ -30,7 +32,8 @@ pub struct EguiRenderer {
     pub console: ConsoleState,
     about_open: bool,
     update_modal: UpdateModalState,
-    toast: Option<Toast>,
+    preferences_modal: PreferencesModal,
+    toasts: VecDeque<Toast>,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
@@ -69,7 +72,8 @@ impl EguiRenderer {
             console: ConsoleState::new(console_buffer),
             about_open: false,
             update_modal: UpdateModalState::new(),
-            toast: None,
+            preferences_modal: PreferencesModal::default(),
+            toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
@@ -107,8 +111,19 @@ impl EguiRenderer {
         self.ctx.wants_keyboard_input()
     }
 
+    /// Upper bound on queued toasts. A burst larger than this drops the
+    /// oldest — "most recent is most relevant" matches user expectation.
+    const TOAST_QUEUE_CAP: usize = 5;
+
+    fn push_toast(&mut self, toast: Toast) {
+        if self.toasts.len() >= Self::TOAST_QUEUE_CAP {
+            self.toasts.pop_front();
+        }
+        self.toasts.push_back(toast);
+    }
+
     pub fn set_toast(&mut self, msg: &str, severity: ToastSeverity) {
-        self.toast = Some(Toast {
+        self.push_toast(Toast {
             message: msg.to_string(),
             severity,
             created: Instant::now(),
@@ -117,7 +132,7 @@ impl EguiRenderer {
     }
 
     pub fn set_capture_message(&mut self, filename: String) {
-        self.toast = Some(Toast {
+        self.push_toast(Toast {
             message: format!("Saved {filename}"),
             severity: ToastSeverity::Success,
             created: Instant::now(),
@@ -134,10 +149,10 @@ impl EguiRenderer {
     }
 
     pub fn clear_expired_toast(&mut self) {
-        if let Some(ref toast) = self.toast
-            && toast.created.elapsed() > toast.duration
+        while let Some(front) = self.toasts.front()
+            && front.created.elapsed() > front.duration
         {
-            self.toast = None;
+            self.toasts.pop_front();
         }
     }
 
@@ -210,7 +225,7 @@ impl EguiRenderer {
             0
         };
         let backend_info = &self.backend_info;
-        let toast = self.toast.as_ref();
+        let toast = self.toasts.front();
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
         let pane_label = &hud.pane_label;
@@ -232,8 +247,12 @@ impl EguiRenderer {
         let mut toast_dismissed = false;
         let console = &mut self.console;
         let update_modal = &mut self.update_modal;
+        let preferences_modal = &mut self.preferences_modal;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
+                actions.open_preferences = true;
+            }
             if menu_vis.menu_bar_visible {
                 draw_menu_bar(
                     ctx,
@@ -262,6 +281,7 @@ impl EguiRenderer {
             }
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
+            draw_preferences_modal(ctx, preferences_modal);
             let hud_ctx = HudCtx {
                 avg_ms,
                 fps,
@@ -330,7 +350,7 @@ impl EguiRenderer {
         self.console.visible = menu_vis.console_visible;
         self.about_open = about_open;
         if toast_dismissed {
-            self.toast = None;
+            self.toasts.pop_front();
         }
 
         self.winit_state
@@ -385,5 +405,17 @@ impl EguiRenderer {
 
     pub fn check_for_updates(&mut self) {
         self.update_modal.refresh();
+    }
+
+    /// Open the preferences modal with `prefs` as the starting draft + snapshot.
+    pub fn open_preferences(&mut self, prefs: Preferences) {
+        self.preferences_modal.open_with(prefs);
+    }
+
+    /// Drain the modal's "committed this frame" slot. The caller writes the
+    /// returned `Preferences` into its in-memory copy; `save()` has already
+    /// been performed by the modal.
+    pub fn take_committed_prefs(&mut self) -> Option<Preferences> {
+        self.preferences_modal.take_committed()
     }
 }

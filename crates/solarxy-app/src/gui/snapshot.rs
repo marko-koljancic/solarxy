@@ -5,7 +5,7 @@ use solarxy_core::preferences::{
 use solarxy_renderer::frame::PostProcessing;
 use crate::state::view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings};
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SidebarChanges {
     pub background_changed: bool,
     pub wireframe_params_changed: bool,
@@ -13,7 +13,7 @@ pub struct SidebarChanges {
     pub ibl_changed: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GuiSnapshot {
     pub view_mode: ViewMode,
     pub normals_mode: NormalsMode,
@@ -139,6 +139,7 @@ impl GuiSnapshot {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct HudInfo {
     pub pane_label: String,
     pub cameras_linked: Option<bool>,

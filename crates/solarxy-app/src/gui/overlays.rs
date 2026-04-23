@@ -33,6 +33,7 @@ pub enum ToastSeverity {
     Error,
 }
 
+#[derive(Debug)]
 pub(super) struct Toast {
     pub message: String,
     pub severity: ToastSeverity,
@@ -54,7 +55,7 @@ pub(super) struct HudCtx<'a> {
     pub validation_counts: (usize, usize),
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct HudResult {
     pub toast_dismissed: bool,
 }

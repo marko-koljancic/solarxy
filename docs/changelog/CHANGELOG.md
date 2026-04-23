@@ -15,6 +15,103 @@ Nothing yet.
 
 ---
 
+## [0.5.0-rc.10] — 2026-04-23
+
+UI and code-quality polish. Closes the remaining user-visible gaps before
+tagging 0.5.0 stable. Preferences move from a standalone TUI to a GUI dialog;
+the CLI `--mode preferences` variant stays parseable but prints a migration
+hint. Several sidebar-unreachable fields (window size, MSAA, recent-files
+capacity, updater behaviour, default UI visibility) become editable for the
+first time.
+
+### Added
+
+- **GUI preferences dialog** (`Edit → Preferences…`, `Ctrl/⌘+,`). Tabbed
+  egui modal with three tabs: **Startup** (window size, MSAA sample count),
+  **Interface** (default sidebar / FPS HUD / console visibility,
+  recent-files capacity), **Updater** (check-for-updates on launch,
+  stable / prerelease channel). OK saves to `config.toml` + closes;
+  Cancel or Esc reverts; Reset-to-defaults acts on the visible tab only.
+  The modal deliberately does **not** duplicate sidebar controls —
+  scope is strictly fields the sidebar cannot reach at runtime.
+- **`Preferences::ui`** and **`Preferences::updater`** sections, backed by
+  new `UiPrefs` and `UpdaterPrefs` structs + the `UpdaterChannel` enum.
+  Loaded with `#[serde(default)]` so rc.8-era `config.toml` files upgrade
+  in place. `MAX_RECENT_FILES_CAP = 50` upper bound.
+- **Console copy-to-clipboard** — right-click a log entry for "Copy
+  message" or "Copy full line" (timestamp + level + message).
+- **Console search** — substring filter beside the level filter, combining
+  with it via AND. Case-insensitive; × clears.
+- **Toast queue** — rapid-fire notifications (e.g. load + HDRI + material
+  in quick succession) now queue instead of replacing. Cap 5; oldest dropped
+  on overflow.
+- **Window menu** — DCC-style top-level menu with visibility toggles for
+  Sidebar / Console / Model Stats / FPS HUD, mirroring the corresponding
+  View-menu entries.
+- **GPU uniform size asserts** — `GradientUniform` (48 bytes) and
+  `WireframeParams` (32 bytes) in `solarxy-renderer::frame` now have
+  `const _: () = assert!(size_of::<T>() == N);` guards, matching the
+  existing pattern on `CameraUniform`, `LightsUniform`,
+  `MaterialUniform`, and `LightEntry`.
+- **Workspace-wide `Debug` derives** on pure-data types in
+  `solarxy-core` (`AABB`, `ViewLayout`, `DisplaySettings`, `BoundsMode`,
+  `PaneDisplaySettings`, `ValidationResult`, all `Json*` types) and on
+  non-GPU types in `solarxy-app` (`GuiSnapshot`, `HudInfo`,
+  `SidebarChanges`, `MenuActions`, `MenuBarVisibility`, `Toast`,
+  `HudResult`, `LogEntry`, `ConsoleLayer`, `ConsoleState`). Types that
+  transitively own wgpu resources (`State`, `Renderer`, `ModelScene`,
+  etc.) intentionally remain without `Debug`.
+
+### Changed
+
+- **Stats window** — removed the visible "N/A" placeholders for UV
+  Coverage and Validation Status. These fields implied functionality that
+  didn't exist. Real implementations (UV overlap GPU readback + validation
+  summary) land in 0.6.0; the UV Data section still shows UV Mapping
+  (Yes/No), which is real.
+- **`solarxy-core` feature `config` renamed to `serialization`**. The old
+  name was ambiguous (compile-time config vs runtime blob vs config-file
+  I/O); the new name unambiguously covers what's gated (serde + toml +
+  dirs + tracing, used by `preferences`, `json`, `report`,
+  `install_source`, `view_config`). All workspace-internal consumers
+  updated; no external consumers known.
+- **`Edit → Preferences` menu entry** — was a stub RichText label above
+  the config-file button; now a proper button that opens the GUI dialog
+  (with keyboard shortcut label).
+- **Recent-files capacity** is now user-configurable via
+  `Preferences::ui::max_recent_files` (clamped to `1..=50`); the old
+  hard-coded `MAX_RECENT_FILES = 20` is the default.
+- **`README.md` preferences section** rewritten to describe the GUI
+  dialog + direct TOML editing; old TUI screenshots and per-setting
+  table dropped.
+- **`solarxy-cli` docs-mode tabs** shrunk from 5 to 3 (**About**,
+  **Analyze Mode**, **Formats**). View Mode documentation was a
+  scope-mismatched 147-line import of GUI-viewer content; preferences
+  documentation covered the removed TUI. Both moved out.
+- **Menu recent-files string truncation** simplified — replaced a
+  double-`collect::<Vec<_>>()` reversal with a single-pass `skip()`.
+  Cleaner read, half the allocations.
+
+### Removed
+
+- **`crates/solarxy-cli/src/tui_preferences.rs`** — the interactive
+  preferences TUI. `solarxy-cli --mode preferences` now prints a
+  migration hint (GUI dialog path + config-file location) and exits
+  with code 1. The clap variant stays parseable so scripted invocations
+  don't blow up with "unknown value".
+- **`crates/solarxy-cli/content/preferences.txt`** and
+  **`view_mode.txt`** — docs-mode content for the two removed tabs.
+
+### Internal
+
+- Documented the `cycle_enum!` macro's safety invariant
+  (`unwrap_or(0)` fallback) with a rustdoc comment.
+- Documented `min_binding_size: None` intent on the three sites in
+  `bind_groups.rs` (the uniform-binding helper plus the two storage-buffer
+  entries for variable-length per-model data).
+
+---
+
 ## [0.5.0-rc.9] — 2026-04-23
 
 CI / packaging / documentation cleanup ahead of 0.5.0 stable. No user-facing

@@ -25,16 +25,16 @@
 
 pub mod aabb;
 pub mod geometry;
-#[cfg(feature = "config")]
+#[cfg(feature = "serialization")]
 pub mod install_source;
-#[cfg(feature = "config")]
+#[cfg(feature = "serialization")]
 pub mod json;
-#[cfg(feature = "config")]
+#[cfg(feature = "serialization")]
 pub mod preferences;
-#[cfg(feature = "config")]
+#[cfg(feature = "serialization")]
 pub mod report;
 pub mod validation;
-#[cfg(feature = "config")]
+#[cfg(feature = "serialization")]
 pub mod view_config;
 
 pub use aabb::AABB;

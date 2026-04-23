@@ -1,7 +1,7 @@
 use solarxy_core::preferences::ProjectionMode;
 use crate::state::view_state::ViewLayout;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct MenuActions {
     pub open_model: bool,
     pub open_hdri: bool,
@@ -11,6 +11,7 @@ pub(crate) struct MenuActions {
     pub save_preferences: bool,
     pub open_recent: Option<String>,
     pub open_config_file: bool,
+    pub open_preferences: bool,
     pub set_layout: Option<ViewLayout>,
     pub set_projection: Option<ProjectionMode>,
     pub open_wiki: bool,
@@ -18,7 +19,7 @@ pub(crate) struct MenuActions {
     pub check_for_updates: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct MenuBarVisibility {
     pub sidebar_visible: bool,
     pub menu_bar_visible: bool,

@@ -9,8 +9,11 @@ authors.workspace = true
 description = "Core data types, geometry algorithms, and validation for 3D model analysis"
 
 [features]
-default = ["config"]
-config = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing"]
+default = ["serialization"]
+# Gates every dependency that exists only to read/write config files,
+# reports, and validation JSON. Disable to use solarxy-core as a pure
+# computation library (e.g. WASM / no_std-adjacent contexts).
+serialization = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing"]
 
 [dependencies]
 cgmath = { workspace = true }

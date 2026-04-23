@@ -477,6 +477,16 @@ impl State {
 
         self.handle_menu_actions(actions);
 
+        if let Some(new_prefs) = self.gui.take_committed_prefs() {
+            self.preferences = new_prefs;
+            let cap = self.preferences.ui.max_recent_files.max(1);
+            if self.preferences.history.recent_files.len() > cap {
+                self.preferences.history.recent_files.truncate(cap);
+            }
+            self.gui
+                .set_toast("Preferences saved", crate::gui::ToastSeverity::Success);
+        }
+
         let capture_buffer = if self.capture_requested {
             self.capture_requested = false;
             Some(self.encode_capture(&output.texture, &mut encoder))

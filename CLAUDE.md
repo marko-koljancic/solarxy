@@ -32,7 +32,7 @@ RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 **MSRV:** Rust 1.92. **Edition:** 2024.
 
 **Feature flags** live on the inner crates, not the root:
-- `solarxy-core`: `config` (default) gates `preferences`, `json`, `report`, `install_source`, `view_config` (the serde/toml/dirs-dependent modules).
+- `solarxy-core`: `serialization` (default) gates `preferences`, `json`, `report`, `install_source`, `view_config` (the serde/toml/dirs-dependent modules). Renamed from `config` in rc.10 — the old name was ambiguous (compile-time config vs runtime config blob vs config-file I/O); `serialization` unambiguously names what's gated.
 - `solarxy-cli`: `tui` (default), `analyzer` (default), `updater` (default).
 - `solarxy-app` and `solarxy-renderer`: no features — always link wgpu/winit/egui.
 - Root `solarxy` binary: **no features**. GUI is always linked; there is no headless build of this crate.

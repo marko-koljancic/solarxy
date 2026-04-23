@@ -24,7 +24,7 @@ A lightweight, cross-platform 3D model viewer and visual debugger built with Rus
 - **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
 - **Report export** -- save analysis reports to file in text or JSON format
-- **Persistent preferences** -- configure display, rendering, and lighting settings via TUI or in-viewer shortcuts
+- **Persistent preferences** -- configure defaults via the GUI **Edit → Preferences…** dialog or tweak the TOML file directly; live changes in the viewer are saved with `Shift+S`
 - **Drag-and-drop** -- drop model files or HDR/EXR environment maps directly into the viewer window
 
 ## Supported Formats
@@ -181,7 +181,7 @@ cargo r --release --bin solarxy-cli -- --model path/to/model.glb --mode analyze 
 | Flag | Description | Default |
 |---|---|---|
 | `-m, --model <PATH>` | Path to model file (required for `--mode analyze`) | -- |
-| `-M, --mode <MODE>` | `view`, `analyze`, `preferences`, or `docs` | `view` |
+| `-M, --mode <MODE>` | `view`, `analyze`, or `docs` (the interactive `preferences` TUI was removed in 0.5.0 — use the GUI or edit the TOML directly) | `view` |
 | `-f, --format <FORMAT>` | Output format: `text` or `json` (analyze mode only) | `text` |
 | `-o, --output <PATH>` | Save report to file (analyze mode only) | -- |
 | `--about` | Show version and application info | -- |
@@ -334,59 +334,19 @@ The analyzer opens a terminal UI with four tabs: **Overview**, **Meshes**, **Mat
 
 ## Preferences
 
-Solarxy persists display, rendering, and lighting settings in a TOML configuration file at a platform-specific location: `~/.config/solarxy/config.toml` on Linux, `~/Library/Application Support/solarxy/config.toml` on macOS, and `%APPDATA%\solarxy\config.toml` on Windows. Preferences are loaded automatically on startup and can be managed in three ways: through the dedicated preferences editor, with keyboard shortcuts in the viewer, or by editing the config file directly.
+Solarxy persists display, rendering, UI, and updater settings in a TOML configuration file at a platform-specific location: `~/.config/solarxy/config.toml` on Linux, `~/Library/Application Support/solarxy/config.toml` on macOS, and `%APPDATA%\solarxy\config.toml` on Windows. Preferences are loaded automatically on startup and can be managed three ways:
 
-Launch the preferences editor:
-
-```bash
-cargo r --release -- --mode preferences
-```
-
-<p align="center">
-  <img src="docs/img/solarxy-preferences.png" width="100%">
-</p>
-
-### Configurable Settings
-
-| Category | Setting | Values |
-|---|---|---|
-| Display | Background | White / Gradient / Dark Gray / Black |
-| Display | View Mode | Shaded / Shaded+Wire / Wireframe / Ghosted |
-| Display | Normals Mode | Off / Face / Vertex / Face+Vertex |
-| Display | Grid Visible | on / off |
-| Display | Axis Gizmo Visible | on / off |
-| Display | Local Axes Visible | on / off |
-| Display | Bloom Enabled | on / off |
-| Display | SSAO Enabled | on / off |
-| Display | UV Mode | Off / Gradient / Checker |
-| Display | Projection Mode | Perspective / Orthographic |
-| Display | Turntable Active | on / off |
-| Display | Turntable RPM | 1.0 -- 60.0 (default 5.0) |
-| Display | IBL Mode | Off / Diffuse / Full |
-| Display | Tone Mode | None (clip) / Linear / Reinhard / ACES Filmic |
-| Display | Exposure | 0.1 -- 10.0 (default 1.0) |
-| Display | Inspection Mode | Shaded / Material ID / Texel Density / Depth |
-| Display | Texel Density Target | 0.01 -- 10.0 (default 1.0) |
-| Rendering | Wireframe Line Weight | Light / Medium / Bold |
-| Rendering | MSAA Sample Count | 1 / 2 / 4 |
-| Lighting | Lighting Lock | on / off |
-
-### Navigation
-
-| Key | Action |
-|---|---|
-| `↑` / `↓`, `k` / `j` | Navigate settings |
-| `Enter` / `Space` / `→` | Cycle value forward |
-| `←` / `h` | Cycle value backward |
-| `s` | Save preferences |
-| `r` | Reset to defaults |
-| `q` / `Esc` | Quit |
-
-Settings can also be changed on the fly in the viewer using keyboard shortcuts and saved with `Shift+S`.
+- **GUI preferences dialog** — **Edit → Preferences…** (or `Ctrl/⌘+,`). Three tabs:
+  - **Startup** — window size, MSAA sample count.
+  - **Interface** — default visibility of sidebar / FPS HUD / console; recent-files capacity.
+  - **Updater** — check-for-updates on launch + release channel (Stable / Prerelease).
+  The dialog stages edits; **OK** saves and closes, **Cancel** / **Esc** reverts. Changes to window size and MSAA take effect on the next launch.
+- **Keyboard shortcuts in the viewer** — every display/rendering/lighting setting has a shortcut (see the sections above). Save the current in-viewport state to `config.toml` with `Shift+S`.
+- **Direct TOML editing** — open the config file from **Edit → Open Config File** in the menu, or at the path above.
 
 ## Docs Mode
 
-The built-in documentation viewer provides an interactive, five-tab reference covering all modes, keyboard shortcuts, CLI options, supported formats, and preferences -- accessible offline without leaving the terminal.
+The built-in documentation viewer provides an interactive, three-tab reference covering the CLI surface (**About**, **Analyze Mode**, **Formats**) — accessible offline without leaving the terminal. The GUI viewer and preferences dialog have their own in-app documentation and keyboard-shortcut overlay.
 
 ```bash
 cargo r --release -- --mode docs
@@ -401,7 +361,7 @@ cargo r --release -- --mode docs
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` | Next / previous tab |
-| `1` `2` `3` `4` `5` | Jump to tab |
+| `1` `2` `3` | Jump to tab |
 | `j` / `k`, arrows | Scroll up / down |
 | `g` / `G` | Jump to top / bottom |
 | `PgUp` / `PgDn` | Page scroll |

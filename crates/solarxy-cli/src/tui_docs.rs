@@ -15,28 +15,18 @@ use super::help::{self, AppInfo};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocsTab {
     About = 0,
-    ViewMode = 1,
-    AnalyzeMode = 2,
-    Formats = 3,
-    Preferences = 4,
+    AnalyzeMode = 1,
+    Formats = 2,
 }
 
 impl DocsTab {
-    const ALL: [DocsTab; 5] = [
-        DocsTab::About,
-        DocsTab::ViewMode,
-        DocsTab::AnalyzeMode,
-        DocsTab::Formats,
-        DocsTab::Preferences,
-    ];
+    const ALL: [DocsTab; 3] = [DocsTab::About, DocsTab::AnalyzeMode, DocsTab::Formats];
 
     fn title(self) -> &'static str {
         match self {
             DocsTab::About => "About",
-            DocsTab::ViewMode => "View Mode",
             DocsTab::AnalyzeMode => "Analyze Mode",
             DocsTab::Formats => "Formats",
-            DocsTab::Preferences => "Preferences",
         }
     }
 
@@ -48,8 +38,8 @@ impl DocsTab {
 pub struct DocsApp {
     exit: bool,
     active_tab: DocsTab,
-    scroll_offsets: [u16; 5],
-    content_heights: [u16; 5],
+    scroll_offsets: [u16; 3],
+    content_heights: [u16; 3],
     app_info: AppInfo,
 }
 
@@ -58,8 +48,8 @@ impl DocsApp {
         Self {
             exit: false,
             active_tab: DocsTab::About,
-            scroll_offsets: [0; 5],
-            content_heights: [0; 5],
+            scroll_offsets: [0; 3],
+            content_heights: [0; 3],
             app_info,
         }
     }
@@ -140,7 +130,7 @@ impl DocsApp {
         let instructions = Line::from(vec![
             Span::raw(" "),
             Span::styled(
-                "Tab/1-5",
+                "Tab/1-3",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -202,10 +192,8 @@ impl DocsApp {
     fn tab_content(&self) -> Text<'static> {
         match self.active_tab {
             DocsTab::About => help::about(&self.app_info),
-            DocsTab::ViewMode => help::view_mode(),
             DocsTab::AnalyzeMode => help::analyze_mode(),
             DocsTab::Formats => help::formats(),
-            DocsTab::Preferences => help::preferences(),
         }
     }
 
@@ -246,10 +234,8 @@ impl DocsApp {
                 self.active_tab = DocsTab::ALL[prev];
             }
             KeyCode::Char('1') => self.active_tab = DocsTab::About,
-            KeyCode::Char('2') => self.active_tab = DocsTab::ViewMode,
-            KeyCode::Char('3') => self.active_tab = DocsTab::AnalyzeMode,
-            KeyCode::Char('4') => self.active_tab = DocsTab::Formats,
-            KeyCode::Char('5') => self.active_tab = DocsTab::Preferences,
+            KeyCode::Char('2') => self.active_tab = DocsTab::AnalyzeMode,
+            KeyCode::Char('3') => self.active_tab = DocsTab::Formats,
             _ => {}
         }
     }

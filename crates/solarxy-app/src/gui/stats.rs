@@ -105,22 +105,6 @@ pub(super) fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mu
                     ui.label("UV Mapping");
                     ui.label(if info.has_uvs { "Yes" } else { "No" });
                     ui.end_row();
-
-                    ui.label("Coverage");
-                    ui.label("N/A");
-                    ui.end_row();
-                });
-
-            ui.separator();
-            ui.strong("Validation");
-
-            egui::Grid::new("stats_val")
-                .num_columns(2)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
-                    ui.label("Status");
-                    ui.label("N/A");
-                    ui.end_row();
                 });
         });
 }

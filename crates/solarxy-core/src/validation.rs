@@ -85,6 +85,7 @@ impl ValidationReport {
     }
 }
 
+#[derive(Debug)]
 pub struct ValidationResult {
     pub report: ValidationReport,
     pub degenerate_faces: Vec<Vec<u32>>,

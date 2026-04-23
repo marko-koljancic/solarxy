@@ -8,7 +8,7 @@ use crate::preferences::{
     UvMapBackground, UvMode, ViewMode,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewLayout {
     #[default]
     Single,
@@ -16,6 +16,7 @@ pub enum ViewLayout {
     SplitHorizontal,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct DisplaySettings {
     pub turntable_active: bool,
     pub turntable_rpm: f32,
@@ -25,7 +26,7 @@ pub struct DisplaySettings {
     pub metallic_scale: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundsMode {
     Off,
     WholeModel,
@@ -46,7 +47,7 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PaneDisplaySettings {
     pub view_mode: ViewMode,
     pub prev_non_ghosted_mode: ViewMode,
