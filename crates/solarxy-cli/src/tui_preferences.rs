@@ -245,15 +245,13 @@ impl PreferencesApp {
 
         match key_event.code {
             KeyCode::Char('q') | KeyCode::Esc => self.exit = true,
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.selected_field > 0 {
-                    self.selected_field -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if self.selected_field > 0 => {
+                self.selected_field -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_field < PREF_FIELD_COUNT - 1 {
-                    self.selected_field += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.selected_field < PREF_FIELD_COUNT - 1 =>
+            {
+                self.selected_field += 1;
             }
             KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Right | KeyCode::Char('l') => {
                 self.cycle_field(true);

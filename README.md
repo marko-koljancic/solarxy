@@ -120,6 +120,13 @@ For the CLI, run `solarxy-cli --update` — it self-updates when installed
 via the shell installer, and prints the correct package-manager command
 otherwise.
 
+### System requirements
+
+- **x86_64** — CPU with **AVX2 + FMA** (Intel Haswell / 2013+, AMD Excavator / 2015+ or later). Release builds embed these feature flags; older CPUs will fault on startup.
+- **Apple Silicon (aarch64-apple-darwin)** — no additional requirements; builds target `apple-m1` and run on every Apple Silicon Mac.
+- **GPU** — any wgpu-compatible backend: Vulkan, Metal, DirectX 12, or WebGPU. Most GPUs from 2016 onward qualify.
+- **OS** — macOS 14+, Windows 10 21H2+, or a modern Linux distribution with Wayland or X11.
+
 ## Build from source
 
 ### Prerequisites

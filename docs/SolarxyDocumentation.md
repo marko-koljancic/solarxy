@@ -1,5 +1,7 @@
 # Solarxy Documentation
 
+> **Out of date.** This document describes Solarxy 0.3.x and has not been updated for the 0.5.0 CLI/GUI split or the UI revamp. A full rewrite is planned for 0.6.0. For current state, see the top-level [README](../README.md), the [CHANGELOG](changelog/CHANGELOG.md), and the in-app `solarxy-cli --mode docs`.
+
 A comprehensive guide to Solarxy -- a lightweight, cross-platform 3D model viewer and validator built with Rust and wgpu.
 
 [GitHub Repository](https://github.com/marko-koljancic/solarxy)

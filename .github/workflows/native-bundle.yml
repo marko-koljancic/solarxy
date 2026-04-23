@@ -44,8 +44,9 @@ jobs:
             runner: macos-15-intel      # Intel — matches cargo-dist's own matrix; macos-13 was retired
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
+          # aarch64 Linux is deferred to 0.6.0: upstream appimagetool does not
+          # yet ship a stable aarch64 binary, and action.yml's AppImage step
+          # is gated to x86_64. Re-add this matrix leg once upstream catches up.
     runs-on: ${{ matrix.runner }}
     env:
       # Detect invocation mode by input presence: `github.event_name` in a

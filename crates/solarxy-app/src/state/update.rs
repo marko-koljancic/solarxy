@@ -257,9 +257,8 @@ impl State {
                         active_ibl,
                         &self.renderer.ibl_res.brdf_lut,
                     );
-                    let file_size = std::fs::metadata(&pending.path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                    let file_size =
+                        std::fs::metadata(&pending.path).map_or(0, |m| m.len());
                     let bounds_size = new_scene.model.bounds.size();
                     self.gui.update_model_info(
                         &pending.filename,

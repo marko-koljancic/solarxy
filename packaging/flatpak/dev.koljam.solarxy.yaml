@@ -37,11 +37,9 @@ modules:
     build-commands:
       # Build only the GUI binary. The CLI is distributed via Homebrew /
       # cargo-dist shell installer; Flatpak isn't a sensible delivery
-      # channel for terminal tools.
-      - cargo --offline build --release
-            --bin solarxy
-            --no-default-features
-            --features viewer,analyzer
+      # channel for terminal tools. The root `solarxy` crate is always-GUI
+      # and has no feature flags — a bare `--bin solarxy` is sufficient.
+      - cargo --offline build --release --bin solarxy
       - install -Dm755 target/release/solarxy /app/bin/solarxy
 
       # Desktop entry, icon, and AppStream metainfo

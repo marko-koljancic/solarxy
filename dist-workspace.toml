@@ -25,12 +25,3 @@ post-announce-jobs = ["./native-bundle"]
 # wix/main.wxs is edited by hand to set the product icon from res/bundle/.
 # Tell dist not to fight us on subsequent `dist generate` runs.
 allow-dirty = ["msi"]
-
-# Native bundles (DMG / .deb / AppImage) are NOT produced by cargo-dist.
-# A separate workflow (`.github/workflows/native-bundle.yml`) handles them;
-# it triggers on `release: published` and uploads bundles to the live
-# release. See that workflow for the rationale (cargo-dist's `github-build-setup`
-# hook runs before `dist build`, so the binary doesn't exist yet; its
-# `local-artifacts-jobs` hook uploads artifacts that `dist host` ignores
-# because they aren't in the dist-manifest; the separate-workflow model
-# sidesteps both issues and survives `dist generate` untouched).

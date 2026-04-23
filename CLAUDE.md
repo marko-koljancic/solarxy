@@ -162,12 +162,13 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 
 **Binary installers (CLI: `solarxy-cli`)** — shell / PowerShell / portable `.zip` — produced by `cargo-dist` 0.31.0. No CLI MSI: CLI MSIs aren't idiomatic on Windows (ripgrep, fd, zoxide, eza, bat, delta, cargo-dist itself don't ship one), so `[package.metadata.wix]` on `crates/solarxy-cli/Cargo.toml` is intentionally absent. Config in `dist-workspace.toml`; CI in the generated `.github/workflows/release.yml`. `dist` regenerates the root `wix/main.wxs` (GUI MSI) on every run; the product-icon edit is preserved via `allow-dirty = ["msi"]`.
 
-**Native GUI bundles (`solarxy`)** — macOS `.dmg`, Linux `.deb` + `.rpm` + `.AppImage` — produced by `.github/workflows/native-bundle.yml`, invoked from cargo-dist's generated `release.yml` via the `post-announce-jobs` hook in `dist-workspace.toml`. In-graph (not `release: published`) is deliberate: `release` events don't fire for `GITHUB_TOKEN`-created releases. Heavy lifting is in the composite action `.github/actions/native-bundle/action.yml`:
-- macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg` (see the comment in `dist-workspace.toml` for why this is *not* inside cargo-dist).
-- Linux: `cargo-deb` (`.deb`), `cargo-generate-rpm` (`.rpm`, reads `[package.metadata.generate-rpm]`), `appimagetool` (x86_64 AppImage; aarch64 deferred to 0.6.0).
+**Native GUI bundles (`solarxy`)** — macOS `.dmg` + Linux `.AppImage` — produced by `.github/workflows/native-bundle.yml`, invoked from cargo-dist's generated `release.yml` via the `post-announce-jobs` hook in `dist-workspace.toml`. In-graph (not `release: published`) is deliberate: `release` events don't fire for `GITHUB_TOKEN`-created releases. Heavy lifting is in the composite action `.github/actions/native-bundle/action.yml`:
+- macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg`.
+- Linux: `appimagetool` (x86_64 AppImage only; aarch64 deferred to 0.6.0 pending upstream arm64 stable binary).
+- `.deb` + `.rpm` were dropped in rc.7 in favour of Flathub for distro-agnostic coverage; community packagers can still build native packages from source.
 
 **Distribution channels:**
-- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`), **winget** (`Koljam.Solarxy`, `packaging/winget/`). Plus raw bundles from GitHub Releases.
+- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`). Plus raw DMG / MSI / AppImage bundles from GitHub Releases. (winget submission deferred to 0.5.1; no in-tree manifest until the `winget-release.yml` auto-bump is reinstated alongside proper per-build ProductCode extraction.)
 - CLI: `cargo-dist` installers (shell / PowerShell + portable `.zip`), Homebrew formula (`solarxy-cli`). No MSI — winget CLI manifest (portable type) deferred to 0.5.1.
 - `solarxy-cli --update` detects the install source via `solarxy_core::install_source::detect()`: Homebrew → `brew upgrade solarxy-cli`, Flatpak → `flatpak update dev.koljam.solarxy`, otherwise `axoupdater` self-update.
 

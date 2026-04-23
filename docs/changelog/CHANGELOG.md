@@ -15,6 +15,69 @@ Nothing yet.
 
 ---
 
+## [0.5.0-rc.9] — 2026-04-23
+
+CI / packaging / documentation cleanup ahead of 0.5.0 stable. No user-facing
+code changes — every diff is release-surface, docs, or CI triggers.
+
+### Removed
+
+- Deleted `.github/workflows/flathub-bump.yml`, `homebrew-bump.yml`, and
+  `winget-release.yml`. The job-level `if:` on each used
+  `secrets.X != ''` at expression scope, which GitHub Actions silently
+  errors on — the workflows had been failing on every release since
+  rc.7. Tap / manifest / winget-pkgs fork don't exist yet; reinstate
+  in 0.5.1 alongside `{{PRODUCT_CODE}}` extraction and a regex-based
+  Homebrew formula version substitution.
+- Deleted `packaging/winget/` entirely. The manifest's `ProductCode`
+  was a copy of the `UpgradeCode` GUID from `wix/main.wxs`, which
+  violates WiX semantics: `ProductCode` must rotate per build so that
+  `winget upgrade` correctly detects version transitions. Fix requires
+  per-build extraction from the built MSI — wired up at reinstatement.
+- Removed the `aarch64-unknown-linux-gnu` leg from the native-bundle
+  matrix. `action.yml`'s AppImage step is gated to x86_64 only, so the
+  aarch64 leg was compiling binaries nothing consumed. Re-add when
+  upstream `appimagetool` ships a stable aarch64 binary.
+
+### Fixed
+
+- **CI branch gating** — `.github/workflows/ci.yml` now runs on pushes
+  to `ui-revamp` in addition to `main`. The 0.5.0 RC chain had been
+  merging to `ui-revamp` without `cargo fmt --check`,
+  `clippy -D warnings`, or `cargo test` enforcement.
+- **Flatpak manifest** — `packaging/flatpak/dev.koljam.solarxy.yaml`
+  no longer passes `--no-default-features --features viewer,analyzer`
+  to `cargo build`. The root `solarxy` crate has no `[features]` block
+  (always-GUI by design), so these flags would error with "unknown
+  feature" during Flathub's sandboxed offline build. Replaced with a
+  bare `cargo --offline build --release --bin solarxy`.
+- **Flatpak `cargo-sources.json`** — regenerated from `Cargo.lock`
+  via `packaging/flatpak/generate-sources.sh`. The committed file
+  was a 3-byte `[]` placeholder; Flathub's sandboxed builder requires
+  the full 557-crate manifest (~300 KB) to materialize sources
+  offline.
+- **`dist-workspace.toml` stale comment** — dropped the trailing
+  comment block that described a `release: published` trigger model
+  replaced in rc.2 by the `post-announce-jobs` in-graph hook (which
+  is documented correctly at the top of the file).
+- **`CLAUDE.md:165-170`** — removed `cargo-deb` / `cargo-generate-rpm`
+  / `[package.metadata.generate-rpm]` references (dropped in rc.7) and
+  the `packaging/winget/` pointer (deleted above). The bundle-pipeline
+  description now matches actual CI surface.
+
+### Added
+
+- **`README.md` — System requirements section** — documents the AVX2+FMA
+  x86_64 baseline (Intel Haswell 2013+, AMD Excavator 2015+) imposed by
+  `.cargo/config.toml`'s `target-feature=+avx2,+fma`. Apple Silicon and
+  Linux aarch64 retain no additional requirements.
+- **`docs/SolarxyDocumentation.md` — out-of-date banner** — the
+  0.3.x-era document is not refreshed for 0.5.0; the banner points
+  readers at README, CHANGELOG, and `solarxy-cli --mode docs` for
+  current state. Full rewrite deferred to 0.6.0.
+
+---
+
 ## [0.5.0-rc.8] — 2026-04-17
 
 Final pre-stable RC. Validates the rc.7 packaging rearchitecture and the
