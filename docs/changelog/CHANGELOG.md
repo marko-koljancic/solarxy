@@ -15,6 +15,100 @@ Nothing yet.
 
 ---
 
+## [0.5.0-rc.11] — unreleased
+
+Final polish RC before 0.5.0 stable. No new features; every change closes a
+"this feels unpolished" gap surfaced during rc.10 dogfooding. Menu bar,
+modal behaviour, toast notifications, console capture, and the CLI install
+path all get their last round of cleanup.
+
+### Added
+
+- **Keyboard Shortcuts modal** (`?` or View menu → Keyboard Shortcuts).
+  Draggable reference window listing every binding grouped by category
+  (File / Window & Layout / Navigation / Shading & Inspection / Show /
+  Lighting). Replaces the old bottom-of-viewport hints overlay. Read-only
+  for this release; user-remappable shortcuts land in 0.6.0.
+- **Preferences → Interface → "Open Model Stats on model load"** checkbox
+  (default on). Governs whether loading a model auto-opens the Model
+  Stats panel. Backed by `UiPrefs::open_stats_on_model_load`; new
+  `#[serde(default)]` keeps older `config.toml` files compatible.
+- **Preferences → Startup → Config File** section: shows the absolute
+  config path and provides an **Open config file** button (opens the
+  TOML file in the system-default text editor). Replaces the removed
+  Edit-menu entries.
+- **Toast tracing bridge**: every `push_toast` now emits a matching
+  `tracing` event on `target: "solarxy::toast"`. Users can review toast
+  history after the fact in the docked console.
+- `docs/perf/rc11-baseline.md` + `docs/perf/rc11-profiling-notes.md` —
+  skeletal perf-spike artifacts (reproduction commands, metrics grid,
+  hot-path templates). Measurements fill in on maintainer hardware; hot
+  paths surface as 0.6.0 issues.
+
+### Changed
+
+- **Menu bar simplified**. File menu drops "Save Preferences" (the
+  modal's OK button saves atomically; `Shift+S` shortcut still saves
+  for power users). Edit menu trims down to a single "Preferences…"
+  entry — the config-path label and Open Config File button move into
+  the Preferences modal's Startup tab. View menu drops the six panel-
+  visibility checkboxes (Sidebar / Menu Bar / Console / Model Stats /
+  FPS HUD / Keyboard Shortcuts) and keeps only functional view
+  controls + a Keyboard Shortcuts button at the end. Window menu is now
+  the single source of truth for panel toggles (Menu Bar joins
+  Sidebar / Console / Model Stats / FPS HUD there).
+- **About / Check for Updates / Preferences modals are now draggable**.
+  They still open centered, but users can reposition them without the
+  anchor pinning them back.
+- **Toast notifications redesigned** to stack at bottom-center (Discord
+  / Slack style). Newest sits at the bottom; older entries stack
+  upward. Auto-dismiss after 5 s (was 3 s); click-to-dismiss retained.
+  Cap of 5 queued toasts preserved.
+- **Console buffer captures `solarxy=trace` by default**
+  (was `solarxy=debug`). The UI filter dropdown still lets users pick
+  ERROR / WARN / INFO / DEBUG; TRACE events are captured but require
+  `SOLARXY_CONSOLE_LOG=solarxy=trace` to surface in the UI filter.
+- **Model-load log message format** updated to
+  `"Loaded model: {path} ({verts} verts, {tris} tris, {meshes} meshes)"`.
+- **Prerelease-channel explanation** in Preferences → Updater is now
+  shown only when the Prerelease radio is active (previously always
+  visible, which made the Stable branch look over-explained).
+- **CLI docs (`solarxy-cli --mode docs` About tab)**: CLI invocation
+  examples now correctly use `solarxy-cli` (was `solarxy`, which is the
+  GUI binary). GUI-launch examples keep the `solarxy` name.
+
+### Removed
+
+- The "Drop a 3D model to view" centered placeholder. An empty viewport
+  stays visually clean; File → Open Model and drag-and-drop both still
+  work without the prompt.
+- The bottom-of-viewport hints overlay (`HINTS_MODEL` / `HINTS_NO_MODEL`
+  strings) and the `hints_visible` flag that drove it. Replaced by the
+  Keyboard Shortcuts modal.
+
+### Breaking / ⚠ Migration
+
+- **CLI install path moved from `~/.cargo/bin` to `~/.local/bin`.** The
+  shell and PowerShell installers now place `solarxy-cli` in the XDG
+  Base Dir location. Users upgrading from rc.10:
+  - Ensure `~/.local/bin` is on your `PATH` (most Linux distros set this
+    in `~/.profile`; macOS users may need to add it manually).
+  - The old binary at `~/.cargo/bin/solarxy-cli` is NOT removed
+    automatically — delete it with `rm ~/.cargo/bin/solarxy-cli` for a
+    clean layout. `install_source::classify_exe_path` keeps recognising
+    the legacy location so `--update` still routes correctly for
+    users who haven't migrated.
+
+### Internal
+
+- Toast caller audit: ~8 duplicate `tracing::…!` calls alongside
+  `set_toast` were removed. With `push_toast` now emitting the matching
+  event, those callers were double-logging.
+- New unit tests in `solarxy-core::install_source` cover both the
+  legacy `.cargo/bin` and the new `.local/bin` classifications.
+
+---
+
 ## [0.5.0-rc.10] — 2026-04-23
 
 UI and code-quality polish. Closes the remaining user-visible gaps before

@@ -66,13 +66,6 @@ pub(super) fn draw_menu_bar(
                     actions.save_screenshot = true;
                     ui.close();
                 }
-                if ui
-                    .add(egui::Button::new("Save Preferences").shortcut_text("Shift+S"))
-                    .clicked()
-                {
-                    actions.save_preferences = true;
-                    ui.close();
-                }
                 ui.separator();
                 if ui
                     .add_enabled(has_model, egui::Button::new("Close Model"))
@@ -93,18 +86,6 @@ pub(super) fn draw_menu_bar(
                     .clicked()
                 {
                     actions.open_preferences = true;
-                    ui.close();
-                }
-                ui.separator();
-                if let Some(path) = solarxy_core::preferences::config_path() {
-                    ui.label(
-                        egui::RichText::new(path.display().to_string())
-                            .small()
-                            .color(egui::Color32::from_white_alpha(140)),
-                    );
-                }
-                if ui.button("Open Config File").clicked() {
-                    actions.open_config_file = true;
                     ui.close();
                 }
             });
@@ -339,22 +320,24 @@ pub(super) fn draw_menu_bar(
 
                 ui.separator();
 
-                ui.checkbox(&mut vis.sidebar_visible, "Sidebar")
-                    .on_hover_text("Tab");
-                ui.checkbox(&mut vis.menu_bar_visible, "Menu Bar")
-                    .on_hover_text("F10");
-                ui.add_enabled(
-                    has_model,
-                    egui::Checkbox::new(&mut vis.stats_visible, "Model Stats"),
-                );
-                ui.checkbox(&mut vis.console_visible, "Console")
-                    .on_hover_text("`");
-                ui.checkbox(&mut vis.fps_hud_visible, "FPS HUD");
-                ui.checkbox(&mut vis.hints_visible, "Keyboard Shortcuts")
-                    .on_hover_text("?");
+                if ui.button("Keyboard Shortcuts").on_hover_text("?").clicked() {
+                    actions.open_shortcuts_modal = true;
+                    ui.close();
+                }
             });
 
             ui.menu_button("Window", |ui| {
+                if ui
+                    .add(
+                        egui::Button::new("Menu Bar")
+                            .selected(vis.menu_bar_visible)
+                            .shortcut_text("F10"),
+                    )
+                    .clicked()
+                {
+                    vis.menu_bar_visible = !vis.menu_bar_visible;
+                    ui.close();
+                }
                 if ui
                     .add(
                         egui::Button::new("Sidebar")
@@ -378,7 +361,10 @@ pub(super) fn draw_menu_bar(
                     ui.close();
                 }
                 if ui
-                    .add(egui::Button::new("Model Stats").selected(vis.stats_visible))
+                    .add_enabled(
+                        has_model,
+                        egui::Button::new("Model Stats").selected(vis.stats_visible),
+                    )
                     .clicked()
                 {
                     vis.stats_visible = !vis.stats_visible;

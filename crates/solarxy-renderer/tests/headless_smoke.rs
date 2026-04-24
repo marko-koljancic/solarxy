@@ -1,16 +1,3 @@
-//! Headless smoke test for the renderer crate.
-//!
-//! Demonstrates the architectural payoff of the workspace split: the
-//! renderer can be exercised in isolation, without a winit window or
-//! surface. Constructs the renderer's foundational components (bind
-//! group layouts, pipelines, IBL fallback, BRDF LUT) against a headless
-//! wgpu adapter — this code path was unreachable before the split
-//! because the renderer was tangled with `State::new` and required a
-//! fully-configured surface to make any progress.
-//!
-//! The test is gated on a real GPU adapter being available (CI runners
-//! without hardware acceleration will skip it gracefully).
-
 use solarxy_renderer::bind_groups::BindGroupLayouts;
 use solarxy_renderer::ibl::{BrdfLut, IblState};
 use solarxy_renderer::pipelines::Pipelines;

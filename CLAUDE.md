@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Solarxy is a cross-platform 3D model viewer, visual debugger, and validator built in Rust with wgpu (WebGPU). It ships as **two separate binaries**:
 
-- `solarxy` — GUI viewer (winit + egui + wgpu, PBR rendering).
-- `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI), `preferences` (TUI editor), `docs` (embedded docs TUI), and `view` which shells out to the GUI binary.
+- `solarxy` — GUI viewer (winit + egui + wgpu, PBR rendering). Preferences live inside the GUI via `Edit → Preferences…` (`Ctrl/⌘+,`).
+- `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI), `docs` (embedded docs TUI, 3 tabs), and `view` which shells out to the GUI binary. `--mode preferences` is still clap-parseable but prints a migration hint and exits with code 1 — the interactive TUI editor was removed in 0.5.0-rc.10 in favour of the GUI dialog.
 
-The two are distributed separately (Flathub / Homebrew Cask / winget MSI for GUI; shell / PowerShell installers + Homebrew formula for CLI — no CLI MSI, matching the Rust-CLI convention). The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
+The two are distributed separately (Flathub + Homebrew Cask + DMG / MSI / AppImage for GUI; shell / PowerShell installers + Homebrew formula + portable `.zip` for CLI — no CLI MSI, matching the Rust-CLI convention). winget (GUI) submission is deferred to 0.5.1. The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
 
 ## Build & Run Commands
 
@@ -18,8 +18,7 @@ cargo build                                                    # Debug build (wh
 cargo build --release                                          # Release build
 cargo r --release -- --model res/models/xyzrgb_dragon.obj      # GUI viewer (root bin is always-GUI)
 cargo r -p solarxy-cli --release -- --mode analyze -m X.obj    # Analyze mode (TUI or stdout)
-cargo r -p solarxy-cli --release -- --mode preferences         # Preferences editor (TUI)
-cargo r -p solarxy-cli --release -- --mode docs                # Built-in docs viewer (TUI)
+cargo r -p solarxy-cli --release -- --mode docs                # Built-in docs viewer (TUI, 3 tabs)
 cargo fmt                                                      # Format (see rustfmt.toml)
 cargo clippy --all-targets                                     # Lint (pedantic + curated allows)
 cargo test                                                     # All tests
@@ -48,7 +47,7 @@ RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 | `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Integration tests under `crates/solarxy-formats/tests/loaders.rs` + `tests/fixtures/`. |
 | `solarxy-renderer` | All wgpu state: pipelines, bind groups, shaders, IBL, SSAO, bloom, shadow, composite, camera, per-frame draw (`frame.rs`), per-model GPU scene (`scene.rs`). No winit, no egui. |
 | `solarxy-app` | winit `ApplicationHandler` + egui + `State`. Owns input, sidebar, menu, HUD, toasts, console, dialogs. Depends on `solarxy-renderer`. |
-| `solarxy-cli` | clap `Args`, TUI apps (`tui_analysis`, `tui_docs`, `tui_preferences`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. View mode spawns the `solarxy` GUI binary as a subprocess. |
+| `solarxy-cli` | clap `Args`, TUI apps (`tui_analysis`, `tui_docs`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. View mode spawns the `solarxy` GUI binary as a subprocess. |
 
 Version is single-sourced in `[workspace.package]` and inherited via `version.workspace = true`. The `dist` profile inherits from `release` with `lto = "fat"`.
 
@@ -66,17 +65,19 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `input/` — `mod.rs` for keyboard/mouse, `dialogs.rs` (native file pickers via `rfd`), `menu_actions.rs` (menu bar → state).
   - `view_state.rs` — `ViewState` (the app-side bundle), re-exporting `ViewLayout`, `DisplaySettings`, `PaneDisplaySettings`, `BoundsMode` **from** `solarxy-core::view_config`.
 - `gui/` — egui integration, one responsibility per file:
-  - `renderer.rs` — `EguiRenderer` frame orchestration.
-  - `sidebar.rs` — collapsible panels (View / Inspect / Material / Debug / Rendering / Advanced).
-  - `menu.rs` — native-style menu bar (File / View / Analyze) with shortcut labels.
+  - `renderer.rs` — `EguiRenderer` frame orchestration. Owns the toast queue (`VecDeque<Toast>`, cap 5 — cf. `TOAST_QUEUE_CAP`), preferences modal, update modal, console state.
+  - `sidebar.rs` — collapsible panels (View / Inspect / Material / Debug / Rendering / Advanced). **Canonical surface for live display/rendering/lighting settings** — the preferences modal deliberately does not duplicate these.
+  - `menu.rs` — native-style menu bar (File / Edit / View / Window / Help) with shortcut labels. `Edit → Preferences…` (`Ctrl/⌘+,`) opens the preferences modal via `MenuActions::open_preferences`. The Window menu is the **single source of truth for panel visibility** (Menu Bar / Sidebar / Console / Model Stats / FPS HUD) — as of 0.5.0-rc.11 the View menu no longer duplicates these toggles. The View menu's only trailing button opens the Keyboard Shortcuts modal (`?`).
   - `snapshot.rs` — **`GuiSnapshot` (the sidebar ↔ state mirror)** and `SidebarChanges` flags, `HudInfo`.
-  - `actions.rs` — `MenuActions` event flags.
-  - `overlays.rs` — toasts (`ToastSeverity`), FPS/frame-time HUD, loading indicator.
-  - `stats.rs` — `ModelInfo` + `draw_stats_window()`.
-  - `console_view.rs` — docked/floating log viewer with level filter.
-  - `update_modal.rs` — in-app update dialog.
-  - `theme.rs`, `about.rs` — dark theme / About modal.
-- `console.rs` — `LogBuffer` + `ConsoleLayer` (a `tracing::Layer` feeding the egui console).
+  - `actions.rs` — `MenuActions` event flags (`open_model`, `open_hdri`, `open_preferences`, `open_shortcuts_modal`, `set_layout`, …).
+  - `overlays.rs` — toast **queue** (bottom-center stacked, drop-oldest on overflow — see `EguiRenderer::push_toast` / `draw_toast_queue`), FPS/frame-time HUD, loading indicator, `ToastSeverity`. Each `push_toast` emits a matching `tracing` event on `target: "solarxy::toast"` — callers must NOT also emit their own log for the same message, or the console records it twice.
+  - `preferences_modal.rs` — tabbed GUI preferences dialog (**Startup / Interface / Updater**). OK / Cancel / Reset semantics; Esc = Cancel. Scope is strictly **fields the sidebar can't reach at runtime** (window size, MSAA) plus `UiPrefs` + `UpdaterPrefs` sections. Startup tab also shows the config file path and an **Open config file** button (replacing the removed Edit-menu entry). Updater tab's prerelease-channel explanation is only visible when the Prerelease radio is active. Commits via `take_committed_prefs()` drained by `state/render.rs` after `render_ui`. Draggable (not pinned).
+  - `keyboard_shortcuts_modal.rs` — read-only reference window listing every binding, grouped by category (File / Window & Layout / Navigation / Shading & Inspection / Show / Lighting). Opens via `?` or View → Keyboard Shortcuts. Dismiss with Esc or the window X. Draggable. User-remappable shortcuts land in 0.6.0.
+  - `stats.rs` — `ModelInfo` + `draw_stats_window()`. Auto-opens on model load when `UiPrefs::open_stats_on_model_load` is true (default).
+  - `console_view.rs` — docked/floating log viewer with level filter, message-content substring search, and right-click Copy message / Copy full line. Buffer captures `solarxy=trace` by default; UI dropdown shows ERROR/WARN/INFO/DEBUG.
+  - `update_modal.rs` — in-app update dialog. Draggable (not pinned).
+  - `theme.rs`, `about.rs` — dark theme / About modal (reference pattern for Esc-dismissable non-modal egui windows). About modal is draggable.
+- `console.rs` — `LogBuffer` + `ConsoleLayer` (a `tracing::Layer` feeding the egui console). `ConsoleState` carries the UI-side level filter, search string, docked/floating flag.
 
 ### `solarxy-renderer` internals
 
@@ -146,7 +147,11 @@ The renderer re-exports a few things it owns (`frame::*`, `scene::*`) to the app
 - Per-pane rendering with independent command encoders, viewport rects, scissor rects.
 - egui sidebar bidirectionally synced with keyboard shortcuts.
 - `help.rs` uses `include_str!` to embed content from `crates/solarxy-cli/content/*.txt`.
-- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup and surfaced in the viewer, the preferences TUI, and as keyboard-driven mutations saved with `Shift+S`.
+- Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **sidebar + `Shift+S`** for live per-session display/rendering/lighting settings; **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), UI visibility defaults (including `open_stats_on_model_load`), recent-files capacity, and updater behaviour; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). New fields: `Preferences::ui` (`UiPrefs`) and `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel` enum) — both default via `#[serde(default)]` so rc.8-era `config.toml` files upgrade cleanly. Use `config_path()` to resolve the platform-specific path.
+
+## Performance
+
+`docs/perf/` holds the rc.11 performance spike (`rc11-baseline.md` + `rc11-profiling-notes.md`). Skeletal as of rc.11 — measurements are filled in on maintainer hardware; hot-path fixes surface as tracked issues for 0.6.0+.
 
 ## Formatting
 

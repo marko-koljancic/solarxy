@@ -213,7 +213,7 @@ impl ApplicationHandler<State> for App {
                     && let Key::Character(ref ch) = event.logical_key
                     && ch.as_str() == "?"
                 {
-                    state.toggle_hints();
+                    state.gui.open_shortcuts_modal();
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {

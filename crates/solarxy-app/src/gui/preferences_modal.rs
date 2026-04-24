@@ -1,12 +1,3 @@
-//! GUI preferences dialog — covers fields the sidebar can't reach at runtime
-//! (window size, MSAA) plus the new UI / Updater sections introduced in 0.5.0.
-//!
-//! Scope guardrail: the sidebar is the canonical surface for live per-session
-//! settings (IBL mode, tone, background, inspection mode, etc.). This modal
-//! deliberately does NOT duplicate those controls — it holds only values the
-//! user can't change from within a loaded viewport, and defaults that govern
-//! startup / UI visibility / updater behaviour.
-
 use solarxy_core::preferences::{
     self, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
     MIN_WINDOW_WIDTH, Preferences, UpdaterChannel,
@@ -38,8 +29,6 @@ pub struct PreferencesModal {
     snapshot: Preferences,
     active_tab: PrefsTab,
     save_error: Option<String>,
-    /// Populated on OK-click frames; the caller (`EguiRenderer`) drains this
-    /// after `render_ui` and writes it into the app-level `State::preferences`.
     committed: Option<Preferences>,
 }
 
@@ -57,8 +46,6 @@ impl Default for PreferencesModal {
 }
 
 impl PreferencesModal {
-    /// Begin a new edit session with the given `Preferences` as the starting
-    /// draft (and the snapshot that Cancel will restore to).
     pub fn open_with(&mut self, prefs: Preferences) {
         self.draft = prefs.clone();
         self.snapshot = prefs;
@@ -68,7 +55,6 @@ impl PreferencesModal {
         self.open = true;
     }
 
-    /// Caller-side drain: returns `Some(new_prefs)` exactly once per OK-click.
     pub fn take_committed(&mut self) -> Option<Preferences> {
         self.committed.take()
     }
@@ -120,12 +106,14 @@ pub(super) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut Preference
     }
 
     let mut open_flag = modal.open;
+    let default_pos = ctx.content_rect().center() - egui::vec2(230.0, 240.0);
     egui::Window::new("Preferences")
         .open(&mut open_flag)
         .resizable(false)
         .collapsible(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_pos(default_pos)
         .default_width(460.0)
+        .movable(true)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 for tab in PrefsTab::ALL {
@@ -233,6 +221,32 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             .small()
             .color(egui::Color32::from_white_alpha(140)),
     );
+
+    ui.add_space(12.0);
+    ui.separator();
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Config File").strong());
+    ui.add_space(4.0);
+    if let Some(path) = preferences::config_path() {
+        ui.label(
+            egui::RichText::new(path.display().to_string())
+                .small()
+                .color(egui::Color32::from_white_alpha(140)),
+        );
+        ui.add_space(4.0);
+        if ui.button("Open config file").clicked()
+            && let Err(e) = open::that(&path)
+        {
+            tracing::warn!("Failed to open config file: {e}");
+        }
+    } else {
+        ui.label(
+            egui::RichText::new("(config path unavailable)")
+                .small()
+                .italics()
+                .color(egui::Color32::from_white_alpha(100)),
+        );
+    }
 }
 
 fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
@@ -250,6 +264,10 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
 
             ui.label("Console docked at launch");
             ui.checkbox(&mut draft.ui.default_console_docked, "");
+            ui.end_row();
+
+            ui.label("Open Model Stats on model load");
+            ui.checkbox(&mut draft.ui.open_stats_on_model_load, "");
             ui.end_row();
 
             ui.label("Recent files capacity");
@@ -283,16 +301,18 @@ fn draw_updater_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             });
             ui.end_row();
         });
-    ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(
-            "Prerelease channel includes release candidates and betas; \
-             the stable channel ships tagged releases only.",
-        )
-        .italics()
-        .small()
-        .color(egui::Color32::from_white_alpha(140)),
-    );
+    if draft.updater.channel == UpdaterChannel::Prerelease {
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(
+                "Prerelease channel includes release candidates and betas; \
+                 the stable channel ships tagged releases only.",
+            )
+            .italics()
+            .small()
+            .color(egui::Color32::from_white_alpha(140)),
+        );
+    }
 }
 
 #[cfg(test)]

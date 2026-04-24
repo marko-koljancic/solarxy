@@ -1,28 +1,5 @@
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-
-#[cfg(target_os = "macos")]
-const HINTS_MODEL: &str = "\
-    M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
-    I IBL  E/Shift+E Exposure\n\
-    Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
-    Shift+I IBL Mode  Shift+V Valid\n\
-    Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
-    C Cap  H Frame  Tab Panel  ? Hints\n\
-    F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  \u{2318}+L Link";
-#[cfg(not(target_os = "macos"))]
-const HINTS_MODEL: &str = "\
-    M Mode  1-5 Inspect  S Shaded  X Ghost  N Normals  U UV  B Bg  G Grid  A Axes  \
-    I IBL  E/Shift+E Exposure\n\
-    Shift+W Weight  Shift+B Bounds  Shift+D Bloom  Shift+O SSAO  Shift+T Tone  \
-    Shift+I IBL Mode  Shift+V Valid\n\
-    Shift+A Local Axes  Shift+L Lights  Shift+S Save  V Turn  P/O Proj  \
-    C Cap  H Frame  Tab Panel  ? Hints\n\
-    F1 Single  F2 V-Split  F3 H-Split  F10 Menu  F11 FS  Ctrl+L Link";
-
-#[cfg(target_os = "macos")]
-const HINTS_NO_MODEL: &str = "\u{2318}+O Open  \u{2318}+Shift+O HDRI  ? Hints";
-#[cfg(not(target_os = "macos"))]
-const HINTS_NO_MODEL: &str = "Ctrl+O Open  Ctrl+Shift+O HDRI  ? Hints";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ToastSeverity {
@@ -35,6 +12,7 @@ pub enum ToastSeverity {
 
 #[derive(Debug)]
 pub(super) struct Toast {
+    pub id: u64,
     pub message: String,
     pub severity: ToastSeverity,
     pub created: Instant,
@@ -44,10 +22,9 @@ pub(super) struct Toast {
 pub(super) struct HudCtx<'a> {
     pub avg_ms: f32,
     pub fps: u32,
-    pub toast: Option<&'a Toast>,
+    pub toasts: &'a VecDeque<Toast>,
     pub loading_message: Option<&'a String>,
     pub has_model: bool,
-    pub hints_visible: bool,
     pub fps_hud_visible: bool,
     pub backend_info: &'a str,
     pub pane_label: &'a str,
@@ -57,7 +34,7 @@ pub(super) struct HudCtx<'a> {
 
 #[derive(Debug, Default)]
 pub(super) struct HudResult {
-    pub toast_dismissed: bool,
+    pub dismissed_toast_id: Option<u64>,
 }
 
 pub(super) fn overlay_frame() -> egui::Frame {
@@ -148,48 +125,65 @@ fn draw_fps_hud(
         });
 }
 
-fn draw_toast(ctx: &egui::Context, toast: &Toast) -> bool {
-    let (icon, icon_color) = match toast.severity {
+fn toast_icon(severity: ToastSeverity) -> (&'static str, egui::Color32) {
+    match severity {
         ToastSeverity::Error => ("\u{2715}", egui::Color32::from_rgb(255, 100, 100)),
         ToastSeverity::Warning => ("\u{26A0}", egui::Color32::from_rgb(255, 200, 80)),
         ToastSeverity::Success => ("\u{2713}", egui::Color32::from_rgb(100, 220, 120)),
         ToastSeverity::Info => ("\u{2139}", egui::Color32::from_rgb(120, 180, 255)),
-    };
+    }
+}
 
+fn draw_toast_card(ui: &mut egui::Ui, toast: &Toast) -> egui::Response {
+    let (icon, icon_color) = toast_icon(toast.severity);
+    let frame_resp = egui::Frame::NONE
+        .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 40, 230))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(14, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(icon)
+                        .color(icon_color)
+                        .strong()
+                        .size(14.0),
+                );
+                ui.label(
+                    egui::RichText::new(&toast.message)
+                        .color(egui::Color32::from_white_alpha(230))
+                        .size(13.0),
+                );
+            });
+        })
+        .response
+        .interact(egui::Sense::click());
+    if frame_resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    frame_resp
+}
+
+fn draw_toast_queue(ctx: &egui::Context, toasts: &VecDeque<Toast>) -> Option<u64> {
+    if toasts.is_empty() {
+        return None;
+    }
     let content = ctx.content_rect();
-    let banner_width = (content.width() - 40.0).max(200.0);
-    let anchor_pos = egui::pos2(content.center().x, content.top() + 8.0);
-
-    let mut dismissed = false;
-    egui::Area::new(egui::Id::new("toast_banner"))
-        .fixed_pos(anchor_pos)
-        .pivot(egui::Align2::CENTER_TOP)
-        .order(egui::Order::Foreground)
-        .interactable(true)
-        .show(ctx, |ui| {
-            ui.set_width(banner_width);
-            let frame_resp = egui::Frame::NONE
-                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 40, 220))
-                .corner_radius(egui::CornerRadius::same(4))
-                .inner_margin(egui::Margin::symmetric(12, 6))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icon).color(icon_color).strong());
-                        ui.label(
-                            egui::RichText::new(&toast.message)
-                                .color(egui::Color32::from_white_alpha(220)),
-                        );
-                    });
-                })
-                .response
-                .interact(egui::Sense::click());
-            if frame_resp.hovered() {
-                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            if frame_resp.clicked() {
-                dismissed = true;
-            }
-        });
+    let mut y = content.bottom() - 16.0;
+    let mut dismissed = None;
+    for toast in toasts.iter().rev() {
+        let area_id = egui::Id::new(("toast_queue", toast.id));
+        let inner = egui::Area::new(area_id)
+            .fixed_pos(egui::pos2(content.center().x, y))
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .order(egui::Order::Foreground)
+            .interactable(true)
+            .show(ctx, |ui| draw_toast_card(ui, toast));
+        let card = inner.inner;
+        if card.clicked() {
+            dismissed = Some(toast.id);
+        }
+        y -= card.rect.height() + 6.0;
+    }
     dismissed
 }
 
@@ -209,11 +203,7 @@ pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult 
         );
     }
 
-    if let Some(toast) = hud.toast
-        && draw_toast(ctx, toast)
-    {
-        result.toast_dismissed = true;
-    }
+    result.dismissed_toast_id = draw_toast_queue(ctx, hud.toasts);
 
     if let Some(msg) = hud.loading_message {
         egui::Area::new(egui::Id::new("loading_overlay"))
@@ -225,42 +215,6 @@ pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult 
                         egui::RichText::new(msg)
                             .size(16.0)
                             .color(egui::Color32::from_rgb(128, 179, 255)),
-                    );
-                });
-            });
-    } else if !hud.has_model {
-        egui::Area::new(egui::Id::new("drop_overlay"))
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                overlay_frame().show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(
-                            "Drop a 3D model to view\n(.obj  .stl  .ply  .gltf  .glb)",
-                        )
-                        .size(16.0)
-                        .color(egui::Color32::from_white_alpha(140)),
-                    );
-                });
-            });
-    }
-
-    if hud.hints_visible {
-        let hints: &'static str = if hud.has_model {
-            HINTS_MODEL
-        } else {
-            HINTS_NO_MODEL
-        };
-        egui::Area::new(egui::Id::new("hints_overlay"))
-            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -8.0])
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                ui.set_max_width(ctx.content_rect().width().min(900.0));
-                overlay_frame().show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(hints)
-                            .small()
-                            .color(egui::Color32::from_white_alpha(160)),
                     );
                 });
             });

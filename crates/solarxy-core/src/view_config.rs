@@ -1,8 +1,3 @@
-//! View configuration shared between the renderer, the GUI bridge, and the
-//! application-state layer. These are pure data — no GPU or windowing
-//! dependencies — so they live in `solarxy-core` and can be imported
-//! freely by any consumer crate.
-
 use crate::preferences::{
     BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     UvMapBackground, UvMode, ViewMode,

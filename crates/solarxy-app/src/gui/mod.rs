@@ -1,6 +1,7 @@
 mod about;
 mod actions;
 mod console_view;
+mod keyboard_shortcuts_modal;
 mod menu;
 mod overlays;
 mod preferences_modal;

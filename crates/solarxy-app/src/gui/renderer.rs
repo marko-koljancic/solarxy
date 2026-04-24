@@ -10,6 +10,7 @@ use solarxy_core::preferences::PaneMode;
 use super::about::draw_about_modal;
 use super::actions::{MenuActions, MenuBarVisibility};
 use super::console_view::{draw_console_docked, draw_console_floating};
+use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
@@ -27,13 +28,14 @@ pub struct EguiRenderer {
     egui_format: wgpu::TextureFormat,
     pub sidebar_visible: bool,
     pub menu_bar_visible: bool,
-    hints_visible: bool,
     fps_hud_visible: bool,
     pub console: ConsoleState,
     about_open: bool,
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
+    shortcuts_modal: KeyboardShortcutsModalState,
     toasts: VecDeque<Toast>,
+    next_toast_id: u64,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
@@ -67,13 +69,14 @@ impl EguiRenderer {
             egui_format,
             sidebar_visible: false,
             menu_bar_visible: true,
-            hints_visible: false,
             fps_hud_visible: false,
             console: ConsoleState::new(console_buffer),
             about_open: false,
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
+            shortcuts_modal: KeyboardShortcutsModalState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
+            next_toast_id: 0,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
@@ -89,8 +92,8 @@ impl EguiRenderer {
         self.stats_user_hidden = false;
     }
 
-    pub fn notify_model_loaded(&mut self) {
-        if !self.stats_user_hidden {
+    pub fn notify_model_loaded(&mut self, open_on_load: bool) {
+        if open_on_load && !self.stats_user_hidden {
             self.stats_visible = true;
         }
     }
@@ -111,33 +114,43 @@ impl EguiRenderer {
         self.ctx.wants_keyboard_input()
     }
 
-    /// Upper bound on queued toasts. A burst larger than this drops the
-    /// oldest — "most recent is most relevant" matches user expectation.
     const TOAST_QUEUE_CAP: usize = 5;
 
-    fn push_toast(&mut self, toast: Toast) {
+    fn push_toast(&mut self, severity: ToastSeverity, message: String, duration: Duration) {
+        match severity {
+            ToastSeverity::Error => {
+                tracing::error!(target: "solarxy::toast", "{message}");
+            }
+            ToastSeverity::Warning => {
+                tracing::warn!(target: "solarxy::toast", "{message}");
+            }
+            ToastSeverity::Info | ToastSeverity::Success => {
+                tracing::info!(target: "solarxy::toast", "{message}");
+            }
+        }
+        self.next_toast_id = self.next_toast_id.wrapping_add(1);
         if self.toasts.len() >= Self::TOAST_QUEUE_CAP {
             self.toasts.pop_front();
         }
-        self.toasts.push_back(toast);
+        self.toasts.push_back(Toast {
+            id: self.next_toast_id,
+            message,
+            severity,
+            created: Instant::now(),
+            duration,
+        });
     }
 
     pub fn set_toast(&mut self, msg: &str, severity: ToastSeverity) {
-        self.push_toast(Toast {
-            message: msg.to_string(),
-            severity,
-            created: Instant::now(),
-            duration: Duration::from_secs(3),
-        });
+        self.push_toast(severity, msg.to_string(), Duration::from_secs(5));
     }
 
     pub fn set_capture_message(&mut self, filename: String) {
-        self.push_toast(Toast {
-            message: format!("Saved {filename}"),
-            severity: ToastSeverity::Success,
-            created: Instant::now(),
-            duration: Duration::from_secs(2),
-        });
+        self.push_toast(
+            ToastSeverity::Success,
+            format!("Saved {filename}"),
+            Duration::from_secs(2),
+        );
     }
 
     pub fn set_loading_message(&mut self, msg: &str) {
@@ -148,16 +161,14 @@ impl EguiRenderer {
         self.loading_message = None;
     }
 
-    pub fn clear_expired_toast(&mut self) {
-        while let Some(front) = self.toasts.front()
-            && front.created.elapsed() > front.duration
-        {
-            self.toasts.pop_front();
-        }
+    pub fn clear_expired_toasts(&mut self) {
+        let now = Instant::now();
+        self.toasts
+            .retain(|t| now.duration_since(t.created) < t.duration);
     }
 
-    pub fn toggle_hints(&mut self) {
-        self.hints_visible = !self.hints_visible;
+    pub fn open_shortcuts_modal(&mut self) {
+        self.shortcuts_modal.open = true;
     }
 
     pub fn set_backend_info(&mut self, info: String) {
@@ -225,7 +236,7 @@ impl EguiRenderer {
             0
         };
         let backend_info = &self.backend_info;
-        let toast = self.toasts.front();
+        let toasts = &self.toasts;
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
         let pane_label = &hud.pane_label;
@@ -239,15 +250,15 @@ impl EguiRenderer {
             sidebar_visible: self.sidebar_visible,
             menu_bar_visible: self.menu_bar_visible,
             stats_visible: self.stats_visible,
-            hints_visible: self.hints_visible,
             fps_hud_visible: self.fps_hud_visible,
             console_visible: self.console.visible,
         };
         let mut about_open = self.about_open;
-        let mut toast_dismissed = false;
+        let mut dismissed_toast_id: Option<u64> = None;
         let console = &mut self.console;
         let update_modal = &mut self.update_modal;
         let preferences_modal = &mut self.preferences_modal;
+        let shortcuts_modal = &mut self.shortcuts_modal;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
@@ -282,13 +293,13 @@ impl EguiRenderer {
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
+            draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
             let hud_ctx = HudCtx {
                 avg_ms,
                 fps,
-                toast,
+                toasts,
                 loading_message,
                 has_model,
-                hints_visible: menu_vis.hints_visible,
                 fps_hud_visible: menu_vis.fps_hud_visible,
                 backend_info,
                 pane_label,
@@ -296,8 +307,8 @@ impl EguiRenderer {
                 validation_counts,
             };
             let hud_result = draw_hud_overlays(ctx, &hud_ctx);
-            if hud_result.toast_dismissed {
-                toast_dismissed = true;
+            if let Some(id) = hud_result.dismissed_toast_id {
+                dismissed_toast_id = Some(id);
             }
             if let Some(rect) = divider_rect {
                 let painter = ctx.layer_painter(egui::LayerId::background());
@@ -345,12 +356,11 @@ impl EguiRenderer {
         } else if !stats_visible_before && self.stats_visible {
             self.stats_user_hidden = false;
         }
-        self.hints_visible = menu_vis.hints_visible;
         self.fps_hud_visible = menu_vis.fps_hud_visible;
         self.console.visible = menu_vis.console_visible;
         self.about_open = about_open;
-        if toast_dismissed {
-            self.toasts.pop_front();
+        if let Some(id) = dismissed_toast_id {
+            self.toasts.retain(|t| t.id != id);
         }
 
         self.winit_state
@@ -407,14 +417,10 @@ impl EguiRenderer {
         self.update_modal.refresh();
     }
 
-    /// Open the preferences modal with `prefs` as the starting draft + snapshot.
     pub fn open_preferences(&mut self, prefs: Preferences) {
         self.preferences_modal.open_with(prefs);
     }
 
-    /// Drain the modal's "committed this frame" slot. The caller writes the
-    /// returned `Preferences` into its in-memory copy; `save()` has already
-    /// been performed by the modal.
     pub fn take_committed_prefs(&mut self) -> Option<Preferences> {
         self.preferences_modal.take_committed()
     }

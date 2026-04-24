@@ -1,8 +1,3 @@
-//! Per-model GPU scene state. Holds everything the renderer needs to draw a
-//! loaded model: GPU buffers, light bind group, shadow state, validation
-//! map. Owned by `solarxy_app::State` (one per loaded model) and passed by
-//! reference to the per-frame render passes in `frame.rs`.
-
 use cgmath::Rotation3;
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::validation::ValidationReport;

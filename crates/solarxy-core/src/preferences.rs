@@ -1,26 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Declare an enum with `ALL: &[Self]`, `Display`, and (optionally) a `next()`
-/// method that cycles through variants.
-///
-/// Two forms:
-///
-/// ```ignore
-/// cycle_enum! {
-///     pub enum Foo { A => "A", B => "B" }
-/// }             // enum + ALL + Display
-///
-/// cycle_enum! {
-///     pub enum Bar { A => "A", B => "B" }
-///     ; cycle    // adds `fn next(self) -> Self`
-/// }
-/// ```
-///
-/// Safety invariant backing `next()`: `self` is always a variant of `Self`,
-/// `ALL` contains every variant by construction, so `position()` is always
-/// `Some`. The `unwrap_or(0)` fallback exists so that if `ALL` is ever edited
-/// incorrectly the result is the first variant rather than a panic.
 macro_rules! cycle_enum {
     (
         $(#[$meta:meta])*
@@ -406,6 +386,8 @@ pub struct UiPrefs {
     pub default_console_docked: bool,
     #[serde(default = "default_max_recent_files")]
     pub max_recent_files: usize,
+    #[serde(default = "default_true")]
+    pub open_stats_on_model_load: bool,
 }
 
 fn default_max_recent_files() -> usize {
@@ -419,6 +401,7 @@ impl Default for UiPrefs {
             default_fps_hud_visible: false,
             default_console_docked: true,
             max_recent_files: default_max_recent_files(),
+            open_stats_on_model_load: true,
         }
     }
 }
@@ -607,6 +590,7 @@ mod tests {
                 default_fps_hud_visible: true,
                 default_console_docked: false,
                 max_recent_files: 10,
+                open_stats_on_model_load: false,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -738,8 +722,6 @@ mod tests {
 
     #[test]
     fn rc8_era_toml_upgrades_cleanly() {
-        // A TOML from before the ui/updater sections were added must still
-        // parse, with the new sections filled in from their Default impls.
         let toml_str = r#"
             config_version = 1
 

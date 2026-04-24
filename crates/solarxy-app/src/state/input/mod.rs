@@ -41,10 +41,6 @@ impl State {
         self.input.modifiers = modifiers;
     }
 
-    pub fn toggle_hints(&mut self) {
-        self.gui.toggle_hints();
-    }
-
     pub fn handle_key(&mut self, _event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if !is_pressed {
             self.for_each_target_cam(|cam| {
@@ -493,12 +489,10 @@ impl State {
 
         match preferences::save(&self.preferences) {
             Ok(()) => {
-                tracing::info!("Preferences saved");
                 self.gui
                     .set_toast("Preferences saved", ToastSeverity::Success);
             }
             Err(e) => {
-                tracing::error!("Failed to save preferences: {}", e);
                 self.gui
                     .set_toast(&format!("Save failed: {}", e), ToastSeverity::Error);
             }

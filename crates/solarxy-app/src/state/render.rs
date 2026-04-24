@@ -14,7 +14,7 @@ impl State {
         }
 
         let frame_ms = self.dt * 1000.0;
-        self.gui.clear_expired_toast();
+        self.gui.clear_expired_toasts();
 
         let output = self.surface.get_current_texture()?;
         let surface_view = output

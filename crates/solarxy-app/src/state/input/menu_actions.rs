@@ -29,6 +29,9 @@ impl State {
         if actions.open_preferences {
             self.gui.open_preferences(self.preferences.clone());
         }
+        if actions.open_shortcuts_modal {
+            self.gui.open_shortcuts_modal();
+        }
         if actions.open_wiki {
             let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/wiki");
             if let Err(e) = open::that(url) {

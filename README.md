@@ -72,13 +72,18 @@ For terminal-only workflows (CI, scripts, headless servers):
 # Homebrew (macOS + Linux)
 brew install koljam/solarxy/solarxy-cli
 
-# Shell installer (macOS + Linux, places binary in ~/.cargo/bin)
+# Shell installer (macOS + Linux, places binary in ~/.local/bin)
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-cli-installer.sh | sh
 
 # PowerShell installer (Windows, when the MSI is overkill)
 powershell -c "irm https://github.com/marko-koljancic/solarxy/releases/latest/download/solarxy-cli-installer.ps1 | iex"
 ```
+
+Make sure `~/.local/bin` is on your `PATH` (most Linux distros set this via
+`~/.profile`; macOS users may need to add it to their shell rc). Upgrading
+from rc.10 or earlier? The old binary at `~/.cargo/bin/solarxy-cli` is NOT
+removed automatically — delete it by hand if you want a clean layout.
 
 `solarxy-cli` self-updates with `solarxy-cli --update` when installed
 via the shell / PowerShell installer. On Homebrew or Flatpak it instead

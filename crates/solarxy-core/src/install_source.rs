@@ -118,6 +118,10 @@ fn classify_exe_path(exe: &Path) -> Option<InstallSource> {
         if exe.starts_with(&default_cargo_bin) {
             return Some(InstallSource::CargoInstall);
         }
+        let local_bin = home.join(".local/bin");
+        if exe.starts_with(&local_bin) {
+            return Some(InstallSource::CargoInstall);
+        }
     }
 
     None
@@ -182,5 +186,23 @@ mod tests {
             UpdateHint::ShowCommand(c) => assert!(c.contains("--cask")),
             other => panic!("expected ShowCommand, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn local_bin_classifies_as_cargo_install() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let exe = home.join(".local/bin/solarxy-cli");
+        assert_eq!(classify_exe_path(&exe), Some(InstallSource::CargoInstall));
+    }
+
+    #[test]
+    fn dot_cargo_bin_still_classifies_as_cargo_install() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let exe = home.join(".cargo/bin/solarxy-cli");
+        assert_eq!(classify_exe_path(&exe), Some(InstallSource::CargoInstall));
     }
 }

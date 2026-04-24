@@ -7,12 +7,14 @@ pub(super) fn draw_about_modal(ctx: &egui::Context, open: &mut bool) {
         *open = false;
         return;
     }
+    let default_pos = ctx.content_rect().center() - egui::vec2(160.0, 100.0);
     egui::Window::new("About Solarxy")
         .open(open)
         .resizable(false)
         .collapsible(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_pos(default_pos)
         .default_width(320.0)
+        .movable(true)
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("Solarxy");

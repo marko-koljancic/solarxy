@@ -36,13 +36,15 @@ pub(super) fn draw_update_modal(ctx: &egui::Context, state: &mut UpdateModalStat
 
     let title = "Check for Updates";
     let mut open = state.open;
+    let default_pos = ctx.content_rect().center() - egui::vec2(210.0, 120.0);
 
     egui::Window::new(title)
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_pos(default_pos)
         .default_width(420.0)
+        .movable(true)
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("Check for Updates");

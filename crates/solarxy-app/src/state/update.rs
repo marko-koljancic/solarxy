@@ -227,19 +227,16 @@ impl State {
                 self.rebuild_light_bind_group();
                 self.gui.clear_loading_message();
                 self.gui.set_toast("HDRI loaded", ToastSeverity::Success);
-                tracing::info!("HDRI loaded");
             }
             Some(Ok(Err(e))) => {
                 self.pending_hdri.take();
                 self.gui.clear_loading_message();
-                tracing::error!("Failed to load HDRI: {}", e);
                 self.gui
                     .set_toast(&format!("HDRI error: {}", e), ToastSeverity::Error);
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending_hdri.take();
                 self.gui.clear_loading_message();
-                tracing::error!("HDRI loading thread crashed");
                 self.gui
                     .set_toast("HDRI load thread crashed", ToastSeverity::Error);
             }
@@ -270,8 +267,8 @@ impl State {
                         new_scene.model.has_uvs,
                     );
                     tracing::info!(
-                        "Loaded {}: {} verts, {} tris, {} meshes",
-                        pending.filename,
+                        "Loaded model: {} ({} verts, {} tris, {} meshes)",
+                        pending.path,
                         new_scene.stats.verts,
                         new_scene.stats.tris,
                         new_scene.model.meshes.len(),
@@ -280,7 +277,8 @@ impl State {
                     self.window
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
-                    self.gui.notify_model_loaded();
+                    self.gui
+                        .notify_model_loaded(self.preferences.ui.open_stats_on_model_load);
                     self.scene = Some(new_scene);
                     if let Some(scene) = &mut self.scene {
                         scene
@@ -321,7 +319,6 @@ impl State {
                 }
                 Ok(Err(e)) => {
                     self.gui.clear_loading_message();
-                    tracing::error!("Failed to load model: {}", e);
                     self.gui
                         .set_toast(&format!("Failed to load: {}", e), ToastSeverity::Error);
                 }
@@ -330,7 +327,6 @@ impl State {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.gui.clear_loading_message();
-                    tracing::error!("Model loading thread crashed");
                     self.gui
                         .set_toast("Loading thread crashed", ToastSeverity::Error);
                 }
