@@ -209,9 +209,9 @@ impl From<&AnalysisReport> for JsonReport {
     }
 }
 
-pub fn report_to_json(report: &AnalysisReport) -> Result<String, serde_json::Error> {
+pub fn report_to_json(report: &AnalysisReport) -> anyhow::Result<String> {
     let json_report = JsonReport::from(report);
-    serde_json::to_string_pretty(&json_report)
+    serde_json::to_string_pretty(&json_report).map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]

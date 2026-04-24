@@ -13,7 +13,7 @@ default = ["serialization"]
 # Gates every dependency that exists only to read/write config files,
 # reports, and validation JSON. Disable to use solarxy-core as a pure
 # computation library (e.g. WASM / no_std-adjacent contexts).
-serialization = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing"]
+serialization = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing", "dep:anyhow"]
 
 [dependencies]
 cgmath = { workspace = true }
@@ -22,3 +22,4 @@ serde_json = { version = "1.0", optional = true }
 toml = { version = "0.8", optional = true }
 dirs = { version = "6.0", optional = true }
 tracing = { version = "0.1", optional = true }
+anyhow  = { workspace = true, optional = true }
