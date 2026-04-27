@@ -15,7 +15,7 @@ Nothing yet.
 
 ---
 
-## [0.5.0-rc.11] — unreleased
+## [0.5.0-rc.11] — 2026-04-24
 
 Final polish RC before 0.5.0 stable. No new features; every change closes a
 "this feels unpolished" gap surfaced during rc.10 dogfooding. Menu bar,
@@ -396,7 +396,7 @@ output with Flathub + Homebrew distribution.
 
 ---
 
-## [0.5.0] — 2026-04-XX
+## [0.5.0] — 2026-04-27
 
 UI-revamp milestone: top menu bar, native file dialogs, in-app console, and
 native installers on every major platform. No user-visible rendering changes.
@@ -436,13 +436,14 @@ native installers on every major platform. No user-visible rendering changes.
   the View menu.
 - **Window title** now reflects the loaded model — `Solarxy — foo.glb`.
 - **`F10`** toggles the menu bar; **`F11`** toggles borderless fullscreen.
-- **Native installers on every major platform** (new in 0.5.0):
-  - macOS: `.dmg` — drag to Applications with Install CLI.command helper
-  - Windows: `.msi` — Start Menu entry, PATH registration
-  - Ubuntu / Debian (x64, ARM64): `.deb` — desktop menu integration
-  - Fedora / RHEL 9+ / openSUSE (x64, ARM64): `.rpm` — same assets as the
-    `.deb`, pulls `vulkan-loader` at install time
-  - Distro-agnostic Linux (x64): `.AppImage`
+- **Native bundles** (new in 0.5.0, GitHub Releases):
+  - macOS: `.dmg` (aarch64 + x86_64) — drag to Applications with the
+    `Install CLI.command` helper
+  - Windows: `.msi` (x86_64) — Start Menu entry, PATH registration
+  - Linux: `.AppImage` (x86_64)
+- **CLI installers** (new in 0.5.0, via `cargo-dist`): shell installer
+  (`solarxy-installer.sh`), PowerShell installer (`solarxy-installer.ps1`),
+  and a portable `.zip` per target.
 
 ### Changed
 
@@ -475,6 +476,22 @@ native installers on every major platform. No user-visible rendering changes.
 - **Keyboard shortcut gating** — all viewport shortcuts correctly gated on
   `!gui.wants_keyboard_input()`, eliminating interference with GUI text
   fields (Recent Files search, etc.).
+
+### Deferred to follow-up releases
+
+Captured here so users who followed the rc series know what's _not_ in 0.5.0:
+
+- **winget manifests** (GUI + CLI, with auto-bump) — deferred to **0.5.1**.
+- **Homebrew Cask** (`koljam/solarxy/solarxy`) and **Homebrew formula**
+  (`solarxy-cli`), plus the **Flathub** app (`dev.koljam.solarxy`) — deferred
+  to **0.6.0**. 0.5.0 ships the GUI as `.dmg` / `.msi` / `.AppImage` and the
+  CLI as `cargo-dist` shell / PowerShell installers + portable `.zip` only.
+- **aarch64 Linux `.AppImage`** — deferred to **0.6.0** pending an upstream
+  `appimagetool` arm64 stable binary.
+- **User-remappable keyboard shortcuts** — deferred to **0.6.0**.
+- **Performance measurements** in `docs/perf/rc11-baseline.md` and
+  `docs/perf/rc11-profiling-notes.md` — file structure shipped; numbers
+  filled in on maintainer hardware in **0.6.0**.
 
 ### Notes on first launch
 

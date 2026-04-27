@@ -18,3 +18,6 @@ target
 /wix/*.msi
 
 /release-notes-*.md
+
+# Stray viewer screenshots written to project root
+/solarxy_[0-9]*.png
