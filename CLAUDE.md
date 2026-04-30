@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Solarxy is a cross-platform 3D model viewer, visual debugger, and validator built in Rust with wgpu (WebGPU). It ships as **two separate binaries**:
 
 - `solarxy` — GUI viewer (winit + egui + wgpu, PBR rendering). Preferences live inside the GUI via `Edit → Preferences…` (`Ctrl/⌘+,`).
-- `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI), `docs` (embedded docs TUI, 3 tabs), and `view` which shells out to the GUI binary. `--mode preferences` is still clap-parseable but prints a migration hint and exits with code 1 — the interactive TUI editor was removed in 0.5.0-rc.10 in favour of the GUI dialog.
+- `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI) and `view` which shells out to the GUI binary. The `--mode preferences` and `--mode docs` variants were dropped from `OperationMode` in v0.5.x — `clap` rejects them with "invalid value". Preferences live in the GUI **Edit → Preferences…** dialog (`Ctrl/⌘+,`); user docs live in the [Solarxy Wiki](https://github.com/marko-koljancic/solarxy/wiki).
 
 The two are distributed separately (Flathub + Homebrew Cask + DMG / MSI / AppImage for GUI; shell / PowerShell installers + Homebrew formula + portable `.zip` for CLI — no CLI MSI, matching the Rust-CLI convention). winget (GUI) submission is deferred to 0.5.1. The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
 
@@ -18,7 +18,7 @@ cargo build                                                    # Debug build (wh
 cargo build --release                                          # Release build
 cargo r --release -- --model res/models/xyzrgb_dragon.obj      # GUI viewer (root bin is always-GUI)
 cargo r -p solarxy-cli --release -- --mode analyze -m X.obj    # Analyze mode (TUI or stdout)
-cargo r -p solarxy-cli --release -- --mode docs                # Built-in docs viewer (TUI, 3 tabs)
+cargo r -p solarxy-cli --release -- --about                    # Print version / repo / license
 cargo fmt                                                      # Format (see rustfmt.toml)
 cargo clippy --all-targets                                     # Lint (pedantic + curated allows)
 cargo test                                                     # All tests
@@ -47,7 +47,7 @@ RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 | `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Integration tests under `crates/solarxy-formats/tests/loaders.rs` + `tests/fixtures/`. |
 | `solarxy-renderer` | All wgpu state: pipelines, bind groups, shaders, IBL, SSAO, bloom, shadow, composite, camera, per-frame draw (`frame.rs`), per-model GPU scene (`scene.rs`). No winit, no egui. |
 | `solarxy-app` | winit `ApplicationHandler` + egui + `State`. Owns input, sidebar, menu, HUD, toasts, console, dialogs. Depends on `solarxy-renderer`. |
-| `solarxy-cli` | clap `Args`, TUI apps (`tui_analysis`, `tui_docs`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. View mode spawns the `solarxy` GUI binary as a subprocess. |
+| `solarxy-cli` | clap `Args`, analyze TUI (`tui_analysis`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. `--mode view` spawns the `solarxy` GUI binary as a subprocess. |
 
 Version is single-sourced in `[workspace.package]` and inherited via `version.workspace = true`. The `dist` profile inherits from `release` with `lto = "fat"`.
 
@@ -146,12 +146,11 @@ The renderer re-exports a few things it owns (`frame::*`, `scene::*`) to the app
 - Resources loaded async with `pollster` blocking.
 - Per-pane rendering with independent command encoders, viewport rects, scissor rects.
 - egui sidebar bidirectionally synced with keyboard shortcuts.
-- `help.rs` uses `include_str!` to embed content from `crates/solarxy-cli/content/*.txt`.
 - Preferences live at `~/.config/solarxy/config.toml` (`dirs::config_dir()` + `solarxy/config.toml`); loaded via `solarxy_core::preferences::load()` on startup. Three edit surfaces, each authoritative for a different slice: **sidebar + `Shift+S`** for live per-session display/rendering/lighting settings; **`Edit → Preferences…` modal (`Ctrl/⌘+,`)** for startup-only fields (window size, MSAA), UI visibility defaults (including `open_stats_on_model_load`), recent-files capacity, and updater behaviour; **direct TOML editing** via the Preferences modal's **Open config file** button (Startup tab). New fields: `Preferences::ui` (`UiPrefs`) and `Preferences::updater` (`UpdaterPrefs` + `UpdaterChannel` enum) — both default via `#[serde(default)]` so rc.8-era `config.toml` files upgrade cleanly. Use `config_path()` to resolve the platform-specific path.
 
 ## Performance
 
-`docs/perf/` holds the rc.11 performance spike (`rc11-baseline.md` + `rc11-profiling-notes.md`). Skeletal as of rc.11 — measurements are filled in on maintainer hardware; hot-path fixes surface as tracked issues for 0.6.0+.
+Performance baseline + profiling notes from rc.11 are deferred to 0.6.0; measurements are filled in on maintainer hardware as hot paths are profiled. The previous `docs/perf/` skeleton was removed alongside the v0.5.0 documentation overhaul.
 
 ## Formatting
 
@@ -186,4 +185,4 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 - `linux/solarxy.desktop`, `linux/appimage/AppRun`.
 - `macos/Install CLI.command` (clears Gatekeeper quarantine on `/Applications/Solarxy.app` + sudo symlink into `/usr/local/bin`), `macos/READ ME FIRST.txt` (Gatekeeper walkthrough; filename chosen for top-of-DMG sort).
 
-**Changelog**: `docs/changelog/CHANGELOG.md` (Keep a Changelog format). Not at the repo root.
+**Release notes**: maintained in the [Solarxy Wiki](https://github.com/marko-koljancic/solarxy/wiki/Release-Notes). No in-repo `CHANGELOG.md`; cargo-dist sources GitHub Release bodies from its own manifest, not a repo file.

@@ -19,13 +19,9 @@
 
 #[cfg(feature = "analyzer")]
 pub mod calc;
-#[cfg(feature = "tui")]
-pub mod help;
 pub mod parser;
 #[cfg(feature = "tui")]
 pub(crate) mod tui;
 #[cfg(feature = "tui")]
 pub mod tui_analysis;
-#[cfg(feature = "tui")]
-pub mod tui_docs;
 mod validators;

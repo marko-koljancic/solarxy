@@ -7,19 +7,11 @@ use anyhow::Context;
 use clap::Parser;
 
 use solarxy_cli::parser::{Args, OperationMode, OutputFormat};
-use solarxy_cli::tui_docs::DocsApp;
 
 #[cfg(feature = "analyzer")]
 use solarxy_cli::calc::analyze::ModelAnalyzer;
 #[cfg(feature = "analyzer")]
 use solarxy_cli::tui_analysis::TerminalApp;
-
-const APP_INFO: solarxy_cli::help::AppInfo = solarxy_cli::help::AppInfo {
-    version: env!("CARGO_PKG_VERSION"),
-    description: env!("CARGO_PKG_DESCRIPTION"),
-    repository: env!("CARGO_PKG_REPOSITORY"),
-    license: env!("CARGO_PKG_LICENSE"),
-};
 
 fn main() -> anyhow::Result<ExitCode> {
     tracing_subscriber::fmt()
@@ -62,33 +54,7 @@ fn main() -> anyhow::Result<ExitCode> {
         OperationMode::View => Ok(exec_gui(model_path.as_deref())),
         OperationMode::Analyze => run_analyze(model_path, &args.format, args.output.as_deref())
             .map(|()| ExitCode::SUCCESS),
-        OperationMode::Preferences => Ok(preferences_migration_hint()),
-        OperationMode::Docs => {
-            DocsApp::new(APP_INFO).run()?;
-            Ok(ExitCode::SUCCESS)
-        }
     }
-}
-
-// The interactive preferences TUI was removed in 0.5.0-rc.10. Preferences
-// are now managed through the GUI (Edit → Preferences…) or by editing the
-// TOML file directly. We keep the `--mode preferences` variant parseable so
-// scripts don't fail with a clap "unknown value" error; instead we print a
-// migration hint and exit non-zero.
-fn preferences_migration_hint() -> ExitCode {
-    let path = solarxy_core::preferences::config_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~/.config/solarxy/config.toml".to_string());
-    eprintln!("The interactive preferences TUI was removed in Solarxy 0.5.0.");
-    eprintln!();
-    eprintln!("Preferences are now managed:");
-    eprintln!("  - In the GUI — Edit \u{2192} Preferences\u{2026}  (or press Ctrl/Cmd+,)");
-    eprintln!("  - By editing the TOML file directly:");
-    eprintln!("      {path}");
-    eprintln!();
-    eprintln!("Most display / rendering / lighting settings can also be changed live");
-    eprintln!("from the viewer's sidebar and saved with Shift+S.");
-    ExitCode::FAILURE
 }
 
 fn exec_gui(model_path: Option<&str>) -> ExitCode {
