@@ -1,3 +1,12 @@
+//! Model validation: detects degenerate triangles, zero-area faces,
+//! missing UVs, missing normals, suspect alpha configurations, and other
+//! findings that warrant a sidebar warning or analyzer flag.
+//!
+//! Entry point: [`validate_raw_model`]. Result: [`ValidationResult`] —
+//! a [`ValidationReport`] (the full set of findings) plus per-mesh /
+//! per-material / per-vertex index sets the renderer uses to drive the
+//! validation overlay shader.
+
 use std::fmt;
 
 use cgmath::InnerSpace;
@@ -570,7 +579,7 @@ mod tests {
 
     #[test]
     fn invalid_material_ref_at_boundary() {
-        use crate::geometry::RawMaterialData;
+        use crate::geometry::{AlphaMode, RawMaterialData};
         let mut raw = single_triangle_raw();
         raw.meshes[0].material_index = Some(1);
         raw.materials.push(RawMaterialData {
@@ -588,7 +597,7 @@ mod tests {
             roughness_factor: 0.5,
             metallic_factor: 0.0,
             emissive_factor: [0.0; 3],
-            alpha_mode: 0,
+            alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             ambient: None,
             diffuse: None,

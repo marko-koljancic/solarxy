@@ -1,3 +1,14 @@
+//! All `wgpu::RenderPipeline`s used by the renderer, grouped by purpose:
+//! [`ScenePipelines`] (PBR, shadow, floor, wireframes, gbuffer),
+//! [`PostProcessingPipelines`] (bloom, SSAO, composite),
+//! [`OverlayPipelines`] (grid, normals, background, gizmo, validation),
+//! [`UvPipelines`] (UV map / overlap / debug), and
+//! [`InspectionPipelines`] (reserved for inspection-mode-specific pipelines
+//! — empty in 0.6.0 Stream A; populated by the Overdraw work in Stream D).
+//!
+//! Built once at startup via [`Pipelines::new`] and reused. The fluent
+//! builder in [`crate::pipeline_builder`] cuts boilerplate.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::model::{self, Vertex};
 use crate::pipeline_builder::PipelineBuilder;
@@ -73,7 +84,7 @@ impl model::Vertex for InstanceRaw {
     }
 }
 
-pub struct Pipelines {
+pub struct ScenePipelines {
     pub main: wgpu::RenderPipeline,
     pub alpha_blend: wgpu::RenderPipeline,
     pub shadow: wgpu::RenderPipeline,
@@ -81,9 +92,28 @@ pub struct Pipelines {
     pub ghosted_fill: wgpu::RenderPipeline,
     pub edge_wire: wgpu::RenderPipeline,
     pub edge_wire_ghosted: wgpu::RenderPipeline,
+    pub gbuffer: wgpu::RenderPipeline,
+}
+
+pub struct PostProcessingPipelines {
+    pub bloom_extract: wgpu::RenderPipeline,
+    pub bloom_blur_h: wgpu::RenderPipeline,
+    pub bloom_blur_v: wgpu::RenderPipeline,
+    pub composite: wgpu::RenderPipeline,
+    pub ssao: wgpu::RenderPipeline,
+    pub ssao_blur_h: wgpu::RenderPipeline,
+    pub ssao_blur_v: wgpu::RenderPipeline,
+}
+
+pub struct OverlayPipelines {
     pub grid: wgpu::RenderPipeline,
     pub normals: wgpu::RenderPipeline,
     pub background: wgpu::RenderPipeline,
+    pub gizmo: wgpu::RenderPipeline,
+    pub validation_overlay: wgpu::RenderPipeline,
+}
+
+pub struct UvPipelines {
     pub uv_gradient: wgpu::RenderPipeline,
     pub uv_checker: wgpu::RenderPipeline,
     pub uv_no_uvs: wgpu::RenderPipeline,
@@ -92,16 +122,17 @@ pub struct Pipelines {
     pub uv_map_wire: wgpu::RenderPipeline,
     pub uv_overlap_count: wgpu::RenderPipeline,
     pub uv_overlap_overlay: wgpu::RenderPipeline,
-    pub gizmo: wgpu::RenderPipeline,
-    pub bloom_extract: wgpu::RenderPipeline,
-    pub bloom_blur_h: wgpu::RenderPipeline,
-    pub bloom_blur_v: wgpu::RenderPipeline,
-    pub composite: wgpu::RenderPipeline,
-    pub gbuffer: wgpu::RenderPipeline,
-    pub ssao: wgpu::RenderPipeline,
-    pub ssao_blur_h: wgpu::RenderPipeline,
-    pub ssao_blur_v: wgpu::RenderPipeline,
-    pub validation_overlay: wgpu::RenderPipeline,
+}
+
+#[derive(Default)]
+pub struct InspectionPipelines {}
+
+pub struct Pipelines {
+    pub scene: ScenePipelines,
+    pub post: PostProcessingPipelines,
+    pub overlay: OverlayPipelines,
+    pub uv: UvPipelines,
+    pub inspection: InspectionPipelines,
 }
 
 fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
@@ -112,6 +143,12 @@ fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
 }
 
 impl Pipelines {
+    /// Builds every render pipeline once at startup; returns them grouped
+    /// into [`ScenePipelines`], [`PostProcessingPipelines`], [`OverlayPipelines`],
+    /// [`UvPipelines`], and [`InspectionPipelines`]. Each pipeline reuses
+    /// layouts from `layouts` (which itself is the single source of truth
+    /// for bind-group layouts) and a shared `sample_count` for MSAA-aware
+    /// pipelines.
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -685,34 +722,43 @@ impl Pipelines {
         .build();
 
         Pipelines {
-            main,
-            alpha_blend,
-            shadow,
-            floor,
-            ghosted_fill,
-            edge_wire,
-            edge_wire_ghosted,
-            grid,
-            normals,
-            background,
-            uv_gradient,
-            uv_checker,
-            uv_no_uvs,
-            uv_map_checker,
-            uv_map_texture,
-            uv_map_wire,
-            uv_overlap_count,
-            uv_overlap_overlay,
-            gizmo,
-            bloom_extract,
-            bloom_blur_h,
-            bloom_blur_v,
-            composite,
-            gbuffer,
-            ssao,
-            ssao_blur_h,
-            ssao_blur_v,
-            validation_overlay,
+            scene: ScenePipelines {
+                main,
+                alpha_blend,
+                shadow,
+                floor,
+                ghosted_fill,
+                edge_wire,
+                edge_wire_ghosted,
+                gbuffer,
+            },
+            post: PostProcessingPipelines {
+                bloom_extract,
+                bloom_blur_h,
+                bloom_blur_v,
+                composite,
+                ssao,
+                ssao_blur_h,
+                ssao_blur_v,
+            },
+            overlay: OverlayPipelines {
+                grid,
+                normals,
+                background,
+                gizmo,
+                validation_overlay,
+            },
+            uv: UvPipelines {
+                uv_gradient,
+                uv_checker,
+                uv_no_uvs,
+                uv_map_checker,
+                uv_map_texture,
+                uv_map_wire,
+                uv_overlap_count,
+                uv_overlap_overlay,
+            },
+            inspection: InspectionPipelines::default(),
         }
     }
 }

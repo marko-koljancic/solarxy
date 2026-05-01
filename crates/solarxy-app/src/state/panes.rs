@@ -1,3 +1,7 @@
+//! Split-viewport layout math: pane rectangles for `F1`/`F2`/`F3`, the
+//! divider hit-rect for the (currently fixed-50/50) split, and the
+//! cursor→pane hit test.
+
 use super::view_state::ViewLayout;
 use super::{Pane, State, compute_target_dimensions, hit_test_pane};
 

@@ -1,3 +1,20 @@
+//! Solarxy's user preferences: the `~/.config/solarxy/config.toml` schema
+//! plus every cycle-able enum shared between sidebar UI and shader uniforms.
+//!
+//! - [`Preferences`] — the root struct, loaded by [`load`] and saved by
+//!   [`save`]. Sub-structs (`display`/`rendering`/`lighting`/`window`/
+//!   `history`/`ui`/`updater`) each use `#[serde(default)]` so older config
+//!   files upgrade cleanly when new fields are added.
+//! - [`config_path`] — platform-specific location via `dirs::config_dir()`.
+//! - Cycle-able enums ([`ViewMode`], [`IblMode`], [`ToneMode`], etc.) are
+//!   produced by an internal `cycle_enum!` macro that emits `Display` plus
+//!   an `ALL: &[Self]` slice — sidebar dropdowns iterate `ALL` directly.
+//!
+//! `IblMode` toggles drive the `rebuild_light_bind_group` chokepoint in
+//! `solarxy-app/src/state/update.rs`. See `IblMode` variants for semantics.
+//!
+//! Available with the `serialization` feature.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

@@ -1,3 +1,7 @@
+//! Direct lights ([`LightEntry`]) plus the consolidated [`LightsUniform`]
+//! pushed to the GPU. The CPU-side L0 SH ambient comes from `IblState` and is
+//! merged here before upload.
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LightEntry {

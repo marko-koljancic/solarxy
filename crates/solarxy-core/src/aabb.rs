@@ -1,5 +1,13 @@
+//! Axis-aligned bounding box (`AABB`) primitives used by the renderer
+//! (camera framing, bounds overlay) and the analyzer (mesh extents).
+
 use cgmath::{InnerSpace, Point3, Vector3};
 
+/// Axis-aligned bounding box with `f32` extents.
+///
+/// Used for camera auto-framing, bounds-overlay drawing, and shadow-frustum
+/// sizing. [`AABB::diagonal`] is the canonical "model size" scalar that
+/// drives auto-framing distance.
 #[derive(Debug, Clone, Copy)]
 pub struct AABB {
     pub min: Point3<f32>,
@@ -7,6 +15,7 @@ pub struct AABB {
 }
 
 impl AABB {
+    /// Geometric center: midpoint of `min` and `max`.
     pub fn center(&self) -> Point3<f32> {
         Point3::new(
             f32::midpoint(self.min.x, self.max.x),
@@ -15,10 +24,13 @@ impl AABB {
         )
     }
 
+    /// Length of the box's space diagonal — the canonical "model size"
+    /// scalar.
     pub fn diagonal(&self) -> f32 {
         (self.max - self.min).magnitude()
     }
 
+    /// Half-extents along each axis (= `size() / 2`).
     pub fn half_extents(&self) -> Vector3<f32> {
         Vector3::new(
             (self.max.x - self.min.x) * 0.5,
@@ -27,6 +39,7 @@ impl AABB {
         )
     }
 
+    /// Per-axis extent (max − min).
     pub fn size(&self) -> Vector3<f32> {
         Vector3::new(
             self.max.x - self.min.x,
@@ -35,6 +48,8 @@ impl AABB {
         )
     }
 
+    /// Eight corners ordered as `(min, max)` combinations along x, then y,
+    /// then z (z slowest-varying). `corners()[0] == min` and `corners()[7] == max`.
     pub fn corners(&self) -> [Point3<f32>; 8] {
         let (mn, mx) = (self.min, self.max);
         [

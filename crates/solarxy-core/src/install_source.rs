@@ -1,6 +1,14 @@
+//! Detects how Solarxy was installed (Flatpak, `AppImage`, Homebrew, MSI,
+//! `cargo install`, etc.) and produces the right [`UpdateHint`] for the
+//! `--update` flow in `solarxy-cli`.
+//!
+//! Available with the `serialization` feature.
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+/// How the running Solarxy binary was installed. Drives the per-channel
+/// update guidance returned by [`update_hint`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallSource {
     Flatpak,
@@ -14,10 +22,14 @@ pub enum InstallSource {
     Unknown,
 }
 
+/// Channel-specific update instruction surfaced in the update modal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateHint {
+    /// Open this URL in the default browser (e.g. Flathub page).
     OpenUrl(String),
+    /// Show this command verbatim with a copy-to-clipboard button.
     ShowCommand(String),
+    /// Open the GitHub releases page (fallback for `AppImage` / DMG / unknown).
     OpenReleasesPage,
 }
 
@@ -26,6 +38,7 @@ const FLATHUB_URL: &str = "https://flathub.org/apps/dev.koljam.solarxy";
 
 static CACHED: OnceLock<InstallSource> = OnceLock::new();
 
+/// Detect once per process (cached via [`OnceLock`]).
 pub fn detect() -> InstallSource {
     *CACHED.get_or_init(detect_uncached)
 }
@@ -127,6 +140,8 @@ fn classify_exe_path(exe: &Path) -> Option<InstallSource> {
     None
 }
 
+/// Maps a detected [`InstallSource`] to the channel-appropriate
+/// [`UpdateHint`].
 pub fn update_hint(src: InstallSource) -> UpdateHint {
     match src {
         InstallSource::Flatpak => UpdateHint::OpenUrl(FLATHUB_URL.to_string()),
@@ -148,6 +163,7 @@ pub fn update_hint(src: InstallSource) -> UpdateHint {
     }
 }
 
+/// The canonical GitHub releases page URL.
 pub fn releases_url() -> &'static str {
     RELEASES_URL
 }

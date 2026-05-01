@@ -1,3 +1,10 @@
+//! GPU-side PBR material: [`MaterialUniform`] (`#[repr(C)]`, 48 bytes) and
+//! the bundle of textures + bind group consumed by the main shader.
+//!
+//! `MaterialUniform.alpha_mode` is `u32` for shader binding; the CPU-side
+//! enum lives in `solarxy_core::geometry::AlphaMode`, with the conversion at
+//! `crate::resources`.
+
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

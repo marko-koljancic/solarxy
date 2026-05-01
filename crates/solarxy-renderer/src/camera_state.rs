@@ -1,3 +1,6 @@
+//! Per-pane [`CameraState`] bundle: a [`crate::camera::Camera`] plus its
+//! GPU-side uniform buffer + bind group, refreshed each frame.
+
 use cgmath::InnerSpace;
 use wgpu::util::DeviceExt;
 use winit::event::MouseButton;

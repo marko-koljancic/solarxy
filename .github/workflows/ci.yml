@@ -14,13 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.92
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-features -- -D warnings
       - run: cargo test --workspace --all-features
+      - name: cargo doc (workspace, all-features)
+        run: cargo doc --no-deps --workspace --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: cargo doc (solarxy-core, no-default-features)
+        run: cargo doc --no-deps -p solarxy-core --no-default-features
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   build:
     name: Build (${{ matrix.os }})
@@ -31,6 +39,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.92
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --all-features

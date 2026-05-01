@@ -1,3 +1,9 @@
+//! Per-frame state updates. Owns `rebuild_light_bind_group` — the **single
+//! IBL chokepoint** triggered on HDRI drop, [`IblMode`] toggle (`I` /
+//! `Shift+I`), and background change. Adding any IBL-derived uniform means
+//! routing it through this function so Clay modes etc. update instantly
+//! without waiting for the next camera-driven frame.
+
 use std::sync::mpsc;
 
 use super::*;

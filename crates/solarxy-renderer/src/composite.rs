@@ -1,3 +1,6 @@
+//! Final composite pass: tone-mapping HDR onto the swapchain, plus the
+//! per-pane viewport/scissor rectangle that splits the surface in F2/F3.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::bloom::BLOOM_STRENGTH;
 use crate::pipelines::Pipelines;
@@ -107,7 +110,7 @@ impl CompositeState {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
             pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         }
-        pass.set_pipeline(&pipelines.composite);
+        pass.set_pipeline(&pipelines.post.composite);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.params_bind_group, &[]);
         if ssao_enabled {

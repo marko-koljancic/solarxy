@@ -1,3 +1,9 @@
+//! `serde_json` schema for analyzer output (`solarxy-cli analyze --json`).
+//! Mirrors [`crate::report::AnalysisReport`] in a stable, documented JSON
+//! shape consumed by tooling.
+//!
+//! Available with the `serialization` feature.
+
 use serde::Serialize;
 
 use crate::report::{
@@ -209,6 +215,11 @@ impl From<&AnalysisReport> for JsonReport {
     }
 }
 
+/// Serializes an [`AnalysisReport`] to a pretty-printed JSON string.
+///
+/// # Errors
+/// Returns `Err` if any field contains values that don't serialize (e.g.
+/// non-finite floats — currently impossible by construction).
 pub fn report_to_json(report: &AnalysisReport) -> anyhow::Result<String> {
     let json_report = JsonReport::from(report);
     serde_json::to_string_pretty(&json_report).map_err(anyhow::Error::from)

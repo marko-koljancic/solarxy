@@ -1,3 +1,18 @@
+//! Central application state — [`State`] (the GUI's root struct), plus
+//! `Pane`, `PendingLoad`, `InputState`, and per-pane geometry helpers.
+//!
+//! Submodules:
+//! - `init.rs` — startup wiring (surface, device, queue, renderer).
+//! - `update.rs` — per-frame updates; owns the IBL chokepoint
+//!   `rebuild_light_bind_group` called on HDRI load, `IblMode` toggle, and
+//!   background change.
+//! - `render.rs` — `State::render`, per-pane orchestration.
+//! - `panes.rs` — split-viewport layout math.
+//! - `overlap.rs` — UV-overlap GPU readback polling.
+//! - `capture.rs` — screenshot capture.
+//! - `input/` — keyboard/mouse, dialogs, menu actions.
+//! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
+
 mod capture;
 mod init;
 mod input;

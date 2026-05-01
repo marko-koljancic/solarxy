@@ -1,3 +1,7 @@
+//! GPU-side model representation: [`Model`], [`Mesh`], the [`Vertex`] trait
+//! (defines vertex buffer layouts), and the `DrawModel`/`DrawMeshSimple`
+//! draw-call helpers used by [`crate::frame::Renderer`].
+
 use std::ops::Range;
 
 pub use solarxy_core::AABB;

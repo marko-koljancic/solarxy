@@ -1,3 +1,12 @@
+//! `State::render`: per-frame entry point. Builds a per-pane camera,
+//! invokes [`solarxy_renderer::frame::Renderer::render_pane`] for each pane,
+//! and drives the egui sidebar/menu/HUD/console paint at the end.
+//!
+//! Reads `GuiSnapshot::from_state` then calls `apply_to_state` after the
+//! sidebar has had a chance to mutate it; the resulting `SidebarChanges`
+//! drives any expensive recomputations (background, wireframe, composite,
+//! IBL).
+
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::visualization::GridUniform;
 use solarxy_core::preferences::{MaterialOverride, PaneMode, UvMapBackground};
@@ -7,6 +16,18 @@ use super::view_state::PaneDisplaySettings;
 use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
+    /// Per-frame render entry point. Computes pane rectangles, dispatches
+    /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
+    /// HUD, console, modals, toasts), and presents the swapchain frame.
+    ///
+    /// Wraps `GuiSnapshot::from_state` → sidebar mutation → `apply_to_state`
+    /// each frame; the resulting [`crate::gui::SidebarChanges`] flags drive
+    /// any expensive recomputations (background gradient rebuild, wireframe
+    /// params upload, composite params upload, IBL bind-group rebuild).
+    ///
+    /// # Errors
+    /// Returns `Err` if the surface texture is unavailable (e.g. the window
+    /// was minimised between frames) or if the GPU device is lost.
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
         if !self.is_surface_configured {
@@ -456,12 +477,14 @@ impl State {
             &recent_files,
         );
 
-        let changes = snap_after.diff(&snap_before);
-        snap_after.write_back_pane(&mut self.view.pane_settings[ap]);
-        snap_after.write_back_display(&mut self.view.display);
-        snap_after.write_back_post(&mut self.renderer.post);
-        self.renderer.ibl_res.ibl_mode = snap_after.ibl_mode;
-        self.view.cameras_linked = snap_after.cameras_linked;
+        let changes = snap_after.apply_to_state(
+            &snap_before,
+            &mut self.view.pane_settings[ap],
+            &mut self.view.display,
+            &mut self.renderer.post,
+            &mut self.renderer.ibl_res.ibl_mode,
+            &mut self.view.cameras_linked,
+        );
 
         if changes.background_changed {
             self.apply_background_change();

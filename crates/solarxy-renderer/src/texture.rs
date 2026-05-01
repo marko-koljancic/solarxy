@@ -1,3 +1,6 @@
+//! GPU texture wrappers + the [`SharedSamplers`] cache (linear/nearest,
+//! shadow comparison, etc.) used across pipelines.
+
 use anyhow::*;
 use image::GenericImageView;
 

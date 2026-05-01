@@ -1,3 +1,6 @@
+//! Per-pane orthographic UV camera state — drives the UV map, UV overlap,
+//! and UV debug passes when a pane is in `PaneMode::UvMap`.
+
 use wgpu::util::DeviceExt;
 
 use super::camera::{CameraUniform, OPENGL_TO_WGPU_MATRIX};

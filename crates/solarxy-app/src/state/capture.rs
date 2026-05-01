@@ -1,3 +1,6 @@
+//! Screenshot capture: creates a one-shot CPU-mappable buffer, blits the
+//! current frame into it, and writes a PNG once the readback resolves.
+
 use super::*;
 
 impl State {

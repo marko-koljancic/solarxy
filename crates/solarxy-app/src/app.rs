@@ -1,3 +1,7 @@
+//! `App`: the winit `ApplicationHandler`. Owns the event loop, defers
+//! window creation to the first `resumed` event (winit 0.30 contract), and
+//! forwards events to [`crate::state::State`].
+
 use std::sync::Arc;
 
 use wgpu::SurfaceError;

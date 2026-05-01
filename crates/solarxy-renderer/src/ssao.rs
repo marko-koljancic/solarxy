@@ -1,3 +1,7 @@
+//! Screen-space ambient occlusion: GBuffer-fed AO render plus a separable
+//! blur (horizontal + vertical) into the half-resolution AO target consumed
+//! by the main pass.
+
 use super::bind_groups::BindGroupLayouts;
 use wgpu::util::DeviceExt;
 

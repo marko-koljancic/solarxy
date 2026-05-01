@@ -1,3 +1,6 @@
+//! Bloom post-processing: brightness extraction + separable Gaussian blur
+//! (horizontal + vertical) over a half-resolution bloom mip chain.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::pipelines::Pipelines;
 use crate::texture;
@@ -130,7 +133,7 @@ impl BloomState {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&pipelines.bloom_extract);
+            pass.set_pipeline(&pipelines.post.bloom_extract);
             pass.set_bind_group(0, &self.extract_bind_group, &[]);
             pass.set_bind_group(1, &self.params_bind_group, &[]);
             pass.draw(0..3, 0..1);
@@ -157,7 +160,7 @@ impl BloomState {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&pipelines.bloom_blur_h);
+            pass.set_pipeline(&pipelines.post.bloom_blur_h);
             pass.set_bind_group(0, &self.blur_h_bind_group, &[]);
             pass.set_bind_group(1, &self.params_bind_group, &[]);
             pass.draw(0..3, 0..1);
@@ -179,7 +182,7 @@ impl BloomState {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&pipelines.bloom_blur_v);
+            pass.set_pipeline(&pipelines.post.bloom_blur_v);
             pass.set_bind_group(0, &self.blur_v_bind_group, &[]);
             pass.set_bind_group(1, &self.params_bind_group, &[]);
             pass.draw(0..3, 0..1);

@@ -1,3 +1,11 @@
+//! Per-frame draw orchestration: [`Renderer`] (the top-level handle),
+//! [`RenderTargets`] (HDR + depth + bloom + SSAO targets), [`PostProcessing`]
+//! (bloom/SSAO/tone settings), [`IblResources`], [`WireframeResources`],
+//! [`UvOverlapResources`], [`ValidationColorResources`].
+//!
+//! `Renderer::render_pane` is the per-pane entry point called from
+//! `solarxy-app/src/state/render.rs`.
+
 use std::sync::Arc;
 
 use cgmath::prelude::*;
@@ -117,7 +125,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        pass.set_pipeline(&self.pipelines.background);
+        pass.set_pipeline(&self.pipelines.overlay.background);
         pass.set_bind_group(0, &self.wire.gradient_bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
@@ -181,7 +189,7 @@ impl Renderer {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        pass.set_pipeline(&self.pipelines.gbuffer);
+        pass.set_pipeline(&self.pipelines.scene.gbuffer);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
@@ -212,7 +220,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.ssao);
+            pass.set_pipeline(&self.pipelines.post.ssao);
             pass.set_bind_group(0, &self.post.ssao.ssao_bind_group, &[]);
             pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
@@ -233,7 +241,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.ssao_blur_h);
+            pass.set_pipeline(&self.pipelines.post.ssao_blur_h);
             pass.set_bind_group(0, &self.post.ssao.blur_h_bind_group, &[]);
             pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
@@ -254,7 +262,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.ssao_blur_v);
+            pass.set_pipeline(&self.pipelines.post.ssao_blur_v);
             pass.set_bind_group(0, &self.post.ssao.blur_v_bind_group, &[]);
             pass.set_bind_group(1, cam_bg, &[]);
             pass.draw(0..3, 0..1);
@@ -276,7 +284,7 @@ impl Renderer {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        pass.set_pipeline(&self.pipelines.shadow);
+        pass.set_pipeline(&self.pipelines.scene.shadow);
         pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
@@ -337,17 +345,22 @@ impl Renderer {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
-                            &self.pipelines.edge_wire,
+                            &self.pipelines.scene.edge_wire,
                             cam_bg,
                         );
                     }
                     self.draw_blend_meshes(&mut pass, scene, cam_bg, cam);
                 }
                 ViewMode::WireframeOnly => {
-                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire, cam_bg);
+                    self.draw_edge_wireframe(
+                        &mut pass,
+                        scene,
+                        &self.pipelines.scene.edge_wire,
+                        cam_bg,
+                    );
                 }
                 ViewMode::Ghosted => {
-                    pass.set_pipeline(&self.pipelines.ghosted_fill);
+                    pass.set_pipeline(&self.pipelines.scene.ghosted_fill);
                     pass.set_bind_group(0, cam_bg, &[]);
                     pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     pass.draw_model_simple(&scene.model, 0..1);
@@ -355,7 +368,7 @@ impl Renderer {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
-                            &self.pipelines.edge_wire_ghosted,
+                            &self.pipelines.scene.edge_wire_ghosted,
                             cam_bg,
                         );
                     }
@@ -366,29 +379,34 @@ impl Renderer {
             if scene.model.has_uvs {
                 match pds.uv_mode {
                     UvMode::Checker => {
-                        pass.set_pipeline(&self.pipelines.uv_checker);
+                        pass.set_pipeline(&self.pipelines.uv.uv_checker);
                         pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
                     }
                     UvMode::Gradient | UvMode::Off => {
-                        pass.set_pipeline(&self.pipelines.uv_gradient);
+                        pass.set_pipeline(&self.pipelines.uv.uv_gradient);
                     }
                 }
             } else {
-                pass.set_pipeline(&self.pipelines.uv_no_uvs);
+                pass.set_pipeline(&self.pipelines.uv.uv_no_uvs);
             }
             pass.draw_model_simple(&scene.model, 0..1);
 
             match pds.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
-                    self.draw_edge_wireframe(&mut pass, scene, &self.pipelines.edge_wire, cam_bg);
+                    self.draw_edge_wireframe(
+                        &mut pass,
+                        scene,
+                        &self.pipelines.scene.edge_wire,
+                        cam_bg,
+                    );
                 }
                 ViewMode::Ghosted => {
                     if pds.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
                             scene,
-                            &self.pipelines.edge_wire_ghosted,
+                            &self.pipelines.scene.edge_wire_ghosted,
                             cam_bg,
                         );
                     }
@@ -397,7 +415,7 @@ impl Renderer {
         }
 
         if pds.show_grid {
-            pass.set_pipeline(&self.pipelines.grid);
+            pass.set_pipeline(&self.pipelines.overlay.grid);
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_bind_group(1, &scene.vis.grid_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
@@ -422,7 +440,7 @@ impl Renderer {
         scene: &'a ModelScene,
         cam_bg: &'a wgpu::BindGroup,
     ) {
-        pass.set_pipeline(&self.pipelines.main);
+        pass.set_pipeline(&self.pipelines.scene.main);
         pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
@@ -464,7 +482,7 @@ impl Renderer {
         blend_list
             .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        pass.set_pipeline(&self.pipelines.alpha_blend);
+        pass.set_pipeline(&self.pipelines.scene.alpha_blend);
         pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
@@ -500,7 +518,7 @@ impl Renderer {
         scene: &'a ModelScene,
         cam_bg: &'a wgpu::BindGroup,
     ) {
-        pass.set_pipeline(&self.pipelines.floor);
+        pass.set_pipeline(&self.pipelines.scene.floor);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &scene.shadow.sample_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
@@ -521,7 +539,7 @@ impl Renderer {
         if !pds.show_axis_gizmo {
             return;
         }
-        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(0, scene.vis.axes_vertex_buf.slice(..));
         pass.draw(0..6, 0..1);
@@ -537,7 +555,7 @@ impl Renderer {
         if !pds.show_local_axes || scene.vis.local_axes_vertex_count == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(0, scene.vis.local_axes_vertex_buf.slice(..));
         pass.draw(0..scene.vis.local_axes_vertex_count, 0..1);
@@ -553,7 +571,7 @@ impl Renderer {
         if pds.bounds_mode == BoundsMode::Off {
             return;
         }
-        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
         match pds.bounds_mode {
             BoundsMode::Off => {}
@@ -578,7 +596,7 @@ impl Renderer {
     ) {
         use crate::validation::IssueCategory;
 
-        pass.set_pipeline(&self.pipelines.validation_overlay);
+        pass.set_pipeline(&self.pipelines.overlay.validation_overlay);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
@@ -628,7 +646,7 @@ impl Renderer {
             timestamp_writes: None,
         });
 
-        pass.set_pipeline(&self.pipelines.uv_overlap_count);
+        pass.set_pipeline(&self.pipelines.uv.uv_overlap_count);
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
@@ -682,13 +700,13 @@ impl Renderer {
                 self.draw_background_gradient(&mut pass);
             }
             UvMapBackground::Checker => {
-                pass.set_pipeline(&self.pipelines.uv_map_checker);
+                pass.set_pipeline(&self.pipelines.uv.uv_map_checker);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
                 pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
                 pass.draw_model_simple(&scene.model, 0..1);
             }
             UvMapBackground::Texture => {
-                pass.set_pipeline(&self.pipelines.uv_map_texture);
+                pass.set_pipeline(&self.pipelines.uv.uv_map_texture);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
                 for mesh in &scene.model.meshes {
                     let material = &scene.model.materials[mesh.material];
@@ -700,7 +718,7 @@ impl Renderer {
             }
         }
 
-        pass.set_pipeline(&self.pipelines.uv_map_wire);
+        pass.set_pipeline(&self.pipelines.uv.uv_map_wire);
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         for mesh in &scene.model.meshes {
@@ -712,13 +730,13 @@ impl Renderer {
             }
         }
 
-        pass.set_pipeline(&self.pipelines.gizmo);
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_vertex_buffer(0, self.uv_boundary_buf.slice(..));
         pass.draw(0..8, 0..1);
 
         if pds.show_uv_overlap {
-            pass.set_pipeline(&self.pipelines.uv_overlap_overlay);
+            pass.set_pipeline(&self.pipelines.uv.uv_overlap_overlay);
             pass.set_bind_group(0, &self.uv_overlap.overlay_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -734,7 +752,7 @@ impl Renderer {
         if pds.normals_mode == NormalsMode::Off {
             return;
         }
-        pass.set_pipeline(&self.pipelines.normals);
+        pass.set_pipeline(&self.pipelines.overlay.normals);
         pass.set_bind_group(0, cam_bg, &[]);
         if matches!(
             pds.normals_mode,

@@ -1,3 +1,17 @@
+//! `GuiSnapshot`: the sidebar ↔ state mirror.
+//!
+//! Each frame, `State::render` builds a [`GuiSnapshot`] from per-pane
+//! `PaneDisplaySettings`, global `DisplaySettings`, and `PostProcessing`
+//! state via [`GuiSnapshot::from_state`], hands it to the egui sidebar to
+//! mutate, then writes the mutated copy back via
+//! [`GuiSnapshot::apply_to_state`] — returning a [`SidebarChanges`] flag
+//! struct so the caller knows which expensive recomputations (background
+//! gradient, wireframe params, composite params, IBL bind group) to
+//! re-trigger.
+//!
+//! Adding a sidebar control: add a field to [`GuiSnapshot`], wire it in
+//! [`from_state`], wire it in [`apply_to_state`].
+
 use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     ProjectionMode, ToneMode, UvMapBackground, UvMode, ViewMode,
@@ -104,7 +118,25 @@ impl GuiSnapshot {
         }
     }
 
-    pub fn write_back_pane(&self, pds: &mut PaneDisplaySettings) {
+    /// Diffs `self` against `prev`, writes every mirrored field back to its
+    /// destination, and returns [`SidebarChanges`] so the caller knows which
+    /// expensive recomputations (background gradient, wireframe params,
+    /// composite params, IBL bind group) to re-trigger.
+    ///
+    /// Takes disjoint borrows rather than `&mut State` to keep `gui::snapshot`
+    /// independent of `State`'s field shape — adding a sidebar field means
+    /// adding a parameter here, not crossing module-boundary visibility.
+    pub fn apply_to_state(
+        &self,
+        prev: &Self,
+        pds: &mut PaneDisplaySettings,
+        display: &mut DisplaySettings,
+        post: &mut PostProcessing,
+        ibl_mode: &mut IblMode,
+        cameras_linked: &mut bool,
+    ) -> SidebarChanges {
+        let changes = self.diff(prev);
+
         pds.view_mode = self.view_mode;
         pds.normals_mode = self.normals_mode;
         pds.background_mode = self.background_mode;
@@ -121,21 +153,22 @@ impl GuiSnapshot {
         pds.uv_bg = self.uv_bg;
         pds.show_uv_overlap = self.show_uv_overlap;
         pds.show_validation = self.show_validation;
-    }
 
-    pub fn write_back_display(&self, display: &mut DisplaySettings) {
         display.turntable_active = self.turntable_active;
         display.turntable_rpm = self.turntable_rpm;
         display.lights_locked = self.lights_locked;
         display.roughness_scale = self.roughness_scale;
         display.metallic_scale = self.metallic_scale;
-    }
 
-    pub fn write_back_post(&self, post: &mut PostProcessing) {
         post.bloom_enabled = self.bloom_enabled;
         post.ssao_enabled = self.ssao_enabled;
         post.tone_mode = self.tone_mode;
         post.exposure = self.exposure;
+
+        *ibl_mode = self.ibl_mode;
+        *cameras_linked = self.cameras_linked;
+
+        changes
     }
 }
 
@@ -145,4 +178,88 @@ pub(crate) struct HudInfo {
     pub cameras_linked: Option<bool>,
     pub has_uvs: bool,
     pub uv_overlap_pct: Option<f32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a baseline snapshot with deterministic non-default values so
+    /// each test can mutate one field at a time and assert which
+    /// [`SidebarChanges`] flag fires.
+    fn baseline() -> GuiSnapshot {
+        GuiSnapshot {
+            view_mode: ViewMode::Shaded,
+            normals_mode: NormalsMode::Off,
+            background_mode: BackgroundMode::Gradient,
+            uv_mode: UvMode::Off,
+            bounds_mode: BoundsMode::Off,
+            line_weight: LineWeight::Medium,
+            show_grid: true,
+            show_axis_gizmo: true,
+            show_local_axes: false,
+            inspection_mode: InspectionMode::Shaded,
+            material_override: MaterialOverride::None,
+            texel_density_target: 1.0,
+            pane_mode: PaneMode::Scene3D,
+            uv_bg: UvMapBackground::Dark,
+            show_uv_overlap: false,
+            show_validation: false,
+            turntable_active: false,
+            turntable_rpm: 6.0,
+            lights_locked: false,
+            roughness_scale: 1.0,
+            metallic_scale: 1.0,
+            bloom_enabled: false,
+            ssao_enabled: false,
+            tone_mode: ToneMode::Reinhard,
+            exposure: 1.0,
+            ibl_mode: IblMode::Full,
+            cameras_linked: false,
+            is_split: false,
+            projection_mode: ProjectionMode::Perspective,
+        }
+    }
+
+    #[test]
+    fn diff_no_changes_when_identical() {
+        let s = baseline();
+        let c = s.diff(&s);
+        assert!(!c.background_changed);
+        assert!(!c.wireframe_params_changed);
+        assert!(!c.composite_params_changed);
+        assert!(!c.ibl_changed);
+    }
+
+    #[test]
+    fn diff_bloom_toggle_marks_composite_params() {
+        let prev = baseline();
+        let mut next = prev;
+        next.bloom_enabled = !prev.bloom_enabled;
+        let c = next.diff(&prev);
+        assert!(c.composite_params_changed);
+        assert!(!c.background_changed);
+        assert!(!c.ibl_changed);
+    }
+
+    #[test]
+    fn diff_ibl_toggle_marks_ibl_changed() {
+        let prev = baseline();
+        let mut next = prev;
+        next.ibl_mode = IblMode::Off;
+        let c = next.diff(&prev);
+        assert!(c.ibl_changed);
+        assert!(!c.composite_params_changed);
+    }
+
+    #[test]
+    fn diff_background_change_suppresses_wireframe_signal() {
+        let prev = baseline();
+        let mut next = prev;
+        next.background_mode = BackgroundMode::White;
+        next.line_weight = LineWeight::Bold;
+        let c = next.diff(&prev);
+        assert!(c.background_changed);
+        assert!(!c.wireframe_params_changed);
+    }
 }

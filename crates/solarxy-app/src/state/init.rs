@@ -1,3 +1,7 @@
+//! Startup wiring: creates the wgpu surface, device, queue, [`Renderer`],
+//! egui state, and initial preferences. Called from [`crate::app::App::resumed`]
+//! on first window creation.
+
 use std::sync::Arc;
 
 use wgpu::util::DeviceExt;

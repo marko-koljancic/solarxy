@@ -1,3 +1,7 @@
+//! [`BindGroupLayouts`]: the single source of truth for every wgpu bind
+//! group layout used by the renderer's pipelines. All uniform entries use
+//! `min_binding_size: None`, so growing a uniform is layout-invisible.
+
 pub struct BindGroupLayouts {
     pub texture: wgpu::BindGroupLayout,
     pub camera: wgpu::BindGroupLayout,

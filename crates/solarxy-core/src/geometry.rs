@@ -1,3 +1,13 @@
+//! Raw mesh + material data types ([`RawModelData`], [`RawMeshData`],
+//! [`RawMaterialData`], [`RawImageData`]) and topology helpers
+//! ([`compute_normals`], [`compute_tangent_basis`], [`extract_edges`],
+//! [`compute_bounds`]).
+//!
+//! This is the type loaders in `solarxy-formats` produce and the renderer
+//! consumes. Held briefly during model load, then transformed into GPU
+//! resources in `solarxy-renderer/src/resources.rs` and dropped — these
+//! types are not long-lived in steady state.
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -5,6 +15,10 @@ use cgmath::InnerSpace;
 
 use crate::aabb::AABB;
 
+/// One mesh inside a [`RawModelData`].
+///
+/// Triangulated indices, optional per-vertex `normals` / `tex_coords`, and
+/// an optional `material_index` into the parent [`RawModelData::materials`].
 pub struct RawMeshData {
     pub name: String,
     pub positions: Vec<[f32; 3]>,
@@ -14,12 +28,41 @@ pub struct RawMeshData {
     pub material_index: Option<usize>,
 }
 
+/// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.
 pub struct RawImageData {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
 
+/// PBR alpha-blending mode for [`RawMaterialData`].
+///
+/// Discriminants match the GPU wire format
+/// (`solarxy-renderer::material::MaterialUniform.alpha_mode: u32`)
+/// and the WGSL shaders. Conversion at the CPU↔GPU boundary in
+/// `solarxy-renderer/src/resources.rs` via `From<AlphaMode> for u32`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AlphaMode {
+    /// Fully opaque — no alpha test, no blending.
+    #[default]
+    Opaque = 0,
+    /// Alpha-test cutoff at [`RawMaterialData::alpha_cutoff`].
+    Mask = 1,
+    /// Alpha-blended (BLEND), drawn in a separate pass.
+    Blend = 2,
+}
+
+impl From<AlphaMode> for u32 {
+    fn from(m: AlphaMode) -> u32 {
+        m as u32
+    }
+}
+
+/// One PBR material inside a [`RawModelData`].
+///
+/// Holds factor scalars, optional textures (path or in-memory bytes), and the
+/// PBR alpha mode. `solarxy-renderer/src/resources.rs` consumes this and
+/// produces a `MaterialUniform` + GPU textures.
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<PathBuf>,
@@ -35,7 +78,7 @@ pub struct RawMaterialData {
     pub roughness_factor: f32,
     pub metallic_factor: f32,
     pub emissive_factor: [f32; 3],
-    pub alpha_mode: u32,
+    pub alpha_mode: AlphaMode,
     pub alpha_cutoff: f32,
     pub ambient: Option<[f32; 3]>,
     pub diffuse: Option<[f32; 3]>,
@@ -51,12 +94,23 @@ pub struct RawMaterialData {
     pub dissolve_texture_name: Option<String>,
 }
 
+/// One loaded model — the unit `solarxy-formats` produces and
+/// `solarxy-renderer::resources` consumes.
+///
+/// `polygon_count` is preserved from the source file (number of polygons
+/// before triangulation), distinct from `meshes[i].indices.len() / 3`
+/// which counts triangles after triangulation.
 pub struct RawModelData {
     pub meshes: Vec<RawMeshData>,
     pub materials: Vec<RawMaterialData>,
     pub polygon_count: usize,
 }
 
+/// Computes per-vertex normals by accumulating face normals across all
+/// triangles touching a vertex, then normalising.
+///
+/// Degenerate triangles contribute zero-magnitude face normals, which leave
+/// affected vertices with NaN-or-zero normals. Validators flag these.
 pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0f32; 3]; positions.len()];
 
@@ -79,6 +133,13 @@ pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]>
     normals
 }
 
+/// Computes per-vertex tangent + bitangent vectors from position deltas
+/// scaled by UV deltas (the standard MikkT-adjacent derivation), averaged
+/// across triangles touching a vertex.
+///
+/// `normals` is currently unused but kept in the signature for future
+/// orthonormalisation work. Returns `(tangents, bitangents)`, both in the
+/// same vertex order as `positions`.
 pub fn compute_tangent_basis(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
@@ -128,6 +189,8 @@ pub fn compute_tangent_basis(
     (tangents, bitangents)
 }
 
+/// Synthesises a tangent basis purely from per-vertex normals (no UVs).
+/// Used as a fallback for meshes loaded without tex-coords.
 pub fn compute_tangent_from_normal(normals: &[[f32; 3]]) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     let mut tangents = Vec::with_capacity(normals.len());
     let mut bitangents = Vec::with_capacity(normals.len());
@@ -146,6 +209,8 @@ pub fn compute_tangent_from_normal(normals: &[[f32; 3]]) -> (Vec<[f32; 3]>, Vec<
     (tangents, bitangents)
 }
 
+/// Tight axis-aligned bounding box around `positions`. Empty input returns
+/// the unit cube at origin (avoids degenerate zero-volume bounds downstream).
 pub fn compute_bounds(positions: &[[f32; 3]]) -> AABB {
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
@@ -170,6 +235,9 @@ pub fn compute_bounds(positions: &[[f32; 3]]) -> AABB {
     }
 }
 
+/// Deduplicated edge index pairs (`[v0, v1, v0, v1, …]`) for line-list
+/// rendering. Each undirected edge appears once regardless of how many
+/// triangles share it.
 pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
     let mut edge_set = HashSet::with_capacity(indices.len());
     for tri in indices.chunks(3) {
@@ -192,6 +260,17 @@ pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Locks `AlphaMode` discriminants to the GPU wire format
+    /// (`MaterialUniform.alpha_mode: u32` and the WGSL shaders).
+    /// If anyone reorders variants, this test fails before reaching the GPU.
+    #[test]
+    fn alpha_mode_discriminants_match_wire_format() {
+        assert_eq!(u32::from(AlphaMode::Opaque), 0);
+        assert_eq!(u32::from(AlphaMode::Mask), 1);
+        assert_eq!(u32::from(AlphaMode::Blend), 2);
+        assert_eq!(u32::from(AlphaMode::default()), 0);
+    }
 
     fn assert_vec3_approx(a: [f32; 3], b: [f32; 3], eps: f32) {
         assert!(

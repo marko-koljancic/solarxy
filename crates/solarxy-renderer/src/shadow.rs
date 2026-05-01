@@ -1,3 +1,7 @@
+//! Single directional-light shadow map: depth render target, sample bind
+//! group for the main pass, and the `ShadowUniform` (`light_vp`) pushed to
+//! GPU.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::camera::OPENGL_TO_WGPU_MATRIX;
 use crate::light::LightsUniform;
@@ -9,6 +13,7 @@ use wgpu::util::DeviceExt;
 struct ShadowUniform {
     light_vp: [[f32; 4]; 4],
 }
+const _: () = assert!(std::mem::size_of::<ShadowUniform>() == 64);
 
 pub struct ShadowState {
     pub texture_view: wgpu::TextureView,

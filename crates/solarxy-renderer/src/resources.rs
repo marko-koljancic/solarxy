@@ -1,3 +1,10 @@
+//! Loads CPU-side `solarxy_core::RawModelData` into GPU-side meshes,
+//! materials, and textures.
+//!
+//! The single CPU↔GPU boundary for `AlphaMode`: the CPU enum
+//! (`solarxy_core::AlphaMode`) is converted to `u32` here via
+//! `From<AlphaMode> for u32` before being copied into [`crate::material::MaterialUniform`].
+
 use std::path::Path;
 
 use wgpu::util::DeviceExt;
@@ -130,7 +137,7 @@ fn upload_model(
             ao_strength: 1.0,
             alpha_cutoff: mat.alpha_cutoff,
             emissive: mat.emissive_factor,
-            alpha_mode: mat.alpha_mode,
+            alpha_mode: mat.alpha_mode.into(),
             material_index: mat_idx as u32,
             _pad: [0.0; 3],
         };

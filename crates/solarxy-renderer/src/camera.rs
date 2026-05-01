@@ -1,3 +1,6 @@
+//! Orbit camera + the `CameraUniform` GPU struct that drives every shader's
+//! view/projection matrices and material-override switching.
+
 use winit::{event::MouseButton, keyboard::KeyCode};
 use super::model;
 use solarxy_core::preferences::ProjectionMode;

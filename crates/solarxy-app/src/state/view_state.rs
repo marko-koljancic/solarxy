@@ -1,3 +1,7 @@
+//! `ViewState` — the per-session bundle of view-related state owned by
+//! [`crate::state::State`]. Re-exports [`solarxy_core::view_config`] types
+//! (`ViewLayout`, `DisplaySettings`, `PaneDisplaySettings`, `BoundsMode`).
+
 use solarxy_renderer::camera_state::CameraState;
 
 pub(crate) use solarxy_core::view_config::{

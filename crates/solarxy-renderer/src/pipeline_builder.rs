@@ -1,3 +1,8 @@
+//! Fluent [`PipelineBuilder`] wrapper that cuts boilerplate in
+//! [`crate::pipelines::Pipelines::new`] — sets common defaults (depth
+//! format, MSAA, primitive topology) and lets each pipeline diverge by
+//! chaining method calls.
+
 use crate::texture;
 
 #[must_use]

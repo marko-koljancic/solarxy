@@ -1,3 +1,7 @@
+//! GPU-side resources for the validation overlay: per-mesh validation index
+//! buffer + the bind group consumed by `validation.wgsl`. The CPU-side
+//! findings live in `solarxy_core::validation`.
+
 pub use solarxy_core::validation::*;
 use solarxy_core::RawModelData;
 

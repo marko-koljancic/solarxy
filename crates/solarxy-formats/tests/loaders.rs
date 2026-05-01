@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use solarxy_formats::{obj, ply, stl};
+use solarxy_formats::{gltf, obj, ply, stl};
 
 fn fixture(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -77,4 +77,28 @@ fn ply_triangle_default_material() {
         "PLY should create a default material"
     );
     assert_eq!(raw.meshes[0].material_index, Some(0));
+}
+
+#[test]
+fn load_gltf_triangle() {
+    let raw = gltf::load_gltf(&fixture("triangle.glb")).unwrap();
+    assert_eq!(raw.meshes.len(), 1);
+    assert_eq!(raw.meshes[0].positions.len(), 3);
+    assert_eq!(raw.meshes[0].indices.len(), 3);
+    assert_eq!(raw.polygon_count, 1);
+}
+
+#[test]
+fn load_gltf_nonexistent() {
+    assert!(gltf::load_gltf("/nonexistent/model.glb").is_err());
+}
+
+#[test]
+fn gltf_triangle_position_values() {
+    let raw = gltf::load_gltf(&fixture("triangle.glb")).unwrap();
+    let pos = &raw.meshes[0].positions;
+    assert_eq!(pos.len(), 3);
+    assert_eq!(pos[0], [0.0, 0.0, 0.0]);
+    assert_eq!(pos[1], [1.0, 0.0, 0.0]);
+    assert_eq!(pos[2], [0.0, 1.0, 0.0]);
 }

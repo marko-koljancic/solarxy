@@ -1,8 +1,20 @@
+//! Per-pane and per-session view configuration: [`ViewLayout`] (single /
+//! split), [`DisplaySettings`] (global, e.g. turntable, lights lock),
+//! [`PaneDisplaySettings`] (per-pane view/inspection mode), [`BoundsMode`].
+//!
+//! Lives in `solarxy-core` because both `solarxy-renderer` (consumes for
+//! drawing) and `solarxy-app` (mutates from the sidebar) need access — keeps
+//! the dependency graph acyclic.
+//!
+//! Available with the `serialization` feature.
+
 use crate::preferences::{
     BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
     UvMapBackground, UvMode, ViewMode,
 };
 
+/// Pane arrangement: one viewport, two side-by-side, or two top/bottom.
+/// Toggled via `F1` / `F2` / `F3`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewLayout {
     #[default]

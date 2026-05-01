@@ -1,3 +1,8 @@
+//! [`ModelScene`]: per-loaded-model GPU state — vertex/index buffers, bind
+//! groups, shadow state, validation map. Plus the [`lights_from_camera`] and
+//! [`create_light_bind_group`] / [`create_light_bind_group_selective`]
+//! helpers used by both `ModelScene` construction and the per-frame update.
+
 use cgmath::Rotation3;
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::validation::ValidationReport;

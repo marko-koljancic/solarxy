@@ -1,3 +1,7 @@
+//! Debug visualizers: grid lines, axis gizmo, AABB bounds, and per-vertex /
+//! per-face normal arrows. All CPU-side mesh construction with their own
+//! pipelines registered in [`crate::pipelines::OverlayPipelines`].
+
 use solarxy_core::AABB;
 use crate::bind_groups::BindGroupLayouts;
 use crate::model::{self, Model};
@@ -9,6 +13,7 @@ use wgpu::util::DeviceExt;
 struct NormalsColor {
     color: [f32; 4],
 }
+const _: () = assert!(std::mem::size_of::<NormalsColor>() == 16);
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -16,6 +21,7 @@ pub struct GridUniform {
     pub cell_size: f32,
     pub color: [f32; 3],
 }
+const _: () = assert!(std::mem::size_of::<GridUniform>() == 16);
 
 impl GridUniform {
     pub const COLOR_OFFSET: u64 = std::mem::offset_of!(Self, color) as u64;

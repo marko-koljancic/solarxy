@@ -1,3 +1,28 @@
+//! GPU-free CPU-side type home for the Solarxy workspace.
+//!
+//! Foundation crate shared by `solarxy-renderer`, `solarxy-app`, and
+//! `solarxy-cli`:
+//!
+//! - **Geometry primitives** ([`AABB`], [`geometry::compute_normals`],
+//!   [`geometry::compute_tangent_basis`]) used by every loader and the
+//!   renderer.
+//! - **The raw model I/O type** ([`RawModelData`]) that loaders in
+//!   `solarxy-formats` produce and the renderer consumes.
+//! - **Validation** ([`validation::validate_raw_model`], [`ValidationReport`])
+//!   shared by the CLI's `analyze` mode and the GUI's validation overlay.
+//! - **Preferences** (`preferences::Preferences`, plus cycle-able enums like
+//!   `preferences::IblMode`) loaded from `~/.config/solarxy/config.toml` via
+//!   `preferences::load`.
+//! - **Reporting** (`report::AnalysisReport`, `json::report_to_json`).
+//!
+//! No GPU types, no winit, no egui — depend on this crate from anywhere
+//! without pulling wgpu/egui/winit into the build graph.
+//!
+//! # Feature flags
+//!
+//! - `serialization` (default): gates `preferences`, `json`, `report`,
+//!   `install_source`, and `view_config`. Disable for a pure-computation
+//!   build — only [`aabb`], [`geometry`], and [`validation`] remain.
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -38,7 +63,7 @@ pub mod validation;
 pub mod view_config;
 
 pub use aabb::AABB;
-pub use geometry::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+pub use geometry::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 pub use validation::{
     IssueKind, IssueScope, Severity, ValidationIssue, ValidationReport, ValidationResult,
 };

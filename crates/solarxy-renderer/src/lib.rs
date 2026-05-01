@@ -1,3 +1,31 @@
+//! All wgpu state for Solarxy: render pipelines, bind groups, shaders, IBL,
+//! SSAO, bloom, shadow, composite, camera, per-frame draw orchestration
+//! ([`frame`]), and per-model GPU scene state ([`scene`]).
+//!
+//! This crate has **no winit, no egui** — input and UI live in `solarxy-app`.
+//! The app drives a [`frame::Renderer`] each frame; everything below that is
+//! implementation detail.
+//!
+//! # Render pass order (per pane in split mode)
+//!
+//! 1. Shadow → 2. `GBuffer` (if SSAO) → 3. Background → 4. Main PBR →
+//! 5. Floor → 6. Wireframe overlays → 7. Grid + normals + gizmo →
+//! 8. Validation overlay → 9. SSAO + Bloom → 10. Composite (tone-map) →
+//! 11. UV map passes (UV-mode panes) → 12. egui (in `solarxy-app`).
+//!
+//! # GPU uniform buffer convention
+//!
+//! `*Uniform` structs are `#[repr(C)]` with explicit `_pad` fields sized to
+//! hit WGSL's 16-byte struct-size alignment. Several have
+//! `const _: () = assert!(std::mem::size_of::<T>() == N);` size guards —
+//! when extending a uniform, repack padding and update the assert in lockstep
+//! with the matching shader.
+//!
+//! # Bind group layouts
+//!
+//! [`bind_groups::BindGroupLayouts`] is the single source of truth for every
+//! layout. All entries use `min_binding_size: None` so growing a uniform is
+//! layout-invisible.
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,
