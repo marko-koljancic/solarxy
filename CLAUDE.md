@@ -186,3 +186,17 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 - `macos/Install CLI.command` (clears Gatekeeper quarantine on `/Applications/Solarxy.app` + sudo symlink into `/usr/local/bin`), `macos/READ ME FIRST.txt` (Gatekeeper walkthrough; filename chosen for top-of-DMG sort).
 
 **Release notes**: maintained in the [Solarxy Wiki](https://github.com/marko-koljancic/solarxy/wiki/Release-Notes). No in-repo `CHANGELOG.md`; cargo-dist sources GitHub Release bodies from its own manifest, not a repo file.
+
+
+## Working Agreement
+
+- **Implementation according to best practices**, as a senior software engineer and computer graphics domain expert in Rust. For UI work, also as a UX/UI expert.
+- **Ask for clarifications until at least 90% sure** of intent before implementing. The user can clarify or provide decision guidance. Craft a detailed, objective plan before writing code.
+- **No `unwrap` / `expect` outside of tests.** Use `?` with `anyhow` (app/CLI) or `thiserror` (library crates) and add context via `.context(...)` where it helps debugging.
+- **Library crates use `thiserror`; binary crates use `anyhow`.** Do not pull `anyhow` into `solarxy-core` (except behind the `serialization` feature), `solarxy-formats`, or `solarxy-renderer` as a public dependency.
+- **Distinguish current state from planned refactors.** The 0.6.0 milestone plan describes future work (pipeline sub-struct grouping, `GuiSnapshot::apply_to_state` consolidation, doc-comment coverage). Do not refactor toward planned-but-unscheduled work without surfacing it first.
+- **Surface findings before unilaterally refactoring.** Multi-file refactors get a plan first.
+
+## Audit
+
+Run `/solarxy-audit` for a full code-quality sweep covering Rust idioms, wgpu + WGSL correctness, egui patterns, ratatui (analyze TUI only), architecture, performance & safety, workspace hygiene, and (when relevant) cross-platform readiness. The audit runs in an isolated subagent so the report does not pollute the main session. See `.claude/skills/solarxy-audit/SKILL.md`.
