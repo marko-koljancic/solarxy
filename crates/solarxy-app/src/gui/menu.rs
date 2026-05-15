@@ -114,6 +114,8 @@ pub(super) fn draw_menu_bar(
                             InspectionMode::MaterialId => "2",
                             InspectionMode::TexelDensity => "4",
                             InspectionMode::Depth => "5",
+                            InspectionMode::Overdraw => "6",
+                            InspectionMode::AoPreview => "7",
                         };
                         if ui
                             .selectable_label(selected, mode.to_string())

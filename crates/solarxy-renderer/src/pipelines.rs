@@ -124,8 +124,10 @@ pub struct UvPipelines {
     pub uv_overlap_overlay: wgpu::RenderPipeline,
 }
 
-#[derive(Default)]
-pub struct InspectionPipelines {}
+pub struct InspectionPipelines {
+    pub overdraw_count: wgpu::RenderPipeline,
+    pub overdraw_show: wgpu::RenderPipeline,
+}
 
 pub struct Pipelines {
     pub scene: ScenePipelines,
@@ -721,6 +723,60 @@ impl Pipelines {
         .no_depth()
         .build();
 
+        let overdraw_count_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Overdraw Count Pipeline Layout"),
+                bind_group_layouts: &[&layouts.camera],
+                push_constant_ranges: &[],
+            });
+        let overdraw_count_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Overdraw Count Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overdraw_count.wgsl").into()),
+        });
+        let overdraw_count_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::REPLACE,
+        };
+        let overdraw_count = PipelineBuilder::new(
+            device,
+            "Overdraw Count Pipeline",
+            &overdraw_count_layout,
+            &overdraw_count_shader,
+        )
+        .vertex_entry("vs_count")
+        .fragment_entry("fs_count")
+        .buffers(model_instance_buffers())
+        .color_format(crate::overdraw::COUNT_FORMAT)
+        .blend(overdraw_count_blend)
+        .no_depth()
+        .build();
+
+        let overdraw_show_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Overdraw Show Pipeline Layout"),
+            bind_group_layouts: &[&layouts.overdraw_show],
+            push_constant_ranges: &[],
+        });
+        let overdraw_show_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Overdraw Show Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overdraw_show.wgsl").into()),
+        });
+        let overdraw_show = PipelineBuilder::new(
+            device,
+            "Overdraw Show Pipeline",
+            &overdraw_show_layout,
+            &overdraw_show_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_show")
+        .color_format(hdr_format)
+        .no_blend()
+        .no_depth()
+        .build();
+
         Pipelines {
             scene: ScenePipelines {
                 main,
@@ -758,7 +814,10 @@ impl Pipelines {
                 uv_overlap_count,
                 uv_overlap_overlay,
             },
-            inspection: InspectionPipelines::default(),
+            inspection: InspectionPipelines {
+                overdraw_count,
+                overdraw_show,
+            },
         }
     }
 }

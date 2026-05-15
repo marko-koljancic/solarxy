@@ -1,0 +1,106 @@
+# Bump the Solarxy Flathub manifest after each stable GitHub Release.
+#
+# Steps:
+#   1. Verify the FLATHUB_PAT secret is set (step-level guard — job-level
+#      `if: secrets.X != ''` is not a valid GHA expression and silently
+#      no-ops; first-step check makes the skip explicit in the log).
+#   2. Regenerate `cargo-sources.json` against the released `Cargo.lock`.
+#   3. Open a PR against `github.com/flathub/dev.koljam.solarxy` updating
+#      the manifest's `commit:` ref and replacing the cargo-sources file.
+#
+# Skipped on prerelease tags (`rc.N`) — Flathub gets stable releases only.
+name: Flathub bump
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.6.0)"
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    steps:
+      - name: Verify FLATHUB_PAT presence
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.FLATHUB_PAT }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FLATHUB_PAT not set — Flathub bump will be skipped. Provision the secret to enable automatic submissions."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tag
+        if: steps.secrets.outputs.ready == 'true'
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout solarxy at tag
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Install Python (for flatpak-cargo-generator)
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate cargo-sources.json
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          chmod +x packaging/flatpak/generate-sources.sh
+          ./packaging/flatpak/generate-sources.sh
+
+      - name: Checkout flathub repo
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: flathub/dev.koljam.solarxy
+          token: ${{ secrets.FLATHUB_PAT }}
+          path: flathub-target
+          fetch-depth: 1
+
+      - name: Update flathub repo
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          cp packaging/flatpak/dev.koljam.solarxy.yaml flathub-target/dev.koljam.solarxy.yaml
+          cp packaging/flatpak/cargo-sources.json flathub-target/cargo-sources.json
+          # Pin the manifest's git ref to the released tag (replaces the
+          # existing `tag:` line in the source block; preserves YAML
+          # surrounding context).
+          sed -i -E "s|tag: .*|tag: ${TAG}|" flathub-target/dev.koljam.solarxy.yaml
+
+      - name: Open PR against flathub
+        if: steps.secrets.outputs.ready == 'true'
+        working-directory: flathub-target
+        env:
+          GH_TOKEN: ${{ secrets.FLATHUB_PAT }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          BRANCH="bump-${TAG}"
+          git config user.name "solarxy-bot"
+          git config user.email "noreply@github.com"
+          git checkout -b "$BRANCH"
+          git add dev.koljam.solarxy.yaml cargo-sources.json
+          git commit -m "Bump to ${TAG}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "Bump to ${TAG}" \
+            --body "Automated bump from marko-koljancic/solarxy ${TAG}." \
+            --head "$BRANCH" \
+            --base master

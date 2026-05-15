@@ -8,7 +8,7 @@ use crate::console::{ConsoleState, LogBuffer};
 use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
-use super::actions::{MenuActions, MenuBarVisibility};
+use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
 use super::console_view::{draw_console_docked, draw_console_floating};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::menu::draw_menu_bar;
@@ -218,7 +218,7 @@ impl EguiRenderer {
         surface_texture: &wgpu::Texture,
         screen: ScreenDescriptor,
         frame_ms: f32,
-        divider_rect: Option<egui::Rect>,
+        divider: Option<DividerInfo>,
         active_pane_rect: Option<egui::Rect>,
         recent_files: &[String],
     ) -> (GuiSnapshot, MenuActions) {
@@ -305,14 +305,57 @@ impl EguiRenderer {
                 pane_label,
                 cameras_linked,
                 validation_counts,
+                overdraw_active: hud.overdraw_active,
             };
             let hud_result = draw_hud_overlays(ctx, &hud_ctx);
             if let Some(id) = hud_result.dismissed_toast_id {
                 dismissed_toast_id = Some(id);
             }
-            if let Some(rect) = divider_rect {
+            if let Some(div) = divider {
                 let painter = ctx.layer_painter(egui::LayerId::background());
-                painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
+                painter.rect_filled(div.visible, 0.0, egui::Color32::from_gray(40));
+                let resp = egui::Area::new(egui::Id::new("solarxy_divider_drag"))
+                    .fixed_pos(div.hit.min)
+                    .order(egui::Order::Foreground)
+                    .interactable(true)
+                    .show(ctx, |ui| {
+                        ui.allocate_exact_size(div.hit.size(), egui::Sense::click_and_drag())
+                    })
+                    .inner
+                    .1;
+
+                if resp.hovered() || resp.dragged() {
+                    ctx.set_cursor_icon(match div.layout {
+                        solarxy_core::view_config::ViewLayout::SplitVertical => {
+                            egui::CursorIcon::ResizeHorizontal
+                        }
+                        solarxy_core::view_config::ViewLayout::SplitHorizontal => {
+                            egui::CursorIcon::ResizeVertical
+                        }
+                        solarxy_core::view_config::ViewLayout::Single => egui::CursorIcon::Default,
+                    });
+                }
+                if resp.dragged()
+                    && let Some(pos) = resp.interact_pointer_pos()
+                {
+                    let screen = ctx.input(egui::InputState::viewport_rect);
+                    let raw_ratio = match div.layout {
+                        solarxy_core::view_config::ViewLayout::SplitVertical => {
+                            (pos.x - screen.left()) / screen.width()
+                        }
+                        solarxy_core::view_config::ViewLayout::SplitHorizontal => {
+                            (pos.y - screen.top()) / screen.height()
+                        }
+                        solarxy_core::view_config::ViewLayout::Single => 0.5,
+                    };
+                    actions.set_split_ratio = Some(
+                        solarxy_core::view_config::DisplaySettings::clamp_split_ratio(raw_ratio),
+                    );
+                }
+                if resp.double_clicked() {
+                    actions.set_split_ratio =
+                        Some(solarxy_core::view_config::DisplaySettings::DEFAULT_SPLIT_RATIO);
+                }
             }
             if let Some(rect) = active_pane_rect {
                 let painter = ctx.layer_painter(egui::LayerId::new(

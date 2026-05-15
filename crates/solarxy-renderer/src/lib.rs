@@ -63,6 +63,7 @@ pub mod ibl;
 pub mod light;
 pub mod material;
 pub mod model;
+pub mod overdraw;
 pub mod pipeline_builder;
 pub mod pipelines;
 pub mod resources;

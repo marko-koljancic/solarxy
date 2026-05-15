@@ -18,6 +18,17 @@ pub(crate) struct MenuActions {
     pub open_wiki: bool,
     pub open_about: bool,
     pub check_for_updates: bool,
+    pub set_split_ratio: Option<f32>,
+}
+
+/// Bundle the visible divider rect, its wider hit zone, and the current
+/// layout in one parameter — keeps `EguiRenderer::render_ui` argument count
+/// stable when adding the draggable-divider plumbing.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DividerInfo {
+    pub visible: egui::Rect,
+    pub hit: egui::Rect,
+    pub layout: ViewLayout,
 }
 
 #[derive(Debug, Clone, Copy)]

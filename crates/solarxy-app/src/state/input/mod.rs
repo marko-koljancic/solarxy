@@ -335,6 +335,20 @@ impl State {
                 self.gui
                     .set_toast("Inspection: Depth", ToastSeverity::Success);
             }
+            KeyCode::Digit6 => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
+                pds.inspection_mode = InspectionMode::Overdraw;
+                self.gui
+                    .set_toast("Inspection: Overdraw", ToastSeverity::Success);
+            }
+            KeyCode::Digit7 => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
+                pds.inspection_mode = InspectionMode::AoPreview;
+                self.gui
+                    .set_toast("Inspection: AO Preview", ToastSeverity::Success);
+            }
             KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
             KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
             KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
@@ -347,12 +361,14 @@ impl State {
     }
 
     fn write_composite_params(&self) {
+        let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         self.renderer.post.composite.write_params(
             &self.queue,
             self.renderer.post.bloom_enabled,
             self.renderer.post.ssao_enabled,
             self.renderer.post.tone_mode,
             self.renderer.post.exposure,
+            active_inspection,
         );
     }
 

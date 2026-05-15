@@ -23,6 +23,8 @@ struct CompositeParams {
     ssao_strength: f32,
     tone_mode: u32,
     exposure: f32,
+    inspection_mode: u32,
+    _pad: u32,
 }
 @group(1) @binding(0) var<uniform> composite: CompositeParams;
 
@@ -52,6 +54,19 @@ fn tone_aces(x: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
+    if composite.inspection_mode == 4u {
+        let color = textureSample(scene_texture, tex_sampler, in.uv).rgb;
+        return vec4<f32>(color, 1.0);
+    }
+
+    if composite.inspection_mode == 5u {
+        if composite.ssao_enabled != 0u {
+            let ao = textureSample(ssao_texture, ssao_sampler, in.uv).r;
+            return vec4<f32>(ao, ao, ao, 1.0);
+        }
+        return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    }
+
     var color = textureSample(scene_texture, tex_sampler, in.uv).rgb;
     if composite.bloom_enabled != 0u {
         let bloom_color = textureSample(bloom_texture, tex_sampler, in.uv).rgb;

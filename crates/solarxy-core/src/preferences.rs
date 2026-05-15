@@ -210,16 +210,30 @@ cycle_enum! {
         MaterialId => "Material ID",
         TexelDensity => "Texel Density",
         Depth => "Depth",
+        Overdraw => "Overdraw",
+        AoPreview => "AO Preview",
     }
 }
 
 impl InspectionMode {
+    /// Discriminant passed to shader-side `inspection_mode` uniforms.
+    ///
+    /// - `Shaded` (0): default PBR rendering — no special case in shaders.
+    /// - `MaterialId` (1): per-material hashed colors — see `shader.wgsl`.
+    /// - `TexelDensity` (2): UV-derivative-based density ramp — see `shader.wgsl`.
+    /// - `Depth` (3): linearized depth ramp — see `shader.wgsl`.
+    /// - `Overdraw` (4): handled outside `shader.wgsl` via a dedicated
+    ///   count+show pipeline pair in `solarxy-renderer/src/overdraw.rs`.
+    /// - `AoPreview` (5): handled in `composite.wgsl` — composite samples
+    ///   the SSAO buffer directly and bypasses scene tone-mapping.
     pub fn as_u32(self) -> u32 {
         match self {
             Self::Shaded => 0,
             Self::MaterialId => 1,
             Self::TexelDensity => 2,
             Self::Depth => 3,
+            Self::Overdraw => 4,
+            Self::AoPreview => 5,
         }
     }
 }

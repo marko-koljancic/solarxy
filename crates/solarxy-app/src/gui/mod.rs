@@ -21,5 +21,5 @@ pub use overlays::ToastSeverity;
 pub use renderer::EguiRenderer;
 pub use snapshot::SidebarChanges;
 
-pub(crate) use actions::MenuActions;
+pub(crate) use actions::{DividerInfo, MenuActions};
 pub(crate) use snapshot::{GuiSnapshot, HudInfo};

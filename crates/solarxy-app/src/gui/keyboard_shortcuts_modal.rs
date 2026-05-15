@@ -147,6 +147,14 @@ const SECTIONS: &[Section] = &[
                 action: "Inspection: Depth",
             },
             Entry {
+                keys: "6",
+                action: "Inspection: Overdraw",
+            },
+            Entry {
+                keys: "7",
+                action: "Inspection: AO Preview",
+            },
+            Entry {
                 keys: "M / Shift+M",
                 action: "Cycle material override",
             },
@@ -281,7 +289,7 @@ pub(super) fn draw_keyboard_shortcuts_modal(
                 }
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new("User-remappable shortcuts land in 0.6.0.")
+                    egui::RichText::new("User-remappable shortcuts land in a future release.")
                         .small()
                         .italics()
                         .color(egui::Color32::from_white_alpha(140)),

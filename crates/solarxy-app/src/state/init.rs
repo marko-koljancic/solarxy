@@ -301,6 +301,13 @@ impl State {
             }
         };
 
+        let overdraw_res = solarxy_renderer::overdraw::OverdrawResources::new(
+            &device,
+            &layouts,
+            size.width,
+            size.height,
+        );
+
         let mut state = Self {
             surface,
             device,
@@ -358,6 +365,7 @@ impl State {
                     readback_pending: false,
                 },
                 validation_colors,
+                overdraw: overdraw_res,
                 shared_samplers,
                 msaa_sample_count,
                 target_width: size.width,
@@ -394,6 +402,7 @@ impl State {
                     turntable_rpm: preferences.display.turntable_rpm,
                     lights_locked: preferences.lighting.lock,
                     layout: ViewLayout::default(),
+                    split_ratio: DisplaySettings::DEFAULT_SPLIT_RATIO,
                     roughness_scale: 1.0,
                     metallic_scale: 1.0,
                 },

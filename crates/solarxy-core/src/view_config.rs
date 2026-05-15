@@ -29,8 +29,30 @@ pub struct DisplaySettings {
     pub turntable_rpm: f32,
     pub lights_locked: bool,
     pub layout: ViewLayout,
+    /// Split-divider ratio in [0.05, 0.95] (pane-1 fraction of the split
+    /// axis). Defaults to 0.5 (centered). Single layout ignores this.
+    /// Per-orientation ratios (separate vertical / horizontal) are
+    /// deferred — both currently share this single value.
+    pub split_ratio: f32,
     pub roughness_scale: f32,
     pub metallic_scale: f32,
+}
+
+impl DisplaySettings {
+    /// Default split ratio (centered). Exported so callers wiring new
+    /// `DisplaySettings` instances don't repeat the magic number.
+    pub const DEFAULT_SPLIT_RATIO: f32 = 0.5;
+
+    /// Smallest legal divider ratio — keeps either pane visible.
+    pub const MIN_SPLIT_RATIO: f32 = 0.05;
+    /// Largest legal divider ratio — keeps either pane visible.
+    pub const MAX_SPLIT_RATIO: f32 = 0.95;
+
+    /// Clamp a candidate ratio to the legal `[MIN_SPLIT_RATIO,
+    /// MAX_SPLIT_RATIO]` range.
+    pub fn clamp_split_ratio(ratio: f32) -> f32 {
+        ratio.clamp(Self::MIN_SPLIT_RATIO, Self::MAX_SPLIT_RATIO)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

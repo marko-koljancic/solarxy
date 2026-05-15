@@ -9,7 +9,7 @@
 
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::visualization::GridUniform;
-use solarxy_core::preferences::{MaterialOverride, PaneMode, UvMapBackground};
+use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, UvMapBackground};
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
@@ -105,10 +105,46 @@ impl State {
             }
 
             self.write_3d_pane_uniforms(i, &pds);
-            self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
+
+            if pds.inspection_mode == InspectionMode::Overdraw {
+                self.render_overdraw_pane(&mut encoder, i, pane, is_split);
+            } else {
+                self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
+            }
         }
 
         self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
+    }
+
+    fn render_overdraw_pane(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        i: usize,
+        pane: &Pane,
+        is_split: bool,
+    ) {
+        let cam_bg = if i == 0 {
+            self.scene.as_ref().map(|s| &s.cam.bind_group)
+        } else {
+            self.view
+                .secondary_cam
+                .as_ref()
+                .map(|c| &c.bind_group)
+                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
+        };
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let Some(cam_bg) = cam_bg else {
+            return;
+        };
+        let pane_viewport = if is_split {
+            Some([pane.x, pane.y, pane.width, pane.height])
+        } else {
+            None
+        };
+        self.renderer
+            .render_overdraw_passes(encoder, scene, cam_bg, pane_viewport);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -124,12 +160,14 @@ impl State {
     ) {
         let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
         let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
+        let pane_inspection = self.view.pane_settings[i].inspection_mode;
         self.renderer.post.composite.write_params(
             &self.queue,
             pane_bloom,
             pane_ssao,
             self.renderer.post.tone_mode,
             self.renderer.post.exposure,
+            pane_inspection,
         );
         let viewport = if is_split {
             Some([pane.x, pane.y, pane.width, pane.height])
@@ -384,7 +422,14 @@ impl State {
                 label: Some("UI Encoder"),
             });
 
-        let divider_rect = self.compute_divider_rect();
+        let divider = match (self.compute_divider_rect(), self.compute_divider_hit_rect()) {
+            (Some(visible), Some(hit)) => Some(crate::gui::DividerInfo {
+                visible,
+                hit,
+                layout: self.view.display.layout,
+            }),
+            _ => None,
+        };
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
@@ -448,6 +493,8 @@ impl State {
             is_split,
             projection_mode,
         );
+        let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
+        let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
         let hud = HudInfo {
             pane_label,
             cameras_linked: if is_split {
@@ -457,6 +504,8 @@ impl State {
             },
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
             uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
+            overdraw_active: active_inspection == InspectionMode::Overdraw
+                && active_pane_mode == PaneMode::Scene3D,
         };
         let validation_report = self.scene.as_ref().map(|s| &s.validation);
 
@@ -472,7 +521,7 @@ impl State {
             &output.texture,
             screen,
             frame_ms,
-            divider_rect,
+            divider,
             active_pane_rect,
             &recent_files,
         );

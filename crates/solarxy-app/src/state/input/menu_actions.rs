@@ -50,6 +50,10 @@ impl State {
         if let Some(proj) = actions.set_projection {
             self.for_each_target_cam(|cam| cam.set_projection(proj));
         }
+        if let Some(ratio) = actions.set_split_ratio {
+            self.view.display.split_ratio =
+                solarxy_core::view_config::DisplaySettings::clamp_split_ratio(ratio);
+        }
         if actions.quit {
             self.quit_requested = true;
         }

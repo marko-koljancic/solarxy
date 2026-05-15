@@ -116,6 +116,7 @@ pub struct Renderer {
     pub uv_boundary_buf: wgpu::Buffer,
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
+    pub overdraw: crate::overdraw::OverdrawResources,
     #[allow(unused)]
     pub shared_samplers: SharedSamplers,
     pub msaa_sample_count: u32,
@@ -265,6 +266,76 @@ impl Renderer {
             pass.set_pipeline(&self.pipelines.post.ssao_blur_v);
             pass.set_bind_group(0, &self.post.ssao.blur_v_bind_group, &[]);
             pass.set_bind_group(1, cam_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    /// Overdraw heat map — count + show. Replaces the main pass entirely for
+    /// the active pane when `InspectionMode::Overdraw` is selected. Composite
+    /// short-circuits with `inspection_mode == 4u` so the heatmap is presented
+    /// untouched (no tone mapping, no bloom, no SSAO multiplication).
+    ///
+    /// `pane_viewport` is `[x, y, w, h]` in physical pixels, or `None` for
+    /// single-pane mode (whole window).
+    pub fn render_overdraw_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &ModelScene,
+        cam_bg: &wgpu::BindGroup,
+        pane_viewport: Option<[f32; 4]>,
+    ) {
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Overdraw Count Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.overdraw.count_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            if let Some([x, y, w, h]) = pane_viewport {
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
+            }
+            pass.set_pipeline(&self.pipelines.inspection.overdraw_count);
+            pass.set_bind_group(0, cam_bg, &[]);
+            pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+            for mesh in &scene.model.meshes {
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+            }
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Overdraw Show Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.targets.hdr_resolve_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            if let Some([x, y, w, h]) = pane_viewport {
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
+            }
+            pass.set_pipeline(&self.pipelines.inspection.overdraw_show);
+            pass.set_bind_group(0, &self.overdraw.show_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
     }

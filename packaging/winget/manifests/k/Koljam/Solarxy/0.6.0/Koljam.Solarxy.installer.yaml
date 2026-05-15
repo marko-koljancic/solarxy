@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+#
+# Installer manifest for Koljam.Solarxy.
+#
+# Two placeholders are filled in by the release-time workflow
+# (`.github/workflows/winget-release.yml`) before submission:
+#   {{INSTALLER_SHA256}} — SHA-256 hash of the produced MSI artifact.
+#   {{PRODUCT_CODE}}     — actual ProductCode GUID extracted from the MSI
+#                          via `msiinfo export <msi> Property` (the WiX
+#                          ProductCode rotates per build, so it can't be
+#                          hard-coded in this manifest).
+#
+# UpgradeCode is stable across versions and lives in the root `Cargo.toml`
+# `[package.metadata.wix]` (F201EA19-A29E-4B9E-A3CE-85CEB9BAF9CE).
+
+PackageIdentifier: Koljam.Solarxy
+PackageVersion: 0.6.0
+InstallerType: wix
+InstallerLocale: en-US
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Commands:
+  - solarxy
+FileExtensions:
+  - obj
+  - stl
+  - ply
+  - gltf
+  - glb
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/marko-koljancic/solarxy/releases/download/v0.6.0/solarxy-x86_64-pc-windows-msvc.msi
+    InstallerSha256: '{{INSTALLER_SHA256}}'
+    ProductCode: '{{PRODUCT_CODE}}'
+ManifestType: installer
+ManifestVersion: 1.6.0

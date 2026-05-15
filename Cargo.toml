@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0-dev"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -18,23 +18,23 @@ repository = "https://github.com/marko-koljancic/solarxy"
 authors = ["Marko Koljancic <marko.koljancic@gmail.com>"]
 
 [workspace.dependencies]
-cgmath    = "0.18"
-anyhow    = "1.0.100"
+cgmath = "0.18"
+anyhow = "1.0.100"
 thiserror = "2"
 
 [profile.release]
-opt-level     = 3
-lto           = "thin"
+opt-level = 3
+lto = "thin"
 codegen-units = 1
-strip         = "symbols"
-panic         = "abort"
+strip = "symbols"
+panic = "abort"
 
 [profile.dist]
-inherits      = "release"
-lto           = "fat"
+inherits = "release"
+lto = "fat"
 codegen-units = 1
-strip         = "symbols"
-panic         = "abort"
+strip = "symbols"
+panic = "abort"
 
 [package]
 name = "solarxy"
@@ -52,11 +52,11 @@ path = "src/main.rs"
 
 [dependencies]
 solarxy-core = { path = "crates/solarxy-core" }
-solarxy-app  = { path = "crates/solarxy-app" }
-clap         = { version = "4.5.53", features = ["derive"] }
-anyhow       = { workspace = true }
+solarxy-app = { path = "crates/solarxy-app" }
+clap = { version = "4.5.53", features = ["derive"] }
+anyhow = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
-time         = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
+time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 
 [package.metadata.bundle]
 name = "Solarxy"

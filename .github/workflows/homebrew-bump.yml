@@ -1,0 +1,102 @@
+# Bump the Solarxy Homebrew tap after each stable GitHub Release.
+#
+# Updates both:
+#   - Casks/solarxy.rb       — the GUI .dmg (cask)
+#   - Formula/solarxy-cli.rb — the CLI source build (formula)
+#
+# Pushes a commit directly to the tap (no PR — the tap is a single-maintainer
+# repo). Brew users get the new version on `brew update`.
+#
+# Skipped on prerelease tags (`rc.N`).
+name: Homebrew bump
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.6.0)"
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    steps:
+      - name: Verify HOMEBREW_TAP_PAT presence
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.HOMEBREW_TAP_PAT }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::HOMEBREW_TAP_PAT not set — Homebrew bump will be skipped. Provision the secret to enable automatic tap updates."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tag and version
+        if: steps.secrets.outputs.ready == 'true'
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: koljam/homebrew-solarxy
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          path: tap
+          fetch-depth: 1
+
+      - name: Compute artifact SHA-256 sums
+        if: steps.secrets.outputs.ready == 'true'
+        id: sha
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # GUI cask: macOS arm64 DMG
+          DMG_URL="https://github.com/marko-koljancic/solarxy/releases/download/${TAG}/solarxy-aarch64-apple-darwin.dmg"
+          # CLI formula: source tarball
+          SRC_URL="https://github.com/marko-koljancic/solarxy/archive/refs/tags/${TAG}.tar.gz"
+          DMG_SHA=$(curl -fsSL "$DMG_URL" | sha256sum | awk '{print $1}')
+          SRC_SHA=$(curl -fsSL "$SRC_URL" | sha256sum | awk '{print $1}')
+          echo "dmg_sha=$DMG_SHA" >> "$GITHUB_OUTPUT"
+          echo "src_sha=$SRC_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update cask + formula
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          DMG_SHA: ${{ steps.sha.outputs.dmg_sha }}
+          SRC_SHA: ${{ steps.sha.outputs.src_sha }}
+        run: |
+          # Cask — update version + sha256
+          sed -i -E "s|^( *version )\".*\"|\1\"${VERSION}\"|" tap/Casks/solarxy.rb
+          sed -i -E "s|^( *sha256 )\".*\"|\1\"${DMG_SHA}\"|" tap/Casks/solarxy.rb
+          # Formula — update url's tag segment + sha256
+          sed -i -E "s|/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\.tar\.gz|/v${VERSION}.tar.gz|" tap/Formula/solarxy-cli.rb
+          sed -i -E "s|^( *sha256 )\".*\"|\1\"${SRC_SHA}\"|" tap/Formula/solarxy-cli.rb
+
+      - name: Commit and push
+        if: steps.secrets.outputs.ready == 'true'
+        working-directory: tap
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          git config user.name "solarxy-bot"
+          git config user.email "noreply@github.com"
+          git add Casks/solarxy.rb Formula/solarxy-cli.rb
+          if git diff --cached --quiet; then
+            echo "::notice::No changes to bump — cask and formula already at ${TAG}."
+            exit 0
+          fi
+          git commit -m "Bump to ${TAG}"
+          git push origin HEAD

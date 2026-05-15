@@ -17,6 +17,7 @@ impl State {
     pub(super) fn compute_panes(&self) -> Vec<Pane> {
         let w = self.config.width as f32;
         let h = self.config.height as f32;
+        let ratio = self.view.display.split_ratio;
         match self.view.display.layout {
             ViewLayout::Single => vec![Pane {
                 x: 0.0,
@@ -25,36 +26,36 @@ impl State {
                 height: h,
             }],
             ViewLayout::SplitVertical => {
-                let half = (w * 0.5).floor();
+                let split = (w * ratio).floor();
                 vec![
                     Pane {
                         x: 0.0,
                         y: 0.0,
-                        width: half - 1.0,
+                        width: (split - 1.0).max(1.0),
                         height: h,
                     },
                     Pane {
-                        x: half + 1.0,
+                        x: split + 1.0,
                         y: 0.0,
-                        width: w - half - 1.0,
+                        width: (w - split - 1.0).max(1.0),
                         height: h,
                     },
                 ]
             }
             ViewLayout::SplitHorizontal => {
-                let half = (h * 0.5).floor();
+                let split = (h * ratio).floor();
                 vec![
                     Pane {
                         x: 0.0,
                         y: 0.0,
                         width: w,
-                        height: half - 1.0,
+                        height: (split - 1.0).max(1.0),
                     },
                     Pane {
                         x: 0.0,
-                        y: half + 1.0,
+                        y: split + 1.0,
                         width: w,
-                        height: h - half - 1.0,
+                        height: (h - split - 1.0).max(1.0),
                     },
                 ]
             }
@@ -73,22 +74,37 @@ impl State {
         let w = self.config.width as f32;
         let h = self.config.height as f32;
         let ppp = self.window.scale_factor() as f32;
+        let ratio = self.view.display.split_ratio;
         match self.view.display.layout {
             ViewLayout::Single => None,
             ViewLayout::SplitVertical => {
-                let cx = (w * 0.5).floor();
+                let cx = (w * ratio).floor();
                 Some(egui::Rect::from_min_size(
                     egui::pos2((cx - 1.0) / ppp, 0.0),
                     egui::vec2(2.0 / ppp, h / ppp),
                 ))
             }
             ViewLayout::SplitHorizontal => {
-                let cy = (h * 0.5).floor();
+                let cy = (h * ratio).floor();
                 Some(egui::Rect::from_min_size(
                     egui::pos2(0.0, (cy - 1.0) / ppp),
                     egui::vec2(w / ppp, 2.0 / ppp),
                 ))
             }
         }
+    }
+
+    /// Wider hit-test rectangle around the divider (egui drag affordance).
+    /// The visual divider is 2 px wide; this returns an 8 px-wide band
+    /// centered on it so the user doesn't have to land pixel-perfect.
+    pub(super) fn compute_divider_hit_rect(&self) -> Option<egui::Rect> {
+        let visible = self.compute_divider_rect()?;
+        let ppp = self.window.scale_factor() as f32;
+        let pad_logical = 3.0 / ppp; // 3 px on each side around the visible 2 px
+        Some(visible.expand2(match self.view.display.layout {
+            ViewLayout::SplitVertical => egui::vec2(pad_logical, 0.0),
+            ViewLayout::SplitHorizontal => egui::vec2(0.0, pad_logical),
+            ViewLayout::Single => egui::vec2(0.0, 0.0),
+        }))
     }
 }

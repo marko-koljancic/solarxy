@@ -23,6 +23,7 @@ pub struct BindGroupLayouts {
     pub ssao_read: wgpu::BindGroupLayout,
     pub uv_overlap_read: wgpu::BindGroupLayout,
     pub validation_color: wgpu::BindGroupLayout,
+    pub overdraw_show: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -220,6 +221,10 @@ impl BindGroupLayouts {
             label: Some("validation_color_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+        let overdraw_show = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overdraw_show_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -241,6 +246,7 @@ impl BindGroupLayouts {
             ssao_read,
             uv_overlap_read,
             validation_color,
+            overdraw_show,
         }
     }
 }

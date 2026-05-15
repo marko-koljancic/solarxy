@@ -217,6 +217,10 @@ impl State {
             .post
             .ssao
             .resize(&self.device, &self.renderer.layouts, width, height);
+
+        self.renderer
+            .overdraw
+            .resize(&self.device, &self.renderer.layouts, width, height);
     }
 
     pub fn update(&mut self) {
