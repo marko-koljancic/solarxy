@@ -57,6 +57,8 @@ pub mod json;
 #[cfg(feature = "serialization")]
 pub mod preferences;
 #[cfg(feature = "serialization")]
+pub mod project_config;
+#[cfg(feature = "serialization")]
 pub mod report;
 pub mod validation;
 #[cfg(feature = "serialization")]
@@ -65,7 +67,14 @@ pub mod view_config;
 pub use aabb::AABB;
 pub use geometry::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 pub use validation::{
-    IssueKind, IssueScope, Severity, ValidationIssue, ValidationReport, ValidationResult,
+    IssueKind, IssueScope, Severity, ValidationConfig, ValidationIssue, ValidationReport,
+    ValidationResult, ValidationThresholds,
+};
+
+#[cfg(feature = "serialization")]
+pub use project_config::{
+    AssetCategory, Budgets, ClassifierRule, FilenameClassifier, ProjectConfig, ProjectConfigError,
+    classify_compiled, discover as discover_project_config,
 };
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];

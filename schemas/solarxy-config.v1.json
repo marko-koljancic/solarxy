@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProjectConfig",
+  "type": "object",
+  "properties": {
+    "budgets": {
+      "default": {
+        "default": 30000,
+        "environment": 50000,
+        "hero": 100000,
+        "prop": 20000
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/Budgets"
+        }
+      ]
+    },
+    "filenames": {
+      "default": {
+        "rules": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/FilenameClassifier"
+        }
+      ]
+    },
+    "format_version": {
+      "default": 1,
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "thresholds": {
+      "default": {
+        "flipped_normal_dot": -0.5,
+        "triangle_budget_tolerance_percent": 20.0
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ValidationThresholds"
+        }
+      ]
+    },
+    "validation": {
+      "default": {
+        "allow_open_mesh": false,
+        "degenerate_triangles": true,
+        "flipped_normals": true,
+        "index_buffer": true,
+        "material_refs": true,
+        "non_manifold_edges": true,
+        "normal_mismatch": true,
+        "triangle_budget": true,
+        "uv_presence": true
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ValidationConfig"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "AssetCategory": {
+      "type": "string",
+      "enum": [
+        "hero",
+        "prop",
+        "environment",
+        "default"
+      ]
+    },
+    "Budgets": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "default": 30000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "environment": {
+          "default": 50000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "hero": {
+          "default": 100000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "prop": {
+          "default": 20000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ClassifierRule": {
+      "type": "object",
+      "required": [
+        "category",
+        "pattern"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/AssetCategory"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FilenameClassifier": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ClassifierRule"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ValidationConfig": {
+      "type": "object",
+      "properties": {
+        "allow_open_mesh": {
+          "default": false,
+          "type": "boolean"
+        },
+        "degenerate_triangles": {
+          "default": true,
+          "type": "boolean"
+        },
+        "flipped_normals": {
+          "default": true,
+          "type": "boolean"
+        },
+        "index_buffer": {
+          "default": true,
+          "type": "boolean"
+        },
+        "material_refs": {
+          "default": true,
+          "type": "boolean"
+        },
+        "non_manifold_edges": {
+          "default": true,
+          "type": "boolean"
+        },
+        "normal_mismatch": {
+          "default": true,
+          "type": "boolean"
+        },
+        "triangle_budget": {
+          "default": true,
+          "type": "boolean"
+        },
+        "uv_presence": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ValidationThresholds": {
+      "type": "object",
+      "properties": {
+        "flipped_normal_dot": {
+          "default": -0.5,
+          "type": "number",
+          "format": "float"
+        },
+        "triangle_budget_tolerance_percent": {
+          "default": 20.0,
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

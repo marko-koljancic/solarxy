@@ -24,4 +24,6 @@ pub mod parser;
 pub(crate) mod tui;
 #[cfg(feature = "tui")]
 pub mod tui_analysis;
+#[cfg(feature = "analyzer")]
+pub mod validate;
 mod validators;

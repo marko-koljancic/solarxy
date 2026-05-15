@@ -28,6 +28,13 @@ pub enum IssueScope {
     Material(usize),
     Model,
     Face(usize, usize),
+    /// Edge spanning two vertex indices (canonical order: `vertices[0] < vertices[1]`)
+    /// inside the given mesh. Used by `NonManifoldEdge` so the renderer overlay
+    /// can highlight the specific edge.
+    Edge {
+        mesh_index: usize,
+        vertices: [u32; 2],
+    },
 }
 
 impl fmt::Display for IssueScope {
@@ -39,6 +46,14 @@ impl fmt::Display for IssueScope {
             IssueScope::Face(mesh, count) => {
                 write!(f, "Mesh [{}]: {} degenerate faces", mesh, count)
             }
+            IssueScope::Edge {
+                mesh_index,
+                vertices,
+            } => write!(
+                f,
+                "Mesh [{}] edge {}-{}",
+                mesh_index, vertices[0], vertices[1]
+            ),
         }
     }
 }
@@ -46,6 +61,7 @@ impl fmt::Display for IssueScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueKind {
     NormalMismatch,
+    FlippedNormals,
     UvMismatch,
     MissingUvs,
     NonTriangulated,
@@ -53,6 +69,8 @@ pub enum IssueKind {
     InvalidMaterialRef,
     DegenerateTriangles,
     MissingTexture,
+    NonManifoldEdge,
+    TriangleBudgetExceeded,
 }
 
 #[derive(Debug, Clone)]

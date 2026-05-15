@@ -111,6 +111,7 @@ pub struct OverlayPipelines {
     pub background: wgpu::RenderPipeline,
     pub gizmo: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
+    pub validation_edge: wgpu::RenderPipeline,
 }
 
 pub struct UvPipelines {
@@ -283,6 +284,28 @@ impl Pipelines {
             slope_scale: -1.0,
             clamp: 0.0,
         })
+        .sample_count(sample_count)
+        .build();
+
+        let validation_edge = PipelineBuilder::new(
+            device,
+            "Validation Edge Lines",
+            &validation_layout,
+            &validation_shader,
+        )
+        .vertex_entry("vs_validation")
+        .fragment_entry("fs_validation")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::LessEqual)
+        .depth_bias(wgpu::DepthBiasState {
+            constant: -8,
+            slope_scale: -1.0,
+            clamp: 0.0,
+        })
+        .topology(wgpu::PrimitiveTopology::LineList)
         .sample_count(sample_count)
         .build();
 
@@ -803,6 +826,7 @@ impl Pipelines {
                 background,
                 gizmo,
                 validation_overlay,
+                validation_edge,
             },
             uv: UvPipelines {
                 uv_gradient,

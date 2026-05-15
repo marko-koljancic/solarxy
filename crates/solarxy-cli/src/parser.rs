@@ -2,6 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use super::validators::is_valid_model_path;
+use crate::validate::adapter::{AdapterFormat, AdapterName, FailOn};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -31,6 +32,39 @@ pub struct Args {
         help = "Write analysis report to file (requires analyze mode)"
     )]
     pub output: Option<PathBuf>,
+    #[clap(
+        long = "config",
+        value_name = "PATH",
+        help = "Path to a solarxy.toml. When omitted, discovery walks upward from the model's directory until .git/ or filesystem root."
+    )]
+    pub config: Option<PathBuf>,
+    #[clap(
+        long = "paths",
+        value_name = "GLOB",
+        help = "Glob pattern(s) for batch validation (e.g. 'assets/**/*.glb'). Repeatable. Presence of --paths switches dispatch from single-file analyze to the validate orchestrator.",
+        num_args = 1..,
+    )]
+    pub paths: Vec<String>,
+    #[clap(
+        long = "adapter",
+        value_enum,
+        default_value_t = AdapterName::Generic,
+        help = "Pipeline adapter to format the output."
+    )]
+    pub adapter: AdapterName,
+    #[clap(
+        long = "adapter-format",
+        value_enum,
+        help = "Output format for the chosen adapter. Defaults to the adapter's default (generic→json, github-actions→gha-commands)."
+    )]
+    pub adapter_format: Option<AdapterFormat>,
+    #[clap(
+        long = "fail-on",
+        value_enum,
+        default_value_t = FailOn::Error,
+        help = "Exit-code policy: 'error' (fail on errors only), 'warning' (fail on either), 'never' (always exit 0)."
+    )]
+    pub fail_on: FailOn,
     #[arg(long, help = "Print version and project info")]
     pub about: bool,
     #[arg(long, help = "Check for updates and self-update")]

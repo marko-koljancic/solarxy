@@ -113,6 +113,9 @@ pub struct ModelScene {
     pub stats: ModelStats,
     pub validation: ValidationReport,
     pub validation_mesh_cat: Vec<Option<usize>>,
+    /// Per-GPU-mesh `LineList` index buffer for `IssueScope::Edge` issues.
+    /// `(buffer, num_indices)`. `None` for meshes without edge issues.
+    pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
 }
 
 impl ModelScene {
@@ -179,6 +182,28 @@ impl ModelScene {
             &viewer_validation.raw_to_gpu,
         );
 
+        let edge_index_lists = validation::build_mesh_edge_indices(
+            &viewer_validation.report,
+            model.meshes.len(),
+            &viewer_validation.raw_to_gpu,
+        );
+        let validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>> = edge_index_lists
+            .into_iter()
+            .enumerate()
+            .map(|(mi, indices)| {
+                if indices.is_empty() {
+                    None
+                } else {
+                    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("Validation Edge Indices {mi}")),
+                        contents: bytemuck::cast_slice(&indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    Some((buf, indices.len() as u32))
+                }
+            })
+            .collect();
+
         Ok(ModelScene {
             model,
             cam,
@@ -192,6 +217,7 @@ impl ModelScene {
             stats,
             validation: viewer_validation.report,
             validation_mesh_cat,
+            validation_edge_buffers,
         })
     }
 }

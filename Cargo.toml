@@ -21,6 +21,11 @@ authors = ["Marko Koljancic <marko.koljancic@gmail.com>"]
 cgmath = "0.18"
 anyhow = "1.0.100"
 thiserror = "2"
+regex = "1.11"
+strsim = "0.11"
+schemars = "0.8"
+ulid = "1"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

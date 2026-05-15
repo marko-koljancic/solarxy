@@ -692,6 +692,28 @@ impl Renderer {
                 pass.draw_indexed(0..mesh.degen_num_elements, 0, 0..1);
             }
         }
+
+        let edge_idx = IssueCategory::ALL
+            .iter()
+            .position(|c| *c == IssueCategory::NonManifoldEdge)
+            .unwrap_or(5);
+        let mut switched_to_edge = false;
+        for (mi, mesh) in scene.model.meshes.iter().enumerate() {
+            if let Some(Some((edge_buf, num))) =
+                scene.validation_edge_buffers.get(mi).map(|o| o.as_ref())
+            {
+                if !switched_to_edge {
+                    pass.set_pipeline(&self.pipelines.overlay.validation_edge);
+                    pass.set_bind_group(0, cam_bg, &[]);
+                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+                    switched_to_edge = true;
+                }
+                pass.set_bind_group(1, &self.validation_colors.bind_groups[edge_idx], &[]);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*num, 0, 0..1);
+            }
+        }
     }
 
     pub fn render_uv_overlap_count_pass(
