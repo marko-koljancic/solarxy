@@ -88,6 +88,10 @@ pub struct ReviewState {
     /// Case-insensitive substring filter applied to annotation text.
     /// Empty ⇒ no filter.
     pub text_filter: String,
+
+    /// `Some(id)` while the cascade-delete confirmation modal is open.
+    /// Cleared on Cancel or after a successful delete.
+    pub delete_confirm: Option<String>,
 }
 
 impl Default for ReviewState {
@@ -103,12 +107,11 @@ impl Default for ReviewState {
             dirty: false,
             author: None,
             panel_open: false,
-            // Panel UX defaults: docked on right, all categories visible,
-            // resolved shown, no text filter.
             panel_docked: true,
             category_filters: [true; 4],
             show_resolved: true,
             text_filter: String::new(),
+            delete_confirm: None,
         }
     }
 }
@@ -124,6 +127,7 @@ pub struct EditDraft {
 
     /// Screen-space pixel location of the click that triggered this draft
     /// — used to position the egui popup near where the user clicked.
+    /// For replies opened via the panel, this is the screen center.
     pub screen_pos: (f32, f32),
 
     /// In-progress text. Editable via `egui::TextEdit::multiline`.
@@ -136,10 +140,15 @@ pub struct EditDraft {
     /// `Some(id)` when editing an existing annotation; `None` when
     /// creating a new one.
     pub editing_id: Option<String>,
+
+    /// `Some(parent_id)` when the draft is a reply to an existing
+    /// annotation; `None` for top-level notes. Replies share the
+    /// parent's anchor and don't get their own 3D marker.
+    pub reply_to: Option<String>,
 }
 
 impl EditDraft {
-    /// Build a fresh draft for a new annotation at the given anchor.
+    /// Build a fresh draft for a new top-level annotation at the given anchor.
     pub fn new_at(anchor: AnchorPosition, screen_pos: (f32, f32)) -> Self {
         Self {
             anchor,
@@ -147,6 +156,25 @@ impl EditDraft {
             text: String::new(),
             category: AnnotationCategory::default(),
             editing_id: None,
+            reply_to: None,
+        }
+    }
+
+    /// Build a draft for a reply to `parent_id` — anchor borrowed from
+    /// the parent, popup positioned at `screen_pos` (typically the
+    /// viewport center when opened via the panel's Reply button).
+    pub fn new_reply(
+        parent_id: String,
+        parent_anchor: AnchorPosition,
+        screen_pos: (f32, f32),
+    ) -> Self {
+        Self {
+            anchor: parent_anchor,
+            screen_pos,
+            text: String::new(),
+            category: AnnotationCategory::default(),
+            editing_id: None,
+            reply_to: Some(parent_id),
         }
     }
 }
@@ -192,7 +220,7 @@ impl ReviewState {
                 anchor: draft.anchor,
                 category: draft.category,
                 text: draft.text,
-                reply_to: None,
+                reply_to: draft.reply_to,
                 resolved: false,
                 stale: false,
             });
@@ -251,6 +279,75 @@ impl ReviewState {
         self.dirty = true;
     }
 
+    /// Lookup by id (linear scan — annotation counts are small).
+    pub fn find(&self, id: &str) -> Option<&ReviewAnnotation> {
+        self.annotations.iter().find(|a| a.id == id)
+    }
+
+    /// Number of direct replies an annotation has. `0` for replies and
+    /// for unparented leaves.
+    pub fn reply_count(&self, parent_id: &str) -> usize {
+        self.annotations
+            .iter()
+            .filter(|a| a.reply_to.as_deref() == Some(parent_id))
+            .count()
+    }
+
+    /// Touch `updated_at` on an annotation. No-op if `id` isn't found.
+    /// Doesn't dirty (text edits in the inline editor don't change
+    /// markers); callers flip `dirty` themselves when category /
+    /// resolved / anchor changes.
+    pub fn touch_updated(&mut self, id: &str) {
+        if let Some(ann) = self.annotations.iter_mut().find(|a| a.id == id) {
+            ann.updated_at = Self::now_rfc3339();
+        }
+    }
+
+    /// Delete an annotation and all its direct replies. Returns the
+    /// total count removed. Clears `selected` if it pointed at any
+    /// removed entry. Dirties the marker buffer so the GPU set
+    /// rebuilds next frame.
+    pub fn delete_cascade(&mut self, id: &str) -> usize {
+        let before = self.annotations.len();
+        let target = id.to_string();
+        let was_selected_removed = self
+            .annotations
+            .iter()
+            .any(|a| a.id == target || a.reply_to.as_deref() == Some(&target));
+        self.annotations
+            .retain(|a| a.id != target && a.reply_to.as_deref() != Some(&target));
+        let removed = before - self.annotations.len();
+        if removed > 0 {
+            self.dirty = true;
+        }
+        if was_selected_removed
+            && let Some(sel) = &self.selected
+            && (sel == &target || !self.annotations.iter().any(|a| &a.id == sel))
+        {
+            self.selected = None;
+        }
+        if self.delete_confirm.as_deref() == Some(id) {
+            self.delete_confirm = None;
+        }
+        removed
+    }
+
+    /// Open the popup as a reply to `parent_id`. No-op if the parent
+    /// doesn't exist. `screen_pos` positions the popup; pass the
+    /// viewport center when opening via the panel.
+    pub fn open_reply_draft(&mut self, parent_id: &str, screen_pos: (f32, f32)) {
+        let Some(parent) = self.find(parent_id) else {
+            return;
+        };
+        let parent_anchor = parent.anchor.clone();
+        let parent_id_owned = parent.id.clone();
+        self.editing = Some(EditDraft::new_reply(
+            parent_id_owned,
+            parent_anchor,
+            screen_pos,
+        ));
+    }
+
     /// Mark every annotation whose mesh's current hash differs from the
     /// stored one as stale. Used after loading a sidecar to flag anchors
     /// that need explicit reconciliation by the user.
@@ -264,7 +361,7 @@ impl ReviewState {
             let mi = ann.anchor.mesh_index as usize;
             let stale = match (stored_mesh_hashes.get(mi), current_mesh_hashes.get(mi)) {
                 (Some(old), Some(new)) => old != new,
-                _ => true, // mesh index doesn't exist any more
+                _ => true,
             };
             ann.stale = stale;
             if stale {
@@ -425,6 +522,7 @@ mod tests {
             text: "Looks off".into(),
             category: AnnotationCategory::Warning,
             editing_id: None,
+            reply_to: None,
         });
         let id = state.commit_draft().expect("commit returns the new id");
         assert!(state.editing.is_none(), "draft cleared on commit");
@@ -461,6 +559,7 @@ mod tests {
             text: "Updated text".into(),
             category: AnnotationCategory::Change,
             editing_id: Some(id.clone()),
+            reply_to: None,
         });
         let returned_id = state.commit_draft().expect("edit returns the same id");
         assert_eq!(returned_id, id);
@@ -517,6 +616,122 @@ mod tests {
         state.toggle_active();
         assert!(!state.active);
         assert!(state.editing.is_none(), "draft auto-cancelled on exit");
+    }
+
+    #[test]
+    fn commit_draft_with_reply_to_persists_parent_link() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let parent_id = state.commit_draft().unwrap();
+
+        state.open_reply_draft(&parent_id, (100.0, 100.0));
+        let draft = state.editing.as_mut().expect("reply draft open");
+        draft.text = "Fixed in v2".into();
+        let reply_id = state.commit_draft().unwrap();
+
+        assert_ne!(parent_id, reply_id);
+        let reply = state.find(&reply_id).expect("reply persisted");
+        assert_eq!(reply.reply_to.as_deref(), Some(parent_id.as_str()));
+        assert_eq!(reply.text, "Fixed in v2");
+    }
+
+    #[test]
+    fn open_reply_draft_inherits_parent_anchor_and_sets_reply_to() {
+        let parent_anchor = anchor_at([3.5, 1.2, -0.4]);
+        let mut state = state_with_draft(EditDraft {
+            anchor: parent_anchor.clone(),
+            screen_pos: (0.0, 0.0),
+            text: "Parent".into(),
+            category: AnnotationCategory::Question,
+            editing_id: None,
+            reply_to: None,
+        });
+        let parent_id = state.commit_draft().unwrap();
+        state.open_reply_draft(&parent_id, (500.0, 250.0));
+        let draft = state.editing.as_ref().expect("draft open");
+        assert_eq!(draft.reply_to.as_deref(), Some(parent_id.as_str()));
+        assert_eq!(draft.screen_pos, (500.0, 250.0));
+        assert!(draft.editing_id.is_none());
+        assert!(
+            approx_eq_3(
+                draft.anchor.world_pos_fallback,
+                parent_anchor.world_pos_fallback
+            ),
+            "draft inherits parent anchor"
+        );
+    }
+
+    #[test]
+    fn open_reply_draft_is_noop_for_unknown_parent() {
+        let mut state = ReviewState::default();
+        state.open_reply_draft("nonexistent-id", (0.0, 0.0));
+        assert!(state.editing.is_none());
+    }
+
+    #[test]
+    fn delete_cascade_removes_parent_and_replies() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let parent_id = state.commit_draft().unwrap();
+
+        for i in 0..2 {
+            state.open_reply_draft(&parent_id, (0.0, 0.0));
+            state.editing.as_mut().unwrap().text = format!("reply {i}");
+            state.commit_draft();
+        }
+
+        state.editing = Some(EditDraft::new_at(anchor_at([5.0, 0.0, 0.0]), (0.0, 0.0)));
+        state.editing.as_mut().unwrap().text = "orphan".into();
+        let orphan_id = state.commit_draft().unwrap();
+
+        assert_eq!(state.annotations.len(), 4);
+        let removed = state.delete_cascade(&parent_id);
+        assert_eq!(removed, 3, "parent + 2 replies = 3");
+        assert!(state.find(&parent_id).is_none());
+        assert!(state.find(&orphan_id).is_some(), "orphan untouched");
+        assert!(state.dirty, "marker buffer needs rebuild");
+    }
+
+    #[test]
+    fn delete_cascade_clears_selection_when_target_removed() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let id = state.commit_draft().unwrap();
+        state.selected = Some(id.clone());
+        state.delete_cascade(&id);
+        assert!(state.selected.is_none());
+    }
+
+    #[test]
+    fn delete_cascade_clears_selection_when_selected_reply_cascades_with_parent() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let parent_id = state.commit_draft().unwrap();
+        state.open_reply_draft(&parent_id, (0.0, 0.0));
+        state.editing.as_mut().unwrap().text = "reply".into();
+        let reply_id = state.commit_draft().unwrap();
+        state.selected = Some(reply_id.clone());
+
+        state.delete_cascade(&parent_id);
+        assert!(state.selected.is_none(), "cascade swept the selected reply");
+    }
+
+    #[test]
+    fn delete_cascade_clears_pending_confirm() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let id = state.commit_draft().unwrap();
+        state.delete_confirm = Some(id.clone());
+        state.delete_cascade(&id);
+        assert!(state.delete_confirm.is_none());
+    }
+
+    #[test]
+    fn reply_count_counts_only_direct_children() {
+        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let parent_id = state.commit_draft().unwrap();
+        for _ in 0..3 {
+            state.open_reply_draft(&parent_id, (0.0, 0.0));
+            state.editing.as_mut().unwrap().text = "r".into();
+            state.commit_draft();
+        }
+        assert_eq!(state.reply_count(&parent_id), 3);
+        assert_eq!(state.reply_count("no-such-id"), 0);
     }
 
     #[test]

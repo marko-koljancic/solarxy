@@ -236,6 +236,186 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
         }
         review.dirty = true;
     }
+
+    // Selected-annotation inline editor pinned below the list.
+    if review.selected.is_some() {
+        draw_selected_editor(ui, review);
+    }
+}
+
+fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
+    let Some(selected_id) = review.selected.clone() else {
+        return;
+    };
+    let Some(idx) = review.annotations.iter().position(|a| a.id == selected_id) else {
+        return;
+    };
+
+    ui.separator();
+    ui.label(
+        egui::RichText::new("Selected note").small().weak(),
+    );
+
+    let mut any_change = false;
+    let mut reply_clicked = false;
+    let mut delete_clicked = false;
+    {
+        let ann = &mut review.annotations[idx];
+
+        // Category dropdown — same chip colors as the list.
+        ui.horizontal(|ui| {
+            ui.label("Category:");
+            let prev_cat = ann.category;
+            egui::ComboBox::from_id_salt("review_selected_category")
+                .selected_text(
+                    egui::RichText::new(ann.category.to_string())
+                        .color(category_color(ann.category)),
+                )
+                .show_ui(ui, |ui| {
+                    for &cat in AnnotationCategory::ALL {
+                        ui.selectable_value(
+                            &mut ann.category,
+                            cat,
+                            egui::RichText::new(cat.to_string()).color(category_color(cat)),
+                        );
+                    }
+                });
+            if ann.category != prev_cat {
+                any_change = true;
+            }
+        });
+
+        // Text editor.
+        let text_resp = ui.add(
+            egui::TextEdit::multiline(&mut ann.text)
+                .desired_rows(3)
+                .desired_width(f32::INFINITY),
+        );
+        if text_resp.changed() {
+            any_change = true;
+        }
+
+        // Resolved toggle.
+        let prev_resolved = ann.resolved;
+        ui.checkbox(&mut ann.resolved, "Resolved");
+        if ann.resolved != prev_resolved {
+            any_change = true;
+        }
+
+        if any_change {
+            ann.updated_at = ReviewState::now_rfc3339();
+        }
+
+        // Buttons.
+        ui.horizontal(|ui| {
+            if ui
+                .button("\u{21B3} Reply")
+                .on_hover_text("Add a threaded reply to this note")
+                .clicked()
+            {
+                reply_clicked = true;
+            }
+            if ui
+                .button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)))
+                .on_hover_text("Remove this annotation (cascade-deletes replies)")
+                .clicked()
+            {
+                delete_clicked = true;
+            }
+        });
+    }
+
+    if any_change {
+        review.dirty = true;
+    }
+
+    if reply_clicked {
+        let center = ui.ctx().content_rect().center();
+        review.open_reply_draft(&selected_id, (center.x, center.y));
+    }
+
+    if delete_clicked {
+        if review.reply_count(&selected_id) > 0 {
+            // Defer to confirmation modal.
+            review.delete_confirm = Some(selected_id);
+        } else {
+            review.delete_cascade(&selected_id);
+        }
+    }
+}
+
+/// Confirmation modal for cascade-delete of an annotation that has
+/// replies. Drawn in `gui::renderer::render_ui` after the panel itself
+/// so it overlays correctly. No-op when `review.delete_confirm` is
+/// `None`.
+pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut ReviewState) {
+    let Some(target_id) = review.delete_confirm.clone() else {
+        return;
+    };
+    // Target may have been deleted out from under us (defensive).
+    let Some(target) = review.find(&target_id) else {
+        review.delete_confirm = None;
+        return;
+    };
+    let preview: String = target.text.lines().next().unwrap_or("").chars().take(60).collect();
+    let preview_label = if target.text.is_empty() {
+        "(no text)".to_string()
+    } else if target.text.chars().count() > 60 || target.text.lines().count() > 1 {
+        format!("{preview}…")
+    } else {
+        preview
+    };
+    let reply_count = review.reply_count(&target_id);
+
+    let mut do_delete = false;
+    let mut do_cancel = false;
+
+    // Esc dismisses the confirmation without deleting.
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        do_cancel = true;
+    }
+
+    egui::Window::new("Delete annotation?")
+        .id(egui::Id::new("solarxy_review_delete_confirm"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(280.0);
+            ui.label(format!("\u{201C}{preview_label}\u{201D}"));
+            ui.add_space(4.0);
+            ui.label(if reply_count == 1 {
+                "This will also delete 1 reply.".to_string()
+            } else {
+                format!("This will also delete {reply_count} replies.")
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    do_cancel = true;
+                }
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if ui
+                            .button(
+                                egui::RichText::new("Delete")
+                                    .color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)),
+                            )
+                            .clicked()
+                        {
+                            do_delete = true;
+                        }
+                    },
+                );
+            });
+        });
+
+    if do_delete {
+        review.delete_cascade(&target_id);
+    } else if do_cancel {
+        review.delete_confirm = None;
+    }
 }
 
 fn draw_section(

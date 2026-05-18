@@ -14,7 +14,9 @@ use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
-use super::review_panel::{draw_review_panel_docked, draw_review_panel_floating};
+use super::review_panel::{
+    draw_delete_confirm_modal, draw_review_panel_docked, draw_review_panel_floating,
+};
 use super::review_popup::draw_review_popup;
 use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
@@ -304,6 +306,8 @@ impl EguiRenderer {
             } else if menu_vis.review_panel_visible {
                 draw_review_panel_floating(ctx, review, &mut menu_vis.review_panel_visible);
             }
+
+            draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
             let hud_ctx = HudCtx {
                 avg_ms,
