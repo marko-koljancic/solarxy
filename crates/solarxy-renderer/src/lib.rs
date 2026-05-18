@@ -67,6 +67,7 @@ pub mod overdraw;
 pub mod pipeline_builder;
 pub mod pipelines;
 pub mod resources;
+pub mod review_markers;
 pub mod scene;
 pub mod shadow;
 pub mod ssao;

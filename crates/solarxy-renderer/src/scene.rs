@@ -16,6 +16,7 @@ use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
 use crate::pipelines::Instance;
 use crate::resources::{self, ModelStats};
+use crate::review_markers::ReviewMarkerResources;
 use crate::shadow::ShadowState;
 use crate::validation;
 use crate::visualization::VisualizationState;
@@ -116,6 +117,10 @@ pub struct ModelScene {
     /// Per-GPU-mesh `LineList` index buffer for `IssueScope::Edge` issues.
     /// `(buffer, num_indices)`. `None` for meshes without edge issues.
     pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
+    /// Per-annotation marker buffer; instance count = 0 when no review file
+    /// is loaded for the current model. Populated by `state::review` in
+    /// `solarxy-app` whenever the annotation set changes.
+    pub review_markers: ReviewMarkerResources,
 }
 
 impl ModelScene {
@@ -204,6 +209,8 @@ impl ModelScene {
             })
             .collect();
 
+        let review_markers = ReviewMarkerResources::new(device);
+
         Ok(ModelScene {
             model,
             cam,
@@ -218,6 +225,7 @@ impl ModelScene {
             validation: viewer_validation.report,
             validation_mesh_cat,
             validation_edge_buffers,
+            review_markers,
         })
     }
 }

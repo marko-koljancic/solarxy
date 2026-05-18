@@ -112,6 +112,7 @@ pub struct OverlayPipelines {
     pub gizmo: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
+    pub review_marker: wgpu::RenderPipeline,
 }
 
 pub struct UvPipelines {
@@ -306,6 +307,31 @@ impl Pipelines {
             clamp: 0.0,
         })
         .topology(wgpu::PrimitiveTopology::LineList)
+        .sample_count(sample_count)
+        .build();
+
+        let review_marker_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Review Marker Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera],
+            push_constant_ranges: &[],
+        });
+        let review_marker_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Review Marker Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/review_marker.wgsl").into()),
+        });
+        let review_marker = PipelineBuilder::new(
+            device,
+            "Review Marker Pipeline",
+            &review_marker_layout,
+            &review_marker_shader,
+        )
+        .vertex_entry("vs_marker")
+        .fragment_entry("fs_marker")
+        .buffers(vec![crate::review_markers::ReviewMarkerInstance::layout()])
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
         .sample_count(sample_count)
         .build();
 
@@ -827,6 +853,7 @@ impl Pipelines {
                 gizmo,
                 validation_overlay,
                 validation_edge,
+                review_marker,
             },
             uv: UvPipelines {
                 uv_gradient,
