@@ -10,6 +10,8 @@
 //! - `panes.rs` — split-viewport layout math.
 //! - `overlap.rs` — UV-overlap GPU readback polling.
 //! - `capture.rs` — screenshot capture.
+//! - `raycast.rs` — CPU picking (Möller-Trumbore + AABB early-reject)
+//!   used by review-mode click anchoring and any future selection sync.
 //! - `input/` — keyboard/mouse, dialogs, menu actions.
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
@@ -18,6 +20,7 @@ mod init;
 mod input;
 mod overlap;
 mod panes;
+pub(crate) mod raycast;
 mod render;
 mod update;
 pub(crate) mod view_state;
