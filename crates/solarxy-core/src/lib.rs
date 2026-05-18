@@ -21,8 +21,11 @@
 //! # Feature flags
 //!
 //! - `serialization` (default): gates `preferences`, `json`, `report`,
-//!   `install_source`, and `view_config`. Disable for a pure-computation
-//!   build — only [`aabb`], [`geometry`], and [`validation`] remain.
+//!   `install_source`, `project_config`, `review`, and `view_config`.
+//!   Disable for a pure-computation build — only [`aabb`], [`geometry`],
+//!   and [`validation`] remain.
+//! - `schemars-gen`: adds `schemars::JsonSchema` derives on the public
+//!   on-disk types (used to regenerate `schemas/*.json`).
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -60,6 +63,8 @@ pub mod preferences;
 pub mod project_config;
 #[cfg(feature = "serialization")]
 pub mod report;
+#[cfg(feature = "serialization")]
+pub mod review;
 pub mod validation;
 #[cfg(feature = "serialization")]
 pub mod view_config;
@@ -75,6 +80,12 @@ pub use validation::{
 pub use project_config::{
     AssetCategory, Budgets, ClassifierRule, FilenameClassifier, ProjectConfig, ProjectConfigError,
     classify_compiled, discover as discover_project_config,
+};
+
+#[cfg(feature = "serialization")]
+pub use review::{
+    AnchorPosition, AnnotationCategory, ReviewAnnotation, ReviewError, ReviewFile, hash_bytes,
+    hash_file, hash_mesh, hash_meshes, sidecar_path_for,
 };
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];

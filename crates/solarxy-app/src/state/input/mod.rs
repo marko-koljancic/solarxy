@@ -1,3 +1,18 @@
+//! Keyboard + mouse input dispatch for the `State`-rooted application.
+//!
+//! Submodules:
+//! - `dialogs` — native file pickers (model open, HDRI import,
+//!   screenshot save) via the `rfd` crate. Returns to the event loop;
+//!   results land in `State::pending_load`.
+//! - `menu_actions` — menu-bar event flags ([`super::super::gui::MenuActions`])
+//!   draining: file/HDRI dialogs, preferences modal, view layout,
+//!   recent-file opens, etc.
+//!
+//! The keyboard map lives in this module's `handle_key_pressed`; see
+//! `gui::keyboard_shortcuts_modal` for the user-facing reference. Adding
+//! a new binding means a match arm here PLUS an entry in the shortcuts
+//! modal — they should never disagree.
+
 mod dialogs;
 mod menu_actions;
 
