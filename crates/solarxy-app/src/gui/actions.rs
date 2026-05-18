@@ -38,4 +38,5 @@ pub(super) struct MenuBarVisibility {
     pub stats_visible: bool,
     pub fps_hud_visible: bool,
     pub console_visible: bool,
+    pub review_panel_visible: bool,
 }

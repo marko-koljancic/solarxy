@@ -21,9 +21,10 @@ use std::path::PathBuf;
 use solarxy_core::review::{AnchorPosition, AnnotationCategory, ReviewAnnotation};
 use solarxy_renderer::review_markers::ReviewMarkerInstance;
 
-/// Top-level review-mode state on `State`. Initialized empty; populated
-/// on model load (task #7) and mutated through the popup + side panel.
-#[derive(Debug, Default)]
+/// Top-level review-mode state on `State`. Initialized via [`Default`]
+/// (which seeds sensible filter/dock defaults); populated on model load
+/// (task #7) and mutated through the popup + side panel.
+#[derive(Debug)]
 pub struct ReviewState {
     /// True between R-press and R-press-again. Click handling in
     /// `state::input` consults this to decide whether a left-click
@@ -65,8 +66,51 @@ pub struct ReviewState {
 
     /// Whether the side panel (task #8) is visible. Mirrors
     /// `Preferences::review.panel_open` at startup; toggleable via
-    /// `Window → Review Panel`.
+    /// `Window → Review Panel` and auto-opens on Shift+R when off.
     pub panel_open: bool,
+
+    /// Docked-vs-floating panel mode. `true` (default) ⇒ docked
+    /// right-side `SidePanel`; `false` ⇒ floating `egui::Window`.
+    /// Matches the Console pattern.
+    pub panel_docked: bool,
+
+    /// Per-category filter chips on the panel: index by
+    /// `AnnotationCategory as u32` (0=Info, 1=Warning, 2=Question,
+    /// 3=Change). `true` ⇒ category visible in the list. All default
+    /// to true.
+    pub category_filters: [bool; 4],
+
+    /// `true` ⇒ resolved annotations are shown in their own collapsible
+    /// section. `false` ⇒ resolved entries are hidden entirely.
+    /// Default `true` — showing resolved keeps conversation context.
+    pub show_resolved: bool,
+
+    /// Case-insensitive substring filter applied to annotation text.
+    /// Empty ⇒ no filter.
+    pub text_filter: String,
+}
+
+impl Default for ReviewState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            annotations: Vec::new(),
+            selected: None,
+            editing: None,
+            model_hash: None,
+            mesh_hashes: Vec::new(),
+            sidecar_path: None,
+            dirty: false,
+            author: None,
+            panel_open: false,
+            // Panel UX defaults: docked on right, all categories visible,
+            // resolved shown, no text filter.
+            panel_docked: true,
+            category_filters: [true; 4],
+            show_resolved: true,
+            text_filter: String::new(),
+        }
+    }
 }
 
 /// Popup-form-in-progress state for the new-annotation modal. Created on

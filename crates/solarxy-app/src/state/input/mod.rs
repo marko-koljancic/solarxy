@@ -138,6 +138,9 @@ impl State {
             KeyCode::KeyR => {
                 if self.input.modifiers.shift_key() {
                     let now_active = self.review.toggle_active();
+                    if now_active {
+                        self.review.panel_open = true;
+                    }
                     let msg = if now_active {
                         "Review mode: On (click a face to annotate)"
                     } else {

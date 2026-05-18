@@ -76,7 +76,12 @@
   "definitions": {
     "AssetCategory": {
       "type": "string",
-      "enum": ["hero", "prop", "environment", "default"]
+      "enum": [
+        "hero",
+        "prop",
+        "environment",
+        "default"
+      ]
     },
     "Budgets": {
       "type": "object",
@@ -110,7 +115,10 @@
     },
     "ClassifierRule": {
       "type": "object",
-      "required": ["category", "pattern"],
+      "required": [
+        "category",
+        "pattern"
+      ],
       "properties": {
         "category": {
           "$ref": "#/definitions/AssetCategory"
@@ -141,7 +149,10 @@
         "sidecar_dir": {
           "description": "Override location of the `.solarxy-review.json` sidecar. `None` (default) ⇒ sibling to the model file. Relative paths are resolved against the model's parent directory (so `\".solarxy\"` produces `<model_dir>/.solarxy/<stem>.solarxy-review.json`). Absolute paths are used as-is.",
           "default": null,
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

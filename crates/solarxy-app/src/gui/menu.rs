@@ -379,6 +379,13 @@ pub(super) fn draw_menu_bar(
                     vis.fps_hud_visible = !vis.fps_hud_visible;
                     ui.close();
                 }
+                if ui
+                    .add(egui::Button::new("Review Panel").selected(vis.review_panel_visible))
+                    .clicked()
+                {
+                    vis.review_panel_visible = !vis.review_panel_visible;
+                    ui.close();
+                }
             });
 
             ui.menu_button("Help", |ui| {

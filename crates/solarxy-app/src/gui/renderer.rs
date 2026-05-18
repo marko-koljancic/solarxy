@@ -14,6 +14,7 @@ use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
+use super::review_panel::{draw_review_panel_docked, draw_review_panel_floating};
 use super::review_popup::draw_review_popup;
 use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
@@ -254,6 +255,7 @@ impl EguiRenderer {
             stats_visible: self.stats_visible,
             fps_hud_visible: self.fps_hud_visible,
             console_visible: self.console.visible,
+            review_panel_visible: review.panel_open,
         };
         let mut about_open = self.about_open;
         let mut dismissed_toast_id: Option<u64> = None;
@@ -296,6 +298,12 @@ impl EguiRenderer {
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
+
+            if review.panel_docked {
+                draw_review_panel_docked(ctx, review, &mut menu_vis.review_panel_visible);
+            } else if menu_vis.review_panel_visible {
+                draw_review_panel_floating(ctx, review, &mut menu_vis.review_panel_visible);
+            }
             draw_review_popup(ctx, review);
             let hud_ctx = HudCtx {
                 avg_ms,
@@ -404,6 +412,8 @@ impl EguiRenderer {
         }
         self.fps_hud_visible = menu_vis.fps_hud_visible;
         self.console.visible = menu_vis.console_visible;
+
+        review.panel_open = menu_vis.review_panel_visible;
         self.about_open = about_open;
         if let Some(id) = dismissed_toast_id {
             self.toasts.retain(|t| t.id != id);

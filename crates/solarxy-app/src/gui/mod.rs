@@ -35,6 +35,7 @@ mod menu;
 mod overlays;
 mod preferences_modal;
 mod renderer;
+mod review_panel;
 mod review_popup;
 mod sidebar;
 mod snapshot;
