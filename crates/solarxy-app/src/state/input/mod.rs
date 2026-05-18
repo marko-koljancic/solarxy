@@ -218,7 +218,14 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
-                if self.input.modifiers.shift_key() {
+                let cmd_or_ctrl = if cfg!(target_os = "macos") {
+                    self.input.modifiers.super_key()
+                } else {
+                    self.input.modifiers.control_key()
+                };
+                if cmd_or_ctrl && self.review.active {
+                    self.save_review_sidecar();
+                } else if self.input.modifiers.shift_key() {
                     self.save_preferences();
                 } else {
                     self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;

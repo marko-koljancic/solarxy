@@ -85,7 +85,7 @@ pub use project_config::{
 #[cfg(feature = "serialization")]
 pub use review::{
     AnchorPosition, AnnotationCategory, ReviewAnnotation, ReviewError, ReviewFile, hash_bytes,
-    hash_file, hash_mesh, hash_meshes, sidecar_path_for,
+    hash_file, hash_mesh, hash_meshes, hash_positions_indices, sidecar_path_for,
 };
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];

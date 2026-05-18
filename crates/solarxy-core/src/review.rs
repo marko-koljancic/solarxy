@@ -263,17 +263,17 @@ pub fn hash_file(path: &Path) -> std::io::Result<String> {
     Ok(hash_bytes(&bytes))
 }
 
-/// Hex-encoded SHA-256 of a mesh's positions + indices. Topology-sensitive:
-/// reordering vertices or remeshing changes the hash; rigid transforms also
-/// change the hash (positions are baked in).
+/// Hex-encoded SHA-256 of a mesh's positions + indices.
 ///
-/// The intent is "did the mesh's *contents* change between exports" — if
-/// you want a hash that ignores rigid transforms, hash a normalized copy
-/// (subtract centroid, divide by AABB diagonal) at a higher layer.
-pub fn hash_mesh(mesh: &RawMeshData) -> String {
+/// Lower-level than [`hash_mesh`]: works directly off borrowed slices, so
+/// callers that already hold their own geometry buffers (e.g. the renderer's
+/// `Model::cpu_meshes`) don't need a `RawMeshData` round-trip.
+///
+/// Same topology-sensitivity contract as [`hash_mesh`].
+pub fn hash_positions_indices(positions: &[[f32; 3]], indices: &[u32]) -> String {
     let mut hasher = Sha256::new();
     // Positions: feed as little-endian f32 bytes.
-    for pos in &mesh.positions {
+    for pos in positions {
         for component in pos {
             hasher.update(component.to_le_bytes());
         }
@@ -282,10 +282,21 @@ pub fn hash_mesh(mesh: &RawMeshData) -> String {
     // a degenerate "all positions are zero" mesh that accidentally collides
     // with an empty-position mesh of nonzero indices).
     hasher.update(b"|idx|");
-    for idx in &mesh.indices {
+    for idx in indices {
         hasher.update(idx.to_le_bytes());
     }
     hex_encode(&hasher.finalize())
+}
+
+/// Hex-encoded SHA-256 of a mesh's positions + indices. Topology-sensitive:
+/// reordering vertices or remeshing changes the hash; rigid transforms also
+/// change the hash (positions are baked in).
+///
+/// The intent is "did the mesh's *contents* change between exports" — if
+/// you want a hash that ignores rigid transforms, hash a normalized copy
+/// (subtract centroid, divide by AABB diagonal) at a higher layer.
+pub fn hash_mesh(mesh: &RawMeshData) -> String {
+    hash_positions_indices(&mesh.positions, &mesh.indices)
 }
 
 /// Compute per-mesh hashes for a model. Convenience wrapper around
@@ -432,6 +443,17 @@ mod tests {
         let m_empty_pos = sample_mesh(vec![], vec![1, 2, 3]);
         let m_empty_idx = sample_mesh(vec![[0.0, 0.0, 0.0]], vec![]);
         assert_ne!(hash_mesh(&m_empty_pos), hash_mesh(&m_empty_idx));
+    }
+
+    #[test]
+    fn hash_positions_indices_matches_hash_mesh() {
+        let m = sample_mesh(
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        );
+        let via_mesh = hash_mesh(&m);
+        let via_slices = hash_positions_indices(&m.positions, &m.indices);
+        assert_eq!(via_mesh, via_slices);
     }
 
     #[test]

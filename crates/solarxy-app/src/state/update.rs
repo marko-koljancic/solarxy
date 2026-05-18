@@ -299,6 +299,8 @@ impl State {
                             .set_projection(self.preferences.display.projection_mode);
                     }
 
+                    self.load_review_for_model(&pending.path);
+
                     self.view.secondary_cam = None;
                     if self.view.display.layout != ViewLayout::Single
                         && let Some(scene) = &self.scene

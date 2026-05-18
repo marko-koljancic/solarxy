@@ -131,7 +131,6 @@ impl ReviewState {
         let now = Self::now_rfc3339();
 
         if let Some(existing_id) = draft.editing_id {
-            // Edit path: find by id, mutate in place.
             if let Some(ann) = self.annotations.iter_mut().find(|a| a.id == existing_id) {
                 ann.text = draft.text;
                 ann.category = draft.category;
@@ -140,7 +139,6 @@ impl ReviewState {
             self.dirty = true;
             Some(existing_id)
         } else {
-            // Create path.
             let id = Self::new_id();
             self.annotations.push(ReviewAnnotation {
                 id: id.clone(),
@@ -207,6 +205,139 @@ impl ReviewState {
         self.mesh_hashes.clear();
         self.sidecar_path = None;
         self.dirty = true;
+    }
+
+    /// Mark every annotation whose mesh's current hash differs from the
+    /// stored one as stale. Used after loading a sidecar to flag anchors
+    /// that need explicit reconciliation by the user.
+    pub fn apply_stale_flags(
+        &mut self,
+        stored_mesh_hashes: &[String],
+        current_mesh_hashes: &[String],
+    ) -> usize {
+        let mut stale_count = 0;
+        for ann in &mut self.annotations {
+            let mi = ann.anchor.mesh_index as usize;
+            let stale = match (stored_mesh_hashes.get(mi), current_mesh_hashes.get(mi)) {
+                (Some(old), Some(new)) => old != new,
+                _ => true, // mesh index doesn't exist any more
+            };
+            ann.stale = stale;
+            if stale {
+                stale_count += 1;
+            }
+        }
+        stale_count
+    }
+}
+
+use crate::state::State;
+use crate::gui::ToastSeverity;
+
+impl State {
+    /// Compute hashes + resolve sidecar path + attempt load. Called from
+    /// the model-load completion site in `state::update`. Replaces any
+    /// previously-loaded review state.
+    pub(crate) fn load_review_for_model(&mut self, model_path: &str) {
+        self.review.clear_for_new_model();
+        let path = std::path::Path::new(model_path);
+        let model_hash = solarxy_core::review::hash_file(path).ok();
+        let mesh_hashes: Vec<String> = self
+            .scene
+            .as_ref()
+            .map(|s| {
+                s.model
+                    .cpu_meshes
+                    .iter()
+                    .map(|m| solarxy_core::review::hash_positions_indices(&m.positions, &m.indices))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        self.review
+            .author
+            .clone_from(&self.preferences.review.author);
+        self.review.model_hash = model_hash;
+        self.review.mesh_hashes.clone_from(&mesh_hashes);
+
+        let project_root = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let sidecar_dir = solarxy_core::project_config::discover(project_root, None)
+            .ok()
+            .flatten()
+            .and_then(|(_, cfg)| cfg.review.sidecar_dir);
+        let sidecar_path = solarxy_core::sidecar_path_for(path, sidecar_dir.as_deref());
+        self.review.sidecar_path = Some(sidecar_path.clone());
+
+        if !sidecar_path.exists() {
+            return;
+        }
+        match solarxy_core::review::ReviewFile::load(&sidecar_path) {
+            Ok(file) => {
+                let count = file.annotations.len();
+                let stored_hashes = file.mesh_hashes.clone();
+                self.review.annotations = file.annotations;
+                let stale = self.review.apply_stale_flags(&stored_hashes, &mesh_hashes);
+                self.review.dirty = true;
+                let msg = if stale == 0 {
+                    format!("Loaded {count} review annotations")
+                } else {
+                    format!("Loaded {count} annotations ({stale} need re-anchor)")
+                };
+                let severity = if stale == 0 {
+                    ToastSeverity::Success
+                } else {
+                    ToastSeverity::Warning
+                };
+                self.gui.set_toast(&msg, severity);
+            }
+            Err(e) => {
+                self.gui
+                    .set_toast(&format!("Review load failed: {e}"), ToastSeverity::Error);
+            }
+        }
+    }
+
+    /// Persist the current annotation set + hashes to the resolved sidecar
+    /// path. Toasts on success or failure.
+    pub(crate) fn save_review_sidecar(&mut self) {
+        let Some(path) = self.review.sidecar_path.clone() else {
+            self.gui.set_toast(
+                "Open a model before saving review notes",
+                ToastSeverity::Warning,
+            );
+            return;
+        };
+        if self.review.annotations.is_empty() && !path.exists() {
+            self.gui
+                .set_toast("No annotations to save", ToastSeverity::Info);
+            return;
+        }
+
+        let file = solarxy_core::review::ReviewFile {
+            format_version: solarxy_core::review::FORMAT_VERSION_CURRENT,
+            model_hash: self.review.model_hash.clone().unwrap_or_default(),
+            mesh_hashes: self.review.mesh_hashes.clone(),
+            annotations: self.review.annotations.clone(),
+        };
+        match file.save(&path) {
+            Ok(()) => {
+                let count = self.review.annotations.len();
+                tracing::info!(
+                    target: "solarxy::toast",
+                    "Saved {} annotations to {}",
+                    count,
+                    path.display()
+                );
+                self.gui.set_toast(
+                    &format!("Saved {count} annotations"),
+                    ToastSeverity::Success,
+                );
+            }
+            Err(e) => {
+                self.gui
+                    .set_toast(&format!("Save failed: {e}"), ToastSeverity::Error);
+            }
+        }
     }
 }
 
@@ -280,7 +411,6 @@ mod tests {
         let id = state.commit_draft().unwrap();
         let created_at = state.annotations[0].created_at.clone();
 
-        // Edit path
         state.editing = Some(EditDraft {
             anchor: anchor_at([0.0; 3]),
             screen_pos: (0.0, 0.0),
@@ -343,6 +473,61 @@ mod tests {
         state.toggle_active();
         assert!(!state.active);
         assert!(state.editing.is_none(), "draft auto-cancelled on exit");
+    }
+
+    #[test]
+    fn apply_stale_flags_marks_only_mismatched_meshes() {
+        let mut state = ReviewState::default();
+        let mut anchor_a = anchor_at([0.0, 0.0, 0.0]);
+        anchor_a.mesh_index = 0;
+        let mut anchor_b = anchor_at([1.0, 0.0, 0.0]);
+        anchor_b.mesh_index = 1;
+        for (i, anchor) in [anchor_a, anchor_b].iter().enumerate() {
+            state.annotations.push(ReviewAnnotation {
+                id: format!("id-{i}"),
+                created_at: ReviewState::now_rfc3339(),
+                updated_at: ReviewState::now_rfc3339(),
+                author: None,
+                anchor: anchor.clone(),
+                category: AnnotationCategory::Info,
+                text: format!("note-{i}"),
+                reply_to: None,
+                resolved: false,
+                stale: false,
+            });
+        }
+        let stored = vec!["mesh0_hash".to_string(), "mesh1_hash".to_string()];
+        let current = vec!["mesh0_hash".to_string(), "mesh1_DIFFERENT".to_string()];
+        let stale_count = state.apply_stale_flags(&stored, &current);
+        assert_eq!(stale_count, 1);
+        assert!(!state.annotations[0].stale);
+        assert!(state.annotations[1].stale);
+    }
+
+    #[test]
+    fn apply_stale_flags_marks_out_of_range_as_stale() {
+        let mut state = ReviewState::default();
+        let mut anchor = anchor_at([0.0, 0.0, 0.0]);
+        anchor.mesh_index = 5;
+        state.annotations.push(ReviewAnnotation {
+            id: "id-5".into(),
+            created_at: ReviewState::now_rfc3339(),
+            updated_at: ReviewState::now_rfc3339(),
+            author: None,
+            anchor,
+            category: AnnotationCategory::Info,
+            text: "note".into(),
+            reply_to: None,
+            resolved: false,
+            stale: false,
+        });
+
+        let stale_count = state.apply_stale_flags(
+            &["a".to_string(), "b".to_string(), "c".to_string()],
+            &["a".to_string(), "b".to_string()],
+        );
+        assert_eq!(stale_count, 1);
+        assert!(state.annotations[0].stale);
     }
 
     #[test]
