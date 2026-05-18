@@ -14,6 +14,7 @@ use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
+use super::review_popup::draw_review_popup;
 use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::{ModelInfo, draw_stats_window};
@@ -221,6 +222,7 @@ impl EguiRenderer {
         divider: Option<DividerInfo>,
         active_pane_rect: Option<egui::Rect>,
         recent_files: &[String],
+        review: &mut crate::state::review::ReviewState,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -294,6 +296,7 @@ impl EguiRenderer {
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
+            draw_review_popup(ctx, review);
             let hud_ctx = HudCtx {
                 avg_ms,
                 fps,

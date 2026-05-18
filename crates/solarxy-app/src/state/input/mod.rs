@@ -136,15 +136,25 @@ impl State {
                 }
             }
             KeyCode::KeyR => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
-                    self.for_each_target_cam(|cam| {
-                        cam.reset_to_bounds_axis(
-                            &bounds,
-                            cgmath::Vector3::unit_x(),
-                            cgmath::Vector3::unit_y(),
-                        );
-                    });
+                if self.input.modifiers.shift_key() {
+                    let now_active = self.review.toggle_active();
+                    let msg = if now_active {
+                        "Review mode: On (click a face to annotate)"
+                    } else {
+                        "Review mode: Off"
+                    };
+                    self.gui.set_toast(msg, ToastSeverity::Success);
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| {
+                            cam.reset_to_bounds_axis(
+                                &bounds,
+                                cgmath::Vector3::unit_x(),
+                                cgmath::Vector3::unit_y(),
+                            );
+                        });
+                    }
                 }
             }
             KeyCode::KeyP => {
@@ -531,6 +541,14 @@ impl State {
     }
 
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        if pressed
+            && matches!(button, MouseButton::Left)
+            && self.review.active
+            && self.try_review_pick()
+        {
+            return;
+        }
+
         let ap = self.view.active_pane;
         if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
             match button {
@@ -551,6 +569,76 @@ impl State {
         } else {
             self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
         }
+    }
+
+    /// Resolve a review-mode click into either an open `EditDraft` or a
+    /// miss-toast. Returns `true` if the click was consumed (the caller
+    /// should not pass it down to camera handling).
+    fn try_review_pick(&mut self) -> bool {
+        if self.review.editing.is_some() {
+            return true;
+        }
+        let Some(scene) = self.scene.as_ref() else {
+            return false;
+        };
+
+        let panes = self.compute_panes();
+        let cursor = self.input.cursor_pos;
+        let pane_idx = super::hit_test_pane(&panes, cursor);
+        let pane = &panes[pane_idx];
+
+        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
+            return false;
+        }
+
+        let camera = if pane_idx == 0 || self.view.cameras_linked {
+            scene.cam.camera
+        } else if let Some(c) = self.view.secondary_cam.as_ref() {
+            c.camera
+        } else {
+            return false;
+        };
+
+        let view_proj = camera.build_view_projection_matrix();
+        let local = (cursor.0 - pane.x, cursor.1 - pane.y);
+
+        let ray = crate::state::raycast::screen_to_world_ray(
+            local,
+            (pane.width, pane.height),
+            view_proj,
+            camera.eye,
+        );
+
+        let model = &scene.model;
+        let views: Vec<crate::state::raycast::MeshView<'_>> = model
+            .cpu_meshes
+            .iter()
+            .zip(model.mesh_bounds.iter())
+            .map(|(m, b)| crate::state::raycast::MeshView {
+                positions: &m.positions,
+                indices: &m.indices,
+                bounds: *b,
+            })
+            .collect();
+
+        match crate::state::raycast::raycast_meshes(&ray, &views) {
+            Some(hit) => {
+                let anchor = solarxy_core::review::AnchorPosition {
+                    mesh_index: hit.mesh_index,
+                    face_index: hit.face_index,
+                    barycentric: hit.barycentric,
+                    world_pos_fallback: [hit.world_pos.x, hit.world_pos.y, hit.world_pos.z],
+                };
+                self.review.editing = Some(crate::state::review::EditDraft::new_at(anchor, cursor));
+            }
+            None => {
+                self.gui.set_toast(
+                    "Click on the model surface to annotate",
+                    ToastSeverity::Info,
+                );
+            }
+        }
+        true
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {

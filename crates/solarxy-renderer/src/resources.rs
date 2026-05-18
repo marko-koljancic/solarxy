@@ -173,12 +173,19 @@ fn upload_model(
 
     let mut gpu_meshes = Vec::new();
     let mut gpu_mesh_bounds = Vec::new();
+    let mut cpu_meshes: Vec<model::CpuMesh> = Vec::new();
     let mut raw_to_gpu: Vec<Option<usize>> = vec![None; raw.meshes.len()];
     for (i, (vertices, indices)) in mesh_vertices.iter().zip(mesh_indices.iter()).enumerate() {
         if vertices.is_empty() {
             continue;
         }
         raw_to_gpu[i] = Some(gpu_meshes.len());
+
+        let cpu_positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
+        cpu_meshes.push(model::CpuMesh {
+            positions: cpu_positions,
+            indices: indices.clone(),
+        });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{:?} Vertex Buffer {}", file_path, i)),
@@ -312,6 +319,7 @@ fn upload_model(
             materials: gpu_materials,
             bounds,
             mesh_bounds: gpu_mesh_bounds,
+            cpu_meshes,
             has_uvs,
         },
         normals_geo,

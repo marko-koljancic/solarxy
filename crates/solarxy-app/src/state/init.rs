@@ -419,6 +419,11 @@ impl State {
                 uv_middle_pressed: false,
                 modifiers: ModifiersState::empty(),
             },
+            review: super::review::ReviewState {
+                author: preferences.review.author.clone(),
+                panel_open: preferences.review.panel_open,
+                ..super::review::ReviewState::default()
+            },
             pending_load: None,
             pending_hdri: None,
             capture_requested: false,

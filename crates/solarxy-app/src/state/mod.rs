@@ -12,6 +12,8 @@
 //! - `capture.rs` — screenshot capture.
 //! - `raycast.rs` — CPU picking (Möller-Trumbore + AABB early-reject)
 //!   used by review-mode click anchoring and any future selection sync.
+//! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
+//!   plus transient UI state (draft, selection, panel visibility).
 //! - `input/` — keyboard/mouse, dialogs, menu actions.
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
@@ -22,6 +24,7 @@ mod overlap;
 mod panes;
 pub(crate) mod raycast;
 mod render;
+pub(crate) mod review;
 mod update;
 pub(crate) mod view_state;
 
@@ -81,6 +84,7 @@ pub struct State {
     pub(super) scene: Option<ModelScene>,
     pub(super) view: ViewState,
     pub(super) input: InputState,
+    pub(super) review: review::ReviewState,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
     pub(super) capture_requested: bool,

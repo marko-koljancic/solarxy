@@ -36,6 +36,7 @@ impl State {
 
         let frame_ms = self.dt * 1000.0;
         self.gui.clear_expired_toasts();
+        self.flush_review_markers();
 
         let output = self.surface.get_current_texture()?;
         let surface_view = output
@@ -524,6 +525,7 @@ impl State {
             divider,
             active_pane_rect,
             &recent_files,
+            &mut self.review,
         );
 
         let changes = snap_after.apply_to_state(
@@ -571,5 +573,22 @@ impl State {
         if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
             self.save_capture(buffer, padded_row_bytes, width, height);
         }
+    }
+
+    /// Push any pending annotation-set changes to the GPU marker buffer.
+    /// Cheap no-op when `review.dirty` is false. Called at the start of
+    /// every frame (after `clear_expired_toasts`, before per-pane draw)
+    /// so the popup-commit from the previous frame becomes visible.
+    fn flush_review_markers(&mut self) {
+        if !self.review.dirty {
+            return;
+        }
+        let instances = self.review.marker_instances();
+        if let Some(scene) = self.scene.as_mut() {
+            scene
+                .review_markers
+                .update(&self.device, &self.queue, &instances);
+        }
+        self.review.dirty = false;
     }
 }

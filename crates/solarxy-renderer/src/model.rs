@@ -138,11 +138,27 @@ pub struct Mesh {
     pub degen_num_elements: u32,
 }
 
+/// CPU-side mirror of a GPU mesh's geometry. Kept around for picking
+/// (review-mode click anchoring) and for the topology hashing used by
+/// review-file stale detection ([`solarxy_core::review::hash_mesh`]).
+///
+/// Indexed identically to [`Model::meshes`] — `cpu_meshes[i]` corresponds
+/// to `meshes[i]`. Empty raw meshes are filtered out symmetrically.
+///
+/// Memory cost: ~24 bytes per vertex + ~4 bytes per index. A typical 100K-
+/// triangle, 50K-vertex model adds ~1.2 MB CPU-side — trivial vs. the GPU
+/// resources.
+pub struct CpuMesh {
+    pub positions: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+}
+
 pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
     pub bounds: AABB,
     pub mesh_bounds: Vec<AABB>,
+    pub cpu_meshes: Vec<CpuMesh>,
     pub has_uvs: bool,
 }
 
