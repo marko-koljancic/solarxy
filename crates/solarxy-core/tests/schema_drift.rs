@@ -10,7 +10,7 @@ use solarxy_core::project_config::ProjectConfig;
 
 fn workspace_root() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // crates/solarxy-core → workspace root
+
     manifest
         .parent()
         .and_then(|p| p.parent())
@@ -21,8 +21,7 @@ fn workspace_root() -> PathBuf {
 #[test]
 fn solarxy_config_schema_matches_disk() {
     let schema = schemars::schema_for!(ProjectConfig);
-    let generated =
-        serde_json::to_string_pretty(&schema).expect("serialize schema") + "\n";
+    let generated = serde_json::to_string_pretty(&schema).expect("serialize schema") + "\n";
     let path = workspace_root().join("schemas/solarxy-config.v1.json");
     let on_disk =
         std::fs::read_to_string(&path).expect("schemas/solarxy-config.v1.json must exist");

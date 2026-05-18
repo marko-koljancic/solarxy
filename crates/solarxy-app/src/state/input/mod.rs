@@ -581,9 +581,19 @@ impl State {
         }
     }
 
-    /// Resolve a review-mode click into either an open `EditDraft` or a
-    /// miss-toast. Returns `true` if the click was consumed (the caller
-    /// should not pass it down to camera handling).
+    /// Resolve a review-mode click. Returns `true` if the click was
+    /// consumed (the caller should not pass it down to camera handling).
+    ///
+    /// Routing order:
+    /// 1. **Re-anchor pending** — raycast geometry and route the hit
+    ///    through `ReviewState::complete_reanchor`. Always consumes the
+    ///    click; never falls through to the other paths.
+    /// 2. **Marker hit-test** — project visible markers to screen space
+    ///    and check distance to the cursor. Within ~20 px ⇒ select that
+    ///    annotation (cyan ring + panel scroll). Consumes the click.
+    /// 3. **New annotation** — raycast geometry and open a fresh
+    ///    `EditDraft` popup at the cursor; or toast "Click on the model
+    ///    surface" on a miss. Consumes the click either way.
     fn try_review_pick(&mut self) -> bool {
         if self.review.editing.is_some() {
             return true;
@@ -611,6 +621,57 @@ impl State {
 
         let view_proj = camera.build_view_projection_matrix();
         let local = (cursor.0 - pane.x, cursor.1 - pane.y);
+
+        if let Some(target_id) = self.review.reanchor_target.clone() {
+            let ray = crate::state::raycast::screen_to_world_ray(
+                local,
+                (pane.width, pane.height),
+                view_proj,
+                camera.eye,
+            );
+            let model = &scene.model;
+            let views: Vec<crate::state::raycast::MeshView<'_>> = model
+                .cpu_meshes
+                .iter()
+                .zip(model.mesh_bounds.iter())
+                .map(|(m, b)| crate::state::raycast::MeshView {
+                    positions: &m.positions,
+                    indices: &m.indices,
+                    bounds: *b,
+                })
+                .collect();
+            let preview = self.review.find(&target_id).map_or_else(
+                || "annotation".to_string(),
+                |a| crate::state::review::short_text_preview(&a.text),
+            );
+            match crate::state::raycast::raycast_meshes(&ray, &views) {
+                Some(hit) => {
+                    if self.review.complete_reanchor(&hit) {
+                        self.gui.set_toast(
+                            &format!("Re-anchored \u{201C}{preview}\u{201D}"),
+                            ToastSeverity::Success,
+                        );
+                    }
+                }
+                None => {
+                    self.gui.set_toast(
+                        "No surface under cursor \u{2014} try again",
+                        ToastSeverity::Info,
+                    );
+                }
+            }
+            return true;
+        }
+
+        if let Some(id) =
+            self.review
+                .marker_at_screen_pos(local, (pane.width, pane.height), view_proj, 20.0)
+        {
+            self.review.selected = Some(id);
+            self.review.scroll_to_selected = true;
+            self.review.dirty = true;
+            return true;
+        }
 
         let ray = crate::state::raycast::screen_to_world_ray(
             local,

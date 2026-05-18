@@ -309,6 +309,45 @@ impl EguiRenderer {
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
+
+            if let Some(target_id) = review.reanchor_target.clone() {
+                let preview = review
+                    .find(&target_id)
+                    .map_or_else(|| "annotation".to_string(), |a| {
+                        crate::state::review::short_text_preview(&a.text)
+                    });
+                let amber_bg = egui::Color32::from_rgba_unmultiplied(0x6A, 0x4C, 0x10, 0xE6);
+                let amber_fg = egui::Color32::from_rgb(0xFF, 0xCC, 0x66);
+                egui::Area::new(egui::Id::new("solarxy_reanchor_banner"))
+                    .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
+                    .order(egui::Order::Foreground)
+                    .interactable(false)
+                    .show(ctx, |ui| {
+                        egui::Frame::NONE
+                            .fill(amber_bg)
+                            .corner_radius(6.0)
+                            .inner_margin(egui::Margin::symmetric(12, 6))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Re-anchoring \u{201C}{preview}\u{201D} \u{2014} click on the model to re-place. Esc to cancel."
+                                    ))
+                                    .color(amber_fg),
+                                );
+                            });
+                    });
+                ctx.request_repaint();
+            }
+
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                if review.reanchor_target.is_some() {
+                    review.cancel_reanchor();
+                    actions.cancel_reanchor = true;
+                } else if review.active {
+                    review.toggle_active();
+                    actions.exit_review_mode = true;
+                }
+            }
             let hud_ctx = HudCtx {
                 avg_ms,
                 fps,

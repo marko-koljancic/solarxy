@@ -202,6 +202,31 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Review",
+        entries: &[
+            Entry {
+                keys: "Shift+R",
+                action: "Toggle review mode",
+            },
+            Entry {
+                keys: "Click",
+                action: "Select marker (within ~20 px) or create new note",
+            },
+            Entry {
+                keys: "__MOD__+Enter",
+                action: "Save the open review note",
+            },
+            Entry {
+                keys: "__MOD__+S",
+                action: "Save sidecar (in review mode)",
+            },
+            Entry {
+                keys: "Esc",
+                action: "Cancel popup / re-anchor / delete confirm / exit review mode",
+            },
+        ],
+    },
+    Section {
         title: "Lighting & Post-Processing",
         entries: &[
             Entry {

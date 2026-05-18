@@ -1,4 +1,5 @@
 use super::super::State;
+use crate::gui::ToastSeverity;
 
 impl State {
     pub(in crate::state) fn handle_menu_actions(&mut self, actions: crate::gui::MenuActions) {
@@ -53,6 +54,14 @@ impl State {
         if let Some(ratio) = actions.set_split_ratio {
             self.view.display.split_ratio =
                 solarxy_core::view_config::DisplaySettings::clamp_split_ratio(ratio);
+        }
+        if actions.cancel_reanchor {
+            self.gui
+                .set_toast("Re-anchor cancelled", ToastSeverity::Info);
+        }
+        if actions.exit_review_mode {
+            self.gui
+                .set_toast("Review mode: Off", ToastSeverity::Success);
         }
         if actions.quit {
             self.quit_requested = true;

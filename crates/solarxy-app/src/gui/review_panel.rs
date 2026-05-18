@@ -193,7 +193,15 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
     }
 
     let selected_id = review.selected.clone();
+    let reanchor_id = review.reanchor_target.clone();
+    let scroll_to = if review.scroll_to_selected {
+        selected_id.clone()
+    } else {
+        None
+    };
     let mut click_target: Option<String> = None;
+    let mut reanchor_click: Option<String> = None;
+    let mut cancel_reanchor_click = false;
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -204,7 +212,12 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
                 &open_idx,
                 &review.annotations,
                 selected_id.as_deref(),
+                reanchor_id.as_deref(),
+                scroll_to.as_deref(),
+                false,
                 &mut click_target,
+                &mut reanchor_click,
+                &mut cancel_reanchor_click,
             );
             if !stale_idx.is_empty() {
                 draw_section(
@@ -213,7 +226,12 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
                     &stale_idx,
                     &review.annotations,
                     selected_id.as_deref(),
+                    reanchor_id.as_deref(),
+                    scroll_to.as_deref(),
+                    true,
                     &mut click_target,
+                    &mut reanchor_click,
+                    &mut cancel_reanchor_click,
                 );
             }
             if !resolved_idx.is_empty() {
@@ -223,10 +241,19 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
                     &resolved_idx,
                     &review.annotations,
                     selected_id.as_deref(),
+                    reanchor_id.as_deref(),
+                    scroll_to.as_deref(),
+                    false,
                     &mut click_target,
+                    &mut reanchor_click,
+                    &mut cancel_reanchor_click,
                 );
             }
         });
+
+    if review.scroll_to_selected {
+        review.scroll_to_selected = false;
+    }
 
     if let Some(id) = click_target {
         if review.selected.as_deref() == Some(id.as_str()) {
@@ -235,6 +262,13 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
             review.selected = Some(id);
         }
         review.dirty = true;
+    }
+
+    if let Some(id) = reanchor_click {
+        review.begin_reanchor(id);
+    }
+    if cancel_reanchor_click {
+        review.cancel_reanchor();
     }
 
     // Selected-annotation inline editor pinned below the list.
@@ -250,19 +284,20 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
     let Some(idx) = review.annotations.iter().position(|a| a.id == selected_id) else {
         return;
     };
+    let is_stale = review.annotations[idx].stale;
+    let reanchor_active = review.reanchor_target.as_deref() == Some(selected_id.as_str());
 
     ui.separator();
-    ui.label(
-        egui::RichText::new("Selected note").small().weak(),
-    );
+    ui.label(egui::RichText::new("Selected note").small().weak());
 
     let mut any_change = false;
     let mut reply_clicked = false;
     let mut delete_clicked = false;
+    let mut reanchor_click: Option<String> = None;
+    let mut cancel_reanchor_click = false;
     {
         let ann = &mut review.annotations[idx];
 
-        // Category dropdown — same chip colors as the list.
         ui.horizontal(|ui| {
             ui.label("Category:");
             let prev_cat = ann.category;
@@ -285,7 +320,6 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             }
         });
 
-        // Text editor.
         let text_resp = ui.add(
             egui::TextEdit::multiline(&mut ann.text)
                 .desired_rows(3)
@@ -295,7 +329,6 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             any_change = true;
         }
 
-        // Resolved toggle.
         let prev_resolved = ann.resolved;
         ui.checkbox(&mut ann.resolved, "Resolved");
         if ann.resolved != prev_resolved {
@@ -306,7 +339,6 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             ann.updated_at = ReviewState::now_rfc3339();
         }
 
-        // Buttons.
         ui.horizontal(|ui| {
             if ui
                 .button("\u{21B3} Reply")
@@ -315,8 +347,28 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             {
                 reply_clicked = true;
             }
+            if is_stale {
+                if reanchor_active {
+                    let amber = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
+                    if ui
+                        .button(egui::RichText::new("Cancel re-anchor").color(amber))
+                        .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
+                        .clicked()
+                    {
+                        cancel_reanchor_click = true;
+                    }
+                } else if ui
+                    .button("Re-place here")
+                    .on_hover_text("Then click on the model to set a new anchor")
+                    .clicked()
+                {
+                    reanchor_click = Some(selected_id.clone());
+                }
+            }
             if ui
-                .button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)))
+                .button(
+                    egui::RichText::new("Delete").color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)),
+                )
                 .on_hover_text("Remove this annotation (cascade-deletes replies)")
                 .clicked()
             {
@@ -337,10 +389,17 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
     if delete_clicked {
         if review.reply_count(&selected_id) > 0 {
             // Defer to confirmation modal.
-            review.delete_confirm = Some(selected_id);
+            review.delete_confirm = Some(selected_id.clone());
         } else {
             review.delete_cascade(&selected_id);
         }
+    }
+
+    if let Some(id) = reanchor_click {
+        review.begin_reanchor(id);
+    }
+    if cancel_reanchor_click {
+        review.cancel_reanchor();
     }
 }
 
@@ -352,12 +411,18 @@ pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut Review
     let Some(target_id) = review.delete_confirm.clone() else {
         return;
     };
-    // Target may have been deleted out from under us (defensive).
     let Some(target) = review.find(&target_id) else {
         review.delete_confirm = None;
         return;
     };
-    let preview: String = target.text.lines().next().unwrap_or("").chars().take(60).collect();
+    let preview: String = target
+        .text
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(60)
+        .collect();
     let preview_label = if target.text.is_empty() {
         "(no text)".to_string()
     } else if target.text.chars().count() > 60 || target.text.lines().count() > 1 {
@@ -370,7 +435,6 @@ pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut Review
     let mut do_delete = false;
     let mut do_cancel = false;
 
-    // Esc dismisses the confirmation without deleting.
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         do_cancel = true;
     }
@@ -394,20 +458,17 @@ pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut Review
                 if ui.button("Cancel").clicked() {
                     do_cancel = true;
                 }
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        if ui
-                            .button(
-                                egui::RichText::new("Delete")
-                                    .color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)),
-                            )
-                            .clicked()
-                        {
-                            do_delete = true;
-                        }
-                    },
-                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button(
+                            egui::RichText::new("Delete")
+                                .color(egui::Color32::from_rgb(0xE0, 0x6C, 0x6C)),
+                        )
+                        .clicked()
+                    {
+                        do_delete = true;
+                    }
+                });
             });
         });
 
@@ -418,20 +479,39 @@ pub(super) fn draw_delete_confirm_modal(ctx: &egui::Context, review: &mut Review
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_section(
     ui: &mut egui::Ui,
     title: &str,
     indices: &[usize],
     annotations: &[solarxy_core::review::ReviewAnnotation],
     selected: Option<&str>,
+    reanchor_target: Option<&str>,
+    scroll_to: Option<&str>,
+    is_stale_section: bool,
     click_target: &mut Option<String>,
+    reanchor_click: &mut Option<String>,
+    cancel_reanchor_click: &mut bool,
 ) {
     egui::CollapsingHeader::new(format!("{title} ({})", indices.len()))
         .default_open(true)
         .show(ui, |ui| {
             for &i in indices {
                 let ann = &annotations[i];
-                draw_annotation_row(ui, ann, selected, click_target);
+                let row_resp =
+                    draw_annotation_row(ui, ann, selected, reanchor_target, click_target);
+                if scroll_to == Some(ann.id.as_str()) {
+                    row_resp.scroll_to_me(Some(egui::Align::Center));
+                }
+                if is_stale_section {
+                    draw_replace_button(
+                        ui,
+                        &ann.id,
+                        reanchor_target,
+                        reanchor_click,
+                        cancel_reanchor_click,
+                    );
+                }
                 let reply_indices: Vec<usize> = annotations
                     .iter()
                     .enumerate()
@@ -458,9 +538,12 @@ fn draw_annotation_row(
     ui: &mut egui::Ui,
     ann: &solarxy_core::review::ReviewAnnotation,
     selected: Option<&str>,
+    reanchor_target: Option<&str>,
     click_target: &mut Option<String>,
-) {
+) -> egui::Response {
     let is_selected = selected == Some(ann.id.as_str());
+    let is_reanchor = reanchor_target == Some(ann.id.as_str());
+
     let row_resp = ui
         .scope(|ui| {
             ui.horizontal_top(|ui| {
@@ -481,7 +564,7 @@ fn draw_annotation_row(
                         .collect();
                     let preview_label =
                         if ann.text.lines().count() > 1 || ann.text.chars().count() > 64 {
-                            format!("{preview}…")
+                            format!("{preview}\u{2026}")
                         } else {
                             preview
                         };
@@ -504,6 +587,16 @@ fn draw_annotation_row(
         })
         .response;
 
+    if is_reanchor {
+        let t = ui.ctx().input(|i| i.time);
+        let phase = ((t * std::f64::consts::TAU / 0.6).sin().mul_add(0.5, 0.5)) as f32;
+        let alpha = (30.0 + 40.0 * phase).round() as u8;
+        let amber = egui::Color32::from_rgba_unmultiplied(0xFF, 0xB2, 0x3D, alpha);
+        ui.painter()
+            .rect_filled(row_resp.rect.expand(2.0), 3.0, amber);
+        ui.ctx().request_repaint();
+    }
+
     if is_selected {
         ui.painter().rect_stroke(
             row_resp.rect.expand(2.0),
@@ -517,6 +610,38 @@ fn draw_annotation_row(
     if clickable.clicked() {
         *click_target = Some(ann.id.clone());
     }
+    clickable
+}
+
+fn draw_replace_button(
+    ui: &mut egui::Ui,
+    annotation_id: &str,
+    reanchor_target: Option<&str>,
+    reanchor_click: &mut Option<String>,
+    cancel_reanchor_click: &mut bool,
+) {
+    let is_active = reanchor_target == Some(annotation_id);
+    ui.horizontal(|ui| {
+        ui.add_space(20.0);
+        if is_active {
+            let amber = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
+            let btn =
+                egui::Button::new(egui::RichText::new("Cancel re-anchor").color(amber)).small();
+            if ui
+                .add(btn)
+                .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
+                .clicked()
+            {
+                *cancel_reanchor_click = true;
+            }
+        } else if ui
+            .small_button("Re-place here")
+            .on_hover_text("Then click on the model to set a new anchor")
+            .clicked()
+        {
+            *reanchor_click = Some(annotation_id.to_string());
+        }
+    });
 }
 
 fn draw_reply_row(ui: &mut egui::Ui, ann: &solarxy_core::review::ReviewAnnotation) {

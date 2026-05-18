@@ -33,12 +33,8 @@ impl OverdrawResources {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let show_bind_group = create_show_bind_group(
-            device,
-            &layouts.overdraw_show,
-            &count_view,
-            &sampler,
-        );
+        let show_bind_group =
+            create_show_bind_group(device, &layouts.overdraw_show, &count_view, &sampler);
         Self {
             count_texture,
             count_view,
@@ -57,8 +53,12 @@ impl OverdrawResources {
         let (t, v) = create_count_texture(device, width, height);
         self.count_texture = t;
         self.count_view = v;
-        self.show_bind_group =
-            create_show_bind_group(device, &layouts.overdraw_show, &self.count_view, &self.sampler);
+        self.show_bind_group = create_show_bind_group(
+            device,
+            &layouts.overdraw_show,
+            &self.count_view,
+            &self.sampler,
+        );
     }
 }
 
