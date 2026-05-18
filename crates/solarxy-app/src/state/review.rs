@@ -69,11 +69,6 @@ pub struct ReviewState {
     /// `Window → Review Panel` and auto-opens on Shift+R when off.
     pub panel_open: bool,
 
-    /// Docked-vs-floating panel mode. `true` (default) ⇒ docked
-    /// right-side `SidePanel`; `false` ⇒ floating `egui::Window`.
-    /// Matches the Console pattern.
-    pub panel_docked: bool,
-
     /// Per-category filter chips on the panel: index by
     /// `AnnotationCategory as u32` (0=Info, 1=Warning, 2=Question,
     /// 3=Change). `true` ⇒ category visible in the list. All default
@@ -118,7 +113,6 @@ impl Default for ReviewState {
             dirty: false,
             author: None,
             panel_open: false,
-            panel_docked: true,
             category_filters: [true; 4],
             show_resolved: true,
             text_filter: String::new(),

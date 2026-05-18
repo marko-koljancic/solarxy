@@ -142,16 +142,17 @@ fn resolve_texture(
     parent_dir: &std::path::Path,
 ) -> (Option<std::path::PathBuf>, Option<RawImageData>) {
     let image = texture.source();
+    let decoded = image_data_to_raw(&images[image.index()]);
 
     match image.source() {
         ::gltf::image::Source::Uri { uri, .. } => {
             if uri.starts_with("data:") {
-                (None, image_data_to_raw(&images[image.index()]))
+                (None, decoded)
             } else {
-                (Some(parent_dir.join(uri)), None)
+                (Some(parent_dir.join(uri)), decoded)
             }
         }
-        ::gltf::image::Source::View { .. } => (None, image_data_to_raw(&images[image.index()])),
+        ::gltf::image::Source::View { .. } => (None, decoded),
     }
 }
 

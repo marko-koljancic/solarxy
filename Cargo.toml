@@ -26,6 +26,7 @@ strsim = "0.11"
 schemars = "0.8"
 ulid = "1"
 sha2 = "0.10"
+egui_dock = { version = "0.18", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

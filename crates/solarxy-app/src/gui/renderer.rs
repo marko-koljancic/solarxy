@@ -9,21 +9,19 @@ use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
 use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
-use super::console_view::{draw_console_docked, draw_console_floating};
+use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
-use super::material_inspector::{MaterialInspectorState, draw_material_inspector_window};
+use super::material_inspector::MaterialInspectorState;
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
-use super::review_panel::{
-    draw_delete_confirm_modal, draw_review_panel_docked, draw_review_panel_floating,
-};
+use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
-use super::sidebar::draw_sidebar;
 use super::snapshot::{GuiSnapshot, HudInfo};
-use super::stats::{ModelInfo, draw_stats_window};
-use super::theme::{apply_theme, configure_fonts};
+use super::stats::ModelInfo;
+use super::theme::{ACCENT, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
+use egui_dock::{DockArea, DockState};
 use solarxy_core::preferences::Preferences;
 
 pub struct EguiRenderer {
@@ -31,7 +29,6 @@ pub struct EguiRenderer {
     winit_state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
     egui_format: wgpu::TextureFormat,
-    pub sidebar_visible: bool,
     pub menu_bar_visible: bool,
     fps_hud_visible: bool,
     pub console: ConsoleState,
@@ -40,15 +37,39 @@ pub struct EguiRenderer {
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
     material_inspector: MaterialInspectorState,
-    material_inspector_open: bool,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
     backend_info: String,
-    stats_visible: bool,
+    /// `true` when the user has explicitly closed the Stats tab. While
+    /// set, `notify_model_loaded` won't auto-re-open it on the next
+    /// model load. Flips back to `false` when the user re-opens via the
+    /// Window menu (sticky-hidden semantics).
     stats_user_hidden: bool,
+    /// Symmetric with `stats_user_hidden` — controls whether
+    /// `notify_model_loaded` auto-adds the Material Inspector tab.
+    material_inspector_user_hidden: bool,
+    /// All five user-facing panels + the 3D Viewport tab. See
+    /// `gui::dock` for the `SolarxyTab` enum + `TabViewer` dispatch.
+    pub(super) dock_state: DockState<SolarxyTab>,
+    /// Cached Viewport-tab rect + the surface size it was captured at.
+    /// Read by `state::panes` (target dims + pane rects + divider) and
+    /// `app::route_pointer_to_camera`. Tagged with `surface_size` so we
+    /// can detect a stale rect after `WindowEvent::Resized` (cached
+    /// rect was logical units relative to the OLD surface, multiplying
+    /// by the current scale factor produces wrong physical pixels).
+    pub last_viewport_rect: Option<CachedViewportRect>,
+}
+
+/// Viewport-tab geometry from the previous egui frame, tagged with the
+/// surface dimensions it was captured at. Consumed next frame by
+/// `state::panes` to size the wgpu render targets to the Viewport rect.
+#[derive(Debug, Clone, Copy)]
+pub struct CachedViewportRect {
+    pub rect: egui::Rect,
+    pub surface_size: (u32, u32),
 }
 
 impl EguiRenderer {
@@ -74,7 +95,6 @@ impl EguiRenderer {
             winit_state,
             renderer,
             egui_format,
-            sidebar_visible: false,
             menu_bar_visible: true,
             fps_hud_visible: false,
             console: ConsoleState::new(console_buffer),
@@ -83,29 +103,47 @@ impl EguiRenderer {
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             material_inspector: MaterialInspectorState::default(),
-            material_inspector_open: false,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
             backend_info: String::new(),
-            stats_visible: false,
             stats_user_hidden: false,
+            material_inspector_user_hidden: false,
+            dock_state: default_dock_state(),
+            last_viewport_rect: None,
         }
     }
 
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
-        self.stats_visible = false;
         self.stats_user_hidden = false;
-        self.material_inspector_open = false;
+        self.material_inspector_user_hidden = false;
+        // Remove Material Inspector + Stats tabs (re-added when user
+        // re-opens via Window menu, or auto-added by `notify_model_loaded`
+        // on the next model load — see the sticky-hidden semantics on
+        // the `*_user_hidden` flags).
+        if tab_present(&self.dock_state, SolarxyTab::MaterialInspector) {
+            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
+        }
+        if tab_present(&self.dock_state, SolarxyTab::Stats) {
+            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
+        }
         self.material_inspector.clear_for_new_model();
     }
 
     pub fn notify_model_loaded(&mut self, open_on_load: bool) {
-        if open_on_load && !self.stats_user_hidden {
-            self.stats_visible = true;
+        if open_on_load
+            && !self.stats_user_hidden
+            && !tab_present(&self.dock_state, SolarxyTab::Stats)
+        {
+            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
+        }
+        if !self.material_inspector_user_hidden
+            && !tab_present(&self.dock_state, SolarxyTab::MaterialInspector)
+        {
+            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
         }
     }
 
@@ -180,6 +218,40 @@ impl EguiRenderer {
 
     pub fn open_shortcuts_modal(&mut self) {
         self.shortcuts_modal.open = true;
+    }
+
+    pub fn toggle_sidebar_tab(&mut self) {
+        toggle_tab(&mut self.dock_state, SolarxyTab::Sidebar);
+    }
+
+    pub fn toggle_console_tab(&mut self) {
+        toggle_tab(&mut self.dock_state, SolarxyTab::Console);
+    }
+
+    #[must_use]
+    pub fn cursor_in_viewport(&self, cursor_logical: egui::Pos2) -> bool {
+        self.last_viewport_rect
+            .is_none_or(|c| c.rect.contains(cursor_logical))
+    }
+
+    #[must_use]
+    pub fn viewport_rect_for_surface(&self, surface_size: (u32, u32)) -> Option<egui::Rect> {
+        self.last_viewport_rect
+            .and_then(|c| (c.surface_size == surface_size).then_some(c.rect))
+    }
+
+    pub fn invalidate_viewport_rect(&mut self) {
+        self.last_viewport_rect = None;
+    }
+
+    #[must_use]
+    pub fn any_blocking_modal_open(&self, review: &crate::state::review::ReviewState) -> bool {
+        self.about_open
+            || self.preferences_modal.open
+            || self.update_modal.open
+            || self.shortcuts_modal.open
+            || review.delete_confirm.is_some()
+            || review.editing.is_some()
     }
 
     pub fn set_backend_info(&mut self, info: String) {
@@ -258,16 +330,23 @@ impl EguiRenderer {
             validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
         let mut actions = MenuActions::default();
-        let stats_visible_before = self.stats_visible;
+
+        if review.panel_open != tab_present(&self.dock_state, SolarxyTab::ReviewPanel) {
+            toggle_tab(&mut self.dock_state, SolarxyTab::ReviewPanel);
+        }
+
+        let present_at_start: std::collections::HashSet<SolarxyTab> =
+            self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
         let mut menu_vis = MenuBarVisibility {
-            sidebar_visible: self.sidebar_visible,
+            sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
             menu_bar_visible: self.menu_bar_visible,
-            stats_visible: self.stats_visible,
+            stats_visible: present_at_start.contains(&SolarxyTab::Stats),
             fps_hud_visible: self.fps_hud_visible,
-            console_visible: self.console.visible,
-            review_panel_visible: review.panel_open,
-            material_inspector_visible: self.material_inspector_open,
+            console_visible: present_at_start.contains(&SolarxyTab::Console),
+            review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
+            material_inspector_visible: present_at_start.contains(&SolarxyTab::MaterialInspector),
         };
+        let menu_vis_before = menu_vis;
         let mut about_open = self.about_open;
         let mut dismissed_toast_id: Option<u64> = None;
         let console = &mut self.console;
@@ -275,6 +354,8 @@ impl EguiRenderer {
         let preferences_modal = &mut self.preferences_modal;
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
+        let dock_state = &mut self.dock_state;
+        let mut viewport_rect_logical: Option<egui::Rect> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
@@ -290,42 +371,72 @@ impl EguiRenderer {
                     recent_files,
                 );
             }
-            if console.docked {
-                draw_console_docked(ctx, console, &mut menu_vis.console_visible);
-            }
-            draw_sidebar(
-                ctx,
-                &mut snap,
-                menu_vis.sidebar_visible,
-                hud.uv_overlap_pct,
+
+            let mut tab_viewer = SolarxyTabViewer {
+                snap: &mut snap,
+                hud,
                 validation_report,
-            );
-            if let Some(info) = model_info {
-                draw_stats_window(ctx, info, &mut menu_vis.stats_visible);
-            }
-            if !console.docked && menu_vis.console_visible {
-                draw_console_floating(ctx, console, &mut menu_vis.console_visible);
-            }
+                review,
+                console,
+                model,
+                model_info: model_info.as_ref(),
+                material_inspector,
+                viewport_rect_out: &mut viewport_rect_logical,
+            };
+            DockArea::new(dock_state)
+                .style(make_dock_style(ctx))
+                .show(ctx, &mut tab_viewer);
+
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
 
-            if review.panel_docked {
-                draw_review_panel_docked(ctx, review, &mut menu_vis.review_panel_visible);
-            } else if menu_vis.review_panel_visible {
-                draw_review_panel_floating(ctx, review, &mut menu_vis.review_panel_visible);
-            }
-
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
 
-            draw_material_inspector_window(
-                ctx,
-                material_inspector,
-                &mut menu_vis.material_inspector_visible,
-                model,
-            );
+            if review.active {
+                let stripe = egui::Color32::from_rgba_unmultiplied(
+                    ACCENT.r(),
+                    ACCENT.g(),
+                    ACCENT.b(),
+                    0xB0,
+                );
+                let stripe_painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("solarxy_review_mode_edge_stripe"),
+                ));
+                stripe_painter.rect_stroke(
+                    ctx.content_rect(),
+                    egui::CornerRadius::ZERO,
+                    egui::Stroke::new(3.0, stripe),
+                    egui::StrokeKind::Inside,
+                );
+
+                if review.reanchor_target.is_none() {
+                    let amber_bg =
+                        egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xCC);
+                    let amber_fg = ACCENT;
+                    egui::Area::new(egui::Id::new("solarxy_review_mode_banner"))
+                        .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(ctx, |ui| {
+                            egui::Frame::NONE
+                                .fill(amber_bg)
+                                .corner_radius(6.0)
+                                .inner_margin(egui::Margin::symmetric(12, 6))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Review Mode \u{2014} click to add a note, Shift+R to exit",
+                                        )
+                                        .color(amber_fg),
+                                    );
+                                });
+                        });
+                }
+            }
 
             if let Some(target_id) = review.reanchor_target.clone() {
                 let preview = review
@@ -333,8 +444,8 @@ impl EguiRenderer {
                     .map_or_else(|| "annotation".to_string(), |a| {
                         crate::state::review::short_text_preview(&a.text)
                     });
-                let amber_bg = egui::Color32::from_rgba_unmultiplied(0x6A, 0x4C, 0x10, 0xE6);
-                let amber_fg = egui::Color32::from_rgb(0xFF, 0xCC, 0x66);
+                let amber_bg = egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xE6);
+                let amber_fg = ACCENT;
                 egui::Area::new(egui::Id::new("solarxy_reanchor_banner"))
                     .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
                     .order(egui::Order::Foreground)
@@ -409,13 +520,14 @@ impl EguiRenderer {
                 if resp.dragged()
                     && let Some(pos) = resp.interact_pointer_pos()
                 {
-                    let screen = ctx.input(egui::InputState::viewport_rect);
+                    let viewport = viewport_rect_logical
+                        .unwrap_or_else(|| ctx.input(egui::InputState::viewport_rect));
                     let raw_ratio = match div.layout {
                         solarxy_core::view_config::ViewLayout::SplitVertical => {
-                            (pos.x - screen.left()) / screen.width()
+                            (pos.x - viewport.left()) / viewport.width().max(1.0)
                         }
                         solarxy_core::view_config::ViewLayout::SplitHorizontal => {
-                            (pos.y - screen.top()) / screen.height()
+                            (pos.y - viewport.top()) / viewport.height().max(1.0)
                         }
                         solarxy_core::view_config::ViewLayout::Single => 0.5,
                     };
@@ -462,19 +574,72 @@ impl EguiRenderer {
             }
         });
 
-        self.sidebar_visible = menu_vis.sidebar_visible;
         self.menu_bar_visible = menu_vis.menu_bar_visible;
-        self.stats_visible = menu_vis.stats_visible;
-        if stats_visible_before && !self.stats_visible {
-            self.stats_user_hidden = true;
-        } else if !stats_visible_before && self.stats_visible {
-            self.stats_user_hidden = false;
-        }
         self.fps_hud_visible = menu_vis.fps_hud_visible;
-        self.console.visible = menu_vis.console_visible;
 
-        review.panel_open = menu_vis.review_panel_visible;
-        self.material_inspector_open = menu_vis.material_inspector_visible;
+        let menu_intents: [(SolarxyTab, bool, bool); 5] = [
+            (
+                SolarxyTab::Sidebar,
+                menu_vis_before.sidebar_visible,
+                menu_vis.sidebar_visible,
+            ),
+            (
+                SolarxyTab::Console,
+                menu_vis_before.console_visible,
+                menu_vis.console_visible,
+            ),
+            (
+                SolarxyTab::ReviewPanel,
+                menu_vis_before.review_panel_visible,
+                menu_vis.review_panel_visible,
+            ),
+            (
+                SolarxyTab::MaterialInspector,
+                menu_vis_before.material_inspector_visible,
+                menu_vis.material_inspector_visible,
+            ),
+            (
+                SolarxyTab::Stats,
+                menu_vis_before.stats_visible,
+                menu_vis.stats_visible,
+            ),
+        ];
+        for &(tab, before, after) in &menu_intents {
+            if before != after {
+                toggle_tab(&mut self.dock_state, tab);
+            }
+        }
+
+        let present_after: std::collections::HashSet<SolarxyTab> =
+            self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
+        for &(tab, _, _) in &menu_intents {
+            let was = present_at_start.contains(&tab);
+            let is = present_after.contains(&tab);
+            if was && !is {
+                match tab {
+                    SolarxyTab::Stats => self.stats_user_hidden = true,
+                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = true,
+                    _ => {}
+                }
+            } else if !was && is {
+                match tab {
+                    SolarxyTab::Stats => self.stats_user_hidden = false,
+                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = false,
+                    _ => {}
+                }
+            }
+        }
+
+        self.console.visible = present_after.contains(&SolarxyTab::Console);
+        review.panel_open = present_after.contains(&SolarxyTab::ReviewPanel);
+
+        if let Some(rect) = viewport_rect_logical {
+            self.last_viewport_rect = Some(CachedViewportRect {
+                rect,
+                surface_size: (screen.size_in_pixels[0], screen.size_in_pixels[1]),
+            });
+        }
+
         let pending = std::mem::take(&mut self.material_inspector.pending_toasts);
         for (msg, severity) in pending {
             self.push_toast(severity, msg, Duration::from_secs(5));

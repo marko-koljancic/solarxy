@@ -96,7 +96,6 @@ pub struct ConsoleState {
     pub auto_scroll: bool,
     pub min_level: Level,
     pub visible: bool,
-    pub docked: bool,
     pub(crate) search: String,
 }
 
@@ -107,7 +106,6 @@ impl ConsoleState {
             auto_scroll: true,
             min_level: Level::INFO,
             visible: false,
-            docked: true,
             search: String::new(),
         }
     }

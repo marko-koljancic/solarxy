@@ -37,6 +37,7 @@ impl State {
         let frame_ms = self.dt * 1000.0;
         self.gui.clear_expired_toasts();
         self.flush_review_markers();
+        self.sync_render_target_dims();
 
         let output = self.surface.get_current_texture()?;
         let surface_view = output
@@ -170,11 +171,9 @@ impl State {
             self.renderer.post.exposure,
             pane_inspection,
         );
-        let viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
+
+        let _ = is_split;
+        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
         self.renderer.post.composite.render(
             &mut encoder,
             &self.renderer.pipelines,
@@ -575,6 +574,20 @@ impl State {
         if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
             self.save_capture(buffer, padded_row_bytes, width, height);
         }
+    }
+
+    /// Recreate HDR + derived render targets to match the current
+    /// Viewport-tab rect dims when those have changed since last frame.
+    /// No-op steady-state — `resize_render_targets` has its own
+    /// early-out when dims already match. Triggered each frame after
+    /// the previous frame's egui pass populated `last_viewport_rect`;
+    /// also a no-op when no rect is cached (full-surface fallback).
+    fn sync_render_target_dims(&mut self) {
+        let (target_w, target_h) = self.target_dimensions();
+        if target_w == self.renderer.target_width && target_h == self.renderer.target_height {
+            return;
+        }
+        self.resize_render_targets(target_w, target_h);
     }
 
     /// Push any pending annotation-set changes to the GPU marker buffer.

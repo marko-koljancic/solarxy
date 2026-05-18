@@ -415,14 +415,10 @@ pub struct UiPrefs {
     pub default_sidebar_visible: bool,
     #[serde(default)]
     pub default_fps_hud_visible: bool,
-    #[serde(default = "default_true")]
-    pub default_console_docked: bool,
     #[serde(default = "default_max_recent_files")]
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
     pub open_stats_on_model_load: bool,
-    #[serde(default)]
-    pub material_inspector_open: bool,
 }
 
 fn default_max_recent_files() -> usize {
@@ -434,10 +430,8 @@ impl Default for UiPrefs {
         Self {
             default_sidebar_visible: true,
             default_fps_hud_visible: false,
-            default_console_docked: true,
             max_recent_files: default_max_recent_files(),
             open_stats_on_model_load: true,
-            material_inspector_open: false,
         }
     }
 }
@@ -641,10 +635,8 @@ mod tests {
             ui: UiPrefs {
                 default_sidebar_visible: false,
                 default_fps_hud_visible: true,
-                default_console_docked: false,
                 max_recent_files: 10,
                 open_stats_on_model_load: false,
-                material_inspector_open: true,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -797,7 +789,6 @@ mod tests {
         let ui = UiPrefs::default();
         assert!(ui.default_sidebar_visible);
         assert!(!ui.default_fps_hud_visible);
-        assert!(ui.default_console_docked);
         assert_eq!(ui.max_recent_files, 20);
     }
 

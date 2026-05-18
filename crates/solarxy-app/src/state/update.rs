@@ -137,10 +137,12 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
+            self.gui.invalidate_viewport_rect();
+
             let (tw, th) = self.target_dimensions();
             self.resize_render_targets(tw, th);
 
-            let aspect = width as f32 / height as f32;
+            let aspect = tw as f32 / th as f32;
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(aspect);
             }

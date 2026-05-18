@@ -99,51 +99,14 @@ impl MaterialInspectorState {
     }
 }
 
-/// Draw the Material Inspector window if `*visible`. The window's own
-/// X button writes through `visible` (same Window-menu pattern as the
-/// Review panel + Console).
-pub(super) fn draw_material_inspector_window(
-    ctx: &egui::Context,
+/// Render the Material Inspector's content into the provided `ui`.
+/// The hosting Window / dock tab is the caller's job (`egui_dock` tab in
+/// `gui::dock`).
+pub(super) fn draw_material_inspector_content(
+    ui: &mut egui::Ui,
+    model: &Model,
     state: &mut MaterialInspectorState,
-    visible: &mut bool,
-    model: Option<&Model>,
 ) {
-    if !*visible {
-        return;
-    }
-    let title = match model {
-        Some(m) => format!("Material Inspector ({})", m.materials.len()),
-        None => "Material Inspector".to_string(),
-    };
-    let mut open = *visible;
-    egui::Window::new(title)
-        .id(egui::Id::new("solarxy_material_inspector"))
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(true)
-        .default_width(420.0)
-        .default_height(560.0)
-        .show(ctx, |ui| match model {
-            None => draw_no_model_placeholder(ui),
-            Some(m) => draw_material_list(ui, m, state),
-        });
-    *visible = open;
-}
-
-fn draw_no_model_placeholder(ui: &mut egui::Ui) {
-    ui.add_space(20.0);
-    ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("No model loaded").weak());
-        ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new("Open a model to inspect its materials")
-                .small()
-                .weak(),
-        );
-    });
-}
-
-fn draw_material_list(ui: &mut egui::Ui, model: &Model, state: &mut MaterialInspectorState) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -187,10 +150,19 @@ fn draw_material_row(
                     egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
                     egui::StrokeKind::Outside,
                 );
+                let has_albedo = thumbs.albedo.is_some();
+                let (prefix, suffix) = if has_albedo {
+                    ("Base color factor", " × Albedo")
+                } else {
+                    ("Base color", "")
+                };
                 ui.label(
-                    egui::RichText::new(color_hex(thumbs.base_color))
-                        .monospace()
-                        .small(),
+                    egui::RichText::new(format!(
+                        "{prefix}: {}{suffix}",
+                        color_hex(thumbs.base_color)
+                    ))
+                    .monospace()
+                    .small(),
                 );
             });
 

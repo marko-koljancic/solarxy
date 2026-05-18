@@ -17,6 +17,22 @@ use crate::console::LogBuffer;
 use solarxy_core::preferences::Preferences;
 use crate::state::State;
 
+/// Returns `true` when a pointer/mouse event should drive the 3D camera
+/// (orbit / pan / zoom) — i.e., the cursor is inside the Viewport tab's
+/// rect AND no blocking modal owns focus. Post-egui_dock replacement for
+/// the older `!gui.wants_pointer_input()` guard, which became unusable
+/// because `egui_dock`'s tab body registers as a hover-sensing area and
+/// caused `wants_pointer_input` to return `true` over the Viewport tab.
+fn route_pointer_to_camera(state: &State) -> bool {
+    let ppp = state.window.scale_factor() as f32;
+    let cursor_logical = egui::pos2(
+        state.input.cursor_pos.0 / ppp,
+        state.input.cursor_pos.1 / ppp,
+    );
+    state.gui.cursor_in_viewport(cursor_logical)
+        && !state.gui.any_blocking_modal_open(&state.review)
+}
+
 pub struct App {
     state: Option<State>,
     model_path: Option<String>,
@@ -109,7 +125,7 @@ impl ApplicationHandler<State> for App {
             };
             match event.physical_key {
                 PhysicalKey::Code(KeyCode::Tab) if !state.gui.wants_keyboard_input() => {
-                    state.gui.sidebar_visible = !state.gui.sidebar_visible;
+                    state.gui.toggle_sidebar_tab();
                 }
                 PhysicalKey::Code(KeyCode::F10) => {
                     state.gui.menu_bar_visible = !state.gui.menu_bar_visible;
@@ -186,18 +202,16 @@ impl ApplicationHandler<State> for App {
                 state: btn_state,
                 button,
                 ..
-            } if !egui_consumed && !state.gui.wants_pointer_input() => {
+            } if route_pointer_to_camera(state) => {
                 state.handle_mouse_button(button, btn_state.is_pressed());
             }
             WindowEvent::CursorMoved { position, .. } => {
                 state.input.cursor_pos = (position.x as f32, position.y as f32);
-                if !egui_consumed && !state.gui.wants_pointer_input() {
+                if route_pointer_to_camera(state) {
                     state.handle_mouse_move(position.x as f32, position.y as f32);
                 }
             }
-            WindowEvent::MouseWheel { delta, .. }
-                if !egui_consumed && !state.gui.wants_pointer_input() =>
-            {
+            WindowEvent::MouseWheel { delta, .. } if route_pointer_to_camera(state) => {
                 let scroll = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.01,

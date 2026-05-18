@@ -30,6 +30,7 @@
 mod about;
 mod actions;
 mod console_view;
+mod dock;
 mod keyboard_shortcuts_modal;
 mod material_inspector;
 mod menu;

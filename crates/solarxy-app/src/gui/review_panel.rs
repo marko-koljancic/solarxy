@@ -47,46 +47,43 @@ fn category_index(c: AnnotationCategory) -> usize {
     }
 }
 
-/// Right-side docked variant. Lays out as a vertical column matching the
-/// existing left sidebar visually. `visible` mirrors `review.panel_open`
-/// via the Window-menu canonical flag — see `gui::renderer::render_ui`.
-pub(super) fn draw_review_panel_docked(
-    ctx: &egui::Context,
+/// Category filter chip. Active = saturated category fill + white text;
+/// inactive = transparent fill + 1px category-color stroke + colored text.
+/// Both states pass WCAG-AA against the dark panel background — replaces
+/// the earlier `Button::selected(on)` which inherited egui's default
+/// teal "selected" fill and made the pastel chip text unreadable.
+fn draw_category_chip(
+    ui: &mut egui::Ui,
+    cat: AnnotationCategory,
+    on: bool,
+    text: &str,
+) -> egui::Response {
+    let color = category_color(cat);
+    let (fill, text_color, stroke) = if on {
+        (color, egui::Color32::WHITE, egui::Stroke::NONE)
+    } else {
+        (
+            egui::Color32::TRANSPARENT,
+            color,
+            egui::Stroke::new(1.0, color),
+        )
+    };
+    let btn = egui::Button::new(egui::RichText::new(text).color(text_color).strong())
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius::same(4))
+        .small();
+    ui.add(btn)
+}
+
+/// Review-panel content for hosting inside an `egui_dock` tab. Header
+/// `×` closes the panel (writes `*visible = false`); dock placement is
+/// owned by `gui::dock`.
+pub(super) fn draw_review_panel_content(
+    ui: &mut egui::Ui,
     review: &mut ReviewState,
     visible: &mut bool,
 ) {
-    egui::SidePanel::right("review_panel")
-        .resizable(true)
-        .default_width(300.0)
-        .min_width(220.0)
-        .max_width(520.0)
-        .show_animated(ctx, *visible, |ui| {
-            draw_review_panel_content(ui, review, visible);
-        });
-}
-
-/// Floating-window variant — toggled via the Dock button in the panel
-/// header. Default position is near the right edge so it doesn't
-/// immediately overlap the viewport center.
-pub(super) fn draw_review_panel_floating(
-    ctx: &egui::Context,
-    review: &mut ReviewState,
-    visible: &mut bool,
-) {
-    let mut open = *visible;
-    egui::Window::new("Review")
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(true)
-        .default_size([320.0, 480.0])
-        .default_pos([800.0, 80.0])
-        .show(ctx, |ui| {
-            draw_review_panel_content(ui, review, visible);
-        });
-    *visible = open;
-}
-
-fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visible: &mut bool) {
     ui.horizontal(|ui| {
         let total = review.annotations.len();
         ui.heading(format!("Review ({total})"));
@@ -98,18 +95,6 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
             {
                 *visible = false;
             }
-            let dock_label = if review.panel_docked {
-                "\u{2197} Detach"
-            } else {
-                "\u{2199} Dock"
-            };
-            if ui
-                .small_button(dock_label)
-                .on_hover_text("Toggle dock / floating")
-                .clicked()
-            {
-                review.panel_docked = !review.panel_docked;
-            }
         });
     });
     ui.separator();
@@ -120,12 +105,7 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
             let idx = category_index(cat);
             let on = review.category_filters[idx];
             let chip_text = format!("{} {}", category_label_short(cat), cat);
-            let resp = ui.add(
-                egui::Button::new(egui::RichText::new(chip_text).color(category_color(cat)))
-                    .selected(on)
-                    .small(),
-            );
-            if resp.clicked() {
+            if draw_category_chip(ui, cat, on, &chip_text).clicked() {
                 review.category_filters[idx] = !on;
             }
         }
@@ -347,7 +327,7 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             }
             if is_stale {
                 if reanchor_active {
-                    let amber = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
+                    let amber = egui::Color32::from_rgb(0xFF, 0xC4, 0x4C);
                     if ui
                         .button(egui::RichText::new("Cancel re-anchor").color(amber))
                         .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
@@ -588,7 +568,7 @@ fn draw_annotation_row(
         let t = ui.ctx().input(|i| i.time);
         let phase = ((t * std::f64::consts::TAU / 0.6).sin().mul_add(0.5, 0.5)) as f32;
         let alpha = (30.0 + 40.0 * phase).round() as u8;
-        let amber = egui::Color32::from_rgba_unmultiplied(0xFF, 0xB2, 0x3D, alpha);
+        let amber = egui::Color32::from_rgba_unmultiplied(0xFF, 0xC4, 0x4C, alpha);
         ui.painter()
             .rect_filled(row_resp.rect.expand(2.0), 3.0, amber);
         ui.ctx().request_repaint();
@@ -621,7 +601,7 @@ fn draw_replace_button(
     ui.horizontal(|ui| {
         ui.add_space(20.0);
         if is_active {
-            let amber = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
+            let amber = egui::Color32::from_rgb(0xFF, 0xC4, 0x4C);
             let btn =
                 egui::Button::new(egui::RichText::new("Cancel re-anchor").color(amber)).small();
             if ui
@@ -668,9 +648,6 @@ fn draw_reply_row(ui: &mut egui::Ui, ann: &solarxy_core::review::ReviewAnnotatio
     });
 }
 
-/// Best-effort RFC 3339 → "HH:MM" or first-10-chars fallback. We don't
-/// parse the timestamp here — just trim the seconds + timezone for
-/// display purposes.
 fn short_time(rfc3339: &str) -> String {
     rfc3339.chars().take(16).collect()
 }

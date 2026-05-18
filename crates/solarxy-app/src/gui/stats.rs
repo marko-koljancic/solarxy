@@ -25,86 +25,82 @@ fn format_file_size(bytes: u64) -> String {
     }
 }
 
-pub(super) fn draw_stats_window(ctx: &egui::Context, info: &ModelInfo, open: &mut bool) {
-    egui::Window::new("Model Stats")
-        .open(open)
-        .resizable(true)
-        .collapsible(true)
-        .default_pos([240.0, 60.0])
-        .default_width(260.0)
-        .show(ctx, |ui| {
-            egui::Grid::new("stats_file")
-                .num_columns(2)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
-                    ui.label("File");
-                    ui.label(&info.filename);
-                    ui.end_row();
+/// Render the Model-Stats content into the provided `ui`. The host
+/// is the `egui_dock` `Stats` tab (`gui::dock`).
+pub(super) fn draw_stats_content(ui: &mut egui::Ui, info: &ModelInfo) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::Grid::new("stats_file")
+            .num_columns(2)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                ui.label("File");
+                ui.label(&info.filename);
+                ui.end_row();
 
-                    ui.label("Path");
-                    ui.label(&info.file_path);
-                    ui.end_row();
+                ui.label("Path");
+                ui.label(&info.file_path);
+                ui.end_row();
 
-                    ui.label("Size");
-                    ui.label(format_file_size(info.file_size));
-                    ui.end_row();
+                ui.label("Size");
+                ui.label(format_file_size(info.file_size));
+                ui.end_row();
 
-                    ui.label("Format");
-                    ui.label(&info.format);
-                    ui.end_row();
-                });
+                ui.label("Format");
+                ui.label(&info.format);
+                ui.end_row();
+            });
 
-            ui.separator();
-            ui.strong("Geometry");
+        ui.separator();
+        ui.strong("Geometry");
 
-            egui::Grid::new("stats_geo")
-                .num_columns(2)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
-                    ui.label("Polygons");
-                    ui.label(format_number(info.stats.polys));
-                    ui.end_row();
+        egui::Grid::new("stats_geo")
+            .num_columns(2)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                ui.label("Polygons");
+                ui.label(format_number(info.stats.polys));
+                ui.end_row();
 
-                    ui.label("Triangles");
-                    ui.label(format_number(info.stats.tris));
-                    ui.end_row();
+                ui.label("Triangles");
+                ui.label(format_number(info.stats.tris));
+                ui.end_row();
 
-                    ui.label("Vertices");
-                    ui.label(format_number(info.stats.verts));
-                    ui.end_row();
+                ui.label("Vertices");
+                ui.label(format_number(info.stats.verts));
+                ui.end_row();
 
-                    ui.label("Meshes");
-                    ui.label(info.mesh_count.to_string());
-                    ui.end_row();
+                ui.label("Meshes");
+                ui.label(info.mesh_count.to_string());
+                ui.end_row();
 
-                    ui.label("Materials");
-                    ui.label(info.material_count.to_string());
-                    ui.end_row();
-                });
+                ui.label("Materials");
+                ui.label(info.material_count.to_string());
+                ui.end_row();
+            });
 
-            ui.separator();
-            ui.strong("Bounds");
+        ui.separator();
+        ui.strong("Bounds");
 
-            let [w, h, d] = info.bounds_size;
-            egui::Grid::new("stats_bounds")
-                .num_columns(2)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
-                    ui.label("W \u{00d7} H \u{00d7} D");
-                    ui.label(format!("{w:.3} \u{00d7} {h:.3} \u{00d7} {d:.3}"));
-                    ui.end_row();
-                });
+        let [w, h, d] = info.bounds_size;
+        egui::Grid::new("stats_bounds")
+            .num_columns(2)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                ui.label("W \u{00d7} H \u{00d7} D");
+                ui.label(format!("{w:.3} \u{00d7} {h:.3} \u{00d7} {d:.3}"));
+                ui.end_row();
+            });
 
-            ui.separator();
-            ui.strong("UV Data");
+        ui.separator();
+        ui.strong("UV Data");
 
-            egui::Grid::new("stats_uv")
-                .num_columns(2)
-                .spacing([8.0, 2.0])
-                .show(ui, |ui| {
-                    ui.label("UV Mapping");
-                    ui.label(if info.has_uvs { "Yes" } else { "No" });
-                    ui.end_row();
-                });
-        });
+        egui::Grid::new("stats_uv")
+            .num_columns(2)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                ui.label("UV Mapping");
+                ui.label(if info.has_uvs { "Yes" } else { "No" });
+                ui.end_row();
+            });
+    });
 }
