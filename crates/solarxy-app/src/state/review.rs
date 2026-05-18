@@ -521,10 +521,24 @@ impl State {
         self.review.mesh_hashes.clone_from(&mesh_hashes);
 
         let project_root = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-        let sidecar_dir = solarxy_core::project_config::discover(project_root, None)
+        let discovered = solarxy_core::project_config::discover(project_root, None)
             .ok()
-            .flatten()
-            .and_then(|(_, cfg)| cfg.review.sidecar_dir);
+            .flatten();
+        if let Some((cfg_path, _)) = discovered.as_ref()
+            && self.last_project_config_toast.as_ref() != Some(cfg_path)
+        {
+            let label = cfg_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("solarxy.toml")
+                .to_string();
+            self.gui.set_toast(
+                &format!("Loaded project config from {label}"),
+                ToastSeverity::Info,
+            );
+            self.last_project_config_toast = Some(cfg_path.clone());
+        }
+        let sidecar_dir = discovered.and_then(|(_, cfg)| cfg.review.sidecar_dir);
         let sidecar_path = solarxy_core::sidecar_path_for(path, sidecar_dir.as_deref());
         self.review.sidecar_path = Some(sidecar_path.clone());
 
@@ -943,9 +957,6 @@ mod tests {
 
     #[test]
     fn marker_at_screen_pos_finds_nearest_within_threshold() {
-        // Viewport 200×200 with identity view_proj — world (0, 0, 0)
-        // projects to screen (100, 100); world (0.5, 0, 0) projects to
-        // (150, 100); world (-0.5, 0, 0) projects to (50, 100).
         let mut state = ReviewState::default();
         push_annotation(&mut state, "left", [-0.5, 0.0, 0.0]);
         push_annotation(&mut state, "right", [0.5, 0.0, 0.0]);
@@ -953,7 +964,6 @@ mod tests {
         let view_proj = identity_view_proj();
         let viewport = (200.0, 200.0);
 
-        // Cursor just inside the right marker.
         let hit = state.marker_at_screen_pos((155.0, 100.0), viewport, view_proj, 20.0);
         assert_eq!(
             hit.as_deref(),
@@ -961,7 +971,6 @@ mod tests {
             "right marker wins by distance"
         );
 
-        // Cursor near the left marker.
         let hit = state.marker_at_screen_pos((45.0, 100.0), viewport, view_proj, 20.0);
         assert_eq!(hit.as_deref(), Some("left"));
     }
@@ -972,7 +981,6 @@ mod tests {
         push_annotation(&mut state, "a", [0.0, 0.0, 0.0]);
         let view_proj = identity_view_proj();
         let viewport = (200.0, 200.0);
-        // Cursor 50px from the only marker; threshold 20.
         let hit = state.marker_at_screen_pos((150.0, 100.0), viewport, view_proj, 20.0);
         assert!(hit.is_none());
     }
@@ -980,8 +988,6 @@ mod tests {
     #[test]
     fn marker_at_screen_pos_skips_markers_behind_camera() {
         let mut state = ReviewState::default();
-        // NDC z = 2.0 (past the far plane) — should skip even though it
-        // projects to the viewport center.
         push_annotation(&mut state, "behind", [0.0, 0.0, 2.0]);
         let view_proj = identity_view_proj();
         let viewport = (200.0, 200.0);
@@ -1062,8 +1068,6 @@ mod tests {
         push_annotation(&mut state, "a", [0.0, 0.0, 0.0]);
         state.annotations[0].stale = true;
         let pre_updated = state.annotations[0].updated_at.clone();
-        // Sleep-free: the bump uses now_rfc3339 with millis precision,
-        // which can collide in fast paths. Force a probe value first.
         state.annotations[0].updated_at = "2000-01-01T00:00:00Z".into();
         state.begin_reanchor("a".into());
 

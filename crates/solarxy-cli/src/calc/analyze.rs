@@ -100,7 +100,6 @@ impl ModelAnalyzer {
 
     /// Loads a model and runs validation with a discovered or explicit
     /// `solarxy.toml`. Discovery starts in the model's parent directory.
-    ///
     /// Emits a `tracing::info!` event when a config is loaded so the GUI
     /// console / CLI logging surfaces it.
     pub fn new_with_config(path: &str, config_path: Option<&Path>) -> Result<Self> {

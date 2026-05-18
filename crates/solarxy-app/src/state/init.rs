@@ -424,6 +424,7 @@ impl State {
                 panel_open: preferences.review.panel_open,
                 ..super::review::ReviewState::default()
             },
+            last_project_config_toast: None,
             pending_load: None,
             pending_hdri: None,
             capture_requested: false,

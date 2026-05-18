@@ -178,8 +178,6 @@ pub(crate) struct HudInfo {
     pub cameras_linked: Option<bool>,
     pub has_uvs: bool,
     pub uv_overlap_pct: Option<f32>,
-    /// True when the active pane is in `InspectionMode::Overdraw` — drives
-    /// the legend overlay at the bottom-left of the viewport.
     pub overdraw_active: bool,
 }
 

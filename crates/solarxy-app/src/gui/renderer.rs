@@ -11,6 +11,7 @@ use super::about::draw_about_modal;
 use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
 use super::console_view::{draw_console_docked, draw_console_floating};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
+use super::material_inspector::{MaterialInspectorState, draw_material_inspector_window};
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
@@ -38,6 +39,8 @@ pub struct EguiRenderer {
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
+    material_inspector: MaterialInspectorState,
+    material_inspector_open: bool,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
@@ -79,6 +82,8 @@ impl EguiRenderer {
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
+            material_inspector: MaterialInspectorState::default(),
+            material_inspector_open: false,
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
@@ -94,6 +99,8 @@ impl EguiRenderer {
         self.model_info = None;
         self.stats_visible = false;
         self.stats_user_hidden = false;
+        self.material_inspector_open = false;
+        self.material_inspector.clear_for_new_model();
     }
 
     pub fn notify_model_loaded(&mut self, open_on_load: bool) {
@@ -226,6 +233,7 @@ impl EguiRenderer {
         active_pane_rect: Option<egui::Rect>,
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
+        model: Option<&solarxy_renderer::model::Model>,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -258,6 +266,7 @@ impl EguiRenderer {
             fps_hud_visible: self.fps_hud_visible,
             console_visible: self.console.visible,
             review_panel_visible: review.panel_open,
+            material_inspector_visible: self.material_inspector_open,
         };
         let mut about_open = self.about_open;
         let mut dismissed_toast_id: Option<u64> = None;
@@ -265,6 +274,7 @@ impl EguiRenderer {
         let update_modal = &mut self.update_modal;
         let preferences_modal = &mut self.preferences_modal;
         let shortcuts_modal = &mut self.shortcuts_modal;
+        let material_inspector = &mut self.material_inspector;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
@@ -309,6 +319,13 @@ impl EguiRenderer {
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
+
+            draw_material_inspector_window(
+                ctx,
+                material_inspector,
+                &mut menu_vis.material_inspector_visible,
+                model,
+            );
 
             if let Some(target_id) = review.reanchor_target.clone() {
                 let preview = review
@@ -457,6 +474,11 @@ impl EguiRenderer {
         self.console.visible = menu_vis.console_visible;
 
         review.panel_open = menu_vis.review_panel_visible;
+        self.material_inspector_open = menu_vis.material_inspector_visible;
+        let pending = std::mem::take(&mut self.material_inspector.pending_toasts);
+        for (msg, severity) in pending {
+            self.push_toast(severity, msg, Duration::from_secs(5));
+        }
         self.about_open = about_open;
         if let Some(id) = dismissed_toast_id {
             self.toasts.retain(|t| t.id != id);

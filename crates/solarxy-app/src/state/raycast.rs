@@ -81,13 +81,8 @@ pub fn screen_to_world_ray(
     camera_eye: Point3<f32>,
 ) -> Ray {
     let inv = view_proj.invert().unwrap_or_else(Matrix4::identity);
-
-    // Pixel → NDC. wgpu uses [-1, 1] x [-1, 1] x [0, 1]; pixel-y is
-    // top-down but NDC y is up.
     let ndc_x = (cursor_px.0 / viewport_size_px.0) * 2.0 - 1.0;
     let ndc_y = 1.0 - (cursor_px.1 / viewport_size_px.1) * 2.0;
-
-    // Unproject a point on the far plane.
     let far_clip = Vector4::new(ndc_x, ndc_y, 1.0, 1.0);
     let far_world_h = inv * far_clip;
     let far_world = Point3::new(

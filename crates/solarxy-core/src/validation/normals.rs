@@ -180,7 +180,6 @@ mod tests {
 
     #[test]
     fn flipped_normals_counts_within_mixed_mesh() {
-        // Two coplanar triangles; vertex 0..2 with normals UP, 3..5 with normals DOWN.
         let positions = vec![
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -224,14 +223,12 @@ mod tests {
 
     #[test]
     fn flipped_normals_returns_none_when_counts_mismatch() {
-        // NormalMismatch handles the structural error; flipped_normals stays silent.
         let mesh = single_triangle(Some(vec![[0.0, 0.0, 1.0]; 2]));
         assert!(check_flipped_normals(0, &mesh, -0.5).is_none());
     }
 
     #[test]
     fn end_to_end_via_raw_model() {
-        // Sanity: the helpers compose into the orchestrator without panicking.
         let raw = RawModelData {
             meshes: vec![single_triangle(Some(vec![[0.0, 0.0, -1.0]; 3]))],
             materials: Vec::new(),

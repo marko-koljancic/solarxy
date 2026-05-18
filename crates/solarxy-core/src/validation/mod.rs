@@ -135,8 +135,6 @@ mod tests {
     use super::*;
     use crate::geometry::{RawMeshData, RawModelData};
 
-    /// Single-triangle fixture is inherently an open mesh; tests that only
-    /// care about other checks opt into allowing boundary edges.
     fn permissive_config() -> ValidationConfig {
         ValidationConfig {
             allow_open_mesh: true,

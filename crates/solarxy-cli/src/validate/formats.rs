@@ -125,7 +125,6 @@ pub fn render_gha_commands(report: &ValidationRunReport) -> String {
 }
 
 fn escape_gha_message(s: &str) -> String {
-    // Workflow commands use newline/comma/percent escaping per GH docs.
     s.replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")

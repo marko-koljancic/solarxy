@@ -386,6 +386,17 @@ pub(super) fn draw_menu_bar(
                     vis.review_panel_visible = !vis.review_panel_visible;
                     ui.close();
                 }
+                if ui
+                    .add_enabled(
+                        has_model,
+                        egui::Button::new("Material Inspector")
+                            .selected(vis.material_inspector_visible),
+                    )
+                    .clicked()
+                {
+                    vis.material_inspector_visible = !vis.material_inspector_visible;
+                    ui.close();
+                }
             });
 
             ui.menu_button("Help", |ui| {

@@ -76,9 +76,24 @@ pub struct ModelStats {
     pub verts: usize,
 }
 
+/// Build a [`model::TextureThumbnail`] from one role's source slots and
+/// move the bytes out so the raw material drops cheaply. Returns `None`
+/// when the role has no source texture; the path is cloned so the
+/// caller's GPU upload retains its own copy. Used by `upload_model`.
+fn take_thumbnail(
+    data: &mut Option<solarxy_core::RawImageData>,
+    path: Option<&std::path::PathBuf>,
+) -> Option<model::TextureThumbnail> {
+    let image = data.take()?;
+    Some(model::TextureThumbnail {
+        image: std::sync::Arc::new(image),
+        source_path: path.cloned(),
+    })
+}
+
 #[allow(clippy::unnecessary_wraps)]
 fn upload_model(
-    raw: RawModelData,
+    mut raw: RawModelData,
     file_path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -101,7 +116,8 @@ fn upload_model(
     let (mesh_vertices, mesh_indices, bounds, per_mesh_bounds, normals_geo) =
         geometry::process_raw_model(&raw);
     let mut gpu_materials = Vec::new();
-    for (mat_idx, mat) in raw.materials.iter().enumerate() {
+    let mut material_thumbnails: Vec<model::MaterialThumbnails> = Vec::new();
+    for (mat_idx, mat) in raw.materials.iter_mut().enumerate() {
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
@@ -152,6 +168,35 @@ fn upload_model(
             uniform,
             layout,
         ));
+
+        // CPU-side thumbnail cache for the Material Inspector. `take` moves
+        // the decoded bytes out of the raw material (which is about to
+        // drop anyway) into an Arc so the inspector can hold a cheap
+        // reference; paths are cloned because both the GPU upload and the
+        // cache need them.
+        material_thumbnails.push(model::MaterialThumbnails {
+            albedo: take_thumbnail(
+                &mut mat.diffuse_texture_data,
+                mat.diffuse_texture_path.as_ref(),
+            ),
+            normal: take_thumbnail(
+                &mut mat.normal_texture_data,
+                mat.normal_texture_path.as_ref(),
+            ),
+            metallic_roughness: take_thumbnail(
+                &mut mat.metallic_roughness_texture_data,
+                mat.metallic_roughness_texture_path.as_ref(),
+            ),
+            occlusion: take_thumbnail(
+                &mut mat.occlusion_texture_data,
+                mat.occlusion_texture_path.as_ref(),
+            ),
+            emissive: take_thumbnail(
+                &mut mat.emissive_texture_data,
+                mat.emissive_texture_path.as_ref(),
+            ),
+            base_color: mat.diffuse.unwrap_or([0.8, 0.8, 0.8]),
+        });
     }
 
     if gpu_materials.is_empty() {
@@ -169,6 +214,14 @@ fn upload_model(
             material::MaterialUniform::default(),
             layout,
         ));
+        material_thumbnails.push(model::MaterialThumbnails {
+            albedo: None,
+            normal: None,
+            metallic_roughness: None,
+            occlusion: None,
+            emissive: None,
+            base_color: [0.8, 0.8, 0.8],
+        });
     }
 
     let mut gpu_meshes = Vec::new();
@@ -320,6 +373,7 @@ fn upload_model(
             bounds,
             mesh_bounds: gpu_mesh_bounds,
             cpu_meshes,
+            material_thumbnails,
             has_uvs,
         },
         normals_geo,

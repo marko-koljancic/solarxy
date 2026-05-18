@@ -30,8 +30,6 @@ pub(super) struct HudCtx<'a> {
     pub pane_label: &'a str,
     pub cameras_linked: Option<bool>,
     pub validation_counts: (usize, usize),
-    /// True when the active pane is in `InspectionMode::Overdraw`. Drives
-    /// the color-ramp legend overlay at the bottom-left of the viewport.
     pub overdraw_active: bool,
 }
 

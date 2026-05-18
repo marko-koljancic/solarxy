@@ -31,6 +31,7 @@ mod about;
 mod actions;
 mod console_view;
 mod keyboard_shortcuts_modal;
+mod material_inspector;
 mod menu;
 mod overlays;
 mod preferences_modal;

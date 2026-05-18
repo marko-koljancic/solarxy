@@ -64,6 +64,8 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `capture.rs` — screenshot capture.
   - `input/` — `mod.rs` for keyboard/mouse, `dialogs.rs` (native file pickers via `rfd`), `menu_actions.rs` (menu bar → state).
   - `view_state.rs` — `ViewState` (the app-side bundle), re-exporting `ViewLayout`, `DisplaySettings`, `PaneDisplaySettings`, `BoundsMode` **from** `solarxy-core::view_config`.
+  - `review.rs` — `ReviewState` + `EditDraft` (in-memory mirror of the open `.solarxy-review.json`). `load_review_for_model` / `save_review_sidecar` handle disk I/O via `solarxy-core::review::ReviewFile`. Owns the **marker hit-test** (`marker_at_screen_pos`, 20 px screen-space threshold) and the **re-anchor sub-mode** (`begin_reanchor` / `cancel_reanchor` / `complete_reanchor` keyed by `reanchor_target: Option<String>`). Author defaults to anonymous; sidecar location honors `ProjectConfig.review.sidecar_dir` from `solarxy.toml`.
+  - `raycast.rs` — CPU Möller-Trumbore + AABB slab-method. Single primitive feeding both the Review System anchoring and any future 3D ↔ UV selection sync.
 - `gui/` — egui integration, one responsibility per file:
   - `renderer.rs` — `EguiRenderer` frame orchestration. Owns the toast queue (`VecDeque<Toast>`, cap 5 — cf. `TOAST_QUEUE_CAP`), preferences modal, update modal, console state.
   - `sidebar.rs` — collapsible panels (View / Inspect / Material / Debug / Rendering / Advanced). **Canonical surface for live display/rendering/lighting settings** — the preferences modal deliberately does not duplicate these.
@@ -76,6 +78,9 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `stats.rs` — `ModelInfo` + `draw_stats_window()`. Auto-opens on model load when `UiPrefs::open_stats_on_model_load` is true (default).
   - `console_view.rs` — docked/floating log viewer with level filter, message-content substring search, and right-click Copy message / Copy full line. Buffer captures `solarxy=trace` by default; UI dropdown shows ERROR/WARN/INFO/DEBUG.
   - `update_modal.rs` — in-app update dialog. Draggable (not pinned).
+  - `review_popup.rs` — floating new/edit annotation popup anchored at the click position. `Cmd/Ctrl+Enter` saves, `Esc` cancels (egui-consumed before reaching `state/input`).
+  - `review_panel.rs` — docked-or-floating side panel (Console pattern). Category filter chips, text search, three collapsible sections (Open / Needs re-anchor / Resolved), inline selected-annotation editor with Reply/Delete/Re-place buttons, cascade-delete confirmation modal. `MenuBarVisibility.review_panel_visible` is the canonical visibility write target.
+  - `material_inspector.rs` — view-only floating window (`Window → Material Inspector`). Per-material rows with collapsing headers showing base-color swatch + scalar PBR + alpha mode + 5 source-side texture rows (Albedo / Normal / Metallic-Roughness / Occlusion / Emissive). 128×128 thumbnails decoded once from `Model::material_thumbnails` (CPU-side mirror populated by `resources::upload_model`). "Open externally" via `open::that()`; disabled for embedded textures. **No 3D-viewport mutation** — selecting a material does not change the inspection mode.
   - `theme.rs`, `about.rs` — dark theme / About modal (reference pattern for Esc-dismissable non-modal egui windows). About modal is draggable.
 - `console.rs` — `LogBuffer` + `ConsoleLayer` (a `tracing::Layer` feeding the egui console). `ConsoleState` carries the UI-side level filter, search string, docked/floating flag.
 
@@ -138,6 +143,14 @@ Types used on **both** sides of the CPU/GPU boundary live in `solarxy-core` so b
 - `solarxy_core::validation` — `ValidationReport`, `IssueKind`, `Severity`, etc.
 
 The renderer re-exports a few things it owns (`frame::*`, `scene::*`) to the app via `solarxy_app::state::mod.rs` `pub(super) use` blocks — grep those imports when you need to know what the app is allowed to touch.
+
+### Review System click routing
+Left-click in review mode (`Shift+R`) walks a three-step ladder in `state/input/mod.rs::try_review_pick`:
+1. **Re-anchor pending** (`review.reanchor_target.is_some()`) → raycast → `complete_reanchor`; consumes the click unconditionally so a miss doesn't fall through to creation.
+2. **Marker hit-test** — project visible markers to pane-relative pixels; within ~20 px of cursor wins. Sets `selected` + flips `scroll_to_selected` so the panel jumps to that row. Resolved markers stay hit-testable (they render dimmed, not hidden).
+3. **Geometry raycast** — Möller-Trumbore → open `EditDraft` popup at the click position.
+
+`Esc` runs an analogous priority chain inside `gui/renderer.rs::render_ui` (after the popup / delete-confirm modal have had their own chance to consume): re-anchor cancel → review-mode exit. Each consumes the key and emits a toast via `MenuActions.cancel_reanchor` / `exit_review_mode`. `Cmd/Ctrl+S` while review-mode-active saves the sidecar; `Shift+S` still saves preferences.
 
 ### Other
 - wgpu bind groups for GPU resource access; pipelines created at init and reused.

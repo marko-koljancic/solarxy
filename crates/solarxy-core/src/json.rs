@@ -143,9 +143,6 @@ impl From<&MaterialSummary> for JsonMaterial {
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonIssue {
     pub severity: String,
-    /// CamelCase kind name (e.g. `"FlippedNormals"`). Added in
-    /// `schema_version` 1; consumers parsing pre-0.6.0 reports may not see
-    /// this field.
     pub kind: String,
     pub scope: String,
     pub scope_index: Option<usize>,

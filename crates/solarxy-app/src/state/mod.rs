@@ -85,6 +85,7 @@ pub struct State {
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,
+    pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
     pub(super) capture_requested: bool,

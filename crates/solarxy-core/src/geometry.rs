@@ -16,7 +16,6 @@ use cgmath::InnerSpace;
 use crate::aabb::AABB;
 
 /// One mesh inside a [`RawModelData`].
-///
 /// Triangulated indices, optional per-vertex `normals` / `tex_coords`, and
 /// an optional `material_index` into the parent [`RawModelData::materials`].
 pub struct RawMeshData {
@@ -36,7 +35,6 @@ pub struct RawImageData {
 }
 
 /// PBR alpha-blending mode for [`RawMaterialData`].
-///
 /// Discriminants match the GPU wire format
 /// (`solarxy-renderer::material::MaterialUniform.alpha_mode: u32`)
 /// and the WGSL shaders. Conversion at the CPU↔GPU boundary in
@@ -59,7 +57,6 @@ impl From<AlphaMode> for u32 {
 }
 
 /// One PBR material inside a [`RawModelData`].
-///
 /// Holds factor scalars, optional textures (path or in-memory bytes), and the
 /// PBR alpha mode. `solarxy-renderer/src/resources.rs` consumes this and
 /// produces a `MaterialUniform` + GPU textures.
@@ -96,7 +93,6 @@ pub struct RawMaterialData {
 
 /// One loaded model — the unit `solarxy-formats` produces and
 /// `solarxy-renderer::resources` consumes.
-///
 /// `polygon_count` is preserved from the source file (number of polygons
 /// before triangulation), distinct from `meshes[i].indices.len() / 3`
 /// which counts triangles after triangulation.
@@ -108,7 +104,6 @@ pub struct RawModelData {
 
 /// Computes per-vertex normals by accumulating face normals across all
 /// triangles touching a vertex, then normalising.
-///
 /// Degenerate triangles contribute zero-magnitude face normals, which leave
 /// affected vertices with NaN-or-zero normals. Validators flag these.
 pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
@@ -136,7 +131,6 @@ pub fn compute_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]>
 /// Computes per-vertex tangent + bitangent vectors from position deltas
 /// scaled by UV deltas (the standard MikkT-adjacent derivation), averaged
 /// across triangles touching a vertex.
-///
 /// `normals` is currently unused but kept in the signature for future
 /// orthonormalisation work. Returns `(tangents, bitangents)`, both in the
 /// same vertex order as `positions`.

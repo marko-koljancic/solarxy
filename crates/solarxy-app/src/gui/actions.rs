@@ -19,13 +19,7 @@ pub(crate) struct MenuActions {
     pub open_about: bool,
     pub check_for_updates: bool,
     pub set_split_ratio: Option<f32>,
-    /// User pressed Esc while a re-anchor was pending. The state mutation
-    /// has already happened in `EguiRenderer::render_ui`; this flag asks
-    /// `State` to emit the matching toast.
     pub cancel_reanchor: bool,
-    /// User pressed Esc with no modal / popup / re-anchor active and
-    /// review mode was on. Same pattern — mutation in `render_ui`, toast
-    /// in `State`.
     pub exit_review_mode: bool,
 }
 
@@ -47,4 +41,5 @@ pub(super) struct MenuBarVisibility {
     pub fps_hud_visible: bool,
     pub console_visible: bool,
     pub review_panel_visible: bool,
+    pub material_inspector_visible: bool,
 }

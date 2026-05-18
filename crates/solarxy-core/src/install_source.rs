@@ -163,7 +163,6 @@ pub fn update_hint(src: InstallSource) -> UpdateHint {
     }
 }
 
-/// The canonical GitHub releases page URL.
 pub fn releases_url() -> &'static str {
     RELEASES_URL
 }

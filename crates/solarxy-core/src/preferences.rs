@@ -421,6 +421,8 @@ pub struct UiPrefs {
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
     pub open_stats_on_model_load: bool,
+    #[serde(default)]
+    pub material_inspector_open: bool,
 }
 
 fn default_max_recent_files() -> usize {
@@ -435,6 +437,7 @@ impl Default for UiPrefs {
             default_console_docked: true,
             max_recent_files: default_max_recent_files(),
             open_stats_on_model_load: true,
+            material_inspector_open: false,
         }
     }
 }
@@ -641,6 +644,7 @@ mod tests {
                 default_console_docked: false,
                 max_recent_files: 10,
                 open_stats_on_model_load: false,
+                material_inspector_open: true,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,

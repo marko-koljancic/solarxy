@@ -270,8 +270,6 @@ fn draw_review_panel_content(ui: &mut egui::Ui, review: &mut ReviewState, visibl
     if cancel_reanchor_click {
         review.cancel_reanchor();
     }
-
-    // Selected-annotation inline editor pinned below the list.
     if review.selected.is_some() {
         draw_selected_editor(ui, review);
     }
@@ -388,7 +386,6 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
 
     if delete_clicked {
         if review.reply_count(&selected_id) > 0 {
-            // Defer to confirmation modal.
             review.delete_confirm = Some(selected_id.clone());
         } else {
             review.delete_cascade(&selected_id);

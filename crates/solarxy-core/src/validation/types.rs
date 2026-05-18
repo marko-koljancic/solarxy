@@ -28,9 +28,6 @@ pub enum IssueScope {
     Material(usize),
     Model,
     Face(usize, usize),
-    /// Edge spanning two vertex indices (canonical order: `vertices[0] < vertices[1]`)
-    /// inside the given mesh. Used by `NonManifoldEdge` so the renderer overlay
-    /// can highlight the specific edge.
     Edge {
         mesh_index: usize,
         vertices: [u32; 2],

@@ -511,6 +511,7 @@ impl State {
         let validation_report = self.scene.as_ref().map(|s| &s.validation);
 
         let recent_files = self.preferences.history.recent_files.clone();
+        let model = self.scene.as_ref().map(|s| &s.model);
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
@@ -526,6 +527,7 @@ impl State {
             active_pane_rect,
             &recent_files,
             &mut self.review,
+            model,
         );
 
         let changes = snap_after.apply_to_state(

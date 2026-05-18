@@ -24,8 +24,7 @@ impl AABB {
         )
     }
 
-    /// Length of the box's space diagonal — the canonical "model size"
-    /// scalar.
+    /// Length of the box's space diagonal — the canonical "model size" scalar.
     pub fn diagonal(&self) -> f32 {
         (self.max - self.min).magnitude()
     }
