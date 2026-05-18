@@ -313,6 +313,8 @@ pub struct Preferences {
     pub ui: UiPrefs,
     #[serde(default)]
     pub updater: UpdaterPrefs,
+    #[serde(default)]
+    pub review: ReviewPrefs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -445,6 +447,22 @@ pub struct UpdaterPrefs {
     pub channel: UpdaterChannel,
 }
 
+/// User-level review-mode preferences. Project-level settings (sidecar
+/// location, etc.) live in [`crate::project_config::ReviewSettings`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReviewPrefs {
+    /// Display name written to `ReviewAnnotation.author` on new annotations.
+    /// `None` ⇒ anonymous. Solarxy deliberately does NOT auto-derive from
+    /// `git config user.name` or OS username — attribution is opt-in.
+    #[serde(default)]
+    pub author: Option<String>,
+
+    /// Whether the review side panel is visible by default on app launch.
+    /// Persists across sessions; mirror flag for the panel's open state.
+    #[serde(default)]
+    pub panel_open: bool,
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -456,6 +474,7 @@ impl Default for Preferences {
             history: HistoryPrefs::default(),
             ui: UiPrefs::default(),
             updater: UpdaterPrefs::default(),
+            review: ReviewPrefs::default(),
         }
     }
 }
@@ -627,10 +646,50 @@ mod tests {
                 check_on_launch: true,
                 channel: UpdaterChannel::Prerelease,
             },
+            review: ReviewPrefs {
+                author: Some("Marko".to_string()),
+                panel_open: true,
+            },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();
         assert_eq!(prefs, parsed);
+    }
+
+    #[test]
+    fn review_prefs_default_is_anonymous_closed() {
+        let r = ReviewPrefs::default();
+        assert!(
+            r.author.is_none(),
+            "default author must be None (anonymous)"
+        );
+        assert!(!r.panel_open, "default panel_open must be false");
+    }
+
+    #[test]
+    fn review_prefs_missing_section_uses_defaults() {
+        let toml_str = r"
+            config_version = 1
+        ";
+        let parsed: Preferences = toml::from_str(toml_str).expect("parses without [review]");
+        assert!(parsed.review.author.is_none());
+        assert!(!parsed.review.panel_open);
+    }
+
+    #[test]
+    fn review_prefs_partial_section_fills_missing_with_defaults() {
+        let toml_str = r#"
+            config_version = 1
+
+            [review]
+            author = "Marko"
+        "#;
+        let parsed: Preferences = toml::from_str(toml_str).expect("parses with partial [review]");
+        assert_eq!(parsed.review.author.as_deref(), Some("Marko"));
+        assert!(
+            !parsed.review.panel_open,
+            "panel_open defaults when omitted"
+        );
     }
 
     #[test]

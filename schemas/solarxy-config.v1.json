@@ -32,6 +32,16 @@
       "format": "uint32",
       "minimum": 0.0
     },
+    "review": {
+      "default": {
+        "sidecar_dir": null
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewSettings"
+        }
+      ]
+    },
     "thresholds": {
       "default": {
         "flipped_normal_dot": -0.5,
@@ -66,12 +76,7 @@
   "definitions": {
     "AssetCategory": {
       "type": "string",
-      "enum": [
-        "hero",
-        "prop",
-        "environment",
-        "default"
-      ]
+      "enum": ["hero", "prop", "environment", "default"]
     },
     "Budgets": {
       "type": "object",
@@ -105,10 +110,7 @@
     },
     "ClassifierRule": {
       "type": "object",
-      "required": [
-        "category",
-        "pattern"
-      ],
+      "required": ["category", "pattern"],
       "properties": {
         "category": {
           "$ref": "#/definitions/AssetCategory"
@@ -128,6 +130,18 @@
           "items": {
             "$ref": "#/definitions/ClassifierRule"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReviewSettings": {
+      "description": "Project-level review-system settings. User-level prefs (display name for the `author` field, panel open default) live in [`crate::preferences::ReviewPrefs`].",
+      "type": "object",
+      "properties": {
+        "sidecar_dir": {
+          "description": "Override location of the `.solarxy-review.json` sidecar. `None` (default) ⇒ sibling to the model file. Relative paths are resolved against the model's parent directory (so `\".solarxy\"` produces `<model_dir>/.solarxy/<stem>.solarxy-review.json`). Absolute paths are used as-is.",
+          "default": null,
+          "type": ["string", "null"]
         }
       },
       "additionalProperties": false

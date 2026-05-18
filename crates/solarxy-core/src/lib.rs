@@ -79,7 +79,7 @@ pub use validation::{
 #[cfg(feature = "serialization")]
 pub use project_config::{
     AssetCategory, Budgets, ClassifierRule, FilenameClassifier, ProjectConfig, ProjectConfigError,
-    classify_compiled, discover as discover_project_config,
+    ReviewSettings, classify_compiled, discover as discover_project_config,
 };
 
 #[cfg(feature = "serialization")]

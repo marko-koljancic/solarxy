@@ -44,6 +44,8 @@ pub struct ProjectConfig {
     pub thresholds: ValidationThresholds,
     #[serde(default)]
     pub filenames: FilenameClassifier,
+    #[serde(default)]
+    pub review: ReviewSettings,
 }
 
 impl Default for ProjectConfig {
@@ -54,6 +56,7 @@ impl Default for ProjectConfig {
             validation: ValidationConfig::default(),
             thresholds: ValidationThresholds::default(),
             filenames: FilenameClassifier::default(),
+            review: ReviewSettings::default(),
         }
     }
 }
@@ -172,6 +175,22 @@ impl FilenameClassifier {
             })
             .collect()
     }
+}
+
+/// Project-level review-system settings. User-level prefs (display name
+/// for the `author` field, panel open default) live in
+/// [`crate::preferences::ReviewPrefs`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct ReviewSettings {
+    /// Override location of the `.solarxy-review.json` sidecar. `None`
+    /// (default) ⇒ sibling to the model file. Relative paths are resolved
+    /// against the model's parent directory (so `".solarxy"` produces
+    /// `<model_dir>/.solarxy/<stem>.solarxy-review.json`). Absolute paths
+    /// are used as-is.
+    #[serde(default)]
+    pub sidecar_dir: Option<PathBuf>,
 }
 
 /// Classifies `path` against a pre-compiled rule set. First match wins;
@@ -416,6 +435,55 @@ mod tests {
         let cfg = load_file(&path).expect("loads despite mismatch");
         assert_eq!(cfg.format_version, 99);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn review_settings_default_has_no_sidecar_override() {
+        let r = ReviewSettings::default();
+        assert!(r.sidecar_dir.is_none());
+    }
+
+    #[test]
+    fn review_settings_missing_section_uses_defaults() {
+        let toml_src = r"
+            [budgets]
+            hero = 50000
+        ";
+        let cfg: ProjectConfig = toml::from_str(toml_src).expect("parses without [review]");
+        assert!(cfg.review.sidecar_dir.is_none());
+        assert_eq!(cfg.budgets.hero, 50_000);
+    }
+
+    #[test]
+    fn review_settings_sidecar_dir_roundtrips() {
+        let toml_src = r#"
+            [review]
+            sidecar_dir = ".solarxy"
+        "#;
+        let cfg: ProjectConfig = toml::from_str(toml_src).expect("parses [review]");
+        assert_eq!(
+            cfg.review.sidecar_dir.as_deref(),
+            Some(Path::new(".solarxy"))
+        );
+        // Re-serialize and parse again.
+        let s = toml::to_string(&cfg).expect("serialize");
+        let parsed: ProjectConfig = toml::from_str(&s).expect("re-parse");
+        assert_eq!(
+            parsed.review.sidecar_dir.as_deref(),
+            Some(Path::new(".solarxy"))
+        );
+    }
+
+    #[test]
+    fn review_settings_rejects_unknown_field() {
+        let toml_src = r#"
+            [review]
+            sidecar_dir = ".x"
+            unknown_field = true
+        "#;
+        let err = toml::from_str::<ProjectConfig>(toml_src).expect_err("unknown rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("unknown_field"), "got: {msg}");
     }
 
     #[test]
