@@ -25,4 +25,4 @@ post-announce-jobs = ["./native-bundle", "./ghcr-publish"]
 
 # wix/main.wxs is edited by hand to set the product icon from res/bundle/.
 # Tell dist not to fight us on subsequent `dist generate` runs.
-allow-dirty = ["msi"]
+allow-dirty = ["msi", "ci"]
