@@ -4,9 +4,10 @@
 //! Inspector, Model Stats) plus the 3D Viewport live as tabs inside a
 //! single [`egui_dock::DockState`]. Users drag tab titles between leaves
 //! to dock left/right/bottom/top; drag outside the dock area to tear out
-//! into a floating window. The Viewport tab is **non-closeable,
-//! non-floatable, and transparent** — `egui_dock` never paints over the
-//! wgpu surface, and the user can't accidentally orphan the 3D render.
+//! into a floating window. The Viewport tab is **closeable but
+//! non-floatable and transparent** — `egui_dock` never paints over the
+//! wgpu surface, and the user can recover a closed Viewport via the
+//! Window menu (`Window → Viewport`).
 //!
 //! ## Viewport rect plumbing (one-frame latency)
 //!
@@ -33,8 +34,9 @@ use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::ModelInfo;
 
 /// The six tab variants in the Solarxy dock. The `Viewport` variant is
-/// special-cased throughout: it never closes, never floats, never paints
-/// a background (so the wgpu surface shows through).
+/// special-cased throughout: it never floats and never paints a background
+/// (so the wgpu surface shows through). It *can* be closed — the Window
+/// menu restores it via [`toggle_tab`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(super) enum SolarxyTab {
     Viewport,
@@ -67,13 +69,9 @@ impl SolarxyTab {
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
-
-    // 18% left strip for the Sidebar.
     let [center_etc, _sidebar] =
         surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Sidebar]);
-    // 78% boundary on the right: ReviewPanel claims the remaining 22%.
     let [center, _review] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::ReviewPanel]);
-    // 72% boundary on the bottom: Console claims the remaining 28%.
     let [_main, _console] = surface.split_below(center, 0.72, vec![SolarxyTab::Console]);
 
     state
@@ -153,8 +151,8 @@ impl TabViewer for SolarxyTabViewer<'_> {
         }
     }
 
-    fn closeable(&mut self, tab: &mut Self::Tab) -> bool {
-        !matches!(tab, SolarxyTab::Viewport)
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        true
     }
 
     fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {

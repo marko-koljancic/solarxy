@@ -16,7 +16,6 @@ use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
 use crate::pipelines::Instance;
 use crate::resources::{self, ModelStats};
-use crate::review_markers::ReviewMarkerResources;
 use crate::shadow::ShadowState;
 use crate::validation;
 use crate::visualization::VisualizationState;
@@ -50,6 +49,12 @@ impl BackgroundModeExt for BackgroundMode {
                 b: 0.12,
                 a: 1.0,
             },
+            Self::AyuMirage => wgpu::Color {
+                r: 0.122,
+                g: 0.141,
+                b: 0.188,
+                a: 1.0,
+            },
             Self::Black => wgpu::Color {
                 r: 0.0,
                 g: 0.0,
@@ -72,6 +77,10 @@ impl BackgroundModeExt for BackgroundMode {
             Self::White => ([1.0, 1.0, 1.0], [0.85, 0.85, 0.85]),
             Self::Gradient => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
             Self::DarkGray => ([0.30, 0.32, 0.35], [0.15, 0.14, 0.13]),
+            Self::AyuMirage => (
+                [0.122 * 1.4, 0.141 * 1.4, 0.188 * 1.4],
+                [0.122 * 0.6, 0.141 * 0.6, 0.188 * 0.6],
+            ),
             Self::Black => ([0.20, 0.22, 0.25], [0.08, 0.07, 0.06]),
         }
     }
@@ -114,13 +123,7 @@ pub struct ModelScene {
     pub stats: ModelStats,
     pub validation: ValidationReport,
     pub validation_mesh_cat: Vec<Option<usize>>,
-    /// Per-GPU-mesh `LineList` index buffer for `IssueScope::Edge` issues.
-    /// `(buffer, num_indices)`. `None` for meshes without edge issues.
     pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
-    /// Per-annotation marker buffer; instance count = 0 when no review file
-    /// is loaded for the current model. Populated by `state::review` in
-    /// `solarxy-app` whenever the annotation set changes.
-    pub review_markers: ReviewMarkerResources,
 }
 
 impl ModelScene {
@@ -209,8 +212,6 @@ impl ModelScene {
             })
             .collect();
 
-        let review_markers = ReviewMarkerResources::new(device);
-
         Ok(ModelScene {
             model,
             cam,
@@ -225,7 +226,6 @@ impl ModelScene {
             validation: viewer_validation.report,
             validation_mesh_cat,
             validation_edge_buffers,
-            review_markers,
         })
     }
 }

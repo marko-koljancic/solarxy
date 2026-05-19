@@ -143,6 +143,11 @@ impl ApplicationHandler<State> for App {
                 PhysicalKey::Code(KeyCode::Backquote) if !state.gui.wants_keyboard_input() => {
                     state.gui.console.visible = !state.gui.console.visible;
                 }
+                PhysicalKey::Code(KeyCode::Digit1)
+                    if cmd_or_ctrl && !state.gui.wants_keyboard_input() =>
+                {
+                    state.gui.toggle_viewport_tab();
+                }
                 _ => {}
             }
         }
@@ -239,6 +244,12 @@ impl ApplicationHandler<State> for App {
                 state.resize(size.width, size.height);
             }
             _ => {}
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(state) = &mut self.state {
+            state.flush_dock_layout_on_exit();
         }
     }
 }

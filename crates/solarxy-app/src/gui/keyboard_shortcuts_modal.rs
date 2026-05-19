@@ -73,6 +73,13 @@ const SECTIONS: &[Section] = &[
                 action: "Toggle console",
             },
             Entry {
+                #[cfg(target_os = "macos")]
+                keys: "⌘+1",
+                #[cfg(not(target_os = "macos"))]
+                keys: "Ctrl+1",
+                action: "Toggle viewport",
+            },
+            Entry {
                 keys: "?",
                 action: "Open this Keyboard Shortcuts window",
             },

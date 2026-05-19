@@ -21,6 +21,9 @@ pub(crate) struct MenuActions {
     pub set_split_ratio: Option<f32>,
     pub cancel_reanchor: bool,
     pub exit_review_mode: bool,
+    pub save_dock_layout: bool,
+    pub restore_saved_layout: bool,
+    pub reset_dock_layout: bool,
 }
 
 /// Bundle the visible divider rect, its wider hit zone, and the current
@@ -42,4 +45,6 @@ pub(super) struct MenuBarVisibility {
     pub console_visible: bool,
     pub review_panel_visible: bool,
     pub material_inspector_visible: bool,
+    pub viewport_visible: bool,
+    pub has_saved_layout: bool,
 }

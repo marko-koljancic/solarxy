@@ -145,6 +145,7 @@ cycle_enum! {
         White => "White",
         Gradient => "Gradient",
         DarkGray => "Dark",
+        AyuMirage => "Ayu Mirage",
         Black => "Black",
     }
     ; cycle
@@ -315,10 +316,13 @@ pub struct Preferences {
     pub updater: UpdaterPrefs,
     #[serde(default)]
     pub review: ReviewPrefs,
+    #[serde(default)]
+    pub dock: DockPrefs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayPrefs {
+    #[serde(default = "default_background")]
     pub background: BackgroundMode,
     pub view_mode: ViewMode,
     pub normals_mode: NormalsMode,
@@ -347,6 +351,10 @@ pub struct DisplayPrefs {
     pub inspection_mode: InspectionMode,
     #[serde(default = "default_texel_density_target")]
     pub texel_density_target: f32,
+}
+
+fn default_background() -> BackgroundMode {
+    BackgroundMode::Gradient
 }
 
 fn default_exposure() -> f32 {
@@ -444,6 +452,26 @@ pub struct UpdaterPrefs {
     pub channel: UpdaterChannel,
 }
 
+/// Persisted dock layout. JSON strings hold a serialized
+/// `egui_dock::DockState<SolarxyTab>` (the `egui_dock` 0.18 `serde` feature
+/// derives `Serialize`/`Deserialize` on `DockState<T: Serialize>`).
+///
+/// Two slots:
+/// - `last_layout_json` is auto-written on app quit and restored on launch.
+/// - `saved_layout_json` is written only by Window → Save Layout and
+///   replayed by Window → Restore Saved Layout. Independent from auto-save
+///   so the user can mess up the live layout without losing their snapshot.
+///
+/// Deserialization failures (e.g. after a `SolarxyTab` variant bump) fall
+/// back to the default layout and log a debug line — never panic.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockPrefs {
+    #[serde(default)]
+    pub last_layout_json: Option<String>,
+    #[serde(default)]
+    pub saved_layout_json: Option<String>,
+}
+
 /// User-level review-mode preferences. Project-level settings (sidecar
 /// location, etc.) live in [`crate::project_config::ReviewSettings`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -472,6 +500,7 @@ impl Default for Preferences {
             ui: UiPrefs::default(),
             updater: UpdaterPrefs::default(),
             review: ReviewPrefs::default(),
+            dock: DockPrefs::default(),
         }
     }
 }
@@ -645,6 +674,10 @@ mod tests {
             review: ReviewPrefs {
                 author: Some("Marko".to_string()),
                 panel_open: true,
+            },
+            dock: DockPrefs {
+                last_layout_json: Some(r#"{"surfaces":[]}"#.to_string()),
+                saved_layout_json: None,
             },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();

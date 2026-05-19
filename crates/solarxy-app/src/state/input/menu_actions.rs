@@ -33,11 +33,10 @@ impl State {
         if actions.open_shortcuts_modal {
             self.gui.open_shortcuts_modal();
         }
-        if actions.open_wiki {
-            let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/wiki");
-            if let Err(e) = open::that(url) {
-                tracing::warn!("Failed to open wiki URL: {e}");
-            }
+        if actions.open_wiki
+            && let Err(e) = open::that(solarxy_core::WIKI_URL)
+        {
+            tracing::warn!("Failed to open wiki URL: {e}");
         }
         if actions.open_about {
             self.gui.open_about();
@@ -62,6 +61,32 @@ impl State {
         if actions.exit_review_mode {
             self.gui
                 .set_toast("Review mode: Off", ToastSeverity::Success);
+        }
+        if actions.save_dock_layout {
+            if let Some(json) = self.gui.serialize_layout() {
+                self.preferences.dock.saved_layout_json = Some(json);
+                self.gui.set_has_saved_layout(true);
+                self.save_preferences();
+                self.gui.set_toast("Layout saved.", ToastSeverity::Success);
+            } else {
+                self.gui
+                    .set_toast("Failed to save layout.", ToastSeverity::Warning);
+            }
+        }
+        if actions.restore_saved_layout {
+            if let Some(json) = self.preferences.dock.saved_layout_json.clone()
+                && self.gui.apply_layout_json(&json)
+            {
+                self.gui.set_toast("Layout restored.", ToastSeverity::Info);
+            } else {
+                self.gui
+                    .set_toast("No valid saved layout to restore.", ToastSeverity::Warning);
+            }
+        }
+        if actions.reset_dock_layout {
+            self.gui.reset_dock_layout();
+            self.gui
+                .set_toast("Layout reset to default.", ToastSeverity::Info);
         }
         if actions.quit {
             self.quit_requested = true;

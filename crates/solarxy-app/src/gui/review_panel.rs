@@ -11,32 +11,8 @@
 
 use solarxy_core::review::AnnotationCategory;
 
+use super::review_visuals::{category_color, category_letter as category_label_short};
 use crate::state::review::ReviewState;
-
-/// Color tints per category. Mirrors `shaders/review_marker.wgsl` so
-/// chips in the panel match the 3D marker color exactly.
-const COLOR_INFO: egui::Color32 = egui::Color32::from_rgb(0x5C, 0x9E, 0xFF);
-const COLOR_WARNING: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
-const COLOR_QUESTION: egui::Color32 = egui::Color32::from_rgb(0xA0, 0x6D, 0xFF);
-const COLOR_CHANGE: egui::Color32 = egui::Color32::from_rgb(0x3D, 0xC9, 0x7A);
-
-fn category_color(c: AnnotationCategory) -> egui::Color32 {
-    match c {
-        AnnotationCategory::Info => COLOR_INFO,
-        AnnotationCategory::Warning => COLOR_WARNING,
-        AnnotationCategory::Question => COLOR_QUESTION,
-        AnnotationCategory::Change => COLOR_CHANGE,
-    }
-}
-
-fn category_label_short(c: AnnotationCategory) -> &'static str {
-    match c {
-        AnnotationCategory::Info => "i",
-        AnnotationCategory::Warning => "!",
-        AnnotationCategory::Question => "?",
-        AnnotationCategory::Change => "✎",
-    }
-}
 
 fn category_index(c: AnnotationCategory) -> usize {
     match c {

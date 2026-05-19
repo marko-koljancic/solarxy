@@ -61,6 +61,9 @@ pub struct EguiRenderer {
     /// rect was logical units relative to the OLD surface, multiplying
     /// by the current scale factor produces wrong physical pixels).
     pub last_viewport_rect: Option<CachedViewportRect>,
+    /// `true` when `Preferences.dock.saved_layout_json.is_some()`. Drives
+    /// the enabled state of Window → Layout → Restore Saved Layout.
+    pub(super) has_saved_layout: bool,
 }
 
 /// Viewport-tab geometry from the previous egui frame, tagged with the
@@ -113,6 +116,7 @@ impl EguiRenderer {
             material_inspector_user_hidden: false,
             dock_state: default_dock_state(),
             last_viewport_rect: None,
+            has_saved_layout: false,
         }
     }
 
@@ -120,10 +124,6 @@ impl EguiRenderer {
         self.model_info = None;
         self.stats_user_hidden = false;
         self.material_inspector_user_hidden = false;
-        // Remove Material Inspector + Stats tabs (re-added when user
-        // re-opens via Window menu, or auto-added by `notify_model_loaded`
-        // on the next model load — see the sticky-hidden semantics on
-        // the `*_user_hidden` flags).
         if tab_present(&self.dock_state, SolarxyTab::MaterialInspector) {
             toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
         }
@@ -228,6 +228,10 @@ impl EguiRenderer {
         toggle_tab(&mut self.dock_state, SolarxyTab::Console);
     }
 
+    pub fn toggle_viewport_tab(&mut self) {
+        toggle_tab(&mut self.dock_state, SolarxyTab::Viewport);
+    }
+
     #[must_use]
     pub fn cursor_in_viewport(&self, cursor_logical: egui::Pos2) -> bool {
         self.last_viewport_rect
@@ -242,6 +246,48 @@ impl EguiRenderer {
 
     pub fn invalidate_viewport_rect(&mut self) {
         self.last_viewport_rect = None;
+    }
+
+    /// `true` iff the Viewport tab is currently mounted in the dock. The
+    /// state layer gates the 3D render pass on this so a hidden Viewport
+    /// doesn't burn GPU work behind opaque docked panels.
+    #[must_use]
+    pub fn viewport_tab_present(&self) -> bool {
+        tab_present(&self.dock_state, SolarxyTab::Viewport)
+    }
+
+    /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
+    /// deserialized into a valid `DockState`; on failure, the existing
+    /// layout is preserved and a debug line is logged.
+    pub fn apply_layout_json(&mut self, json: &str) -> bool {
+        match serde_json::from_str::<DockState<SolarxyTab>>(json) {
+            Ok(state) => {
+                self.dock_state = state;
+                true
+            }
+            Err(err) => {
+                tracing::debug!("dock layout JSON rejected (falling back): {err}");
+                false
+            }
+        }
+    }
+
+    /// Serialize the current dock layout to a JSON string. Returns `None`
+    /// if `serde_json` rejects the state (shouldn't happen for the upstream
+    /// `DockState<SolarxyTab>` impl, but we treat it as best-effort).
+    #[must_use]
+    pub fn serialize_layout(&self) -> Option<String> {
+        serde_json::to_string(&self.dock_state).ok()
+    }
+
+    /// Replace the current dock layout with the factory default produced
+    /// by [`default_dock_state`].
+    pub fn reset_dock_layout(&mut self) {
+        self.dock_state = default_dock_state();
+    }
+
+    pub fn set_has_saved_layout(&mut self, has: bool) {
+        self.has_saved_layout = has;
     }
 
     #[must_use]
@@ -303,6 +349,7 @@ impl EguiRenderer {
         frame_ms: f32,
         divider: Option<DividerInfo>,
         active_pane_rect: Option<egui::Rect>,
+        review_panes: &[super::ReviewPaneOverlay],
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
         model: Option<&solarxy_renderer::model::Model>,
@@ -345,6 +392,8 @@ impl EguiRenderer {
             console_visible: present_at_start.contains(&SolarxyTab::Console),
             review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
             material_inspector_visible: present_at_start.contains(&SolarxyTab::MaterialInspector),
+            viewport_visible: present_at_start.contains(&SolarxyTab::Viewport),
+            has_saved_layout: self.has_saved_layout,
         };
         let menu_vis_before = menu_vis;
         let mut about_open = self.about_open;
@@ -386,6 +435,19 @@ impl EguiRenderer {
             DockArea::new(dock_state)
                 .style(make_dock_style(ctx))
                 .show(ctx, &mut tab_viewer);
+
+            let suppress_overlay = about_open
+                || preferences_modal.open
+                || update_modal.open
+                || shortcuts_modal.open
+                || review.delete_confirm.is_some()
+                || review.editing.is_some();
+            super::review_overlay::draw_review_overlay(
+                ctx,
+                review_panes,
+                review,
+                suppress_overlay,
+            );
 
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
@@ -577,7 +639,12 @@ impl EguiRenderer {
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.fps_hud_visible = menu_vis.fps_hud_visible;
 
-        let menu_intents: [(SolarxyTab, bool, bool); 5] = [
+        let menu_intents: [(SolarxyTab, bool, bool); 6] = [
+            (
+                SolarxyTab::Viewport,
+                menu_vis_before.viewport_visible,
+                menu_vis.viewport_visible,
+            ),
             (
                 SolarxyTab::Sidebar,
                 menu_vis_before.sidebar_visible,

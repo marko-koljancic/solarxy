@@ -42,12 +42,18 @@ pub(super) fn draw_review_popup(ctx: &egui::Context, review: &mut ReviewState) -
     let mut want_cancel = esc;
     let mut close_requested = false;
 
+    let popup_id = match draft.editing_id.as_deref() {
+        Some(id) => egui::Id::new(("solarxy_review_popup_edit", id)),
+        None => egui::Id::new(("solarxy_review_popup_new", draft.seq)),
+    };
+
     egui::Window::new(title)
-        .id(egui::Id::new("solarxy_review_popup"))
+        .id(popup_id)
         .collapsible(false)
         .resizable(false)
+        .movable(true)
         .default_size(popup_size)
-        .fixed_pos(egui::pos2(x, y))
+        .default_pos(egui::pos2(x, y))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Category:");

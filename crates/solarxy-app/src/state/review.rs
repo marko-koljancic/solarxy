@@ -3,9 +3,8 @@
 //! draft, panel filters).
 //!
 //! Owns the [`ReviewAnnotation`] set for the currently-loaded model.
-//! Marker GPU buffer in [`solarxy_renderer::review_markers`] is rebuilt
-//! from this state whenever `dirty` flips on (annotation added /
-//! edited / resolved / deleted / selected, mode toggle, model load).
+//! Markers are drawn as an egui overlay (see `gui::review_overlay`)
+//! using this state directly — no GPU buffer involved.
 //!
 //! Persistence (load/save sidecar, model + mesh hashing, stale detection)
 //! lives in task #7; this module is the in-memory authority.
@@ -19,7 +18,6 @@
 use std::path::PathBuf;
 
 use solarxy_core::review::{AnchorPosition, AnnotationCategory, ReviewAnnotation};
-use solarxy_renderer::review_markers::ReviewMarkerInstance;
 
 /// Top-level review-mode state on `State`. Initialized via [`Default`]
 /// (which seeds sensible filter/dock defaults); populated on model load
@@ -98,6 +96,19 @@ pub struct ReviewState {
     /// hit-test and `begin_reanchor` to keep the panel aligned with the
     /// 3D selection.
     pub scroll_to_selected: bool,
+
+    /// `id` of the marker currently under the cursor, if any. Updated
+    /// on mouse-move by `state::input` and consumed by
+    /// `gui::review_overlay` to decide which pin should expand into a
+    /// card. Cleared (set to `None`) when the cursor leaves all pins.
+    pub hovered: Option<String>,
+
+    /// Monotonically-increasing counter used to key the egui popup window
+    /// by *draft session* (instead of click pixel). Each new draft pulls
+    /// a fresh value via [`alloc_draft_seq`]; the popup uses the seq in
+    /// its `Id` so reopening a popup at a new click position resets
+    /// egui's cached drag position cleanly.
+    pub next_draft_seq: u64,
 }
 
 impl Default for ReviewState {
@@ -119,6 +130,8 @@ impl Default for ReviewState {
             delete_confirm: None,
             reanchor_target: None,
             scroll_to_selected: false,
+            hovered: None,
+            next_draft_seq: 0,
         }
     }
 }
@@ -162,13 +175,21 @@ pub struct EditDraft {
 
     /// `Some(parent_id)` when the draft is a reply to an existing
     /// annotation; `None` for top-level notes. Replies share the
-    /// parent's anchor and don't get their own 3D marker.
+    /// parent's anchor and don't get their own 3D marker (see
+    /// `gui::review_overlay`).
     pub reply_to: Option<String>,
+
+    /// Unique per-draft-session seq, allocated via
+    /// [`ReviewState::alloc_draft_seq`]. The popup uses this in its
+    /// egui `Id` so each fresh draft gets a clean cached position.
+    pub seq: u64,
 }
 
 impl EditDraft {
-    /// Build a fresh draft for a new top-level annotation at the given anchor.
-    pub fn new_at(anchor: AnchorPosition, screen_pos: (f32, f32)) -> Self {
+    /// Build a fresh draft for a new top-level annotation at the given
+    /// anchor. `seq` must be allocated via
+    /// [`ReviewState::alloc_draft_seq`] so the popup keys cleanly.
+    pub fn new_at(seq: u64, anchor: AnchorPosition, screen_pos: (f32, f32)) -> Self {
         Self {
             anchor,
             screen_pos,
@@ -176,6 +197,7 @@ impl EditDraft {
             category: AnnotationCategory::default(),
             editing_id: None,
             reply_to: None,
+            seq,
         }
     }
 
@@ -183,6 +205,7 @@ impl EditDraft {
     /// the parent, popup positioned at `screen_pos` (typically the
     /// viewport center when opened via the panel's Reply button).
     pub fn new_reply(
+        seq: u64,
         parent_id: String,
         parent_anchor: AnchorPosition,
         screen_pos: (f32, f32),
@@ -194,11 +217,20 @@ impl EditDraft {
             category: AnnotationCategory::default(),
             editing_id: None,
             reply_to: Some(parent_id),
+            seq,
         }
     }
 }
 
 impl ReviewState {
+    /// Allocate the next draft session id. Bumps the in-memory counter
+    /// and returns the new value. Wraps on overflow (the counter is
+    /// `u64` — won't realistically hit it).
+    pub fn alloc_draft_seq(&mut self) -> u64 {
+        self.next_draft_seq = self.next_draft_seq.wrapping_add(1);
+        self.next_draft_seq
+    }
+
     /// Generate a fresh ULID-as-string. Wraps the workspace `ulid` dep
     /// so callers don't need to import it.
     pub fn new_id() -> String {
@@ -251,26 +283,6 @@ impl ReviewState {
     /// Discard the open draft (Cancel / Esc).
     pub fn cancel_draft(&mut self) {
         self.editing = None;
-    }
-
-    /// Convert all top-level (non-reply) annotations to GPU marker
-    /// instances. Replies share their parent's anchor and don't get
-    /// their own 3D marker.
-    pub fn marker_instances(&self) -> Vec<ReviewMarkerInstance> {
-        self.annotations
-            .iter()
-            .filter(|a| a.reply_to.is_none())
-            .map(|a| {
-                let cat = match a.category {
-                    AnnotationCategory::Info => 0,
-                    AnnotationCategory::Warning => 1,
-                    AnnotationCategory::Question => 2,
-                    AnnotationCategory::Change => 3,
-                };
-                let selected = self.selected.as_deref() == Some(a.id.as_str());
-                ReviewMarkerInstance::new(a.anchor.world_pos_fallback, cat, a.resolved, selected)
-            })
-            .collect()
     }
 
     /// Toggle review mode. Sets a transient toast via the caller; this
@@ -360,7 +372,9 @@ impl ReviewState {
         };
         let parent_anchor = parent.anchor.clone();
         let parent_id_owned = parent.id.clone();
+        let seq = self.alloc_draft_seq();
         self.editing = Some(EditDraft::new_reply(
+            seq,
             parent_id_owned,
             parent_anchor,
             screen_pos,
@@ -650,6 +664,7 @@ mod tests {
             category: AnnotationCategory::Warning,
             editing_id: None,
             reply_to: None,
+            seq: 0,
         });
         let id = state.commit_draft().expect("commit returns the new id");
         assert!(state.editing.is_none(), "draft cleared on commit");
@@ -667,7 +682,7 @@ mod tests {
     fn commit_carries_author_from_state() {
         let mut state = ReviewState {
             author: Some("Marko".into()),
-            editing: Some(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0))),
+            editing: Some(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0))),
             ..Default::default()
         };
         state.commit_draft();
@@ -676,7 +691,7 @@ mod tests {
 
     #[test]
     fn commit_edit_path_mutates_existing_in_place() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let id = state.commit_draft().unwrap();
         let created_at = state.annotations[0].created_at.clone();
 
@@ -687,6 +702,7 @@ mod tests {
             category: AnnotationCategory::Change,
             editing_id: Some(id.clone()),
             reply_to: None,
+            seq: 0,
         });
         let returned_id = state.commit_draft().expect("edit returns the same id");
         assert_eq!(returned_id, id);
@@ -701,7 +717,7 @@ mod tests {
 
     #[test]
     fn cancel_draft_discards_without_creating() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         state.cancel_draft();
         assert!(state.editing.is_none());
         assert_eq!(state.annotations.len(), 0);
@@ -709,37 +725,11 @@ mod tests {
     }
 
     #[test]
-    fn replies_are_not_emitted_as_markers() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([1.0, 0.0, 0.0]), (0.0, 0.0)));
-        let parent_id = state.commit_draft().unwrap();
-        state.annotations.push(ReviewAnnotation {
-            id: ReviewState::new_id(),
-            created_at: ReviewState::now_rfc3339(),
-            updated_at: ReviewState::now_rfc3339(),
-            author: None,
-            anchor: anchor_at([2.0, 0.0, 0.0]),
-            category: AnnotationCategory::Info,
-            text: "Fixed".into(),
-            reply_to: Some(parent_id),
-            resolved: false,
-            stale: false,
-        });
-
-        let markers = state.marker_instances();
-        assert_eq!(markers.len(), 1, "reply does not emit its own marker");
-        assert!(
-            approx_eq_3(markers[0].world_pos, [1.0, 0.0, 0.0]),
-            "marker world_pos {:?} should match parent anchor",
-            markers[0].world_pos
-        );
-    }
-
-    #[test]
     fn toggle_active_clears_open_draft_on_exit() {
         let mut state = ReviewState::default();
         state.toggle_active();
         assert!(state.active);
-        state.editing = Some(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        state.editing = Some(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         state.toggle_active();
         assert!(!state.active);
         assert!(state.editing.is_none(), "draft auto-cancelled on exit");
@@ -747,7 +737,7 @@ mod tests {
 
     #[test]
     fn commit_draft_with_reply_to_persists_parent_link() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let parent_id = state.commit_draft().unwrap();
 
         state.open_reply_draft(&parent_id, (100.0, 100.0));
@@ -771,6 +761,7 @@ mod tests {
             category: AnnotationCategory::Question,
             editing_id: None,
             reply_to: None,
+            seq: 0,
         });
         let parent_id = state.commit_draft().unwrap();
         state.open_reply_draft(&parent_id, (500.0, 250.0));
@@ -796,7 +787,7 @@ mod tests {
 
     #[test]
     fn delete_cascade_removes_parent_and_replies() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let parent_id = state.commit_draft().unwrap();
 
         for i in 0..2 {
@@ -805,7 +796,7 @@ mod tests {
             state.commit_draft();
         }
 
-        state.editing = Some(EditDraft::new_at(anchor_at([5.0, 0.0, 0.0]), (0.0, 0.0)));
+        state.editing = Some(EditDraft::new_at(0, anchor_at([5.0, 0.0, 0.0]), (0.0, 0.0)));
         state.editing.as_mut().unwrap().text = "orphan".into();
         let orphan_id = state.commit_draft().unwrap();
 
@@ -819,7 +810,7 @@ mod tests {
 
     #[test]
     fn delete_cascade_clears_selection_when_target_removed() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let id = state.commit_draft().unwrap();
         state.selected = Some(id.clone());
         state.delete_cascade(&id);
@@ -828,7 +819,7 @@ mod tests {
 
     #[test]
     fn delete_cascade_clears_selection_when_selected_reply_cascades_with_parent() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let parent_id = state.commit_draft().unwrap();
         state.open_reply_draft(&parent_id, (0.0, 0.0));
         state.editing.as_mut().unwrap().text = "reply".into();
@@ -841,7 +832,7 @@ mod tests {
 
     #[test]
     fn delete_cascade_clears_pending_confirm() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let id = state.commit_draft().unwrap();
         state.delete_confirm = Some(id.clone());
         state.delete_cascade(&id);
@@ -850,7 +841,7 @@ mod tests {
 
     #[test]
     fn reply_count_counts_only_direct_children() {
-        let mut state = state_with_draft(EditDraft::new_at(anchor_at([0.0; 3]), (0.0, 0.0)));
+        let mut state = state_with_draft(EditDraft::new_at(0, anchor_at([0.0; 3]), (0.0, 0.0)));
         let parent_id = state.commit_draft().unwrap();
         for _ in 0..3 {
             state.open_reply_draft(&parent_id, (0.0, 0.0));

@@ -24,7 +24,12 @@ pollster = "0.4.0"
 bytemuck = { version = "1.24", features = ["derive"] }
 rfd = "0.15"
 open = "5"
-time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
+time = { version = "0.3", features = [
+    "local-offset",
+    "formatting",
+    "parsing",
+    "macros",
+] }
 cgmath = { workspace = true }
 ulid = { workspace = true }
 anyhow = { workspace = true }

@@ -503,24 +503,6 @@ impl Renderer {
         if pds.show_validation {
             self.draw_validation_overlay(&mut pass, scene, cam_bg);
         }
-        // Always-on-top after every other 3D-scene overlay. A zero
-        // instance count short-circuits the draw inside the helper.
-        self.draw_review_markers(&mut pass, scene, cam_bg);
-    }
-
-    fn draw_review_markers<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
-        cam_bg: &'a wgpu::BindGroup,
-    ) {
-        if scene.review_markers.instance_count == 0 {
-            return;
-        }
-        pass.set_pipeline(&self.pipelines.overlay.review_marker);
-        pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_vertex_buffer(0, scene.review_markers.instance_buffer.slice(..));
-        pass.draw(0..6, 0..scene.review_markers.instance_count);
     }
 
     fn draw_opaque_meshes<'a>(

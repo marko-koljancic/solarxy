@@ -100,6 +100,10 @@ impl State {
 
         let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
         gui.set_backend_info(backend_info.clone());
+        if let Some(json) = preferences.dock.last_layout_json.as_deref() {
+            gui.apply_layout_json(json);
+        }
+        gui.set_has_saved_layout(preferences.dock.saved_layout_json.is_some());
 
         let gradient_uniform = GradientUniform {
             top_color: [0.35, 0.41, 0.47, 1.0],

@@ -331,6 +331,17 @@ pub(super) fn draw_menu_bar(
             ui.menu_button("Window", |ui| {
                 if ui
                     .add(
+                        egui::Button::new("Viewport")
+                            .selected(vis.viewport_visible)
+                            .shortcut_text(format!("{MOD}+1")),
+                    )
+                    .clicked()
+                {
+                    vis.viewport_visible = !vis.viewport_visible;
+                    ui.close();
+                }
+                if ui
+                    .add(
                         egui::Button::new("Menu Bar")
                             .selected(vis.menu_bar_visible)
                             .shortcut_text("F10"),
@@ -397,6 +408,30 @@ pub(super) fn draw_menu_bar(
                     vis.material_inspector_visible = !vis.material_inspector_visible;
                     ui.close();
                 }
+
+                ui.separator();
+
+                ui.menu_button("Layout", |ui| {
+                    if ui.button("Save Layout").clicked() {
+                        actions.save_dock_layout = true;
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            vis.has_saved_layout,
+                            egui::Button::new("Restore Saved Layout"),
+                        )
+                        .clicked()
+                    {
+                        actions.restore_saved_layout = true;
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Reset Layout to Default").clicked() {
+                        actions.reset_dock_layout = true;
+                        ui.close();
+                    }
+                });
             });
 
             ui.menu_button("Help", |ui| {

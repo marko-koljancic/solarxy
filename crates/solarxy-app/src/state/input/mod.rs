@@ -550,6 +550,23 @@ impl State {
         }
     }
 
+    /// Auto-save the current dock layout into `preferences.dock.last_layout_json`
+    /// and flush preferences to disk. Called on app exit so the next launch
+    /// restores the layout the user actually left behind. Silent on failure —
+    /// the user is on their way out and a toast wouldn't be seen anyway.
+    pub fn flush_dock_layout_on_exit(&mut self) {
+        let Some(json) = self.gui.serialize_layout() else {
+            return;
+        };
+        if self.preferences.dock.last_layout_json.as_ref() == Some(&json) {
+            return;
+        }
+        self.preferences.dock.last_layout_json = Some(json);
+        if let Err(e) = preferences::save(&self.preferences) {
+            tracing::warn!("Failed to persist dock layout on exit: {e}");
+        }
+    }
+
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
         if pressed
             && matches!(button, MouseButton::Left)
@@ -700,7 +717,9 @@ impl State {
                     barycentric: hit.barycentric,
                     world_pos_fallback: [hit.world_pos.x, hit.world_pos.y, hit.world_pos.z],
                 };
-                self.review.editing = Some(crate::state::review::EditDraft::new_at(anchor, cursor));
+                let seq = self.review.alloc_draft_seq();
+                self.review.editing =
+                    Some(crate::state::review::EditDraft::new_at(seq, anchor, cursor));
             }
             None => {
                 self.gui.set_toast(

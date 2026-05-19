@@ -37,8 +37,10 @@ mod menu;
 mod overlays;
 mod preferences_modal;
 mod renderer;
+mod review_overlay;
 mod review_panel;
 mod review_popup;
+mod review_visuals;
 mod sidebar;
 mod snapshot;
 mod stats;
@@ -55,4 +57,5 @@ pub use renderer::EguiRenderer;
 pub use snapshot::SidebarChanges;
 
 pub(crate) use actions::{DividerInfo, MenuActions};
+pub(crate) use review_overlay::ReviewPaneOverlay;
 pub(crate) use snapshot::{GuiSnapshot, HudInfo};
