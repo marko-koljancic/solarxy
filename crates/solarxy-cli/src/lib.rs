@@ -19,13 +19,15 @@
 
 #[cfg(feature = "analyzer")]
 pub mod calc;
-#[cfg(feature = "tui")]
-pub mod help;
 pub mod parser;
 #[cfg(feature = "tui")]
 pub(crate) mod tui;
 #[cfg(feature = "tui")]
 pub mod tui_analysis;
-#[cfg(feature = "tui")]
-pub mod tui_docs;
 mod validators;
+
+// Re-export the validation orchestration library so existing call sites
+// that referenced `solarxy_cli::validate::…` keep working after the
+// extraction. New code should depend on `solarxy-validate` directly.
+#[cfg(feature = "analyzer")]
+pub use solarxy_validate as validate;

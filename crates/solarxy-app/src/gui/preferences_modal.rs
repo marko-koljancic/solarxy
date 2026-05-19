@@ -262,10 +262,6 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             ui.checkbox(&mut draft.ui.default_fps_hud_visible, "");
             ui.end_row();
 
-            ui.label("Console docked at launch");
-            ui.checkbox(&mut draft.ui.default_console_docked, "");
-            ui.end_row();
-
             ui.label("Open Model Stats on model load");
             ui.checkbox(&mut draft.ui.open_stats_on_model_load, "");
             ui.end_row();

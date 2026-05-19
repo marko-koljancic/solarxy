@@ -30,6 +30,7 @@ pub(super) struct HudCtx<'a> {
     pub pane_label: &'a str,
     pub cameras_linked: Option<bool>,
     pub validation_counts: (usize, usize),
+    pub overdraw_active: bool,
 }
 
 #[derive(Debug, Default)]
@@ -220,5 +221,51 @@ pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult 
             });
     }
 
+    if hud.overdraw_active {
+        draw_overdraw_legend(ctx);
+    }
+
     result
+}
+
+/// Color-ramp legend matching the 6 stops in `overdraw_show.wgsl`. Bottom
+/// -left of the viewport, transparent dark frame, small font — meant to
+/// communicate the mapping at a glance, not dominate the view.
+fn draw_overdraw_legend(ctx: &egui::Context) {
+    let content = ctx.content_rect();
+    let stops: &[(&str, [u8; 3])] = &[
+        ("0", [0, 0, 0]),
+        ("1", [30, 58, 138]),
+        ("2-3", [14, 165, 233]),
+        ("4-6", [252, 211, 77]),
+        ("7-10", [249, 115, 22]),
+        ("11+", [220, 38, 38]),
+    ];
+    egui::Area::new(egui::Id::new("overdraw_legend"))
+        .fixed_pos(egui::pos2(content.left() + 12.0, content.bottom() - 12.0))
+        .pivot(egui::Align2::LEFT_BOTTOM)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            overlay_frame().show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Overdraw (draws / pixel)")
+                        .small()
+                        .color(egui::Color32::from_white_alpha(220)),
+                );
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    for (label, [r, g, b]) in stops {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(18.0, 12.0), egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(rect, 2.0, egui::Color32::from_rgb(*r, *g, *b));
+                        ui.label(
+                            egui::RichText::new(*label)
+                                .small()
+                                .color(egui::Color32::from_white_alpha(200)),
+                        );
+                    }
+                });
+            });
+        });
 }

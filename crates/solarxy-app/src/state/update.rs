@@ -1,3 +1,9 @@
+//! Per-frame state updates. Owns `rebuild_light_bind_group` — the **single
+//! IBL chokepoint** triggered on HDRI drop, [`IblMode`] toggle (`I` /
+//! `Shift+I`), and background change. Adding any IBL-derived uniform means
+//! routing it through this function so Clay modes etc. update instantly
+//! without waiting for the next camera-driven frame.
+
 use std::sync::mpsc;
 
 use super::*;
@@ -131,10 +137,12 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
+            self.gui.invalidate_viewport_rect();
+
             let (tw, th) = self.target_dimensions();
             self.resize_render_targets(tw, th);
 
-            let aspect = width as f32 / height as f32;
+            let aspect = tw as f32 / th as f32;
             if let Some(scene) = &mut self.scene {
                 scene.cam.resize(aspect);
             }
@@ -210,6 +218,10 @@ impl State {
         self.renderer
             .post
             .ssao
+            .resize(&self.device, &self.renderer.layouts, width, height);
+
+        self.renderer
+            .overdraw
             .resize(&self.device, &self.renderer.layouts, width, height);
     }
 
@@ -288,6 +300,8 @@ impl State {
                             .cam
                             .set_projection(self.preferences.display.projection_mode);
                     }
+
+                    self.load_review_for_model(&pending.path);
 
                     self.view.secondary_cam = None;
                     if self.view.display.layout != ViewLayout::Single

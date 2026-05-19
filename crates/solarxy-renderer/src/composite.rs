@@ -1,8 +1,11 @@
+//! Final composite pass: tone-mapping HDR onto the swapchain, plus the
+//! per-pane viewport/scissor rectangle that splits the surface in F2/F3.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::bloom::BLOOM_STRENGTH;
 use crate::pipelines::Pipelines;
 use crate::ssao::SsaoState;
-use solarxy_core::preferences::ToneMode;
+use solarxy_core::preferences::{InspectionMode, ToneMode};
 use wgpu::util::DeviceExt;
 
 const SSAO_STRENGTH: f32 = 0.8;
@@ -26,7 +29,13 @@ impl CompositeState {
         tone_mode: ToneMode,
         exposure: f32,
     ) -> Self {
-        let params_data = build_params(bloom_enabled, ssao_enabled, tone_mode, exposure);
+        let params_data = build_params(
+            bloom_enabled,
+            ssao_enabled,
+            tone_mode,
+            exposure,
+            InspectionMode::Shaded,
+        );
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Composite Params Uniform"),
             contents: bytemuck::bytes_of(&params_data),
@@ -107,7 +116,7 @@ impl CompositeState {
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
             pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
         }
-        pass.set_pipeline(&pipelines.composite);
+        pass.set_pipeline(&pipelines.post.composite);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.params_bind_group, &[]);
         if ssao_enabled {
@@ -118,6 +127,7 @@ impl CompositeState {
         pass.draw(0..3, 0..1);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn write_params(
         &self,
         queue: &wgpu::Queue,
@@ -125,8 +135,15 @@ impl CompositeState {
         ssao_enabled: bool,
         tone_mode: ToneMode,
         exposure: f32,
+        inspection_mode: InspectionMode,
     ) {
-        let params = build_params(bloom_enabled, ssao_enabled, tone_mode, exposure);
+        let params = build_params(
+            bloom_enabled,
+            ssao_enabled,
+            tone_mode,
+            exposure,
+            inspection_mode,
+        );
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
 }
@@ -140,13 +157,18 @@ struct CompositeParams {
     ssao_strength: f32,
     tone_mode: u32,
     exposure: f32,
+    inspection_mode: u32,
+    _pad: u32,
 }
+
+const _: () = assert!(std::mem::size_of::<CompositeParams>() == 32);
 
 fn build_params(
     bloom_enabled: bool,
     ssao_enabled: bool,
     tone_mode: ToneMode,
     exposure: f32,
+    inspection_mode: InspectionMode,
 ) -> CompositeParams {
     CompositeParams {
         bloom_strength: BLOOM_STRENGTH,
@@ -155,6 +177,8 @@ fn build_params(
         ssao_strength: SSAO_STRENGTH,
         tone_mode: tone_mode.as_u32(),
         exposure,
+        inspection_mode: inspection_mode.as_u32(),
+        _pad: 0,
     }
 }
 

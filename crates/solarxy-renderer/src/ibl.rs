@@ -1,3 +1,12 @@
+//! Image-based lighting: the irradiance + prefiltered specular cubemaps and
+//! BRDF LUT used by the PBR shader.
+//!
+//! [`IblState`] has three constructors — [`IblState::fallback`],
+//! [`IblState::from_sky_colors`], and [`IblState::from_hdri`]. Any
+//! IBL-derived CPU data (e.g. the L0 ambient SH coefficient) must be
+//! computed in **all three**; `solarxy-app/src/state/update.rs::rebuild_light_bind_group`
+//! is the single chokepoint that pushes IBL-derived uniforms to the GPU.
+
 use std::path::Path;
 
 use half::f16;
@@ -134,6 +143,11 @@ impl BrdfLut {
 }
 
 impl IblState {
+    /// Solid-grey fallback IBL (`0.2, 0.2, 0.2`) — used when no HDRI is
+    /// loaded and the user has not selected a sky-colour gradient. One of
+    /// the three IBL constructors that **must all** compute the same
+    /// CPU-side derived data (e.g. `irradiance_average`) so the
+    /// `rebuild_light_bind_group` chokepoint sees a consistent shape.
     pub fn fallback(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut pixel_bytes = [0u8; 8];
         write_rgba16f(&mut pixel_bytes, 0, 0.2, 0.2, 0.2, 1.0);
@@ -159,6 +173,9 @@ impl IblState {
         )
     }
 
+    /// Procedural IBL from a top/bottom sky-colour gradient. Generates the
+    /// irradiance + prefiltered cubemaps on the GPU once. See [`Self::fallback`]
+    /// for the CPU-side-derived-data invariant.
     pub fn from_sky_colors(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -181,6 +198,15 @@ impl IblState {
         )
     }
 
+    /// Builds an IBL from an HDRI image on disk (`.hdr` or `.exr`). Decodes
+    /// the equirect, projects to a cubemap, and convolves into irradiance +
+    /// prefiltered specular mips. See [`Self::fallback`] for the CPU-side-
+    /// derived-data invariant the `rebuild_light_bind_group` chokepoint
+    /// relies on.
+    ///
+    /// # Errors
+    /// Returns `Err` if the image fails to decode or the file extension is
+    /// not one of the supported HDRI formats.
     pub fn from_hdri(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

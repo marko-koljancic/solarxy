@@ -1,3 +1,7 @@
+//! Startup wiring: creates the wgpu surface, device, queue, [`Renderer`],
+//! egui state, and initial preferences. Called from [`crate::app::App::resumed`]
+//! on first window creation.
+
 use std::sync::Arc;
 
 use wgpu::util::DeviceExt;
@@ -96,6 +100,10 @@ impl State {
 
         let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
         gui.set_backend_info(backend_info.clone());
+        if let Some(json) = preferences.dock.last_layout_json.as_deref() {
+            gui.apply_layout_json(json);
+        }
+        gui.set_has_saved_layout(preferences.dock.saved_layout_json.is_some());
 
         let gradient_uniform = GradientUniform {
             top_color: [0.35, 0.41, 0.47, 1.0],
@@ -297,6 +305,13 @@ impl State {
             }
         };
 
+        let overdraw_res = solarxy_renderer::overdraw::OverdrawResources::new(
+            &device,
+            &layouts,
+            size.width,
+            size.height,
+        );
+
         let mut state = Self {
             surface,
             device,
@@ -354,6 +369,7 @@ impl State {
                     readback_pending: false,
                 },
                 validation_colors,
+                overdraw: overdraw_res,
                 shared_samplers,
                 msaa_sample_count,
                 target_width: size.width,
@@ -390,6 +406,7 @@ impl State {
                     turntable_rpm: preferences.display.turntable_rpm,
                     lights_locked: preferences.lighting.lock,
                     layout: ViewLayout::default(),
+                    split_ratio: DisplaySettings::DEFAULT_SPLIT_RATIO,
                     roughness_scale: 1.0,
                     metallic_scale: 1.0,
                 },
@@ -406,6 +423,12 @@ impl State {
                 uv_middle_pressed: false,
                 modifiers: ModifiersState::empty(),
             },
+            review: super::review::ReviewState {
+                author: preferences.review.author.clone(),
+                panel_open: preferences.review.panel_open,
+                ..super::review::ReviewState::default()
+            },
+            last_project_config_toast: None,
             pending_load: None,
             pending_hdri: None,
             capture_requested: false,

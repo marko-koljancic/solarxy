@@ -244,7 +244,7 @@
         <!--
           Product icon — shown in Add/Remove Programs and the installer UI.
           Source lives under res/bundle/; regenerate via
-          scripts/gen_placeholder_icons.sh.
+          packaging/scripts/gen_bundle_icons.sh.
         -->
         <Icon Id='ProductICO' SourceFile='res\bundle\solarxy.ico'/>
         <Property Id='ARPPRODUCTICON' Value='ProductICO' />

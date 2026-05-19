@@ -10,10 +10,20 @@ description = "Core data types, geometry algorithms, and validation for 3D model
 
 [features]
 default = ["serialization"]
-# Gates every dependency that exists only to read/write config files,
-# reports, and validation JSON. Disable to use solarxy-core as a pure
-# computation library (e.g. WASM / no_std-adjacent contexts).
-serialization = ["dep:serde", "dep:serde_json", "dep:toml", "dep:dirs", "dep:tracing", "dep:anyhow"]
+serialization = [
+    "dep:serde",
+    "dep:serde_json",
+    "dep:toml",
+    "dep:dirs",
+    "dep:tracing",
+    "dep:anyhow",
+    "dep:thiserror",
+    "dep:regex",
+    "dep:strsim",
+    "dep:sha2",
+]
+
+schemars-gen = ["dep:schemars", "serialization"]
 
 [dependencies]
 cgmath = { workspace = true }
@@ -22,4 +32,9 @@ serde_json = { version = "1.0", optional = true }
 toml = { version = "0.8", optional = true }
 dirs = { version = "6.0", optional = true }
 tracing = { version = "0.1", optional = true }
-anyhow  = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+strsim = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }

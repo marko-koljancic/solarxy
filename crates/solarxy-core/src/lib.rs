@@ -1,3 +1,31 @@
+//! GPU-free CPU-side type home for the Solarxy workspace.
+//!
+//! Foundation crate shared by `solarxy-renderer`, `solarxy-app`, and
+//! `solarxy-cli`:
+//!
+//! - **Geometry primitives** ([`AABB`], [`geometry::compute_normals`],
+//!   [`geometry::compute_tangent_basis`]) used by every loader and the
+//!   renderer.
+//! - **The raw model I/O type** ([`RawModelData`]) that loaders in
+//!   `solarxy-formats` produce and the renderer consumes.
+//! - **Validation** ([`validation::validate_raw_model`], [`ValidationReport`])
+//!   shared by the CLI's `analyze` mode and the GUI's validation overlay.
+//! - **Preferences** (`preferences::Preferences`, plus cycle-able enums like
+//!   `preferences::IblMode`) loaded from `~/.config/solarxy/config.toml` via
+//!   `preferences::load`.
+//! - **Reporting** (`report::AnalysisReport`, `json::report_to_json`).
+//!
+//! No GPU types, no winit, no egui — depend on this crate from anywhere
+//! without pulling wgpu/egui/winit into the build graph.
+//!
+//! # Feature flags
+//!
+//! - `serialization` (default): gates `preferences`, `json`, `report`,
+//!   `install_source`, `project_config`, `review`, and `view_config`.
+//!   Disable for a pure-computation build — only [`aabb`], [`geometry`],
+//!   and [`validation`] remain.
+//! - `schemars-gen`: adds `schemars::JsonSchema` derives on the public
+//!   on-disk types (used to regenerate `schemas/*.json`).
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -32,15 +60,34 @@ pub mod json;
 #[cfg(feature = "serialization")]
 pub mod preferences;
 #[cfg(feature = "serialization")]
+pub mod project_config;
+#[cfg(feature = "serialization")]
 pub mod report;
+#[cfg(feature = "serialization")]
+pub mod review;
 pub mod validation;
 #[cfg(feature = "serialization")]
 pub mod view_config;
 
 pub use aabb::AABB;
-pub use geometry::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+pub use geometry::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
+
+pub const WIKI_URL: &str = "https://github.com/marko-koljancic/solarxy/wiki";
 pub use validation::{
-    IssueKind, IssueScope, Severity, ValidationIssue, ValidationReport, ValidationResult,
+    IssueKind, IssueScope, Severity, ValidationConfig, ValidationIssue, ValidationReport,
+    ValidationResult, ValidationThresholds,
+};
+
+#[cfg(feature = "serialization")]
+pub use project_config::{
+    AssetCategory, Budgets, ClassifierRule, FilenameClassifier, ProjectConfig, ProjectConfigError,
+    ReviewSettings, classify_compiled, discover as discover_project_config,
+};
+
+#[cfg(feature = "serialization")]
+pub use review::{
+    AnchorPosition, AnnotationCategory, ReviewAnnotation, ReviewError, ReviewFile, hash_bytes,
+    hash_file, hash_mesh, hash_meshes, hash_positions_indices, sidecar_path_for,
 };
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["obj", "stl", "ply", "gltf", "glb"];

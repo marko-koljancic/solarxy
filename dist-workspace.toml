@@ -13,15 +13,16 @@ targets = [
     "x86_64-pc-windows-msvc",
 ]
 install-path = "~/.local/bin"
-# Whether to install an updater program
 install-updater = false
 
-# Reusable workflow invoked after cargo-dist announces the release. Produces
-# DMG / .deb / AppImage bundles and uploads them to the same release. Runs
-# in-graph (same workflow run), so it inherits secrets and bypasses the
+# Reusable workflows invoked after cargo-dist announces the release. Runs
+# in-graph (same workflow run), so they inherit secrets and bypass the
 # GITHUB_TOKEN chain restriction that kills `on: release: published`.
-post-announce-jobs = ["./native-bundle"]
+# - native-bundle: produces DMG / AppImage and uploads them to the release.
+# - ghcr-publish:  builds and pushes ghcr.io/marko-koljancic/solarxy-cli:<tags>
+#                  (skipped on prereleases).
+post-announce-jobs = ["./native-bundle", "./ghcr-publish"]
 
 # wix/main.wxs is edited by hand to set the product icon from res/bundle/.
 # Tell dist not to fight us on subsequent `dist generate` runs.
-allow-dirty = ["msi"]
+allow-dirty = ["msi", "ci"]

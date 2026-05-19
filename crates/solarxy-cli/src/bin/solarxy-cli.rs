@@ -7,18 +7,15 @@ use anyhow::Context;
 use clap::Parser;
 
 use solarxy_cli::parser::{Args, OperationMode, OutputFormat};
-use solarxy_cli::tui_docs::DocsApp;
 
 #[cfg(feature = "analyzer")]
 use solarxy_cli::calc::analyze::ModelAnalyzer;
 #[cfg(feature = "analyzer")]
 use solarxy_cli::tui_analysis::TerminalApp;
-
-const APP_INFO: solarxy_cli::help::AppInfo = solarxy_cli::help::AppInfo {
-    version: env!("CARGO_PKG_VERSION"),
-    description: env!("CARGO_PKG_DESCRIPTION"),
-    repository: env!("CARGO_PKG_REPOSITORY"),
-    license: env!("CARGO_PKG_LICENSE"),
+#[cfg(feature = "analyzer")]
+use solarxy_validate::{
+    self as validate, ConfigSource, Output as ValidateOutput,
+    adapter::{AdapterFormat, AdapterName, FailOn},
 };
 
 fn main() -> anyhow::Result<ExitCode> {
@@ -60,35 +57,28 @@ fn main() -> anyhow::Result<ExitCode> {
 
     match args.mode {
         OperationMode::View => Ok(exec_gui(model_path.as_deref())),
-        OperationMode::Analyze => run_analyze(model_path, &args.format, args.output.as_deref())
-            .map(|()| ExitCode::SUCCESS),
-        OperationMode::Preferences => Ok(preferences_migration_hint()),
-        OperationMode::Docs => {
-            DocsApp::new(APP_INFO).run()?;
-            Ok(ExitCode::SUCCESS)
+        OperationMode::Analyze => {
+            if !args.paths.is_empty() {
+                run_validate(
+                    &args.paths,
+                    args.config.as_deref(),
+                    args.adapter,
+                    args.adapter_format,
+                    args.fail_on,
+                    args.output.as_deref(),
+                )
+                .map(|code| u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from))
+            } else {
+                run_analyze(
+                    model_path,
+                    &args.format,
+                    args.output.as_deref(),
+                    args.config.as_deref(),
+                )
+                .map(|()| ExitCode::SUCCESS)
+            }
         }
     }
-}
-
-// The interactive preferences TUI was removed in 0.5.0-rc.10. Preferences
-// are now managed through the GUI (Edit → Preferences…) or by editing the
-// TOML file directly. We keep the `--mode preferences` variant parseable so
-// scripts don't fail with a clap "unknown value" error; instead we print a
-// migration hint and exit non-zero.
-fn preferences_migration_hint() -> ExitCode {
-    let path = solarxy_core::preferences::config_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~/.config/solarxy/config.toml".to_string());
-    eprintln!("The interactive preferences TUI was removed in Solarxy 0.5.0.");
-    eprintln!();
-    eprintln!("Preferences are now managed:");
-    eprintln!("  - In the GUI — Edit \u{2192} Preferences\u{2026}  (or press Ctrl/Cmd+,)");
-    eprintln!("  - By editing the TOML file directly:");
-    eprintln!("      {path}");
-    eprintln!();
-    eprintln!("Most display / rendering / lighting settings can also be changed live");
-    eprintln!("from the viewer's sidebar and saved with Shift+S.");
-    ExitCode::FAILURE
 }
 
 fn exec_gui(model_path: Option<&str>) -> ExitCode {
@@ -136,10 +126,12 @@ fn run_analyze(
     model_path: Option<String>,
     format: &OutputFormat,
     output: Option<&Path>,
+    config: Option<&Path>,
 ) -> anyhow::Result<()> {
     let model_path =
         model_path.ok_or_else(|| anyhow::anyhow!("Model path required for analyze mode"))?;
-    let analyzer = ModelAnalyzer::new(&model_path).context("Failed to load model")?;
+    let analyzer =
+        ModelAnalyzer::new_with_config(&model_path, config).context("Failed to load model")?;
     let report = analyzer.generate_report();
 
     let rendered = match format {
@@ -170,8 +162,41 @@ fn run_analyze(
     _model_path: Option<String>,
     _format: &OutputFormat,
     _output: Option<&Path>,
+    _config: Option<&Path>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Analyzer not available: rebuild solarxy-cli with the 'analyzer' feature")
+}
+
+#[cfg(feature = "analyzer")]
+fn run_validate(
+    paths: &[String],
+    config_path: Option<&Path>,
+    adapter_name: AdapterName,
+    adapter_format: Option<AdapterFormat>,
+    fail_on: FailOn,
+    output: Option<&Path>,
+) -> anyhow::Result<i32> {
+    let source = match config_path {
+        Some(p) => ConfigSource::load(p)?,
+        None => ConfigSource::discover(Path::new("."))?,
+    };
+    let adapter = validate::resolve_adapter(adapter_name);
+    let format = adapter_format.unwrap_or_else(|| adapter.default_format());
+    let out = ValidateOutput::from_path(output);
+    validate::run_validation(paths, source, adapter.as_ref(), format, fail_on, &out)
+        .map_err(anyhow::Error::from)
+}
+
+#[cfg(not(feature = "analyzer"))]
+fn run_validate(
+    _paths: &[String],
+    _config_path: Option<&Path>,
+    _adapter_name: AdapterName,
+    _adapter_format: Option<AdapterFormat>,
+    _fail_on: FailOn,
+    _output: Option<&Path>,
+) -> anyhow::Result<i32> {
+    anyhow::bail!("Validator not available: rebuild solarxy-cli with the 'analyzer' feature")
 }
 
 #[cfg(feature = "updater")]

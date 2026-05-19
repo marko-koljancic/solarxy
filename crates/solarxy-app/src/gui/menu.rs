@@ -114,6 +114,8 @@ pub(super) fn draw_menu_bar(
                             InspectionMode::MaterialId => "2",
                             InspectionMode::TexelDensity => "4",
                             InspectionMode::Depth => "5",
+                            InspectionMode::Overdraw => "6",
+                            InspectionMode::AoPreview => "7",
                         };
                         if ui
                             .selectable_label(selected, mode.to_string())
@@ -329,6 +331,17 @@ pub(super) fn draw_menu_bar(
             ui.menu_button("Window", |ui| {
                 if ui
                     .add(
+                        egui::Button::new("Viewport")
+                            .selected(vis.viewport_visible)
+                            .shortcut_text(format!("{MOD}+1")),
+                    )
+                    .clicked()
+                {
+                    vis.viewport_visible = !vis.viewport_visible;
+                    ui.close();
+                }
+                if ui
+                    .add(
                         egui::Button::new("Menu Bar")
                             .selected(vis.menu_bar_visible)
                             .shortcut_text("F10"),
@@ -377,6 +390,48 @@ pub(super) fn draw_menu_bar(
                     vis.fps_hud_visible = !vis.fps_hud_visible;
                     ui.close();
                 }
+                if ui
+                    .add(egui::Button::new("Review Panel").selected(vis.review_panel_visible))
+                    .clicked()
+                {
+                    vis.review_panel_visible = !vis.review_panel_visible;
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        has_model,
+                        egui::Button::new("Material Inspector")
+                            .selected(vis.material_inspector_visible),
+                    )
+                    .clicked()
+                {
+                    vis.material_inspector_visible = !vis.material_inspector_visible;
+                    ui.close();
+                }
+
+                ui.separator();
+
+                ui.menu_button("Layout", |ui| {
+                    if ui.button("Save Layout").clicked() {
+                        actions.save_dock_layout = true;
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            vis.has_saved_layout,
+                            egui::Button::new("Restore Saved Layout"),
+                        )
+                        .clicked()
+                    {
+                        actions.restore_saved_layout = true;
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Reset Layout to Default").clicked() {
+                        actions.reset_dock_layout = true;
+                        ui.close();
+                    }
+                });
             });
 
             ui.menu_button("Help", |ui| {

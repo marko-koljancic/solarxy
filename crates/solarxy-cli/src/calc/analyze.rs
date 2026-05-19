@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use solarxy_core::geometry::RawModelData;
+use solarxy_core::project_config::{self, FilenameClassifier, ProjectConfig};
 
 use super::geometry::compute_bounds;
 use solarxy_core::report::{
@@ -91,7 +92,17 @@ fn raw_to_analyzer(raw: &RawModelData) -> (Vec<AnalyzerMesh>, Vec<AnalyzerMateri
 }
 
 impl ModelAnalyzer {
+    /// Loads a model and runs validation with [`ProjectConfig::default`].
+    /// Equivalent to [`ModelAnalyzer::new_with_config`] passing `None`.
     pub fn new(path: &str) -> Result<Self> {
+        Self::new_with_config(path, None)
+    }
+
+    /// Loads a model and runs validation with a discovered or explicit
+    /// `solarxy.toml`. Discovery starts in the model's parent directory.
+    /// Emits a `tracing::info!` event when a config is loaded so the GUI
+    /// console / CLI logging surfaces it.
+    pub fn new_with_config(path: &str, config_path: Option<&Path>) -> Result<Self> {
         let ext = Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
@@ -106,7 +117,31 @@ impl ModelAnalyzer {
             .unwrap_or(path)
             .to_string();
 
-        let base_validation = solarxy_core::validation::validate_raw_model(&raw, &ext).report;
+        let model_dir = Path::new(path)
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
+        let project_config = match project_config::discover(&model_dir, config_path) {
+            Ok(Some((found, cfg))) => {
+                tracing::info!(target: "solarxy::toast", "Loaded solarxy.toml from {}", found.display());
+                cfg
+            }
+            Ok(None) => ProjectConfig::default(),
+            Err(e) => {
+                tracing::warn!("solarxy.toml load failed: {e}. Continuing with defaults.");
+                ProjectConfig::default()
+            }
+        };
+
+        let budget = resolve_triangle_budget(&project_config, Path::new(path));
+        let base_validation = solarxy_core::validation::validate_raw_model_with_config(
+            &raw,
+            &ext,
+            &project_config.validation,
+            &project_config.thresholds,
+            budget,
+        )
+        .report;
         let (meshes, materials) = raw_to_analyzer(&raw);
 
         Ok(ModelAnalyzer {
@@ -212,6 +247,19 @@ impl ModelAnalyzer {
             validation: ValidationReport { issues },
         }
     }
+}
+
+/// Resolves the per-file triangle budget by classifying the model's file
+/// name with `project_config.filenames` and looking up the resulting
+/// `AssetCategory` in `project_config.budgets`. Returns `None` when the
+/// path has no filename (defensive — practically always `Some`).
+fn resolve_triangle_budget(project_config: &ProjectConfig, path: &Path) -> Option<u32> {
+    if !project_config.validation.triangle_budget {
+        return None;
+    }
+    let classifier: &FilenameClassifier = &project_config.filenames;
+    let category = classifier.classify(path);
+    Some(project_config.budgets.for_category(category))
 }
 
 fn check_texture(

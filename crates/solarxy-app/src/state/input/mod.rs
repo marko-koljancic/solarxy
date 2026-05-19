@@ -1,3 +1,18 @@
+//! Keyboard + mouse input dispatch for the `State`-rooted application.
+//!
+//! Submodules:
+//! - `dialogs` — native file pickers (model open, HDRI import,
+//!   screenshot save) via the `rfd` crate. Returns to the event loop;
+//!   results land in `State::pending_load`.
+//! - `menu_actions` — menu-bar event flags ([`super::super::gui::MenuActions`])
+//!   draining: file/HDRI dialogs, preferences modal, view layout,
+//!   recent-file opens, etc.
+//!
+//! The keyboard map lives in this module's `handle_key_pressed`; see
+//! `gui::keyboard_shortcuts_modal` for the user-facing reference. Adding
+//! a new binding means a match arm here PLUS an entry in the shortcuts
+//! modal — they should never disagree.
+
 mod dialogs;
 mod menu_actions;
 
@@ -121,15 +136,28 @@ impl State {
                 }
             }
             KeyCode::KeyR => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
-                    self.for_each_target_cam(|cam| {
-                        cam.reset_to_bounds_axis(
-                            &bounds,
-                            cgmath::Vector3::unit_x(),
-                            cgmath::Vector3::unit_y(),
-                        );
-                    });
+                if self.input.modifiers.shift_key() {
+                    let now_active = self.review.toggle_active();
+                    if now_active {
+                        self.review.panel_open = true;
+                    }
+                    let msg = if now_active {
+                        "Review mode: On (click a face to annotate)"
+                    } else {
+                        "Review mode: Off"
+                    };
+                    self.gui.set_toast(msg, ToastSeverity::Success);
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| {
+                            cam.reset_to_bounds_axis(
+                                &bounds,
+                                cgmath::Vector3::unit_x(),
+                                cgmath::Vector3::unit_y(),
+                            );
+                        });
+                    }
                 }
             }
             KeyCode::KeyP => {
@@ -193,7 +221,14 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
-                if self.input.modifiers.shift_key() {
+                let cmd_or_ctrl = if cfg!(target_os = "macos") {
+                    self.input.modifiers.super_key()
+                } else {
+                    self.input.modifiers.control_key()
+                };
+                if cmd_or_ctrl && self.review.active {
+                    self.save_review_sidecar();
+                } else if self.input.modifiers.shift_key() {
                     self.save_preferences();
                 } else {
                     self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
@@ -335,6 +370,20 @@ impl State {
                 self.gui
                     .set_toast("Inspection: Depth", ToastSeverity::Success);
             }
+            KeyCode::Digit6 => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
+                pds.inspection_mode = InspectionMode::Overdraw;
+                self.gui
+                    .set_toast("Inspection: Overdraw", ToastSeverity::Success);
+            }
+            KeyCode::Digit7 => {
+                let pds = &mut self.view.pane_settings[self.view.active_pane];
+                pds.pane_mode = PaneMode::Scene3D;
+                pds.inspection_mode = InspectionMode::AoPreview;
+                self.gui
+                    .set_toast("Inspection: AO Preview", ToastSeverity::Success);
+            }
             KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
             KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
             KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
@@ -347,12 +396,14 @@ impl State {
     }
 
     fn write_composite_params(&self) {
+        let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
         self.renderer.post.composite.write_params(
             &self.queue,
             self.renderer.post.bloom_enabled,
             self.renderer.post.ssao_enabled,
             self.renderer.post.tone_mode,
             self.renderer.post.exposure,
+            active_inspection,
         );
     }
 
@@ -499,7 +550,32 @@ impl State {
         }
     }
 
+    /// Auto-save the current dock layout into `preferences.dock.last_layout_json`
+    /// and flush preferences to disk. Called on app exit so the next launch
+    /// restores the layout the user actually left behind. Silent on failure —
+    /// the user is on their way out and a toast wouldn't be seen anyway.
+    pub fn flush_dock_layout_on_exit(&mut self) {
+        let Some(json) = self.gui.serialize_layout() else {
+            return;
+        };
+        if self.preferences.dock.last_layout_json.as_ref() == Some(&json) {
+            return;
+        }
+        self.preferences.dock.last_layout_json = Some(json);
+        if let Err(e) = preferences::save(&self.preferences) {
+            tracing::warn!("Failed to persist dock layout on exit: {e}");
+        }
+    }
+
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        if pressed
+            && matches!(button, MouseButton::Left)
+            && self.review.active
+            && self.try_review_pick()
+        {
+            return;
+        }
+
         let ap = self.view.active_pane;
         if self.view.pane_settings[ap].pane_mode == PaneMode::UvMap {
             match button {
@@ -520,6 +596,139 @@ impl State {
         } else {
             self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
         }
+    }
+
+    /// Resolve a review-mode click. Returns `true` if the click was
+    /// consumed (the caller should not pass it down to camera handling).
+    ///
+    /// Routing order:
+    /// 1. **Re-anchor pending** — raycast geometry and route the hit
+    ///    through `ReviewState::complete_reanchor`. Always consumes the
+    ///    click; never falls through to the other paths.
+    /// 2. **Marker hit-test** — project visible markers to screen space
+    ///    and check distance to the cursor. Within ~20 px ⇒ select that
+    ///    annotation (cyan ring + panel scroll). Consumes the click.
+    /// 3. **New annotation** — raycast geometry and open a fresh
+    ///    `EditDraft` popup at the cursor; or toast "Click on the model
+    ///    surface" on a miss. Consumes the click either way.
+    fn try_review_pick(&mut self) -> bool {
+        if self.review.editing.is_some() {
+            return true;
+        }
+        let Some(scene) = self.scene.as_ref() else {
+            return false;
+        };
+
+        let panes = self.compute_panes();
+        let cursor = self.input.cursor_pos;
+        let pane_idx = super::hit_test_pane(&panes, cursor);
+        let pane = &panes[pane_idx];
+
+        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
+            return false;
+        }
+
+        let camera = if pane_idx == 0 || self.view.cameras_linked {
+            scene.cam.camera
+        } else if let Some(c) = self.view.secondary_cam.as_ref() {
+            c.camera
+        } else {
+            return false;
+        };
+
+        let view_proj = camera.build_view_projection_matrix();
+        let local = (cursor.0 - pane.x, cursor.1 - pane.y);
+
+        if let Some(target_id) = self.review.reanchor_target.clone() {
+            let ray = crate::state::raycast::screen_to_world_ray(
+                local,
+                (pane.width, pane.height),
+                view_proj,
+                camera.eye,
+            );
+            let model = &scene.model;
+            let views: Vec<crate::state::raycast::MeshView<'_>> = model
+                .cpu_meshes
+                .iter()
+                .zip(model.mesh_bounds.iter())
+                .map(|(m, b)| crate::state::raycast::MeshView {
+                    positions: &m.positions,
+                    indices: &m.indices,
+                    bounds: *b,
+                })
+                .collect();
+            let preview = self.review.find(&target_id).map_or_else(
+                || "annotation".to_string(),
+                |a| crate::state::review::short_text_preview(&a.text),
+            );
+            match crate::state::raycast::raycast_meshes(&ray, &views) {
+                Some(hit) => {
+                    if self.review.complete_reanchor(&hit) {
+                        self.gui.set_toast(
+                            &format!("Re-anchored \u{201C}{preview}\u{201D}"),
+                            ToastSeverity::Success,
+                        );
+                    }
+                }
+                None => {
+                    self.gui.set_toast(
+                        "No surface under cursor \u{2014} try again",
+                        ToastSeverity::Info,
+                    );
+                }
+            }
+            return true;
+        }
+
+        if let Some(id) =
+            self.review
+                .marker_at_screen_pos(local, (pane.width, pane.height), view_proj, 20.0)
+        {
+            self.review.selected = Some(id);
+            self.review.scroll_to_selected = true;
+            self.review.dirty = true;
+            return true;
+        }
+
+        let ray = crate::state::raycast::screen_to_world_ray(
+            local,
+            (pane.width, pane.height),
+            view_proj,
+            camera.eye,
+        );
+
+        let model = &scene.model;
+        let views: Vec<crate::state::raycast::MeshView<'_>> = model
+            .cpu_meshes
+            .iter()
+            .zip(model.mesh_bounds.iter())
+            .map(|(m, b)| crate::state::raycast::MeshView {
+                positions: &m.positions,
+                indices: &m.indices,
+                bounds: *b,
+            })
+            .collect();
+
+        match crate::state::raycast::raycast_meshes(&ray, &views) {
+            Some(hit) => {
+                let anchor = solarxy_core::review::AnchorPosition {
+                    mesh_index: hit.mesh_index,
+                    face_index: hit.face_index,
+                    barycentric: hit.barycentric,
+                    world_pos_fallback: [hit.world_pos.x, hit.world_pos.y, hit.world_pos.z],
+                };
+                let seq = self.review.alloc_draft_seq();
+                self.review.editing =
+                    Some(crate::state::review::EditDraft::new_at(seq, anchor, cursor));
+            }
+            None => {
+                self.gui.set_toast(
+                    "Click on the model surface to annotate",
+                    ToastSeverity::Info,
+                );
+            }
+        }
+        true
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {

@@ -1,9 +1,16 @@
+//! `serde_json` schema for analyzer output (`solarxy-cli analyze --json`).
+//! Mirrors [`crate::report::AnalysisReport`] in a stable, documented JSON
+//! shape consumed by tooling.
+//!
+//! Available with the `serialization` feature.
+
 use serde::Serialize;
 
 use crate::report::{
     AnalysisReport, BoundsSummary, IssueScope, MaterialSummary, MeshSummary, Severity,
     TextureEntry, ValidationIssue, ValidationReport,
 };
+use crate::validation::IssueKind;
 
 #[derive(Debug, Serialize)]
 pub struct JsonVec3 {
@@ -133,9 +140,10 @@ impl From<&MaterialSummary> for JsonMaterial {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct JsonIssue {
     pub severity: String,
+    pub kind: String,
     pub scope: String,
     pub scope_index: Option<usize>,
     pub message: String,
@@ -148,12 +156,27 @@ impl From<&ValidationIssue> for JsonIssue {
             IssueScope::Mesh(idx) => ("mesh", Some(*idx)),
             IssueScope::Material(idx) => ("material", Some(*idx)),
             IssueScope::Face(mesh_idx, _) => ("mesh", Some(*mesh_idx)),
+            IssueScope::Edge { mesh_index, .. } => ("edge", Some(*mesh_index)),
+        };
+        let kind = match i.kind {
+            IssueKind::NormalMismatch => "NormalMismatch",
+            IssueKind::FlippedNormals => "FlippedNormals",
+            IssueKind::UvMismatch => "UvMismatch",
+            IssueKind::MissingUvs => "MissingUvs",
+            IssueKind::NonTriangulated => "NonTriangulated",
+            IssueKind::EmptyIndices => "EmptyIndices",
+            IssueKind::InvalidMaterialRef => "InvalidMaterialRef",
+            IssueKind::DegenerateTriangles => "DegenerateTriangles",
+            IssueKind::MissingTexture => "MissingTexture",
+            IssueKind::NonManifoldEdge => "NonManifoldEdge",
+            IssueKind::TriangleBudgetExceeded => "TriangleBudgetExceeded",
         };
         Self {
             severity: match i.severity {
                 Severity::Error => "error".to_owned(),
                 Severity::Warning => "warning".to_owned(),
             },
+            kind: kind.to_owned(),
             scope: scope.to_owned(),
             scope_index,
             message: i.message.clone(),
@@ -178,8 +201,13 @@ impl From<&ValidationReport> for JsonValidation {
     }
 }
 
+/// JSON `schema_version` written by this build. Bump when the on-disk shape
+/// changes incompatibly; new optional fields don't require a bump.
+pub const JSON_REPORT_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Serialize)]
 pub struct JsonReport {
+    pub schema_version: u32,
     pub model_name: String,
     pub mesh_count: usize,
     pub material_count: usize,
@@ -195,6 +223,7 @@ pub struct JsonReport {
 impl From<&AnalysisReport> for JsonReport {
     fn from(r: &AnalysisReport) -> Self {
         Self {
+            schema_version: JSON_REPORT_SCHEMA_VERSION,
             model_name: r.model_name.clone(),
             mesh_count: r.mesh_count,
             material_count: r.material_count,
@@ -209,6 +238,11 @@ impl From<&AnalysisReport> for JsonReport {
     }
 }
 
+/// Serializes an [`AnalysisReport`] to a pretty-printed JSON string.
+///
+/// # Errors
+/// Returns `Err` if any field contains values that don't serialize (e.g.
+/// non-finite floats — currently impossible by construction).
 pub fn report_to_json(report: &AnalysisReport) -> anyhow::Result<String> {
     let json_report = JsonReport::from(report);
     serde_json::to_string_pretty(&json_report).map_err(anyhow::Error::from)

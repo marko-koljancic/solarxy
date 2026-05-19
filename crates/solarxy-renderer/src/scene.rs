@@ -1,3 +1,8 @@
+//! [`ModelScene`]: per-loaded-model GPU state — vertex/index buffers, bind
+//! groups, shadow state, validation map. Plus the [`lights_from_camera`] and
+//! [`create_light_bind_group`] / [`create_light_bind_group_selective`]
+//! helpers used by both `ModelScene` construction and the per-frame update.
+
 use cgmath::Rotation3;
 use solarxy_core::preferences::BackgroundMode;
 use solarxy_core::validation::ValidationReport;
@@ -44,6 +49,12 @@ impl BackgroundModeExt for BackgroundMode {
                 b: 0.12,
                 a: 1.0,
             },
+            Self::AyuMirage => wgpu::Color {
+                r: 0.122,
+                g: 0.141,
+                b: 0.188,
+                a: 1.0,
+            },
             Self::Black => wgpu::Color {
                 r: 0.0,
                 g: 0.0,
@@ -66,6 +77,10 @@ impl BackgroundModeExt for BackgroundMode {
             Self::White => ([1.0, 1.0, 1.0], [0.85, 0.85, 0.85]),
             Self::Gradient => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
             Self::DarkGray => ([0.30, 0.32, 0.35], [0.15, 0.14, 0.13]),
+            Self::AyuMirage => (
+                [0.122 * 1.4, 0.141 * 1.4, 0.188 * 1.4],
+                [0.122 * 0.6, 0.141 * 0.6, 0.188 * 0.6],
+            ),
             Self::Black => ([0.20, 0.22, 0.25], [0.08, 0.07, 0.06]),
         }
     }
@@ -108,6 +123,7 @@ pub struct ModelScene {
     pub stats: ModelStats,
     pub validation: ValidationReport,
     pub validation_mesh_cat: Vec<Option<usize>>,
+    pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
 }
 
 impl ModelScene {
@@ -174,6 +190,28 @@ impl ModelScene {
             &viewer_validation.raw_to_gpu,
         );
 
+        let edge_index_lists = validation::build_mesh_edge_indices(
+            &viewer_validation.report,
+            model.meshes.len(),
+            &viewer_validation.raw_to_gpu,
+        );
+        let validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>> = edge_index_lists
+            .into_iter()
+            .enumerate()
+            .map(|(mi, indices)| {
+                if indices.is_empty() {
+                    None
+                } else {
+                    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("Validation Edge Indices {mi}")),
+                        contents: bytemuck::cast_slice(&indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    Some((buf, indices.len() as u32))
+                }
+            })
+            .collect();
+
         Ok(ModelScene {
             model,
             cam,
@@ -187,6 +225,7 @@ impl ModelScene {
             stats,
             validation: viewer_validation.report,
             validation_mesh_cat,
+            validation_edge_buffers,
         })
     }
 }

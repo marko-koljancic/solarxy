@@ -73,6 +73,13 @@ const SECTIONS: &[Section] = &[
                 action: "Toggle console",
             },
             Entry {
+                #[cfg(target_os = "macos")]
+                keys: "⌘+1",
+                #[cfg(not(target_os = "macos"))]
+                keys: "Ctrl+1",
+                action: "Toggle viewport",
+            },
+            Entry {
                 keys: "?",
                 action: "Open this Keyboard Shortcuts window",
             },
@@ -147,6 +154,14 @@ const SECTIONS: &[Section] = &[
                 action: "Inspection: Depth",
             },
             Entry {
+                keys: "6",
+                action: "Inspection: Overdraw",
+            },
+            Entry {
+                keys: "7",
+                action: "Inspection: AO Preview",
+            },
+            Entry {
                 keys: "M / Shift+M",
                 action: "Cycle material override",
             },
@@ -190,6 +205,31 @@ const SECTIONS: &[Section] = &[
             Entry {
                 keys: "Shift+V",
                 action: "Validation overlay",
+            },
+        ],
+    },
+    Section {
+        title: "Review",
+        entries: &[
+            Entry {
+                keys: "Shift+R",
+                action: "Toggle review mode",
+            },
+            Entry {
+                keys: "Click",
+                action: "Select marker (within ~20 px) or create new note",
+            },
+            Entry {
+                keys: "__MOD__+Enter",
+                action: "Save the open review note",
+            },
+            Entry {
+                keys: "__MOD__+S",
+                action: "Save sidecar (in review mode)",
+            },
+            Entry {
+                keys: "Esc",
+                action: "Cancel popup / re-anchor / delete confirm / exit review mode",
             },
         ],
     },
@@ -281,7 +321,7 @@ pub(super) fn draw_keyboard_shortcuts_modal(
                 }
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new("User-remappable shortcuts land in 0.6.0.")
+                    egui::RichText::new("User-remappable shortcuts land in a future release.")
                         .small()
                         .italics()
                         .color(egui::Color32::from_white_alpha(140)),

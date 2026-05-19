@@ -1,0 +1,121 @@
+name: GHCR Publish (solarxy-cli)
+
+# Builds and pushes a multi-arch Docker image of solarxy-cli to GitHub
+# Container Registry on each stable release.
+#
+# Image tags published:
+#   ghcr.io/marko-koljancic/solarxy-cli:<major>.<minor>.<patch>   (e.g. 0.6.0)
+#   ghcr.io/marko-koljancic/solarxy-cli:<major>.<minor>           (e.g. 0.6)
+#   ghcr.io/marko-koljancic/solarxy-cli:latest                    (stable only)
+#
+# Skipped entirely on prereleases (-rc.*, -alpha.*, -beta.*) so RC tags
+# don't pollute `:latest` or the `:0.6` floating tag.
+#
+# Invocation:
+#   - `workflow_call` — cargo-dist's release.yml hooks this via
+#     post-announce-jobs (see dist-workspace.toml). The plan JSON carries
+#     `announcement_tag` + `announcement_is_prerelease`.
+#   - `workflow_dispatch` — manual run against an existing release tag.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v0.6.0). The Dockerfile fetches assets from this tag.
+        required: true
+      force-latest:
+        description: Tag this build as ':latest' even if the tag looks like a prerelease.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write       # required to push to ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # `github.event_name` in a reusable workflow reflects the CALLER's event,
+      # so we can't key off it. Detect mode by input presence and short-circuit
+      # fromJson via the empty-string guard.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+      IS_PRERELEASE: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_is_prerelease || false }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Skip on prerelease
+        id: gate
+        run: |
+          set -euo pipefail
+          tag="${TAG#v}"
+          # Workflow-dispatch override: --force-latest also forces the build.
+          if [[ "${{ inputs.force-latest }}" == "true" ]]; then
+            echo "force-latest set; building anyway"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$IS_PRERELEASE" == "true" || "$tag" == *-rc.* || "$tag" == *-alpha.* || "$tag" == *-beta.* ]]; then
+            echo "Tag '${TAG}' is a prerelease; skipping GHCR publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute image tags
+        if: steps.gate.outputs.publish == 'true'
+        id: tags
+        run: |
+          set -euo pipefail
+          ver="${TAG#v}"
+          # Strip any prerelease/build suffix for the floating major.minor tag.
+          base="${ver%%-*}"
+          minor=$(echo "$base" | cut -d. -f1,2)
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/solarxy-cli"
+          {
+            echo "tags<<EOF"
+            echo "${repo}:${ver}"
+            echo "${repo}:${minor}"
+            echo "${repo}:latest"
+            echo "EOF"
+            echo "solarxy_version=${ver}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (for arm64 emulation)
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cli
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            SOLARXY_VERSION=${{ steps.tags.outputs.solarxy_version }}
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: true
+          sbom: true
+          push: true

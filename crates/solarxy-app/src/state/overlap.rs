@@ -1,3 +1,7 @@
+//! UV overlap GPU readback polling: maps the overlap counter buffer once
+//! the readback fence resolves and surfaces the per-mesh overlap percentage
+//! to the sidebar.
+
 use super::{State, UvOverlapResources};
 
 impl State {

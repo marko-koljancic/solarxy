@@ -1,3 +1,14 @@
+//! All `wgpu::RenderPipeline`s used by the renderer, grouped by purpose:
+//! [`ScenePipelines`] (PBR, shadow, floor, wireframes, gbuffer),
+//! [`PostProcessingPipelines`] (bloom, SSAO, composite),
+//! [`OverlayPipelines`] (grid, normals, background, gizmo, validation),
+//! [`UvPipelines`] (UV map / overlap / debug), and
+//! [`InspectionPipelines`] (reserved for inspection-mode-specific pipelines
+//! — empty in 0.6.0 Stream A; populated by the Overdraw work in Stream D).
+//!
+//! Built once at startup via [`Pipelines::new`] and reused. The fluent
+//! builder in [`crate::pipeline_builder`] cuts boilerplate.
+
 use crate::bind_groups::BindGroupLayouts;
 use crate::model::{self, Vertex};
 use crate::pipeline_builder::PipelineBuilder;
@@ -73,7 +84,7 @@ impl model::Vertex for InstanceRaw {
     }
 }
 
-pub struct Pipelines {
+pub struct ScenePipelines {
     pub main: wgpu::RenderPipeline,
     pub alpha_blend: wgpu::RenderPipeline,
     pub shadow: wgpu::RenderPipeline,
@@ -81,9 +92,29 @@ pub struct Pipelines {
     pub ghosted_fill: wgpu::RenderPipeline,
     pub edge_wire: wgpu::RenderPipeline,
     pub edge_wire_ghosted: wgpu::RenderPipeline,
+    pub gbuffer: wgpu::RenderPipeline,
+}
+
+pub struct PostProcessingPipelines {
+    pub bloom_extract: wgpu::RenderPipeline,
+    pub bloom_blur_h: wgpu::RenderPipeline,
+    pub bloom_blur_v: wgpu::RenderPipeline,
+    pub composite: wgpu::RenderPipeline,
+    pub ssao: wgpu::RenderPipeline,
+    pub ssao_blur_h: wgpu::RenderPipeline,
+    pub ssao_blur_v: wgpu::RenderPipeline,
+}
+
+pub struct OverlayPipelines {
     pub grid: wgpu::RenderPipeline,
     pub normals: wgpu::RenderPipeline,
     pub background: wgpu::RenderPipeline,
+    pub gizmo: wgpu::RenderPipeline,
+    pub validation_overlay: wgpu::RenderPipeline,
+    pub validation_edge: wgpu::RenderPipeline,
+}
+
+pub struct UvPipelines {
     pub uv_gradient: wgpu::RenderPipeline,
     pub uv_checker: wgpu::RenderPipeline,
     pub uv_no_uvs: wgpu::RenderPipeline,
@@ -92,16 +123,19 @@ pub struct Pipelines {
     pub uv_map_wire: wgpu::RenderPipeline,
     pub uv_overlap_count: wgpu::RenderPipeline,
     pub uv_overlap_overlay: wgpu::RenderPipeline,
-    pub gizmo: wgpu::RenderPipeline,
-    pub bloom_extract: wgpu::RenderPipeline,
-    pub bloom_blur_h: wgpu::RenderPipeline,
-    pub bloom_blur_v: wgpu::RenderPipeline,
-    pub composite: wgpu::RenderPipeline,
-    pub gbuffer: wgpu::RenderPipeline,
-    pub ssao: wgpu::RenderPipeline,
-    pub ssao_blur_h: wgpu::RenderPipeline,
-    pub ssao_blur_v: wgpu::RenderPipeline,
-    pub validation_overlay: wgpu::RenderPipeline,
+}
+
+pub struct InspectionPipelines {
+    pub overdraw_count: wgpu::RenderPipeline,
+    pub overdraw_show: wgpu::RenderPipeline,
+}
+
+pub struct Pipelines {
+    pub scene: ScenePipelines,
+    pub post: PostProcessingPipelines,
+    pub overlay: OverlayPipelines,
+    pub uv: UvPipelines,
+    pub inspection: InspectionPipelines,
 }
 
 fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
@@ -112,6 +146,12 @@ fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
 }
 
 impl Pipelines {
+    /// Builds every render pipeline once at startup; returns them grouped
+    /// into [`ScenePipelines`], [`PostProcessingPipelines`], [`OverlayPipelines`],
+    /// [`UvPipelines`], and [`InspectionPipelines`]. Each pipeline reuses
+    /// layouts from `layouts` (which itself is the single source of truth
+    /// for bind-group layouts) and a shared `sample_count` for MSAA-aware
+    /// pipelines.
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -244,6 +284,28 @@ impl Pipelines {
             slope_scale: -1.0,
             clamp: 0.0,
         })
+        .sample_count(sample_count)
+        .build();
+
+        let validation_edge = PipelineBuilder::new(
+            device,
+            "Validation Edge Lines",
+            &validation_layout,
+            &validation_shader,
+        )
+        .vertex_entry("vs_validation")
+        .fragment_entry("fs_validation")
+        .buffers(model_instance_buffers())
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::LessEqual)
+        .depth_bias(wgpu::DepthBiasState {
+            constant: -8,
+            slope_scale: -1.0,
+            clamp: 0.0,
+        })
+        .topology(wgpu::PrimitiveTopology::LineList)
         .sample_count(sample_count)
         .build();
 
@@ -684,35 +746,102 @@ impl Pipelines {
         .no_depth()
         .build();
 
+        let overdraw_count_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Overdraw Count Pipeline Layout"),
+                bind_group_layouts: &[&layouts.camera],
+                push_constant_ranges: &[],
+            });
+        let overdraw_count_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Overdraw Count Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overdraw_count.wgsl").into()),
+        });
+        let overdraw_count_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::REPLACE,
+        };
+        let overdraw_count = PipelineBuilder::new(
+            device,
+            "Overdraw Count Pipeline",
+            &overdraw_count_layout,
+            &overdraw_count_shader,
+        )
+        .vertex_entry("vs_count")
+        .fragment_entry("fs_count")
+        .buffers(model_instance_buffers())
+        .color_format(crate::overdraw::COUNT_FORMAT)
+        .blend(overdraw_count_blend)
+        .no_depth()
+        .build();
+
+        let overdraw_show_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Overdraw Show Pipeline Layout"),
+            bind_group_layouts: &[&layouts.overdraw_show],
+            push_constant_ranges: &[],
+        });
+        let overdraw_show_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Overdraw Show Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overdraw_show.wgsl").into()),
+        });
+        let overdraw_show = PipelineBuilder::new(
+            device,
+            "Overdraw Show Pipeline",
+            &overdraw_show_layout,
+            &overdraw_show_shader,
+        )
+        .vertex_entry("vs_fullscreen")
+        .fragment_entry("fs_show")
+        .color_format(hdr_format)
+        .no_blend()
+        .no_depth()
+        .build();
+
         Pipelines {
-            main,
-            alpha_blend,
-            shadow,
-            floor,
-            ghosted_fill,
-            edge_wire,
-            edge_wire_ghosted,
-            grid,
-            normals,
-            background,
-            uv_gradient,
-            uv_checker,
-            uv_no_uvs,
-            uv_map_checker,
-            uv_map_texture,
-            uv_map_wire,
-            uv_overlap_count,
-            uv_overlap_overlay,
-            gizmo,
-            bloom_extract,
-            bloom_blur_h,
-            bloom_blur_v,
-            composite,
-            gbuffer,
-            ssao,
-            ssao_blur_h,
-            ssao_blur_v,
-            validation_overlay,
+            scene: ScenePipelines {
+                main,
+                alpha_blend,
+                shadow,
+                floor,
+                ghosted_fill,
+                edge_wire,
+                edge_wire_ghosted,
+                gbuffer,
+            },
+            post: PostProcessingPipelines {
+                bloom_extract,
+                bloom_blur_h,
+                bloom_blur_v,
+                composite,
+                ssao,
+                ssao_blur_h,
+                ssao_blur_v,
+            },
+            overlay: OverlayPipelines {
+                grid,
+                normals,
+                background,
+                gizmo,
+                validation_overlay,
+                validation_edge,
+            },
+            uv: UvPipelines {
+                uv_gradient,
+                uv_checker,
+                uv_no_uvs,
+                uv_map_checker,
+                uv_map_texture,
+                uv_map_wire,
+                uv_overlap_count,
+                uv_overlap_overlay,
+            },
+            inspection: InspectionPipelines {
+                overdraw_count,
+                overdraw_show,
+            },
         }
     }
 }

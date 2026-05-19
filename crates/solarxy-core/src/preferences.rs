@@ -1,3 +1,20 @@
+//! Solarxy's user preferences: the `~/.config/solarxy/config.toml` schema
+//! plus every cycle-able enum shared between sidebar UI and shader uniforms.
+//!
+//! - [`Preferences`] — the root struct, loaded by [`load`] and saved by
+//!   [`save`]. Sub-structs (`display`/`rendering`/`lighting`/`window`/
+//!   `history`/`ui`/`updater`) each use `#[serde(default)]` so older config
+//!   files upgrade cleanly when new fields are added.
+//! - [`config_path`] — platform-specific location via `dirs::config_dir()`.
+//! - Cycle-able enums ([`ViewMode`], [`IblMode`], [`ToneMode`], etc.) are
+//!   produced by an internal `cycle_enum!` macro that emits `Display` plus
+//!   an `ALL: &[Self]` slice — sidebar dropdowns iterate `ALL` directly.
+//!
+//! `IblMode` toggles drive the `rebuild_light_bind_group` chokepoint in
+//! `solarxy-app/src/state/update.rs`. See `IblMode` variants for semantics.
+//!
+//! Available with the `serialization` feature.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -128,6 +145,7 @@ cycle_enum! {
         White => "White",
         Gradient => "Gradient",
         DarkGray => "Dark",
+        AyuMirage => "Ayu Mirage",
         Black => "Black",
     }
     ; cycle
@@ -193,16 +211,30 @@ cycle_enum! {
         MaterialId => "Material ID",
         TexelDensity => "Texel Density",
         Depth => "Depth",
+        Overdraw => "Overdraw",
+        AoPreview => "AO Preview",
     }
 }
 
 impl InspectionMode {
+    /// Discriminant passed to shader-side `inspection_mode` uniforms.
+    ///
+    /// - `Shaded` (0): default PBR rendering — no special case in shaders.
+    /// - `MaterialId` (1): per-material hashed colors — see `shader.wgsl`.
+    /// - `TexelDensity` (2): UV-derivative-based density ramp — see `shader.wgsl`.
+    /// - `Depth` (3): linearized depth ramp — see `shader.wgsl`.
+    /// - `Overdraw` (4): handled outside `shader.wgsl` via a dedicated
+    ///   count+show pipeline pair in `solarxy-renderer/src/overdraw.rs`.
+    /// - `AoPreview` (5): handled in `composite.wgsl` — composite samples
+    ///   the SSAO buffer directly and bypasses scene tone-mapping.
     pub fn as_u32(self) -> u32 {
         match self {
             Self::Shaded => 0,
             Self::MaterialId => 1,
             Self::TexelDensity => 2,
             Self::Depth => 3,
+            Self::Overdraw => 4,
+            Self::AoPreview => 5,
         }
     }
 }
@@ -265,6 +297,23 @@ cycle_enum! {
     ; cycle
 }
 
+/// Root TOML structure persisted at `~/.config/solarxy/config.toml`
+/// (via [`config_path`]).
+///
+/// Every sub-section is `#[serde(default)]` so older config files load
+/// cleanly when new sections are added across releases. `config_version`
+/// is reserved for future migrations; the loader currently treats every
+/// version as readable and lets serde fill in unknown fields via defaults.
+///
+/// Three edit surfaces mutate this struct, each authoritative for a
+/// different slice (see CLAUDE.md "Key Patterns" for the canonical
+/// split):
+/// - GUI **Edit → Preferences…** (`Ctrl/⌘+,`) — startup-only fields
+///   (window size, MSAA), UI defaults, updater behaviour.
+/// - GUI sidebar + `Shift+S` — live per-session display / rendering /
+///   lighting settings.
+/// - Direct TOML editing — anything; reload via the modal's
+///   **Open config file** button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     pub config_version: u32,
@@ -282,10 +331,15 @@ pub struct Preferences {
     pub ui: UiPrefs,
     #[serde(default)]
     pub updater: UpdaterPrefs,
+    #[serde(default)]
+    pub review: ReviewPrefs,
+    #[serde(default)]
+    pub dock: DockPrefs,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayPrefs {
+    #[serde(default = "default_background")]
     pub background: BackgroundMode,
     pub view_mode: ViewMode,
     pub normals_mode: NormalsMode,
@@ -314,6 +368,10 @@ pub struct DisplayPrefs {
     pub inspection_mode: InspectionMode,
     #[serde(default = "default_texel_density_target")]
     pub texel_density_target: f32,
+}
+
+fn default_background() -> BackgroundMode {
+    BackgroundMode::Gradient
 }
 
 fn default_exposure() -> f32 {
@@ -382,8 +440,6 @@ pub struct UiPrefs {
     pub default_sidebar_visible: bool,
     #[serde(default)]
     pub default_fps_hud_visible: bool,
-    #[serde(default = "default_true")]
-    pub default_console_docked: bool,
     #[serde(default = "default_max_recent_files")]
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
@@ -399,7 +455,6 @@ impl Default for UiPrefs {
         Self {
             default_sidebar_visible: true,
             default_fps_hud_visible: false,
-            default_console_docked: true,
             max_recent_files: default_max_recent_files(),
             open_stats_on_model_load: true,
         }
@@ -414,6 +469,42 @@ pub struct UpdaterPrefs {
     pub channel: UpdaterChannel,
 }
 
+/// Persisted dock layout. JSON strings hold a serialized
+/// `egui_dock::DockState<SolarxyTab>` (the `egui_dock` 0.18 `serde` feature
+/// derives `Serialize`/`Deserialize` on `DockState<T: Serialize>`).
+///
+/// Two slots:
+/// - `last_layout_json` is auto-written on app quit and restored on launch.
+/// - `saved_layout_json` is written only by Window → Save Layout and
+///   replayed by Window → Restore Saved Layout. Independent from auto-save
+///   so the user can mess up the live layout without losing their snapshot.
+///
+/// Deserialization failures (e.g. after a `SolarxyTab` variant bump) fall
+/// back to the default layout and log a debug line — never panic.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockPrefs {
+    #[serde(default)]
+    pub last_layout_json: Option<String>,
+    #[serde(default)]
+    pub saved_layout_json: Option<String>,
+}
+
+/// User-level review-mode preferences. Project-level settings (sidecar
+/// location, etc.) live in [`crate::project_config::ReviewSettings`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReviewPrefs {
+    /// Display name written to `ReviewAnnotation.author` on new annotations.
+    /// `None` ⇒ anonymous. Solarxy deliberately does NOT auto-derive from
+    /// `git config user.name` or OS username — attribution is opt-in.
+    #[serde(default)]
+    pub author: Option<String>,
+
+    /// Whether the review side panel is visible by default on app launch.
+    /// Persists across sessions; mirror flag for the panel's open state.
+    #[serde(default)]
+    pub panel_open: bool,
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -425,6 +516,8 @@ impl Default for Preferences {
             history: HistoryPrefs::default(),
             ui: UiPrefs::default(),
             updater: UpdaterPrefs::default(),
+            review: ReviewPrefs::default(),
+            dock: DockPrefs::default(),
         }
     }
 }
@@ -588,7 +681,6 @@ mod tests {
             ui: UiPrefs {
                 default_sidebar_visible: false,
                 default_fps_hud_visible: true,
-                default_console_docked: false,
                 max_recent_files: 10,
                 open_stats_on_model_load: false,
             },
@@ -596,10 +688,54 @@ mod tests {
                 check_on_launch: true,
                 channel: UpdaterChannel::Prerelease,
             },
+            review: ReviewPrefs {
+                author: Some("Marko".to_string()),
+                panel_open: true,
+            },
+            dock: DockPrefs {
+                last_layout_json: Some(r#"{"surfaces":[]}"#.to_string()),
+                saved_layout_json: None,
+            },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Preferences = toml::from_str(&toml_str).unwrap();
         assert_eq!(prefs, parsed);
+    }
+
+    #[test]
+    fn review_prefs_default_is_anonymous_closed() {
+        let r = ReviewPrefs::default();
+        assert!(
+            r.author.is_none(),
+            "default author must be None (anonymous)"
+        );
+        assert!(!r.panel_open, "default panel_open must be false");
+    }
+
+    #[test]
+    fn review_prefs_missing_section_uses_defaults() {
+        let toml_str = r"
+            config_version = 1
+        ";
+        let parsed: Preferences = toml::from_str(toml_str).expect("parses without [review]");
+        assert!(parsed.review.author.is_none());
+        assert!(!parsed.review.panel_open);
+    }
+
+    #[test]
+    fn review_prefs_partial_section_fills_missing_with_defaults() {
+        let toml_str = r#"
+            config_version = 1
+
+            [review]
+            author = "Marko"
+        "#;
+        let parsed: Preferences = toml::from_str(toml_str).expect("parses with partial [review]");
+        assert_eq!(parsed.review.author.as_deref(), Some("Marko"));
+        assert!(
+            !parsed.review.panel_open,
+            "panel_open defaults when omitted"
+        );
     }
 
     #[test]
@@ -703,7 +839,6 @@ mod tests {
         let ui = UiPrefs::default();
         assert!(ui.default_sidebar_visible);
         assert!(!ui.default_fps_hud_visible);
-        assert!(ui.default_console_docked);
         assert_eq!(ui.max_recent_files, 20);
     }
 

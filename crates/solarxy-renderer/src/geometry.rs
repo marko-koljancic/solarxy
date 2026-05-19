@@ -1,3 +1,7 @@
+//! Renderer-side geometry helpers (CPU-side index/vertex buffer construction
+//! for grid lines, axes, gizmo arrows, UV quads, etc.). For raw mesh data,
+//! see `solarxy_core::geometry`.
+
 pub use solarxy_core::geometry::{
     compute_bounds, compute_normals, compute_tangent_basis, compute_tangent_from_normal,
     extract_edges, RawImageData, RawMaterialData, RawMeshData, RawModelData,

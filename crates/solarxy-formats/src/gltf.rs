@@ -1,6 +1,6 @@
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
-use solarxy_core::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
 pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
     let (document, buffers, images) = ::gltf::import(file_path)?;
@@ -24,7 +24,7 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
             roughness_factor: 0.5,
             metallic_factor: 0.0,
             emissive_factor: [0.0, 0.0, 0.0],
-            alpha_mode: 0,
+            alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             ambient: None,
             diffuse: None,
@@ -90,9 +90,9 @@ fn extract_materials(
             let emissive_factor = mat.emissive_factor();
 
             let alpha_mode = match mat.alpha_mode() {
-                ::gltf::material::AlphaMode::Opaque => 0,
-                ::gltf::material::AlphaMode::Mask => 1,
-                ::gltf::material::AlphaMode::Blend => 2,
+                ::gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
+                ::gltf::material::AlphaMode::Mask => AlphaMode::Mask,
+                ::gltf::material::AlphaMode::Blend => AlphaMode::Blend,
             };
             let alpha_cutoff = mat.alpha_cutoff().unwrap_or(0.5);
 
@@ -142,16 +142,17 @@ fn resolve_texture(
     parent_dir: &std::path::Path,
 ) -> (Option<std::path::PathBuf>, Option<RawImageData>) {
     let image = texture.source();
+    let decoded = image_data_to_raw(&images[image.index()]);
 
     match image.source() {
         ::gltf::image::Source::Uri { uri, .. } => {
             if uri.starts_with("data:") {
-                (None, image_data_to_raw(&images[image.index()]))
+                (None, decoded)
             } else {
-                (Some(parent_dir.join(uri)), None)
+                (Some(parent_dir.join(uri)), decoded)
             }
         }
-        ::gltf::image::Source::View { .. } => (None, image_data_to_raw(&images[image.index()])),
+        ::gltf::image::Source::View { .. } => (None, decoded),
     }
 }
 

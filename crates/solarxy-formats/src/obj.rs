@@ -1,7 +1,7 @@
 use std::io::{BufReader, Cursor};
 use tobj::LoadError;
 
-use solarxy_core::{RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
 
 pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
     let obj_text = std::fs::read_to_string(file_path)?;
@@ -54,8 +54,8 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             .unwrap_or(0.0);
 
         let (alpha_mode, alpha_cutoff) = match m.dissolve {
-            Some(d) if d < 1.0 => (1u32, 0.5f32),
-            _ => (0, 0.5),
+            Some(d) if d < 1.0 => (AlphaMode::Mask, 0.5f32),
+            _ => (AlphaMode::Opaque, 0.5),
         };
 
         materials.push(RawMaterialData {

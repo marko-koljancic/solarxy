@@ -1,3 +1,8 @@
+//! Analyzer report data: mesh / material / texture / bounds summaries used
+//! by `solarxy-cli analyze` (TUI rows + JSON output via [`crate::json`]).
+//!
+//! Available with the `serialization` feature.
+
 use std::fmt;
 
 use crate::format_number;

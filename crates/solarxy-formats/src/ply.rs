@@ -1,7 +1,7 @@
 use std::io::BufReader;
 use ply_rs_bw::ply::Property;
 
-use solarxy_core::{RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
     match *prop {
@@ -244,7 +244,7 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
         roughness_factor: 0.5,
         metallic_factor: 0.0,
         emissive_factor: [0.0, 0.0, 0.0],
-        alpha_mode: 0,
+        alpha_mode: AlphaMode::Opaque,
         alpha_cutoff: 0.5,
         ambient: None,
         diffuse: None,

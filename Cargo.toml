@@ -6,11 +6,12 @@ members = [
     "crates/solarxy-renderer",
     "crates/solarxy-app",
     "crates/solarxy-cli",
+    "crates/solarxy-validate",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0-rc.1"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -18,31 +19,29 @@ repository = "https://github.com/marko-koljancic/solarxy"
 authors = ["Marko Koljancic <marko.koljancic@gmail.com>"]
 
 [workspace.dependencies]
-cgmath    = "0.18"
-anyhow    = "1.0.100"
+cgmath = "0.18"
+anyhow = "1.0.100"
 thiserror = "2"
-
-[workspace.lints]
-# (placeholder for future workspace-wide lint config)
+regex = "1.11"
+strsim = "0.11"
+schemars = "0.8"
+ulid = "1"
+sha2 = "0.10"
+egui_dock = { version = "0.18", features = ["serde"] }
 
 [profile.release]
-opt-level     = 3
-lto           = "thin"
+opt-level = 3
+lto = "thin"
 codegen-units = 1
-strip         = "symbols"
-panic         = "abort"
+strip = "symbols"
+panic = "abort"
 
 [profile.dist]
-inherits      = "release"
-lto           = "fat"
+inherits = "release"
+lto = "fat"
 codegen-units = 1
-strip         = "symbols"
-panic         = "abort"
-
-# ---- Root binary ---------------------------------------------------------
-# This crate is bin-only after the v0.6.0 workspace split. Feature-gated
-# build matrix is gone; the GUI is always linked. CLI lives in
-# crates/solarxy-cli with its own [[bin]] target.
+strip = "symbols"
+panic = "abort"
 
 [package]
 name = "solarxy"
@@ -60,18 +59,11 @@ path = "src/main.rs"
 
 [dependencies]
 solarxy-core = { path = "crates/solarxy-core" }
-solarxy-app  = { path = "crates/solarxy-app" }
-clap         = { version = "4.5.53", features = ["derive"] }
-anyhow       = { workspace = true }
+solarxy-app = { path = "crates/solarxy-app" }
+clap = { version = "4.5.53", features = ["derive"] }
+anyhow = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
-time         = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
-
-# ---- Native installer metadata -------------------------------------------
-# `cargo-bundle` consumes [package.metadata.bundle] for macOS .app staging
-# (the actual .app + .dmg is hand-rolled in
-# .github/actions/native-bundle/action.yml). MSI metadata is in
-# [package.metadata.wix]. Linux GUI is shipped via Flathub (manifest under
-# packaging/flatpak/) and AppImage (built in native-bundle action).
+time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
 
 [package.metadata.bundle]
 name = "Solarxy"

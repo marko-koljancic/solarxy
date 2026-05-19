@@ -1,12 +1,33 @@
+//! `State::render`: per-frame entry point. Builds a per-pane camera,
+//! invokes [`solarxy_renderer::frame::Renderer::render_pane`] for each pane,
+//! and drives the egui sidebar/menu/HUD/console paint at the end.
+//!
+//! Reads `GuiSnapshot::from_state` then calls `apply_to_state` after the
+//! sidebar has had a chance to mutate it; the resulting `SidebarChanges`
+//! drives any expensive recomputations (background, wireframe, composite,
+//! IBL).
+
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::visualization::GridUniform;
-use solarxy_core::preferences::{MaterialOverride, PaneMode, UvMapBackground};
+use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, UvMapBackground};
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
 use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
+    /// Per-frame render entry point. Computes pane rectangles, dispatches
+    /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
+    /// HUD, console, modals, toasts), and presents the swapchain frame.
+    ///
+    /// Wraps `GuiSnapshot::from_state` → sidebar mutation → `apply_to_state`
+    /// each frame; the resulting [`crate::gui::SidebarChanges`] flags drive
+    /// any expensive recomputations (background gradient rebuild, wireframe
+    /// params upload, composite params upload, IBL bind-group rebuild).
+    ///
+    /// # Errors
+    /// Returns `Err` if the surface texture is unavailable (e.g. the window
+    /// was minimised between frames) or if the GPU device is lost.
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
         if !self.is_surface_configured {
@@ -15,12 +36,21 @@ impl State {
 
         let frame_ms = self.dt * 1000.0;
         self.gui.clear_expired_toasts();
+        self.sync_render_target_dims();
 
         let output = self.surface.get_current_texture()?;
         let surface_view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.poll_overlap_stats();
+
+        let viewport_present = self.gui.viewport_tab_present();
+        if !viewport_present {
+            self.clear_surface(&surface_view);
+            self.render_gui_overlay(&output, &[], false, frame_ms);
+            output.present();
+            return Ok(());
+        }
 
         let panes = self.compute_panes();
         let is_split = panes.len() > 1;
@@ -32,6 +62,40 @@ impl State {
         self.render_gui_overlay(&output, &panes, is_split, frame_ms);
         output.present();
         Ok(())
+    }
+
+    /// Issue a single clear pass writing the dock background color into the
+    /// surface. Used when the Viewport tab is hidden — egui still needs a
+    /// fresh canvas to paint the docked panels into.
+    fn clear_surface(&self, surface_view: &wgpu::TextureView) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Surface Clear (Viewport hidden)"),
+            });
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Surface Clear Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.122,
+                            g: 0.141,
+                            b: 0.188,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
     }
 
     fn render_pane(
@@ -84,10 +148,46 @@ impl State {
             }
 
             self.write_3d_pane_uniforms(i, &pds);
-            self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
+
+            if pds.inspection_mode == InspectionMode::Overdraw {
+                self.render_overdraw_pane(&mut encoder, i, pane, is_split);
+            } else {
+                self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
+            }
         }
 
         self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
+    }
+
+    fn render_overdraw_pane(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        i: usize,
+        pane: &Pane,
+        is_split: bool,
+    ) {
+        let cam_bg = if i == 0 {
+            self.scene.as_ref().map(|s| &s.cam.bind_group)
+        } else {
+            self.view
+                .secondary_cam
+                .as_ref()
+                .map(|c| &c.bind_group)
+                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
+        };
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let Some(cam_bg) = cam_bg else {
+            return;
+        };
+        let pane_viewport = if is_split {
+            Some([pane.x, pane.y, pane.width, pane.height])
+        } else {
+            None
+        };
+        self.renderer
+            .render_overdraw_passes(encoder, scene, cam_bg, pane_viewport);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -103,18 +203,18 @@ impl State {
     ) {
         let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
         let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
+        let pane_inspection = self.view.pane_settings[i].inspection_mode;
         self.renderer.post.composite.write_params(
             &self.queue,
             pane_bloom,
             pane_ssao,
             self.renderer.post.tone_mode,
             self.renderer.post.exposure,
+            pane_inspection,
         );
-        let viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
+
+        let _ = is_split;
+        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
         self.renderer.post.composite.render(
             &mut encoder,
             &self.renderer.pipelines,
@@ -363,15 +463,22 @@ impl State {
                 label: Some("UI Encoder"),
             });
 
-        let divider_rect = self.compute_divider_rect();
+        let divider = match (self.compute_divider_rect(), self.compute_divider_hit_rect()) {
+            (Some(visible), Some(hit)) => Some(crate::gui::DividerInfo {
+                visible,
+                hit,
+                layout: self.view.display.layout,
+            }),
+            _ => None,
+        };
 
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
         };
 
+        let ppp = self.window.scale_factor() as f32;
         let active_pane_rect = if is_split {
-            let ppp = self.window.scale_factor() as f32;
             panes.get(self.view.active_pane).map(|p| {
                 egui::Rect::from_min_size(
                     egui::pos2(p.x / ppp, p.y / ppp),
@@ -381,6 +488,8 @@ impl State {
         } else {
             None
         };
+
+        let review_panes = self.build_review_panes(panes, ppp);
 
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
@@ -427,6 +536,8 @@ impl State {
             is_split,
             projection_mode,
         );
+        let active_inspection = self.view.pane_settings[self.view.active_pane].inspection_mode;
+        let active_pane_mode = self.view.pane_settings[self.view.active_pane].pane_mode;
         let hud = HudInfo {
             pane_label,
             cameras_linked: if is_split {
@@ -436,10 +547,13 @@ impl State {
             },
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
             uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
+            overdraw_active: active_inspection == InspectionMode::Overdraw
+                && active_pane_mode == PaneMode::Scene3D,
         };
         let validation_report = self.scene.as_ref().map(|s| &s.validation);
 
         let recent_files = self.preferences.history.recent_files.clone();
+        let model = self.scene.as_ref().map(|s| &s.model);
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
@@ -451,17 +565,22 @@ impl State {
             &output.texture,
             screen,
             frame_ms,
-            divider_rect,
+            divider,
             active_pane_rect,
+            &review_panes,
             &recent_files,
+            &mut self.review,
+            model,
         );
 
-        let changes = snap_after.diff(&snap_before);
-        snap_after.write_back_pane(&mut self.view.pane_settings[ap]);
-        snap_after.write_back_display(&mut self.view.display);
-        snap_after.write_back_post(&mut self.renderer.post);
-        self.renderer.ibl_res.ibl_mode = snap_after.ibl_mode;
-        self.view.cameras_linked = snap_after.cameras_linked;
+        let changes = snap_after.apply_to_state(
+            &snap_before,
+            &mut self.view.pane_settings[ap],
+            &mut self.view.display,
+            &mut self.renderer.post,
+            &mut self.renderer.ibl_res.ibl_mode,
+            &mut self.view.cameras_linked,
+        );
 
         if changes.background_changed {
             self.apply_background_change();
@@ -499,5 +618,61 @@ impl State {
         if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
             self.save_capture(buffer, padded_row_bytes, width, height);
         }
+    }
+
+    /// Build the per-pane data the egui review overlay needs: one
+    /// `ReviewPaneOverlay` per `Scene3D` pane, pairing the pane's
+    /// egui-logical rect with the pane camera's `view * proj` matrix.
+    /// UV panes are skipped (markers never render on UV map panes).
+    fn build_review_panes(&self, panes: &[Pane], ppp: f32) -> Vec<crate::gui::ReviewPaneOverlay> {
+        let mut out = Vec::with_capacity(panes.len());
+        for (i, pane) in panes.iter().enumerate() {
+            let pds = self.view.pane_settings[i.min(1)];
+            if pds.pane_mode != PaneMode::Scene3D {
+                continue;
+            }
+            let pane_aspect = if pane.height > 0.0 {
+                pane.width / pane.height
+            } else {
+                1.0
+            };
+            let cam_opt = if i == 0 {
+                self.scene.as_ref().map(|s| s.cam.camera)
+            } else {
+                self.view
+                    .secondary_cam
+                    .as_ref()
+                    .map(|c| c.camera)
+                    .or_else(|| self.scene.as_ref().map(|s| s.cam.camera))
+            };
+            let Some(mut cam) = cam_opt else {
+                continue;
+            };
+            cam.aspect = pane_aspect;
+            let view_proj = cam.build_view_projection_matrix();
+            let egui_rect = egui::Rect::from_min_size(
+                egui::pos2(pane.x / ppp, pane.y / ppp),
+                egui::vec2(pane.width / ppp, pane.height / ppp),
+            );
+            out.push(crate::gui::ReviewPaneOverlay {
+                egui_rect,
+                view_proj,
+            });
+        }
+        out
+    }
+
+    /// Recreate HDR + derived render targets to match the current
+    /// Viewport-tab rect dims when those have changed since last frame.
+    /// No-op steady-state — `resize_render_targets` has its own
+    /// early-out when dims already match. Triggered each frame after
+    /// the previous frame's egui pass populated `last_viewport_rect`;
+    /// also a no-op when no rect is cached (full-surface fallback).
+    fn sync_render_target_dims(&mut self) {
+        let (target_w, target_h) = self.target_dimensions();
+        if target_w == self.renderer.target_width && target_h == self.renderer.target_height {
+            return;
+        }
+        self.resize_render_targets(target_w, target_h);
     }
 }

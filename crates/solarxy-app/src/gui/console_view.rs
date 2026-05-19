@@ -1,39 +1,9 @@
 use crate::console::ConsoleState;
 
-pub(super) fn draw_console_docked(
-    ctx: &egui::Context,
-    console: &mut ConsoleState,
-    visible: &mut bool,
-) {
-    egui::TopBottomPanel::bottom("console_panel")
-        .resizable(true)
-        .default_height(150.0)
-        .min_height(80.0)
-        .max_height(400.0)
-        .show_animated(ctx, *visible, |ui| {
-            draw_console_content(ui, console);
-        });
-}
-
-pub(super) fn draw_console_floating(
-    ctx: &egui::Context,
-    console: &mut ConsoleState,
-    visible: &mut bool,
-) {
-    let mut open = *visible;
-    egui::Window::new("Console")
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(true)
-        .default_size([520.0, 220.0])
-        .default_pos([240.0, 400.0])
-        .show(ctx, |ui| {
-            draw_console_content(ui, console);
-        });
-    *visible = open;
-}
-
-fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
+/// Console content for hosting inside an `egui_dock` tab. The dock owns
+/// docked/floating placement; this function paints the level filter,
+/// search bar, and the scrolling log entries.
+pub(super) fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("console_filter")
             .selected_text(console.min_level.as_str())
@@ -66,17 +36,6 @@ fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
         if search_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             console.search.clear();
         }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = if console.docked {
-                "\u{2197} Detach"
-            } else {
-                "\u{2199} Dock"
-            };
-            if ui.small_button(label).clicked() {
-                console.docked = !console.docked;
-            }
-        });
     });
     ui.separator();
 

@@ -1,9 +1,30 @@
+//! Central application state — [`State`] (the GUI's root struct), plus
+//! `Pane`, `PendingLoad`, `InputState`, and per-pane geometry helpers.
+//!
+//! Submodules:
+//! - `init.rs` — startup wiring (surface, device, queue, renderer).
+//! - `update.rs` — per-frame updates; owns the IBL chokepoint
+//!   `rebuild_light_bind_group` called on HDRI load, `IblMode` toggle, and
+//!   background change.
+//! - `render.rs` — `State::render`, per-pane orchestration.
+//! - `panes.rs` — split-viewport layout math.
+//! - `overlap.rs` — UV-overlap GPU readback polling.
+//! - `capture.rs` — screenshot capture.
+//! - `raycast.rs` — CPU picking (Möller-Trumbore + AABB early-reject)
+//!   used by review-mode click anchoring and any future selection sync.
+//! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
+//!   plus transient UI state (draft, selection, panel visibility).
+//! - `input/` — keyboard/mouse, dialogs, menu actions.
+//! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
+
 mod capture;
 mod init;
 mod input;
 mod overlap;
 mod panes;
+pub(crate) mod raycast;
 mod render;
+pub(crate) mod review;
 mod update;
 pub(crate) mod view_state;
 
@@ -63,6 +84,8 @@ pub struct State {
     pub(super) scene: Option<ModelScene>,
     pub(super) view: ViewState,
     pub(super) input: InputState,
+    pub(super) review: review::ReviewState,
+    pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
     pub(super) capture_requested: bool,

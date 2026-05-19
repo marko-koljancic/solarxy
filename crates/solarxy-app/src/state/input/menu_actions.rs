@@ -1,4 +1,5 @@
 use super::super::State;
+use crate::gui::ToastSeverity;
 
 impl State {
     pub(in crate::state) fn handle_menu_actions(&mut self, actions: crate::gui::MenuActions) {
@@ -32,11 +33,10 @@ impl State {
         if actions.open_shortcuts_modal {
             self.gui.open_shortcuts_modal();
         }
-        if actions.open_wiki {
-            let url = concat!(env!("CARGO_PKG_REPOSITORY"), "/wiki");
-            if let Err(e) = open::that(url) {
-                tracing::warn!("Failed to open wiki URL: {e}");
-            }
+        if actions.open_wiki
+            && let Err(e) = open::that(solarxy_core::WIKI_URL)
+        {
+            tracing::warn!("Failed to open wiki URL: {e}");
         }
         if actions.open_about {
             self.gui.open_about();
@@ -49,6 +49,44 @@ impl State {
         }
         if let Some(proj) = actions.set_projection {
             self.for_each_target_cam(|cam| cam.set_projection(proj));
+        }
+        if let Some(ratio) = actions.set_split_ratio {
+            self.view.display.split_ratio =
+                solarxy_core::view_config::DisplaySettings::clamp_split_ratio(ratio);
+        }
+        if actions.cancel_reanchor {
+            self.gui
+                .set_toast("Re-anchor cancelled", ToastSeverity::Info);
+        }
+        if actions.exit_review_mode {
+            self.gui
+                .set_toast("Review mode: Off", ToastSeverity::Success);
+        }
+        if actions.save_dock_layout {
+            if let Some(json) = self.gui.serialize_layout() {
+                self.preferences.dock.saved_layout_json = Some(json);
+                self.gui.set_has_saved_layout(true);
+                self.save_preferences();
+                self.gui.set_toast("Layout saved.", ToastSeverity::Success);
+            } else {
+                self.gui
+                    .set_toast("Failed to save layout.", ToastSeverity::Warning);
+            }
+        }
+        if actions.restore_saved_layout {
+            if let Some(json) = self.preferences.dock.saved_layout_json.clone()
+                && self.gui.apply_layout_json(&json)
+            {
+                self.gui.set_toast("Layout restored.", ToastSeverity::Info);
+            } else {
+                self.gui
+                    .set_toast("No valid saved layout to restore.", ToastSeverity::Warning);
+            }
+        }
+        if actions.reset_dock_layout {
+            self.gui.reset_dock_layout();
+            self.gui
+                .set_toast("Layout reset to default.", ToastSeverity::Info);
         }
         if actions.quit {
             self.quit_requested = true;

@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUNDLE="${ROOT}/res/bundle"
 MASTER="${BUNDLE}/solarxy-512.png"
 

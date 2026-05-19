@@ -1,0 +1,72 @@
+# Submit Solarxy (GUI) to microsoft/winget-pkgs after each stable release.
+#
+# Uses `wingetcreate` to auto-extract the ProductCode from the produced MSI
+# and submit a PR against winget-pkgs. ProductCode rotates per build (WiX
+# generates a fresh one each time `cargo dist build` runs), so it can't be
+# hard-coded in our template — wingetcreate pulls it out of the MSI metadata.
+#
+# Microsoft moderation review typically takes 3-7 days. Once merged, users
+# install with `winget install Koljam.Solarxy`.
+#
+# Skipped on prerelease tags (`rc.N`).
+name: Winget release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.6.0)"
+        required: true
+
+jobs:
+  submit:
+    runs-on: windows-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    steps:
+      - name: Verify WINGET_RELEASE_PAT presence
+        id: secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.WINGET_RELEASE_PAT }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::WINGET_RELEASE_PAT not set — winget submission will be skipped. Provision a fork PAT to enable automatic submissions."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tag and version
+        if: steps.secrets.outputs.ready == 'true'
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install wingetcreate
+        if: steps.secrets.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+      - name: Submit to winget-pkgs
+        if: steps.secrets.outputs.ready == 'true'
+        shell: pwsh
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          WINGET_PAT: ${{ secrets.WINGET_RELEASE_PAT }}
+        run: |
+          $msiUrl = "https://github.com/marko-koljancic/solarxy/releases/download/$env:TAG/solarxy-x86_64-pc-windows-msvc.msi"
+          ./wingetcreate.exe update Koljam.Solarxy `
+            --version $env:VERSION `
+            --urls $msiUrl `
+            --submit `
+            --token $env:WINGET_PAT

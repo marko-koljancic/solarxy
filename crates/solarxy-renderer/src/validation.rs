@@ -1,3 +1,7 @@
+//! GPU-side resources for the validation overlay: per-mesh validation index
+//! buffer + the bind group consumed by `validation.wgsl`. The CPU-side
+//! findings live in `solarxy_core::validation`.
+
 pub use solarxy_core::validation::*;
 use solarxy_core::RawModelData;
 
@@ -23,6 +27,10 @@ pub enum IssueCategory {
     NormalMismatch,
     MissingUvs,
     DegenerateTriangles,
+    /// Non-manifold edges — orange-red. Distinct from `InvalidMaterial` so the
+    /// GUI edge-highlight overlay (Stream B7) can paint edges with its own
+    /// color, brighter than the face-highlight palette.
+    NonManifoldEdge,
 }
 
 impl IssueCategory {
@@ -33,6 +41,7 @@ impl IssueCategory {
             Self::NormalMismatch => [0.0, 0.85, 1.0, 0.4],
             Self::MissingUvs => [1.0, 0.0, 0.8, 0.4],
             Self::DegenerateTriangles => [1.0, 0.9, 0.0, 0.4],
+            Self::NonManifoldEdge => [1.0, 0.55, 0.1, 0.6],
         }
     }
 
@@ -42,17 +51,44 @@ impl IssueCategory {
         Self::NormalMismatch,
         Self::MissingUvs,
         Self::DegenerateTriangles,
+        Self::NonManifoldEdge,
     ];
 }
 
 pub fn issue_category(issue: &ValidationIssue) -> IssueCategory {
     match issue.kind {
         IssueKind::InvalidMaterialRef => IssueCategory::InvalidMaterial,
-        IssueKind::NormalMismatch => IssueCategory::NormalMismatch,
+        IssueKind::NormalMismatch | IssueKind::FlippedNormals => IssueCategory::NormalMismatch,
         IssueKind::MissingUvs | IssueKind::UvMismatch => IssueCategory::MissingUvs,
         IssueKind::DegenerateTriangles => IssueCategory::DegenerateTriangles,
+        IssueKind::NonManifoldEdge => IssueCategory::NonManifoldEdge,
         _ => IssueCategory::Error,
     }
+}
+
+/// Builds the per-GPU-mesh edge index buffer source from
+/// `IssueScope::Edge` issues. Returns one `Vec<u32>` per GPU mesh — the
+/// flat `[v0, v1, v0, v1, ...]` shape consumed by `LineList` topology.
+/// Empty when no edge issues touch a mesh.
+pub fn build_mesh_edge_indices(
+    report: &ValidationReport,
+    gpu_mesh_count: usize,
+    raw_to_gpu: &[Option<usize>],
+) -> Vec<Vec<u32>> {
+    let mut out: Vec<Vec<u32>> = vec![Vec::new(); gpu_mesh_count];
+    for issue in &report.issues {
+        if let IssueScope::Edge {
+            mesh_index,
+            vertices,
+        } = &issue.scope
+            && let Some(Some(gpu_idx)) = raw_to_gpu.get(*mesh_index)
+        {
+            let dst = &mut out[*gpu_idx];
+            dst.push(vertices[0]);
+            dst.push(vertices[1]);
+        }
+    }
+    out
 }
 
 pub fn build_mesh_category_map(
@@ -66,6 +102,7 @@ pub fn build_mesh_category_map(
     for issue in &report.issues {
         let raw_idx = match &issue.scope {
             IssueScope::Mesh(i) => *i,
+            IssueScope::Edge { mesh_index, .. } => *mesh_index,
             _ => continue,
         };
         let Some(Some(gpu_idx)) = raw_to_gpu.get(raw_idx) else {
@@ -100,12 +137,14 @@ mod tests {
                 IssueCategory::InvalidMaterial,
             ),
             (IssueKind::NormalMismatch, IssueCategory::NormalMismatch),
+            (IssueKind::FlippedNormals, IssueCategory::NormalMismatch),
             (IssueKind::MissingUvs, IssueCategory::MissingUvs),
             (IssueKind::UvMismatch, IssueCategory::MissingUvs),
             (
                 IssueKind::DegenerateTriangles,
                 IssueCategory::DegenerateTriangles,
             ),
+            (IssueKind::NonManifoldEdge, IssueCategory::NonManifoldEdge),
             (IssueKind::NonTriangulated, IssueCategory::Error),
             (IssueKind::EmptyIndices, IssueCategory::Error),
             (IssueKind::MissingTexture, IssueCategory::Error),
