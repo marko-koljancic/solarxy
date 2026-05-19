@@ -88,9 +88,11 @@ impl Default for ValidationThresholds {
     }
 }
 
+#[cfg(feature = "serialization")]
 fn default_true() -> bool {
     true
 }
+#[cfg(feature = "serialization")]
 fn default_false() -> bool {
     false
 }
