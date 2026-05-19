@@ -70,6 +70,14 @@ pub enum IssueKind {
     TriangleBudgetExceeded,
 }
 
+/// One row in a [`ValidationReport`]. Carries everything a renderer (3D
+/// overlay, CLI output, CI annotation) needs to surface a single defect:
+/// where it lives (`scope`), what went wrong (`kind`), how bad
+/// (`severity`), and a human-readable explanation (`message`).
+///
+/// `kind` is enum-typed so downstream code can switch / filter without
+/// parsing the message string; `message` is intended for display, not
+/// programmatic dispatch.
 #[derive(Debug, Clone)]
 pub struct ValidationIssue {
     pub severity: Severity,
@@ -78,6 +86,10 @@ pub struct ValidationIssue {
     pub message: String,
 }
 
+/// The full result of a validation run: a flat list of [`ValidationIssue`]
+/// entries with no implicit ordering. Helper accessors are provided for
+/// summary counts; consumers wanting structured aggregation should iterate
+/// `issues` and bucket by `kind` / `severity` themselves.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationReport {
     pub issues: Vec<ValidationIssue>,

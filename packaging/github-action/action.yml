@@ -1,0 +1,305 @@
+name: 'Solarxy Validate'
+description: 'Validate 3D model assets in your CI pipeline. Powered by solarxy-cli.'
+author: 'Marko Koljancic'
+branding:
+  icon: 'check-circle'
+  color: 'orange'
+
+inputs:
+  paths:
+    description: |
+      Glob pattern(s) for models to validate. Pass multiple patterns
+      separated by newlines or spaces (the action splits both). Use
+      double-quotes to keep the shell from pre-expanding nested `**`.
+    required: true
+    default: '**/*.glb **/*.gltf **/*.obj **/*.stl **/*.ply'
+
+  config:
+    description: 'Path to solarxy.toml (relative to repo root).'
+    required: false
+    default: 'solarxy.toml'
+
+  fail-on:
+    description: |
+      Exit-code policy: 'error' (fail on errors only), 'warning' (fail
+      on either errors or warnings), 'never' (always exit 0; report
+      becomes informational).
+    required: false
+    default: 'error'
+
+  sarif:
+    description: |
+      Set to 'true' to emit SARIF and upload to GitHub Code Scanning
+      (Security → Code Scanning tab). Requires `security-events: write`
+      permission on the calling workflow.
+    required: false
+    default: 'false'
+
+  comment:
+    description: |
+      Set to 'true' to post (and update-in-place) a markdown summary
+      comment on the pull request. Auto-skipped outside PR events.
+      Requires `pull-requests: write` permission and a token in
+      `github-token`.
+    required: false
+    default: 'true'
+
+  solarxy-version:
+    description: |
+      `solarxy-cli` version to install (e.g. '0.6.0', '0.6.1'). Use
+      'latest' to track the most recent stable release. Pin to a
+      concrete version in production for reproducible builds.
+    required: false
+    default: 'latest'
+
+  github-token:
+    description: |
+      Token used for PR comments and SARIF upload. Defaults to the
+      workflow's GITHUB_TOKEN; override only when posting from a fork
+      via a PAT.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  report-json:
+    description: 'Path to the generated JSON validation report.'
+    value: ${{ steps.run.outputs.report-json }}
+  sarif-path:
+    description: 'Path to the generated SARIF file (empty when sarif=false).'
+    value: ${{ steps.run.outputs.sarif-path }}
+  files-total:
+    description: 'Total number of model files scanned.'
+    value: ${{ steps.run.outputs.files-total }}
+  files-with-errors:
+    description: 'Number of files with at least one error.'
+    value: ${{ steps.run.outputs.files-with-errors }}
+  files-with-warnings:
+    description: 'Number of files with at least one warning.'
+    value: ${{ steps.run.outputs.files-with-warnings }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ---------- 1. Resolve the concrete version ----------
+    - name: Resolve solarxy-cli version
+      id: version
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.solarxy-version }}
+      run: |
+        set -euo pipefail
+        if [[ "${REQUESTED}" == "latest" ]]; then
+          RESOLVED=$(curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://api.github.com/repos/marko-koljancic/solarxy/releases/latest" \
+            | grep '"tag_name"' | head -n1 | sed -E 's/.*"v?([^"]+)".*/\1/')
+        else
+          RESOLVED="${REQUESTED#v}"
+        fi
+        echo "Using solarxy-cli ${RESOLVED}"
+        echo "version=${RESOLVED}" >> "$GITHUB_OUTPUT"
+
+    # ---------- 2. Cache the binary keyed on (os, version) ----------
+    - name: Restore solarxy-cli from cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.tool_cache }}/solarxy-cli/${{ steps.version.outputs.version }}
+        key: solarxy-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+
+    # ---------- 3. Install on cache miss (per-OS) ----------
+    - name: Install solarxy-cli (Linux/macOS)
+      if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+      shell: bash
+      env:
+        VER: ${{ steps.version.outputs.version }}
+        TOOL: ${{ runner.tool_cache }}/solarxy-cli/${{ steps.version.outputs.version }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${TOOL}"
+        # cargo-dist installer writes to $CARGO_HOME/bin or ~/.local/bin; we
+        # redirect via CARGO_DIST_FORCE_INSTALL_DIR (supported flag) so the
+        # binary lands in the cacheable tool-cache directory.
+        export CARGO_DIST_FORCE_INSTALL_DIR="${TOOL}"
+        curl --proto '=https' --tlsv1.2 -LsSf \
+          "https://github.com/marko-koljancic/solarxy/releases/download/v${VER}/solarxy-cli-installer.sh" \
+          | sh -s -- --no-modify-path
+
+    - name: Install solarxy-cli (Windows)
+      if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        VER: ${{ steps.version.outputs.version }}
+        TOOL: ${{ runner.tool_cache }}/solarxy-cli/${{ steps.version.outputs.version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force -Path $env:TOOL | Out-Null
+        $env:CARGO_DIST_FORCE_INSTALL_DIR = $env:TOOL
+        $url = "https://github.com/marko-koljancic/solarxy/releases/download/v${env:VER}/solarxy-cli-installer.ps1"
+        Invoke-WebRequest -Uri $url -OutFile $env:TEMP\solarxy-installer.ps1
+        & $env:TEMP\solarxy-installer.ps1 -NoModifyPath
+
+    - name: Add solarxy-cli to PATH
+      shell: bash
+      env:
+        TOOL: ${{ runner.tool_cache }}/solarxy-cli/${{ steps.version.outputs.version }}
+      run: |
+        # cargo-dist puts the binary directly in CARGO_DIST_FORCE_INSTALL_DIR.
+        echo "${TOOL}" >> "$GITHUB_PATH"
+
+    - name: Verify install
+      shell: bash
+      run: solarxy-cli --about
+
+    # ---------- 4. Run validation ----------
+    - name: Run solarxy-cli analyze
+      id: run
+      shell: bash
+      env:
+        PATHS_INPUT: ${{ inputs.paths }}
+        CONFIG_INPUT: ${{ inputs.config }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        SARIF: ${{ inputs.sarif }}
+      run: |
+        set -euo pipefail
+
+        # Split --paths on whitespace + newlines into an array. Each pattern
+        # stays a single arg so nested ** survives.
+        readarray -d '' -t PATHS_ARR < <(printf '%s' "${PATHS_INPUT}" | tr '\n' ' ' | xargs -d ' ' -n 1 printf '%s\0')
+
+        # Always emit JSON as a build artifact; this is independent of the
+        # primary adapter format. We invoke validate twice — once with the
+        # github-actions adapter for inline annotations, once for the JSON
+        # artifact. Cheap relative to model loading.
+        JSON_PATH="${GITHUB_WORKSPACE}/solarxy-validation.json"
+        SARIF_PATH=""
+
+        # Primary run: inline annotations + (optional) SARIF.
+        if [[ "${SARIF}" == "true" ]]; then
+          SARIF_PATH="${GITHUB_WORKSPACE}/solarxy-validation.sarif"
+          solarxy-cli analyze \
+            --paths "${PATHS_ARR[@]}" \
+            --config "${CONFIG_INPUT}" \
+            --adapter github-actions \
+            --adapter-format sarif \
+            --output "${SARIF_PATH}" \
+            --fail-on never
+          # Re-emit GHA workflow commands to stdout so annotations show inline.
+          solarxy-cli analyze \
+            --paths "${PATHS_ARR[@]}" \
+            --config "${CONFIG_INPUT}" \
+            --adapter github-actions \
+            --adapter-format gha-commands \
+            --fail-on never
+        else
+          solarxy-cli analyze \
+            --paths "${PATHS_ARR[@]}" \
+            --config "${CONFIG_INPUT}" \
+            --adapter github-actions \
+            --fail-on never
+        fi
+
+        # Always emit JSON artifact (used for PR comment + as a build artifact).
+        solarxy-cli analyze \
+          --paths "${PATHS_ARR[@]}" \
+          --config "${CONFIG_INPUT}" \
+          --adapter generic \
+          --adapter-format json \
+          --output "${JSON_PATH}" \
+          --fail-on never
+
+        # Extract summary counters for outputs and for the PR comment.
+        files_total=$(jq -r '.summary.files_total' "${JSON_PATH}")
+        files_with_errors=$(jq -r '.summary.files_with_errors' "${JSON_PATH}")
+        files_with_warnings=$(jq -r '.summary.files_with_warnings' "${JSON_PATH}")
+
+        {
+          echo "report-json=${JSON_PATH}"
+          echo "sarif-path=${SARIF_PATH}"
+          echo "files-total=${files_total}"
+          echo "files-with-errors=${files_with_errors}"
+          echo "files-with-warnings=${files_with_warnings}"
+        } >> "$GITHUB_OUTPUT"
+
+        # Apply the fail-on policy ourselves now so PR comment + SARIF upload
+        # steps below still run before we exit non-zero.
+        case "${FAIL_ON}" in
+          never)   exit 0 ;;
+          warning) [[ "${files_with_errors}" -gt 0 || "${files_with_warnings}" -gt 0 ]] && echo "exit-on-warning=1" >> "$GITHUB_OUTPUT" || true ;;
+          error)   [[ "${files_with_errors}" -gt 0 ]] && echo "exit-on-error=1" >> "$GITHUB_OUTPUT" || true ;;
+          *) echo "Unknown fail-on value '${FAIL_ON}'; treating as 'error'."; [[ "${files_with_errors}" -gt 0 ]] && echo "exit-on-error=1" >> "$GITHUB_OUTPUT" || true ;;
+        esac
+
+    # ---------- 5. SARIF upload (gated) ----------
+    - name: Upload SARIF to Code Scanning
+      if: inputs.sarif == 'true' && steps.run.outputs.sarif-path != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif-path }}
+        category: solarxy
+
+    # ---------- 6. PR comment (gated) ----------
+    - name: Build PR comment body
+      id: comment-body
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        JSON_PATH: ${{ steps.run.outputs.report-json }}
+      run: |
+        set -euo pipefail
+        body_file="$(mktemp)"
+        {
+          echo "## Solarxy Validate"
+          echo ""
+          echo "| Files | Errors | Warnings |"
+          echo "|---|---|---|"
+          echo "| ${{ steps.run.outputs.files-total }} | ${{ steps.run.outputs.files-with-errors }} | ${{ steps.run.outputs.files-with-warnings }} |"
+          echo ""
+          if [[ "${{ steps.run.outputs.files-with-errors }}" == "0" && "${{ steps.run.outputs.files-with-warnings }}" == "0" ]]; then
+            echo "_All assets clean._"
+          else
+            echo "<details><summary>Per-file findings</summary>"
+            echo ""
+            echo "| Status | File | Errors | Warnings |"
+            echo "|---|---|---|---|"
+            jq -r '.findings[] | "| \(.status) | `\(.path)` | \(.error_count) | \(.warning_count) |"' "${JSON_PATH}"
+            echo ""
+            echo "</details>"
+          fi
+          echo ""
+          echo "<sub>Generated by [solarxy-validate-action](https://github.com/marko-koljancic/solarxy-validate-action) · run [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>"
+        } > "$body_file"
+        echo "body-file=${body_file}" >> "$GITHUB_OUTPUT"
+
+    - name: Find existing comment
+      id: find-comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      uses: peter-evans/find-comment@v3
+      with:
+        token: ${{ inputs.github-token }}
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: '## Solarxy Validate'
+
+    - name: Post or update PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      uses: peter-evans/create-or-update-comment@v4
+      with:
+        token: ${{ inputs.github-token }}
+        comment-id: ${{ steps.find-comment.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body-path: ${{ steps.comment-body.outputs.body-file }}
+        edit-mode: replace
+
+    # ---------- 7. Apply fail-on policy ----------
+    - name: Apply fail-on policy
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${{ steps.run.outputs.exit-on-error || '' }}" ]]; then
+          echo "::error::Validation found errors. Failing the workflow per fail-on=error."
+          exit 1
+        fi
+        if [[ -n "${{ steps.run.outputs.exit-on-warning || '' }}" ]]; then
+          echo "::error::Validation found errors or warnings. Failing the workflow per fail-on=warning."
+          exit 1
+        fi

@@ -43,26 +43,10 @@ pub struct EguiRenderer {
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
     backend_info: String,
-    /// `true` when the user has explicitly closed the Stats tab. While
-    /// set, `notify_model_loaded` won't auto-re-open it on the next
-    /// model load. Flips back to `false` when the user re-opens via the
-    /// Window menu (sticky-hidden semantics).
     stats_user_hidden: bool,
-    /// Symmetric with `stats_user_hidden` — controls whether
-    /// `notify_model_loaded` auto-adds the Material Inspector tab.
     material_inspector_user_hidden: bool,
-    /// All five user-facing panels + the 3D Viewport tab. See
-    /// `gui::dock` for the `SolarxyTab` enum + `TabViewer` dispatch.
     pub(super) dock_state: DockState<SolarxyTab>,
-    /// Cached Viewport-tab rect + the surface size it was captured at.
-    /// Read by `state::panes` (target dims + pane rects + divider) and
-    /// `app::route_pointer_to_camera`. Tagged with `surface_size` so we
-    /// can detect a stale rect after `WindowEvent::Resized` (cached
-    /// rect was logical units relative to the OLD surface, multiplying
-    /// by the current scale factor produces wrong physical pixels).
     pub last_viewport_rect: Option<CachedViewportRect>,
-    /// `true` when `Preferences.dock.saved_layout_json.is_some()`. Drives
-    /// the enabled state of Window → Layout → Restore Saved Layout.
     pub(super) has_saved_layout: bool,
 }
 
@@ -281,7 +265,7 @@ impl EguiRenderer {
     }
 
     /// Replace the current dock layout with the factory default produced
-    /// by [`default_dock_state`].
+    /// by the crate-private `default_dock_state` constructor.
     pub fn reset_dock_layout(&mut self) {
         self.dock_state = default_dock_state();
     }

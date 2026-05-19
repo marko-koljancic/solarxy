@@ -1,12 +1,14 @@
-//! Shape-level smoke for [`solarxy_cli::validate::run_validation`]. Uses the
-//! existing `triangle.glb` fixture from `solarxy-formats`. We assert
-//! structural invariants rather than byte-identical goldens: changes to
-//! whitespace, run_id, started_at, etc. don't cause spurious failures.
+//! Shape-level smoke tests for [`solarxy_validate::run_validation`].
+//!
+//! Uses the existing `triangle.glb` fixture from `solarxy-formats`. We assert
+//! structural invariants (schema version, GHA workflow-command shape, SARIF
+//! envelope) rather than byte-identical goldens, so spurious failures from
+//! whitespace, `run_id`, or `started_at` jitter never block CI.
 
 use std::path::PathBuf;
 
 use serde_json::Value;
-use solarxy_cli::validate::{
+use solarxy_validate::{
     ConfigSource, Output, adapter::AdapterFormat, adapter::AdapterName, adapter::FailOn,
     resolve_adapter, run_validation,
 };
@@ -95,6 +97,36 @@ fn github_actions_emits_workflow_commands() {
 }
 
 #[test]
+fn junit_xml_emits_well_formed_envelope() {
+    let (body, _) = capture_to_file(AdapterName::Generic, AdapterFormat::JunitXml);
+    assert!(
+        body.starts_with("<?xml version=\"1.0\""),
+        "missing XML decl"
+    );
+    assert!(
+        body.contains("<testsuites name=\"solarxy-validate\""),
+        "missing root <testsuites>; body was: {body}"
+    );
+    assert!(
+        body.contains("<testsuite name=\"solarxy-validate\""),
+        "missing <testsuite>; body was: {body}"
+    );
+    assert!(
+        body.contains("triangle.glb"),
+        "expected fixture path in body"
+    );
+    assert!(
+        body.contains("<system-out>") && body.contains("NonManifoldEdge"),
+        "expected NonManifoldEdge in system-out; body was: {body}"
+    );
+    assert!(
+        !body.contains("<failure"),
+        "warning-only file must not produce <failure>; body was: {body}"
+    );
+    assert!(body.contains("</testsuites>"), "missing closing tag");
+}
+
+#[test]
 fn sarif_emits_valid_2_1_0_envelope() {
     let (body, _) = capture_to_file(AdapterName::GithubActions, AdapterFormat::Sarif);
     let v: Value = serde_json::from_str(&body).expect("parses as SARIF JSON");
@@ -130,6 +162,10 @@ fn generic_rejects_gha_commands_format() {
         &Output::File(out_path),
     )
     .expect_err("must error");
-    assert!(err.to_string().contains("generic adapter"));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("generic") && msg.contains("GhaCommands"),
+        "error should name adapter + format; got: {msg}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

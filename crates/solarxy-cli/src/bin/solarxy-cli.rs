@@ -13,8 +13,8 @@ use solarxy_cli::calc::analyze::ModelAnalyzer;
 #[cfg(feature = "analyzer")]
 use solarxy_cli::tui_analysis::TerminalApp;
 #[cfg(feature = "analyzer")]
-use solarxy_cli::validate::{
-    self, ConfigSource, Output as ValidateOutput,
+use solarxy_validate::{
+    self as validate, ConfigSource, Output as ValidateOutput,
     adapter::{AdapterFormat, AdapterName, FailOn},
 };
 
@@ -184,6 +184,7 @@ fn run_validate(
     let format = adapter_format.unwrap_or_else(|| adapter.default_format());
     let out = ValidateOutput::from_path(output);
     validate::run_validation(paths, source, adapter.as_ref(), format, fail_on, &out)
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(not(feature = "analyzer"))]

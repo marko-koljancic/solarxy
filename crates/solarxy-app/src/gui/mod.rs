@@ -11,11 +11,11 @@
 //! - `menu` — native-style menu bar (File / Edit / View / Window / Help).
 //!   The Window menu is the single source of truth for togglable panel
 //!   visibility.
-//! - `snapshot` — [`GuiSnapshot`] (the sidebar ↔ state mirror) and
-//!   [`SidebarChanges`]; see that module's docs for the "adding a sidebar
-//!   control" recipe.
-//! - `actions` — [`MenuActions`] event flags drained by `state/render.rs`
-//!   after each frame.
+//! - `snapshot` — `GuiSnapshot` (crate-private; the sidebar ↔ state mirror)
+//!   and [`SidebarChanges`]; see that module's docs for the "adding a
+//!   sidebar control" recipe.
+//! - `actions` — `MenuActions` (crate-private) event flags drained by
+//!   `state/render.rs` after each frame.
 //! - `overlays` — toast queue + FPS HUD + loading indicator + severities.
 //!   Every `push_toast` emits a matching `tracing` event on
 //!   `target: "solarxy::toast"` — callers must NOT also emit their own

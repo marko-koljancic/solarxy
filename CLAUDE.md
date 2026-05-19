@@ -9,7 +9,7 @@ Solarxy is a cross-platform 3D model viewer, visual debugger, and validator buil
 - `solarxy` — GUI viewer (winit + egui + wgpu, PBR rendering). Preferences live inside the GUI via `Edit → Preferences…` (`Ctrl/⌘+,`).
 - `solarxy-cli` — CLI + TUI: `analyze` (model report / TUI) and `view` which shells out to the GUI binary. The `--mode preferences` and `--mode docs` variants were dropped from `OperationMode` in v0.5.x — `clap` rejects them with "invalid value". Preferences live in the GUI **Edit → Preferences…** dialog (`Ctrl/⌘+,`); user docs live in the [Solarxy Wiki](https://github.com/marko-koljancic/solarxy/wiki).
 
-The two are distributed separately (Flathub + Homebrew Cask + DMG / MSI / AppImage for GUI; shell / PowerShell installers + Homebrew formula + portable `.zip` for CLI — no CLI MSI, matching the Rust-CLI convention). winget (GUI) submission is deferred to 0.5.1. The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
+The two are distributed separately (Flathub + Homebrew Cask + winget + DMG / MSI / AppImage for GUI; shell / PowerShell installers + Homebrew formula + portable `.zip` for CLI — no CLI MSI, matching the Rust-CLI convention). winget GUI manifest landed in 0.6.0 at `packaging/winget/manifests/k/Koljam/Solarxy/<version>/` with a `{{PRODUCT_CODE}}` placeholder; `.github/workflows/winget-release.yml` extracts the per-build ProductCode from the signed MSI on each stable tag and submits to `microsoft/winget-pkgs`. The CLI's `--update` flow detects the install channel and either self-updates via `axoupdater` or prints the package-manager command.
 
 ## Build & Run Commands
 
@@ -38,15 +38,16 @@ RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 
 ## Architecture
 
-**6-crate workspace:**
+**7-crate workspace:**
 
 | Crate | Role |
 |-------|------|
 | `solarxy` (root) | Thin GUI entrypoint. `src/main.rs` parses its own small `GuiArgs`, sets up tracing, loads preferences, calls `solarxy_app::run_viewer`. |
-| `solarxy-core` | Pure data types: `AABB`, `geometry`, `validation`, `preferences`, `report`, `view_config`, `json`, `install_source`. No GPU, no winit, no egui. |
+| `solarxy-core` | Pure data types: `AABB`, `geometry`, `validation`, `preferences`, `report`, `view_config`, `json`, `install_source`, `project_config`, `review`. No GPU, no winit, no egui. |
 | `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Integration tests under `crates/solarxy-formats/tests/loaders.rs` + `tests/fixtures/`. |
 | `solarxy-renderer` | All wgpu state: pipelines, bind groups, shaders, IBL, SSAO, bloom, shadow, composite, camera, per-frame draw (`frame.rs`), per-model GPU scene (`scene.rs`). No winit, no egui. |
 | `solarxy-app` | winit `ApplicationHandler` + egui + `State`. Owns input, sidebar, menu, HUD, toasts, console, dialogs. Depends on `solarxy-renderer`. |
+| `solarxy-validate` | Validation orchestration + pipeline adapters (GitHub Actions / generic-JSON). Library API consumed by `solarxy-cli` and by external vendors who want structured validation results without a subprocess. `thiserror` per library convention; feature-gated `clap` derive (`features = ["clap"]`). |
 | `solarxy-cli` | clap `Args`, analyze TUI (`tui_analysis`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. `--mode view` spawns the `solarxy` GUI binary as a subprocess. |
 
 Version is single-sourced in `[workspace.package]` and inherited via `version.workspace = true`. The `dist` profile inherits from `release` with `lto = "fat"`.
@@ -193,12 +194,12 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 
 **Native GUI bundles (`solarxy`)** — macOS `.dmg` + Linux `.AppImage` — produced by `.github/workflows/native-bundle.yml`, invoked from cargo-dist's generated `release.yml` via the `post-announce-jobs` hook in `dist-workspace.toml`. In-graph (not `release: published`) is deliberate: `release` events don't fire for `GITHUB_TOKEN`-created releases. Heavy lifting is in the composite action `.github/actions/native-bundle/action.yml`:
 - macOS: hand-rolled `.app` + `Info.plist` + ad-hoc `codesign --sign -` + `create-dmg`.
-- Linux: `appimagetool` (x86_64 AppImage only; aarch64 deferred to 0.6.0 pending upstream arm64 stable binary).
+- Linux: `appimagetool` (x86_64 AppImage only; aarch64 deferred to 0.7.0+ pending upstream arm64 stable binary).
 - `.deb` + `.rpm` were dropped in rc.7 in favour of Flathub for distro-agnostic coverage; community packagers can still build native packages from source.
 
 **Distribution channels:**
-- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`). Plus raw DMG / MSI / AppImage bundles from GitHub Releases. (winget submission deferred to 0.5.1; no in-tree manifest until the `winget-release.yml` auto-bump is reinstated alongside proper per-build ProductCode extraction.)
-- CLI: `cargo-dist` installers (shell / PowerShell + portable `.zip`), Homebrew formula (`solarxy-cli`). No MSI — winget CLI manifest (portable type) deferred to 0.5.1.
+- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`), **winget** (`Koljam.Solarxy`, manifests in `packaging/winget/manifests/k/Koljam/Solarxy/<version>/` with `{{PRODUCT_CODE}}`/`{{INSTALLER_SHA256}}` placeholders filled by `.github/workflows/winget-release.yml` on each stable tag). Plus raw DMG / MSI / AppImage bundles from GitHub Releases.
+- CLI: `cargo-dist` installers (shell / PowerShell + portable `.zip`), Homebrew formula (`solarxy-cli`). No MSI — winget CLI manifest (portable type) still deferred (Rust-CLI convention: ripgrep, fd, zoxide, eza, bat, delta, cargo-dist itself don't ship one either).
 - `solarxy-cli --update` detects the install source via `solarxy_core::install_source::detect()`: Homebrew → `brew upgrade solarxy-cli`, Flatpak → `flatpak update dev.koljam.solarxy`, otherwise `axoupdater` self-update.
 
 **Local dev smoke:**

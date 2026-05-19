@@ -303,3 +303,12 @@ jobs:
     with:
       plan: ${{ needs.plan.outputs.val }}
     secrets: inherit
+
+  custom-ghcr-publish:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/ghcr-publish.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit

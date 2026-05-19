@@ -1,0 +1,32 @@
+[package]
+name = "solarxy-validate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Validation orchestration + pipeline adapters for Solarxy 3D asset checks"
+
+[features]
+default = []
+clap = ["dep:clap"]
+
+[dependencies]
+solarxy-core = { path = "../solarxy-core" }
+solarxy-formats = { path = "../solarxy-formats" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = { workspace = true }
+tracing = "0.1"
+glob = "0.3"
+sha2 = { workspace = true }
+ulid = { workspace = true }
+regex = { workspace = true }
+toml = "0.8"
+time = { version = "0.3", default-features = false, features = [
+    "formatting",
+    "macros",
+    "std",
+] }
+clap = { version = "4.5.53", features = ["derive"], optional = true }

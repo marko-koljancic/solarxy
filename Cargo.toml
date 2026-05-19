@@ -6,6 +6,7 @@ members = [
     "crates/solarxy-renderer",
     "crates/solarxy-app",
     "crates/solarxy-cli",
+    "crates/solarxy-validate",
 ]
 resolver = "2"
 

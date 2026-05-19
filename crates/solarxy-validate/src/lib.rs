@@ -1,24 +1,80 @@
-//! In-CLI validation orchestration.
+//! Validation orchestration + pipeline adapters for Solarxy 3D asset checks.
 //!
-//! Public entry: [`run_validation`]. Expands glob patterns, loads each model
-//! through `solarxy-formats`, runs `validate_raw_model_with_config` against
-//! the supplied `ProjectConfig`, assembles a [`report::ValidationRunReport`],
-//! formats it via the requested [`adapter::PipelineAdapter`], and writes the
-//! result to stdout or a file.
+//! This crate sits one layer above [`solarxy_core::validation`] and
+//! [`solarxy_formats`]:
 //!
-//! L2 — this module lives inside `solarxy-cli` (not a new crate). Extract to
-//! `solarxy-validate` later when a vendor needs library access.
+//! - Resolves a [`ProjectConfig`] (explicit path → `$SOLARXY_CONFIG` →
+//!   discovery walk).
+//! - Expands `--paths` glob patterns to a sorted, deduped list of model
+//!   files.
+//! - Loads each model via `solarxy_formats::load_model`, classifies it via
+//!   the project config's filename rules, picks the per-category budget,
+//!   and runs `solarxy_core::validation::validate_raw_model_with_config`.
+//! - Assembles a [`ValidationRunReport`] (the canonical wire format —
+//!   `schema_version: u32`, currently `1`).
+//! - Hands the report to a [`PipelineAdapter`] which serialises it for a
+//!   specific CI ecosystem (GitHub Actions, generic-JSON for Perforce /
+//!   GitLab / Jenkins) and computes an exit code per `--fail-on`.
+//!
+//! # Stability
+//!
+//! Public types in this crate are part of Solarxy's stable wire format and
+//! are guarded by `cargo-semver-checks` against the published baseline.
+//! Adding fields to [`ValidationRunReport`] / [`FileFinding`] is a minor
+//! version bump; removing or renaming is a major. The
+//! `schema_version` field carried in [`ValidationRunReport`] gives
+//! downstream consumers a runtime check independent of the Rust semver.
+//!
+//! # Library vs. CLI
+//!
+//! Vendors embedding this crate to surface validation results inside their
+//! own product (DAM, asset store, training-data pipeline) depend on this
+//! crate directly and never reach into `solarxy-cli`. The CLI is a thin
+//! wrapper over [`run_validation`] that adds `clap` argument parsing and
+//! routes stdout / file output.
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use solarxy_validate::{ConfigSource, Output, run_validation};
+//! use solarxy_validate::adapter::{AdapterName, FailOn, resolve_adapter};
+//!
+//! let source = ConfigSource::discover(Path::new("."))?;
+//! let adapter = resolve_adapter(AdapterName::Generic);
+//! let format = adapter.default_format();
+//! let exit_code = run_validation(
+//!     &["assets/**/*.glb".to_string()],
+//!     source,
+//!     adapter.as_ref(),
+//!     format,
+//!     FailOn::Error,
+//!     &Output::Stdout,
+//! )?;
+//! # Ok::<(), solarxy_validate::ValidationRunError>(())
+//! ```
+
+#![warn(clippy::pedantic)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::doc_markdown,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::module_name_repetitions,
+    clippy::must_use_candidate,
+    clippy::uninlined_format_args
+)]
 
 pub mod adapter;
 mod adapters;
+pub mod error;
 mod formats;
 pub mod report;
 
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::Context;
 use sha2::{Digest, Sha256};
 use solarxy_core::json::JsonIssue;
 use solarxy_core::project_config::{self, AssetCategory, FilenameClassifier, ProjectConfig};
@@ -27,9 +83,13 @@ use solarxy_core::validation::{IssueScope, Severity, ValidationReport};
 pub use adapter::{
     AdapterFormat, AdapterName, AdapterOutput, Artifact, FailOn, PipelineAdapter, resolve_adapter,
 };
+pub use error::ValidationRunError;
 pub use report::{FileFinding, FileStatus, RunSummary, ValidationRunReport};
 
-/// `--output` destination.
+/// Destination for the rendered adapter output.
+///
+/// The string `"-"` is treated as a stdout alias, matching the Unix CLI
+/// convention (`grep`, `tar`, `jq`, etc.).
 pub enum Output {
     Stdout,
     File(PathBuf),
@@ -65,13 +125,21 @@ impl ConfigSource {
     }
 
     /// Loads `path` and computes a SHA-256 of the raw TOML bytes.
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let bytes =
-            std::fs::read(path).with_context(|| format!("read config '{}'", path.display()))?;
-        let raw = std::str::from_utf8(&bytes)
-            .with_context(|| format!("config '{}' is not utf-8", path.display()))?;
+    pub fn load(path: &Path) -> Result<Self, ValidationRunError> {
+        let bytes = std::fs::read(path).map_err(|source| ValidationRunError::ConfigRead {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let raw =
+            std::str::from_utf8(&bytes).map_err(|source| ValidationRunError::ConfigNotUtf8 {
+                path: path.to_path_buf(),
+                source,
+            })?;
         let config: ProjectConfig =
-            toml::from_str(raw).with_context(|| format!("parse config '{}'", path.display()))?;
+            toml::from_str(raw).map_err(|source| ValidationRunError::ConfigParse {
+                path: path.to_path_buf(),
+                source,
+            })?;
         let hash = hex_encode(&Sha256::digest(&bytes));
         Ok(Self {
             config,
@@ -81,10 +149,13 @@ impl ConfigSource {
     }
 
     /// Discovers a config starting at `start` (typically `.`).
-    pub fn discover(start: &Path) -> anyhow::Result<Self> {
-        match project_config::discover(start, None)
-            .with_context(|| format!("discover config from '{}'", start.display()))?
-        {
+    pub fn discover(start: &Path) -> Result<Self, ValidationRunError> {
+        match project_config::discover(start, None).map_err(|source| {
+            ValidationRunError::ConfigDiscover {
+                path: start.to_path_buf(),
+                source,
+            }
+        })? {
             Some((path, _cfg)) => Self::load(&path),
             None => Ok(Self::defaults()),
         }
@@ -100,18 +171,19 @@ pub fn run_validation(
     format: AdapterFormat,
     fail_on: FailOn,
     output: &Output,
-) -> anyhow::Result<i32> {
+) -> Result<i32, ValidationRunError> {
     let started_at = format_now();
     let started_instant = Instant::now();
 
-    let classifier_rules =
-        source.config.filenames.compile_rules().map_err(|e| {
-            anyhow::anyhow!("invalid regex in solarxy.toml filename classifier: {e}")
-        })?;
+    let classifier_rules = source
+        .config
+        .filenames
+        .compile_rules()
+        .map_err(|e| ValidationRunError::InvalidClassifierRegex(e.to_string()))?;
 
     let expanded = expand_globs(paths)?;
     if expanded.is_empty() {
-        anyhow::bail!("no model files matched the given --paths patterns");
+        return Err(ValidationRunError::NoMatchingPaths);
     }
 
     let mut findings: Vec<FileFinding> = Vec::with_capacity(expanded.len());
@@ -135,8 +207,12 @@ pub fn run_validation(
     let rendered = adapter.format_report(&report, format)?;
     write_output(&rendered.stdout, output)?;
     for artifact in &rendered.artifacts {
-        std::fs::write(&artifact.path, &artifact.content)
-            .with_context(|| format!("write artifact '{}'", artifact.path.display()))?;
+        std::fs::write(&artifact.path, &artifact.content).map_err(|source| {
+            ValidationRunError::ArtifactWrite {
+                path: artifact.path.clone(),
+                source,
+            }
+        })?;
     }
 
     Ok(adapter.exit_code(&report, fail_on))
@@ -226,12 +302,14 @@ fn build_finding(
     }
 }
 
-/// Used by tests as well — keep this `Filenam`-private API stable.
-fn expand_globs(patterns: &[String]) -> anyhow::Result<Vec<PathBuf>> {
+fn expand_globs(patterns: &[String]) -> Result<Vec<PathBuf>, ValidationRunError> {
     let mut out: Vec<PathBuf> = Vec::new();
     for pattern in patterns {
         let mut matched = 0;
-        for entry in glob::glob(pattern).with_context(|| format!("invalid glob '{pattern}'"))? {
+        for entry in glob::glob(pattern).map_err(|source| ValidationRunError::InvalidGlob {
+            pattern: pattern.clone(),
+            source,
+        })? {
             match entry {
                 Ok(path) if path.is_file() => {
                     out.push(path);
@@ -250,16 +328,25 @@ fn expand_globs(patterns: &[String]) -> anyhow::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-fn write_output(text: &str, output: &Output) -> anyhow::Result<()> {
+fn write_output(text: &str, output: &Output) -> Result<(), ValidationRunError> {
+    use std::io::Write;
     match output {
         Output::Stdout => {
-            io::stdout().write_all(text.as_bytes())?;
+            let mut stdout = std::io::stdout();
+            stdout
+                .write_all(text.as_bytes())
+                .map_err(ValidationRunError::StdoutWrite)?;
             if !text.ends_with('\n') {
-                io::stdout().write_all(b"\n")?;
+                stdout
+                    .write_all(b"\n")
+                    .map_err(ValidationRunError::StdoutWrite)?;
             }
         }
         Output::File(p) => {
-            std::fs::write(p, text).with_context(|| format!("write report '{}'", p.display()))?;
+            std::fs::write(p, text).map_err(|source| ValidationRunError::OutputWrite {
+                path: p.clone(),
+                source,
+            })?;
         }
     }
     Ok(())

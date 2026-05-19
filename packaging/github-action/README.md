@@ -1,0 +1,209 @@
+# Solarxy Validate Action
+
+Validate 3D model assets in your GitHub workflow. Powered by [`solarxy-cli`].
+
+- Inline workflow annotations on PRs (one per finding, with file path + issue
+  kind)
+- Optional SARIF upload to GitHub Code Scanning (`Security → Code Scanning`)
+- Optional auto-updating PR comment with summary table + per-file
+  breakdown
+- Supports Linux, macOS, and Windows runners
+- Caches `solarxy-cli` per (runner OS, version) — cold install ~30s,
+  warm <2s
+
+---
+
+## Usage
+
+### Minimal
+
+```yaml
+# .github/workflows/asset-validation.yml
+name: Asset Validation
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write       # for the auto-updating PR comment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: marko-koljancic/solarxy-validate-action@v1
+        with:
+          paths: 'assets/**/*.glb'
+          config: 'solarxy.toml'
+          fail-on: 'error'
+```
+
+### With SARIF upload to Code Scanning
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write          # required for SARIF upload
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: marko-koljancic/solarxy-validate-action@v1
+    with:
+      paths: 'assets/**/*.glb'
+      config: 'solarxy.toml'
+      sarif: 'true'
+```
+
+Findings appear in the **Security → Code Scanning** tab alongside CodeQL,
+ESLint, Trivy, etc.
+
+### Pinned version, multiple glob patterns, warning-strict
+
+```yaml
+- uses: marko-koljancic/solarxy-validate-action@v1.0.0
+  with:
+    paths: |
+      assets/**/*.glb
+      assets/**/*.gltf
+      models/heroes/**/*.obj
+    config: 'solarxy.toml'
+    fail-on: 'warning'            # both errors AND warnings fail the build
+    solarxy-version: '0.6.0'      # pin instead of tracking latest
+    comment: 'false'              # skip the PR comment
+```
+
+---
+
+## Inputs
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `paths` | ✅ | `**/*.glb **/*.gltf **/*.obj **/*.stl **/*.ply` | Glob pattern(s) for models to validate. Newline- or space-separated. Quote patterns with nested `**` so the shell doesn't pre-expand them. |
+| `config` |  | `solarxy.toml` | Path to project `solarxy.toml`. |
+| `fail-on` |  | `error` | `error` / `warning` / `never`. |
+| `sarif` |  | `false` | Set to `true` to emit SARIF + upload to Code Scanning. Requires `security-events: write`. |
+| `comment` |  | `true` | Set to `false` to suppress the auto-updating PR summary comment. Skipped automatically outside PR events. |
+| `solarxy-version` |  | `latest` | `solarxy-cli` version to install. Pin for reproducibility. |
+| `github-token` |  | `${{ github.token }}` | Token for PR comments + SARIF upload. Override only for cross-fork scenarios. |
+
+## Outputs
+
+| Output | Description |
+|---|---|
+| `report-json` | Filesystem path to the generated JSON report. |
+| `sarif-path` | Filesystem path to the SARIF file (empty when `sarif=false`). |
+| `files-total` | Total number of model files scanned. |
+| `files-with-errors` | Number of files with at least one error. |
+| `files-with-warnings` | Number of files with at least one warning. |
+
+---
+
+## Versioning
+
+This action follows the standard GitHub Actions tagging convention:
+
+| Tag | Meaning |
+|---|---|
+| `@v1` | Latest 1.x — picks up bug fixes + non-breaking improvements. **Recommended for most users.** |
+| `@v1.0.0` | Exact version — reproducible builds. |
+| `@main` | Bleeding edge — never use for production. |
+
+Action versioning is independent of `solarxy-cli` versioning. Pin the
+`solarxy-version` input separately if you need to lock down the CLI
+behaviour while still tracking action improvements.
+
+---
+
+## Permissions
+
+Minimum required:
+
+```yaml
+permissions:
+  contents: read
+```
+
+Add the following when the corresponding feature is enabled:
+
+| Feature | Permission needed |
+|---|---|
+| PR comment (`comment: 'true'`, default) | `pull-requests: write` |
+| SARIF upload (`sarif: 'true'`) | `security-events: write` |
+
+---
+
+## What appears in the PR
+
+### Inline annotations
+
+Every finding (one per issue, not per file) surfaces as a `::error` or
+`::warning` workflow command. GitHub renders these as inline annotations
+on the **Files Changed** tab when the finding's file is part of the diff,
+and always in the job summary.
+
+### PR comment (auto-updating)
+
+A single comment per PR is created or updated on every run, so reviewers
+don't get spammed:
+
+```
+## Solarxy Validate
+
+| Files | Errors | Warnings |
+|---|---|---|
+| 47    |    2   |    8     |
+
+<details><summary>Per-file findings</summary>
+
+| Status | File                          | Errors | Warnings |
+|--------|-------------------------------|--------|----------|
+| error  | `assets/props/barrel.glb`     |    1   |    0     |
+| warning| `assets/heroes/knight.glb`    |    0   |    3     |
+...
+
+</details>
+
+Generated by solarxy-validate-action · run #1234567
+```
+
+### Code Scanning (when `sarif: 'true'`)
+
+Findings appear in the **Security → Code Scanning** tab with the
+`solarxy` category, browsable alongside other static-analysis results.
+
+---
+
+## Permissions troubleshooting
+
+### "Resource not accessible by integration" on the PR comment step
+
+The calling workflow needs `pull-requests: write`. Pull-request events
+from forks have read-only `GITHUB_TOKEN` by default; if you must support
+fork PRs, run the comment step in a separate `pull_request_target`-
+triggered workflow that consumes the validation artifact.
+
+### "Resource not accessible by integration" on the SARIF upload step
+
+Add `security-events: write`. Note that this permission is unavailable
+on fork PRs to private repos without explicit org-level approval.
+
+---
+
+## See also
+
+- [`solarxy-cli`] — the underlying validator
+- [Solarxy Wiki / Configuration] — `solarxy.toml` reference
+- [Solarxy Wiki / Validation Issues] — what each issue kind means
+
+[`solarxy-cli`]: https://github.com/marko-koljancic/solarxy
+[Solarxy Wiki / Configuration]: https://github.com/marko-koljancic/solarxy/wiki/Configuration
+[Solarxy Wiki / Validation Issues]: https://github.com/marko-koljancic/solarxy/wiki/Validation-Issues
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

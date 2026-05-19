@@ -1,11 +1,18 @@
 //! Public data types for a validation run.
 //!
 //! [`ValidationRunReport`] is the canonical structure emitted by
-//! [`crate::validate::run_validation`]; adapters consume it and format it
-//! into their adapter-specific output (JSON, SARIF, GHA workflow commands).
+//! [`crate::run_validation`]; adapters consume it and format it into their
+//! adapter-specific output (JSON, SARIF, GHA workflow commands).
 //!
-//! The on-disk JSON shape carries `schema_version` so CI consumers can
-//! lock against a compatible version.
+//! The on-disk JSON shape carries [`schema_version`](ValidationRunReport::schema_version)
+//! so CI consumers can lock against a compatible version. The current
+//! version is [`RUN_REPORT_SCHEMA_VERSION`] (`1` in 0.6.0).
+//!
+//! # Stability
+//!
+//! Adding fields is a minor version bump (consumers must tolerate unknown
+//! fields). Removing or renaming a field requires a `schema_version` bump
+//! with a documented migration path.
 
 use std::path::PathBuf;
 
@@ -13,8 +20,16 @@ use serde::Serialize;
 use solarxy_core::json::JsonIssue;
 use solarxy_core::project_config::AssetCategory;
 
+/// Wire-format version of [`ValidationRunReport`].
+///
+/// CI consumers should compare this against their expected version and
+/// bail rather than silently misinterpret a future-shaped report.
 pub const RUN_REPORT_SCHEMA_VERSION: u32 = 1;
 
+/// Top-level report emitted by a validation run.
+///
+/// Serializes to JSON via the (private) `formats::render_json` renderer;
+/// consumed by adapters to emit format-specific output.
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationRunReport {
     pub schema_version: u32,
@@ -29,6 +44,7 @@ pub struct ValidationRunReport {
     pub summary: RunSummary,
 }
 
+/// Per-file result. One entry per model path expanded from `--paths`.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileFinding {
     pub path: PathBuf,
@@ -44,6 +60,8 @@ pub struct FileFinding {
     pub load_error: Option<String>,
 }
 
+/// Top-level status for a single file. `LoadFailed` distinguishes a tool
+/// error (couldn't parse) from an asset error (validated and failed).
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FileStatus {
@@ -53,6 +71,7 @@ pub enum FileStatus {
     LoadFailed,
 }
 
+/// Aggregated counts for the entire run.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunSummary {
     pub files_total: u32,

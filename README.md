@@ -28,14 +28,19 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 
 - **Multi-format support** -- OBJ, STL, PLY, and glTF/GLB
 - **PBR rendering** -- Cook-Torrance BRDF, normal mapping, shadow mapping, IBL (diffuse + specular), SSAO, bloom, selectable tone mapping (Reinhard, ACES Filmic, Linear, None), alpha blending, 3-light system, 4x MSAA
-- **Split viewport** -- side-by-side or stacked panes with independent cameras and display settings per pane
-- **Inspection modes** -- Material ID, Texel Density heat map, Depth visualization, UV Map with overlap detection
+- **Split viewport** -- side-by-side or stacked panes with independent cameras and display settings per pane; draggable divider (double-click to reset 50/50)
+- **Inspection modes** -- Material ID, UV Map with overlap detection, Texel Density heat map, Depth, **Overdraw** heat map (`6`), **AO Preview** (`7`)
 - **Material overrides** -- Clay Light, Clay Dark, Chrome (IBL-only reflective black), and Silhouette (flat black) for surface inspection
-- **Validation overlay** -- color-coded 3D visualization of validation issues (degenerate triangles, missing UVs, bad material refs)
+- **Review System** -- place spatially-anchored annotations on a model's surface, save to `<model>.solarxy-review.json` sidecar, re-open later to see annotations re-anchored. Categories (Info / Warning / Question / Change), threaded replies, cascade-delete confirm. Toggle via `Shift+R`.
+- **Material Inspector** -- view-only per-material panel (`Window → Material Inspector`) with base-color swatch, scalar PBR (metallic/roughness), alpha mode, and 128×128 texture thumbnails for albedo / normal / metallic-roughness / occlusion / emissive
+- **Validation overlay** -- color-coded 3D visualization of validation issues (flipped normals, non-manifold edges, triangle-budget overruns, degenerate triangles, missing UVs, bad material refs)
+- **Configurable validation** -- per-project `solarxy.toml` overrides budgets, severities, and filename-classifier rules; JSON Schema published at [`schemas/solarxy-config.v1.json`](schemas/solarxy-config.v1.json) for editor autocomplete
+- **CI-friendly CLI** -- `solarxy-cli analyze --paths "assets/**/*.glb" --adapter github-actions --adapter-format sarif` emits SARIF / JUnit-style / TAP / workflow-commands output via the `solarxy-validate` adapter crate
+- **Dockable panels** -- Viewport / Sidebar / Review Panel / Console / Material Inspector / Stats tabs in an `egui_dock` layout; auto-save on quit, restore on launch, **Window → Save Layout / Restore / Reset**
+- **Ayu Mirage theme** -- flat dark UI with amber accent (`#FFC44C`), bundled Lilex font, custom dock styling
 - **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
-- **Report export** -- save analysis reports to file in text or JSON format
-- **Persistent preferences** -- configure defaults via the GUI **Edit → Preferences…** dialog or tweak the TOML file directly; live changes in the viewer are saved with `Shift+S`
+- **Persistent preferences** -- configure defaults via the GUI **Edit → Preferences…** dialog (`Ctrl/⌘+,`) or tweak the TOML file directly; live changes in the viewer are saved with `Shift+S`
 - **Drag-and-drop** -- drop model files or HDR/EXR environment maps directly into the viewer window
 
 ## Supported Formats
@@ -56,7 +61,8 @@ brew install --cask koljam/solarxy/solarxy
 # Linux — GUI via Flathub
 flatpak install flathub dev.koljam.solarxy
 
-# Windows — MSI from Releases (winget submission deferred to 0.5.1)
+# Windows — winget (auto-submitted on each stable release)
+winget install Koljam.Solarxy
 ```
 
 Direct downloads (DMG / MSI / AppImage), CLI-only installs, first-launch
@@ -67,8 +73,16 @@ caveats, system requirements, and the update flow: see
 
 ```bash
 solarxy -m path/to/model.obj                                    # GUI viewer
-solarxy-cli --mode analyze -m model.glb                         # Terminal report
+solarxy-cli --mode analyze -m model.glb                         # Terminal report (single file)
 solarxy-cli --mode analyze -m model.glb -f json -o report.json  # JSON to file
+
+# Batch validation for CI (GitHub Actions / Perforce / GitLab / Jenkins):
+solarxy-cli --mode analyze \
+    --paths "assets/**/*.glb" \
+    --config solarxy.toml \
+    --adapter github-actions \
+    --adapter-format sarif \
+    --output report.sarif
 ```
 
 Every flag for both binaries, validation error reference, and analyze TUI
@@ -97,7 +111,7 @@ cargo r --release --bin solarxy-cli -- --mode analyze --model path/to/m.glb  # C
 
 ## Workspace Structure
 
-Solarxy is built as a Rust workspace with one binary entrypoint plus five library crates:
+Solarxy is built as a Rust workspace with one binary entrypoint plus six library crates:
 
 | Crate | Description |
 |---|---|
@@ -107,6 +121,7 @@ Solarxy is built as a Rust workspace with one binary entrypoint plus five librar
 | [`solarxy-renderer`](crates/solarxy-renderer/) | wgpu pipelines, shaders, IBL / SSAO / bloom / shadow / composite |
 | [`solarxy-app`](crates/solarxy-app/) | winit `ApplicationHandler`, egui sidebar / menu / console / dialogs, state machine |
 | [`solarxy-cli`](crates/solarxy-cli/) | clap parser, analyze TUI, terminal companion binary (`solarxy-cli`) |
+| [`solarxy-validate`](crates/solarxy-validate/) | Validation orchestration + pipeline adapters (GitHub Actions / generic-JSON). Library API for vendor integrators; consumed by `solarxy-cli` |
 
 ## Tech Stack
 

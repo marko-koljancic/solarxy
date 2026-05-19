@@ -1,16 +1,15 @@
 //! Concrete pipeline adapters.
 //!
 //! Each adapter declares its default format, dispatches the requested format
-//! through the [`crate::validate::formats`] renderers, and computes an exit
-//! code per the `--fail-on` policy.
+//! through the [`crate::formats`] renderers, and computes an exit code per
+//! the `--fail-on` policy.
 
-use anyhow::anyhow;
-
-use crate::validate::adapter::{AdapterFormat, AdapterOutput, FailOn, PipelineAdapter};
-use crate::validate::formats::{
-    render_gha_commands, render_json, render_sarif, render_tap, render_text,
+use crate::adapter::{AdapterFormat, AdapterOutput, FailOn, PipelineAdapter};
+use crate::error::ValidationRunError;
+use crate::formats::{
+    render_gha_commands, render_json, render_junit_xml, render_sarif, render_tap, render_text,
 };
-use crate::validate::report::{FileStatus, ValidationRunReport};
+use crate::report::{FileStatus, ValidationRunReport};
 
 pub struct GenericAdapter;
 
@@ -27,16 +26,17 @@ impl PipelineAdapter for GenericAdapter {
         &self,
         report: &ValidationRunReport,
         format: AdapterFormat,
-    ) -> anyhow::Result<AdapterOutput> {
+    ) -> Result<AdapterOutput, ValidationRunError> {
         let stdout = match format {
             AdapterFormat::Json => render_json(report)?,
             AdapterFormat::Text => render_text(report),
             AdapterFormat::Tap => render_tap(report),
+            AdapterFormat::JunitXml => render_junit_xml(report),
             AdapterFormat::GhaCommands | AdapterFormat::Sarif => {
-                return Err(anyhow!(
-                    "generic adapter does not support format '{format:?}'; \
-                     use --adapter github-actions"
-                ));
+                return Err(ValidationRunError::UnsupportedFormat {
+                    adapter: "generic",
+                    format,
+                });
             }
         };
         Ok(AdapterOutput {
@@ -65,13 +65,14 @@ impl PipelineAdapter for GithubActionsAdapter {
         &self,
         report: &ValidationRunReport,
         format: AdapterFormat,
-    ) -> anyhow::Result<AdapterOutput> {
+    ) -> Result<AdapterOutput, ValidationRunError> {
         let stdout = match format {
             AdapterFormat::GhaCommands => render_gha_commands(report),
             AdapterFormat::Sarif => render_sarif(report)?,
             AdapterFormat::Json => render_json(report)?,
             AdapterFormat::Text => render_text(report),
             AdapterFormat::Tap => render_tap(report),
+            AdapterFormat::JunitXml => render_junit_xml(report),
         };
         Ok(AdapterOutput {
             stdout,

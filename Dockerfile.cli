@@ -1,0 +1,83 @@
+# syntax=docker/dockerfile:1.7
+# ---------------------------------------------------------------------------
+# Dockerfile.cli — Solarxy CLI in a slim Debian image, sized for CI/CD use.
+#
+# Built per-release by .github/workflows/ghcr-publish.yml and pushed to:
+#   ghcr.io/marko-koljancic/solarxy-cli:latest
+#   ghcr.io/marko-koljancic/solarxy-cli:<X.Y>          (e.g. 0.6)
+#   ghcr.io/marko-koljancic/solarxy-cli:<X.Y.Z>        (e.g. 0.6.0)
+#
+# Build locally pinned to a specific release:
+#   docker build -f Dockerfile.cli \
+#                --build-arg SOLARXY_VERSION=0.6.0 \
+#                -t solarxy-cli:0.6.0 .
+#
+# Multi-arch build via buildx:
+#   docker buildx build -f Dockerfile.cli \
+#                --platform linux/amd64,linux/arm64 \
+#                --build-arg SOLARXY_VERSION=0.6.0 \
+#                -t ghcr.io/marko-koljancic/solarxy-cli:0.6.0 --push .
+# ---------------------------------------------------------------------------
+
+ARG SOLARXY_VERSION=latest
+
+# ---------- stage 1: fetch the cargo-dist release archive ----------
+FROM debian:bookworm-slim AS fetch
+ARG SOLARXY_VERSION
+ARG TARGETARCH
+
+SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    ca-certificates curl xz-utils jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Map docker buildx arch → cargo-dist target triple.
+RUN case "${TARGETARCH}" in \
+    "amd64") echo "x86_64-unknown-linux-gnu" > /tmp/triple ;; \
+    "arm64") echo "aarch64-unknown-linux-gnu" > /tmp/triple ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac
+
+# Resolve "latest" to the concrete tag via the GitHub API; otherwise honor
+# the literal version. Strip a leading "v" if present so users can pass
+# either `0.6.0` or `v0.6.0`.
+RUN if [[ "${SOLARXY_VERSION}" == "latest" ]]; then \
+    TAG=$(curl -fsSL "https://api.github.com/repos/marko-koljancic/solarxy/releases/latest" \
+    | jq -r '.tag_name'); \
+    else \
+    TAG="${SOLARXY_VERSION}"; \
+    fi; \
+    TAG="${TAG#v}"; \
+    TRIPLE=$(cat /tmp/triple); \
+    ARCHIVE="solarxy-cli-${TRIPLE}.tar.xz"; \
+    URL="https://github.com/marko-koljancic/solarxy/releases/download/v${TAG}/${ARCHIVE}"; \
+    echo "Fetching ${URL}"; \
+    curl -fsSL -o /tmp/cli.tar.xz "${URL}"; \
+    mkdir -p /tmp/cli; \
+    tar -xJf /tmp/cli.tar.xz -C /tmp/cli --strip-components=1; \
+    install -m 0755 /tmp/cli/solarxy-cli /usr/local/bin/solarxy-cli; \
+    /usr/local/bin/solarxy-cli --about
+
+# ---------- stage 2: runtime ----------
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=fetch /usr/local/bin/solarxy-cli /usr/local/bin/solarxy-cli
+
+# CI runners conventionally mount the repo at /workspace (GitLab) or
+# similar. Keep WORKDIR there so relative --paths globs work without ceremony.
+WORKDIR /workspace
+
+ENTRYPOINT ["solarxy-cli"]
+CMD ["--help"]
+
+LABEL org.opencontainers.image.title="solarxy-cli"
+LABEL org.opencontainers.image.description="Solarxy CLI — 3D asset validation for CI/CD pipelines"
+LABEL org.opencontainers.image.source="https://github.com/marko-koljancic/solarxy"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.documentation="https://github.com/marko-koljancic/solarxy/blob/main/docs/integrations/gitlab.md"

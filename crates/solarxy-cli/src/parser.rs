@@ -2,7 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use super::validators::is_valid_model_path;
-use crate::validate::adapter::{AdapterFormat, AdapterName, FailOn};
+use solarxy_validate::adapter::{AdapterFormat, AdapterName, FailOn};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

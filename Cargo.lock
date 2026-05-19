@@ -4020,20 +4020,12 @@ dependencies = [
  "cgmath",
  "clap",
  "crossterm",
- "dirs",
- "glob",
  "ratatui",
- "regex",
- "serde",
- "serde_json",
- "sha2",
  "solarxy-core",
  "solarxy-formats",
- "time",
- "toml",
+ "solarxy-validate",
  "tracing",
  "tracing-subscriber",
- "ulid",
 ]
 
 [[package]]
@@ -4084,6 +4076,25 @@ dependencies = [
  "tracing",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "solarxy-validate"
+version = "0.6.0-dev"
+dependencies = [
+ "clap",
+ "glob",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "solarxy-core",
+ "solarxy-formats",
+ "thiserror 2.0.17",
+ "time",
+ "toml",
+ "tracing",
+ "ulid",
 ]
 
 [[package]]

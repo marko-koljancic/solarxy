@@ -297,6 +297,23 @@ cycle_enum! {
     ; cycle
 }
 
+/// Root TOML structure persisted at `~/.config/solarxy/config.toml`
+/// (via [`config_path`]).
+///
+/// Every sub-section is `#[serde(default)]` so older config files load
+/// cleanly when new sections are added across releases. `config_version`
+/// is reserved for future migrations; the loader currently treats every
+/// version as readable and lets serde fill in unknown fields via defaults.
+///
+/// Three edit surfaces mutate this struct, each authoritative for a
+/// different slice (see CLAUDE.md "Key Patterns" for the canonical
+/// split):
+/// - GUI **Edit → Preferences…** (`Ctrl/⌘+,`) — startup-only fields
+///   (window size, MSAA), UI defaults, updater behaviour.
+/// - GUI sidebar + `Shift+S` — live per-session display / rendering /
+///   lighting settings.
+/// - Direct TOML editing — anything; reload via the modal's
+///   **Open config file** button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
     pub config_version: u32,
