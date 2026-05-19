@@ -54,7 +54,7 @@ pub fn validate_raw_model(raw: &RawModelData, file_ext: &str) -> ValidationResul
 /// Run validation checks against a raw model, honoring per-check toggles in
 /// `config` and numeric tuning in `thresholds`. `triangle_budget`, when
 /// `Some`, is the resolved per-file budget for the file's classified
-/// [`crate::project_config::AssetCategory`].
+/// `project_config::AssetCategory` (available with the `serialization` feature).
 pub fn validate_raw_model_with_config(
     raw: &RawModelData,
     file_ext: &str,

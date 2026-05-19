@@ -2,8 +2,8 @@
 //!
 //! Compares the total triangle count of a model against a budget resolved by
 //! the caller (typically by classifying the model's file path with
-//! [`crate::project_config::FilenameClassifier`] then looking the result up
-//! in [`crate::project_config::Budgets`]).
+//! `project_config::FilenameClassifier` then looking the result up
+//! in `project_config::Budgets` — both available with the `serialization` feature).
 //!
 //! Bands (where `B` = budget, `T` = `tolerance_percent / 100`):
 //! - `count <= B`           → clean (no issue emitted).
