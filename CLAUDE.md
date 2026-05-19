@@ -53,7 +53,7 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
 
 ### `solarxy-app` internals (the interesting half)
 
-- `app.rs` — `ApplicationHandler`, event loop, Tab toggles sidebar.
+- `app.rs` — `ApplicationHandler`, event loop. `Tab` toggles the Sidebar tab via `gui::dock::toggle_tab` — the same canonical add/remove helper every Window-menu and shortcut-driven panel toggle routes through. Also fires `flush_dock_layout_on_exit` on `WindowEvent::CloseRequested` to auto-save the current dock layout into preferences.
 - `state/` — the app's central `State`:
   - `mod.rs` — struct definition, `Pane`, `PendingLoad`, `InputState`, wiring to `solarxy_renderer::{frame, scene}`.
   - `init.rs` — startup.
@@ -67,9 +67,10 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `review.rs` — `ReviewState` + `EditDraft` (in-memory mirror of the open `.solarxy-review.json`). `load_review_for_model` / `save_review_sidecar` handle disk I/O via `solarxy-core::review::ReviewFile`. Owns the **marker hit-test** (`marker_at_screen_pos`, 20 px screen-space threshold) and the **re-anchor sub-mode** (`begin_reanchor` / `cancel_reanchor` / `complete_reanchor` keyed by `reanchor_target: Option<String>`). Author defaults to anonymous; sidecar location honors `ProjectConfig.review.sidecar_dir` from `solarxy.toml`.
   - `raycast.rs` — CPU Möller-Trumbore + AABB slab-method. Single primitive feeding both the Review System anchoring and any future 3D ↔ UV selection sync.
 - `gui/` — egui integration, one responsibility per file:
-  - `renderer.rs` — `EguiRenderer` frame orchestration. Owns the toast queue (`VecDeque<Toast>`, cap 5 — cf. `TOAST_QUEUE_CAP`), preferences modal, update modal, console state.
+  - `dock.rs` — `egui_dock` integration. Defines `SolarxyTab` (Viewport / Sidebar / ReviewPanel / Console / MaterialInspector / Stats), `SolarxyTabViewer`, `default_dock_state`, and the `tab_present` / `toggle_tab` helpers every Window-menu toggle and panel shortcut routes through. The **Viewport tab is special**: non-floatable (`allowed_in_windows = false`), transparent (`clear_background = false` so the wgpu surface shows through), and closeable-but-restorable via `Window → Viewport`. The wgpu `compute_panes` math reads the Viewport tab's rect from the **previous** frame (`EguiRenderer::last_viewport_rect`) — a one-frame latency that's invisible at steady state but means the rect is briefly stale during resize / dock-rearrangement transients.
+  - `renderer.rs` — `EguiRenderer` frame orchestration. Owns the toast queue (`VecDeque<Toast>`, cap 5 — cf. `TOAST_QUEUE_CAP`), preferences modal, update modal, console state, the persistent `DockState<SolarxyTab>`, and `last_viewport_rect`. Mirrors `dock::tab_present` into `MenuBarVisibility.*_visible` before drawing the menu bar each frame.
   - `sidebar.rs` — collapsible panels (View / Inspect / Material / Debug / Rendering / Advanced). **Canonical surface for live display/rendering/lighting settings** — the preferences modal deliberately does not duplicate these.
-  - `menu.rs` — native-style menu bar (File / Edit / View / Window / Help) with shortcut labels. `Edit → Preferences…` (`Ctrl/⌘+,`) opens the preferences modal via `MenuActions::open_preferences`. The Window menu is the **single source of truth for panel visibility** (Menu Bar / Sidebar / Console / Model Stats / FPS HUD) — as of 0.5.0-rc.11 the View menu no longer duplicates these toggles. The View menu's only trailing button opens the Keyboard Shortcuts modal (`?`).
+  - `menu.rs` — native-style menu bar (File / Edit / View / Window / Help) with shortcut labels. `Edit → Preferences…` (`Ctrl/⌘+,`) opens the preferences modal via `MenuActions::open_preferences`. The Window menu's panel-visibility checkmarks (Viewport / Sidebar / Review Panel / Console / Material Inspector / Stats / Menu Bar / FPS HUD) are **projected each frame from `dock::tab_present`** — `renderer.rs` mirrors them into `MenuBarVisibility.*_visible` before the menu draws, and toggle clicks route through `dock::toggle_tab`, so the dock tree (not the menu flags) is the authoritative panel-visibility state. The Window menu also exposes `Save Layout` / `Restore Saved Layout` / `Reset Layout` (`save_dock_layout` / `reset_dock_layout` flags in `gui/actions.rs`); Restore is disabled when no manual layout has been saved. The View menu's only trailing button opens the Keyboard Shortcuts modal (`?`).
   - `snapshot.rs` — **`GuiSnapshot` (the sidebar ↔ state mirror)** and `SidebarChanges` flags, `HudInfo`.
   - `actions.rs` — `MenuActions` event flags (`open_model`, `open_hdri`, `open_preferences`, `open_shortcuts_modal`, `set_layout`, …).
   - `overlays.rs` — toast **queue** (bottom-center stacked, drop-oldest on overflow — see `EguiRenderer::push_toast` / `draw_toast_queue`), FPS/frame-time HUD, loading indicator, `ToastSeverity`. Each `push_toast` emits a matching `tracing` event on `target: "solarxy::toast"` — callers must NOT also emit their own log for the same message, or the console records it twice.
@@ -79,9 +80,12 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
   - `console_view.rs` — docked/floating log viewer with level filter, message-content substring search, and right-click Copy message / Copy full line. Buffer captures `solarxy=trace` by default; UI dropdown shows ERROR/WARN/INFO/DEBUG.
   - `update_modal.rs` — in-app update dialog. Draggable (not pinned).
   - `review_popup.rs` — floating new/edit annotation popup anchored at the click position. `Cmd/Ctrl+Enter` saves, `Esc` cancels (egui-consumed before reaching `state/input`).
+  - `review_overlay.rs` — screen-space marker overlay (pins + expand-on-hover sprite cards with leader lines). Replaced the previous WGSL `review_marker` pipeline with an egui-painted layer: free text rendering, one-call pane clipping, no z-fight against bloom/SSAO. Driven by `ReviewPaneOverlay { egui_rect, view_proj }` slices built per-active-3D-pane in `state/render.rs` (UV panes are filtered out upstream). Markers no longer participate in post-processing — a deliberate readability win over the old SDF-shape-vs-bloom interaction.
+  - `review_visuals.rs` — **single source of truth for the four category visuals**: color (`Info` blue / `Warning` amber / `Question` purple / `Change` green) and letter glyph (`i` / `!` / `?` / `✎`), plus the shared `SELECTION_ACCENT` (Ayu amber `#FFC44C`). Consumed by `review_panel` (chips) and `review_overlay` (pins + cards). Drift between marker color and panel chip color is the user's #1 visual-correlation cue — keep these in sync if either side changes.
   - `review_panel.rs` — docked-or-floating side panel (Console pattern). Category filter chips, text search, three collapsible sections (Open / Needs re-anchor / Resolved), inline selected-annotation editor with Reply/Delete/Re-place buttons, cascade-delete confirmation modal. `MenuBarVisibility.review_panel_visible` is the canonical visibility write target.
   - `material_inspector.rs` — view-only floating window (`Window → Material Inspector`). Per-material rows with collapsing headers showing base-color swatch + scalar PBR + alpha mode + 5 source-side texture rows (Albedo / Normal / Metallic-Roughness / Occlusion / Emissive). 128×128 thumbnails decoded once from `Model::material_thumbnails` (CPU-side mirror populated by `resources::upload_model`). "Open externally" via `open::that()`; disabled for embedded textures. **No 3D-viewport mutation** — selecting a material does not change the inspection mode.
-  - `theme.rs`, `about.rs` — dark theme / About modal (reference pattern for Esc-dismissable non-modal egui windows). About modal is draggable.
+  - `theme.rs` — Ayu Mirage-inspired flat dark theme (`BG #1F2430` / `FG #CCCAC2` / `ACCENT #FFC44C amber` / `SELECTION #33415E` / zero corner radii everywhere). Exports three entry points: `apply_theme` (egui `Visuals` + widget palette across `inactive`/`hovered`/`active`/`open` states), `make_dock_style` (the paired `egui_dock::Style` — flat tab bar matching the panel fill, no contrasting strip, amber drag/hover separators, no `hline_below_active_tab_name`), and `configure_fonts` (bundles `res/Lilex/static/Lilex-Medium.ttf` for both Proportional and Monospace families). The amber accent doubles as the review-mode banner / edge stripe color.
+  - `about.rs` — About modal (reference pattern for Esc-dismissable non-modal egui windows). Draggable.
 - `console.rs` — `LogBuffer` + `ConsoleLayer` (a `tracing::Layer` feeding the egui console). `ConsoleState` carries the UI-side level filter, search string, docked/floating flag.
 
 ### `solarxy-renderer` internals
@@ -144,6 +148,14 @@ Types used on **both** sides of the CPU/GPU boundary live in `solarxy-core` so b
 
 The renderer re-exports a few things it owns (`frame::*`, `scene::*`) to the app via `solarxy_app::state::mod.rs` `pub(super) use` blocks — grep those imports when you need to know what the app is allowed to touch.
 
+### Dock layout persistence
+All five panels (Sidebar / Review Panel / Console / Material Inspector / Stats) plus the Viewport live as tabs in a single `egui_dock::DockState<SolarxyTab>` owned by `EguiRenderer`. `solarxy_core::preferences::DockPrefs` holds two `Option<String>` JSON blobs that serialize that state via `egui_dock`'s `serde` feature (workspace dep `egui_dock = "0.18"` with `features = ["serde"]`):
+
+- `last_layout_json` — auto-saved on app quit (`State::flush_dock_layout_on_exit` in `state/input/mod.rs`, called from `app.rs` on `WindowEvent::CloseRequested`). Restored on startup in `state/init.rs` so the window comes back exactly how you left it. Write is short-circuited if the JSON hasn't changed.
+- `saved_layout_json` — only ever written by `Window → Save Layout`; never overwritten automatically. `Window → Restore Saved Layout` reads it back; the menu entry stays disabled when it's `None` (driven by `EguiRenderer::has_saved_layout`, mirrored from `Preferences.dock.saved_layout_json.is_some()` at startup).
+
+If you add a `SolarxyTab` variant, **handle the serde compatibility carefully** — old `last_layout_json` blobs in users' `config.toml` will fail to deserialize otherwise, and the silent fallback is the default layout (data not lost, but the user loses their arrangement). `Window → Reset Layout` calls `EguiRenderer::reset_dock_layout` to rebuild from `default_dock_state` in `gui/dock.rs` without touching either persisted blob — that's the user-facing escape hatch when a layout gets wedged.
+
 ### Review System click routing
 Left-click in review mode (`Shift+R`) walks a three-step ladder in `state/input/mod.rs::try_review_pick`:
 1. **Re-anchor pending** (`review.reanchor_target.is_some()`) → raycast → `complete_reanchor`; consumes the click unconditionally so a miss doesn't fall through to creation.
@@ -190,8 +202,8 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 - `solarxy-cli --update` detects the install source via `solarxy_core::install_source::detect()`: Homebrew → `brew upgrade solarxy-cli`, Flatpak → `flatpak update dev.koljam.solarxy`, otherwise `axoupdater` self-update.
 
 **Local dev smoke:**
-- `scripts/build_local_dmg.sh` — mirrors the CI macOS bundle path end-to-end.
-- `scripts/gen_placeholder_icons.sh` — regenerates every icon in `res/bundle/` (256/512/1024 PNG, `.icns`, multi-size `.ico`) from a Python-generated master PNG. Rerun after swapping in real icon art.
+- `packaging/scripts/build_local_dmg.sh` — mirrors the CI macOS bundle path end-to-end.
+- `packaging/scripts/gen_bundle_icons.sh` — regenerates every icon in `res/bundle/` (256/512/1024 PNG, `.icns`, multi-size `.ico`) from a Python-generated master PNG. Rerun after swapping in real icon art.
 
 **Bundle assets** live in `res/bundle/`:
 - Icons (`solarxy-{256,512,1024}.png`, `solarxy.png`, `solarxy.icns`, `solarxy.ico`).

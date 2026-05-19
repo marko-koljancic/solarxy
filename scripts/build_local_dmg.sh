@@ -13,8 +13,8 @@
 #   ./bundle-out/Solarxy-<ver>-<arch>.dmg
 #
 # Usage:
-#   ./scripts/build_local_dmg.sh                 # defaults to current arch, v0.5.0
-#   V=0.5.0 TARGET=x86_64-apple-darwin ./scripts/build_local_dmg.sh
+#   ./packaging/scripts/build_local_dmg.sh                 # defaults to current arch, v0.5.0
+#   V=0.5.0 TARGET=x86_64-apple-darwin ./packaging/scripts/build_local_dmg.sh
 #
 set -euo pipefail
 
@@ -30,7 +30,7 @@ fi
 : "${BINARY:=target/release/solarxy}"
 : "${CLI_BINARY:=target/release/solarxy-cli}"
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 if [ ! -x "$BINARY" ]; then
