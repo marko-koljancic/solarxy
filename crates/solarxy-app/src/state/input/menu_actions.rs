@@ -15,7 +15,7 @@ impl State {
         if actions.close_model {
             self.close_model();
         }
-        if actions.save_preferences {
+        if actions.save_preferences || actions.save_view_defaults {
             self.save_preferences();
         }
         if let Some(path) = actions.open_recent {
