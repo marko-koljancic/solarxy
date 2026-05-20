@@ -391,10 +391,10 @@ fn draw_window_menu(ui: &mut egui::Ui, vis: &mut MenuBarVisibility, has_model: b
         ui.separator();
 
         if ui
-            .add(egui::Button::new("FPS HUD").selected(vis.fps_hud_visible))
+            .add(egui::Button::new("Status Bar").selected(vis.status_bar_visible))
             .clicked()
         {
-            vis.fps_hud_visible = !vis.fps_hud_visible;
+            vis.status_bar_visible = !vis.status_bar_visible;
             ui.close();
         }
         if ui

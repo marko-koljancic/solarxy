@@ -19,17 +19,12 @@ pub(super) struct Toast {
     pub duration: Duration,
 }
 
+/// Context for the always-on viewport overlays (toasts, loading
+/// indicator, overdraw legend). The frame-time / validation / pane
+/// readout moved to the bottom status bar (`gui::status_bar`).
 pub(super) struct HudCtx<'a> {
-    pub avg_ms: f32,
-    pub fps: u32,
     pub toasts: &'a VecDeque<Toast>,
     pub loading_message: Option<&'a String>,
-    pub has_model: bool,
-    pub fps_hud_visible: bool,
-    pub backend_info: &'a str,
-    pub pane_label: &'a str,
-    pub cameras_linked: Option<bool>,
-    pub validation_counts: (usize, usize),
     pub overdraw_active: bool,
 }
 
@@ -43,87 +38,6 @@ pub(super) fn overlay_frame() -> egui::Frame {
         .fill(egui::Color32::from_black_alpha(160))
         .corner_radius(egui::CornerRadius::same(3))
         .inner_margin(egui::Margin::same(4))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_fps_hud(
-    ctx: &egui::Context,
-    avg_ms: f32,
-    fps: u32,
-    backend_info: &str,
-    pane_label: &str,
-    cameras_linked: Option<bool>,
-    has_model: bool,
-    validation_counts: (usize, usize),
-) {
-    let screen = ctx.content_rect();
-    let default_pos = egui::pos2(screen.right() - 8.0, screen.top() + 8.0);
-    egui::Window::new("fps_hud")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .movable(true)
-        .default_pos(default_pos)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .order(egui::Order::Foreground)
-        .frame(overlay_frame())
-        .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new(format!("{avg_ms:.1} ms  {fps} fps"))
-                    .small()
-                    .color(egui::Color32::from_white_alpha(200)),
-            );
-            if !backend_info.is_empty() {
-                ui.label(
-                    egui::RichText::new(backend_info)
-                        .small()
-                        .color(egui::Color32::from_white_alpha(160)),
-                );
-            }
-            if has_model && !pane_label.is_empty() {
-                ui.label(
-                    egui::RichText::new(pane_label)
-                        .small()
-                        .color(egui::Color32::from_white_alpha(180)),
-                );
-            }
-            if let Some(linked) = cameras_linked {
-                let text = if linked {
-                    "Cameras: Linked"
-                } else {
-                    "Cameras: Independent"
-                };
-                ui.label(
-                    egui::RichText::new(text)
-                        .small()
-                        .color(egui::Color32::from_white_alpha(140)),
-                );
-            }
-            let (errors, warnings) = validation_counts;
-            if errors > 0 || warnings > 0 {
-                let mut parts = Vec::new();
-                if errors > 0 {
-                    parts.push(format!(
-                        "\u{2715} {} error{}",
-                        errors,
-                        if errors == 1 { "" } else { "s" }
-                    ));
-                }
-                if warnings > 0 {
-                    parts.push(format!(
-                        "\u{26a0} {} warning{}",
-                        warnings,
-                        if warnings == 1 { "" } else { "s" }
-                    ));
-                }
-                let color = if errors > 0 {
-                    egui::Color32::from_rgb(255, 100, 100)
-                } else {
-                    egui::Color32::from_rgb(255, 200, 80)
-                };
-                ui.label(egui::RichText::new(parts.join("  ")).small().color(color));
-            }
-        });
 }
 
 fn toast_icon(severity: ToastSeverity) -> (&'static str, egui::Color32) {
@@ -189,22 +103,9 @@ fn draw_toast_queue(ctx: &egui::Context, toasts: &VecDeque<Toast>) -> Option<u64
 }
 
 pub(super) fn draw_hud_overlays(ctx: &egui::Context, hud: &HudCtx) -> HudResult {
-    let mut result = HudResult::default();
-
-    if hud.fps_hud_visible {
-        draw_fps_hud(
-            ctx,
-            hud.avg_ms,
-            hud.fps,
-            hud.backend_info,
-            hud.pane_label,
-            hud.cameras_linked,
-            hud.has_model,
-            hud.validation_counts,
-        );
-    }
-
-    result.dismissed_toast_id = draw_toast_queue(ctx, hud.toasts);
+    let result = HudResult {
+        dismissed_toast_id: draw_toast_queue(ctx, hud.toasts),
+    };
 
     if let Some(msg) = hud.loading_message {
         egui::Area::new(egui::Id::new("loading_overlay"))

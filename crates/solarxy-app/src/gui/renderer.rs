@@ -14,6 +14,7 @@ use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard
 use super::material_inspector::MaterialInspectorState;
 use super::menu::draw_menu_bar;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
+use super::status_bar::{self, StatusBarData};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
@@ -31,7 +32,7 @@ pub struct EguiRenderer {
     egui_format: wgpu::TextureFormat,
     theme: Theme,
     pub menu_bar_visible: bool,
-    fps_hud_visible: bool,
+    pub status_bar_visible: bool,
     pub console: ConsoleState,
     about_open: bool,
     update_modal: UpdateModalState,
@@ -84,7 +85,7 @@ impl EguiRenderer {
             egui_format,
             theme,
             menu_bar_visible: true,
-            fps_hud_visible: false,
+            status_bar_visible: true,
             console: ConsoleState::new(console_buffer),
             about_open: false,
             update_modal: UpdateModalState::new(),
@@ -359,7 +360,7 @@ impl EguiRenderer {
             sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
             menu_bar_visible: self.menu_bar_visible,
             stats_visible: present_at_start.contains(&SolarxyTab::Stats),
-            fps_hud_visible: self.fps_hud_visible,
+            status_bar_visible: self.status_bar_visible,
             console_visible: present_at_start.contains(&SolarxyTab::Console),
             review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
             material_inspector_visible: present_at_start.contains(&SolarxyTab::MaterialInspector),
@@ -391,6 +392,29 @@ impl EguiRenderer {
                     has_model,
                     recent_files,
                 );
+            }
+
+            if menu_vis.status_bar_visible {
+                let status = status_bar::draw(
+                    ctx,
+                    &StatusBarData {
+                        model: model_info
+                            .as_ref()
+                            .map(|m| (m.filename.as_str(), m.format.as_str())),
+                        validation: validation_counts,
+                        review_active: review.active,
+                        pane_label,
+                        cameras_linked,
+                        avg_ms,
+                        fps,
+                        backend: backend_info,
+                    },
+                    theme,
+                );
+                if status.review_badge_clicked {
+                    review.toggle_active();
+                    actions.exit_review_mode = true;
+                }
             }
 
             let mut tab_viewer = SolarxyTabViewer {
@@ -513,16 +537,8 @@ impl EguiRenderer {
                 }
             }
             let hud_ctx = HudCtx {
-                avg_ms,
-                fps,
                 toasts,
                 loading_message,
-                has_model,
-                fps_hud_visible: menu_vis.fps_hud_visible,
-                backend_info,
-                pane_label,
-                cameras_linked,
-                validation_counts,
                 overdraw_active: hud.overdraw_active,
             };
             let hud_result = draw_hud_overlays(ctx, &hud_ctx);
@@ -611,7 +627,7 @@ impl EguiRenderer {
         });
 
         self.menu_bar_visible = menu_vis.menu_bar_visible;
-        self.fps_hud_visible = menu_vis.fps_hud_visible;
+        self.status_bar_visible = menu_vis.status_bar_visible;
 
         let menu_intents: [(SolarxyTab, bool, bool); 6] = [
             (

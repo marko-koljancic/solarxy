@@ -42,7 +42,7 @@ pub(super) struct MenuBarVisibility {
     pub sidebar_visible: bool,
     pub menu_bar_visible: bool,
     pub stats_visible: bool,
-    pub fps_hud_visible: bool,
+    pub status_bar_visible: bool,
     pub console_visible: bool,
     pub review_panel_visible: bool,
     pub material_inspector_visible: bool,

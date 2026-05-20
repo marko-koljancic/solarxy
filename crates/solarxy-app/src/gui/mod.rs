@@ -44,6 +44,7 @@ mod review_visuals;
 mod sidebar;
 mod snapshot;
 mod stats;
+mod status_bar;
 mod theme;
 mod update_modal;
 
