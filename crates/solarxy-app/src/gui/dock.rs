@@ -91,6 +91,7 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
+    pub pane_toolbar: super::pane_toolbar::PaneToolbarData<'a>,
 }
 
 impl TabViewer for SolarxyTabViewer<'_> {
@@ -115,6 +116,12 @@ impl TabViewer for SolarxyTabViewer<'_> {
         match tab {
             SolarxyTab::Viewport => {
                 *self.viewport_rect_out = Some(ui.max_rect());
+                super::pane_toolbar::draw_pane_toolbars(
+                    ui,
+                    &mut self.pane_toolbar,
+                    self.snap,
+                    self.theme,
+                );
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {

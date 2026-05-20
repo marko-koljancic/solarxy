@@ -110,7 +110,9 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Pane Encoder"),
             });
-        let pane_aspect = pane.width / pane.height;
+        // The 3D scene renders into the pane minus its toolbar strip.
+        let content = pane.content(self.pane_toolbar_height_px());
+        let pane_aspect = content.width / content.height;
 
         let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
 
@@ -118,7 +120,7 @@ impl State {
 
         let Some(cam_data) = cam_data else {
             self.renderer.render_empty_pass(&mut encoder, &pds);
-            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false, false);
+            self.composite_and_submit(encoder, surface_view, i, &content, is_split, false, false);
             return;
         };
 
@@ -138,13 +140,21 @@ impl State {
             self.write_3d_pane_uniforms(i, &pds);
 
             if pds.inspection_mode == InspectionMode::Overdraw {
-                self.render_overdraw_pane(&mut encoder, i, pane, is_split);
+                self.render_overdraw_pane(&mut encoder, i, &content, is_split);
             } else {
                 self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
             }
         }
 
-        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
+        self.composite_and_submit(
+            encoder,
+            surface_view,
+            i,
+            &content,
+            is_split,
+            is_uv_map,
+            true,
+        );
     }
 
     fn render_overdraw_pane(
@@ -455,6 +465,24 @@ impl State {
 
         let review_panes = self.build_review_panes(panes, ppp);
 
+        let pane_rects: Vec<egui::Rect> = panes
+            .iter()
+            .map(|p| {
+                egui::Rect::from_min_size(
+                    egui::pos2(p.x / ppp, p.y / ppp),
+                    egui::vec2(p.width / ppp, p.height / ppp),
+                )
+            })
+            .collect();
+        let default_projection = self.preferences.display.projection_mode;
+        let pane_projections: [solarxy_core::preferences::ProjectionMode; 4] =
+            std::array::from_fn(|i| {
+                self.view.cameras[i]
+                    .as_ref()
+                    .map_or(default_projection, |c| c.camera.projection)
+            });
+        let mut projection_change = None;
+
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
 
@@ -510,6 +538,16 @@ impl State {
 
         let recent_files = self.preferences.history.recent_files.clone();
         let model = self.scene.as_ref().map(|s| &s.model);
+        // `PaneToolbarData` is passed by value — `render_ui` consumes it,
+        // releasing its `&mut self.view.pane_settings` borrow before
+        // `apply_to_state` re-borrows the same field below.
+        let pane_toolbar = crate::gui::PaneToolbarData {
+            rects: &pane_rects,
+            active: ap,
+            pane_settings: &mut self.view.pane_settings,
+            projections: pane_projections,
+            projection_change: &mut projection_change,
+        };
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
@@ -527,7 +565,14 @@ impl State {
             &recent_files,
             &mut self.review,
             model,
+            pane_toolbar,
         );
+
+        if let Some((i, proj)) = projection_change
+            && let Some(cam) = &mut self.view.cameras[i]
+        {
+            cam.set_projection(proj);
+        }
 
         let changes = snap_after.apply_to_state(
             &snap_before,
@@ -586,13 +631,15 @@ impl State {
     /// UV panes are skipped (markers never render on UV map panes).
     fn build_review_panes(&self, panes: &[Pane], ppp: f32) -> Vec<crate::gui::ReviewPaneOverlay> {
         let mut out = Vec::with_capacity(panes.len());
+        let toolbar_h = self.pane_toolbar_height_px();
         for (i, pane) in panes.iter().enumerate() {
             let pds = self.view.pane_settings[i];
             if pds.pane_mode != PaneMode::Scene3D {
                 continue;
             }
-            let pane_aspect = if pane.height > 0.0 {
-                pane.width / pane.height
+            let content = pane.content(toolbar_h);
+            let pane_aspect = if content.height > 0.0 {
+                content.width / content.height
             } else {
                 1.0
             };
@@ -602,8 +649,8 @@ impl State {
             cam.aspect = pane_aspect;
             let view_proj = cam.build_view_projection_matrix();
             let egui_rect = egui::Rect::from_min_size(
-                egui::pos2(pane.x / ppp, pane.y / ppp),
-                egui::vec2(pane.width / ppp, pane.height / ppp),
+                egui::pos2(content.x / ppp, content.y / ppp),
+                egui::vec2(content.width / ppp, content.height / ppp),
             );
             out.push(crate::gui::ReviewPaneOverlay {
                 egui_rect,

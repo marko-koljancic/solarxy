@@ -24,13 +24,18 @@ use crate::state::State;
 /// because `egui_dock`'s tab body registers as a hover-sensing area and
 /// caused `wants_pointer_input` to return `true` over the Viewport tab.
 fn route_pointer_to_camera(state: &State) -> bool {
+    if state.gui.any_blocking_modal_open(&state.review) || state.gui.any_popup_open() {
+        return false;
+    }
     let ppp = state.window.scale_factor() as f32;
     let cursor_logical = egui::pos2(
         state.input.cursor_pos.0 / ppp,
         state.input.cursor_pos.1 / ppp,
     );
-    state.gui.cursor_in_viewport(cursor_logical)
-        && !state.gui.any_blocking_modal_open(&state.review)
+    // Inside the Viewport tab, and specifically inside a pane's 3D
+    // content rect — a click on a per-pane toolbar strip or an open
+    // toolbar dropdown must not orbit the scene.
+    state.gui.cursor_in_viewport(cursor_logical) && state.pointer_in_pane_content()
 }
 
 pub struct App {

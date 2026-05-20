@@ -41,9 +41,18 @@ impl State {
         }
     }
 
+    /// Per-pane toolbar strip height in physical pixels.
+    pub(super) fn pane_toolbar_height_px(&self) -> f32 {
+        solarxy_core::view_config::PANE_TOOLBAR_HEIGHT * self.window.scale_factor() as f32
+    }
+
     pub(super) fn target_dimensions(&self) -> (u32, u32) {
         let (base_w, base_h) = self.viewport_base_size_px();
-        compute_target_dimensions(self.view.display.layout, base_w, base_h)
+        let (w, h) = compute_target_dimensions(self.view.display.layout, base_w, base_h);
+        // The HDR target is sized to the largest pane's 3D content — its
+        // full rect minus the toolbar strip.
+        let toolbar = self.pane_toolbar_height_px().round() as u32;
+        (w, h.saturating_sub(toolbar).max(1))
     }
 
     pub(super) fn compute_panes(&self) -> Vec<Pane> {
@@ -161,6 +170,18 @@ impl State {
                 ]
             }
         }
+    }
+
+    /// `true` when the cursor is inside some pane's 3D **content** rect —
+    /// not its toolbar strip, not an inter-pane gap. The camera-input
+    /// gate uses this so toolbar clicks don't orbit the scene.
+    pub(crate) fn pointer_in_pane_content(&self) -> bool {
+        let (cx, cy) = self.input.cursor_pos;
+        let toolbar_h = self.pane_toolbar_height_px();
+        self.compute_panes().iter().any(|p| {
+            let c = p.content(toolbar_h);
+            cx >= c.x && cx < c.x + c.width && cy >= c.y && cy < c.y + c.height
+        })
     }
 
     pub(super) fn active_pane_index(&self) -> usize {

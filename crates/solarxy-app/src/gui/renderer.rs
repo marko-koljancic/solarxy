@@ -131,6 +131,13 @@ impl EguiRenderer {
         self.ctx.wants_pointer_input()
     }
 
+    /// `true` while any combo / menu / popup is open — the camera input
+    /// gate uses this so a click inside an open pane-toolbar dropdown
+    /// doesn't also orbit the scene.
+    pub fn any_popup_open(&self) -> bool {
+        egui::Popup::is_any_open(&self.ctx)
+    }
+
     pub fn wants_keyboard_input(&self) -> bool {
         self.ctx.wants_keyboard_input()
     }
@@ -325,6 +332,7 @@ impl EguiRenderer {
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
         model: Option<&solarxy_renderer::model::Model>,
+        pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -377,6 +385,16 @@ impl EguiRenderer {
         let material_inspector = &mut self.material_inspector;
         let dock_state = &mut self.dock_state;
         let theme = self.theme;
+        // Destructured here so the egui closure (an `FnMut`) captures the
+        // individual borrows — it rebuilds a fresh `PaneToolbarData` each
+        // run rather than moving a captured owned value out.
+        let super::pane_toolbar::PaneToolbarData {
+            rects: pt_rects,
+            active: pt_active,
+            pane_settings: pt_pane_settings,
+            projections: pt_projections,
+            projection_change: pt_projection_change,
+        } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
@@ -428,6 +446,13 @@ impl EguiRenderer {
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
                 theme,
+                pane_toolbar: super::pane_toolbar::PaneToolbarData {
+                    rects: pt_rects,
+                    active: pt_active,
+                    pane_settings: pt_pane_settings,
+                    projections: pt_projections,
+                    projection_change: pt_projection_change,
+                },
             };
             DockArea::new(dock_state)
                 .style(make_dock_style(ctx, &theme))
@@ -591,21 +616,6 @@ impl EguiRenderer {
                     actions.set_split_ratio =
                         Some(solarxy_core::view_config::DisplaySettings::DEFAULT_SPLIT_RATIO);
                 }
-            }
-            if let Some(rect) = active_pane_rect {
-                let painter = ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new("active_pane"),
-                ));
-                painter.rect_stroke(
-                    rect,
-                    0.0,
-                    egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgba_unmultiplied(100, 160, 255, 120),
-                    ),
-                    egui::StrokeKind::Outside,
-                );
             }
             if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);

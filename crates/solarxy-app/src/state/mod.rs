@@ -60,6 +60,19 @@ pub(super) struct Pane {
     pub height: f32,
 }
 
+impl Pane {
+    /// The 3D content sub-rect — the pane minus the per-pane toolbar
+    /// strip at the top. `toolbar_h` is in physical pixels.
+    pub(super) fn content(&self, toolbar_h: f32) -> Pane {
+        Pane {
+            x: self.x,
+            y: self.y + toolbar_h,
+            width: self.width,
+            height: (self.height - toolbar_h).max(1.0),
+        }
+    }
+}
+
 pub(super) struct PendingLoad {
     pub(super) receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
     pub(super) filename: String,

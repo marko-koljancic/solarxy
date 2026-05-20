@@ -35,6 +35,10 @@ impl ViewLayout {
     }
 }
 
+/// Height of the per-pane viewport toolbar strip, in logical pixels.
+/// Each pane's 3D content is the pane rect minus this strip at the top.
+pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct DisplaySettings {
     pub turntable_active: bool,
