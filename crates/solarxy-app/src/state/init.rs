@@ -100,6 +100,7 @@ impl State {
 
         let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
         gui.set_backend_info(backend_info.clone());
+        gui.apply_theme_choice(preferences.ui.theme);
         if let Some(json) = preferences.dock.last_layout_json.as_deref() {
             gui.apply_layout_json(json);
         }

@@ -297,6 +297,18 @@ cycle_enum! {
     ; cycle
 }
 
+cycle_enum! {
+    /// User-selectable interface theme. Both presets are Ayu Mirage
+    /// derivatives; the GUI hot-swaps between them without a restart.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum ThemeChoice {
+        #[default]
+        AyuMirageDark => "Ayu Mirage Dark",
+        AyuMirageLight => "Ayu Mirage Light",
+    }
+    ; cycle
+}
+
 /// Root TOML structure persisted at `~/.config/solarxy/config.toml`
 /// (via [`config_path`]).
 ///
@@ -444,6 +456,8 @@ pub struct UiPrefs {
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
     pub open_stats_on_model_load: bool,
+    #[serde(default)]
+    pub theme: ThemeChoice,
 }
 
 fn default_max_recent_files() -> usize {
@@ -457,6 +471,7 @@ impl Default for UiPrefs {
             default_fps_hud_visible: false,
             max_recent_files: default_max_recent_files(),
             open_stats_on_model_load: true,
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -683,6 +698,7 @@ mod tests {
                 default_fps_hud_visible: true,
                 max_recent_files: 10,
                 open_stats_on_model_load: false,
+                theme: ThemeChoice::AyuMirageLight,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -853,6 +869,20 @@ mod tests {
     fn updater_channel_cycles() {
         assert_eq!(UpdaterChannel::Stable.next(), UpdaterChannel::Prerelease);
         assert_eq!(UpdaterChannel::Prerelease.next(), UpdaterChannel::Stable);
+    }
+
+    #[test]
+    fn theme_choice_defaults_to_dark_and_cycles() {
+        assert_eq!(ThemeChoice::default(), ThemeChoice::AyuMirageDark);
+        assert_eq!(UiPrefs::default().theme, ThemeChoice::AyuMirageDark);
+        assert_eq!(
+            ThemeChoice::AyuMirageDark.next(),
+            ThemeChoice::AyuMirageLight
+        );
+        assert_eq!(
+            ThemeChoice::AyuMirageLight.next(),
+            ThemeChoice::AyuMirageDark
+        );
     }
 
     #[test]

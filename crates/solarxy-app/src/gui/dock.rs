@@ -32,6 +32,7 @@ use crate::console::ConsoleState;
 use super::material_inspector::MaterialInspectorState;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::ModelInfo;
+use super::theme::Theme;
 
 /// The six tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
@@ -89,6 +90,7 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub model_info: Option<&'a ModelInfo>,
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
+    pub theme: Theme,
 }
 
 impl TabViewer for SolarxyTabViewer<'_> {
@@ -125,7 +127,12 @@ impl TabViewer for SolarxyTabViewer<'_> {
             }
             SolarxyTab::ReviewPanel => {
                 let mut visible = true;
-                super::review_panel::draw_review_panel_content(ui, self.review, &mut visible);
+                super::review_panel::draw_review_panel_content(
+                    ui,
+                    self.review,
+                    &mut visible,
+                    self.theme,
+                );
             }
             SolarxyTab::Console => {
                 super::console_view::draw_console_content(ui, self.console);

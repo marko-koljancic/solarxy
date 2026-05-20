@@ -17,8 +17,8 @@ use std::borrow::Cow;
 use cgmath::{Matrix4, Vector4};
 use solarxy_core::review::ReviewAnnotation;
 
-use super::review_visuals::{SELECTION_ACCENT, category_color, category_label, category_letter};
-use super::theme;
+use super::review_visuals::{category_color, category_label, category_letter};
+use super::theme::Theme;
 use crate::state::review::ReviewState;
 
 /// Per-3D-pane data the overlay needs: the egui-logical rect the pane
@@ -54,6 +54,7 @@ pub(crate) fn draw_review_overlay(
     panes: &[ReviewPaneOverlay],
     review: &mut ReviewState,
     suppress: bool,
+    theme: Theme,
 ) {
     if suppress {
         return;
@@ -125,24 +126,24 @@ pub(crate) fn draw_review_overlay(
                 featured = Some(pin);
                 continue;
             }
-            draw_pin(&painter, pin, false, false);
+            draw_pin(&painter, pin, false, false, theme);
         }
         if let Some(pin) = featured {
             let is_hovered = hovered_id == Some(pin.ann.id.as_str());
             let is_selected = selected_id == Some(pin.ann.id.as_str());
-            draw_pin(&painter, pin, is_hovered, is_selected);
+            draw_pin(&painter, pin, is_hovered, is_selected, theme);
         }
 
         if let Some(pin) = visible
             .iter()
             .find(|p| selected_id == Some(p.ann.id.as_str()))
         {
-            draw_card(&painter, pin, true, review);
+            draw_card(&painter, pin, true, review, theme);
         }
         if let Some(pin) = visible.iter().find(|p| {
             hovered_id == Some(p.ann.id.as_str()) && selected_id != Some(p.ann.id.as_str())
         }) {
-            draw_card(&painter, pin, false, review);
+            draw_card(&painter, pin, false, review, theme);
         }
     }
 
@@ -192,9 +193,15 @@ fn project_to_pane(
 /// Render a single category-colored pin. Selected pins gain a yellow
 /// (Ayu accent) outline; resolved pins drop alpha; stale pins get a
 /// dashed/dotted ring drawn manually.
-fn draw_pin(painter: &egui::Painter, pin: &VisiblePin<'_>, is_hovered: bool, is_selected: bool) {
-    let mut fill = category_color(pin.ann.category);
-    let mut ring = theme::BG;
+fn draw_pin(
+    painter: &egui::Painter,
+    pin: &VisiblePin<'_>,
+    is_hovered: bool,
+    is_selected: bool,
+    theme: Theme,
+) {
+    let mut fill = category_color(theme, pin.ann.category);
+    let mut ring = theme.bg;
     if pin.ann.resolved {
         fill = with_alpha(fill, RESOLVED_ALPHA);
         ring = with_alpha(ring, RESOLVED_ALPHA);
@@ -210,12 +217,15 @@ fn draw_pin(painter: &egui::Painter, pin: &VisiblePin<'_>, is_hovered: bool, is_
         painter.circle_stroke(
             pin.pos,
             radius + 2.0,
-            egui::Stroke::new(1.6, SELECTION_ACCENT),
+            egui::Stroke::new(1.6, theme.review.selection_accent),
         );
     }
     if pin.ann.stale {
-        let warn = egui::Color32::from_rgb(0xFF, 0xB2, 0x3D);
-        painter.circle_filled(pin.pos + egui::vec2(radius * 0.7, -radius * 0.7), 2.5, warn);
+        painter.circle_filled(
+            pin.pos + egui::vec2(radius * 0.7, -radius * 0.7),
+            2.5,
+            theme.severity_warn,
+        );
     }
 }
 
@@ -261,11 +271,12 @@ fn draw_card(
     pin: &VisiblePin<'_>,
     is_selected: bool,
     review: &ReviewState,
+    theme: Theme,
 ) {
     let Some(card_rect) = pin.card_rect else {
         return;
     };
-    let color = category_color(pin.ann.category);
+    let color = category_color(theme, pin.ann.category);
 
     let leader_target = nearest_edge_point(card_rect, pin.pos);
     painter.line_segment(
@@ -273,9 +284,13 @@ fn draw_card(
         egui::Stroke::new(1.0, with_alpha(color, 200)),
     );
 
-    let bg = with_alpha(theme::BG, CARD_FILL_ALPHA);
+    let bg = with_alpha(theme.bg_elevated, CARD_FILL_ALPHA);
     painter.rect_filled(card_rect, CARD_ROUNDING, bg);
-    let stroke_color = if is_selected { SELECTION_ACCENT } else { color };
+    let stroke_color = if is_selected {
+        theme.review.selection_accent
+    } else {
+        color
+    };
     painter.rect_stroke(
         card_rect,
         CARD_ROUNDING,
@@ -307,7 +322,7 @@ fn draw_card(
         egui::Align2::LEFT_TOP,
         header_label,
         egui::FontId::proportional(11.0),
-        with_alpha(theme::FG, 230),
+        with_alpha(theme.fg, 230),
     );
 
     let body = truncate_with_ellipsis(&pin.ann.text, TEXT_TRUNCATE_CHARS);
@@ -321,10 +336,10 @@ fn draw_card(
     let galley = painter.layout(
         body.into_owned(),
         egui::FontId::proportional(12.0),
-        theme::FG,
+        theme.fg,
         body_rect.width(),
     );
-    painter.galley(body_rect.min, galley, theme::FG);
+    painter.galley(body_rect.min, galley, theme.fg);
 
     let reply_count = review.reply_count(&pin.ann.id);
     if reply_count > 0 {
@@ -341,7 +356,7 @@ fn draw_card(
             egui::Align2::RIGHT_BOTTOM,
             badge_text,
             egui::FontId::proportional(11.0),
-            with_alpha(theme::MUTED, 220),
+            with_alpha(theme.muted, 220),
         );
     }
 }

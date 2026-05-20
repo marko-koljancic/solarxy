@@ -597,7 +597,11 @@ impl State {
         self.handle_menu_actions(actions);
 
         if let Some(new_prefs) = self.gui.take_committed_prefs() {
+            let theme_changed = self.preferences.ui.theme != new_prefs.ui.theme;
             self.preferences = new_prefs;
+            if theme_changed {
+                self.gui.apply_theme_choice(self.preferences.ui.theme);
+            }
             let cap = self.preferences.ui.max_recent_files.max(1);
             if self.preferences.history.recent_files.len() > cap {
                 self.preferences.history.recent_files.truncate(cap);

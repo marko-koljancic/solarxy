@@ -19,16 +19,17 @@ use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::stats::ModelInfo;
-use super::theme::{ACCENT, apply_theme, configure_fonts, make_dock_style};
+use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
-use solarxy_core::preferences::Preferences;
+use solarxy_core::preferences::{Preferences, ThemeChoice};
 
 pub struct EguiRenderer {
     ctx: egui::Context,
     winit_state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
     egui_format: wgpu::TextureFormat,
+    theme: Theme,
     pub menu_bar_visible: bool,
     fps_hud_visible: bool,
     pub console: ConsoleState,
@@ -75,13 +76,15 @@ impl EguiRenderer {
             egui_wgpu::Renderer::new(device, egui_format, egui_wgpu::RendererOptions::default());
 
         configure_fonts(&ctx);
-        apply_theme(&ctx);
+        let theme = Theme::ayu_mirage_dark();
+        apply_theme(&ctx, &theme);
 
         Self {
             ctx,
             winit_state,
             renderer,
             egui_format,
+            theme,
             menu_bar_visible: true,
             fps_hud_visible: false,
             console: ConsoleState::new(console_buffer),
@@ -102,6 +105,14 @@ impl EguiRenderer {
             last_viewport_rect: None,
             has_saved_layout: false,
         }
+    }
+
+    /// Swap the active interface theme and re-push it into the egui
+    /// context. Called at startup with the persisted choice and again on
+    /// every Preferences commit (only when the choice actually changed).
+    pub fn apply_theme_choice(&mut self, choice: ThemeChoice) {
+        self.theme = Theme::from_choice(choice);
+        apply_theme(&self.ctx, &self.theme);
     }
 
     pub fn clear_model_info(&mut self) {
@@ -388,6 +399,7 @@ impl EguiRenderer {
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let dock_state = &mut self.dock_state;
+        let theme = self.theme;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
@@ -415,9 +427,10 @@ impl EguiRenderer {
                 model_info: model_info.as_ref(),
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
+                theme,
             };
             DockArea::new(dock_state)
-                .style(make_dock_style(ctx))
+                .style(make_dock_style(ctx, &theme))
                 .show(ctx, &mut tab_viewer);
 
             let suppress_overlay = about_open
@@ -431,6 +444,7 @@ impl EguiRenderer {
                 review_panes,
                 review,
                 suppress_overlay,
+                theme,
             );
 
             draw_about_modal(ctx, &mut about_open);
@@ -443,9 +457,9 @@ impl EguiRenderer {
 
             if review.active {
                 let stripe = egui::Color32::from_rgba_unmultiplied(
-                    ACCENT.r(),
-                    ACCENT.g(),
-                    ACCENT.b(),
+                    theme.accent.r(),
+                    theme.accent.g(),
+                    theme.accent.b(),
                     0xB0,
                 );
                 let stripe_painter = ctx.layer_painter(egui::LayerId::new(
@@ -462,7 +476,7 @@ impl EguiRenderer {
                 if review.reanchor_target.is_none() {
                     let amber_bg =
                         egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xCC);
-                    let amber_fg = ACCENT;
+                    let amber_fg = theme.accent;
                     egui::Area::new(egui::Id::new("solarxy_review_mode_banner"))
                         .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
                         .order(egui::Order::Foreground)
@@ -491,7 +505,7 @@ impl EguiRenderer {
                         crate::state::review::short_text_preview(&a.text)
                     });
                 let amber_bg = egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xE6);
-                let amber_fg = ACCENT;
+                let amber_fg = theme.accent;
                 egui::Area::new(egui::Id::new("solarxy_reanchor_banner"))
                     .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
                     .order(egui::Order::Foreground)
@@ -541,7 +555,7 @@ impl EguiRenderer {
             }
             if let Some(div) = divider {
                 let painter = ctx.layer_painter(egui::LayerId::background());
-                painter.rect_filled(div.visible, 0.0, egui::Color32::from_gray(40));
+                painter.rect_filled(div.visible, 0.0, theme.border);
                 let resp = egui::Area::new(egui::Id::new("solarxy_divider_drag"))
                     .fixed_pos(div.hit.min)
                     .order(egui::Order::Foreground)
