@@ -1,7 +1,6 @@
 use crate::gui::ToastSeverity;
 use solarxy_renderer::ibl::IblState;
 use solarxy_renderer::resources;
-use solarxy_core::preferences::PaneMode;
 
 use super::super::view_state::ViewLayout;
 use super::super::State;
@@ -71,54 +70,27 @@ impl State {
         self.renderer.uv_overlap.stats_dirty = false;
     }
 
+    /// Switch the viewport layout. Pane cameras and per-pane settings
+    /// stay parked in their slots — `ensure_pane_cameras` fills any
+    /// newly-used slot — so toggling between layouts is idempotent
+    /// within a session (each pane keeps its own camera).
     pub fn set_view_layout(&mut self, layout: ViewLayout) {
-        match layout {
-            ViewLayout::Single => {
-                if self.view.display.layout != ViewLayout::Single {
-                    if self.view.active_pane == 1 {
-                        if let Some(sec) = self.view.secondary_cam.take()
-                            && let Some(scene) = &mut self.scene
-                        {
-                            scene.cam = sec;
-                        }
-                    } else {
-                        self.view.secondary_cam = None;
-                    }
-                }
-                if self.view.active_pane == 1 {
-                    self.view.pane_settings[0] = self.view.pane_settings[1];
-                }
-                self.view.active_pane = 0;
-                self.view.display.layout = ViewLayout::Single;
-                self.gui
-                    .set_toast("Single Viewport", ToastSeverity::Success);
-            }
-            ViewLayout::SplitVertical | ViewLayout::SplitHorizontal => {
-                if self.view.display.layout == ViewLayout::Single {
-                    self.view.pane_settings[1] = self.view.pane_settings[0];
-                    self.view.pane_settings[0].pane_mode = PaneMode::UvMap;
-                    self.view.pane_settings[0].uv_offset = [0.0, 0.0];
-                    self.view.pane_settings[0].uv_zoom = 1.0;
-                    self.view.pane_settings[1].pane_mode = PaneMode::Scene3D;
-                    if let Some(scene) = &self.scene {
-                        self.view.secondary_cam =
-                            Some(scene.cam.clone_with_new_resources(
-                                &self.device,
-                                &self.renderer.layouts.camera,
-                            ));
-                    }
-                }
-                self.view.display.layout = layout;
-                let msg = if matches!(layout, ViewLayout::SplitVertical) {
-                    "Split Vertical"
-                } else {
-                    "Split Horizontal"
-                };
-                self.gui.set_toast(msg, ToastSeverity::Success);
-            }
+        let prev = self.view.display.layout;
+        self.view.display.layout = layout;
+        if self.view.active_pane >= layout.pane_count() {
+            self.view.active_pane = 0;
         }
+        self.ensure_pane_cameras();
         let (tw, th) = self.target_dimensions();
         self.resize_render_targets(tw, th);
+        if prev != layout {
+            let msg = match layout {
+                ViewLayout::Single => "Single Viewport",
+                ViewLayout::SplitVertical => "Split Vertical",
+                ViewLayout::SplitHorizontal => "Split Horizontal",
+            };
+            self.gui.set_toast(msg, ToastSeverity::Success);
+        }
     }
 
     pub fn toggle_fullscreen(&mut self) {

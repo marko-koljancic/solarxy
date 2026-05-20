@@ -401,7 +401,7 @@ impl State {
                         show_uv_overlap: false,
                         show_validation: false,
                     };
-                    [pds, pds]
+                    [pds; 4]
                 },
                 display: DisplaySettings {
                     turntable_active: preferences.display.turntable_active,
@@ -412,7 +412,7 @@ impl State {
                     roughness_scale: 1.0,
                     metallic_scale: 1.0,
                 },
-                secondary_cam: None,
+                cameras: [None, None, None, None],
                 active_pane: 0,
                 cameras_linked: true,
             },

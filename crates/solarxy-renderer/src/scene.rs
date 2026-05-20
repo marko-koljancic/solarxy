@@ -9,8 +9,7 @@ use solarxy_core::validation::ValidationReport;
 use wgpu::util::DeviceExt;
 
 use crate::bind_groups::BindGroupLayouts;
-use crate::camera::Camera;
-use crate::camera_state::CameraState;
+use crate::camera::{Camera, camera_from_bounds};
 use crate::ibl::{BrdfLut, IblState};
 use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
@@ -111,7 +110,6 @@ impl BackgroundModeExt for BackgroundMode {
 
 pub struct ModelScene {
     pub model: Model,
-    pub cam: CameraState,
     pub lights_uniform: LightsUniform,
     pub light_buffer: wgpu::Buffer,
     pub light_bind_group: wgpu::BindGroup,
@@ -146,13 +144,6 @@ impl ModelScene {
             &layouts.edge_geometry,
         )?;
 
-        let cam = CameraState::new(
-            device,
-            &layouts.camera,
-            &model.bounds,
-            config.width as f32 / config.height as f32,
-        );
-
         let instance_data = Instance {
             position: cgmath::Vector3::new(0.0, 0.0, 0.0),
             rotation: cgmath::Quaternion::from_axis_angle(
@@ -167,8 +158,12 @@ impl ModelScene {
         });
 
         let placeholder_ibl = IblState::fallback(device, queue);
+        // Pane cameras now live in the view layer (`ViewState::cameras`);
+        // a throwaway bounds-framed camera seeds the initial light rig.
+        let initial_cam =
+            camera_from_bounds(&model.bounds, config.width as f32 / config.height as f32);
         let lights_uniform = lights_from_camera(
-            &cam.camera,
+            &initial_cam,
             &model.bounds,
             placeholder_ibl.irradiance_average,
         );
@@ -214,7 +209,6 @@ impl ModelScene {
 
         Ok(ModelScene {
             model,
-            cam,
             lights_uniform,
             light_buffer,
             light_bind_group,

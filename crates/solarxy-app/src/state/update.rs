@@ -143,12 +143,41 @@ impl State {
             self.resize_render_targets(tw, th);
 
             let aspect = tw as f32 / th as f32;
-            if let Some(scene) = &mut self.scene {
-                scene.cam.resize(aspect);
-            }
-            if let Some(cam) = &mut self.view.secondary_cam {
+            for cam in self.view.cameras.iter_mut().flatten() {
                 cam.resize(aspect);
             }
+        }
+    }
+
+    /// Lazily create a [`CameraState`] for every pane slot the current
+    /// layout uses. Idempotent — a slot that already holds a camera is
+    /// skipped, so layout toggles preserve per-slot cameras within a
+    /// session. No-op until a model is loaded (bounds frame the camera).
+    /// Slot 0 is bounds-framed in the persisted projection; further slots
+    /// clone slot 0 for now — B1 commit 2 seeds them with orthographic
+    /// Top / Front / Left presets.
+    pub(super) fn ensure_pane_cameras(&mut self) {
+        let Some(bounds) = self.scene.as_ref().map(|s| s.model.bounds) else {
+            return;
+        };
+        let count = self.view.display.layout.pane_count();
+        let (tw, th) = self.target_dimensions();
+        let aspect = tw as f32 / th.max(1) as f32;
+        for i in 0..count {
+            if self.view.cameras[i].is_some() {
+                continue;
+            }
+            let cam = if i == 0 {
+                let mut cam =
+                    CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect);
+                cam.set_projection(self.preferences.display.projection_mode);
+                cam
+            } else if let Some(src) = self.view.cameras[0].as_ref() {
+                src.clone_with_new_resources(&self.device, &self.renderer.layouts.camera)
+            } else {
+                continue;
+            };
+            self.view.cameras[i] = Some(cam);
         }
     }
 
@@ -290,27 +319,9 @@ impl State {
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
                     self.scene = Some(new_scene);
-                    if let Some(scene) = &mut self.scene {
-                        scene
-                            .cam
-                            .resize(self.config.width as f32 / self.config.height as f32);
-                        scene
-                            .cam
-                            .set_projection(self.preferences.display.projection_mode);
-                    }
-
                     self.load_review_for_model(&pending.path);
-
-                    self.view.secondary_cam = None;
-                    if self.view.display.layout != ViewLayout::Single
-                        && let Some(scene) = &self.scene
-                    {
-                        self.view.secondary_cam =
-                            Some(scene.cam.clone_with_new_resources(
-                                &self.device,
-                                &self.renderer.layouts.camera,
-                            ));
-                    }
+                    self.view.cameras = [None, None, None, None];
+                    self.ensure_pane_cameras();
 
                     self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
                     self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
@@ -350,36 +361,32 @@ impl State {
         self.last_frame_time = now;
 
         self.view.active_pane = self.active_pane_index();
+        self.ensure_pane_cameras();
 
         if self.view.display.turntable_active {
             let speed = self.view.display.turntable_rpm * std::f32::consts::TAU / 60.0;
             let yaw = speed * self.dt;
-            if let Some(scene) = &mut self.scene
-                && (self.view.active_pane == 0 || self.view.cameras_linked)
-                && !scene.cam.is_orbiting()
-            {
-                scene.cam.inject_orbit_yaw(yaw);
-            }
-            if (self.view.active_pane == 1 || self.view.cameras_linked)
-                && let Some(cam) = &mut self.view.secondary_cam
-                && !cam.is_orbiting()
-            {
-                cam.inject_orbit_yaw(yaw);
+            let linked = self.view.cameras_linked;
+            let active = self.view.active_pane;
+            for (i, slot) in self.view.cameras.iter_mut().enumerate() {
+                if let Some(cam) = slot
+                    && (i == active || linked)
+                    && !cam.is_orbiting()
+                {
+                    cam.inject_orbit_yaw(yaw);
+                }
             }
         }
 
-        if let Some(scene) = &mut self.scene {
-            scene.cam.update(&self.queue, self.dt);
-        }
-        if let Some(cam) = &mut self.view.secondary_cam {
+        for cam in self.view.cameras.iter_mut().flatten() {
             cam.update(&self.queue, self.dt);
         }
 
         if !self.view.display.lights_locked {
             let ibl_avg = self.active_ibl().irradiance_average;
-            if let Some(scene) = &mut self.scene {
-                scene.lights_uniform =
-                    lights_from_camera(&scene.cam.camera, &scene.model.bounds, ibl_avg);
+            let cam0 = self.view.cameras[0].as_ref().map(|c| c.camera);
+            if let (Some(cam0), Some(scene)) = (cam0, &mut self.scene) {
+                scene.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);
                 self.queue.write_buffer(
                     &scene.light_buffer,
                     0,

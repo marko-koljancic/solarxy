@@ -9,9 +9,15 @@ pub(crate) use solarxy_core::view_config::{
 };
 
 pub(crate) struct ViewState {
-    pub(super) pane_settings: [PaneDisplaySettings; 2],
+    /// Per-pane display settings. Fixed-size — layouts use the first
+    /// `layout.pane_count()` slots; the rest are parked defaults.
+    pub(super) pane_settings: [PaneDisplaySettings; 4],
     pub(super) display: DisplaySettings,
-    pub(super) secondary_cam: Option<CameraState>,
+    /// One camera per pane slot. `None` until `ensure_pane_cameras`
+    /// lazily fills the slot (needs a loaded model for bounds). Slot 0
+    /// is the Single-layout camera; slots beyond `pane_count()` are
+    /// preserved across layout toggles so Quad→Single→Quad is idempotent.
+    pub(super) cameras: [Option<CameraState>; 4],
     pub(super) active_pane: usize,
     pub(super) cameras_linked: bool,
 }

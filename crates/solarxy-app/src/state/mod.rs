@@ -44,6 +44,7 @@ pub(super) use solarxy_core::preferences::{
     self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
     ViewMode,
 };
+pub(super) use solarxy_renderer::camera_state::CameraState;
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
 pub(super) use solarxy_renderer::light::LightsUniform;
 pub(super) use solarxy_renderer::texture;

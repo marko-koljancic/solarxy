@@ -13,14 +13,22 @@ use crate::preferences::{
     UvMapBackground, UvMode, ViewMode,
 };
 
-/// Pane arrangement: one viewport, two side-by-side, or two top/bottom.
-/// Toggled via `F1` / `F2` / `F3`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewLayout {
     #[default]
     Single,
     SplitVertical,
     SplitHorizontal,
+}
+
+impl ViewLayout {
+    #[must_use]
+    pub fn pane_count(self) -> usize {
+        match self {
+            Self::Single => 1,
+            Self::SplitVertical | Self::SplitHorizontal => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

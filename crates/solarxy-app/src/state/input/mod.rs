@@ -36,17 +36,13 @@ impl State {
             super::cam_routing(self.view.active_pane, self.view.cameras_linked);
         if primary
             && self.view.pane_settings[0].pane_mode == PaneMode::Scene3D
-            && let Some(scene) = &mut self.scene
+            && let Some(cam) = &mut self.view.cameras[0]
         {
-            f(&mut scene.cam);
+            f(cam);
         }
         if secondary
-            && self
-                .view
-                .pane_settings
-                .get(1)
-                .is_some_and(|p| p.pane_mode == PaneMode::Scene3D)
-            && let Some(cam) = &mut self.view.secondary_cam
+            && self.view.pane_settings[1].pane_mode == PaneMode::Scene3D
+            && let Some(cam) = &mut self.view.cameras[1]
         {
             f(cam);
         }
@@ -527,8 +523,8 @@ impl State {
         self.preferences.display.uv_mode = pds.uv_mode;
         self.preferences.display.turntable_active = self.view.display.turntable_active;
         self.preferences.display.turntable_rpm = self.view.display.turntable_rpm;
-        if let Some(scene) = &self.scene {
-            self.preferences.display.projection_mode = scene.cam.camera.projection;
+        if let Some(cam) = &self.view.cameras[0] {
+            self.preferences.display.projection_mode = cam.camera.projection;
         }
         self.preferences.rendering.wireframe_line_weight = pds.line_weight;
         self.preferences.lighting.lock = self.view.display.lights_locked;
@@ -628,11 +624,7 @@ impl State {
             return false;
         }
 
-        let camera = if pane_idx == 0 || self.view.cameras_linked {
-            scene.cam.camera
-        } else if let Some(c) = self.view.secondary_cam.as_ref() {
-            c.camera
-        } else {
+        let Some(camera) = self.view.cameras[pane_idx].as_ref().map(|c| c.camera) else {
             return false;
         };
 

@@ -112,17 +112,9 @@ impl State {
             });
         let pane_aspect = pane.width / pane.height;
 
-        let cam_data = if i == 0 {
-            self.scene.as_ref().map(|s| s.cam.camera)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| c.camera)
-                .or(self.scene.as_ref().map(|s| s.cam.camera))
-        };
+        let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
 
-        let pds = self.view.pane_settings[i.min(1)];
+        let pds = self.view.pane_settings[i];
 
         let Some(cam_data) = cam_data else {
             self.renderer.render_empty_pass(&mut encoder, &pds);
@@ -135,12 +127,8 @@ impl State {
         if is_uv_map {
             self.render_uv_map_pane(&mut encoder, pane_aspect, &pds);
         } else {
-            if i == 0 {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.write_with_aspect(&self.queue, pane_aspect);
-                }
-            } else if let Some(sec) = &mut self.view.secondary_cam {
-                sec.write_with_aspect(&self.queue, pane_aspect);
+            if let Some(cam) = &mut self.view.cameras[i] {
+                cam.write_with_aspect(&self.queue, pane_aspect);
             }
 
             if is_split && i == 1 {
@@ -166,15 +154,7 @@ impl State {
         pane: &Pane,
         is_split: bool,
     ) {
-        let cam_bg = if i == 0 {
-            self.scene.as_ref().map(|s| &s.cam.bind_group)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| &c.bind_group)
-                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-        };
+        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         let Some(scene) = &self.scene else {
             return;
         };
@@ -322,23 +302,11 @@ impl State {
             );
         }
 
-        let (cam_buf, depth_bounds) = if i == 0 {
-            (
-                self.scene.as_ref().map(|s| &s.cam.buffer),
-                self.scene
-                    .as_ref()
-                    .map(|s| Self::compute_depth_bounds(&s.cam.camera, &s.model.bounds)),
-            )
-        } else {
-            (
-                self.view.secondary_cam.as_ref().map(|c| &c.buffer),
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .zip(self.scene.as_ref())
-                    .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds)),
-            )
-        };
+        let cam_buf = self.view.cameras[i].as_ref().map(|c| &c.buffer);
+        let depth_bounds = self.view.cameras[i]
+            .as_ref()
+            .zip(self.scene.as_ref())
+            .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds));
         if let Some(buf) = cam_buf {
             let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
             let data: [u32; 7] = [
@@ -391,15 +359,7 @@ impl State {
             self.renderer.render_shadow_pass(encoder, scene);
         }
 
-        let cam_bg = if i == 0 {
-            self.scene.as_ref().map(|s| &s.cam.bind_group)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| &c.bind_group)
-                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-        };
+        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
             if self.renderer.post.ssao_enabled {
                 self.renderer.render_gbuffer_pass(encoder, scene, cam_bg);
@@ -514,19 +474,11 @@ impl State {
             label
         };
 
-        let projection_mode = {
-            let pref = self.preferences.display.projection_mode;
-            if ap == 1 {
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .map_or(pref, |c| c.camera.projection)
-            } else {
-                self.scene
-                    .as_ref()
-                    .map_or(pref, |s| s.cam.camera.projection)
-            }
-        };
+        let projection_mode = self.view.cameras[ap]
+            .as_ref()
+            .map_or(self.preferences.display.projection_mode, |c| {
+                c.camera.projection
+            });
         let snap_before = GuiSnapshot::from_state(
             pds,
             &self.view.display,
@@ -631,7 +583,7 @@ impl State {
     fn build_review_panes(&self, panes: &[Pane], ppp: f32) -> Vec<crate::gui::ReviewPaneOverlay> {
         let mut out = Vec::with_capacity(panes.len());
         for (i, pane) in panes.iter().enumerate() {
-            let pds = self.view.pane_settings[i.min(1)];
+            let pds = self.view.pane_settings[i];
             if pds.pane_mode != PaneMode::Scene3D {
                 continue;
             }
@@ -640,16 +592,7 @@ impl State {
             } else {
                 1.0
             };
-            let cam_opt = if i == 0 {
-                self.scene.as_ref().map(|s| s.cam.camera)
-            } else {
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .map(|c| c.camera)
-                    .or_else(|| self.scene.as_ref().map(|s| s.cam.camera))
-            };
-            let Some(mut cam) = cam_opt else {
+            let Some(mut cam) = self.view.cameras[i].as_ref().map(|c| c.camera) else {
                 continue;
             };
             cam.aspect = pane_aspect;
