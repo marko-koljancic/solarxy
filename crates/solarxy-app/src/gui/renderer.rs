@@ -44,8 +44,6 @@ pub struct EguiRenderer {
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
     backend_info: String,
-    stats_user_hidden: bool,
-    material_inspector_user_hidden: bool,
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
@@ -99,8 +97,6 @@ impl EguiRenderer {
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
             backend_info: String::new(),
-            stats_user_hidden: false,
-            material_inspector_user_hidden: false,
             dock_state: default_dock_state(),
             last_viewport_rect: None,
             has_saved_layout: false,
@@ -115,31 +111,11 @@ impl EguiRenderer {
         apply_theme(&self.ctx, &self.theme);
     }
 
+    /// Drop the cached model info on model close. Panel visibility is
+    /// left untouched — panels are user-controlled (no auto open/close).
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
-        self.stats_user_hidden = false;
-        self.material_inspector_user_hidden = false;
-        if tab_present(&self.dock_state, SolarxyTab::MaterialInspector) {
-            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
-        }
-        if tab_present(&self.dock_state, SolarxyTab::Stats) {
-            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
-        }
         self.material_inspector.clear_for_new_model();
-    }
-
-    pub fn notify_model_loaded(&mut self, open_on_load: bool) {
-        if open_on_load
-            && !self.stats_user_hidden
-            && !tab_present(&self.dock_state, SolarxyTab::Stats)
-        {
-            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
-        }
-        if !self.material_inspector_user_hidden
-            && !tab_present(&self.dock_state, SolarxyTab::MaterialInspector)
-        {
-            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
-        }
     }
 
     pub fn on_window_event(
@@ -677,23 +653,6 @@ impl EguiRenderer {
 
         let present_after: std::collections::HashSet<SolarxyTab> =
             self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
-        for &(tab, _, _) in &menu_intents {
-            let was = present_at_start.contains(&tab);
-            let is = present_after.contains(&tab);
-            if was && !is {
-                match tab {
-                    SolarxyTab::Stats => self.stats_user_hidden = true,
-                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = true,
-                    _ => {}
-                }
-            } else if !was && is {
-                match tab {
-                    SolarxyTab::Stats => self.stats_user_hidden = false,
-                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = false,
-                    _ => {}
-                }
-            }
-        }
 
         self.console.visible = present_after.contains(&SolarxyTab::Console);
         review.panel_open = present_after.contains(&SolarxyTab::ReviewPanel);

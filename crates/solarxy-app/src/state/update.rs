@@ -289,8 +289,6 @@ impl State {
                     self.window
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
-                    self.gui
-                        .notify_model_loaded(self.preferences.ui.open_stats_on_model_load);
                     self.scene = Some(new_scene);
                     if let Some(scene) = &mut self.scene {
                         scene

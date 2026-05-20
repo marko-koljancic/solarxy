@@ -1,21 +1,31 @@
 use solarxy_core::preferences::{
-    self, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
-    MIN_WINDOW_WIDTH, Preferences, UpdaterChannel,
+    self, BackgroundMode, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH,
+    MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences, ThemeChoice, UpdaterChannel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrefsTab {
     Startup,
+    Appearance,
+    View,
     Interface,
     Updater,
 }
 
 impl PrefsTab {
-    const ALL: [Self; 3] = [Self::Startup, Self::Interface, Self::Updater];
+    const ALL: [Self; 5] = [
+        Self::Startup,
+        Self::Appearance,
+        Self::View,
+        Self::Interface,
+        Self::Updater,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::Startup => "Startup",
+            Self::Appearance => "Appearance",
+            Self::View => "View",
             Self::Interface => "Interface",
             Self::Updater => "Updater",
         }
@@ -66,8 +76,15 @@ impl PreferencesModal {
                 self.draft.window = defaults.window;
                 self.draft.rendering.msaa_sample_count = defaults.rendering.msaa_sample_count;
             }
+            PrefsTab::Appearance => {
+                self.draft.ui.theme = defaults.ui.theme;
+            }
+            PrefsTab::View => {
+                self.draft.display.background = defaults.display.background;
+            }
             PrefsTab::Interface => {
-                self.draft.ui = defaults.ui;
+                self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
+                self.draft.ui.status_bar_visible = defaults.ui.status_bar_visible;
             }
             PrefsTab::Updater => {
                 self.draft.updater = defaults.updater;
@@ -130,6 +147,8 @@ pub(super) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut Preference
 
             match modal.active_tab {
                 PrefsTab::Startup => draw_startup_tab(ui, &mut modal.draft),
+                PrefsTab::Appearance => draw_appearance_tab(ui, &mut modal.draft),
+                PrefsTab::View => draw_view_tab(ui, &mut modal.draft),
                 PrefsTab::Interface => draw_interface_tab(ui, &mut modal.draft),
                 PrefsTab::Updater => draw_updater_tab(ui, &mut modal.draft),
             }
@@ -219,7 +238,7 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         egui::RichText::new("Window size and MSAA take effect on next launch.")
             .italics()
             .small()
-            .color(egui::Color32::from_white_alpha(140)),
+            .weak(),
     );
 
     ui.add_space(12.0);
@@ -231,7 +250,7 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         ui.label(
             egui::RichText::new(path.display().to_string())
                 .small()
-                .color(egui::Color32::from_white_alpha(140)),
+                .weak(),
         );
         ui.add_space(4.0);
         if ui.button("Open config file").clicked()
@@ -244,9 +263,60 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             egui::RichText::new("(config path unavailable)")
                 .small()
                 .italics()
-                .color(egui::Color32::from_white_alpha(100)),
+                .weak(),
         );
     }
+}
+
+fn draw_appearance_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
+    egui::Grid::new("prefs_appearance")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Theme");
+            ui.horizontal(|ui| {
+                for choice in ThemeChoice::ALL {
+                    if ui
+                        .selectable_label(draft.ui.theme == *choice, choice.to_string())
+                        .clicked()
+                    {
+                        draft.ui.theme = *choice;
+                    }
+                }
+            });
+            ui.end_row();
+        });
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new("The theme applies immediately when you click OK.")
+            .italics()
+            .small()
+            .weak(),
+    );
+}
+
+fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
+    egui::Grid::new("prefs_view")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Default background");
+            egui::ComboBox::from_id_salt("prefs_default_background")
+                .selected_text(draft.display.background.to_string())
+                .show_ui(ui, |ui| {
+                    for mode in BackgroundMode::ALL {
+                        ui.selectable_value(&mut draft.display.background, *mode, mode.to_string());
+                    }
+                });
+            ui.end_row();
+        });
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new("The viewport background Solarxy starts with.")
+            .italics()
+            .small()
+            .weak(),
+    );
 }
 
 fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
@@ -254,16 +324,8 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Sidebar visible at launch");
-            ui.checkbox(&mut draft.ui.default_sidebar_visible, "");
-            ui.end_row();
-
-            ui.label("FPS HUD visible at launch");
-            ui.checkbox(&mut draft.ui.default_fps_hud_visible, "");
-            ui.end_row();
-
-            ui.label("Open Model Stats on model load");
-            ui.checkbox(&mut draft.ui.open_stats_on_model_load, "");
+            ui.label("Status bar visible at launch");
+            ui.checkbox(&mut draft.ui.status_bar_visible, "");
             ui.end_row();
 
             ui.label("Recent files capacity");
@@ -306,7 +368,7 @@ fn draw_updater_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             )
             .italics()
             .small()
-            .color(egui::Color32::from_white_alpha(140)),
+            .weak(),
         );
     }
 }

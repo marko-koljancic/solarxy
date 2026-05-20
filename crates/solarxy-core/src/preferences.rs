@@ -448,14 +448,10 @@ pub const MAX_RECENT_FILES_CAP: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UiPrefs {
-    #[serde(default = "default_true")]
-    pub default_sidebar_visible: bool,
-    #[serde(default)]
-    pub default_fps_hud_visible: bool,
     #[serde(default = "default_max_recent_files")]
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
-    pub open_stats_on_model_load: bool,
+    pub status_bar_visible: bool,
     #[serde(default)]
     pub theme: ThemeChoice,
 }
@@ -467,10 +463,8 @@ fn default_max_recent_files() -> usize {
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
-            default_sidebar_visible: true,
-            default_fps_hud_visible: false,
             max_recent_files: default_max_recent_files(),
-            open_stats_on_model_load: true,
+            status_bar_visible: true,
             theme: ThemeChoice::default(),
         }
     }
@@ -694,10 +688,8 @@ mod tests {
                 recent_files: vec!["/tmp/model.obj".to_string()],
             },
             ui: UiPrefs {
-                default_sidebar_visible: false,
-                default_fps_hud_visible: true,
                 max_recent_files: 10,
-                open_stats_on_model_load: false,
+                status_bar_visible: false,
                 theme: ThemeChoice::AyuMirageLight,
             },
             updater: UpdaterPrefs {
@@ -853,8 +845,7 @@ mod tests {
     #[test]
     fn ui_prefs_defaults_match_observed() {
         let ui = UiPrefs::default();
-        assert!(ui.default_sidebar_visible);
-        assert!(!ui.default_fps_hud_visible);
+        assert!(ui.status_bar_visible);
         assert_eq!(ui.max_recent_files, 20);
     }
 
