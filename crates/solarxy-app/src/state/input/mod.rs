@@ -31,20 +31,20 @@ use solarxy_core::preferences::{
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
 
 impl State {
+    /// Apply `f` to each pane camera the current gesture targets: the
+    /// active pane, or — when cameras are linked — every pane the layout
+    /// uses. UV-map panes are skipped.
     fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
-        let (primary, secondary) =
-            super::cam_routing(self.view.active_pane, self.view.cameras_linked);
-        if primary
-            && self.view.pane_settings[0].pane_mode == PaneMode::Scene3D
-            && let Some(cam) = &mut self.view.cameras[0]
-        {
-            f(cam);
-        }
-        if secondary
-            && self.view.pane_settings[1].pane_mode == PaneMode::Scene3D
-            && let Some(cam) = &mut self.view.cameras[1]
-        {
-            f(cam);
+        let count = self.view.display.layout.pane_count();
+        let active = self.view.active_pane;
+        let linked = self.view.cameras_linked;
+        for i in 0..count {
+            if (linked || i == active)
+                && self.view.pane_settings[i].pane_mode == PaneMode::Scene3D
+                && let Some(cam) = &mut self.view.cameras[i]
+            {
+                f(cam);
+            }
         }
     }
 
@@ -383,6 +383,8 @@ impl State {
             KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
             KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
             KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
+            KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
+            KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
             _ => {
                 self.for_each_target_cam(|cam| {
                     cam.handle_key(code, is_pressed);
@@ -742,7 +744,22 @@ impl State {
                 self.input.uv_last_mouse_pos = Some((x, y));
             }
         } else {
-            self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+            let ap = self.view.active_pane;
+            let orbiting = self.view.cameras[ap]
+                .as_ref()
+                .is_some_and(CameraState::is_orbiting);
+            if orbiting {
+                // CL-5: an orbit drag stays local to the active pane so
+                // linked orthographic panes keep their axis lock. Pan and
+                // zoom still propagate via `for_each_target_cam`.
+                if self.view.pane_settings[ap].pane_mode == PaneMode::Scene3D
+                    && let Some(cam) = &mut self.view.cameras[ap]
+                {
+                    cam.handle_mouse_move(x, y);
+                }
+            } else {
+                self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+            }
         }
     }
 

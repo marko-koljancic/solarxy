@@ -153,9 +153,9 @@ impl State {
     /// layout uses. Idempotent — a slot that already holds a camera is
     /// skipped, so layout toggles preserve per-slot cameras within a
     /// session. No-op until a model is loaded (bounds frame the camera).
-    /// Slot 0 is bounds-framed in the persisted projection; further slots
-    /// clone slot 0 for now — B1 commit 2 seeds them with orthographic
-    /// Top / Front / Left presets.
+    /// Slot 0 is the perspective Single-layout camera; slots 1-3 seed to
+    /// orthographic Top / Front / Left — a one-time convenience that the
+    /// user re-orients with T / F / L.
     pub(super) fn ensure_pane_cameras(&mut self) {
         let Some(bounds) = self.scene.as_ref().map(|s| s.model.bounds) else {
             return;
@@ -167,16 +167,31 @@ impl State {
             if self.view.cameras[i].is_some() {
                 continue;
             }
-            let cam = if i == 0 {
-                let mut cam =
-                    CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect);
-                cam.set_projection(self.preferences.display.projection_mode);
-                cam
+            let mut cam = if i == 0 {
+                CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect)
             } else if let Some(src) = self.view.cameras[0].as_ref() {
                 src.clone_with_new_resources(&self.device, &self.renderer.layouts.camera)
             } else {
                 continue;
             };
+            match i {
+                0 => cam.set_projection(self.preferences.display.projection_mode),
+                1 => cam.reset_to_bounds_axis(
+                    &bounds,
+                    cgmath::Vector3::unit_y(),
+                    -cgmath::Vector3::unit_z(),
+                ),
+                2 => cam.reset_to_bounds_axis(
+                    &bounds,
+                    cgmath::Vector3::unit_z(),
+                    cgmath::Vector3::unit_y(),
+                ),
+                _ => cam.reset_to_bounds_axis(
+                    &bounds,
+                    -cgmath::Vector3::unit_x(),
+                    cgmath::Vector3::unit_y(),
+                ),
+            }
             self.view.cameras[i] = Some(cam);
         }
     }

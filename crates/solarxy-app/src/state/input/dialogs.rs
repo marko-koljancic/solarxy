@@ -88,6 +88,8 @@ impl State {
                 ViewLayout::Single => "Single Viewport",
                 ViewLayout::SplitVertical => "Split Vertical",
                 ViewLayout::SplitHorizontal => "Split Horizontal",
+                ViewLayout::Quad => "Quad",
+                ViewLayout::ThreeLeftBig => "Three-Left-Big",
             };
             self.gui.set_toast(msg, ToastSeverity::Success);
         }

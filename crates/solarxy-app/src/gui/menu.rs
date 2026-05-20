@@ -294,6 +294,8 @@ fn draw_layout_menu(ui: &mut egui::Ui, actions: &mut MenuActions, vis: &MenuBarV
             (ViewLayout::Single, "Single", "F1"),
             (ViewLayout::SplitVertical, "Split Vertical", "F2"),
             (ViewLayout::SplitHorizontal, "Split Horizontal", "F3"),
+            (ViewLayout::Quad, "Quad", "F4"),
+            (ViewLayout::ThreeLeftBig, "Three-Left-Big", "F5"),
         ] {
             if ui
                 .add(egui::Button::new(label).shortcut_text(shortcut))

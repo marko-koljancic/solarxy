@@ -566,7 +566,7 @@ impl EguiRenderer {
                         solarxy_core::view_config::ViewLayout::SplitHorizontal => {
                             egui::CursorIcon::ResizeVertical
                         }
-                        solarxy_core::view_config::ViewLayout::Single => egui::CursorIcon::Default,
+                        _ => egui::CursorIcon::Default,
                     });
                 }
                 if resp.dragged()
@@ -581,7 +581,7 @@ impl EguiRenderer {
                         solarxy_core::view_config::ViewLayout::SplitHorizontal => {
                             (pos.y - viewport.top()) / viewport.height().max(1.0)
                         }
-                        solarxy_core::view_config::ViewLayout::Single => 0.5,
+                        _ => 0.5,
                     };
                     actions.set_split_ratio = Some(
                         solarxy_core::view_config::DisplaySettings::clamp_split_ratio(raw_ratio),

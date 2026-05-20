@@ -98,17 +98,19 @@ pub struct State {
     pub window: Arc<Window>,
 }
 
+/// Pixel dimensions of the shared HDR render target. The target is sized
+/// to the **largest** pane the layout produces and reused for every pane;
+/// the composite pass scales it down to each pane's surface rect. Quad
+/// uses quarter-size panes; Three-Left-Big's largest pane is the
+/// full-height left pane (half width).
 pub(super) fn compute_target_dimensions(layout: ViewLayout, width: u32, height: u32) -> (u32, u32) {
+    let half_w = ((width as f32 * 0.5).floor() as u32).max(1);
+    let half_h = ((height as f32 * 0.5).floor() as u32).max(1);
     match layout {
         ViewLayout::Single => (width, height),
-        ViewLayout::SplitVertical => {
-            let half = (width as f32 * 0.5).floor() as u32;
-            (half.max(1), height)
-        }
-        ViewLayout::SplitHorizontal => {
-            let half = (height as f32 * 0.5).floor() as u32;
-            (width, half.max(1))
-        }
+        ViewLayout::SplitVertical | ViewLayout::ThreeLeftBig => (half_w, height),
+        ViewLayout::SplitHorizontal => (width, half_h),
+        ViewLayout::Quad => (half_w, half_h),
     }
 }
 
@@ -120,13 +122,6 @@ pub(super) fn hit_test_pane(panes: &[Pane], cursor: (f32, f32)) -> usize {
         }
     }
     0
-}
-
-pub(super) fn cam_routing(active_pane: usize, cameras_linked: bool) -> (bool, bool) {
-    (
-        active_pane == 0 || cameras_linked,
-        active_pane == 1 || cameras_linked,
-    )
 }
 
 #[cfg(test)]
@@ -199,23 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn cam_routing_single_pane() {
-        assert_eq!(cam_routing(0, false), (true, false));
-    }
-
-    #[test]
-    fn cam_routing_split_unlinked() {
-        assert_eq!(cam_routing(0, false), (true, false));
-        assert_eq!(cam_routing(1, false), (false, true));
-    }
-
-    #[test]
-    fn cam_routing_split_linked() {
-        assert_eq!(cam_routing(0, true), (true, true));
-        assert_eq!(cam_routing(1, true), (true, true));
-    }
-
-    #[test]
     fn target_dims_single() {
         assert_eq!(
             compute_target_dimensions(ViewLayout::Single, 1920, 1080),
@@ -256,6 +234,22 @@ mod tests {
         assert_eq!(
             compute_target_dimensions(ViewLayout::SplitHorizontal, 2, 2),
             (2, 1)
+        );
+    }
+
+    #[test]
+    fn target_dims_quad() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::Quad, 1920, 1080),
+            (960, 540)
+        );
+    }
+
+    #[test]
+    fn target_dims_three_left_big() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::ThreeLeftBig, 1920, 1080),
+            (960, 1080)
         );
     }
 }

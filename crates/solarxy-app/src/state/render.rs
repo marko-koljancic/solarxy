@@ -131,8 +131,8 @@ impl State {
                 cam.write_with_aspect(&self.queue, pane_aspect);
             }
 
-            if is_split && i == 1 {
-                self.setup_split_secondary(&cam_data);
+            if is_split && i >= 1 {
+                self.setup_pane_lighting(&cam_data);
             }
 
             self.write_3d_pane_uniforms(i, &pds);
@@ -387,7 +387,11 @@ impl State {
         }
     }
 
-    fn setup_split_secondary(&mut self, cam_data: &Camera) {
+    /// Recompute the camera-relative light rig for a non-primary pane
+    /// from `cam_data` before it renders, so each pane is lit from its
+    /// own viewpoint. No-op when lights are locked. Pane 0 keeps the rig
+    /// `update()` set from slot 0's camera.
+    fn setup_pane_lighting(&mut self, cam_data: &Camera) {
         if !self.view.display.lights_locked {
             let ibl_avg = self.active_ibl().irradiance_average;
             if let Some(scene) = &mut self.scene {

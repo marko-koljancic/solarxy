@@ -93,6 +93,73 @@ impl State {
                     },
                 ]
             }
+
+            ViewLayout::Quad => {
+                let sx = (w * 0.5).floor();
+                let sy = (h * 0.5).floor();
+                let left_w = (sx - 1.0).max(1.0);
+                let right_w = (w - sx - 1.0).max(1.0);
+                let top_h = (sy - 1.0).max(1.0);
+                let bot_h = (h - sy - 1.0).max(1.0);
+                let rx = origin_x + sx + 1.0;
+                let by = origin_y + sy + 1.0;
+                vec![
+                    Pane {
+                        x: origin_x,
+                        y: origin_y,
+                        width: left_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: origin_y,
+                        width: right_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: origin_x,
+                        y: by,
+                        width: left_w,
+                        height: bot_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: by,
+                        width: right_w,
+                        height: bot_h,
+                    },
+                ]
+            }
+            ViewLayout::ThreeLeftBig => {
+                let sx = (w * 0.5).floor();
+                let sy = (h * 0.5).floor();
+                let left_w = (sx - 1.0).max(1.0);
+                let right_w = (w - sx - 1.0).max(1.0);
+                let top_h = (sy - 1.0).max(1.0);
+                let bot_h = (h - sy - 1.0).max(1.0);
+                let rx = origin_x + sx + 1.0;
+                let by = origin_y + sy + 1.0;
+                vec![
+                    Pane {
+                        x: origin_x,
+                        y: origin_y,
+                        width: left_w,
+                        height: h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: origin_y,
+                        width: right_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: by,
+                        width: right_w,
+                        height: bot_h,
+                    },
+                ]
+            }
         }
     }
 
@@ -122,7 +189,7 @@ impl State {
         let ppp = self.window.scale_factor() as f32;
         let ratio = self.view.display.split_ratio;
         match self.view.display.layout {
-            ViewLayout::Single => None,
+            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => None,
             ViewLayout::SplitVertical => {
                 let cx = (viewport.width() * ratio).floor();
                 Some(egui::Rect::from_min_size(
@@ -147,7 +214,9 @@ impl State {
         Some(visible.expand2(match self.view.display.layout {
             ViewLayout::SplitVertical => egui::vec2(pad_logical, 0.0),
             ViewLayout::SplitHorizontal => egui::vec2(0.0, pad_logical),
-            ViewLayout::Single => egui::vec2(0.0, 0.0),
+            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => {
+                egui::vec2(0.0, 0.0)
+            }
         }))
     }
 }

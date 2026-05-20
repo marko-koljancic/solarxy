@@ -19,6 +19,8 @@ pub enum ViewLayout {
     Single,
     SplitVertical,
     SplitHorizontal,
+    Quad,
+    ThreeLeftBig,
 }
 
 impl ViewLayout {
@@ -27,6 +29,8 @@ impl ViewLayout {
         match self {
             Self::Single => 1,
             Self::SplitVertical | Self::SplitHorizontal => 2,
+            Self::ThreeLeftBig => 3,
+            Self::Quad => 4,
         }
     }
 }
@@ -37,10 +41,6 @@ pub struct DisplaySettings {
     pub turntable_rpm: f32,
     pub lights_locked: bool,
     pub layout: ViewLayout,
-    /// Split-divider ratio in [0.05, 0.95] (pane-1 fraction of the split
-    /// axis). Defaults to 0.5 (centered). Single layout ignores this.
-    /// Per-orientation ratios (separate vertical / horizontal) are
-    /// deferred — both currently share this single value.
     pub split_ratio: f32,
     pub roughness_scale: f32,
     pub metallic_scale: f32,
