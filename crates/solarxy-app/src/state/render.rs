@@ -574,6 +574,7 @@ impl State {
             pane_toolbar,
             &mut properties_events,
             &mut outliner_events,
+            &mut self.viewport_context_menu,
         );
 
         if let Some((i, proj)) = projection_change

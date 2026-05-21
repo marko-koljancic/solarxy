@@ -16,6 +16,7 @@ use std::borrow::Cow;
 
 use cgmath::{Matrix4, Vector4};
 use solarxy_core::review::ReviewAnnotation;
+use solarxy_renderer::model::Model;
 
 use super::review_visuals::{category_color, category_label, category_letter};
 use super::theme::Theme;
@@ -55,6 +56,7 @@ pub(crate) fn draw_review_overlay(
     review: &mut ReviewState,
     suppress: bool,
     theme: Theme,
+    model: Option<&Model>,
 ) {
     if suppress {
         return;
@@ -88,10 +90,16 @@ pub(crate) fn draw_review_overlay(
                 continue;
             };
             let card_rect = compute_card_rect(pos, pane.egui_rect);
+            let mesh_hidden = model.is_some_and(|m| {
+                m.meshes
+                    .get(ann.anchor.mesh_index as usize)
+                    .is_some_and(|mesh| !mesh.visible)
+            });
             visible.push(VisiblePin {
                 ann,
                 pos,
                 card_rect,
+                mesh_hidden,
             });
         }
 
@@ -158,6 +166,9 @@ struct VisiblePin<'a> {
     ann: &'a ReviewAnnotation,
     pos: egui::Pos2,
     card_rect: Option<egui::Rect>,
+    /// The mesh this annotation is anchored to is hidden (Outliner / hide
+    /// shortcuts) — the pin renders dimmed, like a resolved one.
+    mesh_hidden: bool,
 }
 
 /// Project a world point through `view_proj` and into the pane's
@@ -191,8 +202,8 @@ fn project_to_pane(
 }
 
 /// Render a single category-colored pin. Selected pins gain a yellow
-/// (Ayu accent) outline; resolved pins drop alpha; stale pins get a
-/// dashed/dotted ring drawn manually.
+/// (Ayu accent) outline; resolved pins and pins on hidden meshes drop
+/// alpha; stale pins get a dashed/dotted ring drawn manually.
 fn draw_pin(
     painter: &egui::Painter,
     pin: &VisiblePin<'_>,
@@ -202,7 +213,7 @@ fn draw_pin(
 ) {
     let mut fill = category_color(theme, pin.ann.category);
     let mut ring = theme.bg;
-    if pin.ann.resolved {
+    if pin.ann.resolved || pin.mesh_hidden {
         fill = with_alpha(fill, RESOLVED_ALPHA);
         ring = with_alpha(ring, RESOLVED_ALPHA);
     }

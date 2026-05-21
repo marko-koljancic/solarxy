@@ -17,6 +17,7 @@ use super::menu::draw_menu_bar;
 use super::outliner::OutlinerEvents;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::status_bar::{self, StatusBarData};
+use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
@@ -350,6 +351,7 @@ impl EguiRenderer {
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
         properties_events: &mut PropertiesEvents,
         outliner_events: &mut OutlinerEvents,
+        viewport_context_menu: &mut Option<ViewportContextMenu>,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -496,6 +498,7 @@ impl EguiRenderer {
                 review,
                 suppress_overlay,
                 theme,
+                model,
             );
 
             draw_about_modal(ctx, &mut about_open);
@@ -505,6 +508,20 @@ impl EguiRenderer {
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
+
+            // Viewport right-click context menu — painted on top; its Esc
+            // consume runs before the review-mode Esc chain below.
+            let menu_outcome = viewport_context_menu
+                .as_mut()
+                .map(|menu| draw_viewport_context_menu(ctx, menu));
+            if let Some(outcome) = menu_outcome {
+                if let Some(act) = outcome.action {
+                    outliner_events.action = Some(act);
+                }
+                if outcome.close {
+                    *viewport_context_menu = None;
+                }
+            }
 
             if review.active {
                 let stripe = egui::Color32::from_rgba_unmultiplied(

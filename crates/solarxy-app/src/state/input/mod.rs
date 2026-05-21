@@ -21,7 +21,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::{OutlinerAction, ToastSeverity};
+use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
 use solarxy_core::preferences::{
     self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
@@ -62,10 +62,19 @@ impl State {
         }
         match code {
             KeyCode::KeyH => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
-                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
+                if self.input.modifiers.shift_key() {
+                    self.hide_hovered_mesh();
+                } else if self.input.modifiers.alt_key() {
+                    self.show_all_meshes();
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
+                    }
                 }
+            }
+            KeyCode::Slash => {
+                self.isolate_hovered_mesh();
             }
             KeyCode::KeyT => {
                 if self.input.modifiers.shift_key() {
@@ -604,6 +613,101 @@ impl State {
                     self.frame_active_pane(aabb);
                 }
             }
+        }
+    }
+
+    /// Model index of the frontmost **visible** mesh under the cursor, via
+    /// a CPU raycast through the active 3D pane's content rect. `None` if
+    /// the cursor is not over a `Scene3D` pane or hits no visible mesh.
+    pub(super) fn hovered_mesh(&self) -> Option<usize> {
+        let scene = self.scene.as_ref()?;
+        let panes = self.compute_panes();
+        let cursor = self.input.cursor_pos;
+        let pane_idx = super::hit_test_pane(&panes, cursor);
+        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
+            return None;
+        }
+        let content = panes[pane_idx].content(self.pane_toolbar_height_px());
+        let mut camera = self.view.cameras[pane_idx].as_ref().map(|c| c.camera)?;
+        camera.aspect = content.width.max(1.0) / content.height.max(1.0);
+        let ray = crate::state::raycast::screen_to_world_ray(
+            (cursor.0 - content.x, cursor.1 - content.y),
+            (content.width, content.height),
+            camera.build_view_projection_matrix(),
+            camera.eye,
+        );
+
+        // Raycast only visible meshes — a hidden mesh you cannot see must
+        // not steal the pick from the geometry behind it.
+        let mut model_index: Vec<usize> = Vec::new();
+        let mut views: Vec<crate::state::raycast::MeshView<'_>> = Vec::new();
+        for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
+            if let (Some(cpu), Some(bounds)) = (
+                scene.model.cpu_meshes.get(i),
+                scene.model.mesh_bounds.get(i),
+            ) {
+                model_index.push(i);
+                views.push(crate::state::raycast::MeshView {
+                    positions: &cpu.positions,
+                    indices: &cpu.indices,
+                    bounds: *bounds,
+                });
+            }
+        }
+        crate::state::raycast::raycast_meshes(&ray, &views)
+            .map(|hit| model_index[hit.mesh_index as usize])
+    }
+
+    /// Open the viewport right-click context menu when the cursor is over
+    /// a mesh; right-clicking empty space clears any open menu.
+    pub fn open_viewport_context_menu(&mut self) {
+        self.viewport_context_menu = self.hovered_mesh().map(|mesh_index| {
+            let ppp = self.window.scale_factor() as f32;
+            ViewportContextMenu {
+                mesh_index,
+                screen_pos: egui::pos2(
+                    self.input.cursor_pos.0 / ppp,
+                    self.input.cursor_pos.1 / ppp,
+                ),
+                suppress_dismiss: true,
+            }
+        });
+    }
+
+    /// `Shift+H` — hide the mesh under the cursor.
+    fn hide_hovered_mesh(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        match self.hovered_mesh() {
+            Some(mesh) => self.handle_outliner_action(OutlinerAction::HideMesh(mesh)),
+            None => self
+                .gui
+                .set_toast("No mesh under cursor", ToastSeverity::Info),
+        }
+    }
+
+    /// `Alt+H` — make every mesh visible again.
+    fn show_all_meshes(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        self.handle_outliner_action(OutlinerAction::ShowAll);
+    }
+
+    /// `/` — hide every mesh except the one under the cursor.
+    fn isolate_hovered_mesh(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        match self.hovered_mesh() {
+            Some(mesh) => self.handle_outliner_action(OutlinerAction::IsolateMesh(mesh)),
+            None => self
+                .gui
+                .set_toast("No mesh under cursor", ToastSeverity::Info),
         }
     }
 

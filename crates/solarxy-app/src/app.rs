@@ -24,7 +24,10 @@ use crate::state::State;
 /// because `egui_dock`'s tab body registers as a hover-sensing area and
 /// caused `wants_pointer_input` to return `true` over the Viewport tab.
 fn route_pointer_to_camera(state: &State) -> bool {
-    if state.gui.any_blocking_modal_open(&state.review) || state.gui.any_popup_open() {
+    if state.gui.any_blocking_modal_open(&state.review)
+        || state.gui.any_popup_open()
+        || state.viewport_context_menu.is_some()
+    {
         return false;
     }
     let ppp = state.window.scale_factor() as f32;
@@ -208,6 +211,13 @@ impl ApplicationHandler<State> for App {
                 }
             }
 
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } if route_pointer_to_camera(state) => {
+                state.open_viewport_context_menu();
+            }
             WindowEvent::MouseInput {
                 state: btn_state,
                 button,

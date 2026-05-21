@@ -49,6 +49,7 @@ mod snapshot;
 mod status_bar;
 mod theme;
 mod update_modal;
+mod viewport_context_menu;
 
 #[cfg(target_os = "macos")]
 const MOD: &str = "\u{2318}";
@@ -65,3 +66,4 @@ pub(crate) use pane_toolbar::PaneToolbarData;
 pub(crate) use properties::PropertiesEvents;
 pub(crate) use review_overlay::ReviewPaneOverlay;
 pub(crate) use snapshot::{GuiSnapshot, HudInfo};
+pub(crate) use viewport_context_menu::ViewportContextMenu;

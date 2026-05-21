@@ -435,6 +435,7 @@ impl State {
             last_project_config_toast: None,
             pending_load: None,
             pending_hdri: None,
+            viewport_context_menu: None,
             capture_requested: false,
             quit_requested: false,
             last_frame_time: Instant::now(),

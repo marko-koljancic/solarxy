@@ -209,6 +209,27 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Mesh Visibility",
+        entries: &[
+            Entry {
+                keys: "Shift+H",
+                action: "Hide mesh under cursor",
+            },
+            Entry {
+                keys: "Alt+H",
+                action: "Show all meshes",
+            },
+            Entry {
+                keys: "/",
+                action: "Isolate mesh under cursor",
+            },
+            Entry {
+                keys: "Right-click",
+                action: "Mesh context menu (Frame / Hide / Hide Others / Show All)",
+            },
+        ],
+    },
+    Section {
         title: "Review",
         entries: &[
             Entry {

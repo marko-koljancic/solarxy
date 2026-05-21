@@ -40,7 +40,7 @@ pub(super) use solarxy_renderer::scene::{
     lights_from_camera,
 };
 
-pub(super) use crate::gui::{EguiRenderer, ToastSeverity};
+pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
 pub(super) use solarxy_core::preferences::{
     self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
     ViewMode,
@@ -111,6 +111,9 @@ pub struct State {
     pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<PendingHdri>,
+    /// Pending viewport right-click context menu — `Some` while the menu
+    /// is open; cleared on dismiss.
+    pub(super) viewport_context_menu: Option<ViewportContextMenu>,
     pub(super) capture_requested: bool,
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
