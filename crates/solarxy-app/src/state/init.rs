@@ -438,6 +438,7 @@ impl State {
             pending_hdri: None,
             viewport_context_menu: None,
             capture_requested: false,
+            screenshot_expand_review: false,
             quit_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,

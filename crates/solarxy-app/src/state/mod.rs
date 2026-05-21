@@ -115,6 +115,10 @@ pub struct State {
     /// is open; cleared on dismiss.
     pub(super) viewport_context_menu: Option<ViewportContextMenu>,
     pub(super) capture_requested: bool,
+    /// Whether the pending capture should force every review annotation
+    /// card open. Set false by `C`/menu, set from the screenshot modal's
+    /// checkbox on a re-capture.
+    pub(super) screenshot_expand_review: bool,
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,

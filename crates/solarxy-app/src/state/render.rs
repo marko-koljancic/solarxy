@@ -575,6 +575,11 @@ impl State {
             customs: &self.preferences.view.custom_backgrounds,
             uv_overlap_pct,
         };
+        // The screenshot modal is suppressed on any capture frame so it
+        // cannot land in the shot; a re-capture additionally forces every
+        // review card open for that frame.
+        let suppress_screenshot_modal = self.capture_requested;
+        let force_expand_review = self.capture_requested && self.screenshot_expand_review;
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
@@ -596,6 +601,8 @@ impl State {
             &mut properties_events,
             &mut outliner_events,
             &mut self.viewport_context_menu,
+            force_expand_review,
+            suppress_screenshot_modal,
         );
 
         if let Some((i, proj)) = projection_change
@@ -657,18 +664,28 @@ impl State {
                 .set_toast("Preferences saved", crate::gui::ToastSeverity::Success);
         }
 
-        let capture_buffer = if self.capture_requested {
+        let capture = if self.capture_requested {
             self.capture_requested = false;
-            Some(self.encode_capture(&output.texture, &mut encoder))
+            self.encode_active_pane_capture(panes, &output.texture, &mut encoder)
         } else {
             None
         };
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
-            self.save_capture(buffer, padded_row_bytes, width, height);
+        if let Some((buffer, padded_row_bytes, width, height)) = capture
+            && let Some(image) = self.read_capture(buffer, padded_row_bytes, width, height)
+        {
+            let filename = self.screenshot_filename();
+            self.gui.set_screenshot_capture(
+                image,
+                filename,
+                self.review.active,
+                self.screenshot_expand_review,
+            );
         }
+
+        self.handle_screenshot_modal();
     }
 
     /// Build the per-pane data the egui review overlay needs: one

@@ -254,9 +254,8 @@ impl State {
                 }
             }
             KeyCode::KeyC => {
-                if self.scene.is_some() {
-                    self.capture_requested = true;
-                }
+                self.capture_requested = true;
+                self.screenshot_expand_review = false;
             }
             KeyCode::KeyA => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];

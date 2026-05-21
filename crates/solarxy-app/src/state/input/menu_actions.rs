@@ -11,6 +11,7 @@ impl State {
         }
         if actions.save_screenshot {
             self.capture_requested = true;
+            self.screenshot_expand_review = false;
         }
         if actions.close_model {
             self.close_model();

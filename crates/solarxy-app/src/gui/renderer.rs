@@ -21,6 +21,7 @@ use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_me
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
+use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
 use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::{GuiSnapshot, HudInfo};
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
@@ -41,6 +42,7 @@ pub struct EguiRenderer {
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
+    screenshot_modal: ScreenshotModal,
     material_inspector: MaterialInspectorState,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
@@ -95,6 +97,7 @@ impl EguiRenderer {
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
+            screenshot_modal: ScreenshotModal::default(),
             material_inspector: MaterialInspectorState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
@@ -352,6 +355,8 @@ impl EguiRenderer {
         properties_events: &mut PropertiesEvents,
         outliner_events: &mut OutlinerEvents,
         viewport_context_menu: &mut Option<ViewportContextMenu>,
+        force_expand_review: bool,
+        suppress_screenshot_modal: bool,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -402,6 +407,7 @@ impl EguiRenderer {
         let console = &mut self.console;
         let update_modal = &mut self.update_modal;
         let preferences_modal = &mut self.preferences_modal;
+        let screenshot_modal = &mut self.screenshot_modal;
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let dock_state = &mut self.dock_state;
@@ -489,10 +495,15 @@ impl EguiRenderer {
                 .style(make_dock_style(ctx, &theme))
                 .show(ctx, &mut tab_viewer);
 
+            // The screenshot modal counts as a blocking overlay only on
+            // frames it is actually drawn — during a re-capture frame it
+            // is suppressed so the markers it would occlude get captured.
+            let screenshot_drawn = screenshot_modal.open && !suppress_screenshot_modal;
             let suppress_overlay = about_open
                 || preferences_modal.open
                 || update_modal.open
                 || shortcuts_modal.open
+                || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
             super::review_overlay::draw_review_overlay(
@@ -502,12 +513,16 @@ impl EguiRenderer {
                 suppress_overlay,
                 theme,
                 model,
+                force_expand_review,
             );
 
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
+            if !suppress_screenshot_modal {
+                draw_screenshot_modal(ctx, screenshot_modal, &theme);
+            }
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
@@ -810,5 +825,39 @@ impl EguiRenderer {
 
     pub fn take_committed_prefs(&mut self) -> Option<Preferences> {
         self.preferences_modal.take_committed()
+    }
+
+    /// Install a fresh screenshot capture and open the modal.
+    pub fn set_screenshot_capture(
+        &mut self,
+        image: image::RgbaImage,
+        filename: String,
+        review_available: bool,
+        expand_review: bool,
+    ) {
+        self.screenshot_modal
+            .set_capture(image, filename, review_available, expand_review);
+    }
+
+    /// Drain a pending re-capture request from the screenshot modal,
+    /// returning the desired expand-review setting.
+    pub fn take_screenshot_recapture(&mut self) -> Option<bool> {
+        self.screenshot_modal.take_recapture()
+    }
+
+    /// Drain a pending `Save As…` request from the screenshot modal.
+    pub fn take_screenshot_save_request(&mut self) -> bool {
+        self.screenshot_modal.take_save_request()
+    }
+
+    /// The screenshot modal's suggested file name (pre-fills the native
+    /// save dialog).
+    pub fn screenshot_suggested_filename(&self) -> String {
+        self.screenshot_modal.suggested_filename().to_string()
+    }
+
+    /// Take the captured screenshot image out and close the modal.
+    pub fn take_screenshot_image(&mut self) -> Option<image::RgbaImage> {
+        self.screenshot_modal.take_image()
     }
 }

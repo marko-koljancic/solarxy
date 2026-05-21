@@ -29,7 +29,7 @@ const SECTIONS: &[Section] = &[
             },
             Entry {
                 keys: "C",
-                action: "Save screenshot",
+                action: "Screenshot\u{2026}",
             },
             Entry {
                 keys: "Shift+S",

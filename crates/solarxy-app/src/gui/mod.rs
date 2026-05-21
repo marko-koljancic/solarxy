@@ -44,6 +44,7 @@ mod review_overlay;
 mod review_panel;
 mod review_popup;
 mod review_visuals;
+mod screenshot_modal;
 mod sidebar;
 mod snapshot;
 mod status_bar;

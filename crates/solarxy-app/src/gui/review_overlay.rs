@@ -57,6 +57,7 @@ pub(crate) fn draw_review_overlay(
     suppress: bool,
     theme: Theme,
     model: Option<&Model>,
+    force_expand_all: bool,
 ) {
     if suppress {
         return;
@@ -142,16 +143,24 @@ pub(crate) fn draw_review_overlay(
             draw_pin(&painter, pin, is_hovered, is_selected, theme);
         }
 
-        if let Some(pin) = visible
-            .iter()
-            .find(|p| selected_id == Some(p.ann.id.as_str()))
-        {
-            draw_card(&painter, pin, true, review, theme);
-        }
-        if let Some(pin) = visible.iter().find(|p| {
-            hovered_id == Some(p.ann.id.as_str()) && selected_id != Some(p.ann.id.as_str())
-        }) {
-            draw_card(&painter, pin, false, review, theme);
+        if force_expand_all {
+            // Screenshot capture — every annotation card open at once.
+            for pin in &visible {
+                let is_selected = selected_id == Some(pin.ann.id.as_str());
+                draw_card(&painter, pin, is_selected, review, theme);
+            }
+        } else {
+            if let Some(pin) = visible
+                .iter()
+                .find(|p| selected_id == Some(p.ann.id.as_str()))
+            {
+                draw_card(&painter, pin, true, review, theme);
+            }
+            if let Some(pin) = visible.iter().find(|p| {
+                hovered_id == Some(p.ann.id.as_str()) && selected_id != Some(p.ann.id.as_str())
+            }) {
+                draw_card(&painter, pin, false, review, theme);
+            }
         }
     }
 
