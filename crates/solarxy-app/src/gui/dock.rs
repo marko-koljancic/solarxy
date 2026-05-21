@@ -156,6 +156,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                         ui,
                         model,
                         self.material_inspector,
+                        &self.theme,
                     );
                 } else {
                     draw_no_model_placeholder(ui);
