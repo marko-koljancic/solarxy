@@ -147,6 +147,7 @@ cycle_enum! {
         DarkGray => "Dark",
         AyuMirage => "Ayu Mirage",
         Black => "Black",
+        HdriSky => "HDRI Sky",
     }
     ; cycle
 }

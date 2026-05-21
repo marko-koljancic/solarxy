@@ -117,6 +117,10 @@ pub struct Renderer {
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
+    /// Bind group for the HDRI skybox pass — `Some` only while an HDRI is
+    /// loaded. Rebuilt through the app's `rebuild_light_bind_group`
+    /// IBL chokepoint.
+    pub skybox_bind_group: Option<wgpu::BindGroup>,
     #[allow(unused)]
     pub shared_samplers: SharedSamplers,
     pub msaa_sample_count: u32,
@@ -128,6 +132,19 @@ impl Renderer {
     pub fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.pipelines.overlay.background);
         pass.set_bind_group(0, &self.wire.gradient_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Draw the HDRI equirect as a fullscreen sky. No-op when no HDRI is
+    /// loaded (`skybox_bind_group` is `None`) — the pass clear colour then
+    /// shows through instead.
+    pub fn draw_skybox<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, cam_bg: &'a wgpu::BindGroup) {
+        let Some(skybox_bg) = &self.skybox_bind_group else {
+            return;
+        };
+        pass.set_pipeline(&self.pipelines.overlay.skybox);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, skybox_bg, &[]);
         pass.draw(0..3, 0..1);
     }
 
@@ -403,6 +420,8 @@ impl Renderer {
 
         if pds.background_mode == BackgroundMode::Gradient {
             self.draw_background_gradient(&mut pass);
+        } else if pds.background_mode == BackgroundMode::HdriSky {
+            self.draw_skybox(&mut pass, cam_bg);
         }
 
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));

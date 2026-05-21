@@ -319,7 +319,7 @@ impl State {
             .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds));
         if let Some(buf) = cam_buf {
             let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
-            let data: [u32; 7] = [
+            let data: [u32; 8] = [
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
                 pds.material_override.as_u32(),
@@ -327,6 +327,7 @@ impl State {
                 depth_far.to_bits(),
                 self.view.display.roughness_scale.to_bits(),
                 self.view.display.metallic_scale.to_bits(),
+                self.view.display.hdri_rotation.to_bits(),
             ];
             self.queue.write_buffer(
                 buf,
@@ -541,12 +542,14 @@ impl State {
         // `PaneToolbarData` is passed by value — `render_ui` consumes it,
         // releasing its `&mut self.view.pane_settings` borrow before
         // `apply_to_state` re-borrows the same field below.
+        let hdri_available = self.renderer.ibl_res.ibl.equirect.is_some();
         let pane_toolbar = crate::gui::PaneToolbarData {
             rects: &pane_rects,
             active: ap,
             pane_settings: &mut self.view.pane_settings,
             projections: pane_projections,
             projection_change: &mut projection_change,
+            hdri_available,
         };
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,

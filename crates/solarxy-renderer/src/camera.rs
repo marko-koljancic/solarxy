@@ -120,7 +120,8 @@ pub struct CameraUniform {
     depth_far: f32,
     roughness_scale: f32,
     metallic_scale: f32,
-    _pad: [f32; 3],
+    hdri_rotation: f32,
+    _pad: [f32; 2],
 }
 
 impl Default for CameraUniform {
@@ -156,7 +157,8 @@ impl CameraUniform {
             depth_far: 100.0,
             roughness_scale: 1.0,
             metallic_scale: 1.0,
-            _pad: [0.0; 3],
+            hdri_rotation: 0.0,
+            _pad: [0.0; 2],
         }
     }
 

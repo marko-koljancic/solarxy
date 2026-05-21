@@ -13,6 +13,7 @@ struct Camera {
     depth_far: f32,
     roughness_scale: f32,
     metallic_scale: f32,
+    hdri_rotation: f32,
 }
 @group(1) @binding(0)
 var<uniform> camera: Camera;
@@ -196,6 +197,15 @@ fn lambert_direct(N: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
     return (albedo / PI) * NdotL;
 }
 
+// Yaw a direction around +Y — rotates IBL cubemap lookups in lockstep
+// with the visible HDRI sky (skybox.wgsl). A no-op for gradient/fallback
+// IBL, whose lookups depend only on the rotation-invariant Y axis.
+fn rotate_yaw(d: vec3<f32>, yaw: f32) -> vec3<f32> {
+    let c = cos(yaw);
+    let s = sin(yaw);
+    return vec3<f32>(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
@@ -299,13 +309,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let NdotV_ibl = max(dot(N_world, V_world), 0.001);
     let F_ibl = F_schlick(NdotV_ibl, F0);
     let kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
-    let irradiance = textureSampleLevel(t_ibl, s_ibl, N_world, 0.0).rgb;
+    let ibl_n = rotate_yaw(N_world, camera.hdri_rotation);
+    let irradiance = textureSampleLevel(t_ibl, s_ibl, ibl_n, 0.0).rgb;
     let diffuse_ibl_pbr = irradiance * albedo * kD_ibl;
 
     let R = reflect(-V_world, N_world);
     let MAX_REFLECTION_LOD = 5.0;
     let mip_level = roughness * MAX_REFLECTION_LOD;
-    let prefiltered_color = textureSampleLevel(t_prefiltered, s_prefiltered, R, mip_level).rgb;
+    let ibl_r = rotate_yaw(R, camera.hdri_rotation);
+    let prefiltered_color = textureSampleLevel(t_prefiltered, s_prefiltered, ibl_r, mip_level).rgb;
     let brdf_uv = vec2(max(dot(N_world, V_world), 0.0), roughness);
     let brdf = textureSample(t_brdf_lut, s_brdf_lut, brdf_uv).rg;
     let specular_ibl_pbr = prefiltered_color * (F0 * brdf.x + brdf.y);

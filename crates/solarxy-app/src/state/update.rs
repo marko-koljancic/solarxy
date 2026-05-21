@@ -17,6 +17,16 @@ impl State {
     }
 
     pub(super) fn rebuild_light_bind_group(&mut self) {
+        // The skybox pass samples the active IBL's source equirect — track
+        // it here so HDRI load / IBL swaps keep the visible sky in sync.
+        self.renderer.skybox_bind_group = self.renderer.ibl_res.ibl.equirect.as_ref().map(|eq| {
+            solarxy_renderer::skybox::create_skybox_bind_group(
+                &self.device,
+                &self.renderer.layouts.skybox,
+                eq,
+            )
+        });
+
         let ibl_avg = self.active_ibl().irradiance_average;
         if let Some(scene) = &mut self.scene {
             scene.light_bind_group = match self.renderer.ibl_res.ibl_mode {

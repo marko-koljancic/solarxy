@@ -109,6 +109,7 @@ pub struct OverlayPipelines {
     pub grid: wgpu::RenderPipeline,
     pub normals: wgpu::RenderPipeline,
     pub background: wgpu::RenderPipeline,
+    pub skybox: wgpu::RenderPipeline,
     pub gizmo: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
@@ -403,6 +404,24 @@ impl Pipelines {
             PipelineBuilder::new(device, "Background Pipeline", &bg_layout, &bg_shader)
                 .vertex_entry("vs_background")
                 .fragment_entry("fs_background")
+                .color_format(hdr_format)
+                .depth_compare(wgpu::CompareFunction::Always)
+                .sample_count(sample_count)
+                .build();
+
+        let skybox_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skybox Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.skybox],
+            push_constant_ranges: &[],
+        });
+        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skybox Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
+        });
+        let skybox =
+            PipelineBuilder::new(device, "Skybox Pipeline", &skybox_layout, &skybox_shader)
+                .vertex_entry("vs_skybox")
+                .fragment_entry("fs_skybox")
                 .color_format(hdr_format)
                 .depth_compare(wgpu::CompareFunction::Always)
                 .sample_count(sample_count)
@@ -824,6 +843,7 @@ impl Pipelines {
                 grid,
                 normals,
                 background,
+                skybox,
                 gizmo,
                 validation_overlay,
                 validation_edge,

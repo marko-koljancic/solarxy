@@ -11,6 +11,8 @@ use std::path::Path;
 
 use half::f16;
 
+use crate::skybox::EquirectTexture;
+
 pub struct BrdfLut {
     #[allow(dead_code)]
     pub texture: wgpu::Texture,
@@ -28,6 +30,11 @@ pub struct IblState {
     pub prefiltered_view: wgpu::TextureView,
     pub prefiltered_sampler: wgpu::Sampler,
     pub irradiance_average: [f32; 3],
+    /// Source equirect HDRI, retained only by [`IblState::from_hdri`] so
+    /// `BackgroundMode::HdriSky` can render the HDRI as a visible sky.
+    /// `None` for the procedural ([`IblState::fallback`] /
+    /// [`IblState::from_sky_colors`]) constructors.
+    pub equirect: Option<EquirectTexture>,
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -170,6 +177,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             [0.2, 0.2, 0.2],
+            None,
         )
     }
 
@@ -195,6 +203,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            None,
         )
     }
 
@@ -229,12 +238,14 @@ impl IblState {
         let irradiance_texture = irradiance_faces_to_texture(device, queue, &irradiance);
         let prefiltered_texture =
             generate_prefiltered_equirect(device, queue, width, height, &pixels);
+        let equirect = EquirectTexture::from_hdr_pixels(device, queue, width, height, &pixels);
 
         Ok(Self::from_parts(
             device,
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            Some(equirect),
         ))
     }
 
@@ -243,6 +254,7 @@ impl IblState {
         irradiance_texture: wgpu::Texture,
         prefiltered_texture: wgpu::Texture,
         irradiance_average: [f32; 3],
+        equirect: Option<EquirectTexture>,
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -285,6 +297,7 @@ impl IblState {
             prefiltered_view,
             prefiltered_sampler,
             irradiance_average,
+            equirect,
         }
     }
 }

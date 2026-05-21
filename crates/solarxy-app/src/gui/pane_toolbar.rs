@@ -26,6 +26,23 @@ const PANE_MODES: [PaneMode; 2] = [PaneMode::Scene3D, PaneMode::UvMap];
 const PROJECTIONS: [ProjectionMode; 2] =
     [ProjectionMode::Perspective, ProjectionMode::Orthographic];
 
+/// The background modes a Background dropdown should offer. `HDRI Sky`
+/// only appears once an HDRI has been loaded.
+pub(super) fn background_modes(hdri_available: bool) -> &'static [BackgroundMode] {
+    const NO_HDRI: [BackgroundMode; 5] = [
+        BackgroundMode::White,
+        BackgroundMode::Gradient,
+        BackgroundMode::DarkGray,
+        BackgroundMode::AyuMirage,
+        BackgroundMode::Black,
+    ];
+    if hdri_available {
+        BackgroundMode::ALL
+    } else {
+        &NO_HDRI
+    }
+}
+
 /// Per-frame data the per-pane toolbars need. `rects` are the full pane
 /// rects (toolbar strip + 3D content) in egui-logical space.
 pub(crate) struct PaneToolbarData<'a> {
@@ -36,6 +53,8 @@ pub(crate) struct PaneToolbarData<'a> {
     /// Set to `(pane, mode)` when a toolbar changes a pane's projection;
     /// the state layer applies it to that pane's camera after `render_ui`.
     pub projection_change: &'a mut Option<(usize, ProjectionMode)>,
+    /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
+    pub hdri_available: bool,
 }
 
 /// Mutable handles to the per-pane fields a toolbar edits.
@@ -101,6 +120,7 @@ pub(super) fn draw_pane_toolbars(
     snap: &mut GuiSnapshot,
     theme: Theme,
 ) {
+    let hdri_available = data.hdri_available;
     for i in 0..data.rects.len() {
         let rect = data.rects[i];
         let strip =
@@ -122,7 +142,15 @@ pub(super) fn draw_pane_toolbars(
                 egui::UiBuilder::new().max_rect(strip.shrink2(egui::vec2(6.0, 2.0))),
                 |ui| {
                     ui.horizontal_centered(|ui| {
-                        draw_controls(ui, i, &mut fields, projection, &mut new_projection, compact);
+                        draw_controls(
+                            ui,
+                            i,
+                            &mut fields,
+                            projection,
+                            &mut new_projection,
+                            compact,
+                            hdri_available,
+                        );
                     });
                 },
             );
@@ -149,6 +177,7 @@ fn draw_controls(
     projection: ProjectionMode,
     new_projection: &mut Option<ProjectionMode>,
     compact: bool,
+    hdri_available: bool,
 ) {
     let scene_3d = *f.pane_mode == PaneMode::Scene3D;
 
@@ -170,12 +199,28 @@ fn draw_controls(
 
     if compact {
         ui.menu_button("\u{22ef}", |ui| {
-            draw_overflow_controls(ui, idx, f, scene_3d, projection, new_projection);
+            draw_overflow_controls(
+                ui,
+                idx,
+                f,
+                scene_3d,
+                projection,
+                new_projection,
+                hdri_available,
+            );
         })
         .response
         .on_hover_text("More controls");
     } else {
-        draw_overflow_controls(ui, idx, f, scene_3d, projection, new_projection);
+        draw_overflow_controls(
+            ui,
+            idx,
+            f,
+            scene_3d,
+            projection,
+            new_projection,
+            hdri_available,
+        );
     }
 }
 
@@ -186,6 +231,7 @@ fn draw_overflow_controls(
     scene_3d: bool,
     projection: ProjectionMode,
     new_projection: &mut Option<ProjectionMode>,
+    hdri_available: bool,
 ) {
     ui.add_enabled_ui(scene_3d, |ui| {
         combo(
@@ -228,7 +274,7 @@ fn draw_overflow_controls(
         (idx, "bg"),
         "Background",
         f.background_mode,
-        BackgroundMode::ALL,
+        background_modes(hdri_available),
     );
 }
 

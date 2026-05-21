@@ -8,13 +8,14 @@
 //! write the same snapshot's global fields.
 
 use solarxy_core::preferences::{
-    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, ToneMode, UvMode, ViewMode,
+    IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode, ProjectionMode,
+    ToneMode, UvMode, ViewMode,
 };
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::MOD;
 use super::actions::{MenuActions, MenuBarVisibility};
+use super::pane_toolbar::background_modes;
 use super::snapshot::GuiSnapshot;
 
 pub(super) fn draw_menu_bar(
@@ -24,12 +25,13 @@ pub(super) fn draw_menu_bar(
     vis: &mut MenuBarVisibility,
     has_model: bool,
     recent_files: &[String],
+    hdri_available: bool,
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, actions, has_model, recent_files);
             draw_edit_menu(ui, actions);
-            draw_render_menu(ui, snap, actions);
+            draw_render_menu(ui, snap, actions, hdri_available);
             draw_view_menu(ui, snap, actions);
             draw_layout_menu(ui, actions, vis);
             draw_window_menu(ui, vis, has_model);
@@ -142,7 +144,12 @@ fn draw_edit_menu(ui: &mut egui::Ui, actions: &mut MenuActions) {
     });
 }
 
-fn draw_render_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut MenuActions) {
+fn draw_render_menu(
+    ui: &mut egui::Ui,
+    snap: &mut GuiSnapshot,
+    actions: &mut MenuActions,
+    hdri_available: bool,
+) {
     ui.menu_button("Render", |ui| {
         variant_submenu(ui, "Shading", "W", &mut snap.view_mode, ViewMode::ALL);
 
@@ -218,7 +225,7 @@ fn draw_render_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut Men
             "Background",
             "B",
             &mut snap.background_mode,
-            BackgroundMode::ALL,
+            background_modes(hdri_available),
         );
 
         ui.separator();

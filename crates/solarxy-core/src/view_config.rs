@@ -48,6 +48,9 @@ pub struct DisplaySettings {
     pub split_ratio: f32,
     pub roughness_scale: f32,
     pub metallic_scale: f32,
+    /// Scene-global HDRI yaw, in radians. Rotates the visible HDRI sky
+    /// and the IBL it derives together. `0.0` when no HDRI is loaded.
+    pub hdri_rotation: f32,
 }
 
 impl DisplaySettings {

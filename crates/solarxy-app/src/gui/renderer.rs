@@ -394,6 +394,7 @@ impl EguiRenderer {
             pane_settings: pt_pane_settings,
             projections: pt_projections,
             projection_change: pt_projection_change,
+            hdri_available: pt_hdri_available,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
@@ -409,6 +410,7 @@ impl EguiRenderer {
                     &mut menu_vis,
                     has_model,
                     recent_files,
+                    pt_hdri_available,
                 );
             }
 
@@ -452,6 +454,7 @@ impl EguiRenderer {
                     pane_settings: pt_pane_settings,
                     projections: pt_projections,
                     projection_change: pt_projection_change,
+                    hdri_available: pt_hdri_available,
                 },
             };
             DockArea::new(dock_state)

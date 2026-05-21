@@ -24,8 +24,8 @@ use solarxy_renderer::camera_state::CameraState;
 use crate::gui::ToastSeverity;
 use solarxy_renderer::ibl::IblState;
 use solarxy_core::preferences::{
-    self, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode, ProjectionMode, UvMode,
-    ViewMode,
+    self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
+    ProjectionMode, UvMode, ViewMode,
 };
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
@@ -471,12 +471,21 @@ impl State {
     }
 
     pub(super) fn apply_background_change(&mut self) {
-        if self.view.active_pane == 0 {
-            let (top, bottom) = self.view.pane_settings[0].background_mode.sky_colors();
-            self.renderer.ibl_res.ibl =
-                IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
-            self.rebuild_light_bind_group();
+        if self.view.active_pane != 0 {
+            return;
         }
+        let bg = self.view.pane_settings[0].background_mode;
+        // Once an HDRI is loaded it is the scene's light source — a
+        // background change never regenerates IBL from sky colours while
+        // an HDRI is active (that would discard the equirect the skybox
+        // pass needs). The background mode then only drives the backdrop.
+        if bg == BackgroundMode::HdriSky || self.renderer.ibl_res.ibl.equirect.is_some() {
+            return;
+        }
+        let (top, bottom) = bg.sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.rebuild_light_bind_group();
     }
 
     pub(super) fn apply_composite_params(&self) {
@@ -488,8 +497,14 @@ impl State {
     }
 
     fn cycle_background(&mut self) {
+        let has_hdri = self.renderer.ibl_res.ibl.equirect.is_some();
         let pds = &mut self.view.pane_settings[self.view.active_pane];
         pds.background_mode = pds.background_mode.next();
+        // `HdriSky` is only reachable via the B-key cycle once an HDRI is
+        // loaded — skip it otherwise.
+        if pds.background_mode == BackgroundMode::HdriSky && !has_hdri {
+            pds.background_mode = pds.background_mode.next();
+        }
         self.apply_background_change();
     }
 

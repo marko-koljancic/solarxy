@@ -36,7 +36,10 @@ impl BackgroundModeExt for BackgroundMode {
                 b: 1.0,
                 a: 1.0,
             },
-            Self::Gradient => wgpu::Color {
+            // `HdriSky` shares this neutral fallback — the skybox pass
+            // covers the whole pane, so it is only seen before an HDRI
+            // has loaded.
+            Self::Gradient | Self::HdriSky => wgpu::Color {
                 r: 0.165,
                 g: 0.165,
                 b: 0.180,
@@ -74,7 +77,10 @@ impl BackgroundModeExt for BackgroundMode {
     fn sky_colors(self) -> ([f32; 3], [f32; 3]) {
         match self {
             Self::White => ([1.0, 1.0, 1.0], [0.85, 0.85, 0.85]),
-            Self::Gradient => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
+            // `HdriSky` shares these neutral mid-tones — grid/wireframe
+            // contrast falls back to them since HDRI brightness is
+            // content-dependent.
+            Self::Gradient | Self::HdriSky => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
             Self::DarkGray => ([0.30, 0.32, 0.35], [0.15, 0.14, 0.13]),
             Self::AyuMirage => (
                 [0.122 * 1.4, 0.141 * 1.4, 0.188 * 1.4],

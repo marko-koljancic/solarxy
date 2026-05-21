@@ -24,6 +24,7 @@ pub struct BindGroupLayouts {
     pub uv_overlap_read: wgpu::BindGroupLayout,
     pub validation_color: wgpu::BindGroupLayout,
     pub overdraw_show: wgpu::BindGroupLayout,
+    pub skybox: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -225,6 +226,10 @@ impl BindGroupLayouts {
             label: Some("overdraw_show_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
+        let skybox = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("skybox_bind_group_layout"),
+            entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -247,6 +252,7 @@ impl BindGroupLayouts {
             uv_overlap_read,
             validation_color,
             overdraw_show,
+            skybox,
         }
     }
 }
