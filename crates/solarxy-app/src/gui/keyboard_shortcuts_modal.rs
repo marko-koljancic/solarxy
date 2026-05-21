@@ -32,10 +32,6 @@ const SECTIONS: &[Section] = &[
                 action: "Screenshot\u{2026}",
             },
             Entry {
-                keys: "Shift+S",
-                action: "Save preferences",
-            },
-            Entry {
                 keys: "__MOD__+,",
                 action: "Preferences",
             },

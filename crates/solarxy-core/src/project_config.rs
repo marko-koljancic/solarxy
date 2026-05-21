@@ -372,13 +372,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn tempdir() -> PathBuf {
+        // A per-process atomic counter — a wall-clock suffix can collide
+        // between tests that run in the same nanosecond on parallel
+        // threads, leaking one test's `solarxy.toml` into another's dir.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let base = std::env::temp_dir().join(format!(
             "solarxy-project-config-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
+            COUNTER.fetch_add(1, Ordering::Relaxed),
         ));
         fs::create_dir_all(&base).expect("tempdir");
         base

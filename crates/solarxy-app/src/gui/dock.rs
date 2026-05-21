@@ -70,9 +70,9 @@ impl SolarxyTab {
 
 /// Build the default dock layout: Viewport central, Outliner top-left
 /// with Sidebar below it, Properties top-right with `ReviewPanel` below
-/// it, Console bottom. `MaterialInspector` starts unattached and only
-/// enters the tree when the user toggles it via the Window menu (or when
-/// persistence restores a layout that pins it in).
+/// it, Console and Material Inspector tabbed together along the bottom.
+/// Every panel ships in the default tree — discoverability is the layout
+/// itself (no panel auto-opens on model load).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
@@ -81,7 +81,11 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let [_outliner, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
     let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
-    let [_main, _console] = surface.split_below(center, 0.72, vec![SolarxyTab::Console]);
+    let [_main, _bottom] = surface.split_below(
+        center,
+        0.72,
+        vec![SolarxyTab::Console, SolarxyTab::MaterialInspector],
+    );
 
     state
 }
@@ -242,10 +246,10 @@ mod tests {
             SolarxyTab::Console,
             SolarxyTab::Properties,
             SolarxyTab::Outliner,
+            SolarxyTab::MaterialInspector,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
-        assert!(!present.contains(&SolarxyTab::MaterialInspector));
     }
 
     #[test]
@@ -280,12 +284,14 @@ mod tests {
     #[test]
     fn tab_present_accuracy_after_sequence() {
         let mut dock = default_dock_state();
-        assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
-
-        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        // Every panel ships in the default tree, so the round-trip starts
+        // from present.
         assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
 
         toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
         assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
+
+        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
     }
 }

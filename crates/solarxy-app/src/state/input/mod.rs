@@ -231,6 +231,9 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
+                // `Shift+S` (save preferences) was retired in RC2 — view
+                // settings now persist via Edit → Save View Settings as
+                // Default. `Cmd/Ctrl+S` still saves the review sidecar.
                 let cmd_or_ctrl = if cfg!(target_os = "macos") {
                     self.input.modifiers.super_key()
                 } else {
@@ -238,9 +241,7 @@ impl State {
                 };
                 if cmd_or_ctrl && self.review.active {
                     self.save_review_sidecar();
-                } else if self.input.modifiers.shift_key() {
-                    self.save_preferences();
-                } else {
+                } else if !self.input.modifiers.shift_key() {
                     self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
                 }
             }
