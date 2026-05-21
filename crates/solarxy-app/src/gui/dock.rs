@@ -30,7 +30,7 @@ use egui_dock::{DockState, NodeIndex, TabViewer};
 use crate::console::ConsoleState;
 
 use super::material_inspector::MaterialInspectorState;
-use super::snapshot::{GuiSnapshot, HudInfo};
+use super::snapshot::GuiSnapshot;
 use super::stats::ModelInfo;
 use super::theme::Theme;
 
@@ -82,8 +82,6 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 /// Constructed fresh inside `render_ui`'s egui closure each frame.
 pub(super) struct SolarxyTabViewer<'a> {
     pub snap: &'a mut GuiSnapshot,
-    pub hud: &'a HudInfo,
-    pub validation_report: Option<&'a solarxy_core::validation::ValidationReport>,
     pub review: &'a mut crate::state::review::ReviewState,
     pub console: &'a mut ConsoleState,
     pub model: Option<&'a solarxy_renderer::model::Model>,
@@ -125,12 +123,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {
-                super::sidebar::draw_sidebar_content(
-                    ui,
-                    self.snap,
-                    self.hud.uv_overlap_pct,
-                    self.validation_report,
-                );
+                super::sidebar::draw_sidebar_content(ui, self.snap);
             }
             SolarxyTab::ReviewPanel => {
                 let mut visible = true;

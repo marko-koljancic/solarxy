@@ -177,7 +177,6 @@ pub(crate) struct HudInfo {
     pub pane_label: String,
     pub cameras_linked: Option<bool>,
     pub has_uvs: bool,
-    pub uv_overlap_pct: Option<f32>,
     pub overdraw_active: bool,
 }
 

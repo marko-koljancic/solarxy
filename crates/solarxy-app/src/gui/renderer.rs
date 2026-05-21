@@ -395,6 +395,7 @@ impl EguiRenderer {
             projections: pt_projections,
             projection_change: pt_projection_change,
             hdri_available: pt_hdri_available,
+            uv_overlap_pct: pt_uv_overlap_pct,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
@@ -439,8 +440,6 @@ impl EguiRenderer {
 
             let mut tab_viewer = SolarxyTabViewer {
                 snap: &mut snap,
-                hud,
-                validation_report,
                 review,
                 console,
                 model,
@@ -455,6 +454,7 @@ impl EguiRenderer {
                     projections: pt_projections,
                     projection_change: pt_projection_change,
                     hdri_available: pt_hdri_available,
+                    uv_overlap_pct: pt_uv_overlap_pct,
                 },
             };
             DockArea::new(dock_state)

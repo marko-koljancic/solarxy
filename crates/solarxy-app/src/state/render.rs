@@ -531,7 +531,6 @@ impl State {
                 None
             },
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
-            uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
@@ -543,6 +542,7 @@ impl State {
         // releasing its `&mut self.view.pane_settings` borrow before
         // `apply_to_state` re-borrows the same field below.
         let hdri_available = self.renderer.ibl_res.ibl.equirect.is_some();
+        let uv_overlap_pct = self.renderer.uv_overlap.overlap_pct;
         let pane_toolbar = crate::gui::PaneToolbarData {
             rects: &pane_rects,
             active: ap,
@@ -550,6 +550,7 @@ impl State {
             projections: pane_projections,
             projection_change: &mut projection_change,
             hdri_available,
+            uv_overlap_pct,
         };
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,

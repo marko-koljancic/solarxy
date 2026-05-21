@@ -10,7 +10,7 @@
 
 use solarxy_core::preferences::{
     BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, UvMode, ViewMode,
+    ProjectionMode, UvMapBackground, UvMode, ViewMode,
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 
@@ -55,6 +55,9 @@ pub(crate) struct PaneToolbarData<'a> {
     pub projection_change: &'a mut Option<(usize, ProjectionMode)>,
     /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
     pub hdri_available: bool,
+    /// Latest UV-shell overlap percentage, shown beside the UV-map
+    /// `Overlap` toggle. `None` until a readback completes.
+    pub uv_overlap_pct: Option<f32>,
 }
 
 /// Mutable handles to the per-pane fields a toolbar edits.
@@ -72,6 +75,8 @@ struct PaneFields<'a> {
     show_axis_gizmo: &'a mut bool,
     show_local_axes: &'a mut bool,
     show_validation: &'a mut bool,
+    uv_bg: &'a mut UvMapBackground,
+    show_uv_overlap: &'a mut bool,
 }
 
 impl<'a> PaneFields<'a> {
@@ -90,6 +95,8 @@ impl<'a> PaneFields<'a> {
             show_axis_gizmo: &mut s.show_axis_gizmo,
             show_local_axes: &mut s.show_local_axes,
             show_validation: &mut s.show_validation,
+            uv_bg: &mut s.uv_bg,
+            show_uv_overlap: &mut s.show_uv_overlap,
         }
     }
 
@@ -108,6 +115,8 @@ impl<'a> PaneFields<'a> {
             show_axis_gizmo: &mut p.show_axis_gizmo,
             show_local_axes: &mut p.show_local_axes,
             show_validation: &mut p.show_validation,
+            uv_bg: &mut p.uv_bg,
+            show_uv_overlap: &mut p.show_uv_overlap,
         }
     }
 }
@@ -121,6 +130,7 @@ pub(super) fn draw_pane_toolbars(
     theme: Theme,
 ) {
     let hdri_available = data.hdri_available;
+    let uv_overlap_pct = data.uv_overlap_pct;
     for i in 0..data.rects.len() {
         let rect = data.rects[i];
         let strip =
@@ -150,6 +160,7 @@ pub(super) fn draw_pane_toolbars(
                             &mut new_projection,
                             compact,
                             hdri_available,
+                            uv_overlap_pct,
                         );
                     });
                 },
@@ -178,13 +189,12 @@ fn draw_controls(
     new_projection: &mut Option<ProjectionMode>,
     compact: bool,
     hdri_available: bool,
+    uv_overlap_pct: Option<f32>,
 ) {
-    let scene_3d = *f.pane_mode == PaneMode::Scene3D;
-
     combo(ui, (idx, "pm"), "Pane mode", f.pane_mode, &PANE_MODES);
-    ui.add_enabled_ui(scene_3d, |ui| {
+
+    if *f.pane_mode == PaneMode::Scene3D {
         combo(ui, (idx, "sh"), "Shading", f.view_mode, ViewMode::ALL);
-        let prev = *f.inspection_mode;
         combo(
             ui,
             (idx, "in"),
@@ -192,56 +202,68 @@ fn draw_controls(
             f.inspection_mode,
             InspectionMode::ALL,
         );
-        if *f.inspection_mode != prev {
-            *f.pane_mode = PaneMode::Scene3D;
-        }
-    });
 
-    if compact {
-        ui.menu_button("\u{22ef}", |ui| {
-            draw_overflow_controls(
-                ui,
-                idx,
-                f,
-                scene_3d,
-                projection,
-                new_projection,
-                hdri_available,
-            );
-        })
-        .response
-        .on_hover_text("More controls");
+        if compact {
+            ui.menu_button("\u{22ef}", |ui| {
+                draw_overflow_controls(ui, idx, f, projection, new_projection, hdri_available);
+            })
+            .response
+            .on_hover_text("More controls");
+        } else {
+            draw_overflow_controls(ui, idx, f, projection, new_projection, hdri_available);
+        }
     } else {
-        draw_overflow_controls(
-            ui,
-            idx,
-            f,
-            scene_3d,
-            projection,
-            new_projection,
-            hdri_available,
-        );
+        draw_uv_controls(ui, idx, f, uv_overlap_pct);
     }
+}
+
+/// UV-map-pane toolbar controls — the per-pane home for what was the
+/// sidebar's UV-map section. Shown when the pane is in UV Map mode.
+fn draw_uv_controls(
+    ui: &mut egui::Ui,
+    idx: usize,
+    f: &mut PaneFields,
+    uv_overlap_pct: Option<f32>,
+) {
+    combo(
+        ui,
+        (idx, "uvbg"),
+        "UV map background",
+        f.uv_bg,
+        UvMapBackground::ALL,
+    );
+    ui.checkbox(f.show_uv_overlap, "Overlap")
+        .on_hover_text("UV shell overlap heatmap");
+    if *f.show_uv_overlap
+        && let Some(pct) = uv_overlap_pct
+    {
+        ui.label(format!("{pct:.1}%"))
+            .on_hover_text("Overlapping UV area");
+    }
+    combo(
+        ui,
+        (idx, "uvlw"),
+        "Wireframe weight",
+        f.line_weight,
+        LineWeight::ALL,
+    );
 }
 
 fn draw_overflow_controls(
     ui: &mut egui::Ui,
     idx: usize,
     f: &mut PaneFields,
-    scene_3d: bool,
     projection: ProjectionMode,
     new_projection: &mut Option<ProjectionMode>,
     hdri_available: bool,
 ) {
-    ui.add_enabled_ui(scene_3d, |ui| {
-        combo(
-            ui,
-            (idx, "ov"),
-            "Material override",
-            f.material_override,
-            MaterialOverride::ALL,
-        );
-    });
+    combo(
+        ui,
+        (idx, "ov"),
+        "Material override",
+        f.material_override,
+        MaterialOverride::ALL,
+    );
 
     let mut proj = projection;
     combo(ui, (idx, "pr"), "Projection", &mut proj, &PROJECTIONS);
