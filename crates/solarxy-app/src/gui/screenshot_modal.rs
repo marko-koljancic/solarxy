@@ -28,6 +28,14 @@ pub(crate) struct ScreenshotModal {
     /// Full-resolution capture of the active pane, kept until save/cancel.
     image: Option<RgbaImage>,
     /// Downscaled preview, uploaded lazily from `image` on first draw.
+    ///
+    /// Only ever dropped/replaced in [`Self::set_capture`] — never in
+    /// `close` / `take_image`. Dropping an `egui::TextureHandle` inside
+    /// the `ctx.run` closure that drew it makes egui free the GPU texture
+    /// the *same* frame, before the recorded draw is submitted (a
+    /// "texture has been destroyed" validation crash). `set_capture` runs
+    /// only on a capture frame, where the modal is suppressed and never
+    /// draws this `Image` — so the swap there is always race-free.
     preview: Option<egui::TextureHandle>,
     /// Suggested file name — shown to the user and pre-filled into the
     /// native save dialog.
@@ -87,14 +95,12 @@ impl ScreenshotModal {
     /// user has chosen a save path.
     pub fn take_image(&mut self) -> Option<RgbaImage> {
         self.open = false;
-        self.preview = None;
         self.image.take()
     }
 
     fn close(&mut self) {
         self.open = false;
         self.image = None;
-        self.preview = None;
     }
 }
 
