@@ -12,7 +12,6 @@ use half::f16;
 /// The source equirectangular HDRI, kept as a 2D `Rgba16Float` texture for
 /// the skybox pass — roughly 64 MB at 4K, accepted for RC2.
 pub struct EquirectTexture {
-    #[allow(dead_code)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,

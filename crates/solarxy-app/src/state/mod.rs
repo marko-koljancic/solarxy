@@ -18,6 +18,7 @@
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
+pub(crate) mod hdri_info;
 mod init;
 mod input;
 mod overlap;
@@ -79,6 +80,14 @@ pub(super) struct PendingLoad {
     pub(super) path: String,
 }
 
+/// In-flight async HDRI load. The source path is retained so the
+/// completion handler in `update.rs` can build [`hdri_info::HdriInfo`]
+/// (filename + file size) once the [`IblState`] arrives.
+pub(super) struct PendingHdri {
+    pub(super) receiver: mpsc::Receiver<anyhow::Result<IblState>>,
+    pub(super) path: std::path::PathBuf,
+}
+
 pub(super) struct InputState {
     pub(super) cursor_pos: (f32, f32),
     pub(super) modifiers: ModifiersState,
@@ -101,7 +110,7 @@ pub struct State {
     pub(super) review: review::ReviewState,
     pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
-    pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
+    pub(super) pending_hdri: Option<PendingHdri>,
     pub(super) capture_requested: bool,
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,

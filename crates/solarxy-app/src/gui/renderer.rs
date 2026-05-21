@@ -5,6 +5,7 @@ use egui_wgpu::ScreenDescriptor;
 
 use solarxy_renderer::resources::ModelStats;
 use crate::console::{ConsoleState, LogBuffer};
+use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
@@ -18,8 +19,8 @@ use super::status_bar::{self, StatusBarData};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
+use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::{GuiSnapshot, HudInfo};
-use super::stats::ModelInfo;
 use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
@@ -44,6 +45,7 @@ pub struct EguiRenderer {
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
+    hdri_info: Option<HdriInfo>,
     backend_info: String,
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
@@ -97,6 +99,7 @@ impl EguiRenderer {
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
+            hdri_info: None,
             backend_info: String::new(),
             dock_state: default_dock_state(),
             last_viewport_rect: None,
@@ -114,9 +117,20 @@ impl EguiRenderer {
 
     /// Drop the cached model info on model close. Panel visibility is
     /// left untouched — panels are user-controlled (no auto open/close).
+    /// The HDRI is independent of the model, so `hdri_info` is kept.
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
         self.material_inspector.clear_for_new_model();
+    }
+
+    /// Cache the loaded HDRI's metadata for the Properties panel.
+    pub(crate) fn update_hdri_info(&mut self, info: HdriInfo) {
+        self.hdri_info = Some(info);
+    }
+
+    /// Drop the cached HDRI metadata when the HDRI is cleared.
+    pub(crate) fn clear_hdri_info(&mut self) {
+        self.hdri_info = None;
     }
 
     pub fn on_window_event(
@@ -333,6 +347,7 @@ impl EguiRenderer {
         review: &mut crate::state::review::ReviewState,
         model: Option<&solarxy_renderer::model::Model>,
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
+        properties_events: &mut PropertiesEvents,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -351,6 +366,7 @@ impl EguiRenderer {
         let toasts = &self.toasts;
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
+        let hdri_info = &self.hdri_info;
         let pane_label = &hud.pane_label;
         let cameras_linked = hud.cameras_linked;
         let validation_counts =
@@ -367,7 +383,7 @@ impl EguiRenderer {
         let mut menu_vis = MenuBarVisibility {
             sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
             menu_bar_visible: self.menu_bar_visible,
-            stats_visible: present_at_start.contains(&SolarxyTab::Stats),
+            properties_visible: present_at_start.contains(&SolarxyTab::Properties),
             status_bar_visible: self.status_bar_visible,
             console_visible: present_at_start.contains(&SolarxyTab::Console),
             review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
@@ -444,6 +460,9 @@ impl EguiRenderer {
                 console,
                 model,
                 model_info: model_info.as_ref(),
+                hdri_info: hdri_info.as_ref(),
+                validation_report,
+                properties_events,
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
                 theme,
@@ -669,9 +688,9 @@ impl EguiRenderer {
                 menu_vis.material_inspector_visible,
             ),
             (
-                SolarxyTab::Stats,
-                menu_vis_before.stats_visible,
-                menu_vis.stats_visible,
+                SolarxyTab::Properties,
+                menu_vis_before.properties_visible,
+                menu_vis.properties_visible,
             ),
         ];
         for &(tab, before, after) in &menu_intents {

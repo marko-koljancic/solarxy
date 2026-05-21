@@ -128,6 +128,10 @@ pub struct ModelScene {
     pub validation: ValidationReport,
     pub validation_mesh_cat: Vec<Option<usize>>,
     pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
+    /// Raw-mesh-index → GPU-mesh-index map (empty raw meshes are filtered
+    /// out). Retained so a validation issue's raw `IssueScope` index can be
+    /// remapped to `Model::mesh_bounds` for camera fly-to.
+    pub validation_raw_to_gpu: Vec<Option<usize>>,
 }
 
 impl ModelScene {
@@ -226,6 +230,7 @@ impl ModelScene {
             validation: viewer_validation.report,
             validation_mesh_cat,
             validation_edge_buffers,
+            validation_raw_to_gpu: viewer_validation.raw_to_gpu,
         })
     }
 }

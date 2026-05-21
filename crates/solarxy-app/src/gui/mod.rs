@@ -21,8 +21,8 @@
 //!   `target: "solarxy::toast"` — callers must NOT also emit their own
 //!   log for the same message.
 //! - `preferences_modal`, `keyboard_shortcuts_modal`, `update_modal`,
-//!   `about`, `console_view`, `stats`, `theme` — supporting modal/panel
-//!   surfaces, each draggable and Esc-dismissable per the rc.11 pattern.
+//!   `about`, `console_view`, `properties`, `theme` — supporting
+//!   modal/panel surfaces.
 //!
 //! Cross-platform: `MOD` resolves to `⌘` on macOS and `Ctrl` elsewhere,
 //! used in menu shortcut labels.
@@ -37,6 +37,7 @@ mod menu;
 mod overlays;
 mod pane_toolbar;
 mod preferences_modal;
+mod properties;
 mod renderer;
 mod review_overlay;
 mod review_panel;
@@ -44,7 +45,6 @@ mod review_popup;
 mod review_visuals;
 mod sidebar;
 mod snapshot;
-mod stats;
 mod status_bar;
 mod theme;
 mod update_modal;
@@ -60,5 +60,6 @@ pub use snapshot::SidebarChanges;
 
 pub(crate) use actions::{DividerInfo, MenuActions};
 pub(crate) use pane_toolbar::PaneToolbarData;
+pub(crate) use properties::PropertiesEvents;
 pub(crate) use review_overlay::ReviewPaneOverlay;
 pub(crate) use snapshot::{GuiSnapshot, HudInfo};

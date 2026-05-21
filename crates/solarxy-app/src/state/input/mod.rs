@@ -27,6 +27,7 @@ use solarxy_core::preferences::{
     self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
     ProjectionMode, UvMode, ViewMode,
 };
+use solarxy_core::validation::IssueScope;
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
 
@@ -496,6 +497,47 @@ impl State {
         self.rebuild_light_bind_group();
     }
 
+    /// Drop the loaded HDRI (Properties → HDRI → Clear). Full revert:
+    /// every pane still on the `HdriSky` background falls back to
+    /// `Gradient`, the IBL returns to the procedural sky-colour gradient,
+    /// and the skybox is released (`rebuild_light_bind_group` rebuilds it
+    /// as `None`).
+    pub(super) fn clear_hdri(&mut self) {
+        for pds in &mut self.view.pane_settings {
+            if pds.background_mode == BackgroundMode::HdriSky {
+                pds.background_mode = BackgroundMode::Gradient;
+            }
+        }
+        let (top, bottom) = self.view.pane_settings[0].background_mode.sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.rebuild_light_bind_group();
+        self.gui.clear_hdri_info();
+        self.gui.set_toast("HDRI cleared", ToastSeverity::Success);
+    }
+
+    /// Fly the active pane's camera to frame the mesh a validation issue
+    /// lives on (Properties → Validation row click) and enable that
+    /// pane's per-face validation overlay so the defect is visible.
+    pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let Some(issue) = scene.validation.issues.get(idx) else {
+            return;
+        };
+        let Some(aabb) =
+            resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
+        else {
+            return;
+        };
+        let ap = self.view.active_pane;
+        self.view.pane_settings[ap].show_validation = true;
+        if let Some(cam) = &mut self.view.cameras[ap] {
+            cam.reset_to_bounds(&aabb);
+        }
+    }
+
     fn cycle_background(&mut self) {
         let has_hdri = self.renderer.ibl_res.ibl.equirect.is_some();
         let pds = &mut self.view.pane_settings[self.view.active_pane];
@@ -786,5 +828,53 @@ impl State {
         } else {
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
         }
+    }
+}
+
+/// Resolve a validation issue's scope to an AABB for camera fly-to.
+/// Mesh-granular for every scope — the per-face / per-edge validation
+/// overlay highlights the exact defect once its mesh is framed. Raw issue
+/// mesh indices are remapped to GPU mesh indices via `raw_to_gpu`.
+fn resolve_issue_aabb(
+    scope: &IssueScope,
+    model: &solarxy_renderer::model::Model,
+    raw_to_gpu: &[Option<usize>],
+) -> Option<solarxy_core::AABB> {
+    let gpu_mesh = |raw: usize| raw_to_gpu.get(raw).copied().flatten();
+    match scope {
+        IssueScope::Model => Some(model.bounds),
+        IssueScope::Mesh(raw) | IssueScope::Face(raw, _) => {
+            gpu_mesh(*raw).and_then(|g| model.mesh_bounds.get(g).copied())
+        }
+        IssueScope::Edge { mesh_index, .. } => {
+            gpu_mesh(*mesh_index).and_then(|g| model.mesh_bounds.get(g).copied())
+        }
+        IssueScope::Material(mat) => {
+            let mut acc: Option<solarxy_core::AABB> = None;
+            for (i, mesh) in model.meshes.iter().enumerate() {
+                if mesh.material == *mat
+                    && let Some(b) = model.mesh_bounds.get(i).copied()
+                {
+                    acc = Some(acc.map_or(b, |a| union_aabb(a, b)));
+                }
+            }
+            acc.or(Some(model.bounds))
+        }
+    }
+}
+
+/// Smallest AABB enclosing both inputs.
+fn union_aabb(a: solarxy_core::AABB, b: solarxy_core::AABB) -> solarxy_core::AABB {
+    solarxy_core::AABB {
+        min: cgmath::Point3::new(
+            a.min.x.min(b.min.x),
+            a.min.y.min(b.min.y),
+            a.min.z.min(b.min.z),
+        ),
+        max: cgmath::Point3::new(
+            a.max.x.max(b.max.x),
+            a.max.y.max(b.max.y),
+            a.max.z.max(b.max.z),
+        ),
     }
 }

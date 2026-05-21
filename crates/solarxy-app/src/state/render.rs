@@ -483,6 +483,7 @@ impl State {
                     .map_or(default_projection, |c| c.camera.projection)
             });
         let mut projection_change = None;
+        let mut properties_events = crate::gui::PropertiesEvents::default();
 
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
@@ -570,6 +571,7 @@ impl State {
             &mut self.review,
             model,
             pane_toolbar,
+            &mut properties_events,
         );
 
         if let Some((i, proj)) = projection_change
@@ -600,6 +602,17 @@ impl State {
         }
 
         self.handle_menu_actions(actions);
+
+        // Properties-panel events: validation fly-to + HDRI load/clear.
+        if let Some(idx) = properties_events.fly_to_issue {
+            self.fly_to_validation_issue(idx);
+        }
+        if properties_events.clear_hdri {
+            self.clear_hdri();
+        }
+        if properties_events.load_hdri {
+            self.open_hdri_dialog();
+        }
 
         if let Some(new_prefs) = self.gui.take_committed_prefs() {
             let theme_changed = self.preferences.ui.theme != new_prefs.ui.theme;

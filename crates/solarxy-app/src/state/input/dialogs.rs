@@ -3,7 +3,7 @@ use solarxy_renderer::ibl::IblState;
 use solarxy_renderer::resources;
 
 use super::super::view_state::ViewLayout;
-use super::super::State;
+use super::super::{PendingHdri, State};
 
 impl State {
     pub fn handle_dropped_file(&mut self, path: std::path::PathBuf) {
@@ -13,11 +13,15 @@ impl State {
             let device = self.device.clone();
             let queue = self.queue.clone();
             let (tx, rx) = std::sync::mpsc::channel();
+            let hdri_path = path.clone();
             std::thread::spawn(move || {
                 let _ = tx.send(IblState::from_hdri(&device, &queue, &path));
             });
             self.gui.set_loading_message("Loading HDRI...");
-            self.pending_hdri = Some(rx);
+            self.pending_hdri = Some(PendingHdri {
+                receiver: rx,
+                path: hdri_path,
+            });
             return;
         }
 

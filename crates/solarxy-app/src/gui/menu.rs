@@ -359,13 +359,10 @@ fn draw_window_menu(ui: &mut egui::Ui, vis: &mut MenuBarVisibility, has_model: b
             ui.close();
         }
         if ui
-            .add_enabled(
-                has_model,
-                egui::Button::new("Model Stats").selected(vis.stats_visible),
-            )
+            .add(egui::Button::new("Properties").selected(vis.properties_visible))
             .clicked()
         {
-            vis.stats_visible = !vis.stats_visible;
+            vis.properties_visible = !vis.properties_visible;
             ui.close();
         }
         if ui

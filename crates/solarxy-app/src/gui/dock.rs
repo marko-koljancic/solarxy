@@ -1,7 +1,7 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
 //! All five user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Model Stats) plus the 3D Viewport live as tabs inside a
+//! Inspector, Properties) plus the 3D Viewport live as tabs inside a
 //! single [`egui_dock::DockState`]. Users drag tab titles between leaves
 //! to dock left/right/bottom/top; drag outside the dock area to tear out
 //! into a floating window. The Viewport tab is **closeable but
@@ -27,11 +27,14 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
+use solarxy_core::validation::ValidationReport;
+
 use crate::console::ConsoleState;
+use crate::state::hdri_info::HdriInfo;
 
 use super::material_inspector::MaterialInspectorState;
+use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::GuiSnapshot;
-use super::stats::ModelInfo;
 use super::theme::Theme;
 
 /// The six tab variants in the Solarxy dock. The `Viewport` variant is
@@ -45,7 +48,7 @@ pub(super) enum SolarxyTab {
     ReviewPanel,
     Console,
     MaterialInspector,
-    Stats,
+    Properties,
 }
 
 impl SolarxyTab {
@@ -57,22 +60,23 @@ impl SolarxyTab {
             Self::ReviewPanel => "review-panel",
             Self::Console => "console",
             Self::MaterialInspector => "material-inspector",
-            Self::Stats => "stats",
+            Self::Properties => "properties",
         }
     }
 }
 
 /// Build the default dock layout: Viewport central, Sidebar left,
-/// `ReviewPanel` right, Console bottom. `MaterialInspector` + Stats start
-/// unattached and only enter the tree when the user toggles them via
-/// the Window menu (or when persistence restores a layout that pins
-/// them in).
+/// Properties top-right with `ReviewPanel` below it, Console bottom.
+/// `MaterialInspector` starts unattached and only enters the tree when
+/// the user toggles it via the Window menu (or when persistence restores
+/// a layout that pins it in).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
     let [center_etc, _sidebar] =
         surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Sidebar]);
-    let [center, _review] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::ReviewPanel]);
+    let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
+    let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
     let [_main, _console] = surface.split_below(center, 0.72, vec![SolarxyTab::Console]);
 
     state
@@ -86,6 +90,9 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub console: &'a mut ConsoleState,
     pub model: Option<&'a solarxy_renderer::model::Model>,
     pub model_info: Option<&'a ModelInfo>,
+    pub hdri_info: Option<&'a HdriInfo>,
+    pub validation_report: Option<&'a ValidationReport>,
+    pub properties_events: &'a mut PropertiesEvents,
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
@@ -106,7 +113,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 self.model.map_or(0, |m| m.materials.len())
             )
             .into(),
-            SolarxyTab::Stats => "Stats".into(),
+            SolarxyTab::Properties => "Properties".into(),
         }
     }
 
@@ -148,12 +155,15 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     draw_no_model_placeholder(ui);
                 }
             }
-            SolarxyTab::Stats => {
-                if let Some(info) = self.model_info {
-                    super::stats::draw_stats_content(ui, info);
-                } else {
-                    draw_no_model_placeholder(ui);
-                }
+            SolarxyTab::Properties => {
+                super::properties::draw_properties_content(
+                    ui,
+                    self.model_info,
+                    self.hdri_info,
+                    self.validation_report,
+                    self.snap,
+                    self.properties_events,
+                );
             }
         }
     }
@@ -212,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn default_dock_state_has_core_four_tabs() {
+    fn default_dock_state_has_core_tabs() {
         let dock = default_dock_state();
         let present = membership(&dock);
         for tab in [
@@ -220,11 +230,11 @@ mod tests {
             SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
             SolarxyTab::Console,
+            SolarxyTab::Properties,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
         assert!(!present.contains(&SolarxyTab::MaterialInspector));
-        assert!(!present.contains(&SolarxyTab::Stats));
     }
 
     #[test]
@@ -259,12 +269,12 @@ mod tests {
     #[test]
     fn tab_present_accuracy_after_sequence() {
         let mut dock = default_dock_state();
-        assert!(!tab_present(&dock, SolarxyTab::Stats));
+        assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
 
-        toggle_tab(&mut dock, SolarxyTab::Stats);
-        assert!(tab_present(&dock, SolarxyTab::Stats));
+        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
 
-        toggle_tab(&mut dock, SolarxyTab::Stats);
-        assert!(!tab_present(&dock, SolarxyTab::Stats));
+        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
     }
 }

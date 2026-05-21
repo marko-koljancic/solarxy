@@ -280,13 +280,28 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        let hdri_poll = self
-            .pending_hdri
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
+        let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {
-                self.pending_hdri.take();
+                if let Some(pending) = self.pending_hdri.take() {
+                    let filename = pending
+                        .path
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("HDRI")
+                        .to_string();
+                    let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
+                    let resolution = new_ibl
+                        .equirect
+                        .as_ref()
+                        .map_or((0, 0), |e| (e.texture.width(), e.texture.height()));
+                    self.gui.update_hdri_info(hdri_info::HdriInfo {
+                        filename,
+                        path: pending.path.display().to_string(),
+                        resolution,
+                        file_size,
+                    });
+                }
                 self.renderer.ibl_res.ibl = new_ibl;
                 self.renderer.ibl_res.ibl_mode = IblMode::Full;
                 self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
