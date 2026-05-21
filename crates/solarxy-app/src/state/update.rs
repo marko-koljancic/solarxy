@@ -349,6 +349,10 @@ impl State {
                         [bounds_size.x, bounds_size.y, bounds_size.z],
                         new_scene.model.has_uvs,
                     );
+                    // The Material Inspector's thumbnail cache is keyed by
+                    // (material_index, role); drop it so the new model's
+                    // textures aren't shadowed by stale entries.
+                    self.gui.reset_material_inspector();
                     tracing::info!(
                         "Loaded model: {} ({} verts, {} tris, {} meshes)",
                         pending.path,

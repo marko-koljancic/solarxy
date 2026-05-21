@@ -332,6 +332,16 @@ impl EguiRenderer {
         });
     }
 
+    /// Drop the Material Inspector's per-model thumbnail cache and reset
+    /// its selection. Must be called alongside [`Self::update_model_info`]
+    /// on every model load: the cache is keyed by `(material_index,
+    /// texture_role)`, so without this a stale `TextureHandle` from the
+    /// previous model would be served for the new model's matching slot
+    /// (and the old handles would leak until app exit).
+    pub(crate) fn reset_material_inspector(&mut self) {
+        self.material_inspector.clear_for_new_model();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_ui(
         &mut self,
