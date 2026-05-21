@@ -912,7 +912,18 @@ impl Renderer {
         {
             pass.set_bind_group(1, &scene.vis.face_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
-            pass.draw(0..scene.vis.face_normals_count, 0..1);
+            // One draw per visible mesh — the segments are parallel to
+            // `model.meshes`, so a hidden mesh's normals are skipped.
+            for (mesh, seg) in scene
+                .model
+                .meshes
+                .iter()
+                .zip(&scene.vis.face_normals_segments)
+            {
+                if mesh.visible && !seg.is_empty() {
+                    pass.draw(seg.clone(), 0..1);
+                }
+            }
         }
         if matches!(
             pds.normals_mode,
@@ -921,7 +932,16 @@ impl Renderer {
         {
             pass.set_bind_group(1, &scene.vis.vertex_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));
-            pass.draw(0..scene.vis.vertex_normals_count, 0..1);
+            for (mesh, seg) in scene
+                .model
+                .meshes
+                .iter()
+                .zip(&scene.vis.vertex_normals_segments)
+            {
+                if mesh.visible && !seg.is_empty() {
+                    pass.draw(seg.clone(), 0..1);
+                }
+            }
         }
     }
 }
