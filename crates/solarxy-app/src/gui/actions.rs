@@ -22,6 +22,10 @@ pub(crate) struct MenuActions {
     pub set_split_ratio: Option<f32>,
     pub cancel_reanchor: bool,
     pub exit_review_mode: bool,
+    /// Review-menu toggle of review mode — applied identically to `Shift+R`.
+    pub toggle_review_mode: bool,
+    /// Review-menu toggle of the 3D marker overlay (`ReviewState::markers_hidden`).
+    pub toggle_review_markers: bool,
     pub save_dock_layout: bool,
     pub restore_saved_layout: bool,
     pub reset_dock_layout: bool,

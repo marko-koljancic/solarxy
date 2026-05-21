@@ -78,6 +78,10 @@ pub struct ReviewState {
     /// Default `true` — showing resolved keeps conversation context.
     pub show_resolved: bool,
 
+    /// `true` ⇒ the 3D viewport marker overlay is suppressed; the panel
+    /// still lists every annotation. Session-only — never persisted.
+    pub markers_hidden: bool,
+
     /// Case-insensitive substring filter applied to annotation text.
     /// Empty ⇒ no filter.
     pub text_filter: String,
@@ -126,6 +130,7 @@ impl Default for ReviewState {
             panel_open: false,
             category_filters: [true; 4],
             show_resolved: true,
+            markers_hidden: false,
             text_filter: String::new(),
             delete_confirm: None,
             reanchor_target: None,

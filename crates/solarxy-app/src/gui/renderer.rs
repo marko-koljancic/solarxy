@@ -441,6 +441,9 @@ impl EguiRenderer {
                     recent_files,
                     pt_hdri_available,
                     pt_customs,
+                    review.active,
+                    review.markers_hidden,
+                    theme,
                 );
             }
 
@@ -506,11 +509,14 @@ impl EguiRenderer {
                 || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
+            // `markers_hidden` suppresses the 3D overlay while the panel
+            // keeps listing every annotation.
+            let suppress_markers = suppress_overlay || review.markers_hidden;
             super::review_overlay::draw_review_overlay(
                 ctx,
                 review_panes,
                 review,
-                suppress_overlay,
+                suppress_markers,
                 theme,
                 model,
                 force_expand_review,

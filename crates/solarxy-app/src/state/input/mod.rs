@@ -156,16 +156,7 @@ impl State {
             }
             KeyCode::KeyR => {
                 if self.input.modifiers.shift_key() {
-                    let now_active = self.review.toggle_active();
-                    if now_active {
-                        self.review.panel_open = true;
-                    }
-                    let msg = if now_active {
-                        "Review mode: On (click a face to annotate)"
-                    } else {
-                        "Review mode: Off"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
+                    self.toggle_review_mode();
                 } else {
                     let bounds = self.scene.as_ref().map(|s| s.model.bounds);
                     if let Some(bounds) = bounds {
@@ -518,6 +509,21 @@ impl State {
 
     pub(super) fn apply_ibl_change(&mut self) {
         self.rebuild_light_bind_group();
+    }
+
+    /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
+    /// opens the panel on entry, and emits the matching toast.
+    pub(super) fn toggle_review_mode(&mut self) {
+        let now_active = self.review.toggle_active();
+        if now_active {
+            self.review.panel_open = true;
+        }
+        let msg = if now_active {
+            "Review mode: On (click a face to annotate)"
+        } else {
+            "Review mode: Off"
+        };
+        self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
     /// Drop the loaded HDRI (Properties → HDRI → Clear). Full revert:

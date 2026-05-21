@@ -16,6 +16,7 @@ use crate::state::view_state::{BoundsMode, ViewLayout};
 use super::MOD;
 use super::actions::{MenuActions, MenuBarVisibility};
 use super::snapshot::GuiSnapshot;
+use super::theme::Theme;
 
 pub(super) fn draw_menu_bar(
     ctx: &egui::Context,
@@ -26,6 +27,9 @@ pub(super) fn draw_menu_bar(
     recent_files: &[String],
     hdri_available: bool,
     customs: &[CustomBackground],
+    review_active: bool,
+    review_markers_hidden: bool,
+    theme: Theme,
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
@@ -36,7 +40,44 @@ pub(super) fn draw_menu_bar(
             draw_layout_menu(ui, actions, vis);
             draw_window_menu(ui, vis, has_model);
             draw_help_menu(ui, actions);
+            draw_review_menu(ui, actions, review_active, review_markers_hidden, theme);
         });
+    });
+}
+
+/// `Review` quick-toggle menu, sat right of `Help`. The button label
+/// turns amber `● Review` while review mode is active.
+fn draw_review_menu(
+    ui: &mut egui::Ui,
+    actions: &mut MenuActions,
+    review_active: bool,
+    review_markers_hidden: bool,
+    theme: Theme,
+) {
+    let label: egui::WidgetText = if review_active {
+        egui::RichText::new("\u{25CF} Review")
+            .color(theme.accent)
+            .into()
+    } else {
+        "Review".into()
+    };
+    ui.menu_button(label, |ui| {
+        if ui
+            .selectable_label(review_active, "Review Mode")
+            .on_hover_text("Shift+R")
+            .clicked()
+        {
+            actions.toggle_review_mode = true;
+            ui.close();
+        }
+        if ui
+            .selectable_label(!review_markers_hidden, "Show Markers")
+            .on_hover_text("Show review markers in the viewport")
+            .clicked()
+        {
+            actions.toggle_review_markers = true;
+            ui.close();
+        }
     });
 }
 

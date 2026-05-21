@@ -74,6 +74,20 @@ pub(super) fn draw_review_panel_content(
             {
                 *visible = false;
             }
+            // Markers toggle — suppresses the 3D viewport overlay while
+            // the panel keeps listing every annotation.
+            let markers_shown = !review.markers_hidden;
+            if ui
+                .selectable_label(markers_shown, "Markers")
+                .on_hover_text(if markers_shown {
+                    "Hide review markers in the viewport"
+                } else {
+                    "Show review markers in the viewport"
+                })
+                .clicked()
+            {
+                review.markers_hidden = markers_shown;
+            }
         });
     });
     ui.separator();
@@ -88,11 +102,10 @@ pub(super) fn draw_review_panel_content(
                 review.category_filters[idx] = !on;
             }
         }
-        ui.checkbox(&mut review.show_resolved, "Resolved");
+        ui.checkbox(&mut review.show_resolved, "Complete");
     });
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("\u{1F50D}").small());
         let resp = ui.add(
             egui::TextEdit::singleline(&mut review.text_filter)
                 .hint_text("filter notes")
@@ -198,7 +211,7 @@ pub(super) fn draw_review_panel_content(
             if !resolved_idx.is_empty() {
                 draw_section(
                     ui,
-                    "Resolved",
+                    "Complete",
                     &resolved_idx,
                     &review.annotations,
                     selected_id.as_deref(),
@@ -290,7 +303,7 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState, theme: Them
         }
 
         let prev_resolved = ann.resolved;
-        ui.checkbox(&mut ann.resolved, "Resolved");
+        ui.checkbox(&mut ann.resolved, "Complete");
         if ann.resolved != prev_resolved {
             any_change = true;
         }
