@@ -33,11 +33,12 @@ use crate::console::ConsoleState;
 use crate::state::hdri_info::HdriInfo;
 
 use super::material_inspector::MaterialInspectorState;
+use super::outliner::OutlinerEvents;
 use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::GuiSnapshot;
 use super::theme::Theme;
 
-/// The six tab variants in the Solarxy dock. The `Viewport` variant is
+/// The seven tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
 /// (so the wgpu surface shows through). It *can* be closed — the Window
 /// menu restores it via [`toggle_tab`].
@@ -49,6 +50,7 @@ pub(super) enum SolarxyTab {
     Console,
     MaterialInspector,
     Properties,
+    Outliner,
 }
 
 impl SolarxyTab {
@@ -61,20 +63,22 @@ impl SolarxyTab {
             Self::Console => "console",
             Self::MaterialInspector => "material-inspector",
             Self::Properties => "properties",
+            Self::Outliner => "outliner",
         }
     }
 }
 
-/// Build the default dock layout: Viewport central, Sidebar left,
-/// Properties top-right with `ReviewPanel` below it, Console bottom.
-/// `MaterialInspector` starts unattached and only enters the tree when
-/// the user toggles it via the Window menu (or when persistence restores
-/// a layout that pins it in).
+/// Build the default dock layout: Viewport central, Outliner top-left
+/// with Sidebar below it, Properties top-right with `ReviewPanel` below
+/// it, Console bottom. `MaterialInspector` starts unattached and only
+/// enters the tree when the user toggles it via the Window menu (or when
+/// persistence restores a layout that pins it in).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
-    let [center_etc, _sidebar] =
-        surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Sidebar]);
+    let [center_etc, left] =
+        surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Outliner]);
+    let [_outliner, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
     let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
     let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
     let [_main, _console] = surface.split_below(center, 0.72, vec![SolarxyTab::Console]);
@@ -93,6 +97,7 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub hdri_info: Option<&'a HdriInfo>,
     pub validation_report: Option<&'a ValidationReport>,
     pub properties_events: &'a mut PropertiesEvents,
+    pub outliner_events: &'a mut OutlinerEvents,
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
     pub theme: Theme,
@@ -114,6 +119,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
             )
             .into(),
             SolarxyTab::Properties => "Properties".into(),
+            SolarxyTab::Outliner => "Outliner".into(),
         }
     }
 
@@ -164,6 +170,9 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     self.snap,
                     self.properties_events,
                 );
+            }
+            SolarxyTab::Outliner => {
+                super::outliner::draw_outliner_content(ui, self.model, self.outliner_events);
             }
         }
     }
@@ -231,6 +240,7 @@ mod tests {
             SolarxyTab::ReviewPanel,
             SolarxyTab::Console,
             SolarxyTab::Properties,
+            SolarxyTab::Outliner,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }

@@ -484,6 +484,7 @@ impl State {
             });
         let mut projection_change = None;
         let mut properties_events = crate::gui::PropertiesEvents::default();
+        let mut outliner_events = crate::gui::OutlinerEvents::default();
 
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
@@ -572,6 +573,7 @@ impl State {
             model,
             pane_toolbar,
             &mut properties_events,
+            &mut outliner_events,
         );
 
         if let Some((i, proj)) = projection_change
@@ -612,6 +614,11 @@ impl State {
         }
         if properties_events.load_hdri {
             self.open_hdri_dialog();
+        }
+
+        // Outliner events: mesh / material visibility + camera framing.
+        if let Some(action) = outliner_events.action {
+            self.handle_outliner_action(action);
         }
 
         if let Some(new_prefs) = self.gui.take_committed_prefs() {

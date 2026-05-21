@@ -14,6 +14,7 @@ use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present,
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::material_inspector::MaterialInspectorState;
 use super::menu::draw_menu_bar;
+use super::outliner::OutlinerEvents;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
 use super::status_bar::{self, StatusBarData};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
@@ -348,6 +349,7 @@ impl EguiRenderer {
         model: Option<&solarxy_renderer::model::Model>,
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
         properties_events: &mut PropertiesEvents,
+        outliner_events: &mut OutlinerEvents,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -382,6 +384,7 @@ impl EguiRenderer {
             self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
         let mut menu_vis = MenuBarVisibility {
             sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
+            outliner_visible: present_at_start.contains(&SolarxyTab::Outliner),
             menu_bar_visible: self.menu_bar_visible,
             properties_visible: present_at_start.contains(&SolarxyTab::Properties),
             status_bar_visible: self.status_bar_visible,
@@ -463,6 +466,7 @@ impl EguiRenderer {
                 hdri_info: hdri_info.as_ref(),
                 validation_report,
                 properties_events,
+                outliner_events,
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
                 theme,
@@ -661,7 +665,7 @@ impl EguiRenderer {
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.status_bar_visible = menu_vis.status_bar_visible;
 
-        let menu_intents: [(SolarxyTab, bool, bool); 6] = [
+        let menu_intents: [(SolarxyTab, bool, bool); 7] = [
             (
                 SolarxyTab::Viewport,
                 menu_vis_before.viewport_visible,
@@ -671,6 +675,11 @@ impl EguiRenderer {
                 SolarxyTab::Sidebar,
                 menu_vis_before.sidebar_visible,
                 menu_vis.sidebar_visible,
+            ),
+            (
+                SolarxyTab::Outliner,
+                menu_vis_before.outliner_visible,
+                menu_vis.outliner_visible,
             ),
             (
                 SolarxyTab::Console,

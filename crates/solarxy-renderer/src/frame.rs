@@ -211,6 +211,9 @@ impl Renderer {
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -325,6 +328,9 @@ impl Renderer {
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
             for mesh in &scene.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
@@ -376,6 +382,9 @@ impl Renderer {
         pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -535,6 +544,9 @@ impl Renderer {
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -555,6 +567,9 @@ impl Renderer {
 
         let mut blend_list: Vec<(usize, f32)> = Vec::new();
         for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode != 2 {
                 continue;
@@ -595,6 +610,9 @@ impl Renderer {
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(edge) = &mesh.edge_data {
                 pass.set_bind_group(2, &edge.bind_group, &[]);
                 pass.draw(0..edge.num_edges * 6, 0..1);
@@ -691,6 +709,9 @@ impl Renderer {
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(cat_idx) = scene.validation_mesh_cat[i] {
                 pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -704,6 +725,9 @@ impl Renderer {
             .position(|c| *c == IssueCategory::DegenerateTriangles)
             .unwrap_or(4);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(ref degen_buf) = mesh.degen_index_buffer {
                 pass.set_bind_group(1, &self.validation_colors.bind_groups[degen_idx], &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -718,6 +742,9 @@ impl Renderer {
             .unwrap_or(5);
         let mut switched_to_edge = false;
         for (mi, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(Some((edge_buf, num))) =
                 scene.validation_edge_buffers.get(mi).map(|o| o.as_ref())
             {
@@ -762,6 +789,9 @@ impl Renderer {
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
@@ -821,6 +851,9 @@ impl Renderer {
                 pass.set_pipeline(&self.pipelines.uv.uv_map_texture);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
                 for mesh in &scene.model.meshes {
+                    if !mesh.visible {
+                        continue;
+                    }
                     let material = &scene.model.materials[mesh.material];
                     pass.set_bind_group(1, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -834,6 +867,9 @@ impl Renderer {
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(uv_edge) = &mesh.uv_edge_data
                 && let Some(edge) = &mesh.edge_data
             {

@@ -21,7 +21,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::ToastSeverity;
+use crate::gui::{OutlinerAction, ToastSeverity};
 use solarxy_renderer::ibl::IblState;
 use solarxy_core::preferences::{
     self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
@@ -520,21 +520,90 @@ impl State {
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
     pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
-        let Some(scene) = &self.scene else {
+        let aabb = self.scene.as_ref().and_then(|scene| {
+            scene.validation.issues.get(idx).and_then(|issue| {
+                resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
+            })
+        });
+        let Some(aabb) = aabb else {
             return;
         };
-        let Some(issue) = scene.validation.issues.get(idx) else {
-            return;
-        };
-        let Some(aabb) =
-            resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
-        else {
-            return;
-        };
-        let ap = self.view.active_pane;
-        self.view.pane_settings[ap].show_validation = true;
-        if let Some(cam) = &mut self.view.cameras[ap] {
-            cam.reset_to_bounds(&aabb);
+        self.view.pane_settings[self.view.active_pane].show_validation = true;
+        self.frame_active_pane(aabb);
+    }
+
+    /// Smoothly fly the active pane's camera to frame `bounds`.
+    fn frame_active_pane(&mut self, bounds: solarxy_core::AABB) {
+        if let Some(cam) = &mut self.view.cameras[self.view.active_pane] {
+            cam.reset_to_bounds(&bounds);
+        }
+    }
+
+    /// Apply an [`OutlinerAction`] (mesh / material visibility or camera
+    /// framing) raised by the Outliner panel.
+    pub(super) fn handle_outliner_action(&mut self, action: OutlinerAction) {
+        match action {
+            OutlinerAction::ToggleMesh(i) => {
+                if let Some(scene) = &mut self.scene
+                    && let Some(mesh) = scene.model.meshes.get_mut(i)
+                {
+                    mesh.visible = !mesh.visible;
+                }
+            }
+            OutlinerAction::HideMesh(i) => {
+                if let Some(scene) = &mut self.scene
+                    && let Some(mesh) = scene.model.meshes.get_mut(i)
+                {
+                    mesh.visible = false;
+                }
+            }
+            OutlinerAction::IsolateMesh(i) => {
+                if let Some(scene) = &mut self.scene {
+                    for (j, mesh) in scene.model.meshes.iter_mut().enumerate() {
+                        mesh.visible = j == i;
+                    }
+                }
+            }
+            OutlinerAction::ShowAll => {
+                if let Some(scene) = &mut self.scene {
+                    for mesh in &mut scene.model.meshes {
+                        mesh.visible = true;
+                    }
+                }
+            }
+            OutlinerAction::ToggleMaterial(mat) => {
+                if let Some(scene) = &mut self.scene {
+                    let all_visible = scene
+                        .model
+                        .meshes
+                        .iter()
+                        .filter(|m| m.material == mat)
+                        .all(|m| m.visible);
+                    for mesh in &mut scene.model.meshes {
+                        if mesh.material == mat {
+                            mesh.visible = !all_visible;
+                        }
+                    }
+                }
+            }
+            OutlinerAction::FrameMesh(i) => {
+                let aabb = self
+                    .scene
+                    .as_ref()
+                    .and_then(|s| s.model.mesh_bounds.get(i).copied());
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::FrameMaterial(mat) => {
+                let aabb = self
+                    .scene
+                    .as_ref()
+                    .and_then(|s| material_meshes_aabb(&s.model, mat));
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
         }
     }
 
@@ -849,18 +918,26 @@ fn resolve_issue_aabb(
         IssueScope::Edge { mesh_index, .. } => {
             gpu_mesh(*mesh_index).and_then(|g| model.mesh_bounds.get(g).copied())
         }
-        IssueScope::Material(mat) => {
-            let mut acc: Option<solarxy_core::AABB> = None;
-            for (i, mesh) in model.meshes.iter().enumerate() {
-                if mesh.material == *mat
-                    && let Some(b) = model.mesh_bounds.get(i).copied()
-                {
-                    acc = Some(acc.map_or(b, |a| union_aabb(a, b)));
-                }
-            }
-            acc.or(Some(model.bounds))
+        IssueScope::Material(mat) => material_meshes_aabb(model, *mat).or(Some(model.bounds)),
+    }
+}
+
+/// Union of the bounds of every mesh using `material`, or `None` when no
+/// mesh references it. Shared by validation fly-to and the Outliner's
+/// frame-material action.
+fn material_meshes_aabb(
+    model: &solarxy_renderer::model::Model,
+    material: usize,
+) -> Option<solarxy_core::AABB> {
+    let mut acc: Option<solarxy_core::AABB> = None;
+    for (i, mesh) in model.meshes.iter().enumerate() {
+        if mesh.material == material
+            && let Some(b) = model.mesh_bounds.get(i).copied()
+        {
+            acc = Some(acc.map_or(b, |a| union_aabb(a, b)));
         }
     }
+    acc
 }
 
 /// Smallest AABB enclosing both inputs.

@@ -359,6 +359,13 @@ fn draw_window_menu(ui: &mut egui::Ui, vis: &mut MenuBarVisibility, has_model: b
             ui.close();
         }
         if ui
+            .add(egui::Button::new("Outliner").selected(vis.outliner_visible))
+            .clicked()
+        {
+            vis.outliner_visible = !vis.outliner_visible;
+            ui.close();
+        }
+        if ui
             .add(egui::Button::new("Properties").selected(vis.properties_visible))
             .clicked()
         {

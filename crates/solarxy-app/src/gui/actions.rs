@@ -40,6 +40,7 @@ pub(crate) struct DividerInfo {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MenuBarVisibility {
     pub sidebar_visible: bool,
+    pub outliner_visible: bool,
     pub menu_bar_visible: bool,
     pub properties_visible: bool,
     pub status_bar_visible: bool,
