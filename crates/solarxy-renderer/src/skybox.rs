@@ -5,7 +5,10 @@
 //! the convolved cubemaps so `BackgroundMode::HdriSky` can render the HDRI
 //! as a visible backdrop. `frame.rs` runs the skybox pass; the rotation
 //! yaw rides in `CameraUniform::hdri_rotation`, shared with the IBL
-//! cubemap lookups in `shader.wgsl` so sky and lighting stay in sync.
+//! cubemap lookups in `shader.wgsl` so the sky and the image-based
+//! lighting share one orientation. The skybox is a backdrop, not a light:
+//! with `IblMode::Off` it still draws the HDRI while the scene falls back
+//! to the studio rig — deliberate, not a desync.
 
 use half::f16;
 

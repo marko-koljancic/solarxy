@@ -3,10 +3,11 @@
 //! (environment file + IBL mode + rotation), and **Validation** (the
 //! issue list, click-a-row to fly the active camera to the defect).
 //!
-//! Replaced `gui::stats` in RC2 — `ModelInfo` + `format_file_size` moved
-//! here unchanged. Read-only except the HDRI IBL-mode / rotation controls
-//! (which write through [`GuiSnapshot`]) and the out-events in
-//! [`PropertiesEvents`], drained by `state/render.rs` after the egui pass.
+//! Replaced `gui::stats` in RC2 — `ModelInfo` moved here unchanged; file
+//! sizes format via `solarxy_core::format_number`. Read-only except the
+//! HDRI IBL-mode / rotation controls (which write through [`GuiSnapshot`])
+//! and the out-events in [`PropertiesEvents`], drained by
+//! `state/render.rs` after the egui pass.
 
 use solarxy_core::format_number;
 use solarxy_core::preferences::IblMode;

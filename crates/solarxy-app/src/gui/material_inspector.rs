@@ -441,6 +441,23 @@ fn scalar_chip(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add_space(10.0);
 }
 
+/// Paint the slashed-box placeholder shown in a texture block when the
+/// slot is empty or its thumbnail could not be decoded.
+fn draw_thumbnail_placeholder(ui: &mut egui::Ui, size: egui::Vec2, theme: &Theme) {
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, theme.widget_bg);
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(1.0, theme.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_top()],
+        egui::Stroke::new(1.0, theme.border),
+    );
+}
+
 /// One texture role in the detail pane: a fixed-width block carrying a
 /// 128 px preview plus filename / dimensions / "Open externally" when
 /// the slot is filled, or a greyed placeholder when it is absent.
@@ -467,31 +484,29 @@ fn draw_texture_block(
                 ui.add(
                     egui::Label::new(egui::RichText::new(role.label()).small().weak()).truncate(),
                 );
-                let (rect, _) = ui.allocate_exact_size(preview, egui::Sense::hover());
-                ui.painter().rect_filled(rect, 0.0, theme.widget_bg);
-                ui.painter().rect_stroke(
-                    rect,
-                    0.0,
-                    egui::Stroke::new(1.0, theme.border),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().line_segment(
-                    [rect.left_bottom(), rect.right_top()],
-                    egui::Stroke::new(1.0, theme.border),
-                );
+                draw_thumbnail_placeholder(ui, preview, theme);
                 ui.label(egui::RichText::new("not present").small().weak().italics());
                 return;
             };
 
             ui.add(egui::Label::new(egui::RichText::new(role.label()).small().strong()).truncate());
-            let handle = get_or_decode_thumbnail(
+            if let Some(handle) = get_or_decode_thumbnail(
                 ui.ctx(),
                 &mut state.thumbnail_cache,
                 material_idx,
                 role,
                 tex,
-            );
-            ui.add(egui::Image::new(&handle).fit_to_exact_size(preview));
+            ) {
+                ui.add(egui::Image::new(&handle).fit_to_exact_size(preview));
+            } else {
+                draw_thumbnail_placeholder(ui, preview, theme);
+                ui.label(
+                    egui::RichText::new("decode failed")
+                        .small()
+                        .weak()
+                        .italics(),
+                );
+            }
 
             let tooltip = tex.source_path.as_ref().map_or_else(
                 || "Embedded texture (no source file)".to_string(),
@@ -542,12 +557,12 @@ fn get_or_decode_thumbnail(
     material_idx: usize,
     role: TextureRole,
     tex: &TextureThumbnail,
-) -> egui::TextureHandle {
+) -> Option<egui::TextureHandle> {
     let key = (material_idx, role);
     if let Some(handle) = cache.get(&key) {
-        return handle.clone();
+        return Some(handle.clone());
     }
-    let downscaled = downscale_to_thumbnail(&tex.image);
+    let downscaled = downscale_to_thumbnail(&tex.image)?;
     let color_image = egui::ColorImage::from_rgba_unmultiplied(
         [downscaled.width() as usize, downscaled.height() as usize],
         downscaled.as_raw(),
@@ -555,17 +570,22 @@ fn get_or_decode_thumbnail(
     let name = format!("material_inspector_{material_idx}_{role:?}");
     let handle = ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR);
     cache.insert(key, handle.clone());
-    handle
+    Some(handle)
 }
 
-fn downscale_to_thumbnail(raw: &solarxy_core::RawImageData) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+/// Decode + downscale a raw RGBA8 texture into a thumbnail. Returns
+/// `None` when the buffer length does not match `width × height × 4` (a
+/// corrupt or malformed source texture) so the caller can draw a
+/// placeholder instead of the panel panicking inside the egui frame.
+fn downscale_to_thumbnail(
+    raw: &solarxy_core::RawImageData,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let buffer: ImageBuffer<Rgba<u8>, _> =
-        ImageBuffer::from_raw(raw.width, raw.height, raw.pixels.clone())
-            .expect("RawImageData length must match width × height × 4");
+        ImageBuffer::from_raw(raw.width, raw.height, raw.pixels.clone())?;
     if raw.width <= THUMBNAIL_SIZE && raw.height <= THUMBNAIL_SIZE {
-        return buffer;
+        return Some(buffer);
     }
-    imageops::thumbnail(&buffer, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+    Some(imageops::thumbnail(&buffer, THUMBNAIL_SIZE, THUMBNAIL_SIZE))
 }
 
 fn base_color_to_color32(c: [f32; 3]) -> egui::Color32 {

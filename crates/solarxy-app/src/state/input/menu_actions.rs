@@ -73,8 +73,14 @@ impl State {
             if let Some(json) = self.gui.serialize_layout() {
                 self.preferences.dock.saved_layout_json = Some(json);
                 self.gui.set_has_saved_layout(true);
-                self.save_preferences();
-                self.gui.set_toast("Layout saved.", ToastSeverity::Success);
+                // Persist silently so the click yields one layout-specific
+                // toast, not a generic "Preferences saved" stacked on top.
+                match self.persist_preferences() {
+                    Ok(()) => self.gui.set_toast("Layout saved.", ToastSeverity::Success),
+                    Err(e) => self
+                        .gui
+                        .set_toast(&format!("Save failed: {}", e), ToastSeverity::Error),
+                }
             } else {
                 self.gui
                     .set_toast("Failed to save layout.", ToastSeverity::Warning);

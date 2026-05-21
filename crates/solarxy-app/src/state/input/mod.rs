@@ -772,7 +772,11 @@ impl State {
         self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
-    fn save_preferences(&mut self) {
+    /// Snapshot the live view / render / lighting state into
+    /// `self.preferences` and write the config file. Returns the I/O
+    /// result so callers can toast a context-appropriate message —
+    /// [`Self::save_preferences`] is the standard toasting wrapper.
+    fn persist_preferences(&mut self) -> Result<(), String> {
         let pds = &self.view.pane_settings[0];
         self.preferences.display.background = pds.background_mode;
         self.preferences.display.view_mode = pds.view_mode;
@@ -795,8 +799,11 @@ impl State {
         self.preferences.display.exposure = self.renderer.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
         self.preferences.display.texel_density_target = pds.texel_density_target;
+        preferences::save(&self.preferences)
+    }
 
-        match preferences::save(&self.preferences) {
+    fn save_preferences(&mut self) {
+        match self.persist_preferences() {
             Ok(()) => {
                 self.gui
                     .set_toast("Preferences saved", ToastSeverity::Success);

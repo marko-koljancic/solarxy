@@ -418,12 +418,15 @@ impl Pipelines {
             label: Some("Skybox Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
         });
-        let skybox =
-            PipelineBuilder::new(device, "Skybox Pipeline", &skybox_layout, &skybox_shader)
+        let skybox = PipelineBuilder::new(device, "Skybox Pipeline", &skybox_layout, &skybox_shader)
                 .vertex_entry("vs_skybox")
                 .fragment_entry("fs_skybox")
                 .color_format(hdr_format)
                 .depth_compare(wgpu::CompareFunction::Always)
+                // Vertex z is the far plane; the depth buffer is already
+                // cleared to 1.0 and the skybox draws first, so writing
+                // depth is a redundant no-op — disable it explicitly.
+                .depth_write(false)
                 .sample_count(sample_count)
                 .build();
 

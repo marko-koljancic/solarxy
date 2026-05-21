@@ -1,7 +1,9 @@
 // HDRI skybox: a fullscreen triangle that reconstructs the world-space
 // view ray per pixel and samples the equirectangular HDRI. The yaw in
 // `camera.hdri_rotation` is shared with the IBL cubemap lookups in
-// shader.wgsl so the visible sky and the lighting it derives stay in sync.
+// shader.wgsl so the sky and the image-based lighting share one
+// orientation. The skybox is only a backdrop: with IBL off it still
+// draws while the scene uses the studio rig.
 
 struct Camera {
     view_pos: vec4<f32>,

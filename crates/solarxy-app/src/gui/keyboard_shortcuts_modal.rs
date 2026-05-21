@@ -53,6 +53,14 @@ const SECTIONS: &[Section] = &[
                 action: "Split horizontal",
             },
             Entry {
+                keys: "F4",
+                action: "Quad viewport",
+            },
+            Entry {
+                keys: "F5",
+                action: "Three-left-big viewport",
+            },
+            Entry {
                 keys: "F10",
                 action: "Toggle menu bar",
             },
@@ -69,10 +77,7 @@ const SECTIONS: &[Section] = &[
                 action: "Toggle console",
             },
             Entry {
-                #[cfg(target_os = "macos")]
-                keys: "⌘+1",
-                #[cfg(not(target_os = "macos"))]
-                keys: "Ctrl+1",
+                keys: "__MOD__+1",
                 action: "Toggle viewport",
             },
             Entry {
