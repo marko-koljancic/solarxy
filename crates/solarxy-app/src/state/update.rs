@@ -68,7 +68,7 @@ impl State {
     }
 
     pub(super) fn write_gradient_colors_for(&self, pds: &PaneDisplaySettings) {
-        let (top, bottom) = pds.background_mode.sky_colors();
+        let (top, bottom) = self.resolve_background(pds).sky_colors();
         let data = GradientUniform {
             top_color: [top[0], top[1], top[2], 1.0],
             bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
@@ -85,7 +85,7 @@ impl State {
 
     pub(super) fn write_wireframe_params_for(&self, pds: &PaneDisplaySettings) {
         let params = WireframeParams {
-            color: pds.background_mode.wireframe_color(),
+            color: self.resolve_background(pds).wireframe_color(),
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
@@ -112,7 +112,9 @@ impl State {
         let queue = self.queue.clone();
         let layouts = Arc::clone(&self.renderer.layouts);
         let config = self.config.clone();
-        let initial_grid_color = self.view.pane_settings[0].background_mode.grid_color();
+        let initial_grid_color = self
+            .resolve_background(&self.view.pane_settings[0])
+            .grid_color();
         let shadow_map_size = self.preferences.rendering.shadow_map_size;
         let path = model_path.clone();
 

@@ -9,13 +9,23 @@
 
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::visualization::GridUniform;
-use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, UvMapBackground};
+use solarxy_core::preferences::{
+    InspectionMode, MaterialOverride, PaneMode, ResolvedBackground, UvMapBackground,
+};
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
 use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
+    /// Resolve a pane's background choice against the user
+    /// custom-background registry into concrete colours for the renderer
+    /// and IBL. A dangling `Custom` id falls back to the builtin Gradient.
+    pub(super) fn resolve_background(&self, pds: &PaneDisplaySettings) -> ResolvedBackground {
+        pds.background_mode
+            .resolve(&self.preferences.view.custom_backgrounds)
+    }
+
     /// Per-frame render entry point. Computes pane rectangles, dispatches
     /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
     /// HUD, console, modals, toasts), and presents the swapchain frame.
@@ -119,7 +129,8 @@ impl State {
         let pds = self.view.pane_settings[i];
 
         let Some(cam_data) = cam_data else {
-            self.renderer.render_empty_pass(&mut encoder, &pds);
+            self.renderer
+                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
             self.composite_and_submit(encoder, surface_view, i, &content, is_split, false, false);
             return;
         };
@@ -293,10 +304,12 @@ impl State {
                     pds,
                 );
             } else {
-                self.renderer.render_empty_pass(encoder, pds);
+                self.renderer
+                    .render_empty_pass(encoder, self.resolve_background(pds));
             }
         } else {
-            self.renderer.render_empty_pass(encoder, pds);
+            self.renderer
+                .render_empty_pass(encoder, self.resolve_background(pds));
         }
     }
 
@@ -304,7 +317,7 @@ impl State {
         self.write_wireframe_params_for(pds);
         self.write_gradient_colors_for(pds);
         if let Some(scene) = &self.scene {
-            let color = pds.background_mode.grid_color();
+            let color = self.resolve_background(pds).grid_color();
             self.queue.write_buffer(
                 &scene.vis.grid_uniform_buf,
                 GridUniform::COLOR_OFFSET,
@@ -375,10 +388,17 @@ impl State {
             if self.renderer.post.ssao_enabled {
                 self.renderer.render_gbuffer_pass(encoder, scene, cam_bg);
             }
-            self.renderer
-                .render_main_pass(encoder, scene, cam_bg, cam_data, pds);
+            self.renderer.render_main_pass(
+                encoder,
+                scene,
+                cam_bg,
+                cam_data,
+                pds,
+                self.resolve_background(pds),
+            );
         } else {
-            self.renderer.render_empty_pass(encoder, pds);
+            self.renderer
+                .render_empty_pass(encoder, self.resolve_background(pds));
         }
 
         if self.renderer.post.ssao_enabled
@@ -552,6 +572,7 @@ impl State {
             projections: pane_projections,
             projection_change: &mut projection_change,
             hdri_available,
+            customs: &self.preferences.view.custom_backgrounds,
             uv_overlap_pct,
         };
         let (snap_after, actions) = self.gui.render_ui(

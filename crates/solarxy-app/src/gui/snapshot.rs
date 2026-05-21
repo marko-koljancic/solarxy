@@ -194,7 +194,7 @@ mod tests {
         GuiSnapshot {
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
-            background_mode: BackgroundMode::Gradient,
+            background_mode: BackgroundMode::GRADIENT,
             uv_mode: UvMode::Off,
             bounds_mode: BoundsMode::Off,
             line_weight: LineWeight::Medium,
@@ -260,7 +260,7 @@ mod tests {
     fn diff_background_change_suppresses_wireframe_signal() {
         let prev = baseline();
         let mut next = prev;
-        next.background_mode = BackgroundMode::White;
+        next.background_mode = BackgroundMode::WHITE;
         next.line_weight = LineWeight::Bold;
         let c = next.diff(&prev);
         assert!(c.background_changed);

@@ -8,14 +8,13 @@
 //! write the same snapshot's global fields.
 
 use solarxy_core::preferences::{
-    IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode, ProjectionMode,
-    ToneMode, UvMode, ViewMode,
+    BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, LineWeight,
+    MaterialOverride, NormalsMode, PaneMode, ProjectionMode, ToneMode, UvMode, ViewMode,
 };
 use crate::state::view_state::{BoundsMode, ViewLayout};
 
 use super::MOD;
 use super::actions::{MenuActions, MenuBarVisibility};
-use super::pane_toolbar::background_modes;
 use super::snapshot::GuiSnapshot;
 
 pub(super) fn draw_menu_bar(
@@ -26,12 +25,13 @@ pub(super) fn draw_menu_bar(
     has_model: bool,
     recent_files: &[String],
     hdri_available: bool,
+    customs: &[CustomBackground],
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             draw_file_menu(ui, actions, has_model, recent_files);
             draw_edit_menu(ui, actions);
-            draw_render_menu(ui, snap, actions, hdri_available);
+            draw_render_menu(ui, snap, actions, hdri_available, customs);
             draw_view_menu(ui, snap, actions);
             draw_layout_menu(ui, actions, vis);
             draw_window_menu(ui, vis, has_model);
@@ -63,6 +63,46 @@ fn variant_submenu<T: PartialEq + Copy + std::fmt::Display>(
     })
     .response
     .on_hover_text(hover);
+}
+
+/// Background submenu — builtins (`HDRI Sky` gated on an HDRI being
+/// loaded) then, under a separator, every user custom background.
+fn background_submenu(
+    ui: &mut egui::Ui,
+    current: &mut BackgroundMode,
+    customs: &[CustomBackground],
+    hdri_available: bool,
+) {
+    ui.menu_button("Background", |ui| {
+        for &builtin in BuiltinBg::ALL {
+            if builtin == BuiltinBg::HdriSky && !hdri_available {
+                continue;
+            }
+            let mode = BackgroundMode::Builtin(builtin);
+            if ui
+                .selectable_label(*current == mode, builtin.to_string())
+                .clicked()
+            {
+                *current = mode;
+                ui.close();
+            }
+        }
+        if !customs.is_empty() {
+            ui.separator();
+            for custom in customs {
+                let mode = BackgroundMode::Custom(custom.id);
+                if ui
+                    .selectable_label(*current == mode, &custom.name)
+                    .clicked()
+                {
+                    *current = mode;
+                    ui.close();
+                }
+            }
+        }
+    })
+    .response
+    .on_hover_text("B");
 }
 
 fn draw_file_menu(
@@ -149,6 +189,7 @@ fn draw_render_menu(
     snap: &mut GuiSnapshot,
     actions: &mut MenuActions,
     hdri_available: bool,
+    customs: &[CustomBackground],
 ) {
     ui.menu_button("Render", |ui| {
         variant_submenu(ui, "Shading", "W", &mut snap.view_mode, ViewMode::ALL);
@@ -220,13 +261,7 @@ fn draw_render_menu(
             ui.checkbox(&mut snap.lights_locked, "Lock Lights")
                 .on_hover_text("Shift+L");
         });
-        variant_submenu(
-            ui,
-            "Background",
-            "B",
-            &mut snap.background_mode,
-            background_modes(hdri_available),
-        );
+        background_submenu(ui, &mut snap.background_mode, customs, hdri_available);
 
         ui.separator();
 

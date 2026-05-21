@@ -16,7 +16,9 @@ use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
 use crate::uv_camera::UvCameraState;
-use solarxy_core::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
+use solarxy_core::preferences::{
+    BgKind, NormalsMode, ResolvedBackground, UvMapBackground, UvMode, ViewMode,
+};
 
 use crate::bloom::BloomState;
 use crate::composite::CompositeState;
@@ -148,14 +150,14 @@ impl Renderer {
         pass.draw(0..3, 0..1);
     }
 
-    pub fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, pds: &PaneDisplaySettings) {
+    pub fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, bg: ResolvedBackground) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(bg.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -403,6 +405,7 @@ impl Renderer {
         cam_bg: &wgpu::BindGroup,
         cam: &Camera,
         pds: &PaneDisplaySettings,
+        bg: ResolvedBackground,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -410,7 +413,7 @@ impl Renderer {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(bg.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -427,10 +430,10 @@ impl Renderer {
             timestamp_writes: None,
         });
 
-        if pds.background_mode == BackgroundMode::Gradient {
-            self.draw_background_gradient(&mut pass);
-        } else if pds.background_mode == BackgroundMode::HdriSky {
-            self.draw_skybox(&mut pass, cam_bg);
+        match bg.kind {
+            BgKind::Gradient => self.draw_background_gradient(&mut pass),
+            BgKind::Hdri => self.draw_skybox(&mut pass, cam_bg),
+            BgKind::Solid => {}
         }
 
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));

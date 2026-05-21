@@ -9,8 +9,8 @@
 //! layer applies after the egui pass.
 
 use solarxy_core::preferences::{
-    BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, UvMapBackground, UvMode, ViewMode,
+    BackgroundMode, BuiltinBg, CustomBackground, InspectionMode, LineWeight, MaterialOverride,
+    NormalsMode, PaneMode, ProjectionMode, UvMapBackground, UvMode, ViewMode,
 };
 use solarxy_core::view_config::PANE_TOOLBAR_HEIGHT;
 
@@ -26,21 +26,38 @@ const PANE_MODES: [PaneMode; 2] = [PaneMode::Scene3D, PaneMode::UvMap];
 const PROJECTIONS: [ProjectionMode; 2] =
     [ProjectionMode::Perspective, ProjectionMode::Orthographic];
 
-/// The background modes a Background dropdown should offer. `HDRI Sky`
-/// only appears once an HDRI has been loaded.
-pub(super) fn background_modes(hdri_available: bool) -> &'static [BackgroundMode] {
-    const NO_HDRI: [BackgroundMode; 5] = [
-        BackgroundMode::White,
-        BackgroundMode::Gradient,
-        BackgroundMode::DarkGray,
-        BackgroundMode::AyuMirage,
-        BackgroundMode::Black,
-    ];
-    if hdri_available {
-        BackgroundMode::ALL
-    } else {
-        &NO_HDRI
-    }
+/// A `ComboBox` listing the builtin backgrounds (`HDRI Sky` gated on an
+/// HDRI being loaded) then, under a separator, every user custom
+/// background. Shared by the per-pane toolbar and the menu bar.
+pub(super) fn background_combo(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    current: &mut BackgroundMode,
+    customs: &[CustomBackground],
+    hdri_available: bool,
+) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(current.label(customs))
+        .show_ui(ui, |ui| {
+            for &builtin in BuiltinBg::ALL {
+                if builtin == BuiltinBg::HdriSky && !hdri_available {
+                    continue;
+                }
+                ui.selectable_value(
+                    current,
+                    BackgroundMode::Builtin(builtin),
+                    builtin.to_string(),
+                );
+            }
+            if !customs.is_empty() {
+                ui.separator();
+                for custom in customs {
+                    ui.selectable_value(current, BackgroundMode::Custom(custom.id), &custom.name);
+                }
+            }
+        })
+        .response
+        .on_hover_text("Background");
 }
 
 /// Per-frame data the per-pane toolbars need. `rects` are the full pane
@@ -55,6 +72,8 @@ pub(crate) struct PaneToolbarData<'a> {
     pub projection_change: &'a mut Option<(usize, ProjectionMode)>,
     /// `true` once an HDRI is loaded — gates the `HDRI Sky` background.
     pub hdri_available: bool,
+    /// User custom backgrounds, listed in every Background dropdown.
+    pub customs: &'a [CustomBackground],
     /// Latest UV-shell overlap percentage, shown beside the UV-map
     /// `Overlap` toggle. `None` until a readback completes.
     pub uv_overlap_pct: Option<f32>,
@@ -131,6 +150,7 @@ pub(super) fn draw_pane_toolbars(
 ) {
     let hdri_available = data.hdri_available;
     let uv_overlap_pct = data.uv_overlap_pct;
+    let customs = data.customs;
     for i in 0..data.rects.len() {
         let rect = data.rects[i];
         let strip =
@@ -160,6 +180,7 @@ pub(super) fn draw_pane_toolbars(
                             &mut new_projection,
                             compact,
                             hdri_available,
+                            customs,
                             uv_overlap_pct,
                         );
                     });
@@ -181,6 +202,7 @@ pub(super) fn draw_pane_toolbars(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_controls(
     ui: &mut egui::Ui,
     idx: usize,
@@ -189,6 +211,7 @@ fn draw_controls(
     new_projection: &mut Option<ProjectionMode>,
     compact: bool,
     hdri_available: bool,
+    customs: &[CustomBackground],
     uv_overlap_pct: Option<f32>,
 ) {
     combo(ui, (idx, "pm"), "Pane mode", f.pane_mode, &PANE_MODES);
@@ -205,12 +228,28 @@ fn draw_controls(
 
         if compact {
             ui.menu_button("\u{22ef}", |ui| {
-                draw_overflow_controls(ui, idx, f, projection, new_projection, hdri_available);
+                draw_overflow_controls(
+                    ui,
+                    idx,
+                    f,
+                    projection,
+                    new_projection,
+                    hdri_available,
+                    customs,
+                );
             })
             .response
             .on_hover_text("More controls");
         } else {
-            draw_overflow_controls(ui, idx, f, projection, new_projection, hdri_available);
+            draw_overflow_controls(
+                ui,
+                idx,
+                f,
+                projection,
+                new_projection,
+                hdri_available,
+                customs,
+            );
         }
     } else {
         draw_uv_controls(ui, idx, f, uv_overlap_pct);
@@ -249,6 +288,7 @@ fn draw_uv_controls(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_overflow_controls(
     ui: &mut egui::Ui,
     idx: usize,
@@ -256,6 +296,7 @@ fn draw_overflow_controls(
     projection: ProjectionMode,
     new_projection: &mut Option<ProjectionMode>,
     hdri_available: bool,
+    customs: &[CustomBackground],
 ) {
     combo(
         ui,
@@ -291,13 +332,7 @@ fn draw_overflow_controls(
     .response
     .on_hover_text("Overlays");
 
-    combo(
-        ui,
-        (idx, "bg"),
-        "Background",
-        f.background_mode,
-        background_modes(hdri_available),
-    );
+    background_combo(ui, (idx, "bg"), f.background_mode, customs, hdri_available);
 }
 
 /// A compact `ComboBox` that picks one of `all` into `current`.

@@ -416,6 +416,7 @@ impl EguiRenderer {
             projections: pt_projections,
             projection_change: pt_projection_change,
             hdri_available: pt_hdri_available,
+            customs: pt_customs,
             uv_overlap_pct: pt_uv_overlap_pct,
         } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
@@ -433,6 +434,7 @@ impl EguiRenderer {
                     has_model,
                     recent_files,
                     pt_hdri_available,
+                    pt_customs,
                 );
             }
 
@@ -479,6 +481,7 @@ impl EguiRenderer {
                     projections: pt_projections,
                     projection_change: pt_projection_change,
                     hdri_available: pt_hdri_available,
+                    customs: pt_customs,
                     uv_overlap_pct: pt_uv_overlap_pct,
                 },
             };

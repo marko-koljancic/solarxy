@@ -129,13 +129,14 @@ impl State {
         });
 
         let background_mode = preferences.display.background;
+        let background = background_mode.resolve(&preferences.view.custom_backgrounds);
 
         let brdf_lut = BrdfLut::generate(&device, &queue);
-        let (ibl_top, ibl_bottom) = background_mode.sky_colors();
+        let (ibl_top, ibl_bottom) = background.sky_colors();
         let ibl = IblState::from_sky_colors(&device, &queue, ibl_top, ibl_bottom);
         let ibl_fallback = IblState::fallback(&device, &queue);
 
-        let wire_color = background_mode.wireframe_color();
+        let wire_color = background.wireframe_color();
 
         let line_weight = preferences.rendering.wireframe_line_weight;
         let wireframe_params_data = WireframeParams {

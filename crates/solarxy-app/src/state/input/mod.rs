@@ -24,12 +24,25 @@ use solarxy_renderer::camera_state::CameraState;
 use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
 use solarxy_core::preferences::{
-    self, BackgroundMode, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode,
-    ProjectionMode, UvMode, ViewMode,
+    self, BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
+    NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
 use solarxy_core::validation::IssueScope;
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
+
+/// The ordered background list the `B` key cycles through: every builtin
+/// (skipping `HDRI Sky` until an HDRI is loaded) followed by every user
+/// custom background.
+fn background_cycle_options(customs: &[CustomBackground], has_hdri: bool) -> Vec<BackgroundMode> {
+    let mut options: Vec<BackgroundMode> = BuiltinBg::ALL
+        .iter()
+        .filter(|b| has_hdri || **b != BuiltinBg::HdriSky)
+        .map(|b| BackgroundMode::Builtin(*b))
+        .collect();
+    options.extend(customs.iter().map(|c| BackgroundMode::Custom(c.id)));
+    options
+}
 
 impl State {
     /// Apply `f` to each pane camera the current gesture targets: the
@@ -489,10 +502,12 @@ impl State {
         // background change never regenerates IBL from sky colours while
         // an HDRI is active (that would discard the equirect the skybox
         // pass needs). The background mode then only drives the backdrop.
-        if bg == BackgroundMode::HdriSky || self.renderer.ibl_res.ibl.equirect.is_some() {
+        if bg.is_hdri_sky() || self.renderer.ibl_res.ibl.equirect.is_some() {
             return;
         }
-        let (top, bottom) = bg.sky_colors();
+        let (top, bottom) = bg
+            .resolve(&self.preferences.view.custom_backgrounds)
+            .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
         self.rebuild_light_bind_group();
@@ -513,11 +528,13 @@ impl State {
     /// as `None`).
     pub(super) fn clear_hdri(&mut self) {
         for pds in &mut self.view.pane_settings {
-            if pds.background_mode == BackgroundMode::HdriSky {
-                pds.background_mode = BackgroundMode::Gradient;
+            if pds.background_mode.is_hdri_sky() {
+                pds.background_mode = BackgroundMode::GRADIENT;
             }
         }
-        let (top, bottom) = self.view.pane_settings[0].background_mode.sky_colors();
+        let (top, bottom) = self
+            .resolve_background(&self.view.pane_settings[0])
+            .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
         self.rebuild_light_bind_group();
@@ -712,14 +729,16 @@ impl State {
     }
 
     fn cycle_background(&mut self) {
+        // `B` walks every builtin (skipping `HDRI Sky` until an HDRI is
+        // loaded) then every user custom background.
         let has_hdri = self.renderer.ibl_res.ibl.equirect.is_some();
+        let options = background_cycle_options(&self.preferences.view.custom_backgrounds, has_hdri);
         let pds = &mut self.view.pane_settings[self.view.active_pane];
-        pds.background_mode = pds.background_mode.next();
-        // `HdriSky` is only reachable via the B-key cycle once an HDRI is
-        // loaded — skip it otherwise.
-        if pds.background_mode == BackgroundMode::HdriSky && !has_hdri {
-            pds.background_mode = pds.background_mode.next();
-        }
+        let i = options
+            .iter()
+            .position(|m| *m == pds.background_mode)
+            .unwrap_or(0);
+        pds.background_mode = options[(i + 1) % options.len()];
         self.apply_background_change();
     }
 
