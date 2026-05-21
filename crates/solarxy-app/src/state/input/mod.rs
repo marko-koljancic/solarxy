@@ -484,11 +484,16 @@ impl State {
         self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
+    /// Regenerate the scene-global gradient IBL from the **active pane's**
+    /// background. The viewer keeps one IBL but a background per pane, so
+    /// the active pane — the one being worked in — drives the lighting.
+    /// Switching the active pane does *not* relight (regenerating the IBL
+    /// as the cursor crossed panes would flicker); only changing the
+    /// active pane's background does. Changing a non-active pane's
+    /// background via its toolbar updates that pane's backdrop but leaves
+    /// the IBL until that pane is made active and edited.
     pub(super) fn apply_background_change(&mut self) {
-        if self.view.active_pane != 0 {
-            return;
-        }
-        let bg = self.view.pane_settings[0].background_mode;
+        let bg = self.view.pane_settings[self.view.active_pane].background_mode;
         // Once an HDRI is loaded it is the scene's light source — a
         // background change never regenerates IBL from sky colours while
         // an HDRI is active (that would discard the equirect the skybox
