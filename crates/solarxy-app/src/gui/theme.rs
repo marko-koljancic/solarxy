@@ -1,74 +1,178 @@
-//! Ayu Mirage-inspired flat dark theme + matching `egui_dock` style.
+//! Ayu Mirage theme system — Dark + Light presets + matching `egui_dock`
+//! style.
 //!
-//! Palette (warm dark blue-grey with an amber accent — designed to feel
-//! at home alongside a 3D viewport without competing with the rendered
-//! content):
+//! [`Theme`] is a flat bundle of `Color32` tokens. Because every field is
+//! `Copy`, `Theme` itself is `Copy` and threads through draw code without
+//! lifetime noise. `EguiRenderer` owns the active `Theme`; [`apply_theme`]
+//! pushes it into the egui `Context` and is re-run on a live theme swap.
 //!
-//! - `BG` `#1F2430` — panel + window background
-//! - `FG` `#CCCAC2` — primary text
-//! - `MUTED` `#5C6773` — secondary text, inactive tabs
-//! - `ACCENT` `#FFC44C` — amber highlight (hyperlink, active hover,
-//!   review-mode banner + edge stripe)
-//! - `SELECTION` `#33415E` — selection fill + active tab body
-//! - `WIDGET_BG` `#3D424D` — inactive widget fill (button, combo)
-//! - `WIDGET_HOVER` `#2D323D` — widget hover fill
+//! Two presets ship: [`Theme::ayu_mirage_dark`] (the original warm
+//! dark-blue-grey palette) and [`Theme::ayu_mirage_light`] (Ayu Light's
+//! near-white surface with the orange accent). Both are selected via
+//! [`solarxy_core::preferences::ThemeChoice`].
 //!
 //! All corner radii are zero — flat, professional, 3D-DCC-app feel.
 
-pub(super) const BG: egui::Color32 = egui::Color32::from_rgb(0x1F, 0x24, 0x30);
-pub(super) const FG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCA, 0xC2);
-pub(super) const MUTED: egui::Color32 = egui::Color32::from_rgb(0x5C, 0x67, 0x73);
-pub(super) const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xC4, 0x4C);
-pub(super) const SELECTION: egui::Color32 = egui::Color32::from_rgb(0x33, 0x41, 0x5E);
-pub(super) const WIDGET_BG: egui::Color32 = egui::Color32::from_rgb(0x3D, 0x42, 0x4D);
-pub(super) const WIDGET_HOVER: egui::Color32 = egui::Color32::from_rgb(0x2D, 0x32, 0x3D);
+use solarxy_core::preferences::ThemeChoice;
 
-pub(super) fn apply_theme(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
+const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
+    egui::Color32::from_rgb(r, g, b)
+}
 
-    visuals.panel_fill = BG;
-    visuals.window_fill = BG;
-    visuals.extreme_bg_color = BG;
-    visuals.faint_bg_color = WIDGET_HOVER;
-    visuals.code_bg_color = WIDGET_HOVER;
-    visuals.override_text_color = Some(FG);
-    visuals.hyperlink_color = ACCENT;
-    visuals.selection.bg_fill = SELECTION;
-    visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+/// The four Review-System category colors plus the shared selection
+/// accent. Kept theme-scoped so the light preset can re-contrast the
+/// category hues against a near-white background.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ReviewColors {
+    pub info: egui::Color32,
+    pub warning: egui::Color32,
+    pub question: egui::Color32,
+    pub change: egui::Color32,
+    pub selection_accent: egui::Color32,
+}
+
+/// A complete interface palette. `Copy` — pass it by value freely.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Theme {
+    pub dark: bool,
+    pub bg: egui::Color32,
+    pub bg_elevated: egui::Color32,
+    pub fg: egui::Color32,
+    pub muted: egui::Color32,
+    pub accent: egui::Color32,
+    pub selection: egui::Color32,
+    pub widget_bg: egui::Color32,
+    pub widget_hover: egui::Color32,
+    pub border: egui::Color32,
+    #[allow(dead_code)]
+    pub severity_error: egui::Color32,
+    pub severity_warn: egui::Color32,
+    #[allow(dead_code)]
+    pub severity_info: egui::Color32,
+    #[allow(dead_code)]
+    pub severity_success: egui::Color32,
+    pub review: ReviewColors,
+}
+
+impl Theme {
+    /// Resolve a persisted [`ThemeChoice`] into a concrete palette.
+    pub(super) fn from_choice(choice: ThemeChoice) -> Self {
+        match choice {
+            ThemeChoice::AyuMirageDark => Self::ayu_mirage_dark(),
+            ThemeChoice::AyuMirageLight => Self::ayu_mirage_light(),
+        }
+    }
+
+    /// Warm dark blue-grey with an amber accent — the original palette.
+    pub(super) fn ayu_mirage_dark() -> Self {
+        Self {
+            dark: true,
+            bg: rgb(0x1F, 0x24, 0x30),
+            bg_elevated: rgb(0x23, 0x28, 0x34),
+            fg: rgb(0xCC, 0xCA, 0xC2),
+            muted: rgb(0x5C, 0x67, 0x73),
+            accent: rgb(0xFF, 0xC4, 0x4C),
+            selection: rgb(0x33, 0x41, 0x5E),
+            widget_bg: rgb(0x3D, 0x42, 0x4D),
+            widget_hover: rgb(0x2D, 0x32, 0x3D),
+            border: rgb(0x3D, 0x42, 0x4D),
+            severity_error: rgb(0xFF, 0x33, 0x33),
+            severity_warn: rgb(0xFF, 0xC4, 0x4C),
+            severity_info: rgb(0x78, 0xA0, 0xEE),
+            severity_success: rgb(0x7F, 0xD9, 0x62),
+            review: ReviewColors {
+                info: rgb(0x5C, 0x9E, 0xFF),
+                warning: rgb(0xFF, 0xB2, 0x3D),
+                question: rgb(0xA0, 0x6D, 0xFF),
+                change: rgb(0x3D, 0xC9, 0x7A),
+                selection_accent: rgb(0xFF, 0xC4, 0x4C),
+            },
+        }
+    }
+
+    /// Ayu Light's near-white surface with the orange accent. Review
+    /// category hues are darkened for AA contrast on the light ground.
+    pub(super) fn ayu_mirage_light() -> Self {
+        Self {
+            dark: false,
+            bg: rgb(0xFA, 0xFA, 0xFA),
+            bg_elevated: rgb(0xF0, 0xF0, 0xF0),
+            fg: rgb(0x5C, 0x67, 0x73),
+            muted: rgb(0x82, 0x8C, 0x99),
+            accent: rgb(0xFF, 0x6A, 0x00),
+            selection: rgb(0xF0, 0xEE, 0xE4),
+            widget_bg: rgb(0xE5, 0xE5, 0xE6),
+            widget_hover: rgb(0xE8, 0xE8, 0xE8),
+            border: rgb(0xD0, 0xD0, 0xD0),
+            severity_error: rgb(0xC7, 0x37, 0x3B),
+            severity_warn: rgb(0xF2, 0xAE, 0x49),
+            severity_info: rgb(0x31, 0x99, 0xE1),
+            severity_success: rgb(0x86, 0xB3, 0x00),
+            review: ReviewColors {
+                info: rgb(0x25, 0x63, 0xC9),
+                warning: rgb(0xB7, 0x79, 0x1F),
+                question: rgb(0x7C, 0x3A, 0xED),
+                change: rgb(0x2F, 0x85, 0x5A),
+                selection_accent: rgb(0xFF, 0x6A, 0x00),
+            },
+        }
+    }
+}
+
+/// Push `theme` into the egui `Context`. Idempotent — safe to re-run on a
+/// live theme swap. The egui `Visuals` base is picked from `theme.dark`
+/// so the handful of fields this function does not override still land
+/// on theme-appropriate values.
+pub(super) fn apply_theme(ctx: &egui::Context, theme: &Theme) {
+    let mut visuals = if theme.dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    visuals.dark_mode = theme.dark;
+
+    visuals.panel_fill = theme.bg;
+    visuals.window_fill = theme.bg;
+    visuals.extreme_bg_color = theme.bg;
+    visuals.faint_bg_color = theme.widget_hover;
+    visuals.code_bg_color = theme.widget_hover;
+    visuals.override_text_color = Some(theme.fg);
+    visuals.hyperlink_color = theme.accent;
+    visuals.selection.bg_fill = theme.selection;
+    visuals.selection.stroke = egui::Stroke::new(1.0, theme.accent);
 
     let zero = egui::CornerRadius::ZERO;
     visuals.window_corner_radius = zero;
     visuals.menu_corner_radius = zero;
 
-    // Widget palette across all interaction states.
-    visuals.widgets.noninteractive.bg_fill = BG;
-    visuals.widgets.noninteractive.weak_bg_fill = BG;
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, WIDGET_BG);
-    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, FG);
+    visuals.widgets.noninteractive.bg_fill = theme.bg;
+    visuals.widgets.noninteractive.weak_bg_fill = theme.bg;
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, theme.widget_bg);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, theme.fg);
     visuals.widgets.noninteractive.corner_radius = zero;
 
-    visuals.widgets.inactive.bg_fill = WIDGET_BG;
-    visuals.widgets.inactive.weak_bg_fill = WIDGET_BG;
+    visuals.widgets.inactive.bg_fill = theme.widget_bg;
+    visuals.widgets.inactive.weak_bg_fill = theme.widget_bg;
     visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, FG);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, theme.fg);
     visuals.widgets.inactive.corner_radius = zero;
 
-    visuals.widgets.hovered.bg_fill = WIDGET_HOVER;
-    visuals.widgets.hovered.weak_bg_fill = WIDGET_HOVER;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, FG);
+    visuals.widgets.hovered.bg_fill = theme.widget_hover;
+    visuals.widgets.hovered.weak_bg_fill = theme.widget_hover;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme.accent);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, theme.fg);
     visuals.widgets.hovered.corner_radius = zero;
 
-    visuals.widgets.active.bg_fill = SELECTION;
-    visuals.widgets.active.weak_bg_fill = SELECTION;
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, FG);
+    visuals.widgets.active.bg_fill = theme.selection;
+    visuals.widgets.active.weak_bg_fill = theme.selection;
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, theme.accent);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, theme.fg);
     visuals.widgets.active.corner_radius = zero;
 
-    visuals.widgets.open.bg_fill = WIDGET_HOVER;
-    visuals.widgets.open.weak_bg_fill = WIDGET_HOVER;
-    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, WIDGET_BG);
-    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, FG);
+    visuals.widgets.open.bg_fill = theme.widget_hover;
+    visuals.widgets.open.weak_bg_fill = theme.widget_hover;
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, theme.widget_bg);
+    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, theme.fg);
     visuals.widgets.open.corner_radius = zero;
 
     let mut style = egui::Style {
@@ -105,52 +209,52 @@ pub(super) fn apply_theme(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-/// Build the `egui_dock` style that pairs with `apply_theme`. Overrides
+/// Build the `egui_dock` style that pairs with [`apply_theme`]. Overrides
 /// the defaults that produce the dark tab-bar strip + rounded leaf
 /// corners: tab bar fill matches the panel (no contrasting strip),
 /// every corner radius is zero, active tab uses the selection chip
-/// fill, inactive tabs use the muted text color on the dim widget fill.
-pub(super) fn make_dock_style(ctx: &egui::Context) -> egui_dock::Style {
+/// fill, inactive tabs use the muted text color on the panel fill.
+pub(super) fn make_dock_style(ctx: &egui::Context, theme: &Theme) -> egui_dock::Style {
     let mut style = egui_dock::Style::from_egui(ctx.style().as_ref());
     let zero = egui::CornerRadius::ZERO;
 
     style.main_surface_border_rounding = zero;
     style.main_surface_border_stroke = egui::Stroke::NONE;
 
-    style.tab_bar.bg_fill = BG;
+    style.tab_bar.bg_fill = theme.bg;
     style.tab_bar.corner_radius = zero;
-    style.tab_bar.hline_color = WIDGET_BG;
+    style.tab_bar.hline_color = theme.widget_bg;
 
-    style.separator.color_idle = WIDGET_BG;
-    style.separator.color_hovered = ACCENT;
-    style.separator.color_dragged = ACCENT;
+    style.separator.color_idle = theme.widget_bg;
+    style.separator.color_hovered = theme.accent;
+    style.separator.color_dragged = theme.accent;
 
     let make_tab = |bg: egui::Color32, text: egui::Color32| egui_dock::TabInteractionStyle {
-        outline_color: WIDGET_BG,
+        outline_color: theme.widget_bg,
         corner_radius: zero,
         bg_fill: bg,
         text_color: text,
     };
-    style.tab.active = make_tab(SELECTION, FG);
-    style.tab.active_with_kb_focus = make_tab(SELECTION, FG);
-    style.tab.focused = make_tab(SELECTION, FG);
-    style.tab.focused_with_kb_focus = make_tab(SELECTION, FG);
-    style.tab.inactive = make_tab(BG, MUTED);
-    style.tab.inactive_with_kb_focus = make_tab(BG, MUTED);
-    style.tab.hovered = make_tab(WIDGET_HOVER, FG);
+    style.tab.active = make_tab(theme.selection, theme.fg);
+    style.tab.active_with_kb_focus = make_tab(theme.selection, theme.fg);
+    style.tab.focused = make_tab(theme.selection, theme.fg);
+    style.tab.focused_with_kb_focus = make_tab(theme.selection, theme.fg);
+    style.tab.inactive = make_tab(theme.bg, theme.muted);
+    style.tab.inactive_with_kb_focus = make_tab(theme.bg, theme.muted);
+    style.tab.hovered = make_tab(theme.widget_hover, theme.fg);
 
-    style.tab.tab_body.bg_fill = BG;
+    style.tab.tab_body.bg_fill = theme.bg;
     style.tab.tab_body.corner_radius = zero;
     style.tab.tab_body.stroke = egui::Stroke::NONE;
     style.tab.hline_below_active_tab_name = false;
 
-    style.buttons.close_tab_color = MUTED;
-    style.buttons.close_tab_active_color = FG;
-    style.buttons.close_tab_bg_fill = WIDGET_HOVER;
-    style.buttons.add_tab_color = MUTED;
-    style.buttons.add_tab_active_color = FG;
-    style.buttons.add_tab_bg_fill = WIDGET_HOVER;
-    style.buttons.add_tab_border_color = WIDGET_BG;
+    style.buttons.close_tab_color = theme.muted;
+    style.buttons.close_tab_active_color = theme.fg;
+    style.buttons.close_tab_bg_fill = theme.widget_hover;
+    style.buttons.add_tab_color = theme.muted;
+    style.buttons.add_tab_active_color = theme.fg;
+    style.buttons.add_tab_bg_fill = theme.widget_hover;
+    style.buttons.add_tab_border_color = theme.widget_bg;
 
     style
 }

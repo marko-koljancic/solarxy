@@ -41,9 +41,18 @@ impl State {
         }
     }
 
+    /// Per-pane toolbar strip height in physical pixels.
+    pub(super) fn pane_toolbar_height_px(&self) -> f32 {
+        solarxy_core::view_config::PANE_TOOLBAR_HEIGHT * self.window.scale_factor() as f32
+    }
+
     pub(super) fn target_dimensions(&self) -> (u32, u32) {
         let (base_w, base_h) = self.viewport_base_size_px();
-        compute_target_dimensions(self.view.display.layout, base_w, base_h)
+        let (w, h) = compute_target_dimensions(self.view.display.layout, base_w, base_h);
+        // The HDR target is sized to the largest pane's 3D content — its
+        // full rect minus the toolbar strip.
+        let toolbar = self.pane_toolbar_height_px().round() as u32;
+        (w, h.saturating_sub(toolbar).max(1))
     }
 
     pub(super) fn compute_panes(&self) -> Vec<Pane> {
@@ -93,7 +102,86 @@ impl State {
                     },
                 ]
             }
+
+            ViewLayout::Quad => {
+                let sx = (w * 0.5).floor();
+                let sy = (h * 0.5).floor();
+                let left_w = (sx - 1.0).max(1.0);
+                let right_w = (w - sx - 1.0).max(1.0);
+                let top_h = (sy - 1.0).max(1.0);
+                let bot_h = (h - sy - 1.0).max(1.0);
+                let rx = origin_x + sx + 1.0;
+                let by = origin_y + sy + 1.0;
+                vec![
+                    Pane {
+                        x: origin_x,
+                        y: origin_y,
+                        width: left_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: origin_y,
+                        width: right_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: origin_x,
+                        y: by,
+                        width: left_w,
+                        height: bot_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: by,
+                        width: right_w,
+                        height: bot_h,
+                    },
+                ]
+            }
+            ViewLayout::ThreeLeftBig => {
+                let sx = (w * 0.5).floor();
+                let sy = (h * 0.5).floor();
+                let left_w = (sx - 1.0).max(1.0);
+                let right_w = (w - sx - 1.0).max(1.0);
+                let top_h = (sy - 1.0).max(1.0);
+                let bot_h = (h - sy - 1.0).max(1.0);
+                let rx = origin_x + sx + 1.0;
+                let by = origin_y + sy + 1.0;
+                vec![
+                    Pane {
+                        x: origin_x,
+                        y: origin_y,
+                        width: left_w,
+                        height: h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: origin_y,
+                        width: right_w,
+                        height: top_h,
+                    },
+                    Pane {
+                        x: rx,
+                        y: by,
+                        width: right_w,
+                        height: bot_h,
+                    },
+                ]
+            }
         }
+    }
+
+    /// `true` when the cursor is inside some pane's 3D **content** rect —
+    /// not its toolbar strip, not an inter-pane gap. The camera-input
+    /// gate uses this so toolbar clicks don't orbit the scene.
+    pub(crate) fn pointer_in_pane_content(&self) -> bool {
+        let (cx, cy) = self.input.cursor_pos;
+        let toolbar_h = self.pane_toolbar_height_px();
+        self.compute_panes().iter().any(|p| {
+            let c = p.content(toolbar_h);
+            cx >= c.x && cx < c.x + c.width && cy >= c.y && cy < c.y + c.height
+        })
     }
 
     pub(super) fn active_pane_index(&self) -> usize {
@@ -122,7 +210,7 @@ impl State {
         let ppp = self.window.scale_factor() as f32;
         let ratio = self.view.display.split_ratio;
         match self.view.display.layout {
-            ViewLayout::Single => None,
+            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => None,
             ViewLayout::SplitVertical => {
                 let cx = (viewport.width() * ratio).floor();
                 Some(egui::Rect::from_min_size(
@@ -147,7 +235,9 @@ impl State {
         Some(visible.expand2(match self.view.display.layout {
             ViewLayout::SplitVertical => egui::vec2(pad_logical, 0.0),
             ViewLayout::SplitHorizontal => egui::vec2(0.0, pad_logical),
-            ViewLayout::Single => egui::vec2(0.0, 0.0),
+            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => {
+                egui::vec2(0.0, 0.0)
+            }
         }))
     }
 }

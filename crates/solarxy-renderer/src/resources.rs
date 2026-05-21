@@ -342,6 +342,7 @@ fn upload_model(
             index_buffer,
             num_elements: indices.len() as u32,
             material: material_index,
+            visible: true,
             edge_data: Some(model::EdgeData {
                 positions_buffer: edge_positions_buffer,
                 index_buffer: edge_index_buffer,
@@ -450,6 +451,7 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         index_buffer,
         num_elements: indices.len() as u32,
         material: 0,
+        visible: true,
         edge_data: None,
         uv_edge_data: None,
         degen_index_buffer: None,
@@ -483,6 +485,7 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
             index_buffer,
             num_elements: indices.len() as u32,
             material: 0,
+            visible: true,
             edge_data: None,
             uv_edge_data: None,
             degen_index_buffer: None,

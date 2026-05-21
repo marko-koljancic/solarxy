@@ -50,6 +50,7 @@ pub(crate) struct GuiSnapshot {
     pub lights_locked: bool,
     pub roughness_scale: f32,
     pub metallic_scale: f32,
+    pub hdri_rotation: f32,
     pub bloom_enabled: bool,
     pub ssao_enabled: bool,
     pub tone_mode: ToneMode,
@@ -93,6 +94,7 @@ impl GuiSnapshot {
             lights_locked: display.lights_locked,
             roughness_scale: display.roughness_scale,
             metallic_scale: display.metallic_scale,
+            hdri_rotation: display.hdri_rotation,
             bloom_enabled: post.bloom_enabled,
             ssao_enabled: post.ssao_enabled,
             tone_mode: post.tone_mode,
@@ -159,6 +161,7 @@ impl GuiSnapshot {
         display.lights_locked = self.lights_locked;
         display.roughness_scale = self.roughness_scale;
         display.metallic_scale = self.metallic_scale;
+        display.hdri_rotation = self.hdri_rotation;
 
         post.bloom_enabled = self.bloom_enabled;
         post.ssao_enabled = self.ssao_enabled;
@@ -177,7 +180,6 @@ pub(crate) struct HudInfo {
     pub pane_label: String,
     pub cameras_linked: Option<bool>,
     pub has_uvs: bool,
-    pub uv_overlap_pct: Option<f32>,
     pub overdraw_active: bool,
 }
 
@@ -192,7 +194,7 @@ mod tests {
         GuiSnapshot {
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
-            background_mode: BackgroundMode::Gradient,
+            background_mode: BackgroundMode::GRADIENT,
             uv_mode: UvMode::Off,
             bounds_mode: BoundsMode::Off,
             line_weight: LineWeight::Medium,
@@ -211,6 +213,7 @@ mod tests {
             lights_locked: false,
             roughness_scale: 1.0,
             metallic_scale: 1.0,
+            hdri_rotation: 0.0,
             bloom_enabled: false,
             ssao_enabled: false,
             tone_mode: ToneMode::Reinhard,
@@ -257,7 +260,7 @@ mod tests {
     fn diff_background_change_suppresses_wireframe_signal() {
         let prev = baseline();
         let mut next = prev;
-        next.background_mode = BackgroundMode::White;
+        next.background_mode = BackgroundMode::WHITE;
         next.line_weight = LineWeight::Bold;
         let c = next.diff(&prev);
         assert!(c.background_changed);

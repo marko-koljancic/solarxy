@@ -100,6 +100,8 @@ impl State {
 
         let mut gui = EguiRenderer::new(&device, surface_format, &window, console_buffer);
         gui.set_backend_info(backend_info.clone());
+        gui.apply_theme_choice(preferences.ui.theme);
+        gui.status_bar_visible = preferences.ui.status_bar_visible;
         if let Some(json) = preferences.dock.last_layout_json.as_deref() {
             gui.apply_layout_json(json);
         }
@@ -127,13 +129,14 @@ impl State {
         });
 
         let background_mode = preferences.display.background;
+        let background = background_mode.resolve(&preferences.view.custom_backgrounds);
 
         let brdf_lut = BrdfLut::generate(&device, &queue);
-        let (ibl_top, ibl_bottom) = background_mode.sky_colors();
+        let (ibl_top, ibl_bottom) = background.sky_colors();
         let ibl = IblState::from_sky_colors(&device, &queue, ibl_top, ibl_bottom);
         let ibl_fallback = IblState::fallback(&device, &queue);
 
-        let wire_color = background_mode.wireframe_color();
+        let wire_color = background.wireframe_color();
 
         let line_weight = preferences.rendering.wireframe_line_weight;
         let wireframe_params_data = WireframeParams {
@@ -370,6 +373,7 @@ impl State {
                 },
                 validation_colors,
                 overdraw: overdraw_res,
+                skybox_bind_group: None,
                 shared_samplers,
                 msaa_sample_count,
                 target_width: size.width,
@@ -399,7 +403,7 @@ impl State {
                         show_uv_overlap: false,
                         show_validation: false,
                     };
-                    [pds, pds]
+                    [pds; 4]
                 },
                 display: DisplaySettings {
                     turntable_active: preferences.display.turntable_active,
@@ -409,8 +413,9 @@ impl State {
                     split_ratio: DisplaySettings::DEFAULT_SPLIT_RATIO,
                     roughness_scale: 1.0,
                     metallic_scale: 1.0,
+                    hdri_rotation: 0.0,
                 },
-                secondary_cam: None,
+                cameras: [None, None, None, None],
                 active_pane: 0,
                 cameras_linked: true,
             },
@@ -431,7 +436,9 @@ impl State {
             last_project_config_toast: None,
             pending_load: None,
             pending_hdri: None,
+            viewport_context_menu: None,
             capture_requested: false,
+            screenshot_expand_review: false,
             quit_requested: false,
             last_frame_time: Instant::now(),
             dt: 0.0,

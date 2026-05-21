@@ -9,6 +9,7 @@ pub(crate) struct MenuActions {
     pub quit: bool,
     pub save_screenshot: bool,
     pub save_preferences: bool,
+    pub save_view_defaults: bool,
     pub open_recent: Option<String>,
     pub open_config_file: bool,
     pub open_preferences: bool,
@@ -21,6 +22,10 @@ pub(crate) struct MenuActions {
     pub set_split_ratio: Option<f32>,
     pub cancel_reanchor: bool,
     pub exit_review_mode: bool,
+    /// Review-menu toggle of review mode — applied identically to `Shift+R`.
+    pub toggle_review_mode: bool,
+    /// Review-menu toggle of the 3D marker overlay (`ReviewState::markers_hidden`).
+    pub toggle_review_markers: bool,
     pub save_dock_layout: bool,
     pub restore_saved_layout: bool,
     pub reset_dock_layout: bool,
@@ -39,9 +44,10 @@ pub(crate) struct DividerInfo {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MenuBarVisibility {
     pub sidebar_visible: bool,
+    pub outliner_visible: bool,
     pub menu_bar_visible: bool,
-    pub stats_visible: bool,
-    pub fps_hud_visible: bool,
+    pub properties_visible: bool,
+    pub status_bar_visible: bool,
     pub console_visible: bool,
     pub review_panel_visible: bool,
     pub material_inspector_visible: bool,

@@ -1,8 +1,4 @@
-use solarxy_core::preferences::{
-    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
-    ToneMode, UvMapBackground, UvMode, ViewMode,
-};
-use crate::state::view_state::BoundsMode;
+use solarxy_core::preferences::{MaterialOverride, ToneMode};
 
 use super::snapshot::GuiSnapshot;
 
@@ -33,103 +29,20 @@ fn checkbox_with_tooltip(ui: &mut egui::Ui, value: &mut bool, label: &str, short
 
 /// Render the sidebar's collapsible-panels content directly into the
 /// provided `ui` — the SidePanel/ScrollArea shell is the caller's job.
-/// Lives this way so `gui::dock` can host the sidebar as an
-/// `egui_dock` tab (which provides its own `Ui`).
-pub(super) fn draw_sidebar_content(
-    ui: &mut egui::Ui,
-    s: &mut GuiSnapshot,
-    uv_overlap_pct: Option<f32>,
-    validation_report: Option<&solarxy_core::validation::ValidationReport>,
-) {
+/// Lives this way so `gui::dock` can host the sidebar as an `egui_dock`
+/// tab (which provides its own `Ui`).
+///
+/// RC2: the sidebar is the canonical surface for **scene-global**
+/// display / post-processing / material settings only. Per-pane view
+/// state lives on the per-pane toolbar; validation and HDRI/IBL moved to
+/// the Properties panel.
+pub(super) fn draw_sidebar_content(ui: &mut egui::Ui, s: &mut GuiSnapshot) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
-
-        egui::CollapsingHeader::new("View")
-            .default_open(true)
-            .show(ui, |ui| {
-                if s.pane_mode == PaneMode::UvMap {
-                    ui.label("UV Map");
-                    combo_with_tooltip(ui, "Background", "U", &mut s.uv_bg, UvMapBackground::ALL);
-                    combo_with_tooltip(
-                        ui,
-                        "Weight",
-                        "Shift+W",
-                        &mut s.line_weight,
-                        LineWeight::ALL,
-                    );
-                    checkbox_with_tooltip(ui, &mut s.show_uv_overlap, "Overlap", "O");
-                    if s.show_uv_overlap
-                        && let Some(pct) = uv_overlap_pct
-                    {
-                        ui.indent("overlap_stats", |ui| {
-                            ui.label(format!("Overlap: {:.1}%", pct));
-                        });
-                    }
-                    if ui.small_button("Back to 3D (3)").clicked() {
-                        s.pane_mode = PaneMode::Scene3D;
-                    }
-                } else {
-                    combo_with_tooltip(ui, "Mode", "W", &mut s.view_mode, ViewMode::ALL);
-                    combo_with_tooltip(
-                        ui,
-                        "Inspection",
-                        "1\u{2013}5",
-                        &mut s.inspection_mode,
-                        InspectionMode::ALL,
-                    );
-                    if s.inspection_mode == InspectionMode::TexelDensity {
-                        ui.indent("texel_density_indent", |ui| {
-                            ui.add(
-                                egui::Slider::new(&mut s.texel_density_target, 0.01..=10.0)
-                                    .logarithmic(true)
-                                    .text("Target"),
-                            );
-                        });
-                    }
-                    combo_with_tooltip(
-                        ui,
-                        "Material",
-                        "M",
-                        &mut s.material_override,
-                        MaterialOverride::ALL,
-                    );
-                    combo_with_tooltip(ui, "Normals", "N", &mut s.normals_mode, NormalsMode::ALL);
-                    combo_with_tooltip(ui, "UV", "U", &mut s.uv_mode, UvMode::ALL);
-                    combo_with_tooltip(
-                        ui,
-                        "Weight",
-                        "Shift+W",
-                        &mut s.line_weight,
-                        LineWeight::ALL,
-                    );
-                    combo_with_tooltip(
-                        ui,
-                        "Background",
-                        "B",
-                        &mut s.background_mode,
-                        BackgroundMode::ALL,
-                    );
-                    combo_with_tooltip(
-                        ui,
-                        "Bounds",
-                        "Shift+B",
-                        &mut s.bounds_mode,
-                        BoundsMode::ALL,
-                    );
-                }
-                if s.is_split {
-                    checkbox_with_tooltip(ui, &mut s.cameras_linked, "Link cameras", "Ctrl+L");
-                }
-            });
-
-        ui.separator();
 
         egui::CollapsingHeader::new("Display")
             .default_open(true)
             .show(ui, |ui| {
-                checkbox_with_tooltip(ui, &mut s.show_grid, "Grid", "G");
-                checkbox_with_tooltip(ui, &mut s.show_axis_gizmo, "Axis Gizmo", "A");
-                checkbox_with_tooltip(ui, &mut s.show_local_axes, "Local Axes", "Shift+A");
                 checkbox_with_tooltip(ui, &mut s.lights_locked, "Lock Lights", "Shift+L");
                 checkbox_with_tooltip(ui, &mut s.turntable_active, "Turntable", "V");
                 if s.turntable_active {
@@ -144,47 +57,6 @@ pub(super) fn draw_sidebar_content(
             });
 
         ui.separator();
-
-        if let Some(report) = validation_report {
-            egui::CollapsingHeader::new("Validation")
-                .default_open(false)
-                .show(ui, |ui| {
-                    checkbox_with_tooltip(
-                        ui,
-                        &mut s.show_validation,
-                        "Highlight issues on mesh",
-                        "Shift+V",
-                    );
-                    if report.is_clean() {
-                        ui.label("No issues found");
-                    } else {
-                        ui.label(format!(
-                            "{} error(s), {} warning(s)",
-                            report.error_count(),
-                            report.warning_count()
-                        ));
-                        for issue in &report.issues {
-                            let color = solarxy_renderer::validation::issue_category(issue).color();
-                            let egui_color = egui::Color32::from_rgba_unmultiplied(
-                                (color[0] * 255.0) as u8,
-                                (color[1] * 255.0) as u8,
-                                (color[2] * 255.0) as u8,
-                                255,
-                            );
-                            ui.horizontal(|ui| {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::hover(),
-                                );
-                                ui.painter().circle_filled(rect.center(), 4.0, egui_color);
-                                ui.label(format!("{} {}", issue.scope, issue.message));
-                            });
-                        }
-                    }
-                });
-
-            ui.separator();
-        }
 
         egui::CollapsingHeader::new("Post-Processing")
             .default_open(true)
@@ -224,14 +96,6 @@ pub(super) fn draw_sidebar_content(
                 if s.material_override != MaterialOverride::None {
                     ui.label("(disabled in override modes)");
                 }
-            });
-
-        ui.separator();
-
-        egui::CollapsingHeader::new("Lighting")
-            .default_open(true)
-            .show(ui, |ui| {
-                combo_with_tooltip(ui, "IBL", "I / Shift+I", &mut s.ibl_mode, IblMode::ALL);
             });
 
         ui.add_space(8.0);

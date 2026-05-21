@@ -8,15 +8,21 @@ pub use solarxy_core::geometry::{
 };
 pub use solarxy_core::AABB;
 
+use std::ops::Range;
+
 use cgmath::InnerSpace;
 use super::model::{self, ModelVertex, NormalsGeometry};
 
+/// Build per-vertex and per-face normal line segments for a single mesh.
+/// Returns `(vertex_lines, face_lines)` — endpoint pairs, two entries per
+/// line. [`process_raw_model`] concatenates these and records the per-mesh
+/// ranges so the overlay can skip hidden meshes.
 pub fn build_normals_geometry(
     positions: &[[f32; 3]],
     normals: &[[f32; 3]],
     indices: &[u32],
     bounds: &AABB,
-) -> NormalsGeometry {
+) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     let mesh_diagonal = bounds.diagonal();
     let scale = if mesh_diagonal > 1e-10 {
         mesh_diagonal * 0.05
@@ -54,10 +60,7 @@ pub fn build_normals_geometry(
         }
     }
 
-    NormalsGeometry {
-        vertex_lines,
-        face_lines,
-    }
+    (vertex_lines, face_lines)
 }
 
 type ProcessedModel = (
@@ -79,6 +82,8 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let mut mesh_bounds: Vec<AABB> = Vec::new();
     let mut all_vertex_lines: Vec<[f32; 3]> = Vec::new();
     let mut all_face_lines: Vec<[f32; 3]> = Vec::new();
+    let mut vertex_segments: Vec<Range<u32>> = Vec::new();
+    let mut face_segments: Vec<Range<u32>> = Vec::new();
 
     for mesh in &raw.meshes {
         if mesh.positions.is_empty() || mesh.indices.is_empty() {
@@ -88,6 +93,11 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
                 min: cgmath::Point3::new(0.0, 0.0, 0.0),
                 max: cgmath::Point3::new(0.0, 0.0, 0.0),
             });
+            // Keep the segment vecs parallel to `meshes` — empty range.
+            let v_at = all_vertex_lines.len() as u32;
+            let f_at = all_face_lines.len() as u32;
+            vertex_segments.push(v_at..v_at);
+            face_segments.push(f_at..f_at);
             continue;
         }
 
@@ -132,10 +142,15 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         all_normals.extend_from_slice(&normals);
 
         let bounds = compute_bounds(&mesh.positions);
-        let normals_geo = build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
+        let (v_lines, f_lines) =
+            build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
         mesh_bounds.push(bounds);
-        all_vertex_lines.extend(normals_geo.vertex_lines);
-        all_face_lines.extend(normals_geo.face_lines);
+        let v_start = all_vertex_lines.len() as u32;
+        let f_start = all_face_lines.len() as u32;
+        all_vertex_lines.extend(v_lines);
+        all_face_lines.extend(f_lines);
+        vertex_segments.push(v_start..all_vertex_lines.len() as u32);
+        face_segments.push(f_start..all_face_lines.len() as u32);
 
         mesh_vertex_data.push(vertices);
         mesh_index_data.push(mesh.indices.clone());
@@ -156,6 +171,8 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let normals_geo = NormalsGeometry {
         vertex_lines: all_vertex_lines,
         face_lines: all_face_lines,
+        vertex_segments,
+        face_segments,
     };
 
     (

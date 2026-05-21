@@ -13,15 +13,31 @@ use crate::preferences::{
     UvMapBackground, UvMode, ViewMode,
 };
 
-/// Pane arrangement: one viewport, two side-by-side, or two top/bottom.
-/// Toggled via `F1` / `F2` / `F3`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewLayout {
     #[default]
     Single,
     SplitVertical,
     SplitHorizontal,
+    Quad,
+    ThreeLeftBig,
 }
+
+impl ViewLayout {
+    #[must_use]
+    pub fn pane_count(self) -> usize {
+        match self {
+            Self::Single => 1,
+            Self::SplitVertical | Self::SplitHorizontal => 2,
+            Self::ThreeLeftBig => 3,
+            Self::Quad => 4,
+        }
+    }
+}
+
+/// Height of the per-pane viewport toolbar strip, in logical pixels.
+/// Each pane's 3D content is the pane rect minus this strip at the top.
+pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DisplaySettings {
@@ -29,13 +45,12 @@ pub struct DisplaySettings {
     pub turntable_rpm: f32,
     pub lights_locked: bool,
     pub layout: ViewLayout,
-    /// Split-divider ratio in [0.05, 0.95] (pane-1 fraction of the split
-    /// axis). Defaults to 0.5 (centered). Single layout ignores this.
-    /// Per-orientation ratios (separate vertical / horizontal) are
-    /// deferred — both currently share this single value.
     pub split_ratio: f32,
     pub roughness_scale: f32,
     pub metallic_scale: f32,
+    /// Scene-global HDRI yaw, in radians. Rotates the visible HDRI sky
+    /// and the IBL it derives together. `0.0` when no HDRI is loaded.
+    pub hdri_rotation: f32,
 }
 
 impl DisplaySettings {

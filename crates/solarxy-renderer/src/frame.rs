@@ -16,7 +16,9 @@ use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
 use crate::uv_camera::UvCameraState;
-use solarxy_core::preferences::{BackgroundMode, NormalsMode, UvMapBackground, UvMode, ViewMode};
+use solarxy_core::preferences::{
+    BgKind, NormalsMode, ResolvedBackground, UvMapBackground, UvMode, ViewMode,
+};
 
 use crate::bloom::BloomState;
 use crate::composite::CompositeState;
@@ -117,6 +119,10 @@ pub struct Renderer {
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
+    /// Bind group for the HDRI skybox pass — `Some` only while an HDRI is
+    /// loaded. Rebuilt through the app's `rebuild_light_bind_group`
+    /// IBL chokepoint.
+    pub skybox_bind_group: Option<wgpu::BindGroup>,
     #[allow(unused)]
     pub shared_samplers: SharedSamplers,
     pub msaa_sample_count: u32,
@@ -131,14 +137,27 @@ impl Renderer {
         pass.draw(0..3, 0..1);
     }
 
-    pub fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, pds: &PaneDisplaySettings) {
+    /// Draw the HDRI equirect as a fullscreen sky. No-op when no HDRI is
+    /// loaded (`skybox_bind_group` is `None`) — the pass clear colour then
+    /// shows through instead.
+    pub fn draw_skybox<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, cam_bg: &'a wgpu::BindGroup) {
+        let Some(skybox_bg) = &self.skybox_bind_group else {
+            return;
+        };
+        pass.set_pipeline(&self.pipelines.overlay.skybox);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, skybox_bg, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    pub fn render_empty_pass(&self, encoder: &mut wgpu::CommandEncoder, bg: ResolvedBackground) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Empty Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(bg.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -194,6 +213,9 @@ impl Renderer {
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -308,6 +330,9 @@ impl Renderer {
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
             for mesh in &scene.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
@@ -359,6 +384,9 @@ impl Renderer {
         pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -377,6 +405,7 @@ impl Renderer {
         cam_bg: &wgpu::BindGroup,
         cam: &Camera,
         pds: &PaneDisplaySettings,
+        bg: ResolvedBackground,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -384,7 +413,7 @@ impl Renderer {
                 view: &self.targets.msaa_hdr_view,
                 resolve_target: Some(&self.targets.hdr_resolve_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(pds.background_mode.clear_color()),
+                    load: wgpu::LoadOp::Clear(bg.clear_color()),
                     store: wgpu::StoreOp::Discard,
                 },
                 depth_slice: None,
@@ -401,8 +430,10 @@ impl Renderer {
             timestamp_writes: None,
         });
 
-        if pds.background_mode == BackgroundMode::Gradient {
-            self.draw_background_gradient(&mut pass);
+        match bg.kind {
+            BgKind::Gradient => self.draw_background_gradient(&mut pass),
+            BgKind::Hdri => self.draw_skybox(&mut pass, cam_bg),
+            BgKind::Solid => {}
         }
 
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
@@ -516,6 +547,9 @@ impl Renderer {
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode == 2 {
                 continue;
@@ -536,6 +570,9 @@ impl Renderer {
 
         let mut blend_list: Vec<(usize, f32)> = Vec::new();
         for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             let material = &scene.model.materials[mesh.material];
             if material.uniform.alpha_mode != 2 {
                 continue;
@@ -576,6 +613,9 @@ impl Renderer {
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         pass.set_vertex_buffer(0, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(edge) = &mesh.edge_data {
                 pass.set_bind_group(2, &edge.bind_group, &[]);
                 pass.draw(0..edge.num_edges * 6, 0..1);
@@ -672,6 +712,9 @@ impl Renderer {
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(cat_idx) = scene.validation_mesh_cat[i] {
                 pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -685,6 +728,9 @@ impl Renderer {
             .position(|c| *c == IssueCategory::DegenerateTriangles)
             .unwrap_or(4);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(ref degen_buf) = mesh.degen_index_buffer {
                 pass.set_bind_group(1, &self.validation_colors.bind_groups[degen_idx], &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -699,6 +745,9 @@ impl Renderer {
             .unwrap_or(5);
         let mut switched_to_edge = false;
         for (mi, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(Some((edge_buf, num))) =
                 scene.validation_edge_buffers.get(mi).map(|o| o.as_ref())
             {
@@ -743,6 +792,9 @@ impl Renderer {
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
@@ -802,6 +854,9 @@ impl Renderer {
                 pass.set_pipeline(&self.pipelines.uv.uv_map_texture);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
                 for mesh in &scene.model.meshes {
+                    if !mesh.visible {
+                        continue;
+                    }
                     let material = &scene.model.materials[mesh.material];
                     pass.set_bind_group(1, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -815,6 +870,9 @@ impl Renderer {
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         for mesh in &scene.model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             if let Some(uv_edge) = &mesh.uv_edge_data
                 && let Some(edge) = &mesh.edge_data
             {
@@ -854,7 +912,18 @@ impl Renderer {
         {
             pass.set_bind_group(1, &scene.vis.face_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
-            pass.draw(0..scene.vis.face_normals_count, 0..1);
+            // One draw per visible mesh — the segments are parallel to
+            // `model.meshes`, so a hidden mesh's normals are skipped.
+            for (mesh, seg) in scene
+                .model
+                .meshes
+                .iter()
+                .zip(&scene.vis.face_normals_segments)
+            {
+                if mesh.visible && !seg.is_empty() {
+                    pass.draw(seg.clone(), 0..1);
+                }
+            }
         }
         if matches!(
             pds.normals_mode,
@@ -863,7 +932,16 @@ impl Renderer {
         {
             pass.set_bind_group(1, &scene.vis.vertex_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));
-            pass.draw(0..scene.vis.vertex_normals_count, 0..1);
+            for (mesh, seg) in scene
+                .model
+                .meshes
+                .iter()
+                .zip(&scene.vis.vertex_normals_segments)
+            {
+                if mesh.visible && !seg.is_empty() {
+                    pass.draw(seg.clone(), 0..1);
+                }
+            }
         }
     }
 }

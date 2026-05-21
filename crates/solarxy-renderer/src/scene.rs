@@ -4,13 +4,12 @@
 //! helpers used by both `ModelScene` construction and the per-frame update.
 
 use cgmath::Rotation3;
-use solarxy_core::preferences::BackgroundMode;
+use solarxy_core::preferences::{BgKind, ResolvedBackground};
 use solarxy_core::validation::ValidationReport;
 use wgpu::util::DeviceExt;
 
 use crate::bind_groups::BindGroupLayouts;
-use crate::camera::Camera;
-use crate::camera_state::CameraState;
+use crate::camera::{Camera, camera_from_bounds};
 use crate::ibl::{BrdfLut, IblState};
 use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
@@ -28,39 +27,13 @@ pub trait BackgroundModeExt {
     fn effective_luminance(self) -> f32;
 }
 
-impl BackgroundModeExt for BackgroundMode {
+impl BackgroundModeExt for ResolvedBackground {
     fn clear_color(self) -> wgpu::Color {
-        match self {
-            Self::White => wgpu::Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            },
-            Self::Gradient => wgpu::Color {
-                r: 0.165,
-                g: 0.165,
-                b: 0.180,
-                a: 1.0,
-            },
-            Self::DarkGray => wgpu::Color {
-                r: 0.12,
-                g: 0.12,
-                b: 0.12,
-                a: 1.0,
-            },
-            Self::AyuMirage => wgpu::Color {
-                r: 0.122,
-                g: 0.141,
-                b: 0.188,
-                a: 1.0,
-            },
-            Self::Black => wgpu::Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
+        wgpu::Color {
+            r: f64::from(self.clear[0]),
+            g: f64::from(self.clear[1]),
+            b: f64::from(self.clear[2]),
+            a: 1.0,
         }
     }
 
@@ -73,16 +46,7 @@ impl BackgroundModeExt for BackgroundMode {
     }
 
     fn sky_colors(self) -> ([f32; 3], [f32; 3]) {
-        match self {
-            Self::White => ([1.0, 1.0, 1.0], [0.85, 0.85, 0.85]),
-            Self::Gradient => ([0.66, 0.70, 0.72], [0.35, 0.41, 0.47]),
-            Self::DarkGray => ([0.30, 0.32, 0.35], [0.15, 0.14, 0.13]),
-            Self::AyuMirage => (
-                [0.122 * 1.4, 0.141 * 1.4, 0.188 * 1.4],
-                [0.122 * 0.6, 0.141 * 0.6, 0.188 * 0.6],
-            ),
-            Self::Black => ([0.20, 0.22, 0.25], [0.08, 0.07, 0.06]),
-        }
+        (self.sky_top, self.sky_bottom)
     }
 
     fn grid_color(self) -> [f32; 3] {
@@ -97,21 +61,19 @@ impl BackgroundModeExt for BackgroundMode {
     }
 
     fn effective_luminance(self) -> f32 {
-        if self == Self::Gradient {
-            let (top, bot) = self.sky_colors();
-            let lum_top = 0.2126 * top[0] + 0.7152 * top[1] + 0.0722 * top[2];
-            let lum_bot = 0.2126 * bot[0] + 0.7152 * bot[1] + 0.0722 * bot[2];
-            (lum_top + lum_bot) * 0.5
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        // A gradient's contrast tracks the mean of its sky band; a solid
+        // (or the pre-load HDRI fallback) tracks the flat clear colour.
+        if self.kind == BgKind::Gradient {
+            (lum(self.sky_top) + lum(self.sky_bottom)) * 0.5
         } else {
-            let c = self.clear_color();
-            (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) as f32
+            lum(self.clear)
         }
     }
 }
 
 pub struct ModelScene {
     pub model: Model,
-    pub cam: CameraState,
     pub lights_uniform: LightsUniform,
     pub light_buffer: wgpu::Buffer,
     pub light_bind_group: wgpu::BindGroup,
@@ -124,6 +86,10 @@ pub struct ModelScene {
     pub validation: ValidationReport,
     pub validation_mesh_cat: Vec<Option<usize>>,
     pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
+    /// Raw-mesh-index → GPU-mesh-index map (empty raw meshes are filtered
+    /// out). Retained so a validation issue's raw `IssueScope` index can be
+    /// remapped to `Model::mesh_bounds` for camera fly-to.
+    pub validation_raw_to_gpu: Vec<Option<usize>>,
 }
 
 impl ModelScene {
@@ -146,13 +112,6 @@ impl ModelScene {
             &layouts.edge_geometry,
         )?;
 
-        let cam = CameraState::new(
-            device,
-            &layouts.camera,
-            &model.bounds,
-            config.width as f32 / config.height as f32,
-        );
-
         let instance_data = Instance {
             position: cgmath::Vector3::new(0.0, 0.0, 0.0),
             rotation: cgmath::Quaternion::from_axis_angle(
@@ -167,8 +126,12 @@ impl ModelScene {
         });
 
         let placeholder_ibl = IblState::fallback(device, queue);
+        // Pane cameras now live in the view layer (`ViewState::cameras`);
+        // a throwaway bounds-framed camera seeds the initial light rig.
+        let initial_cam =
+            camera_from_bounds(&model.bounds, config.width as f32 / config.height as f32);
         let lights_uniform = lights_from_camera(
-            &cam.camera,
+            &initial_cam,
             &model.bounds,
             placeholder_ibl.irradiance_average,
         );
@@ -214,7 +177,6 @@ impl ModelScene {
 
         Ok(ModelScene {
             model,
-            cam,
             lights_uniform,
             light_buffer,
             light_bind_group,
@@ -226,6 +188,7 @@ impl ModelScene {
             validation: viewer_validation.report,
             validation_mesh_cat,
             validation_edge_buffers,
+            validation_raw_to_gpu: viewer_validation.raw_to_gpu,
         })
     }
 }

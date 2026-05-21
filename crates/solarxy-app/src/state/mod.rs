@@ -18,6 +18,7 @@
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
+pub(crate) mod hdri_info;
 mod init;
 mod input;
 mod overlap;
@@ -39,11 +40,12 @@ pub(super) use solarxy_renderer::scene::{
     lights_from_camera,
 };
 
-pub(super) use crate::gui::{EguiRenderer, ToastSeverity};
+pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
 pub(super) use solarxy_core::preferences::{
     self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
     ViewMode,
 };
+pub(super) use solarxy_renderer::camera_state::CameraState;
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
 pub(super) use solarxy_renderer::light::LightsUniform;
 pub(super) use solarxy_renderer::texture;
@@ -59,10 +61,31 @@ pub(super) struct Pane {
     pub height: f32,
 }
 
+impl Pane {
+    /// The 3D content sub-rect — the pane minus the per-pane toolbar
+    /// strip at the top. `toolbar_h` is in physical pixels.
+    pub(super) fn content(&self, toolbar_h: f32) -> Pane {
+        Pane {
+            x: self.x,
+            y: self.y + toolbar_h,
+            width: self.width,
+            height: (self.height - toolbar_h).max(1.0),
+        }
+    }
+}
+
 pub(super) struct PendingLoad {
     pub(super) receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
     pub(super) filename: String,
     pub(super) path: String,
+}
+
+/// In-flight async HDRI load. The source path is retained so the
+/// completion handler in `update.rs` can build [`hdri_info::HdriInfo`]
+/// (filename + file size) once the [`IblState`] arrives.
+pub(super) struct PendingHdri {
+    pub(super) receiver: mpsc::Receiver<anyhow::Result<IblState>>,
+    pub(super) path: std::path::PathBuf,
 }
 
 pub(super) struct InputState {
@@ -87,8 +110,15 @@ pub struct State {
     pub(super) review: review::ReviewState,
     pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
-    pub(super) pending_hdri: Option<mpsc::Receiver<anyhow::Result<IblState>>>,
+    pub(super) pending_hdri: Option<PendingHdri>,
+    /// Pending viewport right-click context menu — `Some` while the menu
+    /// is open; cleared on dismiss.
+    pub(super) viewport_context_menu: Option<ViewportContextMenu>,
     pub(super) capture_requested: bool,
+    /// Whether the pending capture should force every review annotation
+    /// card open. Set false by `C`/menu, set from the screenshot modal's
+    /// checkbox on a re-capture.
+    pub(super) screenshot_expand_review: bool,
     pub(super) quit_requested: bool,
     pub(super) last_frame_time: Instant,
     pub(super) dt: f32,
@@ -97,17 +127,19 @@ pub struct State {
     pub window: Arc<Window>,
 }
 
+/// Pixel dimensions of the shared HDR render target. The target is sized
+/// to the **largest** pane the layout produces and reused for every pane;
+/// the composite pass scales it down to each pane's surface rect. Quad
+/// uses quarter-size panes; Three-Left-Big's largest pane is the
+/// full-height left pane (half width).
 pub(super) fn compute_target_dimensions(layout: ViewLayout, width: u32, height: u32) -> (u32, u32) {
+    let half_w = ((width as f32 * 0.5).floor() as u32).max(1);
+    let half_h = ((height as f32 * 0.5).floor() as u32).max(1);
     match layout {
         ViewLayout::Single => (width, height),
-        ViewLayout::SplitVertical => {
-            let half = (width as f32 * 0.5).floor() as u32;
-            (half.max(1), height)
-        }
-        ViewLayout::SplitHorizontal => {
-            let half = (height as f32 * 0.5).floor() as u32;
-            (width, half.max(1))
-        }
+        ViewLayout::SplitVertical | ViewLayout::ThreeLeftBig => (half_w, height),
+        ViewLayout::SplitHorizontal => (width, half_h),
+        ViewLayout::Quad => (half_w, half_h),
     }
 }
 
@@ -119,13 +151,6 @@ pub(super) fn hit_test_pane(panes: &[Pane], cursor: (f32, f32)) -> usize {
         }
     }
     0
-}
-
-pub(super) fn cam_routing(active_pane: usize, cameras_linked: bool) -> (bool, bool) {
-    (
-        active_pane == 0 || cameras_linked,
-        active_pane == 1 || cameras_linked,
-    )
 }
 
 #[cfg(test)]
@@ -198,23 +223,6 @@ mod tests {
     }
 
     #[test]
-    fn cam_routing_single_pane() {
-        assert_eq!(cam_routing(0, false), (true, false));
-    }
-
-    #[test]
-    fn cam_routing_split_unlinked() {
-        assert_eq!(cam_routing(0, false), (true, false));
-        assert_eq!(cam_routing(1, false), (false, true));
-    }
-
-    #[test]
-    fn cam_routing_split_linked() {
-        assert_eq!(cam_routing(0, true), (true, true));
-        assert_eq!(cam_routing(1, true), (true, true));
-    }
-
-    #[test]
     fn target_dims_single() {
         assert_eq!(
             compute_target_dimensions(ViewLayout::Single, 1920, 1080),
@@ -255,6 +263,22 @@ mod tests {
         assert_eq!(
             compute_target_dimensions(ViewLayout::SplitHorizontal, 2, 2),
             (2, 1)
+        );
+    }
+
+    #[test]
+    fn target_dims_quad() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::Quad, 1920, 1080),
+            (960, 540)
+        );
+    }
+
+    #[test]
+    fn target_dims_three_left_big() {
+        assert_eq!(
+            compute_target_dimensions(ViewLayout::ThreeLeftBig, 1920, 1080),
+            (960, 1080)
         );
     }
 }

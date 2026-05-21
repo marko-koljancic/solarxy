@@ -140,15 +140,188 @@ cycle_enum! {
 }
 
 cycle_enum! {
-    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-    pub enum BackgroundMode {
+    /// The six predefined viewport backgrounds. `HdriSky` renders the
+    /// loaded HDRI as a visible sky (gated on an HDRI being present).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum BuiltinBg {
         White => "White",
         Gradient => "Gradient",
         DarkGray => "Dark",
         AyuMirage => "Ayu Mirage",
         Black => "Black",
+        HdriSky => "HDRI Sky",
     }
-    ; cycle
+}
+
+cycle_enum! {
+    /// Authoring kind of a user [`CustomBackground`].
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum CustomBgKind {
+        #[default]
+        Solid => "Solid",
+        Gradient => "Gradient",
+    }
+}
+
+/// How a [`ResolvedBackground`] is drawn by the renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BgKind {
+    /// Flat fill — only the render-pass clear colour is used.
+    Solid,
+    /// Vertical two-colour gradient pass.
+    Gradient,
+    /// HDRI equirect skybox pass.
+    Hdri,
+}
+
+/// A background resolved to concrete colours — the registry-free form the
+/// renderer and IBL consume. Builtins and customs both resolve to this
+/// via [`BackgroundMode::resolve`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedBackground {
+    pub kind: BgKind,
+    /// Render-pass clear colour (linear RGB).
+    pub clear: [f32; 3],
+    /// Upper sky colour — gradient-pass top + IBL upper hemisphere.
+    pub sky_top: [f32; 3],
+    /// Lower sky colour — gradient-pass bottom + IBL lower hemisphere.
+    pub sky_bottom: [f32; 3],
+}
+
+impl BuiltinBg {
+    /// Concrete colours for each builtin. Hand-tuned; the renderer's
+    /// `BackgroundModeExt` derives clear / grid / wireframe from these.
+    #[must_use]
+    pub fn resolved(self) -> ResolvedBackground {
+        match self {
+            Self::White => ResolvedBackground {
+                kind: BgKind::Solid,
+                clear: [1.0, 1.0, 1.0],
+                sky_top: [1.0, 1.0, 1.0],
+                sky_bottom: [0.85, 0.85, 0.85],
+            },
+            Self::Gradient => ResolvedBackground {
+                kind: BgKind::Gradient,
+                clear: [0.165, 0.165, 0.180],
+                sky_top: [0.66, 0.70, 0.72],
+                sky_bottom: [0.35, 0.41, 0.47],
+            },
+            Self::DarkGray => ResolvedBackground {
+                kind: BgKind::Solid,
+                clear: [0.12, 0.12, 0.12],
+                sky_top: [0.30, 0.32, 0.35],
+                sky_bottom: [0.15, 0.14, 0.13],
+            },
+            Self::AyuMirage => ResolvedBackground {
+                kind: BgKind::Solid,
+                clear: [0.122, 0.141, 0.188],
+                sky_top: [0.122 * 1.4, 0.141 * 1.4, 0.188 * 1.4],
+                sky_bottom: [0.122 * 0.6, 0.141 * 0.6, 0.188 * 0.6],
+            },
+            Self::Black => ResolvedBackground {
+                kind: BgKind::Solid,
+                clear: [0.0, 0.0, 0.0],
+                sky_top: [0.20, 0.22, 0.25],
+                sky_bottom: [0.08, 0.07, 0.06],
+            },
+            // HDRI shares Gradient's neutral fallback — the skybox pass
+            // covers the pane once an HDRI is loaded.
+            Self::HdriSky => ResolvedBackground {
+                kind: BgKind::Hdri,
+                clear: [0.165, 0.165, 0.180],
+                sky_top: [0.66, 0.70, 0.72],
+                sky_bottom: [0.35, 0.41, 0.47],
+            },
+        }
+    }
+}
+
+/// A user-defined background — a named solid fill or two-colour vertical
+/// gradient. Stored in [`ViewPrefs::custom_backgrounds`]; panes reference
+/// it by [`CustomBackground::id`] through [`BackgroundMode::Custom`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomBackground {
+    /// Stable identifier — assigned from [`ViewPrefs::next_custom_id`] and
+    /// never reused, so a pane referencing a deleted custom falls back
+    /// cleanly rather than aliasing a different one.
+    pub id: u32,
+    pub name: String,
+    pub kind: CustomBgKind,
+    /// Solid: the fill colour. Gradient: the top colour. Linear RGB.
+    pub top: [f32; 3],
+    /// Gradient: the bottom colour. Unused when `kind` is `Solid`.
+    pub bottom: [f32; 3],
+}
+
+impl CustomBackground {
+    #[must_use]
+    pub fn resolved(&self) -> ResolvedBackground {
+        match self.kind {
+            CustomBgKind::Solid => ResolvedBackground {
+                kind: BgKind::Solid,
+                clear: self.top,
+                sky_top: self.top,
+                sky_bottom: self.top,
+            },
+            CustomBgKind::Gradient => ResolvedBackground {
+                kind: BgKind::Gradient,
+                clear: self.bottom,
+                sky_top: self.top,
+                sky_bottom: self.bottom,
+            },
+        }
+    }
+}
+
+/// A pane's background choice — a builtin or a reference to a user
+/// [`CustomBackground`]. `#[serde(untagged)]` keeps builtins serialized
+/// as plain strings (so pre-RC2 `config.toml` files still load) and
+/// customs as their integer id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BackgroundMode {
+    Builtin(BuiltinBg),
+    Custom(u32),
+}
+
+impl BackgroundMode {
+    pub const WHITE: Self = Self::Builtin(BuiltinBg::White);
+    pub const GRADIENT: Self = Self::Builtin(BuiltinBg::Gradient);
+    pub const BLACK: Self = Self::Builtin(BuiltinBg::Black);
+    pub const HDRI_SKY: Self = Self::Builtin(BuiltinBg::HdriSky);
+
+    /// Resolve to concrete colours, looking a `Custom` up in `customs`.
+    /// A dangling id (custom deleted while a pane still referenced it)
+    /// falls back to the builtin Gradient.
+    #[must_use]
+    pub fn resolve(self, customs: &[CustomBackground]) -> ResolvedBackground {
+        match self {
+            Self::Builtin(b) => b.resolved(),
+            Self::Custom(id) => customs.iter().find(|c| c.id == id).map_or_else(
+                || BuiltinBg::Gradient.resolved(),
+                CustomBackground::resolved,
+            ),
+        }
+    }
+
+    /// `true` when this is the HDRI-sky builtin.
+    #[must_use]
+    pub fn is_hdri_sky(self) -> bool {
+        self == Self::HDRI_SKY
+    }
+
+    /// Human-readable name — builtin display string, or the custom's name
+    /// (a placeholder if the id is dangling).
+    #[must_use]
+    pub fn label(self, customs: &[CustomBackground]) -> String {
+        match self {
+            Self::Builtin(b) => b.to_string(),
+            Self::Custom(id) => customs
+                .iter()
+                .find(|c| c.id == id)
+                .map_or_else(|| format!("Custom #{id}"), |c| c.name.clone()),
+        }
+    }
 }
 
 cycle_enum! {
@@ -297,6 +470,18 @@ cycle_enum! {
     ; cycle
 }
 
+cycle_enum! {
+    /// User-selectable interface theme. Both presets are Ayu Mirage
+    /// derivatives; the GUI hot-swaps between them without a restart.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum ThemeChoice {
+        #[default]
+        AyuMirageDark => "Ayu Mirage Dark",
+        AyuMirageLight => "Ayu Mirage Light",
+    }
+    ; cycle
+}
+
 /// Root TOML structure persisted at `~/.config/solarxy/config.toml`
 /// (via [`config_path`]).
 ///
@@ -335,6 +520,22 @@ pub struct Preferences {
     pub review: ReviewPrefs,
     #[serde(default)]
     pub dock: DockPrefs,
+    #[serde(default)]
+    pub view: ViewPrefs,
+}
+
+/// View-related preferences — currently the user's custom-background
+/// registry. `default_background` keeps living on [`DisplayPrefs`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ViewPrefs {
+    /// User-defined backgrounds, in display order. Referenced by panes
+    /// through [`BackgroundMode::Custom`].
+    #[serde(default)]
+    pub custom_backgrounds: Vec<CustomBackground>,
+    /// Monotonic id allocator for new customs — never decremented, so a
+    /// deleted id is never reused. See [`CustomBackground::id`].
+    #[serde(default)]
+    pub next_custom_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -371,7 +572,7 @@ pub struct DisplayPrefs {
 }
 
 fn default_background() -> BackgroundMode {
-    BackgroundMode::Gradient
+    BackgroundMode::GRADIENT
 }
 
 fn default_exposure() -> f32 {
@@ -436,14 +637,12 @@ pub const MAX_RECENT_FILES_CAP: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UiPrefs {
-    #[serde(default = "default_true")]
-    pub default_sidebar_visible: bool,
-    #[serde(default)]
-    pub default_fps_hud_visible: bool,
     #[serde(default = "default_max_recent_files")]
     pub max_recent_files: usize,
     #[serde(default = "default_true")]
-    pub open_stats_on_model_load: bool,
+    pub status_bar_visible: bool,
+    #[serde(default)]
+    pub theme: ThemeChoice,
 }
 
 fn default_max_recent_files() -> usize {
@@ -453,10 +652,9 @@ fn default_max_recent_files() -> usize {
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
-            default_sidebar_visible: true,
-            default_fps_hud_visible: false,
             max_recent_files: default_max_recent_files(),
-            open_stats_on_model_load: true,
+            status_bar_visible: true,
+            theme: ThemeChoice::default(),
         }
     }
 }
@@ -518,6 +716,7 @@ impl Default for Preferences {
             updater: UpdaterPrefs::default(),
             review: ReviewPrefs::default(),
             dock: DockPrefs::default(),
+            view: ViewPrefs::default(),
         }
     }
 }
@@ -525,7 +724,7 @@ impl Default for Preferences {
 impl Default for DisplayPrefs {
     fn default() -> Self {
         Self {
-            background: BackgroundMode::Gradient,
+            background: BackgroundMode::GRADIENT,
             view_mode: ViewMode::Shaded,
             normals_mode: NormalsMode::Off,
             grid_visible: true,
@@ -647,7 +846,7 @@ mod tests {
         let prefs = Preferences {
             config_version: 1,
             display: DisplayPrefs {
-                background: BackgroundMode::Black,
+                background: BackgroundMode::BLACK,
                 view_mode: ViewMode::WireframeOnly,
                 normals_mode: NormalsMode::FaceAndVertex,
                 grid_visible: false,
@@ -679,10 +878,9 @@ mod tests {
                 recent_files: vec!["/tmp/model.obj".to_string()],
             },
             ui: UiPrefs {
-                default_sidebar_visible: false,
-                default_fps_hud_visible: true,
                 max_recent_files: 10,
-                open_stats_on_model_load: false,
+                status_bar_visible: false,
+                theme: ThemeChoice::AyuMirageLight,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -695,6 +893,25 @@ mod tests {
             dock: DockPrefs {
                 last_layout_json: Some(r#"{"surfaces":[]}"#.to_string()),
                 saved_layout_json: None,
+            },
+            view: ViewPrefs {
+                custom_backgrounds: vec![
+                    CustomBackground {
+                        id: 0,
+                        name: "Studio".to_string(),
+                        kind: CustomBgKind::Solid,
+                        top: [0.2, 0.2, 0.22],
+                        bottom: [0.0, 0.0, 0.0],
+                    },
+                    CustomBackground {
+                        id: 1,
+                        name: "Sunset".to_string(),
+                        kind: CustomBgKind::Gradient,
+                        top: [0.9, 0.5, 0.2],
+                        bottom: [0.1, 0.1, 0.3],
+                    },
+                ],
+                next_custom_id: 2,
             },
         };
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
@@ -765,7 +982,7 @@ mod tests {
             key = "value"
         "#;
         let parsed: Preferences = toml::from_str(toml_str).unwrap();
-        assert_eq!(parsed.display.background, BackgroundMode::Black);
+        assert_eq!(parsed.display.background, BackgroundMode::BLACK);
         assert!(!parsed.display.bloom_enabled);
         assert_eq!(parsed.rendering.wireframe_line_weight, LineWeight::Medium);
         assert_eq!(parsed.rendering.msaa_sample_count, 8);
@@ -798,7 +1015,7 @@ mod tests {
         assert_eq!(parsed.history, HistoryPrefs::default());
         assert_eq!(parsed.ui, UiPrefs::default());
         assert_eq!(parsed.updater, UpdaterPrefs::default());
-        assert_eq!(parsed.display.background, BackgroundMode::Black);
+        assert_eq!(parsed.display.background, BackgroundMode::BLACK);
     }
 
     #[test]
@@ -837,8 +1054,7 @@ mod tests {
     #[test]
     fn ui_prefs_defaults_match_observed() {
         let ui = UiPrefs::default();
-        assert!(ui.default_sidebar_visible);
-        assert!(!ui.default_fps_hud_visible);
+        assert!(ui.status_bar_visible);
         assert_eq!(ui.max_recent_files, 20);
     }
 
@@ -853,6 +1069,20 @@ mod tests {
     fn updater_channel_cycles() {
         assert_eq!(UpdaterChannel::Stable.next(), UpdaterChannel::Prerelease);
         assert_eq!(UpdaterChannel::Prerelease.next(), UpdaterChannel::Stable);
+    }
+
+    #[test]
+    fn theme_choice_defaults_to_dark_and_cycles() {
+        assert_eq!(ThemeChoice::default(), ThemeChoice::AyuMirageDark);
+        assert_eq!(UiPrefs::default().theme, ThemeChoice::AyuMirageDark);
+        assert_eq!(
+            ThemeChoice::AyuMirageDark.next(),
+            ThemeChoice::AyuMirageLight
+        );
+        assert_eq!(
+            ThemeChoice::AyuMirageLight.next(),
+            ThemeChoice::AyuMirageDark
+        );
     }
 
     #[test]
@@ -898,5 +1128,77 @@ mod tests {
     #[test]
     fn config_path_returns_some() {
         assert!(config_path().is_some());
+    }
+
+    #[test]
+    fn background_mode_untagged_serializes_compactly() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Wrap {
+            bg: BackgroundMode,
+        }
+        // Builtin → bare string (pre-RC2 config.toml stays readable);
+        // custom → bare integer id.
+        let builtin = toml::to_string(&Wrap {
+            bg: BackgroundMode::GRADIENT,
+        })
+        .unwrap();
+        assert_eq!(builtin.trim(), r#"bg = "Gradient""#);
+        let custom = toml::to_string(&Wrap {
+            bg: BackgroundMode::Custom(7),
+        })
+        .unwrap();
+        assert_eq!(custom.trim(), "bg = 7");
+
+        for mode in [
+            BackgroundMode::GRADIENT,
+            BackgroundMode::BLACK,
+            BackgroundMode::HDRI_SKY,
+            BackgroundMode::Custom(42),
+        ] {
+            let w = Wrap { bg: mode };
+            let s = toml::to_string(&w).unwrap();
+            assert_eq!(toml::from_str::<Wrap>(&s).unwrap(), w);
+        }
+    }
+
+    #[test]
+    fn legacy_background_string_still_parses() {
+        // A pre-RC2 config wrote `background = "AyuMirage"` (the serde
+        // variant name) — it must still load as the matching builtin.
+        let toml_str = r#"
+            config_version = 1
+            [display]
+            background = "AyuMirage"
+            view_mode = "Shaded"
+            normals_mode = "Off"
+            grid_visible = true
+            axis_gizmo_visible = true
+            bloom_enabled = true
+        "#;
+        let parsed: Preferences = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            parsed.display.background,
+            BackgroundMode::Builtin(BuiltinBg::AyuMirage)
+        );
+    }
+
+    #[test]
+    fn background_resolve_falls_back_for_dangling_custom() {
+        let customs = vec![CustomBackground {
+            id: 3,
+            name: "Studio".to_string(),
+            kind: CustomBgKind::Solid,
+            top: [0.4, 0.4, 0.4],
+            bottom: [0.0, 0.0, 0.0],
+        }];
+        // Present id resolves to the custom's colours.
+        let hit = BackgroundMode::Custom(3).resolve(&customs);
+        assert_eq!(hit.kind, BgKind::Solid);
+        for channel in hit.clear {
+            assert!((channel - 0.4).abs() < 1e-6);
+        }
+        // Dangling id falls back to the builtin Gradient.
+        let miss = BackgroundMode::Custom(99).resolve(&customs);
+        assert_eq!(miss, BuiltinBg::Gradient.resolved());
     }
 }

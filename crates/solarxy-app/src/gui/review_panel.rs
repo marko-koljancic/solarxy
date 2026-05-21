@@ -12,6 +12,7 @@
 use solarxy_core::review::AnnotationCategory;
 
 use super::review_visuals::{category_color, category_letter as category_label_short};
+use super::theme::Theme;
 use crate::state::review::ReviewState;
 
 fn category_index(c: AnnotationCategory) -> usize {
@@ -33,8 +34,9 @@ fn draw_category_chip(
     cat: AnnotationCategory,
     on: bool,
     text: &str,
+    theme: Theme,
 ) -> egui::Response {
-    let color = category_color(cat);
+    let color = category_color(theme, cat);
     let (fill, text_color, stroke) = if on {
         (color, egui::Color32::WHITE, egui::Stroke::NONE)
     } else {
@@ -59,6 +61,7 @@ pub(super) fn draw_review_panel_content(
     ui: &mut egui::Ui,
     review: &mut ReviewState,
     visible: &mut bool,
+    theme: Theme,
 ) {
     ui.horizontal(|ui| {
         let total = review.annotations.len();
@@ -71,6 +74,20 @@ pub(super) fn draw_review_panel_content(
             {
                 *visible = false;
             }
+            // Markers toggle — suppresses the 3D viewport overlay while
+            // the panel keeps listing every annotation.
+            let markers_shown = !review.markers_hidden;
+            if ui
+                .selectable_label(markers_shown, "Markers")
+                .on_hover_text(if markers_shown {
+                    "Hide review markers in the viewport"
+                } else {
+                    "Show review markers in the viewport"
+                })
+                .clicked()
+            {
+                review.markers_hidden = markers_shown;
+            }
         });
     });
     ui.separator();
@@ -81,15 +98,14 @@ pub(super) fn draw_review_panel_content(
             let idx = category_index(cat);
             let on = review.category_filters[idx];
             let chip_text = format!("{} {}", category_label_short(cat), cat);
-            if draw_category_chip(ui, cat, on, &chip_text).clicked() {
+            if draw_category_chip(ui, cat, on, &chip_text, theme).clicked() {
                 review.category_filters[idx] = !on;
             }
         }
-        ui.checkbox(&mut review.show_resolved, "Resolved");
+        ui.checkbox(&mut review.show_resolved, "Complete");
     });
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("\u{1F50D}").small());
         let resp = ui.add(
             egui::TextEdit::singleline(&mut review.text_filter)
                 .hint_text("filter notes")
@@ -174,6 +190,7 @@ pub(super) fn draw_review_panel_content(
                 &mut click_target,
                 &mut reanchor_click,
                 &mut cancel_reanchor_click,
+                theme,
             );
             if !stale_idx.is_empty() {
                 draw_section(
@@ -188,12 +205,13 @@ pub(super) fn draw_review_panel_content(
                     &mut click_target,
                     &mut reanchor_click,
                     &mut cancel_reanchor_click,
+                    theme,
                 );
             }
             if !resolved_idx.is_empty() {
                 draw_section(
                     ui,
-                    "Resolved",
+                    "Complete",
                     &resolved_idx,
                     &review.annotations,
                     selected_id.as_deref(),
@@ -203,6 +221,7 @@ pub(super) fn draw_review_panel_content(
                     &mut click_target,
                     &mut reanchor_click,
                     &mut cancel_reanchor_click,
+                    theme,
                 );
             }
         });
@@ -227,11 +246,11 @@ pub(super) fn draw_review_panel_content(
         review.cancel_reanchor();
     }
     if review.selected.is_some() {
-        draw_selected_editor(ui, review);
+        draw_selected_editor(ui, review, theme);
     }
 }
 
-fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
+fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState, theme: Theme) {
     let Some(selected_id) = review.selected.clone() else {
         return;
     };
@@ -258,14 +277,14 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             egui::ComboBox::from_id_salt("review_selected_category")
                 .selected_text(
                     egui::RichText::new(ann.category.to_string())
-                        .color(category_color(ann.category)),
+                        .color(category_color(theme, ann.category)),
                 )
                 .show_ui(ui, |ui| {
                     for &cat in AnnotationCategory::ALL {
                         ui.selectable_value(
                             &mut ann.category,
                             cat,
-                            egui::RichText::new(cat.to_string()).color(category_color(cat)),
+                            egui::RichText::new(cat.to_string()).color(category_color(theme, cat)),
                         );
                     }
                 });
@@ -284,7 +303,7 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
         }
 
         let prev_resolved = ann.resolved;
-        ui.checkbox(&mut ann.resolved, "Resolved");
+        ui.checkbox(&mut ann.resolved, "Complete");
         if ann.resolved != prev_resolved {
             any_change = true;
         }
@@ -303,7 +322,7 @@ fn draw_selected_editor(ui: &mut egui::Ui, review: &mut ReviewState) {
             }
             if is_stale {
                 if reanchor_active {
-                    let amber = egui::Color32::from_rgb(0xFF, 0xC4, 0x4C);
+                    let amber = theme.review.selection_accent;
                     if ui
                         .button(egui::RichText::new("Cancel re-anchor").color(amber))
                         .on_hover_text("Exit re-anchor sub-mode without changes (Esc)")
@@ -445,6 +464,7 @@ fn draw_section(
     click_target: &mut Option<String>,
     reanchor_click: &mut Option<String>,
     cancel_reanchor_click: &mut bool,
+    theme: Theme,
 ) {
     egui::CollapsingHeader::new(format!("{title} ({})", indices.len()))
         .default_open(true)
@@ -452,7 +472,7 @@ fn draw_section(
             for &i in indices {
                 let ann = &annotations[i];
                 let row_resp =
-                    draw_annotation_row(ui, ann, selected, reanchor_target, click_target);
+                    draw_annotation_row(ui, ann, selected, reanchor_target, click_target, theme);
                 if scroll_to == Some(ann.id.as_str()) {
                     row_resp.scroll_to_me(Some(egui::Align::Center));
                 }
@@ -463,6 +483,7 @@ fn draw_section(
                         reanchor_target,
                         reanchor_click,
                         cancel_reanchor_click,
+                        theme,
                     );
                 }
                 let reply_indices: Vec<usize> = annotations
@@ -493,6 +514,7 @@ fn draw_annotation_row(
     selected: Option<&str>,
     reanchor_target: Option<&str>,
     click_target: &mut Option<String>,
+    theme: Theme,
 ) -> egui::Response {
     let is_selected = selected == Some(ann.id.as_str());
     let is_reanchor = reanchor_target == Some(ann.id.as_str());
@@ -500,7 +522,7 @@ fn draw_annotation_row(
     let row_resp = ui
         .scope(|ui| {
             ui.horizontal_top(|ui| {
-                let color = category_color(ann.category);
+                let color = category_color(theme, ann.category);
                 let text = egui::RichText::new(category_label_short(ann.category))
                     .strong()
                     .color(color);
@@ -544,7 +566,8 @@ fn draw_annotation_row(
         let t = ui.ctx().input(|i| i.time);
         let phase = ((t * std::f64::consts::TAU / 0.6).sin().mul_add(0.5, 0.5)) as f32;
         let alpha = (30.0 + 40.0 * phase).round() as u8;
-        let amber = egui::Color32::from_rgba_unmultiplied(0xFF, 0xC4, 0x4C, alpha);
+        let sa = theme.review.selection_accent;
+        let amber = egui::Color32::from_rgba_unmultiplied(sa.r(), sa.g(), sa.b(), alpha);
         ui.painter()
             .rect_filled(row_resp.rect.expand(2.0), 3.0, amber);
         ui.ctx().request_repaint();
@@ -572,12 +595,13 @@ fn draw_replace_button(
     reanchor_target: Option<&str>,
     reanchor_click: &mut Option<String>,
     cancel_reanchor_click: &mut bool,
+    theme: Theme,
 ) {
     let is_active = reanchor_target == Some(annotation_id);
     ui.horizontal(|ui| {
         ui.add_space(20.0);
         if is_active {
-            let amber = egui::Color32::from_rgb(0xFF, 0xC4, 0x4C);
+            let amber = theme.review.selection_accent;
             let btn =
                 egui::Button::new(egui::RichText::new("Cancel re-anchor").color(amber)).small();
             if ui
