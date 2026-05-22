@@ -2,16 +2,13 @@
 #
 # Installer manifest for Koljam.Solarxy.
 #
-# Two placeholders are filled in by the release-time workflow
-# (`.github/workflows/winget-release.yml`) before submission:
-#   {{INSTALLER_SHA256}} — SHA-256 hash of the produced MSI artifact.
-#   {{PRODUCT_CODE}}     — actual ProductCode GUID extracted from the MSI
-#                          via `msiinfo export <msi> Property` (the WiX
-#                          ProductCode rotates per build, so it can't be
-#                          hard-coded in this manifest).
+# {{INSTALLER_SHA256}} is filled in by the release-time workflow
+# (`.github/workflows/winget-release.yml`) before submission — the
+# SHA-256 of the produced MSI artifact.
 #
-# UpgradeCode is stable across versions and lives in the root `Cargo.toml`
-# `[package.metadata.wix]` (F201EA19-A29E-4B9E-A3CE-85CEB9BAF9CE).
+# ProductCode is intentionally omitted: it is an optional field, the WiX
+# ProductCode rotates every build, and winget reads it from the MSI itself
+# at install time.
 
 PackageIdentifier: Koljam.Solarxy
 PackageVersion: 0.6.0
@@ -35,6 +32,5 @@ Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/marko-koljancic/solarxy/releases/download/v0.6.0/solarxy-x86_64-pc-windows-msvc.msi
     InstallerSha256: '{{INSTALLER_SHA256}}'
-    ProductCode: '{{PRODUCT_CODE}}'
 ManifestType: installer
 ManifestVersion: 1.6.0

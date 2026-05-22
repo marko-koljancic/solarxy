@@ -14,15 +14,18 @@ manifests/k/Koljam/Solarxy/<version>/
 
 ## Placeholders
 
-`Koljam.Solarxy.installer.yaml` contains two release-time placeholders:
+`Koljam.Solarxy.installer.yaml` contains one release-time placeholder:
 
-| Placeholder         | Source                                            |
-| ------------------- | ------------------------------------------------- |
-| `{{INSTALLER_SHA256}}` | SHA-256 of the produced MSI artifact.          |
-| `{{PRODUCT_CODE}}`     | Extracted from the MSI via `msiinfo export <msi> Property` and grepping the `ProductCode` row. WiX rotates ProductCode per build, so it cannot be hard-coded. |
+| Placeholder            | Source                                |
+| ---------------------- | ------------------------------------- |
+| `{{INSTALLER_SHA256}}` | SHA-256 of the produced MSI artifact. |
 
-The `winget-release.yml` bump workflow performs both substitutions on every
+The `winget-release.yml` workflow performs this substitution on every
 release tag.
+
+`ProductCode` is intentionally omitted from the manifest: it is an
+optional field, the WiX ProductCode rotates every build, and winget reads
+it from the MSI itself at install time.
 
 ## Local validation
 
@@ -31,9 +34,9 @@ release tag.
 winget validate manifests/k/Koljam/Solarxy/<version>
 ```
 
-This will fail until the placeholders are substituted (since `{{PRODUCT_CODE}}`
-isn't a valid GUID). For local pre-flight validation, temporarily replace
-both with valid throw-away values, validate, then revert.
+This will fail until `{{INSTALLER_SHA256}}` is substituted. For local
+pre-flight validation, temporarily replace it with a valid throw-away
+SHA-256, validate, then revert.
 
 ## UpgradeCode
 
