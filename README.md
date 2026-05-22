@@ -40,7 +40,7 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 - **Ayu Mirage theme** -- flat dark UI with amber accent (`#FFC44C`), bundled Lilex font, custom dock styling
 - **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
-- **Persistent preferences** -- configure defaults via the GUI **Edit → Preferences…** dialog (`Ctrl/⌘+,`) or tweak the TOML file directly; live changes in the viewer are saved with `Shift+S`
+- **Persistent preferences** -- configure defaults via the GUI **Edit → Preferences…** dialog (`Ctrl/⌘+,`) or tweak the TOML file directly; live viewer changes are persisted via **Edit → Save View Settings as Default**
 - **Drag-and-drop** -- drop model files or HDR/EXR environment maps directly into the viewer window
 
 ## Supported Formats

@@ -509,8 +509,8 @@ cycle_enum! {
 /// split):
 /// - GUI **Edit → Preferences…** (`Ctrl/⌘+,`) — startup-only fields
 ///   (window size, MSAA), UI defaults, updater behaviour.
-/// - GUI sidebar + `Shift+S` — live per-session display / rendering /
-///   lighting settings.
+/// - GUI sidebar + **Edit → Save View Settings as Default** — live
+///   per-session display / rendering / lighting settings.
 /// - Direct TOML editing — anything; reload via the modal's
 ///   **Open config file** button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

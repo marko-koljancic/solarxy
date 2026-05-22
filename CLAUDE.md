@@ -184,7 +184,7 @@ Left-click in review mode (`Shift+R`) walks a three-step ladder in `state/input/
 
 ## Performance
 
-Performance baseline + profiling notes from rc.11 are deferred to 0.6.0; measurements are filled in on maintainer hardware as hot paths are profiled. The previous `docs/perf/` skeleton was removed alongside the v0.5.0 documentation overhaul.
+Performance baseline + profiling notes from rc.11 are deferred to a later milestone; measurements are filled in on maintainer hardware as hot paths are profiled. The previous `docs/perf/` skeleton was removed alongside the v0.5.0 documentation overhaul.
 
 ## Formatting
 
