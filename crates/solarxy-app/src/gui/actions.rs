@@ -26,9 +26,13 @@ pub(crate) struct MenuActions {
     pub toggle_review_mode: bool,
     /// Review-menu toggle of the 3D marker overlay (`ReviewState::markers_hidden`).
     pub toggle_review_markers: bool,
+    /// Review-menu "Save Review Notes" — writes the sidecar (same as `Cmd/Ctrl+S`).
+    pub save_review_notes: bool,
     pub save_dock_layout: bool,
     pub restore_saved_layout: bool,
     pub reset_dock_layout: bool,
+    /// View-menu "Show All Meshes" — un-hides every mesh (same as `Alt+H`).
+    pub show_all_meshes: bool,
 }
 
 /// Bundle the visible divider rect, its wider hit zone, and the current

@@ -36,12 +36,21 @@ const PIN_RADIUS: f32 = 6.0;
 const PIN_HIT_RADIUS: f32 = 10.0;
 const CARD_OFFSET: egui::Vec2 = egui::vec2(14.0, -14.0);
 const CARD_WIDTH: f32 = 260.0;
-const CARD_HEIGHT: f32 = 72.0;
+/// Vertical space above the body text: top padding + the header row
+/// (category chip + author / time line).
+const CARD_HEADER_H: f32 = 20.0;
+/// The card height is content-driven (it grows to fit the body galley);
+/// clamp it to this readable range so a one-word note isn't a sliver and
+/// a wall of text isn't a full-screen panel.
+const CARD_MIN_HEIGHT: f32 = 54.0;
+const CARD_MAX_HEIGHT: f32 = 240.0;
 const CARD_PADDING: f32 = 8.0;
 const CARD_ROUNDING: f32 = 6.0;
 const CARD_FILL_ALPHA: u8 = 235;
 const RESOLVED_ALPHA: u8 = 90;
-const TEXT_TRUNCATE_CHARS: usize = 140;
+/// Body-text font size — the galley is measured and drawn at this size.
+const CARD_BODY_FONT: f32 = 12.0;
+const TEXT_TRUNCATE_CHARS: usize = 240;
 
 /// Paint review markers + expand-on-hover/select cards across the supplied
 /// 3D panes. Reads from + writes to `review.hovered`; does not change any
@@ -62,7 +71,12 @@ pub(crate) fn draw_review_overlay(
     if suppress {
         return;
     }
-    if panes.is_empty() || review.annotations.iter().all(|a| a.reply_to.is_some()) {
+    // No model ⇒ no markers, ever (the model was closed but annotations
+    // may not be cleared yet on the frame the close lands).
+    if model.is_none()
+        || panes.is_empty()
+        || review.annotations.iter().all(|a| a.reply_to.is_some())
+    {
         review.hovered = None;
         return;
     }
@@ -90,7 +104,13 @@ pub(crate) fn draw_review_overlay(
             ) else {
                 continue;
             };
-            let card_rect = compute_card_rect(pos, pane.egui_rect);
+            // The card sizes to its text: lay the body galley out up front
+            // so its measured height drives `compute_card_rect` (and the
+            // hover hit-test, which keys off `card_rect`).
+            let body_galley = layout_card_body(&painter, ann, theme);
+            let has_replies = review.reply_count(&ann.id) > 0;
+            let card_height = card_height_for(&body_galley, has_replies);
+            let card_rect = compute_card_rect(pos, pane.egui_rect, card_height);
             let mesh_hidden = model.is_some_and(|m| {
                 m.meshes
                     .get(ann.anchor.mesh_index as usize)
@@ -100,6 +120,7 @@ pub(crate) fn draw_review_overlay(
                 ann,
                 pos,
                 card_rect,
+                body_galley,
                 mesh_hidden,
             });
         }
@@ -175,9 +196,38 @@ struct VisiblePin<'a> {
     ann: &'a ReviewAnnotation,
     pos: egui::Pos2,
     card_rect: Option<egui::Rect>,
+    /// Body text pre-laid-out at [`CARD_WIDTH`] — measured once so the
+    /// card height matches what `draw_card` paints.
+    body_galley: std::sync::Arc<egui::Galley>,
     /// The mesh this annotation is anchored to is hidden (Outliner / hide
     /// shortcuts) — the pin renders dimmed, like a resolved one.
     mesh_hidden: bool,
+}
+
+/// Lay out an annotation's body text at the card's content width. The
+/// resulting galley is measured for [`card_height_for`] and reused by
+/// [`draw_card`] so layout and paint never disagree.
+fn layout_card_body(
+    painter: &egui::Painter,
+    ann: &ReviewAnnotation,
+    theme: Theme,
+) -> std::sync::Arc<egui::Galley> {
+    let body = truncate_with_ellipsis(&ann.text, TEXT_TRUNCATE_CHARS);
+    painter.layout(
+        body.into_owned(),
+        egui::FontId::proportional(CARD_BODY_FONT),
+        theme.fg,
+        CARD_WIDTH - 2.0 * CARD_PADDING,
+    )
+}
+
+/// Card height needed to show `body` in full: top padding + header +
+/// galley + an optional reply-badge line + bottom padding, clamped to the
+/// readable range.
+fn card_height_for(body: &egui::Galley, has_replies: bool) -> f32 {
+    let reply_extra = if has_replies { 16.0 } else { 0.0 };
+    (2.0 * CARD_PADDING + CARD_HEADER_H + body.size().y + reply_extra)
+        .clamp(CARD_MIN_HEIGHT, CARD_MAX_HEIGHT)
 }
 
 /// Project a world point through `view_proj` and into the pane's
@@ -253,13 +303,17 @@ fn draw_pin(
 /// `pane_rect`. Returns `None` when the intersection with the pane is
 /// smaller than the minimum readable area — in that case the caller
 /// shows the pin only and lets the side panel carry the full text.
-fn compute_card_rect(pin_pos: egui::Pos2, pane_rect: egui::Rect) -> Option<egui::Rect> {
+fn compute_card_rect(
+    pin_pos: egui::Pos2,
+    pane_rect: egui::Rect,
+    card_height: f32,
+) -> Option<egui::Rect> {
     const EDGE_INSET: f32 = 4.0;
     const MIN_W: f32 = 120.0;
     const MIN_H: f32 = 40.0;
 
     let mut card_min = pin_pos + CARD_OFFSET;
-    let card_size = egui::vec2(CARD_WIDTH, CARD_HEIGHT);
+    let card_size = egui::vec2(CARD_WIDTH, card_height);
 
     if card_min.x + card_size.x > pane_rect.max.x - EDGE_INSET {
         card_min.x = pin_pos.x - CARD_OFFSET.x - card_size.x;
@@ -345,21 +399,10 @@ fn draw_card(
         with_alpha(theme.fg, 230),
     );
 
-    let body = truncate_with_ellipsis(&pin.ann.text, TEXT_TRUNCATE_CHARS);
-    let body_rect = egui::Rect::from_min_max(
-        egui::pos2(card_rect.min.x + CARD_PADDING, header_y + 20.0),
-        egui::pos2(
-            card_rect.max.x - CARD_PADDING,
-            card_rect.max.y - CARD_PADDING,
-        ),
-    );
-    let galley = painter.layout(
-        body.into_owned(),
-        egui::FontId::proportional(12.0),
-        theme.fg,
-        body_rect.width(),
-    );
-    painter.galley(body_rect.min, galley, theme.fg);
+    // Body text was measured into `pin.body_galley` up front; draw it at
+    // the same width/size so the card background always encloses it.
+    let body_min = egui::pos2(card_rect.min.x + CARD_PADDING, header_y + CARD_HEADER_H);
+    painter.galley(body_min, pin.body_galley.clone(), theme.fg);
 
     let reply_count = review.reply_count(&pin.ann.id);
     if reply_count > 0 {

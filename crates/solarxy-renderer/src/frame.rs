@@ -808,11 +808,30 @@ impl Renderer {
         uv_cam_bg: &wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
-        let clear_color = wgpu::Color {
-            r: 0.10,
-            g: 0.10,
-            b: 0.10,
-            a: 1.0,
+        // Flat-solid variants paint the pane purely via the clear colour.
+        // `Charcoal` carries a faint blue tint to sit with the Ayu Mirage
+        // theme; `Dark` clears the same as before and overdraws a gradient.
+        let clear_color = match pds.uv_bg {
+            UvMapBackground::Charcoal => wgpu::Color {
+                r: 0.045,
+                g: 0.050,
+                b: 0.072,
+                a: 1.0,
+            },
+            UvMapBackground::Gray => wgpu::Color {
+                r: 0.300,
+                g: 0.300,
+                b: 0.320,
+                a: 1.0,
+            },
+            UvMapBackground::Dark | UvMapBackground::Checker | UvMapBackground::Texture => {
+                wgpu::Color {
+                    r: 0.10,
+                    g: 0.10,
+                    b: 0.10,
+                    a: 1.0,
+                }
+            }
         };
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -843,6 +862,9 @@ impl Renderer {
         match pds.uv_bg {
             UvMapBackground::Dark => {
                 self.draw_background_gradient(&mut pass);
+            }
+            UvMapBackground::Charcoal | UvMapBackground::Gray => {
+                // Flat solid — the clear colour above is the background.
             }
             UvMapBackground::Checker => {
                 pass.set_pipeline(&self.pipelines.uv.uv_map_checker);

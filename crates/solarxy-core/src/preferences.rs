@@ -126,6 +126,18 @@ impl LineWeight {
             Self::Bold => 3.0,
         }
     }
+
+    /// Name paired with the pixel width — `"Light (1 px)"` etc. The bare
+    /// `Display` string ("Light"/"Medium"/"Bold") is meaningless without
+    /// context; this is used wherever the control stands alone (the UV
+    /// pane toolbar's wireframe-weight dropdown).
+    pub fn descriptive_label(self) -> &'static str {
+        match self {
+            Self::Light => "Light (1 px)",
+            Self::Medium => "Medium (2 px)",
+            Self::Bold => "Bold (3 px)",
+        }
+    }
 }
 
 cycle_enum! {
@@ -370,6 +382,8 @@ cycle_enum! {
     pub enum UvMapBackground {
         #[default]
         Dark => "Dark",
+        Charcoal => "Charcoal",
+        Gray => "Gray",
         Checker => "Checker",
         Texture => "Texture",
     }

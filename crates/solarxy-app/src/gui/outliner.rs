@@ -54,6 +54,22 @@ pub(super) fn draw_outliner_content(
         return;
     };
 
+    // Bulk-visibility action. "Show All" previously lived only in a
+    // right-click menu and was undiscoverable — a persistent button is
+    // the obvious recovery path after hiding meshes.
+    let any_hidden = model.meshes.iter().any(|m| !m.visible);
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(any_hidden, egui::Button::new("Show All Meshes").small())
+            .on_hover_text("Make every mesh visible (Alt+H)")
+            .clicked()
+        {
+            events.action = Some(OutlinerAction::ShowAll);
+        }
+    });
+    ui.separator();
+
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
 
@@ -99,7 +115,7 @@ fn draw_mesh_row(
     model: &Model,
     events: &mut OutlinerEvents,
 ) {
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         let mut visible = mesh.visible;
         if ui
             .checkbox(&mut visible, "")
@@ -110,35 +126,40 @@ fn draw_mesh_row(
         }
 
         let name = mesh_display_name(mesh, idx);
-        let resp = ui
+        if ui
             .selectable_label(false, name)
-            .on_hover_text("Click to frame \u{2014} right-click for actions");
-        if resp.clicked() {
+            .on_hover_text("Click to frame \u{2014} right-click for actions")
+            .clicked()
+        {
             events.action = Some(OutlinerAction::FrameMesh(idx));
         }
-        resp.context_menu(|ui| {
-            if ui.button("Frame").clicked() {
-                events.action = Some(OutlinerAction::FrameMesh(idx));
-                ui.close();
-            }
-            if ui.button("Hide").clicked() {
-                events.action = Some(OutlinerAction::HideMesh(idx));
-                ui.close();
-            }
-            if ui.button("Isolate").clicked() {
-                events.action = Some(OutlinerAction::IsolateMesh(idx));
-                ui.close();
-            }
-            if ui.button("Show All").clicked() {
-                events.action = Some(OutlinerAction::ShowAll);
-                ui.close();
-            }
-        });
 
         if let Some(material) = model.materials.get(mesh.material)
             && !material.name.trim().is_empty()
         {
             ui.label(egui::RichText::new(&material.name).weak());
+        }
+    });
+
+    // Context menu on the whole row, not just the name label — the RC2
+    // build attached it to the label only, so a right-click anywhere
+    // else on the row did nothing.
+    row.response.context_menu(|ui| {
+        if ui.button("Frame").clicked() {
+            events.action = Some(OutlinerAction::FrameMesh(idx));
+            ui.close();
+        }
+        if ui.button("Hide").clicked() {
+            events.action = Some(OutlinerAction::HideMesh(idx));
+            ui.close();
+        }
+        if ui.button("Isolate").clicked() {
+            events.action = Some(OutlinerAction::IsolateMesh(idx));
+            ui.close();
+        }
+        if ui.button("Show All").clicked() {
+            events.action = Some(OutlinerAction::ShowAll);
+            ui.close();
         }
     });
 }

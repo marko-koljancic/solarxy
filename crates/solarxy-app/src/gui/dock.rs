@@ -194,6 +194,19 @@ impl TabViewer for SolarxyTabViewer<'_> {
         !matches!(tab, SolarxyTab::Viewport)
     }
 
+    /// The wgpu surface shows through the Viewport tab, so it must never
+    /// scroll. `egui_dock` wraps every tab body in a `ScrollArea` whose
+    /// `scroll_bars` default to `[true, true]`; in a narrow quad pane the
+    /// per-pane toolbar overflows and grows a spurious horizontal
+    /// scrollbar that shifts the viewport. Other panels keep scrolling.
+    fn scroll_bars(&self, tab: &Self::Tab) -> [bool; 2] {
+        if matches!(tab, SolarxyTab::Viewport) {
+            [false, false]
+        } else {
+            [true, true]
+        }
+    }
+
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         egui::Id::new(("solarxy_tab", tab.slug()))
     }

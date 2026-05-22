@@ -12,6 +12,11 @@
 
 use half::f16;
 
+/// Largest finite value representable as an f16. Finite HDR samples can
+/// still exceed this (sun disks), and `f16::from_f32` maps anything larger
+/// to an f16 infinity — clamp first.
+const F16_MAX: f32 = 65504.0;
+
 /// The source equirectangular HDRI, kept as a 2D `Rgba16Float` texture for
 /// the skybox pass — roughly 64 MB at 4K, accepted for RC2.
 pub struct EquirectTexture {
@@ -51,9 +56,9 @@ impl EquirectTexture {
         for (i, px) in pixels.iter().take(texel_count).enumerate() {
             let o = i * 8;
             let rgba = [
-                f16::from_f32(px[0]),
-                f16::from_f32(px[1]),
-                f16::from_f32(px[2]),
+                f16::from_f32(px[0].clamp(0.0, F16_MAX)),
+                f16::from_f32(px[1].clamp(0.0, F16_MAX)),
+                f16::from_f32(px[2].clamp(0.0, F16_MAX)),
                 f16::from_f32(1.0),
             ];
             for (c, half) in rgba.iter().enumerate() {

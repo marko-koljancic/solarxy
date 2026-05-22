@@ -48,11 +48,9 @@ impl State {
 
     pub(super) fn target_dimensions(&self) -> (u32, u32) {
         let (base_w, base_h) = self.viewport_base_size_px();
-        let (w, h) = compute_target_dimensions(self.view.display.layout, base_w, base_h);
-        // The HDR target is sized to the largest pane's 3D content — its
-        // full rect minus the toolbar strip.
-        let toolbar = self.pane_toolbar_height_px().round() as u32;
-        (w, h.saturating_sub(toolbar).max(1))
+        // The HDR target is sized to the largest pane in full — the 3D
+        // scene fills the whole pane (the toolbar labels float on top).
+        compute_target_dimensions(self.view.display.layout, base_w, base_h)
     }
 
     pub(super) fn compute_panes(&self) -> Vec<Pane> {

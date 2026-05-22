@@ -66,6 +66,10 @@ pub(super) fn draw_review_panel_content(
     ui.horizontal(|ui| {
         let total = review.annotations.len();
         ui.heading(format!("Review ({total})"));
+        if review.dirty {
+            ui.label(egui::RichText::new("\u{25CF}").color(theme.review.selection_accent))
+                .on_hover_text("Unsaved changes");
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .small_button("\u{00D7}")
@@ -73,6 +77,13 @@ pub(super) fn draw_review_panel_content(
                 .clicked()
             {
                 *visible = false;
+            }
+            if ui
+                .add_enabled(review.dirty, egui::Button::new("Save").small())
+                .on_hover_text("Write review notes to the sidecar file (Cmd/Ctrl+S)")
+                .clicked()
+            {
+                review.save_requested = true;
             }
             // Markers toggle — suppresses the 3D viewport overlay while
             // the panel keeps listing every annotation.
@@ -90,6 +101,26 @@ pub(super) fn draw_review_panel_content(
             }
         });
     });
+
+    // Sidecar location + save state — so it is never a mystery where the
+    // notes live or whether they are persisted.
+    if let Some(path) = &review.sidecar_path {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("review.json");
+        let prefix = if review.dirty {
+            "Unsaved \u{2014} "
+        } else {
+            "Saved \u{2014} "
+        };
+        ui.label(
+            egui::RichText::new(format!("{prefix}{name}"))
+                .small()
+                .weak(),
+        )
+        .on_hover_text(path.display().to_string());
+    }
     ui.separator();
 
     ui.horizontal_wrapped(|ui| {
@@ -234,9 +265,11 @@ pub(super) fn draw_review_panel_content(
         if review.selected.as_deref() == Some(id.as_str()) {
             review.selected = None;
         } else {
-            review.selected = Some(id);
+            review.selected = Some(id.clone());
+            // Fly the active camera to the annotation (drained by the
+            // state layer after the egui pass).
+            review.focus_request = Some(id);
         }
-        review.dirty = true;
     }
 
     if let Some(id) = reanchor_click {
@@ -508,6 +541,11 @@ fn draw_section(
         });
 }
 
+/// One annotation row — a full-width, single click target painted
+/// manually (no child widgets, which would each steal the click and shrink
+/// the hit region to the text). Mirrors `material_inspector::draw_material_row`.
+/// Shows a category-letter column, a 2-line wrapped text preview, and an
+/// author · time line; the row sizes to that content.
 fn draw_annotation_row(
     ui: &mut egui::Ui,
     ann: &solarxy_core::review::ReviewAnnotation,
@@ -516,77 +554,112 @@ fn draw_annotation_row(
     click_target: &mut Option<String>,
     theme: Theme,
 ) -> egui::Response {
+    const PAD_X: f32 = 6.0;
+    const PAD_Y: f32 = 4.0;
+    const LETTER_W: f32 = 16.0;
+    const LINE_GAP: f32 = 2.0;
+    const STALE_ORANGE: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x9C, 0x57);
+
     let is_selected = selected == Some(ann.id.as_str());
     let is_reanchor = reanchor_target == Some(ann.id.as_str());
+    let category_color = category_color(theme, ann.category);
 
-    let row_resp = ui
-        .scope(|ui| {
-            ui.horizontal_top(|ui| {
-                let color = category_color(theme, ann.category);
-                let text = egui::RichText::new(category_label_short(ann.category))
-                    .strong()
-                    .color(color);
-                ui.label(text);
+    let full_w = ui.available_width();
+    let text_x_off = PAD_X + LETTER_W + 4.0;
+    let text_w = (full_w - text_x_off - PAD_X).max(24.0);
 
-                ui.vertical(|ui| {
-                    let preview: String = ann
-                        .text
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .chars()
-                        .take(64)
-                        .collect();
-                    let preview_label =
-                        if ann.text.lines().count() > 1 || ann.text.chars().count() > 64 {
-                            format!("{preview}\u{2026}")
-                        } else {
-                            preview
-                        };
-                    let mut row_text = egui::RichText::new(preview_label);
-                    if ann.resolved {
-                        row_text = row_text.strikethrough().weak();
-                    }
-                    if ann.stale {
-                        row_text = row_text.color(egui::Color32::from_rgb(0xFF, 0x9C, 0x57));
-                    }
-                    ui.label(row_text);
-                    let author = ann.author.as_deref().unwrap_or("anonymous");
-                    ui.label(
-                        egui::RichText::new(format!("{author} · {}", short_time(&ann.created_at)))
-                            .small()
-                            .weak(),
-                    );
-                });
-            });
-        })
-        .response;
+    // Preview: up to two wrapped rows of the note text, ellipsised.
+    let trimmed = ann.text.trim();
+    let (preview_src, empty) = if trimmed.is_empty() {
+        ("(no text)", true)
+    } else {
+        (trimmed, false)
+    };
+    let preview_color = if empty || ann.resolved {
+        theme.muted
+    } else if ann.stale {
+        STALE_ORANGE
+    } else {
+        theme.fg
+    };
+    let mut preview_job = egui::text::LayoutJob::single_section(
+        preview_src.chars().take(220).collect(),
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(13.0),
+            color: preview_color,
+            strikethrough: if ann.resolved {
+                egui::Stroke::new(1.0, theme.muted)
+            } else {
+                egui::Stroke::NONE
+            },
+            ..Default::default()
+        },
+    );
+    preview_job.wrap = egui::text::TextWrapping {
+        max_width: text_w,
+        max_rows: 2,
+        break_anywhere: false,
+        overflow_character: Some('\u{2026}'),
+    };
+    let preview_galley = ui.painter().layout_job(preview_job);
 
+    let author = ann.author.as_deref().unwrap_or("anonymous");
+    let meta_galley = ui.painter().layout(
+        format!("{author} \u{00b7} {}", short_time(&ann.created_at)),
+        egui::FontId::proportional(11.0),
+        theme.muted,
+        text_w,
+    );
+
+    let row_h = PAD_Y + preview_galley.size().y + LINE_GAP + meta_galley.size().y + PAD_Y;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(full_w, row_h), egui::Sense::click());
+
+    let painter = ui.painter();
+    if is_selected {
+        painter.rect_filled(rect, 0.0, theme.selection);
+    } else if resp.hovered() {
+        painter.rect_filled(rect, 0.0, theme.widget_hover);
+    }
     if is_reanchor {
         let t = ui.ctx().input(|i| i.time);
         let phase = ((t * std::f64::consts::TAU / 0.6).sin().mul_add(0.5, 0.5)) as f32;
         let alpha = (30.0 + 40.0 * phase).round() as u8;
         let sa = theme.review.selection_accent;
         let amber = egui::Color32::from_rgba_unmultiplied(sa.r(), sa.g(), sa.b(), alpha);
-        ui.painter()
-            .rect_filled(row_resp.rect.expand(2.0), 3.0, amber);
+        painter.rect_filled(rect, 0.0, amber);
         ui.ctx().request_repaint();
     }
-
-    if is_selected {
-        ui.painter().rect_stroke(
-            row_resp.rect.expand(2.0),
-            2.0,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(0x33, 0xE0, 0xFF)),
-            egui::StrokeKind::Outside,
-        );
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
-    let clickable = row_resp.interact(egui::Sense::click());
-    if clickable.clicked() {
+    // Category letter, left column, aligned with the first preview row.
+    painter.text(
+        egui::pos2(rect.left() + PAD_X, rect.top() + PAD_Y),
+        egui::Align2::LEFT_TOP,
+        category_label_short(ann.category),
+        egui::FontId::proportional(13.0),
+        category_color,
+    );
+    let text_x = rect.left() + text_x_off;
+    painter.galley(
+        egui::pos2(text_x, rect.top() + PAD_Y),
+        preview_galley.clone(),
+        preview_color,
+    );
+    painter.galley(
+        egui::pos2(
+            text_x,
+            rect.top() + PAD_Y + preview_galley.size().y + LINE_GAP,
+        ),
+        meta_galley,
+        theme.muted,
+    );
+
+    if resp.clicked() {
         *click_target = Some(ann.id.clone());
     }
-    clickable
+    resp
 }
 
 fn draw_replace_button(

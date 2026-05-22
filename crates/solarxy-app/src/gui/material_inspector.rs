@@ -196,6 +196,20 @@ fn draw_material_list(
     state: &mut MaterialInspectorState,
     theme: &Theme,
 ) {
+    // Column header — names the otherwise-cryptic five-square cluster.
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Material").small().weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new("Maps").small().weak())
+                .on_hover_text(
+                    "Texture slots, in order: Albedo, Normal, \
+                     Metallic / Roughness, Occlusion, Emissive.\n\
+                     Filled = present, outlined = absent.",
+                );
+        });
+    });
+    ui.separator();
+
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -249,24 +263,21 @@ fn draw_material_row(
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
-    // Base-color swatch, hard left.
-    let swatch_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + PAD + SWATCH / 2.0, rect.center().y),
-        egui::vec2(SWATCH, SWATCH),
-    );
-    ui.painter().rect_filled(swatch_rect, 0.0, swatch);
-    ui.painter().rect_stroke(
-        swatch_rect,
-        0.0,
+    // Base-color swatch, hard left — a filled circle so it reads as a
+    // colour chip, not an unchecked checkbox (the RC2 confusion: a
+    // near-black base colour in a bordered square looked like a checkbox).
+    let swatch_center = egui::pos2(rect.left() + PAD + SWATCH / 2.0, rect.center().y);
+    let swatch_radius = SWATCH / 2.0;
+    let swatch_right = swatch_center.x + swatch_radius;
+    ui.painter()
+        .circle_filled(swatch_center, swatch_radius, swatch);
+    ui.painter().circle_stroke(
+        swatch_center,
+        swatch_radius,
         egui::Stroke::new(1.0, theme.border),
-        egui::StrokeKind::Inside,
     );
 
     // Texture-slot presence indicator, hard right.
-    let present_count = TextureRole::ALL
-        .iter()
-        .filter(|r| r.thumbnail_in(thumbs).is_some())
-        .count();
     let presence_w = 5.0 * SQUARE + 4.0 * SQUARE_GAP;
     let presence_left = rect.right() - PAD - presence_w;
     let mut sx = presence_left;
@@ -290,15 +301,39 @@ fn draw_material_row(
 
     // Name, filling the gap between swatch and presence indicator.
     let text_rect = egui::Rect::from_min_max(
-        egui::pos2(swatch_rect.right() + 6.0, rect.top()),
+        egui::pos2(swatch_right + 6.0, rect.top()),
         egui::pos2(presence_left - 6.0, rect.bottom()),
     );
     if text_rect.width() > 4.0 {
         paint_truncated_text(ui, text_rect, &name, theme.fg);
     }
 
-    resp.on_hover_text(format!("{present_count}/5 texture maps"))
-        .clicked()
+    resp.on_hover_text(texture_maps_tooltip(thumbs)).clicked()
+}
+
+/// Tooltip for a picker row's five-square texture indicator — spells out
+/// how many of the five PBR texture slots the material fills and which,
+/// so the squares aren't a mystery.
+fn texture_maps_tooltip(thumbs: &MaterialThumbnails) -> String {
+    let mut present: Vec<&str> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
+    for &role in TextureRole::ALL {
+        if role.thumbnail_in(thumbs).is_some() {
+            present.push(role.label());
+        } else {
+            missing.push(role.label());
+        }
+    }
+    let mut tip = format!("Texture maps: {} of 5", present.len());
+    if !present.is_empty() {
+        tip.push_str("\nPresent: ");
+        tip.push_str(&present.join(", "));
+    }
+    if !missing.is_empty() {
+        tip.push_str("\nMissing: ");
+        tip.push_str(&missing.join(", "));
+    }
+    tip
 }
 
 /// Paint a single line of text into `rect`, truncated with an ellipsis

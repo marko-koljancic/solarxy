@@ -1,5 +1,6 @@
-//! Native-style menu bar — the Houdini-inspired 7-menu layout:
-//! `File / Edit / Render / View / Layout / Window / Help`.
+//! Native-style menu bar — the Houdini-inspired layout:
+//! `File / Edit / Render / Review / View / Layout / Window / Help`.
+//! `Review` sits between `Render` and `View` — it is a viewport mode.
 //!
 //! Per-pane controls (Shading, Inspection, Material Override, Background,
 //! Projection) write through [`GuiSnapshot`], which mirrors the **active
@@ -29,6 +30,7 @@ pub(super) fn draw_menu_bar(
     customs: &[CustomBackground],
     review_active: bool,
     review_markers_hidden: bool,
+    review_dirty: bool,
     theme: Theme,
 ) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -36,22 +38,33 @@ pub(super) fn draw_menu_bar(
             draw_file_menu(ui, actions, has_model, recent_files);
             draw_edit_menu(ui, actions);
             draw_render_menu(ui, snap, actions, hdri_available, customs);
+            // Review is a viewport mode — it belongs between Render and
+            // View, not stranded out past Help.
+            draw_review_menu(
+                ui,
+                actions,
+                review_active,
+                review_markers_hidden,
+                review_dirty,
+                theme,
+            );
             draw_view_menu(ui, snap, actions);
             draw_layout_menu(ui, actions, vis);
             draw_window_menu(ui, vis, has_model);
             draw_help_menu(ui, actions);
-            draw_review_menu(ui, actions, review_active, review_markers_hidden, theme);
         });
     });
 }
 
-/// `Review` quick-toggle menu, sat right of `Help`. The button label
-/// turns amber `● Review` while review mode is active.
+/// `Review` menu, sat between `Render` and `View` — Review is a viewport
+/// mode, not a utility. The button label turns amber `● Review` while
+/// review mode is active.
 fn draw_review_menu(
     ui: &mut egui::Ui,
     actions: &mut MenuActions,
     review_active: bool,
     review_markers_hidden: bool,
+    review_dirty: bool,
     theme: Theme,
 ) {
     let label: egui::WidgetText = if review_active {
@@ -76,6 +89,15 @@ fn draw_review_menu(
             .clicked()
         {
             actions.toggle_review_markers = true;
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .add_enabled(review_dirty, egui::Button::new("Save Review Notes"))
+            .on_hover_text("Write review notes to the sidecar file (Cmd/Ctrl+S)")
+            .clicked()
+        {
+            actions.save_review_notes = true;
             ui.close();
         }
     });
@@ -368,6 +390,16 @@ fn draw_view_menu(ui: &mut egui::Ui, snap: &mut GuiSnapshot, actions: &mut MenuA
                 LineWeight::ALL,
             );
         });
+
+        ui.separator();
+        if ui
+            .button("Show All Meshes")
+            .on_hover_text("Make every mesh visible (Alt+H)")
+            .clicked()
+        {
+            actions.show_all_meshes = true;
+            ui.close();
+        }
     });
 }
 

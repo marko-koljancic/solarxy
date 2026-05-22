@@ -492,6 +492,22 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
                     .integer(),
             );
             ui.end_row();
+
+            ui.label("Reviewer name")
+                .on_hover_text("Author name written on new review annotations");
+            let mut name = draft.review.author.clone().unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut name).hint_text("anonymous"))
+                .changed()
+            {
+                let trimmed = name.trim();
+                draft.review.author = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_owned())
+                };
+            }
+            ui.end_row();
         });
 }
 

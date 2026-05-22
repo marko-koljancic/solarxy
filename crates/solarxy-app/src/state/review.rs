@@ -101,6 +101,16 @@ pub struct ReviewState {
     /// 3D selection.
     pub scroll_to_selected: bool,
 
+    /// One-shot request — `Some(id)` after an annotation row is clicked
+    /// in the panel. The state layer flies the active pane's camera to
+    /// that annotation's anchor, then clears it back to `None`.
+    pub focus_request: Option<String>,
+
+    /// One-shot: set by the Review panel's Save button; the state layer
+    /// writes the sidecar and clears it. Keyboard `Cmd/Ctrl+S` calls
+    /// `save_review_sidecar` directly and does not use this flag.
+    pub save_requested: bool,
+
     /// `id` of the marker currently under the cursor, if any. Updated
     /// on mouse-move by `state::input` and consumed by
     /// `gui::review_overlay` to decide which pin should expand into a
@@ -135,6 +145,8 @@ impl Default for ReviewState {
             delete_confirm: None,
             reanchor_target: None,
             scroll_to_selected: false,
+            focus_request: None,
+            save_requested: false,
             hovered: None,
             next_draft_seq: 0,
         }
@@ -294,9 +306,13 @@ impl ReviewState {
     /// helper just flips the bit.
     pub fn toggle_active(&mut self) -> bool {
         self.active = !self.active;
-        // Close any open draft when exiting review mode.
+        // Leaving review mode closes any open draft and collapses any
+        // expanded marker card (B4) — selection/hover are review-mode UI
+        // state with no meaning once the mode is off.
         if !self.active {
             self.editing = None;
+            self.selected = None;
+            self.hovered = None;
         }
         self.active
     }
@@ -309,10 +325,14 @@ impl ReviewState {
         self.annotations.clear();
         self.selected = None;
         self.editing = None;
+        self.focus_request = None;
         self.model_hash = None;
         self.mesh_hashes.clear();
         self.sidecar_path = None;
-        self.dirty = true;
+        // A fresh model with no annotations has nothing unsaved.
+        // `load_review_for_model` flips this back on only if it reads a
+        // sidecar that then diverges.
+        self.dirty = false;
     }
 
     /// Lookup by id (linear scan — annotation counts are small).
@@ -564,7 +584,9 @@ impl State {
                 let stored_hashes = file.mesh_hashes.clone();
                 self.review.annotations = file.annotations;
                 let stale = self.review.apply_stale_flags(&stored_hashes, &mesh_hashes);
-                self.review.dirty = true;
+                // Freshly loaded annotations match the on-disk file — not
+                // dirty. `dirty` flips only on a real edit afterwards.
+                self.review.dirty = false;
                 let msg = if stale == 0 {
                     format!("Loaded {count} review annotations")
                 } else {
@@ -608,6 +630,7 @@ impl State {
         };
         match file.save(&path) {
             Ok(()) => {
+                self.review.dirty = false;
                 let count = self.review.annotations.len();
                 tracing::info!(
                     target: "solarxy::toast",
@@ -1126,8 +1149,8 @@ mod tests {
         assert!(state.mesh_hashes.is_empty());
         assert!(state.sidecar_path.is_none());
         assert!(
-            state.dirty,
-            "dirty re-set so the GPU buffer flushes to empty"
+            !state.dirty,
+            "a fresh model with no annotations is not unsaved"
         );
     }
 }

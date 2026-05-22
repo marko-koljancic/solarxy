@@ -264,6 +264,7 @@ impl ApplicationHandler<State> for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(state) = &mut self.state {
+            state.flush_review_on_exit();
             state.flush_dock_layout_on_exit();
         }
     }

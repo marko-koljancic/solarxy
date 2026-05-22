@@ -453,6 +453,7 @@ impl EguiRenderer {
                     pt_customs,
                     review.active,
                     review.markers_hidden,
+                    review.dirty,
                     theme,
                 );
             }

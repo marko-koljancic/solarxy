@@ -69,6 +69,12 @@ impl State {
         if actions.toggle_review_markers {
             self.review.markers_hidden = !self.review.markers_hidden;
         }
+        if actions.save_review_notes {
+            self.save_review_sidecar();
+        }
+        if actions.show_all_meshes {
+            self.handle_outliner_action(crate::gui::OutlinerAction::ShowAll);
+        }
         if actions.save_dock_layout {
             if let Some(json) = self.gui.serialize_layout() {
                 self.preferences.dock.saved_layout_json = Some(json);

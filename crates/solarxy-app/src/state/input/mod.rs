@@ -576,6 +576,27 @@ impl State {
         }
     }
 
+    /// Fly the active pane's camera to a review annotation's anchor
+    /// (Review panel row click). Frames a small box around the anchor
+    /// point — sized to a fraction of the model — so the marker lands
+    /// centered at a consistent, useful zoom.
+    pub(super) fn focus_review_annotation(&mut self, id: &str) {
+        let Some(ann) = self.review.find(id) else {
+            return;
+        };
+        let [x, y, z] = ann.anchor.world_pos_fallback;
+        let half = self
+            .scene
+            .as_ref()
+            .map_or(1.0, |s| (s.model.bounds.diagonal() * 0.12).max(0.05));
+        let center = cgmath::Point3::new(x, y, z);
+        let offset = cgmath::Vector3::new(half, half, half);
+        self.frame_active_pane(solarxy_core::AABB {
+            min: center - offset,
+            max: center + offset,
+        });
+    }
+
     /// Apply an [`OutlinerAction`] (mesh / material visibility or camera
     /// framing) raised by the Outliner panel.
     pub(super) fn handle_outliner_action(&mut self, action: OutlinerAction) {
@@ -832,6 +853,16 @@ impl State {
         }
     }
 
+    /// Flush unsaved review notes to the sidecar on app exit — a data-loss
+    /// safety net so quitting mid-review never silently drops annotations.
+    /// In-session saving stays manual (the Review panel's Save button /
+    /// `Cmd/Ctrl+S`); this only fires when there is something unsaved.
+    pub fn flush_review_on_exit(&mut self) {
+        if self.review.dirty {
+            self.save_review_sidecar();
+        }
+    }
+
     pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
         if pressed
             && matches!(button, MouseButton::Left)
@@ -947,9 +978,13 @@ impl State {
         {
             self.review.selected = Some(id);
             self.review.scroll_to_selected = true;
-            self.review.dirty = true;
             return true;
         }
+
+        // The click missed every marker — it lands on geometry or empty
+        // space. Either way, collapse any open card (B4): selection is
+        // cleared before the new-annotation draft (if any) opens.
+        self.review.selected = None;
 
         let ray = crate::state::raycast::screen_to_world_ray(
             local,

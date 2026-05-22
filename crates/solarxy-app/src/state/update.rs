@@ -365,6 +365,11 @@ impl State {
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
                     self.scene = Some(new_scene);
+                    // Flush unsaved review notes for the outgoing model
+                    // before its sidecar path is cleared by the reload.
+                    if self.review.dirty {
+                        self.save_review_sidecar();
+                    }
                     self.load_review_for_model(&pending.path);
                     self.view.cameras = [None, None, None, None];
                     self.ensure_pane_cameras();

@@ -67,7 +67,17 @@ impl State {
     }
 
     pub fn close_model(&mut self) {
+        // Flush unsaved review notes before dropping the model's review
+        // state — consistent with the model-swap / app-exit flushes.
+        if self.review.dirty {
+            self.save_review_sidecar();
+        }
+        self.review.clear_for_new_model();
         self.scene = None;
+        // Reset the pane cameras (the model-load path does the same). This
+        // routes `render_pane` to its empty path so SSAO/bloom no longer
+        // sample the closed model's stale GBuffer as a ghost silhouette.
+        self.view.cameras = [None, None, None, None];
         self.gui.clear_model_info();
         self.window.set_title("Solarxy");
         self.renderer.uv_overlap.overlap_pct = None;
