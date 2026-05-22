@@ -1,17 +1,14 @@
 # Submit Solarxy (GUI) to microsoft/winget-pkgs after each stable release.
 #
-# Flow: check out the repo at the release tag, take the hand-authored
-# manifest under `packaging/winget/manifests/k/Koljam/Solarxy/<version>/`,
-# fill its two release-time placeholders, and `wingetcreate submit` it as a
-# PR to microsoft/winget-pkgs. `submit` works for both a brand-new package
-# (the first 0.6.0 submission) and every later version — unlike `update`,
-# which requires the package to already exist on winget.
+# Flow: check out the repo, take the hand-authored manifest under
+# `packaging/winget/manifests/k/Koljam/Solarxy/<version>/`, fill its
+# `{{INSTALLER_SHA256}}` placeholder, and `wingetcreate submit` it as a PR
+# to microsoft/winget-pkgs. `submit` works for both a brand-new package
+# (the first 0.6.0 submission) and every later version.
 #
-# The two placeholders filled here:
-#   {{INSTALLER_SHA256}} — SHA-256 of the produced MSI artifact.
-#   {{PRODUCT_CODE}}     — WiX ProductCode GUID, read from the MSI Property
-#                          table (it rotates per build, so it can't be
-#                          hard-coded in the manifest).
+# The manifest deliberately omits ProductCode (optional field; the WiX
+# ProductCode rotates per build and winget reads it from the MSI at install
+# time) — so the only release-time substitution is the SHA-256.
 #
 # Microsoft moderation review typically takes 3-7 days. Once merged, users
 # install with `winget install Koljam.Solarxy`.
@@ -23,6 +20,8 @@
 #     `on: release: published` does not apply. The `plan` input carries
 #     cargo-dist's dist-manifest; the tag is read from `announcement_tag`.
 #   - `workflow_dispatch` — manual run against an existing release tag.
+#     Checkout uses the workflow ref, so dispatching from a branch picks up
+#     that branch's manifest (e.g. to re-submit after a manifest fix).
 name: Winget release
 
 on:
@@ -70,11 +69,10 @@ jobs:
           fi
           echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout solarxy at tag
+      - name: Checkout solarxy
         if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -99,31 +97,17 @@ jobs:
           }
           $installerManifest = Join-Path $manifestDir 'Koljam.Solarxy.installer.yaml'
 
-          # Download the MSI cargo-dist produced for this release.
+          # Download the MSI cargo-dist produced for this release and hash it.
           $msiUrl = "https://github.com/marko-koljancic/solarxy/releases/download/$env:TAG/solarxy-x86_64-pc-windows-msvc.msi"
           $msiPath = Join-Path $env:RUNNER_TEMP 'solarxy.msi'
           Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-
-          # SHA-256 of the installer.
           $sha = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
 
-          # ProductCode — read the MSI Property table via the Windows
-          # Installer COM API (WiX rotates the ProductCode every build).
-          $msi = New-Object -ComObject WindowsInstaller.Installer
-          $db = $msi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $msi, @($msiPath, 0))
-          $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @("SELECT Value FROM Property WHERE Property = 'ProductCode'"))
-          $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
-          $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
-          if ($null -eq $record) { throw "ProductCode not found in $msiPath" }
-          $productCode = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
-          if ([string]::IsNullOrWhiteSpace($productCode)) { throw "Empty ProductCode in $msiPath" }
-
-          # Fill the manifest placeholders in place.
+          # Fill the manifest's single placeholder in place.
           (Get-Content $installerManifest -Raw) `
             -replace '\{\{INSTALLER_SHA256\}\}', $sha `
-            -replace '\{\{PRODUCT_CODE\}\}', $productCode `
             | Set-Content $installerManifest -NoNewline
-          Write-Host "Filled $installerManifest — SHA256=$sha ProductCode=$productCode"
+          Write-Host "Filled $installerManifest — SHA256=$sha"
 
           # Submit the manifest set as a PR to microsoft/winget-pkgs.
           ./wingetcreate.exe submit $manifestDir `
