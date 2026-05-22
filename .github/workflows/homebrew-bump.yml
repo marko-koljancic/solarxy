@@ -64,7 +64,7 @@ jobs:
         if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
-          repository: koljam/homebrew-solarxy
+          repository: marko-koljancic/homebrew-solarxy
           token: ${{ secrets.HOMEBREW_TAP_PAT }}
           path: tap
           fetch-depth: 1

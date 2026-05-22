@@ -56,7 +56,7 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 
 ```bash
 # macOS — installs both binaries, clears Gatekeeper automatically
-brew install --cask koljam/solarxy/solarxy
+brew install --cask marko-koljancic/solarxy/solarxy
 
 # Linux — GUI via Flathub
 flatpak install flathub dev.koljam.solarxy

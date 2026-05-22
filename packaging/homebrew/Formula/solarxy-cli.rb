@@ -1,7 +1,7 @@
-# Solarxy CLI formula. Lives in the koljam/homebrew-solarxy tap.
+# Solarxy CLI formula. Lives in the marko-koljancic/homebrew-solarxy tap.
 #
 # Usage:
-#   brew install koljam/solarxy/solarxy-cli
+#   brew install marko-koljancic/solarxy/solarxy-cli
 #
 # Cross-platform: macOS arm64 + macOS x86_64 + Linux x86_64 + Linux
 # aarch64. Each variant downloads the cargo-dist-produced tarball that
