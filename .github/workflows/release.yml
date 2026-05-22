@@ -313,3 +313,30 @@ jobs:
     with:
       plan: ${{ needs.plan.outputs.val }}
     secrets: inherit
+
+  custom-flathub-bump:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/flathub-bump.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+
+  custom-homebrew-bump:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/homebrew-bump.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+
+  custom-winget-release:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/winget-release.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit

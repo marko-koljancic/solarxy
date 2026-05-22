@@ -21,8 +21,20 @@ install-updater = false
 # - native-bundle: produces DMG / AppImage and uploads them to the release.
 # - ghcr-publish:  builds and pushes ghcr.io/marko-koljancic/solarxy-cli:<tags>
 #                  (skipped on prereleases).
-post-announce-jobs = ["./native-bundle", "./ghcr-publish"]
+# - flathub-bump / homebrew-bump / winget-release: submit the GUI to the
+#   downstream package channels. Each gates internally on its PAT secret
+#   being set and on the tag being a stable release (no-op otherwise).
+post-announce-jobs = [
+    "./native-bundle",
+    "./ghcr-publish",
+    "./flathub-bump",
+    "./homebrew-bump",
+    "./winget-release",
+]
 
-# wix/main.wxs is edited by hand to set the product icon from res/bundle/.
-# Tell dist not to fight us on subsequent `dist generate` runs.
+# Generated files dist must NOT overwrite on `dist generate`:
+# - msi: wix/main.wxs carries a hand-set product icon from res/bundle/.
+# - ci:  release.yml carries a hand-added `packages: write` permission so the
+#        in-graph ghcr-publish job can push to GHCR — dist only emits
+#        `contents: write`. If you ever regenerate ci, re-apply that line.
 allow-dirty = ["msi", "ci"]

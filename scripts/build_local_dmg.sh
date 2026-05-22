@@ -13,13 +13,13 @@
 #   ./bundle-out/Solarxy-<ver>-<arch>.dmg
 #
 # Usage:
-#   ./packaging/scripts/build_local_dmg.sh                 # defaults to current arch, v0.5.0
-#   V=0.5.0 TARGET=x86_64-apple-darwin ./packaging/scripts/build_local_dmg.sh
+#   ./packaging/scripts/build_local_dmg.sh                 # defaults to current arch, v0.6.0
+#   V=0.6.0 TARGET=x86_64-apple-darwin ./packaging/scripts/build_local_dmg.sh
 #
 set -euo pipefail
 
 # ---- Defaults (can be overridden via env) ---------------------------------
-: "${V:=0.5.0}"
+: "${V:=0.6.0}"
 if [ -z "${TARGET:-}" ]; then
     case "$(uname -m)" in
         arm64)  TARGET="aarch64-apple-darwin" ;;
