@@ -1,7 +1,7 @@
 # Homebrew tap files
 
 These two files belong in a separate tap repo —
-[`koljam/homebrew-solarxy`](https://github.com/koljam/homebrew-solarxy) — not this
+[`marko-koljancic/homebrew-solarxy`](https://github.com/marko-koljancic/homebrew-solarxy) — not this
 repo. They live here as the source of truth so changes to the tap go
 through the same review process as the rest of the project, and the
 `homebrew-bump.yml` workflow copies them into the tap repo on release.
@@ -18,11 +18,11 @@ through the same review process as the rest of the project, and the
 
 ## One-time tap setup
 
-1. Create a public GitHub repo `koljam/homebrew-solarxy` (the
+1. Create a public GitHub repo `marko-koljancic/homebrew-solarxy` (the
    `homebrew-` prefix is required for `brew tap` to find it).
 2. Copy the contents of this directory into the root of that repo:
    ```bash
-   git clone git@github.com:koljam/homebrew-solarxy.git
+   git clone git@github.com:marko-koljancic/homebrew-solarxy.git
    cd homebrew-solarxy
    cp -r ../solarxy/packaging/homebrew/Casks .
    cp -r ../solarxy/packaging/homebrew/Formula .
@@ -30,14 +30,14 @@ through the same review process as the rest of the project, and the
    git commit -m "initial Solarxy tap"
    git push
    ```
-3. Verify with `brew tap koljam/solarxy && brew search solarxy`.
+3. Verify with `brew tap marko-koljancic/solarxy && brew search solarxy`.
 
 ## Per-release maintenance
 
 `.github/workflows/homebrew-bump.yml` runs on every GitHub release:
 1. Downloads the new release artifacts and computes their SHA256.
 2. Patches `version` and `sha256` in both files.
-3. Pushes a commit to `koljam/homebrew-solarxy` (no PR — single-author
+3. Pushes a commit to `marko-koljancic/homebrew-solarxy` (no PR — single-author
    tap, direct push is fine).
 
 ## Manual update

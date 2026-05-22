@@ -1,7 +1,7 @@
-# Solarxy GUI cask. Lives in the koljam/homebrew-solarxy tap.
+# Solarxy GUI cask. Lives in the marko-koljancic/homebrew-solarxy tap.
 #
 # Usage:
-#   brew install --cask koljam/solarxy/solarxy
+#   brew install --cask marko-koljancic/solarxy/solarxy
 #
 # This cask handles the macOS Gatekeeper friction that the bare DMG
 # download cannot. The `postflight` block strips

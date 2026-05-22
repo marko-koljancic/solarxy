@@ -206,7 +206,7 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 - `.deb` + `.rpm` were dropped in rc.7 in favour of Flathub for distro-agnostic coverage; community packagers can still build native packages from source.
 
 **Distribution channels:**
-- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`koljam/solarxy/solarxy`, `packaging/homebrew/`), **winget** (`Koljam.Solarxy`, manifests in `packaging/winget/manifests/k/Koljam/Solarxy/<version>/` with `{{PRODUCT_CODE}}`/`{{INSTALLER_SHA256}}` placeholders filled by `.github/workflows/winget-release.yml` on each stable tag). Plus raw DMG / MSI / AppImage bundles from GitHub Releases.
+- GUI: **Flathub** (`dev.koljam.solarxy`, manifest in `packaging/flatpak/`), **Homebrew Cask** (`marko-koljancic/solarxy/solarxy`, `packaging/homebrew/`), **winget** (`Koljam.Solarxy`, manifests in `packaging/winget/manifests/k/Koljam/Solarxy/<version>/` with `{{PRODUCT_CODE}}`/`{{INSTALLER_SHA256}}` placeholders filled by `.github/workflows/winget-release.yml` on each stable tag). Plus raw DMG / MSI / AppImage bundles from GitHub Releases.
 - CLI: `cargo-dist` installers (shell / PowerShell + portable `.zip`), Homebrew formula (`solarxy-cli`). No MSI — winget CLI manifest (portable type) still deferred (Rust-CLI convention: ripgrep, fd, zoxide, eza, bat, delta, cargo-dist itself don't ship one either).
 - `solarxy-cli --update` detects the install source via `solarxy_core::install_source::detect()`: Homebrew → `brew upgrade solarxy-cli`, Flatpak → `flatpak update dev.koljam.solarxy`, otherwise `axoupdater` self-update.
 
