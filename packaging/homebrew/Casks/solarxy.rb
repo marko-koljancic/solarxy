@@ -16,15 +16,15 @@
 # channel where we can do this without a separate user gesture.
 
 cask "solarxy" do
-  version :latest
+  version "0.6.0"
   sha256 :no_check
 
   on_arm do
-    url "https://github.com/marko-koljancic/solarxy/releases/latest/download/Solarxy-#{version}-aarch64.dmg"
+    url "https://github.com/marko-koljancic/solarxy/releases/download/v#{version}/Solarxy-#{version}-aarch64.dmg"
   end
 
   on_intel do
-    url "https://github.com/marko-koljancic/solarxy/releases/latest/download/Solarxy-#{version}-x86_64.dmg"
+    url "https://github.com/marko-koljancic/solarxy/releases/download/v#{version}/Solarxy-#{version}-x86_64.dmg"
   end
 
   name "Solarxy"
