@@ -1,124 +1,44 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ProjectConfig",
-  "type": "object",
-  "properties": {
-    "budgets": {
-      "default": {
-        "default": 30000,
-        "environment": 50000,
-        "hero": 100000,
-        "prop": 20000
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/Budgets"
-        }
-      ]
-    },
-    "filenames": {
-      "default": {
-        "rules": []
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/FilenameClassifier"
-        }
-      ]
-    },
-    "format_version": {
-      "default": 1,
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0.0
-    },
-    "review": {
-      "default": {
-        "sidecar_dir": null
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/ReviewSettings"
-        }
-      ]
-    },
-    "thresholds": {
-      "default": {
-        "flipped_normal_dot": -0.5,
-        "triangle_budget_tolerance_percent": 20.0
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/ValidationThresholds"
-        }
-      ]
-    },
-    "validation": {
-      "default": {
-        "allow_open_mesh": false,
-        "degenerate_triangles": true,
-        "flipped_normals": true,
-        "index_buffer": true,
-        "material_refs": true,
-        "non_manifold_edges": true,
-        "normal_mismatch": true,
-        "triangle_budget": true,
-        "uv_presence": true
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/ValidationConfig"
-        }
-      ]
-    }
-  },
   "additionalProperties": false,
   "definitions": {
     "AssetCategory": {
-      "type": "string",
       "enum": [
         "hero",
         "prop",
         "environment",
         "default"
-      ]
+      ],
+      "type": "string"
     },
     "Budgets": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "default": {
           "default": 30000,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
+          "minimum": 0.0,
+          "type": "integer"
         },
         "environment": {
           "default": 50000,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
+          "minimum": 0.0,
+          "type": "integer"
         },
         "hero": {
           "default": 100000,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
+          "minimum": 0.0,
+          "type": "integer"
         },
         "prop": {
           "default": 20000,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     },
     "ClassifierRule": {
-      "type": "object",
-      "required": [
-        "category",
-        "pattern"
-      ],
+      "additionalProperties": false,
       "properties": {
         "category": {
           "$ref": "#/definitions/AssetCategory"
@@ -127,38 +47,42 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "required": [
+        "category",
+        "pattern"
+      ],
+      "type": "object"
     },
     "FilenameClassifier": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "rules": {
           "default": [],
-          "type": "array",
           "items": {
             "$ref": "#/definitions/ClassifierRule"
-          }
+          },
+          "type": "array"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     },
     "ReviewSettings": {
+      "additionalProperties": false,
       "description": "Project-level review-system settings. User-level prefs (display name for the `author` field, panel open default) live in [`crate::preferences::ReviewPrefs`].",
-      "type": "object",
       "properties": {
         "sidecar_dir": {
-          "description": "Override location of the `.solarxy-review.json` sidecar. `None` (default) ⇒ sibling to the model file. Relative paths are resolved against the model's parent directory (so `\".solarxy\"` produces `<model_dir>/.solarxy/<stem>.solarxy-review.json`). Absolute paths are used as-is.",
           "default": null,
+          "description": "Override location of the `.solarxy-review.json` sidecar. `None` (default) ⇒ sibling to the model file. Relative paths are resolved against the model's parent directory (so `\".solarxy\"` produces `<model_dir>/.solarxy/<stem>.solarxy-review.json`). Absolute paths are used as-is.",
           "type": [
             "string",
             "null"
           ]
         }
       },
-      "additionalProperties": false
+      "type": "object"
     },
     "ValidationConfig": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "allow_open_mesh": {
           "default": false,
@@ -197,23 +121,92 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     },
     "ValidationThresholds": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "flipped_normal_dot": {
           "default": -0.5,
-          "type": "number",
-          "format": "float"
+          "type": "number"
         },
         "triangle_budget_tolerance_percent": {
           "default": 20.0,
-          "type": "number",
-          "format": "float"
+          "type": "number"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     }
-  }
+  },
+  "properties": {
+    "budgets": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Budgets"
+        }
+      ],
+      "default": {
+        "default": 30000,
+        "environment": 50000,
+        "hero": 100000,
+        "prop": 20000
+      }
+    },
+    "filenames": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/FilenameClassifier"
+        }
+      ],
+      "default": {
+        "rules": []
+      }
+    },
+    "format_version": {
+      "default": 1,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "review": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewSettings"
+        }
+      ],
+      "default": {
+        "sidecar_dir": null
+      }
+    },
+    "thresholds": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ValidationThresholds"
+        }
+      ],
+      "default": {
+        "flipped_normal_dot": -0.5,
+        "triangle_budget_tolerance_percent": 20.0
+      }
+    },
+    "validation": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ValidationConfig"
+        }
+      ],
+      "default": {
+        "allow_open_mesh": false,
+        "degenerate_triangles": true,
+        "flipped_normals": true,
+        "index_buffer": true,
+        "material_refs": true,
+        "non_manifold_edges": true,
+        "normal_mismatch": true,
+        "triangle_budget": true,
+        "uv_presence": true
+      }
+    }
+  },
+  "title": "ProjectConfig",
+  "type": "object"
 }
