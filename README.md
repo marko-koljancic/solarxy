@@ -35,8 +35,8 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 - **Material Inspector** -- view-only per-material panel (`Window → Material Inspector`) with base-color swatch, scalar PBR (metallic/roughness), alpha mode, and 128×128 texture thumbnails for albedo / normal / metallic-roughness / occlusion / emissive
 - **Validation overlay** -- color-coded 3D visualization of validation issues (flipped normals, non-manifold edges, triangle-budget overruns, degenerate triangles, missing UVs, bad material refs)
 - **Configurable validation** -- per-project `solarxy.toml` overrides budgets, severities, and filename-classifier rules; JSON Schema published at [`schemas/solarxy-config.v1.json`](schemas/solarxy-config.v1.json) for editor autocomplete
-- **CI-friendly CLI** -- `solarxy-cli analyze --paths "assets/**/*.glb" --adapter github-actions --adapter-format sarif` emits SARIF / JUnit-style / TAP / workflow-commands output via the `solarxy-validate` adapter crate
-- **Dockable panels** -- Viewport / Sidebar / Review Panel / Console / Material Inspector / Stats tabs in an `egui_dock` layout; auto-save on quit, restore on launch, **Window → Save Layout / Restore / Reset**
+- **CI-friendly CLI** -- `solarxy-cli --mode analyze --paths "assets/**/*.glb" --adapter github-actions --adapter-format sarif` emits SARIF / JUnit-style / TAP / workflow-commands output via the `solarxy-validate` adapter crate
+- **Dockable panels** -- Viewport / Sidebar / Review Panel / Console / Material Inspector / Properties / Outliner tabs in an `egui_dock` layout; auto-save on quit, restore on launch, **Window → Save Layout / Restore / Reset**
 - **Ayu Mirage theme** -- flat dark UI with amber accent (`#FFC44C`), bundled Lilex font, custom dock styling
 - **egui sidebar** -- interactive control panel with bidirectional keyboard sync
 - **Interactive analysis** -- TUI with per-mesh and per-material breakdowns, validation checks
@@ -55,18 +55,17 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 ## Installation
 
 ```bash
-# macOS — installs both binaries, clears Gatekeeper automatically
+# macOS — Homebrew. The cask installs the GUI app (Gatekeeper cleared
+# automatically); the formula installs the CLI.
 brew install --cask marko-koljancic/solarxy/solarxy
+brew install marko-koljancic/solarxy/solarxy-cli
 
-# Linux — GUI via Flathub
-flatpak install flathub dev.koljam.solarxy
-
-# Windows — winget (auto-submitted on each stable release)
+# Windows — winget
 winget install Koljam.Solarxy
 ```
 
-Direct downloads (DMG / MSI / AppImage), CLI-only installs, first-launch
-caveats, system requirements, and the update flow: see
+**Linux** and direct downloads (DMG / MSI / AppImage), CLI-only installs,
+first-launch caveats, system requirements, and the update flow: see
 [Wiki / Installation](https://github.com/marko-koljancic/solarxy/wiki/Installation).
 
 ## Usage
@@ -76,7 +75,7 @@ solarxy -m path/to/model.obj                                    # GUI viewer
 solarxy-cli --mode analyze -m model.glb                         # Terminal report (single file)
 solarxy-cli --mode analyze -m model.glb -f json -o report.json  # JSON to file
 
-# Batch validation for CI (GitHub Actions / Perforce / GitLab / Jenkins):
+# Batch validation for CI:
 solarxy-cli --mode analyze \
     --paths "assets/**/*.glb" \
     --config solarxy.toml \
