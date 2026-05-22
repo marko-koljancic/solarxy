@@ -65,6 +65,57 @@ fn default_format_version() -> u32 {
     FORMAT_VERSION_CURRENT
 }
 
+/// Generates the [`ProjectConfig`] JSON Schema as a pretty-printed string.
+///
+/// `schemars` annotates numeric fields with non-standard `format` values
+/// (`uint32`, `float`, and similar) that strict JSON Schema validators
+/// reject as unknown formats. Those annotations carry no validation meaning
+/// — `type` plus `minimum` already constrain the values — so they are
+/// removed here. Shared by the `gen_schemas` example and the `schema_drift`
+/// test so both emit identical output.
+///
+/// # Errors
+///
+/// Returns the underlying `serde_json` error if the generated schema fails
+/// to round-trip through a [`serde_json::Value`] (not expected in practice).
+#[cfg(feature = "schemars-gen")]
+pub fn schema_json() -> Result<String, serde_json::Error> {
+    let schema = schemars::schema_for!(ProjectConfig);
+    let mut value = serde_json::to_value(&schema)?;
+    strip_nonstandard_formats(&mut value);
+    serde_json::to_string_pretty(&value)
+}
+
+/// Recursively removes the non-standard numeric `format` annotations
+/// `schemars` emits for Rust integer and float types — see [`schema_json`].
+#[cfg(feature = "schemars-gen")]
+fn strip_nonstandard_formats(value: &mut serde_json::Value) {
+    const NUMERIC_FORMATS: &[&str] = &[
+        "int8", "int16", "int32", "int64", "int128", "isize", "int", "uint8", "uint16", "uint32",
+        "uint64", "uint128", "usize", "uint", "float", "double",
+    ];
+    match value {
+        serde_json::Value::Object(map) => {
+            let drop_format = matches!(
+                map.get("format"),
+                Some(serde_json::Value::String(f)) if NUMERIC_FORMATS.contains(&f.as_str())
+            );
+            if drop_format {
+                map.remove("format");
+            }
+            for child in map.values_mut() {
+                strip_nonstandard_formats(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_nonstandard_formats(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
