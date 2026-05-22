@@ -32,7 +32,6 @@ cask "solarxy" do
   homepage "https://github.com/marko-koljancic/solarxy"
 
   app "Solarxy.app"
-  binary "#{appdir}/Solarxy.app/Contents/MacOS/solarxy-cli"
 
   postflight do
     require "fileutils"
