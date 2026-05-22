@@ -7,48 +7,61 @@
 # Pushes a commit directly to the tap (no PR — the tap is a single-maintainer
 # repo). Brew users get the new version on `brew update`.
 #
-# Skipped on prerelease tags (`rc.N`).
+# Invocation:
+#   - `workflow_call` — called by cargo-dist's release.yml as a reusable
+#     workflow via the `post-announce-jobs` hook (see dist-workspace.toml).
+#     Runs in-graph, so the GITHUB_TOKEN chain restriction that kills
+#     `on: release: published` does not apply. The `plan` input carries
+#     cargo-dist's dist-manifest; the tag is read from `announcement_tag`.
+#   - `workflow_dispatch` — manual run against an existing release tag.
 name: Homebrew bump
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag (e.g. v0.6.0)"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   bump:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    env:
+      # `github.event_name` in a reusable workflow reflects the CALLER's
+      # event, not `workflow_call`, so mode is detected by input presence.
+      # `&&` short-circuits so fromJson only runs when inputs.plan is set.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+      IS_PRERELEASE: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_is_prerelease || false }}
     steps:
-      - name: Verify HOMEBREW_TAP_PAT presence
-        id: secrets
+      - name: Gate — HOMEBREW_TAP_PAT present and not a prerelease
+        id: gate
+        env:
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
         run: |
-          if [ -n "${{ secrets.HOMEBREW_TAP_PAT }}" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::HOMEBREW_TAP_PAT not set — Homebrew bump will be skipped. Provision the secret to enable automatic tap updates."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          proceed=true
+          if [ -z "$HOMEBREW_TAP_PAT" ]; then
+            echo "::warning::HOMEBREW_TAP_PAT not set — Homebrew bump skipped. Provision the secret to enable automatic tap updates."
+            proceed=false
           fi
-
-      - name: Resolve tag and version
-        if: steps.secrets.outputs.ready == 'true'
-        id: tag
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${{ github.event.release.tag_name }}"
+          tag="${TAG#v}"
+          if [ "$IS_PRERELEASE" = "true" ] || [[ "$tag" == *-rc.* || "$tag" == *-alpha.* || "$tag" == *-beta.* ]]; then
+            echo "::notice::$TAG is a prerelease — Homebrew bump skipped."
+            proceed=false
           fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
           repository: koljam/homebrew-solarxy
@@ -57,11 +70,10 @@ jobs:
           fetch-depth: 1
 
       - name: Compute artifact SHA-256 sums
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         id: sha
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
+          set -euo pipefail
           # GUI cask: macOS arm64 DMG
           DMG_URL="https://github.com/marko-koljancic/solarxy/releases/download/${TAG}/solarxy-aarch64-apple-darwin.dmg"
           # CLI formula: source tarball
@@ -72,12 +84,13 @@ jobs:
           echo "src_sha=$SRC_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Update cask + formula
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         env:
-          VERSION: ${{ steps.tag.outputs.version }}
           DMG_SHA: ${{ steps.sha.outputs.dmg_sha }}
           SRC_SHA: ${{ steps.sha.outputs.src_sha }}
         run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
           # Cask — update version + sha256
           sed -i -E "s|^( *version )\".*\"|\1\"${VERSION}\"|" tap/Casks/solarxy.rb
           sed -i -E "s|^( *sha256 )\".*\"|\1\"${DMG_SHA}\"|" tap/Casks/solarxy.rb
@@ -86,10 +99,8 @@ jobs:
           sed -i -E "s|^( *sha256 )\".*\"|\1\"${SRC_SHA}\"|" tap/Formula/solarxy-cli.rb
 
       - name: Commit and push
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         working-directory: tap
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           git config user.name "solarxy-bot"
           git config user.email "noreply@github.com"

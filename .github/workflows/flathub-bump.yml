@@ -1,71 +1,88 @@
 # Bump the Solarxy Flathub manifest after each stable GitHub Release.
 #
-# Steps:
-#   1. Verify the FLATHUB_PAT secret is set (step-level guard — job-level
-#      `if: secrets.X != ''` is not a valid GHA expression and silently
-#      no-ops; first-step check makes the skip explicit in the log).
+# Steps (when enabled):
+#   1. Gate — proceed only if FLATHUB_PAT is set AND the tag is not a
+#      prerelease (Flathub gets stable releases only).
 #   2. Regenerate `cargo-sources.json` against the released `Cargo.lock`.
 #   3. Open a PR against `github.com/flathub/dev.koljam.solarxy` updating
-#      the manifest's `commit:` ref and replacing the cargo-sources file.
+#      the manifest's `tag:` ref and replacing the cargo-sources file.
 #
-# Skipped on prerelease tags (`rc.N`) — Flathub gets stable releases only.
+# Invocation:
+#   - `workflow_call` — called by cargo-dist's release.yml as a reusable
+#     workflow via the `post-announce-jobs` hook (see dist-workspace.toml).
+#     Runs in-graph (same workflow run), so the GITHUB_TOKEN chain
+#     restriction that kills `on: release: published` does not apply. The
+#     `plan` input carries cargo-dist's dist-manifest; the tag is read from
+#     `announcement_tag`.
+#   - `workflow_dispatch` — manual run against an existing release tag.
 name: Flathub bump
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag (e.g. v0.6.0)"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   bump:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    env:
+      # `github.event_name` in a reusable workflow reflects the CALLER's
+      # event, not `workflow_call`, so mode is detected by input presence.
+      # `&&` short-circuits so fromJson only runs when inputs.plan is set.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+      IS_PRERELEASE: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_is_prerelease || false }}
     steps:
-      - name: Verify FLATHUB_PAT presence
-        id: secrets
+      - name: Gate — FLATHUB_PAT present and not a prerelease
+        id: gate
+        env:
+          FLATHUB_PAT: ${{ secrets.FLATHUB_PAT }}
         run: |
-          if [ -n "${{ secrets.FLATHUB_PAT }}" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::FLATHUB_PAT not set — Flathub bump will be skipped. Provision the secret to enable automatic submissions."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          proceed=true
+          if [ -z "$FLATHUB_PAT" ]; then
+            echo "::warning::FLATHUB_PAT not set — Flathub bump skipped. Provision the secret to enable automatic submissions."
+            proceed=false
           fi
-
-      - name: Resolve tag
-        if: steps.secrets.outputs.ready == 'true'
-        id: tag
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          tag="${TAG#v}"
+          if [ "$IS_PRERELEASE" = "true" ] || [[ "$tag" == *-rc.* || "$tag" == *-alpha.* || "$tag" == *-beta.* ]]; then
+            echo "::notice::$TAG is a prerelease — Flathub bump skipped."
+            proceed=false
           fi
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
       - name: Checkout solarxy at tag
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ env.TAG }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install Python (for flatpak-cargo-generator)
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Regenerate cargo-sources.json
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           chmod +x packaging/flatpak/generate-sources.sh
           ./packaging/flatpak/generate-sources.sh
 
       - name: Checkout flathub repo
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
           repository: flathub/dev.koljam.solarxy
@@ -74,9 +91,7 @@ jobs:
           fetch-depth: 1
 
       - name: Update flathub repo
-        if: steps.secrets.outputs.ready == 'true'
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           cp packaging/flatpak/dev.koljam.solarxy.yaml flathub-target/dev.koljam.solarxy.yaml
           cp packaging/flatpak/cargo-sources.json flathub-target/cargo-sources.json
@@ -86,11 +101,10 @@ jobs:
           sed -i -E "s|tag: .*|tag: ${TAG}|" flathub-target/dev.koljam.solarxy.yaml
 
       - name: Open PR against flathub
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         working-directory: flathub-target
         env:
           GH_TOKEN: ${{ secrets.FLATHUB_PAT }}
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           BRANCH="bump-${TAG}"
           git config user.name "solarxy-bot"

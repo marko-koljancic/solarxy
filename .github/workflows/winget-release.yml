@@ -8,65 +8,76 @@
 # Microsoft moderation review typically takes 3-7 days. Once merged, users
 # install with `winget install Koljam.Solarxy`.
 #
-# Skipped on prerelease tags (`rc.N`).
+# Invocation:
+#   - `workflow_call` — called by cargo-dist's release.yml as a reusable
+#     workflow via the `post-announce-jobs` hook (see dist-workspace.toml).
+#     Runs in-graph, so the GITHUB_TOKEN chain restriction that kills
+#     `on: release: published` does not apply. The `plan` input carries
+#     cargo-dist's dist-manifest; the tag is read from `announcement_tag`.
+#   - `workflow_dispatch` — manual run against an existing release tag.
 name: Winget release
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag (e.g. v0.6.0)"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   submit:
     runs-on: windows-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    env:
+      # `github.event_name` in a reusable workflow reflects the CALLER's
+      # event, not `workflow_call`, so mode is detected by input presence.
+      # `&&` short-circuits so fromJson only runs when inputs.plan is set.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+      IS_PRERELEASE: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_is_prerelease || false }}
     steps:
-      - name: Verify WINGET_RELEASE_PAT presence
-        id: secrets
+      - name: Gate — WINGET_RELEASE_PAT present and not a prerelease
+        id: gate
         shell: bash
+        env:
+          WINGET_RELEASE_PAT: ${{ secrets.WINGET_RELEASE_PAT }}
         run: |
-          if [ -n "${{ secrets.WINGET_RELEASE_PAT }}" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::WINGET_RELEASE_PAT not set — winget submission will be skipped. Provision a fork PAT to enable automatic submissions."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          proceed=true
+          if [ -z "$WINGET_RELEASE_PAT" ]; then
+            echo "::warning::WINGET_RELEASE_PAT not set — winget submission skipped. Provision a fork PAT to enable automatic submissions."
+            proceed=false
           fi
-
-      - name: Resolve tag and version
-        if: steps.secrets.outputs.ready == 'true'
-        id: tag
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${{ github.event.release.tag_name }}"
+          tag="${TAG#v}"
+          if [ "$IS_PRERELEASE" = "true" ] || [[ "$tag" == *-rc.* || "$tag" == *-alpha.* || "$tag" == *-beta.* ]]; then
+            echo "::notice::$TAG is a prerelease — winget submission skipped."
+            proceed=false
           fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
       - name: Install wingetcreate
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
       - name: Submit to winget-pkgs
-        if: steps.secrets.outputs.ready == 'true'
+        if: steps.gate.outputs.proceed == 'true'
         shell: pwsh
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
-          VERSION: ${{ steps.tag.outputs.version }}
           WINGET_PAT: ${{ secrets.WINGET_RELEASE_PAT }}
         run: |
+          $version = $env:TAG -replace '^v', ''
           $msiUrl = "https://github.com/marko-koljancic/solarxy/releases/download/$env:TAG/solarxy-x86_64-pc-windows-msvc.msi"
           ./wingetcreate.exe update Koljam.Solarxy `
-            --version $env:VERSION `
+            --version $version `
             --urls $msiUrl `
             --submit `
             --token $env:WINGET_PAT
