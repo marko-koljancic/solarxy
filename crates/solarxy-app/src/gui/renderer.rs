@@ -5,6 +5,7 @@ use egui_wgpu::ScreenDescriptor;
 
 use solarxy_renderer::resources::ModelStats;
 use crate::console::{ConsoleState, LogBuffer};
+use crate::state::hdri_info::HdriInfo;
 use solarxy_core::preferences::PaneMode;
 
 use super::about::draw_about_modal;
@@ -13,38 +14,43 @@ use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present,
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::material_inspector::MaterialInspectorState;
 use super::menu::draw_menu_bar;
+use super::outliner::OutlinerEvents;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
+use super::status_bar::{self, StatusBarData};
+use super::viewport_context_menu::{ViewportContextMenu, draw_viewport_context_menu};
 use super::preferences_modal::{PreferencesModal, draw_preferences_modal};
 use super::review_panel::draw_delete_confirm_modal;
 use super::review_popup::draw_review_popup;
+use super::screenshot_modal::{ScreenshotModal, draw_screenshot_modal};
+use super::properties::{ModelInfo, PropertiesEvents};
 use super::snapshot::{GuiSnapshot, HudInfo};
-use super::stats::ModelInfo;
-use super::theme::{ACCENT, apply_theme, configure_fonts, make_dock_style};
+use super::theme::{Theme, apply_theme, configure_fonts, make_dock_style};
 use super::update_modal::{UpdateModalState, draw_update_modal};
 use egui_dock::{DockArea, DockState};
-use solarxy_core::preferences::Preferences;
+use solarxy_core::preferences::{Preferences, ThemeChoice};
 
 pub struct EguiRenderer {
     ctx: egui::Context,
     winit_state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
     egui_format: wgpu::TextureFormat,
+    theme: Theme,
     pub menu_bar_visible: bool,
-    fps_hud_visible: bool,
+    pub status_bar_visible: bool,
     pub console: ConsoleState,
     about_open: bool,
     update_modal: UpdateModalState,
     preferences_modal: PreferencesModal,
     shortcuts_modal: KeyboardShortcutsModalState,
+    screenshot_modal: ScreenshotModal,
     material_inspector: MaterialInspectorState,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
     frame_times: VecDeque<f32>,
     model_info: Option<ModelInfo>,
+    hdri_info: Option<HdriInfo>,
     backend_info: String,
-    stats_user_hidden: bool,
-    material_inspector_user_hidden: bool,
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
@@ -75,60 +81,61 @@ impl EguiRenderer {
             egui_wgpu::Renderer::new(device, egui_format, egui_wgpu::RendererOptions::default());
 
         configure_fonts(&ctx);
-        apply_theme(&ctx);
+        let theme = Theme::ayu_mirage_dark();
+        apply_theme(&ctx, &theme);
 
         Self {
             ctx,
             winit_state,
             renderer,
             egui_format,
+            theme,
             menu_bar_visible: true,
-            fps_hud_visible: false,
+            status_bar_visible: true,
             console: ConsoleState::new(console_buffer),
             about_open: false,
             update_modal: UpdateModalState::new(),
             preferences_modal: PreferencesModal::default(),
             shortcuts_modal: KeyboardShortcutsModalState::default(),
+            screenshot_modal: ScreenshotModal::default(),
             material_inspector: MaterialInspectorState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
             frame_times: VecDeque::with_capacity(30),
             model_info: None,
+            hdri_info: None,
             backend_info: String::new(),
-            stats_user_hidden: false,
-            material_inspector_user_hidden: false,
             dock_state: default_dock_state(),
             last_viewport_rect: None,
             has_saved_layout: false,
         }
     }
 
+    /// Swap the active interface theme and re-push it into the egui
+    /// context. Called at startup with the persisted choice and again on
+    /// every Preferences commit (only when the choice actually changed).
+    pub fn apply_theme_choice(&mut self, choice: ThemeChoice) {
+        self.theme = Theme::from_choice(choice);
+        apply_theme(&self.ctx, &self.theme);
+    }
+
+    /// Drop the cached model info on model close. Panel visibility is
+    /// left untouched — panels are user-controlled (no auto open/close).
+    /// The HDRI is independent of the model, so `hdri_info` is kept.
     pub fn clear_model_info(&mut self) {
         self.model_info = None;
-        self.stats_user_hidden = false;
-        self.material_inspector_user_hidden = false;
-        if tab_present(&self.dock_state, SolarxyTab::MaterialInspector) {
-            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
-        }
-        if tab_present(&self.dock_state, SolarxyTab::Stats) {
-            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
-        }
         self.material_inspector.clear_for_new_model();
     }
 
-    pub fn notify_model_loaded(&mut self, open_on_load: bool) {
-        if open_on_load
-            && !self.stats_user_hidden
-            && !tab_present(&self.dock_state, SolarxyTab::Stats)
-        {
-            toggle_tab(&mut self.dock_state, SolarxyTab::Stats);
-        }
-        if !self.material_inspector_user_hidden
-            && !tab_present(&self.dock_state, SolarxyTab::MaterialInspector)
-        {
-            toggle_tab(&mut self.dock_state, SolarxyTab::MaterialInspector);
-        }
+    /// Cache the loaded HDRI's metadata for the Properties panel.
+    pub(crate) fn update_hdri_info(&mut self, info: HdriInfo) {
+        self.hdri_info = Some(info);
+    }
+
+    /// Drop the cached HDRI metadata when the HDRI is cleared.
+    pub(crate) fn clear_hdri_info(&mut self) {
+        self.hdri_info = None;
     }
 
     pub fn on_window_event(
@@ -141,6 +148,13 @@ impl EguiRenderer {
 
     pub fn wants_pointer_input(&self) -> bool {
         self.ctx.wants_pointer_input()
+    }
+
+    /// `true` while any combo / menu / popup is open — the camera input
+    /// gate uses this so a click inside an open pane-toolbar dropdown
+    /// doesn't also orbit the scene.
+    pub fn any_popup_open(&self) -> bool {
+        egui::Popup::is_any_open(&self.ctx)
     }
 
     pub fn wants_keyboard_input(&self) -> bool {
@@ -318,6 +332,16 @@ impl EguiRenderer {
         });
     }
 
+    /// Drop the Material Inspector's per-model thumbnail cache and reset
+    /// its selection. Must be called alongside [`Self::update_model_info`]
+    /// on every model load: the cache is keyed by `(material_index,
+    /// texture_role)`, so without this a stale `TextureHandle` from the
+    /// previous model would be served for the new model's matching slot
+    /// (and the old handles would leak until app exit).
+    pub(crate) fn reset_material_inspector(&mut self) {
+        self.material_inspector.clear_for_new_model();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_ui(
         &mut self,
@@ -337,6 +361,12 @@ impl EguiRenderer {
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
         model: Option<&solarxy_renderer::model::Model>,
+        pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
+        properties_events: &mut PropertiesEvents,
+        outliner_events: &mut OutlinerEvents,
+        viewport_context_menu: &mut Option<ViewportContextMenu>,
+        force_expand_review: bool,
+        suppress_screenshot_modal: bool,
     ) -> (GuiSnapshot, MenuActions) {
         if self.frame_times.len() >= 30 {
             self.frame_times.pop_front();
@@ -355,6 +385,7 @@ impl EguiRenderer {
         let toasts = &self.toasts;
         let loading_message = self.loading_message.as_ref();
         let model_info = &self.model_info;
+        let hdri_info = &self.hdri_info;
         let pane_label = &hud.pane_label;
         let cameras_linked = hud.cameras_linked;
         let validation_counts =
@@ -370,9 +401,10 @@ impl EguiRenderer {
             self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
         let mut menu_vis = MenuBarVisibility {
             sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
+            outliner_visible: present_at_start.contains(&SolarxyTab::Outliner),
             menu_bar_visible: self.menu_bar_visible,
-            stats_visible: present_at_start.contains(&SolarxyTab::Stats),
-            fps_hud_visible: self.fps_hud_visible,
+            properties_visible: present_at_start.contains(&SolarxyTab::Properties),
+            status_bar_visible: self.status_bar_visible,
             console_visible: present_at_start.contains(&SolarxyTab::Console),
             review_panel_visible: present_at_start.contains(&SolarxyTab::ReviewPanel),
             material_inspector_visible: present_at_start.contains(&SolarxyTab::MaterialInspector),
@@ -385,9 +417,24 @@ impl EguiRenderer {
         let console = &mut self.console;
         let update_modal = &mut self.update_modal;
         let preferences_modal = &mut self.preferences_modal;
+        let screenshot_modal = &mut self.screenshot_modal;
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
         let dock_state = &mut self.dock_state;
+        let theme = self.theme;
+        // Destructured here so the egui closure (an `FnMut`) captures the
+        // individual borrows — it rebuilds a fresh `PaneToolbarData` each
+        // run rather than moving a captured owned value out.
+        let super::pane_toolbar::PaneToolbarData {
+            rects: pt_rects,
+            active: pt_active,
+            pane_settings: pt_pane_settings,
+            projections: pt_projections,
+            projection_change: pt_projection_change,
+            hdri_available: pt_hdri_available,
+            customs: pt_customs,
+            uv_overlap_pct: pt_uv_overlap_pct,
+        } = pane_toolbar;
         let mut viewport_rect_logical: Option<egui::Rect> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
@@ -402,50 +449,120 @@ impl EguiRenderer {
                     &mut menu_vis,
                     has_model,
                     recent_files,
+                    pt_hdri_available,
+                    pt_customs,
+                    review.active,
+                    review.markers_hidden,
+                    review.dirty,
+                    theme,
                 );
+            }
+
+            if menu_vis.status_bar_visible {
+                let status = status_bar::draw(
+                    ctx,
+                    &StatusBarData {
+                        model: model_info
+                            .as_ref()
+                            .map(|m| (m.filename.as_str(), m.format.as_str())),
+                        validation: validation_counts,
+                        review_active: review.active,
+                        pane_label,
+                        cameras_linked,
+                        avg_ms,
+                        fps,
+                        backend: backend_info,
+                    },
+                    theme,
+                );
+                if status.review_badge_clicked {
+                    review.toggle_active();
+                    actions.exit_review_mode = true;
+                }
             }
 
             let mut tab_viewer = SolarxyTabViewer {
                 snap: &mut snap,
-                hud,
-                validation_report,
                 review,
                 console,
                 model,
                 model_info: model_info.as_ref(),
+                hdri_info: hdri_info.as_ref(),
+                validation_report,
+                properties_events,
+                outliner_events,
                 material_inspector,
                 viewport_rect_out: &mut viewport_rect_logical,
+                theme,
+                pane_toolbar: super::pane_toolbar::PaneToolbarData {
+                    rects: pt_rects,
+                    active: pt_active,
+                    pane_settings: pt_pane_settings,
+                    projections: pt_projections,
+                    projection_change: pt_projection_change,
+                    hdri_available: pt_hdri_available,
+                    customs: pt_customs,
+                    uv_overlap_pct: pt_uv_overlap_pct,
+                },
             };
             DockArea::new(dock_state)
-                .style(make_dock_style(ctx))
+                .style(make_dock_style(ctx, &theme))
                 .show(ctx, &mut tab_viewer);
 
+            // The screenshot modal counts as a blocking overlay only on
+            // frames it is actually drawn — during a re-capture frame it
+            // is suppressed so the markers it would occlude get captured.
+            let screenshot_drawn = screenshot_modal.open && !suppress_screenshot_modal;
             let suppress_overlay = about_open
                 || preferences_modal.open
                 || update_modal.open
                 || shortcuts_modal.open
+                || screenshot_drawn
                 || review.delete_confirm.is_some()
                 || review.editing.is_some();
+            // `markers_hidden` suppresses the 3D overlay while the panel
+            // keeps listing every annotation.
+            let suppress_markers = suppress_overlay || review.markers_hidden;
             super::review_overlay::draw_review_overlay(
                 ctx,
                 review_panes,
                 review,
-                suppress_overlay,
+                suppress_markers,
+                theme,
+                model,
+                force_expand_review,
             );
 
             draw_about_modal(ctx, &mut about_open);
             draw_update_modal(ctx, update_modal);
             draw_preferences_modal(ctx, preferences_modal);
             draw_keyboard_shortcuts_modal(ctx, shortcuts_modal);
+            if !suppress_screenshot_modal {
+                draw_screenshot_modal(ctx, screenshot_modal, &theme);
+            }
 
             draw_delete_confirm_modal(ctx, review);
             draw_review_popup(ctx, review);
 
+            // Viewport right-click context menu — painted on top; its Esc
+            // consume runs before the review-mode Esc chain below.
+            let menu_outcome = viewport_context_menu
+                .as_mut()
+                .map(|menu| draw_viewport_context_menu(ctx, menu));
+            if let Some(outcome) = menu_outcome {
+                if let Some(act) = outcome.action {
+                    outliner_events.action = Some(act);
+                }
+                if outcome.close {
+                    *viewport_context_menu = None;
+                }
+            }
+
             if review.active {
                 let stripe = egui::Color32::from_rgba_unmultiplied(
-                    ACCENT.r(),
-                    ACCENT.g(),
-                    ACCENT.b(),
+                    theme.accent.r(),
+                    theme.accent.g(),
+                    theme.accent.b(),
                     0xB0,
                 );
                 let stripe_painter = ctx.layer_painter(egui::LayerId::new(
@@ -462,7 +579,7 @@ impl EguiRenderer {
                 if review.reanchor_target.is_none() {
                     let amber_bg =
                         egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xCC);
-                    let amber_fg = ACCENT;
+                    let amber_fg = theme.accent;
                     egui::Area::new(egui::Id::new("solarxy_review_mode_banner"))
                         .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
                         .order(egui::Order::Foreground)
@@ -491,7 +608,7 @@ impl EguiRenderer {
                         crate::state::review::short_text_preview(&a.text)
                     });
                 let amber_bg = egui::Color32::from_rgba_unmultiplied(0x4A, 0x37, 0x0E, 0xE6);
-                let amber_fg = ACCENT;
+                let amber_fg = theme.accent;
                 egui::Area::new(egui::Id::new("solarxy_reanchor_banner"))
                     .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
                     .order(egui::Order::Foreground)
@@ -523,16 +640,8 @@ impl EguiRenderer {
                 }
             }
             let hud_ctx = HudCtx {
-                avg_ms,
-                fps,
                 toasts,
                 loading_message,
-                has_model,
-                fps_hud_visible: menu_vis.fps_hud_visible,
-                backend_info,
-                pane_label,
-                cameras_linked,
-                validation_counts,
                 overdraw_active: hud.overdraw_active,
             };
             let hud_result = draw_hud_overlays(ctx, &hud_ctx);
@@ -541,7 +650,7 @@ impl EguiRenderer {
             }
             if let Some(div) = divider {
                 let painter = ctx.layer_painter(egui::LayerId::background());
-                painter.rect_filled(div.visible, 0.0, egui::Color32::from_gray(40));
+                painter.rect_filled(div.visible, 0.0, theme.border);
                 let resp = egui::Area::new(egui::Id::new("solarxy_divider_drag"))
                     .fixed_pos(div.hit.min)
                     .order(egui::Order::Foreground)
@@ -560,7 +669,7 @@ impl EguiRenderer {
                         solarxy_core::view_config::ViewLayout::SplitHorizontal => {
                             egui::CursorIcon::ResizeVertical
                         }
-                        solarxy_core::view_config::ViewLayout::Single => egui::CursorIcon::Default,
+                        _ => egui::CursorIcon::Default,
                     });
                 }
                 if resp.dragged()
@@ -575,7 +684,7 @@ impl EguiRenderer {
                         solarxy_core::view_config::ViewLayout::SplitHorizontal => {
                             (pos.y - viewport.top()) / viewport.height().max(1.0)
                         }
-                        solarxy_core::view_config::ViewLayout::Single => 0.5,
+                        _ => 0.5,
                     };
                     actions.set_split_ratio = Some(
                         solarxy_core::view_config::DisplaySettings::clamp_split_ratio(raw_ratio),
@@ -585,21 +694,6 @@ impl EguiRenderer {
                     actions.set_split_ratio =
                         Some(solarxy_core::view_config::DisplaySettings::DEFAULT_SPLIT_RATIO);
                 }
-            }
-            if let Some(rect) = active_pane_rect {
-                let painter = ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new("active_pane"),
-                ));
-                painter.rect_stroke(
-                    rect,
-                    0.0,
-                    egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgba_unmultiplied(100, 160, 255, 120),
-                    ),
-                    egui::StrokeKind::Outside,
-                );
             }
             if snap.pane_mode == PaneMode::UvMap && !hud.has_uvs {
                 let screen_rect = ctx.input(egui::InputState::viewport_rect);
@@ -621,9 +715,9 @@ impl EguiRenderer {
         });
 
         self.menu_bar_visible = menu_vis.menu_bar_visible;
-        self.fps_hud_visible = menu_vis.fps_hud_visible;
+        self.status_bar_visible = menu_vis.status_bar_visible;
 
-        let menu_intents: [(SolarxyTab, bool, bool); 6] = [
+        let menu_intents: [(SolarxyTab, bool, bool); 7] = [
             (
                 SolarxyTab::Viewport,
                 menu_vis_before.viewport_visible,
@@ -633,6 +727,11 @@ impl EguiRenderer {
                 SolarxyTab::Sidebar,
                 menu_vis_before.sidebar_visible,
                 menu_vis.sidebar_visible,
+            ),
+            (
+                SolarxyTab::Outliner,
+                menu_vis_before.outliner_visible,
+                menu_vis.outliner_visible,
             ),
             (
                 SolarxyTab::Console,
@@ -650,9 +749,9 @@ impl EguiRenderer {
                 menu_vis.material_inspector_visible,
             ),
             (
-                SolarxyTab::Stats,
-                menu_vis_before.stats_visible,
-                menu_vis.stats_visible,
+                SolarxyTab::Properties,
+                menu_vis_before.properties_visible,
+                menu_vis.properties_visible,
             ),
         ];
         for &(tab, before, after) in &menu_intents {
@@ -663,23 +762,6 @@ impl EguiRenderer {
 
         let present_after: std::collections::HashSet<SolarxyTab> =
             self.dock_state.iter_all_tabs().map(|(_, t)| *t).collect();
-        for &(tab, _, _) in &menu_intents {
-            let was = present_at_start.contains(&tab);
-            let is = present_after.contains(&tab);
-            if was && !is {
-                match tab {
-                    SolarxyTab::Stats => self.stats_user_hidden = true,
-                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = true,
-                    _ => {}
-                }
-            } else if !was && is {
-                match tab {
-                    SolarxyTab::Stats => self.stats_user_hidden = false,
-                    SolarxyTab::MaterialInspector => self.material_inspector_user_hidden = false,
-                    _ => {}
-                }
-            }
-        }
 
         self.console.visible = present_after.contains(&SolarxyTab::Console);
         review.panel_open = present_after.contains(&SolarxyTab::ReviewPanel);
@@ -760,5 +842,39 @@ impl EguiRenderer {
 
     pub fn take_committed_prefs(&mut self) -> Option<Preferences> {
         self.preferences_modal.take_committed()
+    }
+
+    /// Install a fresh screenshot capture and open the modal.
+    pub fn set_screenshot_capture(
+        &mut self,
+        image: image::RgbaImage,
+        filename: String,
+        review_available: bool,
+        expand_review: bool,
+    ) {
+        self.screenshot_modal
+            .set_capture(image, filename, review_available, expand_review);
+    }
+
+    /// Drain a pending re-capture request from the screenshot modal,
+    /// returning the desired expand-review setting.
+    pub fn take_screenshot_recapture(&mut self) -> Option<bool> {
+        self.screenshot_modal.take_recapture()
+    }
+
+    /// Drain a pending `Save As…` request from the screenshot modal.
+    pub fn take_screenshot_save_request(&mut self) -> bool {
+        self.screenshot_modal.take_save_request()
+    }
+
+    /// The screenshot modal's suggested file name (pre-fills the native
+    /// save dialog).
+    pub fn screenshot_suggested_filename(&self) -> String {
+        self.screenshot_modal.suggested_filename().to_string()
+    }
+
+    /// Take the captured screenshot image out and close the modal.
+    pub fn take_screenshot_image(&mut self) -> Option<image::RgbaImage> {
+        self.screenshot_modal.take_image()
     }
 }

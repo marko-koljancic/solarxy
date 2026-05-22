@@ -11,11 +11,12 @@ impl State {
         }
         if actions.save_screenshot {
             self.capture_requested = true;
+            self.screenshot_expand_review = false;
         }
         if actions.close_model {
             self.close_model();
         }
-        if actions.save_preferences {
+        if actions.save_preferences || actions.save_view_defaults {
             self.save_preferences();
         }
         if let Some(path) = actions.open_recent {
@@ -62,12 +63,30 @@ impl State {
             self.gui
                 .set_toast("Review mode: Off", ToastSeverity::Success);
         }
+        if actions.toggle_review_mode {
+            self.toggle_review_mode();
+        }
+        if actions.toggle_review_markers {
+            self.review.markers_hidden = !self.review.markers_hidden;
+        }
+        if actions.save_review_notes {
+            self.save_review_sidecar();
+        }
+        if actions.show_all_meshes {
+            self.handle_outliner_action(crate::gui::OutlinerAction::ShowAll);
+        }
         if actions.save_dock_layout {
             if let Some(json) = self.gui.serialize_layout() {
                 self.preferences.dock.saved_layout_json = Some(json);
                 self.gui.set_has_saved_layout(true);
-                self.save_preferences();
-                self.gui.set_toast("Layout saved.", ToastSeverity::Success);
+                // Persist silently so the click yields one layout-specific
+                // toast, not a generic "Preferences saved" stacked on top.
+                match self.persist_preferences() {
+                    Ok(()) => self.gui.set_toast("Layout saved.", ToastSeverity::Success),
+                    Err(e) => self
+                        .gui
+                        .set_toast(&format!("Save failed: {}", e), ToastSeverity::Error),
+                }
             } else {
                 self.gui
                     .set_toast("Failed to save layout.", ToastSeverity::Warning);

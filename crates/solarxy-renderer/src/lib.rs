@@ -69,6 +69,7 @@ pub mod pipelines;
 pub mod resources;
 pub mod scene;
 pub mod shadow;
+pub mod skybox;
 pub mod ssao;
 pub mod texture;
 pub mod uv_camera;

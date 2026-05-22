@@ -9,13 +9,23 @@
 
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::visualization::GridUniform;
-use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, UvMapBackground};
+use solarxy_core::preferences::{
+    InspectionMode, MaterialOverride, PaneMode, ResolvedBackground, UvMapBackground,
+};
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
 use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
+    /// Resolve a pane's background choice against the user
+    /// custom-background registry into concrete colours for the renderer
+    /// and IBL. A dangling `Custom` id falls back to the builtin Gradient.
+    pub(super) fn resolve_background(&self, pds: &PaneDisplaySettings) -> ResolvedBackground {
+        pds.background_mode
+            .resolve(&self.preferences.view.custom_backgrounds)
+    }
+
     /// Per-frame render entry point. Computes pane rectangles, dispatches
     /// per-pane scene/UV passes, paints the egui overlay (sidebar, menu,
     /// HUD, console, modals, toasts), and presents the swapchain frame.
@@ -110,22 +120,17 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Pane Encoder"),
             });
+        // The 3D scene renders the full pane — the per-pane toolbar labels
+        // float on top of it (3ds Max style), no reserved strip.
         let pane_aspect = pane.width / pane.height;
 
-        let cam_data = if i == 0 {
-            self.scene.as_ref().map(|s| s.cam.camera)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| c.camera)
-                .or(self.scene.as_ref().map(|s| s.cam.camera))
-        };
+        let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
 
-        let pds = self.view.pane_settings[i.min(1)];
+        let pds = self.view.pane_settings[i];
 
         let Some(cam_data) = cam_data else {
-            self.renderer.render_empty_pass(&mut encoder, &pds);
+            self.renderer
+                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
             self.composite_and_submit(encoder, surface_view, i, pane, is_split, false, false);
             return;
         };
@@ -135,16 +140,12 @@ impl State {
         if is_uv_map {
             self.render_uv_map_pane(&mut encoder, pane_aspect, &pds);
         } else {
-            if i == 0 {
-                if let Some(scene) = &mut self.scene {
-                    scene.cam.write_with_aspect(&self.queue, pane_aspect);
-                }
-            } else if let Some(sec) = &mut self.view.secondary_cam {
-                sec.write_with_aspect(&self.queue, pane_aspect);
+            if let Some(cam) = &mut self.view.cameras[i] {
+                cam.write_with_aspect(&self.queue, pane_aspect);
             }
 
-            if is_split && i == 1 {
-                self.setup_split_secondary(&cam_data);
+            if is_split && i >= 1 {
+                self.setup_pane_lighting(&cam_data);
             }
 
             self.write_3d_pane_uniforms(i, &pds);
@@ -166,15 +167,7 @@ impl State {
         pane: &Pane,
         is_split: bool,
     ) {
-        let cam_bg = if i == 0 {
-            self.scene.as_ref().map(|s| &s.cam.bind_group)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| &c.bind_group)
-                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-        };
+        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         let Some(scene) = &self.scene else {
             return;
         };
@@ -303,10 +296,12 @@ impl State {
                     pds,
                 );
             } else {
-                self.renderer.render_empty_pass(encoder, pds);
+                self.renderer
+                    .render_empty_pass(encoder, self.resolve_background(pds));
             }
         } else {
-            self.renderer.render_empty_pass(encoder, pds);
+            self.renderer
+                .render_empty_pass(encoder, self.resolve_background(pds));
         }
     }
 
@@ -314,7 +309,7 @@ impl State {
         self.write_wireframe_params_for(pds);
         self.write_gradient_colors_for(pds);
         if let Some(scene) = &self.scene {
-            let color = pds.background_mode.grid_color();
+            let color = self.resolve_background(pds).grid_color();
             self.queue.write_buffer(
                 &scene.vis.grid_uniform_buf,
                 GridUniform::COLOR_OFFSET,
@@ -322,26 +317,14 @@ impl State {
             );
         }
 
-        let (cam_buf, depth_bounds) = if i == 0 {
-            (
-                self.scene.as_ref().map(|s| &s.cam.buffer),
-                self.scene
-                    .as_ref()
-                    .map(|s| Self::compute_depth_bounds(&s.cam.camera, &s.model.bounds)),
-            )
-        } else {
-            (
-                self.view.secondary_cam.as_ref().map(|c| &c.buffer),
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .zip(self.scene.as_ref())
-                    .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds)),
-            )
-        };
+        let cam_buf = self.view.cameras[i].as_ref().map(|c| &c.buffer);
+        let depth_bounds = self.view.cameras[i]
+            .as_ref()
+            .zip(self.scene.as_ref())
+            .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds));
         if let Some(buf) = cam_buf {
             let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
-            let data: [u32; 7] = [
+            let data: [u32; 8] = [
                 pds.inspection_mode.as_u32(),
                 pds.texel_density_target.to_bits(),
                 pds.material_override.as_u32(),
@@ -349,6 +332,7 @@ impl State {
                 depth_far.to_bits(),
                 self.view.display.roughness_scale.to_bits(),
                 self.view.display.metallic_scale.to_bits(),
+                self.view.display.hdri_rotation.to_bits(),
             ];
             self.queue.write_buffer(
                 buf,
@@ -391,23 +375,22 @@ impl State {
             self.renderer.render_shadow_pass(encoder, scene);
         }
 
-        let cam_bg = if i == 0 {
-            self.scene.as_ref().map(|s| &s.cam.bind_group)
-        } else {
-            self.view
-                .secondary_cam
-                .as_ref()
-                .map(|c| &c.bind_group)
-                .or(self.scene.as_ref().map(|s| &s.cam.bind_group))
-        };
+        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
             if self.renderer.post.ssao_enabled {
                 self.renderer.render_gbuffer_pass(encoder, scene, cam_bg);
             }
-            self.renderer
-                .render_main_pass(encoder, scene, cam_bg, cam_data, pds);
+            self.renderer.render_main_pass(
+                encoder,
+                scene,
+                cam_bg,
+                cam_data,
+                pds,
+                self.resolve_background(pds),
+            );
         } else {
-            self.renderer.render_empty_pass(encoder, pds);
+            self.renderer
+                .render_empty_pass(encoder, self.resolve_background(pds));
         }
 
         if self.renderer.post.ssao_enabled
@@ -427,7 +410,11 @@ impl State {
         }
     }
 
-    fn setup_split_secondary(&mut self, cam_data: &Camera) {
+    /// Recompute the camera-relative light rig for a non-primary pane
+    /// from `cam_data` before it renders, so each pane is lit from its
+    /// own viewpoint. No-op when lights are locked. Pane 0 keeps the rig
+    /// `update()` set from slot 0's camera.
+    fn setup_pane_lighting(&mut self, cam_data: &Camera) {
         if !self.view.display.lights_locked {
             let ibl_avg = self.active_ibl().irradiance_average;
             if let Some(scene) = &mut self.scene {
@@ -491,6 +478,26 @@ impl State {
 
         let review_panes = self.build_review_panes(panes, ppp);
 
+        let pane_rects: Vec<egui::Rect> = panes
+            .iter()
+            .map(|p| {
+                egui::Rect::from_min_size(
+                    egui::pos2(p.x / ppp, p.y / ppp),
+                    egui::vec2(p.width / ppp, p.height / ppp),
+                )
+            })
+            .collect();
+        let default_projection = self.preferences.display.projection_mode;
+        let pane_projections: [solarxy_core::preferences::ProjectionMode; 4] =
+            std::array::from_fn(|i| {
+                self.view.cameras[i]
+                    .as_ref()
+                    .map_or(default_projection, |c| c.camera.projection)
+            });
+        let mut projection_change = None;
+        let mut properties_events = crate::gui::PropertiesEvents::default();
+        let mut outliner_events = crate::gui::OutlinerEvents::default();
+
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
 
@@ -514,19 +521,11 @@ impl State {
             label
         };
 
-        let projection_mode = {
-            let pref = self.preferences.display.projection_mode;
-            if ap == 1 {
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .map_or(pref, |c| c.camera.projection)
-            } else {
-                self.scene
-                    .as_ref()
-                    .map_or(pref, |s| s.cam.camera.projection)
-            }
-        };
+        let projection_mode = self.view.cameras[ap]
+            .as_ref()
+            .map_or(self.preferences.display.projection_mode, |c| {
+                c.camera.projection
+            });
         let snap_before = GuiSnapshot::from_state(
             pds,
             &self.view.display,
@@ -546,7 +545,6 @@ impl State {
                 None
             },
             has_uvs: self.scene.as_ref().is_some_and(|s| s.model.has_uvs),
-            uv_overlap_pct: self.renderer.uv_overlap.overlap_pct,
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
@@ -554,6 +552,26 @@ impl State {
 
         let recent_files = self.preferences.history.recent_files.clone();
         let model = self.scene.as_ref().map(|s| &s.model);
+        // `PaneToolbarData` is passed by value — `render_ui` consumes it,
+        // releasing its `&mut self.view.pane_settings` borrow before
+        // `apply_to_state` re-borrows the same field below.
+        let hdri_available = self.renderer.ibl_res.ibl.equirect.is_some();
+        let uv_overlap_pct = self.renderer.uv_overlap.overlap_pct;
+        let pane_toolbar = crate::gui::PaneToolbarData {
+            rects: &pane_rects,
+            active: ap,
+            pane_settings: &mut self.view.pane_settings,
+            projections: pane_projections,
+            projection_change: &mut projection_change,
+            hdri_available,
+            customs: &self.preferences.view.custom_backgrounds,
+            uv_overlap_pct,
+        };
+        // The screenshot modal is suppressed on any capture frame so it
+        // cannot land in the shot; a re-capture additionally forces every
+        // review card open for that frame.
+        let suppress_screenshot_modal = self.capture_requested;
+        let force_expand_review = self.capture_requested && self.screenshot_expand_review;
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
@@ -571,7 +589,19 @@ impl State {
             &recent_files,
             &mut self.review,
             model,
+            pane_toolbar,
+            &mut properties_events,
+            &mut outliner_events,
+            &mut self.viewport_context_menu,
+            force_expand_review,
+            suppress_screenshot_modal,
         );
+
+        if let Some((i, proj)) = projection_change
+            && let Some(cam) = &mut self.view.cameras[i]
+        {
+            cam.set_projection(proj);
+        }
 
         let changes = snap_after.apply_to_state(
             &snap_before,
@@ -596,8 +626,43 @@ impl State {
 
         self.handle_menu_actions(actions);
 
+        // Properties-panel events: validation fly-to + HDRI load/clear.
+        if let Some(idx) = properties_events.fly_to_issue {
+            self.fly_to_validation_issue(idx);
+        }
+        if properties_events.clear_hdri {
+            self.clear_hdri();
+        }
+        if properties_events.load_hdri {
+            self.open_hdri_dialog();
+        }
+
+        // Outliner events: mesh / material visibility + camera framing.
+        if let Some(action) = outliner_events.action {
+            self.handle_outliner_action(action);
+        }
+
+        // Review panel: clicking a note row flies the camera to its anchor.
+        if let Some(id) = self.review.focus_request.take() {
+            self.focus_review_annotation(&id);
+        }
+        // Review panel Save button.
+        if self.review.save_requested {
+            self.review.save_requested = false;
+            self.save_review_sidecar();
+        }
+
         if let Some(new_prefs) = self.gui.take_committed_prefs() {
+            let theme_changed = self.preferences.ui.theme != new_prefs.ui.theme;
             self.preferences = new_prefs;
+            if theme_changed {
+                self.gui.apply_theme_choice(self.preferences.ui.theme);
+            }
+            // The reviewer name is mirrored onto `ReviewState`; refresh it
+            // so new annotations pick up the change without a model reload.
+            self.review
+                .author
+                .clone_from(&self.preferences.review.author);
             let cap = self.preferences.ui.max_recent_files.max(1);
             if self.preferences.history.recent_files.len() > cap {
                 self.preferences.history.recent_files.truncate(cap);
@@ -606,18 +671,28 @@ impl State {
                 .set_toast("Preferences saved", crate::gui::ToastSeverity::Success);
         }
 
-        let capture_buffer = if self.capture_requested {
+        let capture = if self.capture_requested {
             self.capture_requested = false;
-            Some(self.encode_capture(&output.texture, &mut encoder))
+            self.encode_active_pane_capture(panes, &output.texture, &mut encoder)
         } else {
             None
         };
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        if let Some((buffer, padded_row_bytes, width, height)) = capture_buffer {
-            self.save_capture(buffer, padded_row_bytes, width, height);
+        if let Some((buffer, padded_row_bytes, width, height)) = capture
+            && let Some(image) = self.read_capture(buffer, padded_row_bytes, width, height)
+        {
+            let filename = self.screenshot_filename();
+            self.gui.set_screenshot_capture(
+                image,
+                filename,
+                self.review.active,
+                self.screenshot_expand_review,
+            );
         }
+
+        self.handle_screenshot_modal();
     }
 
     /// Build the per-pane data the egui review overlay needs: one
@@ -627,25 +702,18 @@ impl State {
     fn build_review_panes(&self, panes: &[Pane], ppp: f32) -> Vec<crate::gui::ReviewPaneOverlay> {
         let mut out = Vec::with_capacity(panes.len());
         for (i, pane) in panes.iter().enumerate() {
-            let pds = self.view.pane_settings[i.min(1)];
+            let pds = self.view.pane_settings[i];
             if pds.pane_mode != PaneMode::Scene3D {
                 continue;
             }
+            // The 3D scene now fills the whole pane (the toolbar labels
+            // float over it), so markers project against the full rect.
             let pane_aspect = if pane.height > 0.0 {
                 pane.width / pane.height
             } else {
                 1.0
             };
-            let cam_opt = if i == 0 {
-                self.scene.as_ref().map(|s| s.cam.camera)
-            } else {
-                self.view
-                    .secondary_cam
-                    .as_ref()
-                    .map(|c| c.camera)
-                    .or_else(|| self.scene.as_ref().map(|s| s.cam.camera))
-            };
-            let Some(mut cam) = cam_opt else {
+            let Some(mut cam) = self.view.cameras[i].as_ref().map(|c| c.camera) else {
                 continue;
             };
             cam.aspect = pane_aspect;

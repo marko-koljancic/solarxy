@@ -63,6 +63,12 @@ impl Vertex for GizmoVertex {
 pub struct NormalsGeometry {
     pub vertex_lines: Vec<[f32; 3]>,
     pub face_lines: Vec<[f32; 3]>,
+    /// Per-mesh vertex ranges into `vertex_lines`, parallel to
+    /// `Model::meshes` (one entry per mesh, empty for meshes with no
+    /// geometry). Lets the normals overlay skip Outliner-hidden meshes.
+    pub vertex_segments: Vec<Range<u32>>,
+    /// Per-mesh vertex ranges into `face_lines`, parallel to `Model::meshes`.
+    pub face_segments: Vec<Range<u32>>,
 }
 
 #[repr(C)]
@@ -132,6 +138,9 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+    /// Outliner visibility. `false` skips the mesh in every draw pass
+    /// (main / shadow / g-buffer / overlays / UV) — see `frame.rs`.
+    pub visible: bool,
     pub edge_data: Option<EdgeData>,
     pub uv_edge_data: Option<UvEdgeData>,
     pub degen_index_buffer: Option<wgpu::Buffer>,
@@ -203,6 +212,9 @@ where
 {
     fn draw_model_simple(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
         for mesh in &model.meshes {
+            if !mesh.visible {
+                continue;
+            }
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             self.draw_indexed(0..mesh.num_elements, 0, instances.clone());

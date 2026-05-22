@@ -3973,7 +3973,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -3985,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-app"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-cli"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "axoupdater",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-core"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "cgmath",
@@ -4048,7 +4048,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-formats"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "cgmath",
@@ -4062,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-renderer"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4080,7 +4080,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-validate"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.3"
 dependencies = [
  "clap",
  "glob",

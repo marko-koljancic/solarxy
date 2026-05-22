@@ -11,6 +11,8 @@ use std::path::Path;
 
 use half::f16;
 
+use crate::skybox::EquirectTexture;
+
 pub struct BrdfLut {
     #[allow(dead_code)]
     pub texture: wgpu::Texture,
@@ -28,6 +30,11 @@ pub struct IblState {
     pub prefiltered_view: wgpu::TextureView,
     pub prefiltered_sampler: wgpu::Sampler,
     pub irradiance_average: [f32; 3],
+    /// Source equirect HDRI, retained only by [`IblState::from_hdri`] so
+    /// `BackgroundMode::HdriSky` can render the HDRI as a visible sky.
+    /// `None` for the procedural ([`IblState::fallback`] /
+    /// [`IblState::from_sky_colors`]) constructors.
+    pub equirect: Option<EquirectTexture>,
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -170,6 +177,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             [0.2, 0.2, 0.2],
+            None,
         )
     }
 
@@ -195,6 +203,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            None,
         )
     }
 
@@ -218,23 +227,26 @@ impl IblState {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let (width, height, pixels) = match ext.as_str() {
+        let (width, height, mut pixels) = match ext.as_str() {
             "hdr" => load_hdr(path)?,
             "exr" => load_exr(path)?,
             _ => anyhow::bail!("Unsupported IBL format: .{}", ext),
         };
+        sanitize_hdr_pixels(&mut pixels);
 
         let irradiance = convolve_equirect(width, height, &pixels);
         let irradiance_average = compute_irradiance_average(&irradiance);
         let irradiance_texture = irradiance_faces_to_texture(device, queue, &irradiance);
         let prefiltered_texture =
             generate_prefiltered_equirect(device, queue, width, height, &pixels);
+        let equirect = EquirectTexture::from_hdr_pixels(device, queue, width, height, &pixels);
 
         Ok(Self::from_parts(
             device,
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            Some(equirect),
         ))
     }
 
@@ -243,6 +255,7 @@ impl IblState {
         irradiance_texture: wgpu::Texture,
         prefiltered_texture: wgpu::Texture,
         irradiance_average: [f32; 3],
+        equirect: Option<EquirectTexture>,
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -285,6 +298,7 @@ impl IblState {
             prefiltered_view,
             prefiltered_sampler,
             irradiance_average,
+            equirect,
         }
     }
 }
@@ -765,24 +779,39 @@ fn load_hdr(path: &Path) -> anyhow::Result<(u32, u32, Vec<[f32; 3]>)> {
 }
 
 fn load_exr(path: &Path) -> anyhow::Result<(u32, u32, Vec<[f32; 3]>)> {
+    // The set-pixel closure only receives the absolute pixel position, so
+    // the row stride (image width) is carried in the pixel-storage tuple.
+    // `Vec2::width()` aliases `.x()` in the `exr` crate — indexing the
+    // buffer with it instead of the real width scrambles every row but the
+    // first, which is the historical "broken EXR background" bug.
     let image = exr::prelude::read_first_rgba_layer_from_file(
         path,
-        |resolution, _| vec![[0.0_f32; 4]; resolution.width() * resolution.height()],
-        |pixels, pos, (r, g, b, _a): (f32, f32, f32, f32)| {
-            pixels[pos.y() * pos.width() + pos.x()] = [r, g, b, 1.0];
+        |resolution, _| {
+            let width = resolution.width();
+            (width, vec![[0.0_f32; 3]; width * resolution.height()])
+        },
+        |(width, pixels), pos, (r, g, b, _a): (f32, f32, f32, f32)| {
+            pixels[pos.y() * *width + pos.x()] = [r, g, b];
         },
     )?;
 
     let w = image.layer_data.size.width() as u32;
     let h = image.layer_data.size.height() as u32;
-    let pixels: Vec<[f32; 3]> = image
-        .layer_data
-        .channel_data
-        .pixels
-        .into_iter()
-        .map(|p| [p[0], p[1], p[2]])
-        .collect();
+    let (_, pixels) = image.layer_data.channel_data.pixels;
     Ok((w, h, pixels))
+}
+
+/// Replace non-finite samples with `0` and clamp negative radiance to `0`.
+/// HDRIs in the wild are not always clean (sun disks, sloppy exporters),
+/// and the IBL convolution + f16 skybox upload downstream assume finite,
+/// non-negative input — an `Inf` here becomes an f16 infinity that bloom
+/// amplifies into sparkle.
+fn sanitize_hdr_pixels(pixels: &mut [[f32; 3]]) {
+    for px in pixels {
+        for c in px {
+            *c = if c.is_finite() { c.max(0.0) } else { 0.0 };
+        }
+    }
 }
 
 fn sample_equirect(width: u32, height: u32, pixels: &[[f32; 3]], dir: [f32; 3]) -> [f32; 3] {
@@ -835,4 +864,47 @@ fn convolve_equirect(width: u32, height: u32, pixels: &[[f32; 3]]) -> [Vec<[f32;
         }
         face_data
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_exr_preserves_row_layout() {
+        // A 4x3 EXR where each pixel encodes its own coordinates. A
+        // mis-strided decode (the historical `pos.width()` bug) scrambles
+        // every row but the first, so this catches a regression.
+        let path = std::env::temp_dir().join("solarxy_load_exr_roundtrip.exr");
+        let (w, h) = (4usize, 3usize);
+        exr::prelude::write_rgba_file(&path, w, h, |x, y| (x as f32, y as f32, 0.5_f32, 1.0_f32))
+            .expect("write test exr");
+
+        let decoded = load_exr(&path);
+        let _ = std::fs::remove_file(&path);
+        let (dw, dh, pixels) = decoded.expect("decode test exr");
+
+        assert_eq!((dw, dh), (w as u32, h as u32));
+        assert_eq!(pixels.len(), w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let px = pixels[y * w + x];
+                assert!((px[0] - x as f32).abs() < 1e-3, "x mismatch at ({x},{y})");
+                assert!((px[1] - y as f32).abs() < 1e-3, "y mismatch at ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn sanitize_hdr_pixels_drops_non_finite_and_negative() {
+        let mut pixels = [
+            [f32::INFINITY, -1.0, 2.0],
+            [f32::NAN, 0.5, f32::NEG_INFINITY],
+        ];
+        sanitize_hdr_pixels(&mut pixels);
+        let expect = [[0.0_f32, 0.0, 2.0], [0.0, 0.5, 0.0]];
+        for (got, want) in pixels.iter().flatten().zip(expect.iter().flatten()) {
+            assert!((got - want).abs() < 1e-6, "got {got}, want {want}");
+        }
+    }
 }

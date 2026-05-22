@@ -2,6 +2,8 @@
 //! per-face normal arrows. All CPU-side mesh construction with their own
 //! pipelines registered in [`crate::pipelines::OverlayPipelines`].
 
+use std::ops::Range;
+
 use solarxy_core::AABB;
 use crate::bind_groups::BindGroupLayouts;
 use crate::model::{self, Model};
@@ -36,6 +38,10 @@ pub struct VisualizationState {
     pub face_normals_buf: wgpu::Buffer,
     pub vertex_normals_count: u32,
     pub face_normals_count: u32,
+    /// Per-mesh vertex ranges into `vertex_normals_buf` / `face_normals_buf`,
+    /// parallel to `Model::meshes` — `draw_normals` skips hidden meshes.
+    pub vertex_normals_segments: Vec<Range<u32>>,
+    pub face_normals_segments: Vec<Range<u32>>,
     pub face_normals_params_bind_group: wgpu::BindGroup,
     pub vertex_normals_params_bind_group: wgpu::BindGroup,
     pub axes_vertex_buf: wgpu::Buffer,
@@ -207,6 +213,8 @@ impl VisualizationState {
             face_normals_buf,
             vertex_normals_count,
             face_normals_count,
+            vertex_normals_segments: normals_geo.vertex_segments.clone(),
+            face_normals_segments: normals_geo.face_segments.clone(),
             face_normals_params_bind_group,
             vertex_normals_params_bind_group,
             axes_vertex_buf,

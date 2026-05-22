@@ -1,21 +1,32 @@
 use solarxy_core::preferences::{
-    self, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT, MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
-    MIN_WINDOW_WIDTH, Preferences, UpdaterChannel,
+    self, CustomBackground, CustomBgKind, MAX_RECENT_FILES_CAP, MAX_WINDOW_HEIGHT,
+    MAX_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Preferences, ThemeChoice,
+    UpdaterChannel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrefsTab {
     Startup,
+    Appearance,
+    View,
     Interface,
     Updater,
 }
 
 impl PrefsTab {
-    const ALL: [Self; 3] = [Self::Startup, Self::Interface, Self::Updater];
+    const ALL: [Self; 5] = [
+        Self::Startup,
+        Self::Appearance,
+        Self::View,
+        Self::Interface,
+        Self::Updater,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::Startup => "Startup",
+            Self::Appearance => "Appearance",
+            Self::View => "View",
             Self::Interface => "Interface",
             Self::Updater => "Updater",
         }
@@ -30,6 +41,9 @@ pub struct PreferencesModal {
     active_tab: PrefsTab,
     save_error: Option<String>,
     committed: Option<Preferences>,
+    /// Index into `draft.view.custom_backgrounds` of the custom currently
+    /// open in the View tab's inline editor, if any.
+    editing_custom: Option<usize>,
 }
 
 impl Default for PreferencesModal {
@@ -41,6 +55,7 @@ impl Default for PreferencesModal {
             active_tab: PrefsTab::Startup,
             save_error: None,
             committed: None,
+            editing_custom: None,
         }
     }
 }
@@ -52,6 +67,7 @@ impl PreferencesModal {
         self.active_tab = PrefsTab::Startup;
         self.save_error = None;
         self.committed = None;
+        self.editing_custom = None;
         self.open = true;
     }
 
@@ -66,8 +82,18 @@ impl PreferencesModal {
                 self.draft.window = defaults.window;
                 self.draft.rendering.msaa_sample_count = defaults.rendering.msaa_sample_count;
             }
+            PrefsTab::Appearance => {
+                self.draft.ui.theme = defaults.ui.theme;
+            }
+            PrefsTab::View => {
+                // Reset only the default-background choice; custom
+                // backgrounds are user data — removed one at a time.
+                self.draft.display.background = defaults.display.background;
+                self.editing_custom = None;
+            }
             PrefsTab::Interface => {
-                self.draft.ui = defaults.ui;
+                self.draft.ui.max_recent_files = defaults.ui.max_recent_files;
+                self.draft.ui.status_bar_visible = defaults.ui.status_bar_visible;
             }
             PrefsTab::Updater => {
                 self.draft.updater = defaults.updater;
@@ -130,6 +156,10 @@ pub(super) fn draw_preferences_modal(ctx: &egui::Context, modal: &mut Preference
 
             match modal.active_tab {
                 PrefsTab::Startup => draw_startup_tab(ui, &mut modal.draft),
+                PrefsTab::Appearance => draw_appearance_tab(ui, &mut modal.draft),
+                PrefsTab::View => {
+                    draw_view_tab(ui, &mut modal.draft, &mut modal.editing_custom);
+                }
                 PrefsTab::Interface => draw_interface_tab(ui, &mut modal.draft),
                 PrefsTab::Updater => draw_updater_tab(ui, &mut modal.draft),
             }
@@ -219,7 +249,7 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         egui::RichText::new("Window size and MSAA take effect on next launch.")
             .italics()
             .small()
-            .color(egui::Color32::from_white_alpha(140)),
+            .weak(),
     );
 
     ui.add_space(12.0);
@@ -231,7 +261,7 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         ui.label(
             egui::RichText::new(path.display().to_string())
                 .small()
-                .color(egui::Color32::from_white_alpha(140)),
+                .weak(),
         );
         ui.add_space(4.0);
         if ui.button("Open config file").clicked()
@@ -244,9 +274,207 @@ fn draw_startup_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             egui::RichText::new("(config path unavailable)")
                 .small()
                 .italics()
-                .color(egui::Color32::from_white_alpha(100)),
+                .weak(),
         );
     }
+}
+
+fn draw_appearance_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
+    egui::Grid::new("prefs_appearance")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Theme");
+            ui.horizontal(|ui| {
+                for choice in ThemeChoice::ALL {
+                    if ui
+                        .selectable_label(draft.ui.theme == *choice, choice.to_string())
+                        .clicked()
+                    {
+                        draft.ui.theme = *choice;
+                    }
+                }
+            });
+            ui.end_row();
+        });
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new("The theme applies immediately when you click OK.")
+            .italics()
+            .small()
+            .weak(),
+    );
+}
+
+fn draw_view_tab(ui: &mut egui::Ui, draft: &mut Preferences, editing: &mut Option<usize>) {
+    ui.horizontal(|ui| {
+        ui.label("Default background");
+        // No HDRI is loaded at startup, so `HDRI Sky` is not offered as a
+        // default — `false` hides it from the dropdown.
+        super::pane_toolbar::background_combo(
+            ui,
+            "prefs_default_background",
+            &mut draft.display.background,
+            &draft.view.custom_backgrounds,
+            false,
+        );
+    });
+    ui.label(
+        egui::RichText::new("The viewport background Solarxy starts with.")
+            .italics()
+            .small()
+            .weak(),
+    );
+
+    ui.add_space(10.0);
+    ui.label(egui::RichText::new("Custom Backgrounds").strong());
+    ui.add_space(2.0);
+
+    let mut to_delete: Option<usize> = None;
+    for i in 0..draft.view.custom_backgrounds.len() {
+        ui.horizontal(|ui| {
+            let custom = &draft.view.custom_backgrounds[i];
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 16.0), egui::Sense::hover());
+            paint_bg_swatch(ui, rect, custom);
+            ui.label(&custom.name);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Delete").clicked() {
+                    to_delete = Some(i);
+                }
+                if ui.button("Edit").clicked() {
+                    *editing = Some(i);
+                }
+            });
+        });
+    }
+    if draft.view.custom_backgrounds.is_empty() {
+        ui.label(
+            egui::RichText::new("No custom backgrounds yet.")
+                .italics()
+                .small()
+                .weak(),
+        );
+    }
+
+    ui.add_space(2.0);
+    if ui.button("+ Add").clicked() {
+        let id = draft.view.next_custom_id;
+        draft.view.next_custom_id = id.wrapping_add(1);
+        draft.view.custom_backgrounds.push(CustomBackground {
+            id,
+            name: format!("Background {}", id.saturating_add(1)),
+            kind: CustomBgKind::Solid,
+            top: [0.45, 0.46, 0.50],
+            bottom: [0.08, 0.08, 0.11],
+        });
+        *editing = Some(draft.view.custom_backgrounds.len() - 1);
+    }
+
+    if let Some(i) = to_delete {
+        draft.view.custom_backgrounds.remove(i);
+        // Keep the inline editor anchored to the same custom — or close
+        // it if the deleted entry was the one being edited.
+        *editing = match *editing {
+            Some(e) if e == i => None,
+            Some(e) if e > i => Some(e - 1),
+            other => other,
+        };
+    }
+
+    if let Some(i) = *editing {
+        if draft.view.custom_backgrounds.get(i).is_some() {
+            ui.add_space(8.0);
+            ui.separator();
+            draw_custom_editor(ui, &mut draft.view.custom_backgrounds[i], editing);
+        } else {
+            *editing = None;
+        }
+    }
+}
+
+/// The inline editor revealed below the custom list when one is being
+/// edited (Add or Edit). `editing` is cleared when `Done` is pressed.
+fn draw_custom_editor(
+    ui: &mut egui::Ui,
+    custom: &mut CustomBackground,
+    editing: &mut Option<usize>,
+) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("Editing custom background").strong());
+    ui.add_space(4.0);
+    egui::Grid::new("prefs_custom_bg_editor")
+        .num_columns(2)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Name");
+            ui.text_edit_singleline(&mut custom.name);
+            ui.end_row();
+
+            ui.label("Kind");
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut custom.kind, CustomBgKind::Solid, "Solid");
+                ui.radio_value(&mut custom.kind, CustomBgKind::Gradient, "Gradient");
+            });
+            ui.end_row();
+
+            match custom.kind {
+                CustomBgKind::Solid => {
+                    ui.label("Color");
+                    ui.color_edit_button_rgb(&mut custom.top);
+                    ui.end_row();
+                }
+                CustomBgKind::Gradient => {
+                    ui.label("Top color");
+                    ui.color_edit_button_rgb(&mut custom.top);
+                    ui.end_row();
+                    ui.label("Bottom color");
+                    ui.color_edit_button_rgb(&mut custom.bottom);
+                    ui.end_row();
+                }
+            }
+
+            ui.label("Preview");
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 48.0), egui::Sense::hover());
+            paint_bg_swatch(ui, rect, custom);
+            ui.end_row();
+        });
+    ui.add_space(4.0);
+    if ui.button("Done").clicked() {
+        *editing = None;
+    }
+}
+
+/// Paint a custom background's appearance into `rect` — a flat fill for
+/// `Solid`, a real vertical gradient mesh for `Gradient`.
+fn paint_bg_swatch(ui: &egui::Ui, rect: egui::Rect, custom: &CustomBackground) {
+    match custom.kind {
+        CustomBgKind::Solid => {
+            ui.painter().rect_filled(rect, 0.0, bg_color32(custom.top));
+        }
+        CustomBgKind::Gradient => {
+            let mut mesh = egui::Mesh::default();
+            let top = bg_color32(custom.top);
+            let bottom = bg_color32(custom.bottom);
+            mesh.colored_vertex(rect.left_top(), top);
+            mesh.colored_vertex(rect.right_top(), top);
+            mesh.colored_vertex(rect.left_bottom(), bottom);
+            mesh.colored_vertex(rect.right_bottom(), bottom);
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(2, 1, 3);
+            ui.painter().add(mesh);
+        }
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn bg_color32(c: [f32; 3]) -> egui::Color32 {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    egui::Color32::from_rgb(b(c[0]), b(c[1]), b(c[2]))
 }
 
 fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
@@ -254,16 +482,8 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Sidebar visible at launch");
-            ui.checkbox(&mut draft.ui.default_sidebar_visible, "");
-            ui.end_row();
-
-            ui.label("FPS HUD visible at launch");
-            ui.checkbox(&mut draft.ui.default_fps_hud_visible, "");
-            ui.end_row();
-
-            ui.label("Open Model Stats on model load");
-            ui.checkbox(&mut draft.ui.open_stats_on_model_load, "");
+            ui.label("Status bar visible at launch");
+            ui.checkbox(&mut draft.ui.status_bar_visible, "");
             ui.end_row();
 
             ui.label("Recent files capacity");
@@ -271,6 +491,22 @@ fn draw_interface_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
                 egui::Slider::new(&mut draft.ui.max_recent_files, 1..=MAX_RECENT_FILES_CAP)
                     .integer(),
             );
+            ui.end_row();
+
+            ui.label("Reviewer name")
+                .on_hover_text("Author name written on new review annotations");
+            let mut name = draft.review.author.clone().unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut name).hint_text("anonymous"))
+                .changed()
+            {
+                let trimmed = name.trim();
+                draft.review.author = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_owned())
+                };
+            }
             ui.end_row();
         });
 }
@@ -306,7 +542,7 @@ fn draw_updater_tab(ui: &mut egui::Ui, draft: &mut Preferences) {
             )
             .italics()
             .small()
-            .color(egui::Color32::from_white_alpha(140)),
+            .weak(),
         );
     }
 }

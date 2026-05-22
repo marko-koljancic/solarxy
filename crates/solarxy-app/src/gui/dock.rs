@@ -1,7 +1,7 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
 //! All five user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Model Stats) plus the 3D Viewport live as tabs inside a
+//! Inspector, Properties) plus the 3D Viewport live as tabs inside a
 //! single [`egui_dock::DockState`]. Users drag tab titles between leaves
 //! to dock left/right/bottom/top; drag outside the dock area to tear out
 //! into a floating window. The Viewport tab is **closeable but
@@ -27,13 +27,18 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
+use solarxy_core::validation::ValidationReport;
+
 use crate::console::ConsoleState;
+use crate::state::hdri_info::HdriInfo;
 
 use super::material_inspector::MaterialInspectorState;
-use super::snapshot::{GuiSnapshot, HudInfo};
-use super::stats::ModelInfo;
+use super::outliner::OutlinerEvents;
+use super::properties::{ModelInfo, PropertiesEvents};
+use super::snapshot::GuiSnapshot;
+use super::theme::Theme;
 
-/// The six tab variants in the Solarxy dock. The `Viewport` variant is
+/// The seven tab variants in the Solarxy dock. The `Viewport` variant is
 /// special-cased throughout: it never floats and never paints a background
 /// (so the wgpu surface shows through). It *can* be closed — the Window
 /// menu restores it via [`toggle_tab`].
@@ -44,7 +49,8 @@ pub(super) enum SolarxyTab {
     ReviewPanel,
     Console,
     MaterialInspector,
-    Stats,
+    Properties,
+    Outliner,
 }
 
 impl SolarxyTab {
@@ -56,23 +62,30 @@ impl SolarxyTab {
             Self::ReviewPanel => "review-panel",
             Self::Console => "console",
             Self::MaterialInspector => "material-inspector",
-            Self::Stats => "stats",
+            Self::Properties => "properties",
+            Self::Outliner => "outliner",
         }
     }
 }
 
-/// Build the default dock layout: Viewport central, Sidebar left,
-/// `ReviewPanel` right, Console bottom. `MaterialInspector` + Stats start
-/// unattached and only enter the tree when the user toggles them via
-/// the Window menu (or when persistence restores a layout that pins
-/// them in).
+/// Build the default dock layout: Viewport central, Outliner top-left
+/// with Sidebar below it, Properties top-right with `ReviewPanel` below
+/// it, Console and Material Inspector tabbed together along the bottom.
+/// Every panel ships in the default tree — discoverability is the layout
+/// itself (no panel auto-opens on model load).
 pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
     let mut state = DockState::new(vec![SolarxyTab::Viewport]);
     let surface = state.main_surface_mut();
-    let [center_etc, _sidebar] =
-        surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Sidebar]);
-    let [center, _review] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::ReviewPanel]);
-    let [_main, _console] = surface.split_below(center, 0.72, vec![SolarxyTab::Console]);
+    let [center_etc, left] =
+        surface.split_left(NodeIndex::root(), 0.18, vec![SolarxyTab::Outliner]);
+    let [_outliner, _sidebar] = surface.split_below(left, 0.5, vec![SolarxyTab::Sidebar]);
+    let [center, right] = surface.split_right(center_etc, 0.78, vec![SolarxyTab::Properties]);
+    let [_props, _review] = surface.split_below(right, 0.5, vec![SolarxyTab::ReviewPanel]);
+    let [_main, _bottom] = surface.split_below(
+        center,
+        0.72,
+        vec![SolarxyTab::Console, SolarxyTab::MaterialInspector],
+    );
 
     state
 }
@@ -81,14 +94,18 @@ pub(super) fn default_dock_state() -> DockState<SolarxyTab> {
 /// Constructed fresh inside `render_ui`'s egui closure each frame.
 pub(super) struct SolarxyTabViewer<'a> {
     pub snap: &'a mut GuiSnapshot,
-    pub hud: &'a HudInfo,
-    pub validation_report: Option<&'a solarxy_core::validation::ValidationReport>,
     pub review: &'a mut crate::state::review::ReviewState,
     pub console: &'a mut ConsoleState,
     pub model: Option<&'a solarxy_renderer::model::Model>,
     pub model_info: Option<&'a ModelInfo>,
+    pub hdri_info: Option<&'a HdriInfo>,
+    pub validation_report: Option<&'a ValidationReport>,
+    pub properties_events: &'a mut PropertiesEvents,
+    pub outliner_events: &'a mut OutlinerEvents,
     pub material_inspector: &'a mut MaterialInspectorState,
     pub viewport_rect_out: &'a mut Option<egui::Rect>,
+    pub theme: Theme,
+    pub pane_toolbar: super::pane_toolbar::PaneToolbarData<'a>,
 }
 
 impl TabViewer for SolarxyTabViewer<'_> {
@@ -105,7 +122,8 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 self.model.map_or(0, |m| m.materials.len())
             )
             .into(),
-            SolarxyTab::Stats => "Stats".into(),
+            SolarxyTab::Properties => "Properties".into(),
+            SolarxyTab::Outliner => "Outliner".into(),
         }
     }
 
@@ -113,19 +131,25 @@ impl TabViewer for SolarxyTabViewer<'_> {
         match tab {
             SolarxyTab::Viewport => {
                 *self.viewport_rect_out = Some(ui.max_rect());
+                super::pane_toolbar::draw_pane_toolbars(
+                    ui,
+                    &mut self.pane_toolbar,
+                    self.snap,
+                    self.theme,
+                );
                 ui.allocate_space(ui.available_size());
             }
             SolarxyTab::Sidebar => {
-                super::sidebar::draw_sidebar_content(
-                    ui,
-                    self.snap,
-                    self.hud.uv_overlap_pct,
-                    self.validation_report,
-                );
+                super::sidebar::draw_sidebar_content(ui, self.snap);
             }
             SolarxyTab::ReviewPanel => {
                 let mut visible = true;
-                super::review_panel::draw_review_panel_content(ui, self.review, &mut visible);
+                super::review_panel::draw_review_panel_content(
+                    ui,
+                    self.review,
+                    &mut visible,
+                    self.theme,
+                );
             }
             SolarxyTab::Console => {
                 super::console_view::draw_console_content(ui, self.console);
@@ -136,17 +160,24 @@ impl TabViewer for SolarxyTabViewer<'_> {
                         ui,
                         model,
                         self.material_inspector,
+                        &self.theme,
                     );
                 } else {
                     draw_no_model_placeholder(ui);
                 }
             }
-            SolarxyTab::Stats => {
-                if let Some(info) = self.model_info {
-                    super::stats::draw_stats_content(ui, info);
-                } else {
-                    draw_no_model_placeholder(ui);
-                }
+            SolarxyTab::Properties => {
+                super::properties::draw_properties_content(
+                    ui,
+                    self.model_info,
+                    self.hdri_info,
+                    self.validation_report,
+                    self.snap,
+                    self.properties_events,
+                );
+            }
+            SolarxyTab::Outliner => {
+                super::outliner::draw_outliner_content(ui, self.model, self.outliner_events);
             }
         }
     }
@@ -161,6 +192,19 @@ impl TabViewer for SolarxyTabViewer<'_> {
 
     fn clear_background(&self, tab: &Self::Tab) -> bool {
         !matches!(tab, SolarxyTab::Viewport)
+    }
+
+    /// The wgpu surface shows through the Viewport tab, so it must never
+    /// scroll. `egui_dock` wraps every tab body in a `ScrollArea` whose
+    /// `scroll_bars` default to `[true, true]`; in a narrow quad pane the
+    /// per-pane toolbar overflows and grows a spurious horizontal
+    /// scrollbar that shifts the viewport. Other panels keep scrolling.
+    fn scroll_bars(&self, tab: &Self::Tab) -> [bool; 2] {
+        if matches!(tab, SolarxyTab::Viewport) {
+            [false, false]
+        } else {
+            [true, true]
+        }
     }
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
@@ -205,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn default_dock_state_has_core_four_tabs() {
+    fn default_dock_state_has_core_tabs() {
         let dock = default_dock_state();
         let present = membership(&dock);
         for tab in [
@@ -213,11 +257,12 @@ mod tests {
             SolarxyTab::Sidebar,
             SolarxyTab::ReviewPanel,
             SolarxyTab::Console,
+            SolarxyTab::Properties,
+            SolarxyTab::Outliner,
+            SolarxyTab::MaterialInspector,
         ] {
             assert!(present.contains(&tab), "default dock missing tab {tab:?}");
         }
-        assert!(!present.contains(&SolarxyTab::MaterialInspector));
-        assert!(!present.contains(&SolarxyTab::Stats));
     }
 
     #[test]
@@ -252,12 +297,14 @@ mod tests {
     #[test]
     fn tab_present_accuracy_after_sequence() {
         let mut dock = default_dock_state();
-        assert!(!tab_present(&dock, SolarxyTab::Stats));
+        // Every panel ships in the default tree, so the round-trip starts
+        // from present.
+        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
 
-        toggle_tab(&mut dock, SolarxyTab::Stats);
-        assert!(tab_present(&dock, SolarxyTab::Stats));
+        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        assert!(!tab_present(&dock, SolarxyTab::MaterialInspector));
 
-        toggle_tab(&mut dock, SolarxyTab::Stats);
-        assert!(!tab_present(&dock, SolarxyTab::Stats));
+        toggle_tab(&mut dock, SolarxyTab::MaterialInspector);
+        assert!(tab_present(&dock, SolarxyTab::MaterialInspector));
     }
 }

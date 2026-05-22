@@ -29,11 +29,7 @@ const SECTIONS: &[Section] = &[
             },
             Entry {
                 keys: "C",
-                action: "Save screenshot",
-            },
-            Entry {
-                keys: "Shift+S",
-                action: "Save preferences",
+                action: "Screenshot\u{2026}",
             },
             Entry {
                 keys: "__MOD__+,",
@@ -57,6 +53,14 @@ const SECTIONS: &[Section] = &[
                 action: "Split horizontal",
             },
             Entry {
+                keys: "F4",
+                action: "Quad viewport",
+            },
+            Entry {
+                keys: "F5",
+                action: "Three-left-big viewport",
+            },
+            Entry {
                 keys: "F10",
                 action: "Toggle menu bar",
             },
@@ -73,10 +77,7 @@ const SECTIONS: &[Section] = &[
                 action: "Toggle console",
             },
             Entry {
-                #[cfg(target_os = "macos")]
-                keys: "⌘+1",
-                #[cfg(not(target_os = "macos"))]
-                keys: "Ctrl+1",
+                keys: "__MOD__+1",
                 action: "Toggle viewport",
             },
             Entry {
@@ -205,6 +206,27 @@ const SECTIONS: &[Section] = &[
             Entry {
                 keys: "Shift+V",
                 action: "Validation overlay",
+            },
+        ],
+    },
+    Section {
+        title: "Mesh Visibility",
+        entries: &[
+            Entry {
+                keys: "Shift+H",
+                action: "Hide mesh under cursor",
+            },
+            Entry {
+                keys: "Alt+H",
+                action: "Show all meshes",
+            },
+            Entry {
+                keys: "/",
+                action: "Isolate mesh under cursor",
+            },
+            Entry {
+                keys: "Right-click",
+                action: "Mesh context menu (Frame / Hide / Hide Others / Show All)",
             },
         ],
     },

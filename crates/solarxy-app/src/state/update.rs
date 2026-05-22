@@ -17,6 +17,16 @@ impl State {
     }
 
     pub(super) fn rebuild_light_bind_group(&mut self) {
+        // The skybox pass samples the active IBL's source equirect — track
+        // it here so HDRI load / IBL swaps keep the visible sky in sync.
+        self.renderer.skybox_bind_group = self.renderer.ibl_res.ibl.equirect.as_ref().map(|eq| {
+            solarxy_renderer::skybox::create_skybox_bind_group(
+                &self.device,
+                &self.renderer.layouts.skybox,
+                eq,
+            )
+        });
+
         let ibl_avg = self.active_ibl().irradiance_average;
         if let Some(scene) = &mut self.scene {
             scene.light_bind_group = match self.renderer.ibl_res.ibl_mode {
@@ -58,7 +68,7 @@ impl State {
     }
 
     pub(super) fn write_gradient_colors_for(&self, pds: &PaneDisplaySettings) {
-        let (top, bottom) = pds.background_mode.sky_colors();
+        let (top, bottom) = self.resolve_background(pds).sky_colors();
         let data = GradientUniform {
             top_color: [top[0], top[1], top[2], 1.0],
             bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
@@ -75,7 +85,7 @@ impl State {
 
     pub(super) fn write_wireframe_params_for(&self, pds: &PaneDisplaySettings) {
         let params = WireframeParams {
-            color: pds.background_mode.wireframe_color(),
+            color: self.resolve_background(pds).wireframe_color(),
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
@@ -102,7 +112,9 @@ impl State {
         let queue = self.queue.clone();
         let layouts = Arc::clone(&self.renderer.layouts);
         let config = self.config.clone();
-        let initial_grid_color = self.view.pane_settings[0].background_mode.grid_color();
+        let initial_grid_color = self
+            .resolve_background(&self.view.pane_settings[0])
+            .grid_color();
         let shadow_map_size = self.preferences.rendering.shadow_map_size;
         let path = model_path.clone();
 
@@ -143,12 +155,56 @@ impl State {
             self.resize_render_targets(tw, th);
 
             let aspect = tw as f32 / th as f32;
-            if let Some(scene) = &mut self.scene {
-                scene.cam.resize(aspect);
-            }
-            if let Some(cam) = &mut self.view.secondary_cam {
+            for cam in self.view.cameras.iter_mut().flatten() {
                 cam.resize(aspect);
             }
+        }
+    }
+
+    /// Lazily create a [`CameraState`] for every pane slot the current
+    /// layout uses. Idempotent — a slot that already holds a camera is
+    /// skipped, so layout toggles preserve per-slot cameras within a
+    /// session. No-op until a model is loaded (bounds frame the camera).
+    /// Slot 0 is the perspective Single-layout camera; slots 1-3 seed to
+    /// orthographic Top / Front / Left — a one-time convenience that the
+    /// user re-orients with T / F / L.
+    pub(super) fn ensure_pane_cameras(&mut self) {
+        let Some(bounds) = self.scene.as_ref().map(|s| s.model.bounds) else {
+            return;
+        };
+        let count = self.view.display.layout.pane_count();
+        let (tw, th) = self.target_dimensions();
+        let aspect = tw as f32 / th.max(1) as f32;
+        for i in 0..count {
+            if self.view.cameras[i].is_some() {
+                continue;
+            }
+            let mut cam = if i == 0 {
+                CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect)
+            } else if let Some(src) = self.view.cameras[0].as_ref() {
+                src.clone_with_new_resources(&self.device, &self.renderer.layouts.camera)
+            } else {
+                continue;
+            };
+            match i {
+                0 => cam.set_projection(self.preferences.display.projection_mode),
+                1 => cam.reset_to_bounds_axis(
+                    &bounds,
+                    cgmath::Vector3::unit_y(),
+                    -cgmath::Vector3::unit_z(),
+                ),
+                2 => cam.reset_to_bounds_axis(
+                    &bounds,
+                    cgmath::Vector3::unit_z(),
+                    cgmath::Vector3::unit_y(),
+                ),
+                _ => cam.reset_to_bounds_axis(
+                    &bounds,
+                    -cgmath::Vector3::unit_x(),
+                    cgmath::Vector3::unit_y(),
+                ),
+            }
+            self.view.cameras[i] = Some(cam);
         }
     }
 
@@ -226,13 +282,28 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        let hdri_poll = self
-            .pending_hdri
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
+        let hdri_poll = self.pending_hdri.as_ref().map(|p| p.receiver.try_recv());
         match hdri_poll {
             Some(Ok(Ok(new_ibl))) => {
-                self.pending_hdri.take();
+                if let Some(pending) = self.pending_hdri.take() {
+                    let filename = pending
+                        .path
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("HDRI")
+                        .to_string();
+                    let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
+                    let resolution = new_ibl
+                        .equirect
+                        .as_ref()
+                        .map_or((0, 0), |e| (e.texture.width(), e.texture.height()));
+                    self.gui.update_hdri_info(hdri_info::HdriInfo {
+                        filename,
+                        path: pending.path.display().to_string(),
+                        resolution,
+                        file_size,
+                    });
+                }
                 self.renderer.ibl_res.ibl = new_ibl;
                 self.renderer.ibl_res.ibl_mode = IblMode::Full;
                 self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
@@ -278,6 +349,10 @@ impl State {
                         [bounds_size.x, bounds_size.y, bounds_size.z],
                         new_scene.model.has_uvs,
                     );
+                    // The Material Inspector's thumbnail cache is keyed by
+                    // (material_index, role); drop it so the new model's
+                    // textures aren't shadowed by stale entries.
+                    self.gui.reset_material_inspector();
                     tracing::info!(
                         "Loaded model: {} ({} verts, {} tris, {} meshes)",
                         pending.path,
@@ -289,30 +364,15 @@ impl State {
                     self.window
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
-                    self.gui
-                        .notify_model_loaded(self.preferences.ui.open_stats_on_model_load);
                     self.scene = Some(new_scene);
-                    if let Some(scene) = &mut self.scene {
-                        scene
-                            .cam
-                            .resize(self.config.width as f32 / self.config.height as f32);
-                        scene
-                            .cam
-                            .set_projection(self.preferences.display.projection_mode);
+                    // Flush unsaved review notes for the outgoing model
+                    // before its sidecar path is cleared by the reload.
+                    if self.review.dirty {
+                        self.save_review_sidecar();
                     }
-
                     self.load_review_for_model(&pending.path);
-
-                    self.view.secondary_cam = None;
-                    if self.view.display.layout != ViewLayout::Single
-                        && let Some(scene) = &self.scene
-                    {
-                        self.view.secondary_cam =
-                            Some(scene.cam.clone_with_new_resources(
-                                &self.device,
-                                &self.renderer.layouts.camera,
-                            ));
-                    }
+                    self.view.cameras = [None, None, None, None];
+                    self.ensure_pane_cameras();
 
                     self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
                     self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
@@ -352,36 +412,32 @@ impl State {
         self.last_frame_time = now;
 
         self.view.active_pane = self.active_pane_index();
+        self.ensure_pane_cameras();
 
         if self.view.display.turntable_active {
             let speed = self.view.display.turntable_rpm * std::f32::consts::TAU / 60.0;
             let yaw = speed * self.dt;
-            if let Some(scene) = &mut self.scene
-                && (self.view.active_pane == 0 || self.view.cameras_linked)
-                && !scene.cam.is_orbiting()
-            {
-                scene.cam.inject_orbit_yaw(yaw);
-            }
-            if (self.view.active_pane == 1 || self.view.cameras_linked)
-                && let Some(cam) = &mut self.view.secondary_cam
-                && !cam.is_orbiting()
-            {
-                cam.inject_orbit_yaw(yaw);
+            let linked = self.view.cameras_linked;
+            let active = self.view.active_pane;
+            for (i, slot) in self.view.cameras.iter_mut().enumerate() {
+                if let Some(cam) = slot
+                    && (i == active || linked)
+                    && !cam.is_orbiting()
+                {
+                    cam.inject_orbit_yaw(yaw);
+                }
             }
         }
 
-        if let Some(scene) = &mut self.scene {
-            scene.cam.update(&self.queue, self.dt);
-        }
-        if let Some(cam) = &mut self.view.secondary_cam {
+        for cam in self.view.cameras.iter_mut().flatten() {
             cam.update(&self.queue, self.dt);
         }
 
         if !self.view.display.lights_locked {
             let ibl_avg = self.active_ibl().irradiance_average;
-            if let Some(scene) = &mut self.scene {
-                scene.lights_uniform =
-                    lights_from_camera(&scene.cam.camera, &scene.model.bounds, ibl_avg);
+            let cam0 = self.view.cameras[0].as_ref().map(|c| c.camera);
+            if let (Some(cam0), Some(scene)) = (cam0, &mut self.scene) {
+                scene.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);
                 self.queue.write_buffer(
                     &scene.light_buffer,
                     0,

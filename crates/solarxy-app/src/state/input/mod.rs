@@ -21,34 +21,44 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::ToastSeverity;
+use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
 use solarxy_core::preferences::{
-    self, IblMode, InspectionMode, MaterialOverride, NormalsMode, PaneMode, ProjectionMode, UvMode,
-    ViewMode,
+    self, BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
+    NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
+use solarxy_core::validation::IssueScope;
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
 
+/// The ordered background list the `B` key cycles through: every builtin
+/// (skipping `HDRI Sky` until an HDRI is loaded) followed by every user
+/// custom background.
+fn background_cycle_options(customs: &[CustomBackground], has_hdri: bool) -> Vec<BackgroundMode> {
+    let mut options: Vec<BackgroundMode> = BuiltinBg::ALL
+        .iter()
+        .filter(|b| has_hdri || **b != BuiltinBg::HdriSky)
+        .map(|b| BackgroundMode::Builtin(*b))
+        .collect();
+    options.extend(customs.iter().map(|c| BackgroundMode::Custom(c.id)));
+    options
+}
+
 impl State {
+    /// Apply `f` to each pane camera the current gesture targets: the
+    /// active pane, or — when cameras are linked — every pane the layout
+    /// uses. UV-map panes are skipped.
     fn for_each_target_cam(&mut self, mut f: impl FnMut(&mut CameraState)) {
-        let (primary, secondary) =
-            super::cam_routing(self.view.active_pane, self.view.cameras_linked);
-        if primary
-            && self.view.pane_settings[0].pane_mode == PaneMode::Scene3D
-            && let Some(scene) = &mut self.scene
-        {
-            f(&mut scene.cam);
-        }
-        if secondary
-            && self
-                .view
-                .pane_settings
-                .get(1)
-                .is_some_and(|p| p.pane_mode == PaneMode::Scene3D)
-            && let Some(cam) = &mut self.view.secondary_cam
-        {
-            f(cam);
+        let count = self.view.display.layout.pane_count();
+        let active = self.view.active_pane;
+        let linked = self.view.cameras_linked;
+        for i in 0..count {
+            if (linked || i == active)
+                && self.view.pane_settings[i].pane_mode == PaneMode::Scene3D
+                && let Some(cam) = &mut self.view.cameras[i]
+            {
+                f(cam);
+            }
         }
     }
 
@@ -65,10 +75,19 @@ impl State {
         }
         match code {
             KeyCode::KeyH => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
-                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
+                if self.input.modifiers.shift_key() {
+                    self.hide_hovered_mesh();
+                } else if self.input.modifiers.alt_key() {
+                    self.show_all_meshes();
+                } else {
+                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
+                    if let Some(bounds) = bounds {
+                        self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
+                    }
                 }
+            }
+            KeyCode::Slash => {
+                self.isolate_hovered_mesh();
             }
             KeyCode::KeyT => {
                 if self.input.modifiers.shift_key() {
@@ -137,16 +156,7 @@ impl State {
             }
             KeyCode::KeyR => {
                 if self.input.modifiers.shift_key() {
-                    let now_active = self.review.toggle_active();
-                    if now_active {
-                        self.review.panel_open = true;
-                    }
-                    let msg = if now_active {
-                        "Review mode: On (click a face to annotate)"
-                    } else {
-                        "Review mode: Off"
-                    };
-                    self.gui.set_toast(msg, ToastSeverity::Success);
+                    self.toggle_review_mode();
                 } else {
                     let bounds = self.scene.as_ref().map(|s| s.model.bounds);
                     if let Some(bounds) = bounds {
@@ -221,6 +231,9 @@ impl State {
                 }
             }
             KeyCode::KeyS => {
+                // `Shift+S` (save preferences) was retired in RC2 — view
+                // settings now persist via Edit → Save View Settings as
+                // Default. `Cmd/Ctrl+S` still saves the review sidecar.
                 let cmd_or_ctrl = if cfg!(target_os = "macos") {
                     self.input.modifiers.super_key()
                 } else {
@@ -228,16 +241,13 @@ impl State {
                 };
                 if cmd_or_ctrl && self.review.active {
                     self.save_review_sidecar();
-                } else if self.input.modifiers.shift_key() {
-                    self.save_preferences();
-                } else {
+                } else if !self.input.modifiers.shift_key() {
                     self.view.pane_settings[self.view.active_pane].view_mode = ViewMode::Shaded;
                 }
             }
             KeyCode::KeyC => {
-                if self.scene.is_some() {
-                    self.capture_requested = true;
-                }
+                self.capture_requested = true;
+                self.screenshot_expand_review = false;
             }
             KeyCode::KeyA => {
                 let pds = &mut self.view.pane_settings[self.view.active_pane];
@@ -387,6 +397,8 @@ impl State {
             KeyCode::F1 => self.set_view_layout(ViewLayout::Single),
             KeyCode::F2 => self.set_view_layout(ViewLayout::SplitVertical),
             KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
+            KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
+            KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
             _ => {
                 self.for_each_target_cam(|cam| {
                     cam.handle_key(code, is_pressed);
@@ -472,13 +484,29 @@ impl State {
         self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
+    /// Regenerate the scene-global gradient IBL from the **active pane's**
+    /// background. The viewer keeps one IBL but a background per pane, so
+    /// the active pane — the one being worked in — drives the lighting.
+    /// Switching the active pane does *not* relight (regenerating the IBL
+    /// as the cursor crossed panes would flicker); only changing the
+    /// active pane's background does. Changing a non-active pane's
+    /// background via its toolbar updates that pane's backdrop but leaves
+    /// the IBL until that pane is made active and edited.
     pub(super) fn apply_background_change(&mut self) {
-        if self.view.active_pane == 0 {
-            let (top, bottom) = self.view.pane_settings[0].background_mode.sky_colors();
-            self.renderer.ibl_res.ibl =
-                IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
-            self.rebuild_light_bind_group();
+        let bg = self.view.pane_settings[self.view.active_pane].background_mode;
+        // Once an HDRI is loaded it is the scene's light source — a
+        // background change never regenerates IBL from sky colours while
+        // an HDRI is active (that would discard the equirect the skybox
+        // pass needs). The background mode then only drives the backdrop.
+        if bg.is_hdri_sky() || self.renderer.ibl_res.ibl.equirect.is_some() {
+            return;
         }
+        let (top, bottom) = bg
+            .resolve(&self.preferences.view.custom_backgrounds)
+            .sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.rebuild_light_bind_group();
     }
 
     pub(super) fn apply_composite_params(&self) {
@@ -489,9 +517,260 @@ impl State {
         self.rebuild_light_bind_group();
     }
 
+    /// Toggle review mode (`Shift+R` or the Review menu) — flips the bit,
+    /// opens the panel on entry, and emits the matching toast.
+    pub(super) fn toggle_review_mode(&mut self) {
+        let now_active = self.review.toggle_active();
+        if now_active {
+            self.review.panel_open = true;
+        }
+        let msg = if now_active {
+            "Review mode: On (click a face to annotate)"
+        } else {
+            "Review mode: Off"
+        };
+        self.gui.set_toast(msg, ToastSeverity::Success);
+    }
+
+    /// Drop the loaded HDRI (Properties → HDRI → Clear). Full revert:
+    /// every pane still on the `HdriSky` background falls back to
+    /// `Gradient`, the IBL returns to the procedural sky-colour gradient,
+    /// and the skybox is released (`rebuild_light_bind_group` rebuilds it
+    /// as `None`).
+    pub(super) fn clear_hdri(&mut self) {
+        for pds in &mut self.view.pane_settings {
+            if pds.background_mode.is_hdri_sky() {
+                pds.background_mode = BackgroundMode::GRADIENT;
+            }
+        }
+        let (top, bottom) = self
+            .resolve_background(&self.view.pane_settings[0])
+            .sky_colors();
+        self.renderer.ibl_res.ibl =
+            IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.rebuild_light_bind_group();
+        self.gui.clear_hdri_info();
+        self.gui.set_toast("HDRI cleared", ToastSeverity::Success);
+    }
+
+    /// Fly the active pane's camera to frame the mesh a validation issue
+    /// lives on (Properties → Validation row click) and enable that
+    /// pane's per-face validation overlay so the defect is visible.
+    pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
+        let aabb = self.scene.as_ref().and_then(|scene| {
+            scene.validation.issues.get(idx).and_then(|issue| {
+                resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
+            })
+        });
+        let Some(aabb) = aabb else {
+            return;
+        };
+        self.view.pane_settings[self.view.active_pane].show_validation = true;
+        self.frame_active_pane(aabb);
+    }
+
+    /// Smoothly fly the active pane's camera to frame `bounds`.
+    fn frame_active_pane(&mut self, bounds: solarxy_core::AABB) {
+        if let Some(cam) = &mut self.view.cameras[self.view.active_pane] {
+            cam.reset_to_bounds(&bounds);
+        }
+    }
+
+    /// Fly the active pane's camera to a review annotation's anchor
+    /// (Review panel row click). Frames a small box around the anchor
+    /// point — sized to a fraction of the model — so the marker lands
+    /// centered at a consistent, useful zoom.
+    pub(super) fn focus_review_annotation(&mut self, id: &str) {
+        let Some(ann) = self.review.find(id) else {
+            return;
+        };
+        let [x, y, z] = ann.anchor.world_pos_fallback;
+        let half = self
+            .scene
+            .as_ref()
+            .map_or(1.0, |s| (s.model.bounds.diagonal() * 0.12).max(0.05));
+        let center = cgmath::Point3::new(x, y, z);
+        let offset = cgmath::Vector3::new(half, half, half);
+        self.frame_active_pane(solarxy_core::AABB {
+            min: center - offset,
+            max: center + offset,
+        });
+    }
+
+    /// Apply an [`OutlinerAction`] (mesh / material visibility or camera
+    /// framing) raised by the Outliner panel.
+    pub(super) fn handle_outliner_action(&mut self, action: OutlinerAction) {
+        match action {
+            OutlinerAction::ToggleMesh(i) => {
+                if let Some(scene) = &mut self.scene
+                    && let Some(mesh) = scene.model.meshes.get_mut(i)
+                {
+                    mesh.visible = !mesh.visible;
+                }
+            }
+            OutlinerAction::HideMesh(i) => {
+                if let Some(scene) = &mut self.scene
+                    && let Some(mesh) = scene.model.meshes.get_mut(i)
+                {
+                    mesh.visible = false;
+                }
+            }
+            OutlinerAction::IsolateMesh(i) => {
+                if let Some(scene) = &mut self.scene {
+                    for (j, mesh) in scene.model.meshes.iter_mut().enumerate() {
+                        mesh.visible = j == i;
+                    }
+                }
+            }
+            OutlinerAction::ShowAll => {
+                if let Some(scene) = &mut self.scene {
+                    for mesh in &mut scene.model.meshes {
+                        mesh.visible = true;
+                    }
+                }
+            }
+            OutlinerAction::ToggleMaterial(mat) => {
+                if let Some(scene) = &mut self.scene {
+                    let all_visible = scene
+                        .model
+                        .meshes
+                        .iter()
+                        .filter(|m| m.material == mat)
+                        .all(|m| m.visible);
+                    for mesh in &mut scene.model.meshes {
+                        if mesh.material == mat {
+                            mesh.visible = !all_visible;
+                        }
+                    }
+                }
+            }
+            OutlinerAction::FrameMesh(i) => {
+                let aabb = self
+                    .scene
+                    .as_ref()
+                    .and_then(|s| s.model.mesh_bounds.get(i).copied());
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::FrameMaterial(mat) => {
+                let aabb = self
+                    .scene
+                    .as_ref()
+                    .and_then(|s| material_meshes_aabb(&s.model, mat));
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+        }
+    }
+
+    /// Model index of the frontmost **visible** mesh under the cursor, via
+    /// a CPU raycast through the active 3D pane's content rect. `None` if
+    /// the cursor is not over a `Scene3D` pane or hits no visible mesh.
+    pub(super) fn hovered_mesh(&self) -> Option<usize> {
+        let scene = self.scene.as_ref()?;
+        let panes = self.compute_panes();
+        let cursor = self.input.cursor_pos;
+        let pane_idx = super::hit_test_pane(&panes, cursor);
+        if self.view.pane_settings[pane_idx].pane_mode != PaneMode::Scene3D {
+            return None;
+        }
+        let content = panes[pane_idx].content(self.pane_toolbar_height_px());
+        let mut camera = self.view.cameras[pane_idx].as_ref().map(|c| c.camera)?;
+        camera.aspect = content.width.max(1.0) / content.height.max(1.0);
+        let ray = crate::state::raycast::screen_to_world_ray(
+            (cursor.0 - content.x, cursor.1 - content.y),
+            (content.width, content.height),
+            camera.build_view_projection_matrix(),
+            camera.eye,
+        );
+
+        // Raycast only visible meshes — a hidden mesh you cannot see must
+        // not steal the pick from the geometry behind it.
+        let mut model_index: Vec<usize> = Vec::new();
+        let mut views: Vec<crate::state::raycast::MeshView<'_>> = Vec::new();
+        for (i, mesh) in scene.model.meshes.iter().enumerate() {
+            if !mesh.visible {
+                continue;
+            }
+            if let (Some(cpu), Some(bounds)) = (
+                scene.model.cpu_meshes.get(i),
+                scene.model.mesh_bounds.get(i),
+            ) {
+                model_index.push(i);
+                views.push(crate::state::raycast::MeshView {
+                    positions: &cpu.positions,
+                    indices: &cpu.indices,
+                    bounds: *bounds,
+                });
+            }
+        }
+        crate::state::raycast::raycast_meshes(&ray, &views)
+            .map(|hit| model_index[hit.mesh_index as usize])
+    }
+
+    /// Open the viewport right-click context menu when the cursor is over
+    /// a mesh; right-clicking empty space clears any open menu.
+    pub fn open_viewport_context_menu(&mut self) {
+        self.viewport_context_menu = self.hovered_mesh().map(|mesh_index| {
+            let ppp = self.window.scale_factor() as f32;
+            ViewportContextMenu {
+                mesh_index,
+                screen_pos: egui::pos2(
+                    self.input.cursor_pos.0 / ppp,
+                    self.input.cursor_pos.1 / ppp,
+                ),
+                suppress_dismiss: true,
+            }
+        });
+    }
+
+    /// `Shift+H` — hide the mesh under the cursor.
+    fn hide_hovered_mesh(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        match self.hovered_mesh() {
+            Some(mesh) => self.handle_outliner_action(OutlinerAction::HideMesh(mesh)),
+            None => self
+                .gui
+                .set_toast("No mesh under cursor", ToastSeverity::Info),
+        }
+    }
+
+    /// `Alt+H` — make every mesh visible again.
+    fn show_all_meshes(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        self.handle_outliner_action(OutlinerAction::ShowAll);
+    }
+
+    /// `/` — hide every mesh except the one under the cursor.
+    fn isolate_hovered_mesh(&mut self) {
+        if self.gui.any_popup_open() || self.viewport_context_menu.is_some() {
+            return;
+        }
+        match self.hovered_mesh() {
+            Some(mesh) => self.handle_outliner_action(OutlinerAction::IsolateMesh(mesh)),
+            None => self
+                .gui
+                .set_toast("No mesh under cursor", ToastSeverity::Info),
+        }
+    }
+
     fn cycle_background(&mut self) {
+        // `B` walks every builtin (skipping `HDRI Sky` until an HDRI is
+        // loaded) then every user custom background.
+        let has_hdri = self.renderer.ibl_res.ibl.equirect.is_some();
+        let options = background_cycle_options(&self.preferences.view.custom_backgrounds, has_hdri);
         let pds = &mut self.view.pane_settings[self.view.active_pane];
-        pds.background_mode = pds.background_mode.next();
+        let i = options
+            .iter()
+            .position(|m| *m == pds.background_mode)
+            .unwrap_or(0);
+        pds.background_mode = options[(i + 1) % options.len()];
         self.apply_background_change();
     }
 
@@ -514,7 +793,11 @@ impl State {
         self.gui.set_toast(msg, ToastSeverity::Success);
     }
 
-    fn save_preferences(&mut self) {
+    /// Snapshot the live view / render / lighting state into
+    /// `self.preferences` and write the config file. Returns the I/O
+    /// result so callers can toast a context-appropriate message —
+    /// [`Self::save_preferences`] is the standard toasting wrapper.
+    fn persist_preferences(&mut self) -> Result<(), String> {
         let pds = &self.view.pane_settings[0];
         self.preferences.display.background = pds.background_mode;
         self.preferences.display.view_mode = pds.view_mode;
@@ -527,8 +810,8 @@ impl State {
         self.preferences.display.uv_mode = pds.uv_mode;
         self.preferences.display.turntable_active = self.view.display.turntable_active;
         self.preferences.display.turntable_rpm = self.view.display.turntable_rpm;
-        if let Some(scene) = &self.scene {
-            self.preferences.display.projection_mode = scene.cam.camera.projection;
+        if let Some(cam) = &self.view.cameras[0] {
+            self.preferences.display.projection_mode = cam.camera.projection;
         }
         self.preferences.rendering.wireframe_line_weight = pds.line_weight;
         self.preferences.lighting.lock = self.view.display.lights_locked;
@@ -537,8 +820,11 @@ impl State {
         self.preferences.display.exposure = self.renderer.post.exposure;
         self.preferences.display.inspection_mode = pds.inspection_mode;
         self.preferences.display.texel_density_target = pds.texel_density_target;
+        preferences::save(&self.preferences)
+    }
 
-        match preferences::save(&self.preferences) {
+    fn save_preferences(&mut self) {
+        match self.persist_preferences() {
             Ok(()) => {
                 self.gui
                     .set_toast("Preferences saved", ToastSeverity::Success);
@@ -564,6 +850,16 @@ impl State {
         self.preferences.dock.last_layout_json = Some(json);
         if let Err(e) = preferences::save(&self.preferences) {
             tracing::warn!("Failed to persist dock layout on exit: {e}");
+        }
+    }
+
+    /// Flush unsaved review notes to the sidecar on app exit — a data-loss
+    /// safety net so quitting mid-review never silently drops annotations.
+    /// In-session saving stays manual (the Review panel's Save button /
+    /// `Cmd/Ctrl+S`); this only fires when there is something unsaved.
+    pub fn flush_review_on_exit(&mut self) {
+        if self.review.dirty {
+            self.save_review_sidecar();
         }
     }
 
@@ -628,11 +924,7 @@ impl State {
             return false;
         }
 
-        let camera = if pane_idx == 0 || self.view.cameras_linked {
-            scene.cam.camera
-        } else if let Some(c) = self.view.secondary_cam.as_ref() {
-            c.camera
-        } else {
+        let Some(camera) = self.view.cameras[pane_idx].as_ref().map(|c| c.camera) else {
             return false;
         };
 
@@ -686,9 +978,13 @@ impl State {
         {
             self.review.selected = Some(id);
             self.review.scroll_to_selected = true;
-            self.review.dirty = true;
             return true;
         }
+
+        // The click missed every marker — it lands on geometry or empty
+        // space. Either way, collapse any open card (B4): selection is
+        // cleared before the new-annotation draft (if any) opens.
+        self.review.selected = None;
 
         let ray = crate::state::raycast::screen_to_world_ray(
             local,
@@ -750,7 +1046,22 @@ impl State {
                 self.input.uv_last_mouse_pos = Some((x, y));
             }
         } else {
-            self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+            let ap = self.view.active_pane;
+            let orbiting = self.view.cameras[ap]
+                .as_ref()
+                .is_some_and(CameraState::is_orbiting);
+            if orbiting {
+                // CL-5: an orbit drag stays local to the active pane so
+                // linked orthographic panes keep their axis lock. Pan and
+                // zoom still propagate via `for_each_target_cam`.
+                if self.view.pane_settings[ap].pane_mode == PaneMode::Scene3D
+                    && let Some(cam) = &mut self.view.cameras[ap]
+                {
+                    cam.handle_mouse_move(x, y);
+                }
+            } else {
+                self.for_each_target_cam(|cam| cam.handle_mouse_move(x, y));
+            }
         }
     }
 
@@ -762,5 +1073,61 @@ impl State {
         } else {
             self.for_each_target_cam(|cam| cam.handle_scroll(delta));
         }
+    }
+}
+
+/// Resolve a validation issue's scope to an AABB for camera fly-to.
+/// Mesh-granular for every scope — the per-face / per-edge validation
+/// overlay highlights the exact defect once its mesh is framed. Raw issue
+/// mesh indices are remapped to GPU mesh indices via `raw_to_gpu`.
+fn resolve_issue_aabb(
+    scope: &IssueScope,
+    model: &solarxy_renderer::model::Model,
+    raw_to_gpu: &[Option<usize>],
+) -> Option<solarxy_core::AABB> {
+    let gpu_mesh = |raw: usize| raw_to_gpu.get(raw).copied().flatten();
+    match scope {
+        IssueScope::Model => Some(model.bounds),
+        IssueScope::Mesh(raw) | IssueScope::Face(raw, _) => {
+            gpu_mesh(*raw).and_then(|g| model.mesh_bounds.get(g).copied())
+        }
+        IssueScope::Edge { mesh_index, .. } => {
+            gpu_mesh(*mesh_index).and_then(|g| model.mesh_bounds.get(g).copied())
+        }
+        IssueScope::Material(mat) => material_meshes_aabb(model, *mat).or(Some(model.bounds)),
+    }
+}
+
+/// Union of the bounds of every mesh using `material`, or `None` when no
+/// mesh references it. Shared by validation fly-to and the Outliner's
+/// frame-material action.
+fn material_meshes_aabb(
+    model: &solarxy_renderer::model::Model,
+    material: usize,
+) -> Option<solarxy_core::AABB> {
+    let mut acc: Option<solarxy_core::AABB> = None;
+    for (i, mesh) in model.meshes.iter().enumerate() {
+        if mesh.material == material
+            && let Some(b) = model.mesh_bounds.get(i).copied()
+        {
+            acc = Some(acc.map_or(b, |a| union_aabb(a, b)));
+        }
+    }
+    acc
+}
+
+/// Smallest AABB enclosing both inputs.
+fn union_aabb(a: solarxy_core::AABB, b: solarxy_core::AABB) -> solarxy_core::AABB {
+    solarxy_core::AABB {
+        min: cgmath::Point3::new(
+            a.min.x.min(b.min.x),
+            a.min.y.min(b.min.y),
+            a.min.z.min(b.min.z),
+        ),
+        max: cgmath::Point3::new(
+            a.max.x.max(b.max.x),
+            a.max.y.max(b.max.y),
+            a.max.z.max(b.max.z),
+        ),
     }
 }

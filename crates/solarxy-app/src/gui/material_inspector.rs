@@ -1,16 +1,29 @@
-//! View-only Material Inspector window.
+//! View-only Material Inspector — a master/detail panel.
 //!
 //! Toggled via `Window → Material Inspector` (menu-only — no global
 //! keyboard shortcut; `M` and `Shift+M` are already bound to the
 //! material override cycle, and the comprehensive-plan decision log
 //! D1 ruled out a new modifier-key binding).
 //!
+//! Layout adapts to the dock shape so the panel works equally well as a
+//! tall sidebar, a short bottom bar, or a square float:
+//!
+//! - A **compact material list** (the picker): one selectable row per
+//!   material — base-color swatch, name, and a five-square texture-slot
+//!   presence indicator.
+//! - A **detail pane** for the selected material: scalar PBR values plus
+//!   one 128 px entry per texture role.
+//!
+//! The split goes side-by-side when the panel is wide enough
+//! ([`use_side_by_side`]), list-on-top otherwise. Both halves are
+//! user-resizable (`egui::SidePanel` / `TopBottomPanel::show_inside`).
+//!
 //! Reads CPU-side data from
 //! [`solarxy_renderer::model::Model::material_thumbnails`] (populated
 //! during `resources::upload_model` from the source `RawMaterialData`
 //! before the bytes are consumed by GPU upload). 128×128 thumbnails are
-//! decoded on first inspector open per `(material_idx, role)` and stashed
-//! in an egui texture cache that gets cleared on model swap.
+//! decoded on first use per `(material_idx, role)` and stashed in an
+//! egui texture cache cleared on model swap.
 //!
 //! Visibility is the canonical
 //! `MenuBarVisibility.material_inspector_visible` flag threaded in as
@@ -27,8 +40,26 @@ use image::{ImageBuffer, Rgba, imageops};
 use solarxy_renderer::model::{MaterialThumbnails, Model, TextureThumbnail};
 
 use super::overlays::ToastSeverity;
+use super::theme::Theme;
 
+/// Decode resolution for cached thumbnails.
 const THUMBNAIL_SIZE: u32 = 128;
+/// Texture preview edge length in the detail pane.
+const TEXTURE_PREVIEW: f32 = 128.0;
+/// Fixed width of a texture entry block in the detail pane's wrapping
+/// flow — a `TEXTURE_PREVIEW` image plus a little horizontal breathing
+/// room.
+const TEXTURE_BLOCK_WIDTH: f32 = 150.0;
+/// Fixed height of a texture entry block. Every block is sized to this
+/// exactly (shorter content padded out) so `horizontal_wrapped` forms a
+/// clean grid instead of staggering items by their natural height.
+const TEXTURE_BLOCK_HEIGHT: f32 = 216.0;
+/// Height of one material row in the picker list.
+const LIST_ROW_HEIGHT: f32 = 20.0;
+/// Below this panel width the split stacks (list on top) instead of
+/// going side-by-side — narrower than this and the detail pane could not
+/// fit a 128 px preview next to the list.
+const SPLIT_MIN_WIDTH: f32 = 360.0;
 
 /// Source-side texture role. Mirrors the five `Option<RawImageData>`
 /// slots on `RawMaterialData` — `MetallicRoughness` and `Occlusion` are
@@ -75,12 +106,16 @@ impl TextureRole {
 }
 
 /// Per-model cache for the Material Inspector. Visibility lives in
-/// `MenuBarVisibility`; this struct holds the decoded egui textures and
-/// the deferred toast queue (drained by `EguiRenderer::render_ui` after
-/// the egui frame closes, where `push_toast` access is available).
+/// `MenuBarVisibility`; this struct holds the decoded egui textures, the
+/// picker selection, and the deferred toast queue (drained by
+/// `EguiRenderer::render_ui` after the egui frame closes, where
+/// `push_toast` access is available).
 #[derive(Default)]
 pub(super) struct MaterialInspectorState {
     thumbnail_cache: HashMap<(usize, TextureRole), egui::TextureHandle>,
+    /// Index of the material shown in the detail pane. Reset to 0 on
+    /// model swap and clamped into range each frame.
+    selected: usize,
     /// Toast messages produced inside the egui frame closure (success /
     /// failure of "Open externally"). Drained by the renderer after the
     /// closure returns. Pre-existing toast queue + `push_toast` live on
@@ -95,8 +130,17 @@ impl MaterialInspectorState {
     /// internal refcount.
     pub fn clear_for_new_model(&mut self) {
         self.thumbnail_cache.clear();
+        self.selected = 0;
         self.pending_toasts.clear();
     }
+}
+
+/// Whether the master/detail split should be side-by-side (list left,
+/// detail right) rather than stacked (list on top). Side-by-side needs
+/// the panel both wider than [`SPLIT_MIN_WIDTH`] and at least as wide as
+/// it is tall.
+fn use_side_by_side(width: f32, height: f32) -> bool {
+    width >= SPLIT_MIN_WIDTH && width >= height
 }
 
 /// Render the Material Inspector's content into the provided `ui`.
@@ -106,138 +150,407 @@ pub(super) fn draw_material_inspector_content(
     ui: &mut egui::Ui,
     model: &Model,
     state: &mut MaterialInspectorState,
+    theme: &Theme,
 ) {
+    if model.materials.is_empty() {
+        ui.add_space(8.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("This model has no materials.")
+                    .weak()
+                    .italics(),
+            );
+        });
+        return;
+    }
+
+    // Keep the selection valid even if a smaller model loaded mid-frame.
+    state.selected = state.selected.min(model.materials.len() - 1);
+
+    if use_side_by_side(ui.available_width(), ui.available_height()) {
+        egui::SidePanel::left("solarxy_material_list_side")
+            .resizable(true)
+            .default_width(180.0)
+            .width_range(140.0..=320.0)
+            .show_inside(ui, |ui| draw_material_list(ui, model, state, theme));
+        egui::CentralPanel::default()
+            .show_inside(ui, |ui| draw_material_detail(ui, model, state, theme));
+    } else {
+        egui::TopBottomPanel::top("solarxy_material_list_top")
+            .resizable(true)
+            .default_height(150.0)
+            .height_range(60.0..=320.0)
+            .show_inside(ui, |ui| draw_material_list(ui, model, state, theme));
+        egui::CentralPanel::default()
+            .show_inside(ui, |ui| draw_material_detail(ui, model, state, theme));
+    }
+}
+
+// ---------------------------------------------------------------------
+// Master — the material picker list
+// ---------------------------------------------------------------------
+
+fn draw_material_list(
+    ui: &mut egui::Ui,
+    model: &Model,
+    state: &mut MaterialInspectorState,
+    theme: &Theme,
+) {
+    // Column header — names the otherwise-cryptic five-square cluster.
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Material").small().weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new("Maps").small().weak())
+                .on_hover_text(
+                    "Texture slots, in order: Albedo, Normal, \
+                     Metallic / Roughness, Occlusion, Emissive.\n\
+                     Filled = present, outlined = absent.",
+                );
+        });
+    });
+    ui.separator();
+
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
             for (idx, mat) in model.materials.iter().enumerate() {
-                let thumbs = model
-                    .material_thumbnails
-                    .get(idx)
-                    .expect("material_thumbnails length matches materials");
-                draw_material_row(ui, idx, mat, thumbs, state);
-                ui.add_space(2.0);
+                let Some(thumbs) = model.material_thumbnails.get(idx) else {
+                    continue;
+                };
+                if draw_material_row(ui, idx, mat, thumbs, theme, idx == state.selected) {
+                    state.selected = idx;
+                }
             }
         });
 }
 
+/// One picker row: selection background, base-color swatch, truncated
+/// name, and a five-square texture-slot presence indicator. Painted
+/// manually (no child widgets) so the single row response owns the
+/// click/hover cleanly. Returns `true` when clicked.
 fn draw_material_row(
     ui: &mut egui::Ui,
     idx: usize,
     mat: &solarxy_renderer::material::Material,
     thumbs: &MaterialThumbnails,
-    state: &mut MaterialInspectorState,
-) {
-    let display_name = if mat.name.is_empty() {
+    theme: &Theme,
+    selected: bool,
+) -> bool {
+    const PAD: f32 = 4.0;
+    const SWATCH: f32 = 12.0;
+    const SQUARE: f32 = 6.0;
+    const SQUARE_GAP: f32 = 2.5;
+
+    let name = if mat.name.is_empty() {
         format!("Material {idx}")
     } else {
         mat.name.clone()
     };
-    let swatch_color = base_color_to_color32(thumbs.base_color);
+    let swatch = base_color_to_color32(thumbs.base_color);
 
-    let header_id = egui::Id::new(("material_inspector_header", idx));
-    egui::CollapsingHeader::new(egui::RichText::new(&display_name).strong())
-        .id_salt(header_id)
-        .default_open(idx == 0)
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), LIST_ROW_HEIGHT),
+        egui::Sense::click(),
+    );
+
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, theme.selection);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, 0.0, theme.widget_hover);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    // Base-color swatch, hard left — a filled circle so it reads as a
+    // colour chip, not an unchecked checkbox (the RC2 confusion: a
+    // near-black base colour in a bordered square looked like a checkbox).
+    let swatch_center = egui::pos2(rect.left() + PAD + SWATCH / 2.0, rect.center().y);
+    let swatch_radius = SWATCH / 2.0;
+    let swatch_right = swatch_center.x + swatch_radius;
+    ui.painter()
+        .circle_filled(swatch_center, swatch_radius, swatch);
+    ui.painter().circle_stroke(
+        swatch_center,
+        swatch_radius,
+        egui::Stroke::new(1.0, theme.border),
+    );
+
+    // Texture-slot presence indicator, hard right.
+    let presence_w = 5.0 * SQUARE + 4.0 * SQUARE_GAP;
+    let presence_left = rect.right() - PAD - presence_w;
+    let mut sx = presence_left;
+    for &role in TextureRole::ALL {
+        let square = egui::Rect::from_min_size(
+            egui::pos2(sx, rect.center().y - SQUARE / 2.0),
+            egui::vec2(SQUARE, SQUARE),
+        );
+        if role.thumbnail_in(thumbs).is_some() {
+            ui.painter().rect_filled(square, 0.0, theme.muted);
+        } else {
+            ui.painter().rect_stroke(
+                square,
+                0.0,
+                egui::Stroke::new(1.0, theme.border),
+                egui::StrokeKind::Inside,
+            );
+        }
+        sx += SQUARE + SQUARE_GAP;
+    }
+
+    // Name, filling the gap between swatch and presence indicator.
+    let text_rect = egui::Rect::from_min_max(
+        egui::pos2(swatch_right + 6.0, rect.top()),
+        egui::pos2(presence_left - 6.0, rect.bottom()),
+    );
+    if text_rect.width() > 4.0 {
+        paint_truncated_text(ui, text_rect, &name, theme.fg);
+    }
+
+    resp.on_hover_text(texture_maps_tooltip(thumbs)).clicked()
+}
+
+/// Tooltip for a picker row's five-square texture indicator — spells out
+/// how many of the five PBR texture slots the material fills and which,
+/// so the squares aren't a mystery.
+fn texture_maps_tooltip(thumbs: &MaterialThumbnails) -> String {
+    let mut present: Vec<&str> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
+    for &role in TextureRole::ALL {
+        if role.thumbnail_in(thumbs).is_some() {
+            present.push(role.label());
+        } else {
+            missing.push(role.label());
+        }
+    }
+    let mut tip = format!("Texture maps: {} of 5", present.len());
+    if !present.is_empty() {
+        tip.push_str("\nPresent: ");
+        tip.push_str(&present.join(", "));
+    }
+    if !missing.is_empty() {
+        tip.push_str("\nMissing: ");
+        tip.push_str(&missing.join(", "));
+    }
+    tip
+}
+
+/// Paint a single line of text into `rect`, truncated with an ellipsis
+/// if it does not fit. Used for picker rows, where a child `Label` would
+/// occlude the row's own click/hover response.
+fn paint_truncated_text(ui: &egui::Ui, rect: egui::Rect, text: &str, color: egui::Color32) {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(13.0),
+            color,
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: rect.width(),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = ui.painter().layout_job(job);
+    let pos = egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, color);
+}
+
+// ---------------------------------------------------------------------
+// Detail — the selected material
+// ---------------------------------------------------------------------
+
+fn draw_material_detail(
+    ui: &mut egui::Ui,
+    model: &Model,
+    state: &mut MaterialInspectorState,
+    theme: &Theme,
+) {
+    let idx = state.selected;
+    let (Some(mat), Some(thumbs)) = (model.materials.get(idx), model.material_thumbnails.get(idx))
+    else {
+        ui.add_space(8.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Select a material.").weak().italics());
+        });
+        return;
+    };
+
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, 3.0, swatch_color);
-                ui.painter().rect_stroke(
-                    rect,
-                    3.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
-                    egui::StrokeKind::Outside,
-                );
-                let has_albedo = thumbs.albedo.is_some();
-                let (prefix, suffix) = if has_albedo {
-                    ("Base color factor", " × Albedo")
-                } else {
-                    ("Base color", "")
-                };
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{prefix}: {}{suffix}",
-                        color_hex(thumbs.base_color)
-                    ))
-                    .monospace()
-                    .small(),
-                );
-            });
-
-            egui::Grid::new(("material_grid", idx))
-                .num_columns(2)
-                .spacing([12.0, 4.0])
-                .show(ui, |ui| {
-                    ui.label("Metallic");
-                    ui.label(format!("{:.2}", mat.uniform.metallic_factor));
-                    ui.end_row();
-
-                    ui.label("Roughness");
-                    ui.label(format!("{:.2}", mat.uniform.roughness_factor));
-                    ui.end_row();
-
-                    ui.label("Alpha mode");
-                    ui.label(alpha_mode_label(
-                        mat.uniform.alpha_mode,
-                        mat.uniform.alpha_cutoff,
-                    ));
-                    ui.end_row();
-
-                    let emissive = mat.uniform.emissive;
-                    if emissive != [0.0, 0.0, 0.0] {
-                        ui.label("Emissive factor");
-                        ui.label(format!(
-                            "({:.2}, {:.2}, {:.2})",
-                            emissive[0], emissive[1], emissive[2]
-                        ));
-                        ui.end_row();
-                    }
-                });
-
+            draw_detail_header(ui, idx, mat, thumbs, theme);
             ui.add_space(4.0);
-            let mut any_texture = false;
-            for &role in TextureRole::ALL {
-                if let Some(tex) = role.thumbnail_in(thumbs) {
-                    any_texture = true;
-                    draw_texture_row(ui, idx, role, tex, state);
+            draw_detail_scalars(ui, mat);
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new("Textures").small().strong());
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for &role in TextureRole::ALL {
+                    draw_texture_block(ui, idx, role, thumbs, state, theme);
                 }
-            }
-            if !any_texture {
-                ui.label(egui::RichText::new("No textures").small().weak().italics());
-            }
+            });
         });
 }
 
-fn draw_texture_row(
+fn draw_detail_header(
+    ui: &mut egui::Ui,
+    idx: usize,
+    mat: &solarxy_renderer::material::Material,
+    thumbs: &MaterialThumbnails,
+    theme: &Theme,
+) {
+    let name = if mat.name.is_empty() {
+        format!("Material {idx}")
+    } else {
+        mat.name.clone()
+    };
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(rect, 0.0, base_color_to_color32(thumbs.base_color));
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(1.0, theme.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).strong()).truncate());
+    });
+
+    let (prefix, suffix) = if thumbs.albedo.is_some() {
+        ("Base color factor", " × Albedo")
+    } else {
+        ("Base color", "")
+    };
+    ui.label(
+        egui::RichText::new(format!(
+            "{prefix}: {}{suffix}",
+            color_hex(thumbs.base_color)
+        ))
+        .monospace()
+        .small(),
+    );
+}
+
+fn draw_detail_scalars(ui: &mut egui::Ui, mat: &solarxy_renderer::material::Material) {
+    ui.horizontal_wrapped(|ui| {
+        scalar_chip(
+            ui,
+            "Metallic",
+            &format!("{:.2}", mat.uniform.metallic_factor),
+        );
+        scalar_chip(
+            ui,
+            "Roughness",
+            &format!("{:.2}", mat.uniform.roughness_factor),
+        );
+        scalar_chip(
+            ui,
+            "Alpha",
+            &alpha_mode_label(mat.uniform.alpha_mode, mat.uniform.alpha_cutoff),
+        );
+        let emissive = mat.uniform.emissive;
+        if emissive != [0.0, 0.0, 0.0] {
+            scalar_chip(
+                ui,
+                "Emissive",
+                &format!(
+                    "({:.2}, {:.2}, {:.2})",
+                    emissive[0], emissive[1], emissive[2]
+                ),
+            );
+        }
+    });
+}
+
+/// One `label value` pair in the detail pane's wrapping scalar row.
+fn scalar_chip(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.label(egui::RichText::new(label).small().weak());
+    ui.label(egui::RichText::new(value).small().monospace());
+    ui.add_space(10.0);
+}
+
+/// Paint the slashed-box placeholder shown in a texture block when the
+/// slot is empty or its thumbnail could not be decoded.
+fn draw_thumbnail_placeholder(ui: &mut egui::Ui, size: egui::Vec2, theme: &Theme) {
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, theme.widget_bg);
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(1.0, theme.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_top()],
+        egui::Stroke::new(1.0, theme.border),
+    );
+}
+
+/// One texture role in the detail pane: a fixed-width block carrying a
+/// 128 px preview plus filename / dimensions / "Open externally" when
+/// the slot is filled, or a greyed placeholder when it is absent.
+fn draw_texture_block(
     ui: &mut egui::Ui,
     material_idx: usize,
     role: TextureRole,
-    tex: &TextureThumbnail,
+    thumbs: &MaterialThumbnails,
     state: &mut MaterialInspectorState,
+    theme: &Theme,
 ) {
-    let handle = get_or_decode_thumbnail(
-        ui.ctx(),
-        &mut state.thumbnail_cache,
-        material_idx,
-        role,
-        tex,
-    );
+    ui.allocate_ui_with_layout(
+        egui::vec2(TEXTURE_BLOCK_WIDTH, TEXTURE_BLOCK_HEIGHT),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            // Pin every block to the same footprint so the wrapping flow
+            // grids cleanly; content shorter than this is padded out.
+            ui.set_width(TEXTURE_BLOCK_WIDTH);
+            ui.set_min_height(TEXTURE_BLOCK_HEIGHT);
+            ui.spacing_mut().item_spacing.y = 3.0;
+            let preview = egui::vec2(TEXTURE_PREVIEW, TEXTURE_PREVIEW);
 
-    ui.separator();
-    ui.label(egui::RichText::new(role.label()).strong().small());
-    ui.horizontal_top(|ui| {
-        let size = egui::vec2(THUMBNAIL_SIZE as f32, THUMBNAIL_SIZE as f32);
-        ui.add(egui::Image::new(&handle).fit_to_exact_size(size));
-        ui.vertical(|ui| {
-            let label = filename_or_embedded(tex);
+            let Some(tex) = role.thumbnail_in(thumbs) else {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(role.label()).small().weak()).truncate(),
+                );
+                draw_thumbnail_placeholder(ui, preview, theme);
+                ui.label(egui::RichText::new("not present").small().weak().italics());
+                return;
+            };
+
+            ui.add(egui::Label::new(egui::RichText::new(role.label()).small().strong()).truncate());
+            if let Some(handle) = get_or_decode_thumbnail(
+                ui.ctx(),
+                &mut state.thumbnail_cache,
+                material_idx,
+                role,
+                tex,
+            ) {
+                ui.add(egui::Image::new(&handle).fit_to_exact_size(preview));
+            } else {
+                draw_thumbnail_placeholder(ui, preview, theme);
+                ui.label(
+                    egui::RichText::new("decode failed")
+                        .small()
+                        .weak()
+                        .italics(),
+                );
+            }
+
             let tooltip = tex.source_path.as_ref().map_or_else(
                 || "Embedded texture (no source file)".to_string(),
                 |p| p.display().to_string(),
             );
-            ui.label(egui::RichText::new(label).small())
-                .on_hover_text(tooltip);
+            ui.add(
+                egui::Label::new(egui::RichText::new(filename_or_embedded(tex)).small()).truncate(),
+            )
+            .on_hover_text(tooltip);
             ui.label(
                 egui::RichText::new(format!("{}×{}", tex.image.width, tex.image.height))
                     .small()
@@ -245,7 +558,8 @@ fn draw_texture_row(
             );
 
             let has_path = tex.source_path.is_some();
-            let btn = ui.add_enabled(has_path, egui::Button::new("Open externally"));
+            let btn = egui::Button::new(egui::RichText::new("Open externally").small());
+            let btn = ui.add_enabled(has_path, btn);
             let btn = if has_path {
                 btn
             } else {
@@ -254,23 +568,23 @@ fn draw_texture_row(
             if btn.clicked()
                 && let Some(path) = tex.source_path.as_ref()
             {
-                let label = filename_only(path);
+                let name = filename_only(path);
                 match open::that(path) {
-                    Ok(()) => {
-                        state
-                            .pending_toasts
-                            .push((format!("Opened {label}"), ToastSeverity::Success));
-                    }
-                    Err(e) => {
-                        state
-                            .pending_toasts
-                            .push((format!("Couldn't open {label}: {e}"), ToastSeverity::Error));
-                    }
+                    Ok(()) => state
+                        .pending_toasts
+                        .push((format!("Opened {name}"), ToastSeverity::Success)),
+                    Err(e) => state
+                        .pending_toasts
+                        .push((format!("Couldn't open {name}: {e}"), ToastSeverity::Error)),
                 }
             }
-        });
-    });
+        },
+    );
 }
+
+// ---------------------------------------------------------------------
+// Thumbnail decoding + small formatters
+// ---------------------------------------------------------------------
 
 fn get_or_decode_thumbnail(
     ctx: &egui::Context,
@@ -278,12 +592,12 @@ fn get_or_decode_thumbnail(
     material_idx: usize,
     role: TextureRole,
     tex: &TextureThumbnail,
-) -> egui::TextureHandle {
+) -> Option<egui::TextureHandle> {
     let key = (material_idx, role);
     if let Some(handle) = cache.get(&key) {
-        return handle.clone();
+        return Some(handle.clone());
     }
-    let downscaled = downscale_to_thumbnail(&tex.image);
+    let downscaled = downscale_to_thumbnail(&tex.image)?;
     let color_image = egui::ColorImage::from_rgba_unmultiplied(
         [downscaled.width() as usize, downscaled.height() as usize],
         downscaled.as_raw(),
@@ -291,17 +605,22 @@ fn get_or_decode_thumbnail(
     let name = format!("material_inspector_{material_idx}_{role:?}");
     let handle = ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR);
     cache.insert(key, handle.clone());
-    handle
+    Some(handle)
 }
 
-fn downscale_to_thumbnail(raw: &solarxy_core::RawImageData) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+/// Decode + downscale a raw RGBA8 texture into a thumbnail. Returns
+/// `None` when the buffer length does not match `width × height × 4` (a
+/// corrupt or malformed source texture) so the caller can draw a
+/// placeholder instead of the panel panicking inside the egui frame.
+fn downscale_to_thumbnail(
+    raw: &solarxy_core::RawImageData,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let buffer: ImageBuffer<Rgba<u8>, _> =
-        ImageBuffer::from_raw(raw.width, raw.height, raw.pixels.clone())
-            .expect("RawImageData length must match width × height × 4");
+        ImageBuffer::from_raw(raw.width, raw.height, raw.pixels.clone())?;
     if raw.width <= THUMBNAIL_SIZE && raw.height <= THUMBNAIL_SIZE {
-        return buffer;
+        return Some(buffer);
     }
-    imageops::thumbnail(&buffer, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+    Some(imageops::thumbnail(&buffer, THUMBNAIL_SIZE, THUMBNAIL_SIZE))
 }
 
 fn base_color_to_color32(c: [f32; 3]) -> egui::Color32 {
@@ -349,16 +668,37 @@ mod tests {
     fn state_default_is_empty() {
         let s = MaterialInspectorState::default();
         assert!(s.thumbnail_cache.is_empty());
+        assert_eq!(s.selected, 0);
         assert!(s.pending_toasts.is_empty());
     }
 
     #[test]
-    fn clear_for_new_model_drops_caches_and_pending() {
-        let mut s = MaterialInspectorState::default();
+    fn clear_for_new_model_resets_selection_and_pending() {
+        let mut s = MaterialInspectorState {
+            selected: 3,
+            ..Default::default()
+        };
         s.pending_toasts
             .push(("test".into(), ToastSeverity::Success));
         s.clear_for_new_model();
+        assert_eq!(s.selected, 0);
         assert!(s.pending_toasts.is_empty());
+        assert!(s.thumbnail_cache.is_empty());
+    }
+
+    #[test]
+    fn side_by_side_when_wide_and_landscape() {
+        assert!(use_side_by_side(800.0, 400.0));
+        assert!(use_side_by_side(360.0, 360.0));
+    }
+
+    #[test]
+    fn stacked_when_tall_or_too_narrow() {
+        // Taller than wide → stacked.
+        assert!(!use_side_by_side(400.0, 800.0));
+        // Wide aspect but the panel is simply too narrow to split.
+        assert!(!use_side_by_side(300.0, 100.0));
+        assert!(!use_side_by_side(359.0, 100.0));
     }
 
     #[test]
