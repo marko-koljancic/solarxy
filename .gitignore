@@ -17,3 +17,6 @@ target
 /wix/*.msi
 
 /release-notes-*.md
+
+# Golden captures (local regression baselines; not source)
+/.goldens/

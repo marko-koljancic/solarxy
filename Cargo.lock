@@ -4040,6 +4040,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "solarxy-formats",
  "strsim",
  "thiserror 2.0.17",
  "toml",
@@ -4065,6 +4066,7 @@ dependencies = [
 name = "solarxy-renderer"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "bytemuck",
  "cgmath",
  "exr",

@@ -103,6 +103,16 @@ pub struct ModelScene {
 }
 
 impl ModelScene {
+    /// This scene's geometry as one [`crate::frame::DrawObject`] — the
+    /// single-model path's contribution to the multi-object draw loop.
+    #[must_use]
+    pub fn draw_object(&self) -> crate::frame::DrawObject<'_> {
+        crate::frame::DrawObject {
+            model: &self.model,
+            instance_buffer: &self.instance_buffer,
+        }
+    }
+
     /// Load a model file from disk and build its full GPU scene state.
     /// Path-based by nature; a byte-fed scene assembles the same public
     /// fields from `resources::upload_model` output (multi-object scenes
@@ -284,30 +294,43 @@ pub fn lights_from_camera(
     let fill = target + fill_dir * radius;
     let rim = target + rim_dir * radius;
 
+    // The synthesized viewer rig: three point lights with range = 0 and
+    // decay = 0, so the generalized attenuation paths all multiply by 1.0
+    // and desktop output matches the pre-generalization renderer exactly.
+    // The key light (entry 0) is the exclusive shadow caster.
+    let rig = |position: cgmath::Point3<f32>, color: [f32; 3], intensity: f32, shadowed: f32| {
+        LightEntry {
+            position: [position.x, position.y, position.z],
+            kind: crate::light::LIGHT_KIND_POINT,
+            direction: [0.0, -1.0, 0.0],
+            intensity,
+            color,
+            range: 0.0,
+            decay: 0.0,
+            cos_inner: 0.0,
+            cos_outer: 0.0,
+            shadowed,
+        }
+    };
+
+    let mut lights = [LightEntry::disabled(); crate::light::MAX_LIGHTS];
+    lights[0] = rig(key, [1.0, 0.98, 0.95], 2.0, 1.0);
+    lights[1] = rig(fill, [0.90, 0.93, 1.00], 1.0, 0.0);
+    lights[2] = rig(rim, [1.0, 1.00, 1.00], 0.8, 0.0);
+
     LightsUniform {
-        lights: [
-            LightEntry {
-                position: [key.x, key.y, key.z],
-                _pad0: 0.0,
-                color: [1.0, 0.98, 0.95],
-                intensity: 2.0,
-            },
-            LightEntry {
-                position: [fill.x, fill.y, fill.z],
-                _pad0: 0.0,
-                color: [0.90, 0.93, 1.00],
-                intensity: 1.0,
-            },
-            LightEntry {
-                position: [rim.x, rim.y, rim.z],
-                _pad0: 0.0,
-                color: [1.0, 1.00, 1.00],
-                intensity: 0.8,
-            },
-        ],
+        lights,
+        count: 3,
         sphere_scale: bounds.diagonal() * 0.04,
         ibl_avg_r: ibl_avg[0],
         ibl_avg_g: ibl_avg[1],
         ibl_avg_b: ibl_avg[2],
+        hemi_sky_r: 0.0,
+        hemi_sky_g: 0.0,
+        hemi_sky_b: 0.0,
+        hemi_ground_r: 0.0,
+        hemi_ground_g: 0.0,
+        hemi_ground_b: 0.0,
+        _pad_tail: 0.0,
     }
 }

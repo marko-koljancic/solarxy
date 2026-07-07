@@ -46,3 +46,8 @@ regex = { workspace = true, optional = true }
 strsim = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The raycast dragon perf test loads the OBJ fixture through the loaders.
+# Dev-dependency cycles (core <- formats) are permitted by cargo.
+solarxy-formats = { path = "../solarxy-formats" }

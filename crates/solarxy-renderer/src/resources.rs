@@ -394,6 +394,92 @@ pub fn upload_model(
     ))
 }
 
+/// Upload GPU materials for cooked geometry (`solarxy_core::scene`).
+/// Mirrors `upload_model`'s material loop minus the Material-Inspector
+/// thumbnail capture (cooked materials arrive `Arc`-shared, so the
+/// thumbnail bytes cannot be moved out; the inspector pipeline for
+/// engine-driven objects comes with the asset milestone). Falls back to
+/// the clay default when `materials` is empty, exactly like model loads.
+pub(crate) fn upload_cooked_materials(
+    materials: &[std::sync::Arc<RawMaterialData>],
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> Result<Vec<material::Material>, RendererError> {
+    let mut gpu_materials = Vec::with_capacity(materials.len().max(1));
+    for (mat_idx, mat) in materials.iter().enumerate() {
+        let diffuse_texture = load_or_fallback_texture(
+            device,
+            queue,
+            mat.diffuse_texture_data.as_ref(),
+            mat.diffuse_texture_path.as_ref(),
+            false,
+            &mat.name,
+            "diffuse",
+        )?;
+        let normal_texture = load_or_fallback_texture(
+            device,
+            queue,
+            mat.normal_texture_data.as_ref(),
+            mat.normal_texture_path.as_ref(),
+            true,
+            &mat.name,
+            "normal",
+        )?;
+        let orm_texture = load_or_create_orm(device, queue, mat)?;
+        let emissive_texture = load_or_fallback_texture(
+            device,
+            queue,
+            mat.emissive_texture_data.as_ref(),
+            mat.emissive_texture_path.as_ref(),
+            false,
+            &mat.name,
+            "emissive",
+        )?;
+
+        let uniform = material::MaterialUniform {
+            roughness_factor: mat.roughness_factor,
+            metallic_factor: mat.metallic_factor,
+            ao_strength: 1.0,
+            alpha_cutoff: mat.alpha_cutoff,
+            emissive: mat.emissive_factor,
+            alpha_mode: mat.alpha_mode.into(),
+            material_index: mat_idx as u32,
+            _pad: [0.0; 3],
+        };
+
+        gpu_materials.push(material::Material::new(
+            device,
+            &mat.name,
+            diffuse_texture,
+            normal_texture,
+            orm_texture,
+            emissive_texture,
+            uniform,
+            layout,
+        ));
+    }
+
+    if gpu_materials.is_empty() {
+        let diffuse = create_default_texture_colored(device, queue, [204, 204, 204, 255])?;
+        let normal = create_default_texture(device, queue, true)?;
+        let orm = create_default_orm_texture(device, queue)?;
+        let emissive = create_default_emissive_texture(device, queue)?;
+        gpu_materials.push(material::Material::new(
+            device,
+            "clay_default",
+            diffuse,
+            normal,
+            orm,
+            emissive,
+            material::MaterialUniform::default(),
+            layout,
+        ));
+    }
+
+    Ok(gpu_materials)
+}
+
 #[cfg(feature = "std-fs")]
 pub fn load_binary(file_path: &str) -> Result<Vec<u8>, RendererError> {
     std::fs::read(file_path).map_err(|source| RendererError::Io {

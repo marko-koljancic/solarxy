@@ -124,10 +124,13 @@ impl SpikeApp {
                 label: Some("Spike Encoder"),
             });
 
-        self.renderer.render_shadow_pass(&mut encoder, &self.scene);
+        let objects = [self.scene.draw_object()];
+        self.renderer
+            .render_shadow_pass(&mut encoder, &self.scene, &objects);
         self.renderer.render_main_pass(
             &mut encoder,
             &self.scene,
+            &objects,
             &self.cam.bind_group,
             &self.cam.camera,
             &self.pds,

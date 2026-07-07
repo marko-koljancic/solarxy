@@ -30,6 +30,28 @@ impl Instance {
     }
 }
 
+impl InstanceRaw {
+    /// Build from an arbitrary world matrix (the `SceneOp::SetTransform`
+    /// path). The normal matrix is the inverse-transpose of the upper 3x3,
+    /// correct under non-uniform scale; a singular matrix falls back to
+    /// identity.
+    pub fn from_matrix(model: cgmath::Matrix4<f32>) -> Self {
+        use cgmath::{Matrix, SquareMatrix};
+        let upper = cgmath::Matrix3::new(
+            model.x.x, model.x.y, model.x.z, model.y.x, model.y.y, model.y.z, model.z.x, model.z.y,
+            model.z.z,
+        );
+        let normal = upper
+            .invert()
+            .unwrap_or_else(cgmath::Matrix3::identity)
+            .transpose();
+        Self {
+            model: model.into(),
+            normal: normal.into(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {

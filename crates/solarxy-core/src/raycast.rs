@@ -1,25 +1,21 @@
 //! CPU raycaster — picks faces of CPU-side mesh data for review-mode click
-//! anchoring and any future 3D ↔ UV selection sync.
+//! anchoring, viewport picking, and any future 3D ↔ UV selection sync.
 //!
 //! Pure math, no GPU. Möller-Trumbore for triangle-ray intersection, slab
-//! method for the AABB early-reject. Decoupled from the live `ModelScene`
-//! (which only holds GPU buffers): callers build `MeshView` slices over
+//! method for the AABB early-reject. Callers build [`MeshView`] slices over
 //! their CPU mesh copies and pass them in.
 //!
+//! Lives in `solarxy-core` (moved from `solarxy-app` in the web milestone's
+//! phase 2) because web picking runs in Rust — cooked geometry never
+//! crosses into JavaScript, so `engine.pick()` needs this crate-neutral.
+//!
 //! Performance budget: < 5ms for ~100K-triangle scenes on Apple Silicon
-//! / equivalent class hardware (asserted by [`tests::dragon_perf_budget`]
+//! / equivalent class hardware (asserted by `tests::dragon_perf_budget`
 //! when the `xyzrgb_dragon.obj` fixture is present).
 
-// Standard math notation in ray-tracing code: `t`, `u`, `v`, `w`, `h`, `q`,
-// `s`, `a`, `f` are deliberate (Möller-Trumbore + slab method literature).
-#![allow(clippy::many_single_char_names)]
-// Public API surface here is built ahead of its consumers — review-mode
-// click handling (state/review.rs, task #6) is the first caller. The
-// allow stays until then; remove on first use.
-#![allow(dead_code)]
-
 use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3, Vector4};
-use solarxy_core::AABB;
+
+use crate::aabb::AABB;
 
 /// A picking ray in world space.
 #[derive(Debug, Clone, Copy)]
@@ -486,7 +482,7 @@ mod tests {
         let bounds: Vec<AABB> = raw
             .meshes
             .iter()
-            .map(|m| solarxy_core::geometry::compute_bounds(&m.positions))
+            .map(|m| crate::geometry::compute_bounds(&m.positions))
             .collect();
         let views: Vec<MeshView<'_>> = raw
             .meshes
@@ -499,7 +495,7 @@ mod tests {
             })
             .collect();
 
-        let center = solarxy_core::geometry::compute_bounds(
+        let center = crate::geometry::compute_bounds(
             &views
                 .iter()
                 .flat_map(|v| v.positions.iter().copied())

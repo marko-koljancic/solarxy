@@ -423,6 +423,10 @@ impl State {
             KeyCode::F3 => self.set_view_layout(ViewLayout::SplitHorizontal),
             KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
             KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
+            // Debug-build-only: toggle the two multi-object dev cubes
+            // (phase-2 exit criterion harness; see state/dev.rs).
+            #[cfg(debug_assertions)]
+            KeyCode::F9 => self.toggle_dev_objects(),
             _ => {
                 if let Some(key) = to_camera_key(code) {
                     self.for_each_target_cam(|cam| {

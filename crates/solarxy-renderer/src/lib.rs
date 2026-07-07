@@ -71,6 +71,7 @@ pub mod pipeline_builder;
 pub mod pipelines;
 pub mod resources;
 pub mod scene;
+pub mod scene_objects;
 pub mod shadow;
 pub mod skybox;
 pub mod ssao;

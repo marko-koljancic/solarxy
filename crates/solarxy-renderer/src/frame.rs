@@ -111,6 +111,17 @@ pub struct ValidationColorResources {
     pub buffers: Vec<wgpu::Buffer>,
 }
 
+/// One drawable object as the geometry passes see it: a
+/// [`crate::model::Model`] plus its per-object instance buffer (one
+/// `InstanceRaw`). The multi-object draw path iterates slices of these;
+/// `ModelScene` contributes itself as one entry and
+/// `scene_objects::SceneObjects` entries append beside it.
+#[derive(Clone, Copy)]
+pub struct DrawObject<'a> {
+    pub model: &'a crate::model::Model,
+    pub instance_buffer: &'a wgpu::Buffer,
+}
+
 pub struct Renderer {
     pub targets: RenderTargets,
     pub post: PostProcessing,
@@ -491,7 +502,7 @@ impl Renderer {
     pub fn render_gbuffer_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        objects: &[DrawObject<'_>],
         cam_bg: &wgpu::BindGroup,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -523,18 +534,20 @@ impl Renderer {
         });
         pass.set_pipeline(&self.pipelines.scene.gbuffer);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-        for mesh in &scene.model.meshes {
-            if !mesh.visible {
-                continue;
+        for obj in objects {
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                let material = &obj.model.materials[mesh.material];
+                if material.uniform.alpha_mode == 2 {
+                    continue;
+                }
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
             }
-            let material = &scene.model.materials[mesh.material];
-            if material.uniform.alpha_mode == 2 {
-                continue;
-            }
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
         }
     }
 
@@ -614,7 +627,7 @@ impl Renderer {
     pub fn render_overdraw_passes(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        objects: &[DrawObject<'_>],
         cam_bg: &wgpu::BindGroup,
         pane_viewport: Option<[f32; 4]>,
     ) {
@@ -640,14 +653,16 @@ impl Renderer {
             }
             pass.set_pipeline(&self.pipelines.inspection.overdraw_count);
             pass.set_bind_group(0, cam_bg, &[]);
-            pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-            for mesh in &scene.model.meshes {
-                if !mesh.visible {
-                    continue;
+            for obj in objects {
+                pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                for mesh in &obj.model.meshes {
+                    if !mesh.visible {
+                        continue;
+                    }
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
             }
         }
 
@@ -677,7 +692,12 @@ impl Renderer {
         }
     }
 
-    pub fn render_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder, scene: &ModelScene) {
+    pub fn render_shadow_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &ModelScene,
+        objects: &[DrawObject<'_>],
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Shadow Pass"),
             color_attachments: &[],
@@ -694,26 +714,30 @@ impl Renderer {
         });
         pass.set_pipeline(&self.pipelines.scene.shadow);
         pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-        for mesh in &scene.model.meshes {
-            if !mesh.visible {
-                continue;
+        for obj in objects {
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                let material = &obj.model.materials[mesh.material];
+                if material.uniform.alpha_mode == 2 {
+                    continue;
+                }
+                pass.set_bind_group(1, &material.bind_group, &[]);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
             }
-            let material = &scene.model.materials[mesh.material];
-            if material.uniform.alpha_mode == 2 {
-                continue;
-            }
-            pass.set_bind_group(1, &material.bind_group, &[]);
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render_main_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &ModelScene,
+        objects: &[DrawObject<'_>],
         cam_bg: &wgpu::BindGroup,
         cam: &Camera,
         pds: &PaneDisplaySettings,
@@ -748,27 +772,31 @@ impl Renderer {
             BgKind::Solid => {}
         }
 
+        // Scene-level draws (floor, overlays) bind the ModelScene's own
+        // instance buffer; per-object loops rebind slot 1 as they go.
         pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         if pds.uv_mode == UvMode::Off {
             match pds.view_mode {
                 ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                    self.draw_opaque_meshes(&mut pass, scene, cam_bg);
+                    self.draw_opaque_meshes(&mut pass, scene, objects, cam_bg);
+                    // Floor relies on slot 1 = the scene instance buffer.
+                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
                     self.draw_floor(&mut pass, scene, cam_bg);
                     if pds.view_mode == ViewMode::ShadedWireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
-                            scene,
+                            objects,
                             &self.pipelines.scene.edge_wire,
                             cam_bg,
                         );
                     }
-                    self.draw_blend_meshes(&mut pass, scene, cam_bg, cam);
+                    self.draw_blend_meshes(&mut pass, scene, objects, cam_bg, cam);
                 }
                 ViewMode::WireframeOnly => {
                     self.draw_edge_wireframe(
                         &mut pass,
-                        scene,
+                        objects,
                         &self.pipelines.scene.edge_wire,
                         cam_bg,
                     );
@@ -776,12 +804,14 @@ impl Renderer {
                 ViewMode::Ghosted => {
                     pass.set_pipeline(&self.pipelines.scene.ghosted_fill);
                     pass.set_bind_group(0, cam_bg, &[]);
-                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-                    pass.draw_model_simple(&scene.model, 0..1);
+                    for obj in objects {
+                        pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                        pass.draw_model_simple(obj.model, 0..1);
+                    }
                     if pds.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
-                            scene,
+                            objects,
                             &self.pipelines.scene.edge_wire_ghosted,
                             cam_bg,
                         );
@@ -790,27 +820,30 @@ impl Renderer {
             }
         } else {
             pass.set_bind_group(0, cam_bg, &[]);
-            if scene.model.has_uvs {
-                match pds.uv_mode {
-                    UvMode::Checker => {
-                        pass.set_pipeline(&self.pipelines.uv.uv_checker);
-                        pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
+            for obj in objects {
+                pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                if obj.model.has_uvs {
+                    match pds.uv_mode {
+                        UvMode::Checker => {
+                            pass.set_pipeline(&self.pipelines.uv.uv_checker);
+                            pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
+                        }
+                        UvMode::Gradient | UvMode::Off => {
+                            pass.set_pipeline(&self.pipelines.uv.uv_gradient);
+                        }
                     }
-                    UvMode::Gradient | UvMode::Off => {
-                        pass.set_pipeline(&self.pipelines.uv.uv_gradient);
-                    }
+                } else {
+                    pass.set_pipeline(&self.pipelines.uv.uv_no_uvs);
                 }
-            } else {
-                pass.set_pipeline(&self.pipelines.uv.uv_no_uvs);
+                pass.draw_model_simple(obj.model, 0..1);
             }
-            pass.draw_model_simple(&scene.model, 0..1);
 
             match pds.view_mode {
                 ViewMode::Shaded => {}
                 ViewMode::ShadedWireframe | ViewMode::WireframeOnly => {
                     self.draw_edge_wireframe(
                         &mut pass,
-                        scene,
+                        objects,
                         &self.pipelines.scene.edge_wire,
                         cam_bg,
                     );
@@ -819,7 +852,7 @@ impl Renderer {
                     if pds.ghosted_wireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
-                            scene,
+                            objects,
                             &self.pipelines.scene.edge_wire_ghosted,
                             cam_bg,
                         );
@@ -827,6 +860,9 @@ impl Renderer {
                 }
             }
         }
+
+        // Overlays below rely on scene-level bindings.
+        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
         if pds.show_grid {
             pass.set_pipeline(&self.pipelines.overlay.grid);
@@ -852,21 +888,25 @@ impl Renderer {
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
+        objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
     ) {
         pass.set_pipeline(&self.pipelines.scene.main);
         pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &scene.light_bind_group, &[]);
         pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
-        for mesh in &scene.model.meshes {
-            if !mesh.visible {
-                continue;
+        for obj in objects {
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                let material = &obj.model.materials[mesh.material];
+                if material.uniform.alpha_mode == 2 {
+                    continue;
+                }
+                pass.draw_mesh(mesh, material, 0..1);
             }
-            let material = &scene.model.materials[mesh.material];
-            if material.uniform.alpha_mode == 2 {
-                continue;
-            }
-            pass.draw_mesh(mesh, material, 0..1);
         }
     }
 
@@ -874,63 +914,77 @@ impl Renderer {
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         scene: &'a ModelScene,
+        objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
         cam: &Camera,
     ) {
         let forward = (cam.target - cam.eye).normalize();
         let eye = cam.eye;
 
-        let mut blend_list: Vec<(usize, f32)> = Vec::new();
-        for (i, mesh) in scene.model.meshes.iter().enumerate() {
-            if !mesh.visible {
+        // Sort blended meshes back-to-front per object (cross-object
+        // ordering stays draw-order; a global sort would need transformed
+        // bounds and arrives with the engine work if it proves visible).
+        let mut bound_pipeline = false;
+        for obj in objects {
+            let mut blend_list: Vec<(usize, f32)> = Vec::new();
+            for (i, mesh) in obj.model.meshes.iter().enumerate() {
+                if !mesh.visible {
+                    continue;
+                }
+                let material = &obj.model.materials[mesh.material];
+                if material.uniform.alpha_mode != 2 {
+                    continue;
+                }
+                let center = obj.model.mesh_bounds[i].center();
+                let to_center = center - eye;
+                let depth = to_center.dot(forward);
+                blend_list.push((i, depth));
+            }
+
+            if blend_list.is_empty() {
                 continue;
             }
-            let material = &scene.model.materials[mesh.material];
-            if material.uniform.alpha_mode != 2 {
-                continue;
+
+            blend_list.sort_unstable_by(|a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            if !bound_pipeline {
+                pass.set_pipeline(&self.pipelines.scene.alpha_blend);
+                pass.set_bind_group(1, cam_bg, &[]);
+                pass.set_bind_group(2, &scene.light_bind_group, &[]);
+                pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
+                bound_pipeline = true;
             }
-            let center = scene.model.mesh_bounds[i].center();
-            let to_center = center - eye;
-            let depth = to_center.dot(forward);
-            blend_list.push((i, depth));
-        }
-
-        if blend_list.is_empty() {
-            return;
-        }
-
-        blend_list
-            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        pass.set_pipeline(&self.pipelines.scene.alpha_blend);
-        pass.set_bind_group(1, cam_bg, &[]);
-        pass.set_bind_group(2, &scene.light_bind_group, &[]);
-        pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
-        for (idx, _) in &blend_list {
-            let mesh = &scene.model.meshes[*idx];
-            let material = &scene.model.materials[mesh.material];
-            pass.draw_mesh(mesh, material, 0..1);
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for (idx, _) in &blend_list {
+                let mesh = &obj.model.meshes[*idx];
+                let material = &obj.model.materials[mesh.material];
+                pass.draw_mesh(mesh, material, 0..1);
+            }
         }
     }
 
     fn draw_edge_wireframe<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        objects: &[DrawObject<'a>],
         pipeline: &'a wgpu::RenderPipeline,
         cam_bg: &'a wgpu::BindGroup,
     ) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
-        pass.set_vertex_buffer(0, scene.instance_buffer.slice(..));
-        for mesh in &scene.model.meshes {
-            if !mesh.visible {
-                continue;
-            }
-            if let Some(edge) = &mesh.edge_data {
-                pass.set_bind_group(2, &edge.bind_group, &[]);
-                pass.draw(0..edge.num_edges * 6, 0..1);
+        for obj in objects {
+            pass.set_vertex_buffer(0, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                if let Some(edge) = &mesh.edge_data {
+                    pass.set_bind_group(2, &edge.bind_group, &[]);
+                    pass.draw(0..edge.num_edges * 6, 0..1);
+                }
             }
         }
     }

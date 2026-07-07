@@ -10,20 +10,23 @@
 //! - `panes.rs` — split-viewport layout math.
 //! - `overlap.rs` — UV-overlap GPU readback polling.
 //! - `capture.rs` — screenshot capture.
-//! - `raycast.rs` — CPU picking (Möller-Trumbore + AABB early-reject)
-//!   used by review-mode click anchoring and any future selection sync.
+//! - `raycast` — CPU picking (Möller-Trumbore + AABB early-reject), now
+//!   `solarxy_core::raycast` (moved in web-milestone phase 2 so web picking
+//!   can run in Rust); re-exported here so call sites keep their paths.
 //! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
 //!   plus transient UI state (draft, selection, panel visibility).
 //! - `input/` — keyboard/mouse, dialogs, menu actions.
 //! - `view_state.rs` — `ViewState` (re-exports `view_config` types).
 
 mod capture;
+#[cfg(debug_assertions)]
+mod dev;
 pub(crate) mod hdri_info;
 mod init;
 mod input;
 mod overlap;
 mod panes;
-pub(crate) mod raycast;
+pub(crate) use solarxy_core::raycast;
 mod render;
 pub(crate) mod review;
 mod update;
@@ -119,6 +122,12 @@ pub struct State {
     pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
+    /// Multi-object dynamic scene drawn beside `scene` (web-milestone
+    /// phase 2). Fed by [`SceneDelta`] batches queued in
+    /// `pending_scene_deltas` and applied at the top of each frame; the
+    /// node engine becomes the producer in the next milestone.
+    pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
+    pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,

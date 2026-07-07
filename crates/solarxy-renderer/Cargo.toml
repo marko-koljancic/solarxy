@@ -31,6 +31,8 @@ thiserror   = { workspace = true }
 
 [dev-dependencies]
 pollster = "0.4.0"
+# Binary-style error handling for the golden-capture example only.
+anyhow = { workspace = true }
 
 [dependencies.image]
 version          = "0.25.9"

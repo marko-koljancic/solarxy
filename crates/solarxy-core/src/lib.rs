@@ -66,10 +66,12 @@ pub mod json;
 pub mod preferences;
 #[cfg(feature = "serialization")]
 pub mod project_config;
+pub mod raycast;
 #[cfg(feature = "serialization")]
 pub mod report;
 #[cfg(feature = "serialization")]
 pub mod review;
+pub mod scene;
 pub mod validation;
 #[cfg(feature = "serde")]
 pub mod view_config;

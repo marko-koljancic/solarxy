@@ -18,6 +18,7 @@ use crate::aabb::AABB;
 /// One mesh inside a [`RawModelData`].
 /// Triangulated indices, optional per-vertex `normals` / `tex_coords`, and
 /// an optional `material_index` into the parent [`RawModelData::materials`].
+#[derive(Debug)]
 pub struct RawMeshData {
     pub name: String,
     pub positions: Vec<[f32; 3]>,
@@ -28,6 +29,7 @@ pub struct RawMeshData {
 }
 
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.
+#[derive(Debug)]
 pub struct RawImageData {
     pub pixels: Vec<u8>,
     pub width: u32,
@@ -60,6 +62,7 @@ impl From<AlphaMode> for u32 {
 /// Holds factor scalars, optional textures (path or in-memory bytes), and the
 /// PBR alpha mode. `solarxy-renderer/src/resources.rs` consumes this and
 /// produces a `MaterialUniform` + GPU textures.
+#[derive(Debug)]
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<PathBuf>,

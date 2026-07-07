@@ -1,0 +1,542 @@
+//! Headless golden-image capture + comparison for renderer regression
+//! testing. Made possible by the phase-1 decoupling: `Renderer::new` builds
+//! the full renderer without a window or surface.
+//!
+//! Capture a baseline before a rendering refactor, re-capture after, and
+//! compare:
+//!
+//! ```bash
+//! cargo run -p solarxy-renderer --example golden -- \
+//!     capture --model res/models/xyzrgb_dragon.obj --out .goldens/baseline
+//! cargo run -p solarxy-renderer --example golden -- \
+//!     compare .goldens/baseline .goldens/after --tolerance 0
+//! ```
+//!
+//! Blocking readback is deliberate here: this is a native-only dev tool,
+//! not part of the app render path (which is async per phase-1 C6).
+
+use anyhow::{Context, bail};
+
+use solarxy_core::AABB;
+use solarxy_core::preferences::{
+    BackgroundMode, IblMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    ToneMode, UvMapBackground, UvMode, ViewMode,
+};
+use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
+use solarxy_renderer::camera::{Camera, CameraUniform};
+use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::frame::{Renderer, RendererInit};
+use solarxy_renderer::ibl::BrdfLut;
+use solarxy_renderer::scene::{BackgroundModeExt, ModelScene};
+
+const WIDTH: u32 = 1024;
+const HEIGHT: u32 = 768;
+const MSAA: u32 = 4;
+const SHADOW_MAP_SIZE: u32 = 2048;
+
+/// The captured mode set: name + the pane settings that produce it.
+fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
+    let base = PaneDisplaySettings {
+        view_mode: ViewMode::Shaded,
+        prev_non_ghosted_mode: ViewMode::Shaded,
+        ghosted_wireframe: false,
+        normals_mode: NormalsMode::Off,
+        background_mode: BackgroundMode::GRADIENT,
+        uv_mode: UvMode::Off,
+        bounds_mode: BoundsMode::Off,
+        line_weight: LineWeight::Medium,
+        show_grid: true,
+        show_axis_gizmo: false,
+        show_local_axes: false,
+        inspection_mode: InspectionMode::Shaded,
+        material_override: MaterialOverride::None,
+        texel_density_target: 1.0,
+        pane_mode: PaneMode::Scene3D,
+        uv_bg: UvMapBackground::Dark,
+        uv_offset: [0.0, 0.0],
+        uv_zoom: 1.0,
+        show_uv_overlap: false,
+        show_validation: false,
+    };
+    vec![
+        ("shaded", base),
+        (
+            "wireframe",
+            PaneDisplaySettings {
+                view_mode: ViewMode::WireframeOnly,
+                ..base
+            },
+        ),
+        (
+            "material_id",
+            PaneDisplaySettings {
+                inspection_mode: InspectionMode::MaterialId,
+                ..base
+            },
+        ),
+        (
+            "depth",
+            PaneDisplaySettings {
+                inspection_mode: InspectionMode::Depth,
+                ..base
+            },
+        ),
+        (
+            "validation",
+            PaneDisplaySettings {
+                show_validation: true,
+                ..base
+            },
+        ),
+    ]
+}
+
+fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("capture") => capture(&args[1..]),
+        Some("compare") => compare(&args[1..]),
+        _ => {
+            eprintln!(
+                "usage:\n  golden capture --model <path> --out <dir>\n  golden compare <dir_a> <dir_b> [--tolerance N]"
+            );
+            bail!("missing or unknown subcommand");
+        }
+    }
+}
+
+fn arg_value(args: &[String], key: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+}
+
+fn capture(args: &[String]) -> anyhow::Result<()> {
+    let model_path = arg_value(args, "--model").context("--model <path> is required")?;
+    let out_dir = arg_value(args, "--out").context("--out <dir> is required")?;
+    std::fs::create_dir_all(&out_dir)?;
+
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: None,
+        required_features: wgpu::Features::empty(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        required_limits: wgpu::Limits::default(),
+        memory_hints: wgpu::MemoryHints::default(),
+        trace: wgpu::Trace::Off,
+    }))?;
+
+    // No window: fabricate the surface configuration the renderer sizes
+    // its targets and composite pipeline against.
+    let config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        width: WIDTH,
+        height: HEIGHT,
+        present_mode: wgpu::PresentMode::Fifo,
+        alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+        view_formats: vec![],
+        desired_maximum_frame_latency: 2,
+    };
+
+    let background = BackgroundMode::GRADIENT.resolve(&[]);
+    let (sky_top, sky_bottom) = background.sky_colors();
+    let init = RendererInit {
+        msaa_sample_count: MSAA,
+        gradient_top: [0.35, 0.41, 0.47, 1.0],
+        gradient_bottom: [0.66, 0.70, 0.72, 1.0],
+        sky_top,
+        sky_bottom,
+        wireframe_color: background.wireframe_color(),
+        wireframe_line_width: LineWeight::Medium.width_px(),
+        bloom_enabled: false,
+        ssao_enabled: false,
+        tone_mode: ToneMode::AcesFilmic,
+        exposure: 1.0,
+        ibl_mode: IblMode::Full,
+        uv_checker_png: include_bytes!("../../../res/textures/uv-checker_1k.png"),
+    };
+    let renderer = Renderer::new(&device, &queue, &config, &init)
+        .map_err(|e| anyhow::anyhow!("Renderer::new: {e}"))?;
+
+    let brdf_placeholder = BrdfLut::fallback(&device, &queue);
+    let scene = ModelScene::new(
+        model_path.clone(),
+        &device,
+        &queue,
+        &renderer.layouts,
+        &config,
+        background.grid_color(),
+        &brdf_placeholder,
+        SHADOW_MAP_SIZE,
+    )
+    .map_err(|e| anyhow::anyhow!("ModelScene::new: {e}"))?;
+
+    let mut cam = CameraState::new(
+        &device,
+        &renderer.layouts.camera,
+        &scene.model.bounds,
+        WIDTH as f32 / HEIGHT as f32,
+    );
+    cam.update(&queue, 1.0 / 60.0);
+
+    // Offscreen "surface" texture the composite pass tone-maps into.
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Golden Target"),
+        size: wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+    for (name, pds) in modes() {
+        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Encoder"),
+        });
+        let objects = [scene.draw_object()];
+        renderer.render_shadow_pass(&mut encoder, &scene, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            &pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            ToneMode::AcesFilmic,
+            1.0,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/{name}.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path}");
+    }
+
+    // Extra (not part of the compare set): the phase-2 exit-criterion
+    // proof — two extra objects with independent transforms drawn through
+    // the SceneObjects delta path beside the loaded model.
+    {
+        use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
+        use solarxy_renderer::scene_objects::{SceneObjects, cooked_from_parts};
+
+        let d = scene.model.bounds.diagonal();
+        let c = scene.model.bounds.center();
+        let cube = |s: f32| {
+            cooked_from_parts(
+                "golden_cube",
+                vec![
+                    [-s, -s, -s],
+                    [s, -s, -s],
+                    [s, s, -s],
+                    [-s, s, -s],
+                    [-s, -s, s],
+                    [s, -s, s],
+                    [s, s, s],
+                    [-s, s, s],
+                ],
+                vec![
+                    0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4,
+                    7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
+                ],
+                None,
+            )
+        };
+        let place = |dx: f32, dy: f32| -> [[f32; 4]; 4] {
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [c.x + dx, c.y + dy, c.z, 1.0],
+            ]
+        };
+
+        let mut extra = SceneObjects::new();
+        extra
+            .apply(
+                &device,
+                &queue,
+                &renderer.layouts,
+                &SceneDelta {
+                    ops: vec![
+                        SceneOp::UpsertGeometry {
+                            id: SceneObjectId(1),
+                            geometry: std::sync::Arc::new(cube(d * 0.06)),
+                        },
+                        SceneOp::SetTransform {
+                            id: SceneObjectId(1),
+                            transform: place(-d * 0.45, d * 0.15),
+                        },
+                        SceneOp::UpsertGeometry {
+                            id: SceneObjectId(2),
+                            geometry: std::sync::Arc::new(cube(d * 0.035)),
+                        },
+                        SceneOp::SetTransform {
+                            id: SceneObjectId(2),
+                            transform: place(d * 0.45, d * 0.3),
+                        },
+                    ],
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("SceneObjects::apply: {e}"))?;
+
+        let (name, pds) = &modes()[0];
+        let _ = name;
+        write_inspection_block(&queue, &cam, pds, &scene.model.bounds);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Two-Object Encoder"),
+        });
+        let mut objects = vec![scene.draw_object()];
+        objects.extend(extra.draw_objects());
+        renderer.render_shadow_pass(&mut encoder, &scene, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            ToneMode::AcesFilmic,
+            1.0,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/two_objects.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path} (exit-criterion proof, not compared)");
+    }
+
+    println!(
+        "GOLDEN capture complete: {} modes in {out_dir}",
+        modes().len()
+    );
+    Ok(())
+}
+
+/// Replicates the app's per-pane partial camera-uniform write (inspection
+/// mode, texel density, overrides, depth bounds) for deterministic modes.
+fn write_inspection_block(
+    queue: &wgpu::Queue,
+    cam: &CameraState,
+    pds: &PaneDisplaySettings,
+    bounds: &AABB,
+) {
+    let (near, far) = depth_bounds(&cam.camera, bounds);
+    let data: [u32; 8] = [
+        pds.inspection_mode.as_u32(),
+        pds.texel_density_target.to_bits(),
+        pds.material_override.as_u32(),
+        near.to_bits(),
+        far.to_bits(),
+        1.0f32.to_bits(),
+        1.0f32.to_bits(),
+        0.0f32.to_bits(),
+    ];
+    queue.write_buffer(
+        &cam.buffer,
+        CameraUniform::INSPECTION_OFFSET,
+        bytemuck::cast_slice(&data),
+    );
+}
+
+/// Same math as the app's `compute_depth_bounds`.
+fn depth_bounds(camera: &Camera, bounds: &AABB) -> (f32, f32) {
+    let view = camera.build_view_matrix();
+    let mut z_min = f32::INFINITY;
+    let mut z_max = f32::NEG_INFINITY;
+    for corner in &bounds.corners() {
+        let vp = view * corner.to_homogeneous();
+        let z = -vp.z;
+        z_min = z_min.min(z);
+        z_max = z_max.max(z);
+    }
+    z_min = z_min.max(0.001);
+    if z_max <= z_min {
+        z_max = z_min + 1.0;
+    }
+    (z_min, z_max)
+}
+
+/// Blocking BGRA readback of the offscreen target, returned as RGBA rows.
+fn read_target(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &wgpu::Texture,
+) -> anyhow::Result<Vec<u8>> {
+    let bytes_per_pixel = 4u32;
+    let unpadded = WIDTH * bytes_per_pixel;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = unpadded.div_ceil(align) * align;
+
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Golden Readback"),
+        size: u64::from(padded * HEIGHT),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Golden Copy Encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(HEIGHT),
+            },
+        },
+        wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+    match rx.recv() {
+        Ok(Ok(())) => {}
+        other => bail!("map_async failed: {other:?}"),
+    }
+
+    let data = slice.get_mapped_range();
+    let mut pixels = Vec::with_capacity((unpadded * HEIGHT) as usize);
+    for row in 0..HEIGHT {
+        let start = (row * padded) as usize;
+        pixels.extend_from_slice(&data[start..start + unpadded as usize]);
+    }
+    drop(data);
+    buffer.unmap();
+
+    // BGRA -> RGBA.
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+    Ok(pixels)
+}
+
+fn compare(args: &[String]) -> anyhow::Result<()> {
+    let (Some(dir_a), Some(dir_b)) = (args.first(), args.get(1)) else {
+        bail!("compare needs <dir_a> <dir_b>");
+    };
+    let tolerance: u8 = arg_value(args, "--tolerance")
+        .map(|t| t.parse())
+        .transpose()?
+        .unwrap_or(0);
+
+    let mut failures = 0usize;
+    for (name, _) in modes() {
+        let pa = format!("{dir_a}/{name}.png");
+        let pb = format!("{dir_b}/{name}.png");
+        let a = image::open(&pa).with_context(|| pa.clone())?.to_rgba8();
+        let b = image::open(&pb).with_context(|| pb.clone())?.to_rgba8();
+        if a.dimensions() != b.dimensions() {
+            println!(
+                "GOLDEN {name}: DIMENSION MISMATCH {:?} vs {:?}",
+                a.dimensions(),
+                b.dimensions()
+            );
+            failures += 1;
+            continue;
+        }
+        let mut max_delta = 0u8;
+        let mut differing = 0usize;
+        for (pa, pb) in a.pixels().zip(b.pixels()) {
+            let mut pixel_differs = false;
+            for c in 0..4 {
+                let d = pa.0[c].abs_diff(pb.0[c]);
+                max_delta = max_delta.max(d);
+                if d > tolerance {
+                    pixel_differs = true;
+                }
+            }
+            if pixel_differs {
+                differing += 1;
+            }
+        }
+        let total = (a.width() * a.height()) as usize;
+        let status = if differing == 0 { "OK" } else { "DIFF" };
+        println!(
+            "GOLDEN {name}: {status} max_channel_delta={max_delta} differing_pixels={differing}/{total}"
+        );
+        if differing > 0 {
+            failures += 1;
+        }
+    }
+    if failures > 0 {
+        bail!("{failures} golden(s) differ beyond tolerance {tolerance}");
+    }
+    println!("GOLDEN compare: all modes match (tolerance {tolerance})");
+    Ok(())
+}

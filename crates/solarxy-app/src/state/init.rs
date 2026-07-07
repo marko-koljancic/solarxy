@@ -154,6 +154,8 @@ impl State {
             },
             gui,
             scene: None,
+            scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
+            pending_scene_deltas: Vec::new(),
             input: InputState {
                 cursor_pos: (0.0, 0.0),
                 uv_last_mouse_pos: None,

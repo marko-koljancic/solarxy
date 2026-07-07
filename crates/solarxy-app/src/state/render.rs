@@ -55,6 +55,21 @@ impl State {
         self.poll_overlap_stats();
         self.poll_pending_capture();
 
+        // Drain queued scene deltas into the multi-object scene before any
+        // pane encodes (the engine's per-frame commit point, next milestone).
+        if !self.pending_scene_deltas.is_empty() {
+            for delta in std::mem::take(&mut self.pending_scene_deltas) {
+                if let Err(e) = self.scene_objects.apply(
+                    &self.device,
+                    &self.queue,
+                    &self.renderer.layouts,
+                    &delta,
+                ) {
+                    tracing::error!("Scene delta apply failed: {e}");
+                }
+            }
+        }
+
         let viewport_present = self.gui.viewport_tab_present();
         if !viewport_present {
             self.clear_surface(&surface_view);
@@ -180,8 +195,20 @@ impl State {
         } else {
             None
         };
+        let objects = self.draw_objects(scene);
         self.renderer
-            .render_overdraw_passes(encoder, scene, cam_bg, pane_viewport);
+            .render_overdraw_passes(encoder, &objects, cam_bg, pane_viewport);
+    }
+
+    /// The frame's draw list: the loaded model plus every visible
+    /// multi-object entry, in that order.
+    fn draw_objects<'a>(
+        &'a self,
+        scene: &'a solarxy_renderer::scene::ModelScene,
+    ) -> Vec<solarxy_renderer::frame::DrawObject<'a>> {
+        let mut objects = vec![scene.draw_object()];
+        objects.extend(self.scene_objects.draw_objects());
+        objects
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -373,17 +400,20 @@ impl State {
         if (i == 0 || !self.view.display.lights_locked)
             && let Some(scene) = &self.scene
         {
-            self.renderer.render_shadow_pass(encoder, scene);
+            let objects = self.draw_objects(scene);
+            self.renderer.render_shadow_pass(encoder, scene, &objects);
         }
 
         let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
+            let objects = self.draw_objects(scene);
             if self.renderer.post.ssao_enabled {
-                self.renderer.render_gbuffer_pass(encoder, scene, cam_bg);
+                self.renderer.render_gbuffer_pass(encoder, &objects, cam_bg);
             }
             self.renderer.render_main_pass(
                 encoder,
                 scene,
+                &objects,
                 cam_bg,
                 cam_data,
                 pds,

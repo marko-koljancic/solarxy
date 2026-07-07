@@ -134,17 +134,36 @@ struct MaterialUniform {
 }
 @group(0) @binding(8) var<uniform> material: MaterialUniform;
 
+// Matches the Rust `LightEntry` / `LightsUniform` layout (light.rs; size
+// asserts there). kind: 0 = point, 1 = directional, 2 = spot. range = 0
+// and decay = 0 disable their attenuation terms, which is how the
+// synthesized viewer rig keeps pre-generalization output exactly.
 struct LightEntry {
     position: vec3<f32>,
-    color: vec3<f32>,
+    kind: u32,
+    direction: vec3<f32>,
     intensity: f32,
+    color: vec3<f32>,
+    range: f32,
+    decay: f32,
+    cos_inner: f32,
+    cos_outer: f32,
+    shadowed: f32,
 }
 struct LightsUniform {
-    lights: array<LightEntry, 3>,
+    lights: array<LightEntry, 8>,
+    count: u32,
     sphere_scale: f32,
     ibl_avg_r: f32,
     ibl_avg_g: f32,
     ibl_avg_b: f32,
+    hemi_sky_r: f32,
+    hemi_sky_g: f32,
+    hemi_sky_b: f32,
+    hemi_ground_r: f32,
+    hemi_ground_g: f32,
+    hemi_ground_b: f32,
+    _pad_tail: f32,
 }
 @group(2) @binding(0)
 var<uniform> lights: LightsUniform;
@@ -330,7 +349,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let diffuse_ibl = select(diffuse_ibl_pbr, ibl_ambient * albedo, is_clay);
     let specular_ibl = select(specular_ibl_pbr, vec3<f32>(0.0), is_clay);
 
-    let ambient = (diffuse_ibl + specular_ibl) * ao;
+    // Hemisphere/ambient light-node term: blends ground-to-sky by the
+    // world-space up component of the normal. All-zero (exactly no
+    // contribution) when no ambient or hemisphere lights exist.
+    let hemi_sky = vec3<f32>(lights.hemi_sky_r, lights.hemi_sky_g, lights.hemi_sky_b);
+    let hemi_ground =
+        vec3<f32>(lights.hemi_ground_r, lights.hemi_ground_g, lights.hemi_ground_b);
+    let hemi_up = clamp(N_world.y * 0.5 + 0.5, 0.0, 1.0);
+    let hemi = mix(hemi_ground, hemi_sky, hemi_up) * albedo / PI;
+
+    let ambient = (diffuse_ibl + specular_ibl + hemi) * ao;
 
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;
@@ -340,26 +368,61 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var radiance_acc = vec3(0.0);
 
     if camera.material_override != 3u {
-        {
-            let L = normalize(tbn * lights.lights[0].position - in.tangent_position);
-            let scale = lights.lights[0].intensity * 3.0 * shadow;
-            let brdf = select(
-                cook_torrance(N, V, L, albedo, roughness, metallic),
-                lambert_direct(N, L, albedo),
-                is_clay,
-            );
-            radiance_acc += lights.lights[0].color * brdf * scale;
-        }
+        // All lighting runs in tangent space; the TBN is orthonormal, so
+        // distances and angles match their world-space values.
+        for (var i = 0u; i < lights.count; i++) {
+            let light = lights.lights[i];
 
-        for (var i = 1u; i < 3u; i++) {
-            let L = normalize(tbn * lights.lights[i].position - in.tangent_position);
-            let scale = lights.lights[i].intensity * 3.0;
+            // Explicit vec3 copies: naga's Metal backend emits packed_float3
+            // for struct members, which cannot multiply a float3x3 directly.
+            let light_dir = vec3<f32>(light.direction);
+            let light_pos = vec3<f32>(light.position);
+
+            var L: vec3<f32>;
+            var atten = 1.0;
+            if light.kind == 1u {
+                // Directional: L opposes the light's travel direction.
+                L = normalize(tbn * (-light_dir));
+            } else {
+                let light_pos_t = tbn * light_pos;
+                let to_light = light_pos_t - in.tangent_position;
+                let dist = length(to_light);
+                // normalize() (not to_light / dist): bit-parity with the
+                // pre-generalization shader for the golden comparison.
+                L = normalize(to_light);
+
+                // range = 0 and decay = 0 both multiply by exactly 1.0 —
+                // the synthesized viewer rig's parity path.
+                if light.range > 0.0 {
+                    let w = clamp(1.0 - pow(dist / light.range, 4.0), 0.0, 1.0);
+                    atten *= w * w;
+                }
+                if light.decay > 0.0 {
+                    atten *= 1.0 / pow(max(dist, 0.01), light.decay);
+                }
+
+                if light.kind == 2u {
+                    // Spot cone: smooth falloff between the cone cosines.
+                    let dir_t = normalize(tbn * light_dir);
+                    let cos_angle = dot(-L, dir_t);
+                    let cone = clamp(
+                        (cos_angle - light.cos_outer)
+                            / max(light.cos_inner - light.cos_outer, 1e-4),
+                        0.0,
+                        1.0,
+                    );
+                    atten *= cone;
+                }
+            }
+
+            let shadow_factor = select(1.0, shadow, light.shadowed > 0.5);
+            let scale = light.intensity * 3.0 * atten * shadow_factor;
             let brdf = select(
                 cook_torrance(N, V, L, albedo, roughness, metallic),
                 lambert_direct(N, L, albedo),
                 is_clay,
             );
-            radiance_acc += lights.lights[i].color * brdf * scale;
+            radiance_acc += light.color * brdf * scale;
         }
     }
 
