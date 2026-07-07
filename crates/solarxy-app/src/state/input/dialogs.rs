@@ -15,7 +15,10 @@ impl State {
             let (tx, rx) = std::sync::mpsc::channel();
             let hdri_path = path.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(IblState::from_hdri(&device, &queue, &path));
+                // The channel carries anyhow (binary-crate convention); the
+                // renderer's typed error converts at the boundary.
+                let _ = tx
+                    .send(IblState::from_hdri(&device, &queue, &path).map_err(anyhow::Error::from));
             });
             self.gui.set_loading_message("Loading HDRI...");
             self.pending_hdri = Some(PendingHdri {

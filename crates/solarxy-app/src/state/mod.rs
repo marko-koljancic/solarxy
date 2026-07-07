@@ -32,8 +32,7 @@ pub(crate) mod view_state;
 pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
 pub(super) use solarxy_renderer::frame::{
-    GradientUniform, IblResources, PostProcessing, RenderTargets, Renderer, UvOverlapResources,
-    ValidationColorResources, WireframeParams, WireframeResources,
+    GradientUniform, Renderer, UvOverlapResources, WireframeParams,
 };
 pub(super) use solarxy_renderer::scene::{
     BackgroundModeExt, ModelScene, create_light_bind_group, create_light_bind_group_selective,
@@ -88,6 +87,21 @@ pub(super) struct PendingHdri {
     pub(super) path: std::path::PathBuf,
 }
 
+/// In-flight screenshot readback: the staging buffer with a `map_async`
+/// request armed, polled non-blocking each frame (`poll_pending_capture`).
+/// The modal context (filename, review flags) is captured at arm time so
+/// the image lands with the state the user triggered it under.
+pub(super) struct PendingCapture {
+    pub(super) buffer: wgpu::Buffer,
+    pub(super) padded_row_bytes: u32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    pub(super) filename: String,
+    pub(super) review_active: bool,
+    pub(super) expand_review: bool,
+}
+
 pub(super) struct InputState {
     pub(super) cursor_pos: (f32, f32),
     pub(super) modifiers: ModifiersState,
@@ -111,6 +125,7 @@ pub struct State {
     pub(super) last_project_config_toast: Option<std::path::PathBuf>,
     pub(super) pending_load: Option<PendingLoad>,
     pub(super) pending_hdri: Option<PendingHdri>,
+    pub(super) pending_capture: Option<PendingCapture>,
     /// Pending viewport right-click context menu — `Some` while the menu
     /// is open; cleared on dismiss.
     pub(super) viewport_context_menu: Option<ViewportContextMenu>,

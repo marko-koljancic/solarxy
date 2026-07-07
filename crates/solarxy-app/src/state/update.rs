@@ -132,7 +132,9 @@ impl State {
                 &placeholder_brdf,
                 shadow_map_size,
             );
-            let _ = tx.send(result);
+            // The channel carries anyhow (binary-crate convention); the
+            // renderer's typed error converts at the boundary.
+            let _ = tx.send(result.map_err(anyhow::Error::from));
         });
 
         self.pending_load = Some(PendingLoad {

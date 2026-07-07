@@ -3,19 +3,29 @@
 //! [`create_light_bind_group`] / [`create_light_bind_group_selective`]
 //! helpers used by both `ModelScene` construction and the per-frame update.
 
+// Imports used only by the std-fs-gated `ModelScene::new` are gated with
+// it so the no-std-fs (wasm) build stays warning-free.
+#[cfg(feature = "std-fs")]
 use cgmath::Rotation3;
 use solarxy_core::preferences::{BgKind, ResolvedBackground};
 use solarxy_core::validation::ValidationReport;
+#[cfg(feature = "std-fs")]
 use wgpu::util::DeviceExt;
 
 use crate::bind_groups::BindGroupLayouts;
-use crate::camera::{Camera, camera_from_bounds};
+#[cfg(feature = "std-fs")]
+use crate::camera::camera_from_bounds;
+use crate::camera::Camera;
 use crate::ibl::{BrdfLut, IblState};
 use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
+#[cfg(feature = "std-fs")]
 use crate::pipelines::Instance;
-use crate::resources::{self, ModelStats};
+use crate::resources::ModelStats;
+#[cfg(feature = "std-fs")]
+use crate::resources::{self};
 use crate::shadow::ShadowState;
+#[cfg(feature = "std-fs")]
 use crate::validation;
 use crate::visualization::VisualizationState;
 
@@ -93,6 +103,11 @@ pub struct ModelScene {
 }
 
 impl ModelScene {
+    /// Load a model file from disk and build its full GPU scene state.
+    /// Path-based by nature; a byte-fed scene assembles the same public
+    /// fields from `resources::upload_model` output (multi-object scenes
+    /// replace this in the web milestone's phase 2).
+    #[cfg(feature = "std-fs")]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         model_path: String,
@@ -103,7 +118,7 @@ impl ModelScene {
         initial_grid_color: [f32; 3],
         brdf_lut: &BrdfLut,
         shadow_map_size: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, crate::error::RendererError> {
         let (model, normals_geo, stats, viewer_validation) = resources::load_model_any(
             &model_path,
             device,

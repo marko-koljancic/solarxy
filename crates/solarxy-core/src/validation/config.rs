@@ -7,38 +7,35 @@
 //! pure-computation builds.
 
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    feature = "serialization",
-    derive(serde::Serialize, serde::Deserialize)
-)]
-#[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct ValidationConfig {
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub normal_mismatch: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub flipped_normals: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub non_manifold_edges: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub triangle_budget: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_false"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_false"))]
     pub allow_open_mesh: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub degenerate_triangles: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub material_refs: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub uv_presence: bool,
 
-    #[cfg_attr(feature = "serialization", serde(default = "default_true"))]
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub index_buffer: bool,
 }
 
@@ -59,23 +56,14 @@ impl Default for ValidationConfig {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(
-    feature = "serialization",
-    derive(serde::Serialize, serde::Deserialize)
-)]
-#[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct ValidationThresholds {
-    #[cfg_attr(
-        feature = "serialization",
-        serde(default = "default_tolerance_percent")
-    )]
+    #[cfg_attr(feature = "serde", serde(default = "default_tolerance_percent"))]
     pub triangle_budget_tolerance_percent: f32,
 
-    #[cfg_attr(
-        feature = "serialization",
-        serde(default = "default_flipped_normal_dot")
-    )]
+    #[cfg_attr(feature = "serde", serde(default = "default_flipped_normal_dot"))]
     pub flipped_normal_dot: f32,
 }
 
@@ -88,11 +76,11 @@ impl Default for ValidationThresholds {
     }
 }
 
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 fn default_true() -> bool {
     true
 }
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 fn default_false() -> bool {
     false
 }

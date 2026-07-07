@@ -3,12 +3,11 @@
 
 use cgmath::InnerSpace;
 use wgpu::util::DeviceExt;
-use winit::event::MouseButton;
-use winit::keyboard::KeyCode;
 
 use super::camera::{
     camera_from_bounds, camera_from_bounds_axis, Camera, CameraController, CameraUniform,
 };
+use super::input::{CameraKey, PointerButton};
 use solarxy_core::preferences::ProjectionMode;
 use super::model::AABB;
 
@@ -135,14 +134,14 @@ impl CameraState {
         self.camera.projection = mode;
     }
 
-    pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
+    pub fn handle_key(&mut self, code: CameraKey, is_pressed: bool) -> bool {
         if self.transition.is_some() {
             return false;
         }
         self.controller.handle_key(code, is_pressed)
     }
 
-    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+    pub fn handle_mouse_button(&mut self, button: PointerButton, pressed: bool) {
         if self.transition.is_some() {
             return;
         }

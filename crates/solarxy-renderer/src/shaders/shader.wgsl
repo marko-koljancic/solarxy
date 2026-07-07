@@ -227,18 +227,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let ddy = dpdy(in.tex_coords);
         let density = length(ddx) * length(ddy);
 
-        if density == 0.0 {
-            return vec4(0.5, 0.5, 0.5, 1.0);
-        }
-
-        let td_target = max(camera.texel_density_target, 0.001);
-        let t = clamp(log2(density / td_target) / 2.0, -1.0, 1.0);
-
-        var color: vec3<f32>;
-        if t < 0.0 {
-            color = mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), -t);
-        } else {
-            color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);
+        // Single unconditional return: WebGPU's uniformity analysis
+        // (Tint/Dawn) rejects the later implicit-derivative texture samples
+        // if a return in this branch is conditional on the non-uniform
+        // density. Native Naga accepted the early return; the web does not.
+        var color = vec3(0.5, 0.5, 0.5);
+        if density != 0.0 {
+            let td_target = max(camera.texel_density_target, 0.001);
+            let t = clamp(log2(density / td_target) / 2.0, -1.0, 1.0);
+            if t < 0.0 {
+                color = mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), -t);
+            } else {
+                color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);
+            }
         }
         return vec4(color, 1.0);
     }
@@ -319,7 +320,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ibl_r = rotate_yaw(R, camera.hdri_rotation);
     let prefiltered_color = textureSampleLevel(t_prefiltered, s_prefiltered, ibl_r, mip_level).rgb;
     let brdf_uv = vec2(max(dot(N_world, V_world), 0.0), roughness);
-    let brdf = textureSample(t_brdf_lut, s_brdf_lut, brdf_uv).rg;
+    // Explicit level: the BRDF LUT is single-mip, and level sampling stays
+    // valid in non-uniform control flow under WebGPU's uniformity analysis.
+    let brdf = textureSampleLevel(t_brdf_lut, s_brdf_lut, brdf_uv, 0.0).rg;
     let specular_ibl_pbr = prefiltered_color * (F0 * brdf.x + brdf.y);
 
     let is_clay = camera.material_override == 1u || camera.material_override == 2u;

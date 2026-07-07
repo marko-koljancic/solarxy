@@ -62,7 +62,11 @@ fn fs_ssao(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let frag_pos = reconstruct_view_pos(in.uv, depth);
 
-    let world_normal = textureSample(normal_texture, tex_sampler, in.uv).xyz * 2.0 - 1.0;
+    // Explicit level: the G-buffer normal target is single-mip, and the
+    // early depth return above puts this in non-uniform control flow, where
+    // WebGPU (Tint/Dawn) forbids implicit-derivative sampling.
+    let world_normal =
+        textureSampleLevel(normal_texture, tex_sampler, in.uv, 0.0).xyz * 2.0 - 1.0;
     let view_normal = normalize((camera.view * vec4<f32>(world_normal, 0.0)).xyz);
 
     let pixel_coord = vec2<i32>(in.uv * normal_tex_size);

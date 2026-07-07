@@ -16,6 +16,7 @@
 //! Available with the `serialization` feature.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "fs")]
 use std::path::PathBuf;
 
 macro_rules! cycle_enum {
@@ -769,10 +770,12 @@ impl Default for RenderingPrefs {
     }
 }
 
+#[cfg(feature = "fs")]
 pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("solarxy").join("config.toml"))
 }
 
+#[cfg(feature = "fs")]
 pub fn load() -> Preferences {
     #[cfg(debug_assertions)]
     if let Some(ref path) = config_path() {
@@ -814,6 +817,7 @@ pub fn load() -> Preferences {
     }
 }
 
+#[cfg(feature = "fs")]
 pub fn save(prefs: &Preferences) -> Result<(), String> {
     let path = config_path().ok_or("Could not determine config directory")?;
 
@@ -832,6 +836,7 @@ pub fn save(prefs: &Preferences) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "fs")]
 pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
     let cap = prefs.ui.max_recent_files.max(1);
     let files = &mut prefs.history.recent_files;
@@ -843,7 +848,8 @@ pub fn add_recent_file(prefs: &mut Preferences, path: &str) {
     }
 }
 
-#[cfg(test)]
+// The roundtrip tests serialize through toml, which rides the `fs` feature.
+#[cfg(all(test, feature = "fs"))]
 mod tests {
     use super::*;
 

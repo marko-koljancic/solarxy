@@ -1,17 +1,48 @@
+//! OBJ/MTL loading. `load_obj_bytes` parses from memory with MTL libraries
+//! supplied by an [`AssetResolver`]; `load_obj` (std-fs) wraps it with a
+//! directory-rooted resolver and directory-joined texture paths.
+
 use std::io::{BufReader, Cursor};
+use std::path::{Path, PathBuf};
+
 use tobj::LoadError;
 
+use crate::{AssetResolver, FormatsError};
 use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
 
-pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
-    let obj_text = std::fs::read_to_string(file_path)?;
-    let obj_cursor = Cursor::new(obj_text);
-    let mut obj_reader = BufReader::new(obj_cursor);
+/// Parse OBJ bytes; `.mtl` libraries resolve through `resolver`. Texture
+/// references are recorded as the (cleaned) relative names from the MTL —
+/// byte-mode callers own path semantics.
+pub fn load_obj_bytes(
+    bytes: &[u8],
+    resolver: &mut dyn AssetResolver,
+) -> Result<RawModelData, FormatsError> {
+    parse_obj(bytes, resolver, None)
+}
 
-    let obj_dir = std::path::Path::new(file_path)
+/// Load an OBJ from disk. MTL libraries and texture paths resolve relative
+/// to the OBJ's directory, exactly as before the byte-first refactor.
+#[cfg(feature = "std-fs")]
+pub fn load_obj(file_path: &str) -> Result<RawModelData, FormatsError> {
+    let bytes = crate::read_file(file_path)?;
+    let obj_dir = Path::new(file_path)
         .parent()
-        .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().to_string());
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let mut resolver = crate::DirResolver::new(&obj_dir);
+    parse_obj(&bytes, &mut resolver, Some(&obj_dir))
+}
 
+/// Shared parse core. `texture_base` joins MTL texture references onto a
+/// directory (path mode); `None` records them as-is (byte mode).
+fn parse_obj(
+    bytes: &[u8],
+    resolver: &mut dyn AssetResolver,
+    texture_base: Option<&Path>,
+) -> Result<RawModelData, FormatsError> {
+    let mut obj_reader = BufReader::new(Cursor::new(bytes));
+
+    // tobj's material loader is `Fn`; a RefCell bridges the `&mut` resolver.
+    let resolver = std::cell::RefCell::new(resolver);
     let (models, obj_materials) = tobj::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
@@ -20,18 +51,22 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
             ..Default::default()
         },
         |p| {
-            let mat_path = std::path::Path::new(&obj_dir).join(p);
-            let mat_text = std::fs::read_to_string(&mat_path).map_err(|_| LoadError::ReadError)?;
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+            let rel = p.to_string_lossy();
+            let mat_bytes = resolver
+                .borrow_mut()
+                .read(&rel)
+                .ok_or(LoadError::ReadError)?;
+            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_bytes)))
         },
     )?;
 
+    let tex_path = |rel: &str| -> PathBuf {
+        texture_base.map_or_else(|| PathBuf::from(rel), |base| base.join(rel))
+    };
+
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {
-        let diffuse_path = m
-            .diffuse_texture
-            .as_deref()
-            .map(|p| std::path::Path::new(&obj_dir).join(p));
+        let diffuse_path = m.diffuse_texture.as_deref().map(&tex_path);
 
         let normal_path = m.normal_texture.as_deref().map(|p| {
             let cleaned = p
@@ -39,7 +74,7 @@ pub fn load_obj(file_path: &str) -> anyhow::Result<RawModelData> {
                 .filter(|s| !s.starts_with('-'))
                 .collect::<Vec<_>>()
                 .join(" ");
-            std::path::Path::new(&obj_dir).join(cleaned)
+            tex_path(&cleaned)
         });
 
         let roughness_factor = m

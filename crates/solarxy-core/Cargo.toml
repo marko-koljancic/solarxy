@@ -10,12 +10,20 @@ description = "Core data types, geometry algorithms, and validation for 3D model
 
 [features]
 default = ["serialization"]
+
+# Wasm-safe serde derives + JSON: view_config, preferences types, and the
+# validation-type derives. No filesystem, no platform dirs.
+serde = ["dep:serde", "dep:serde_json"]
+
+# File IO on top of `serde`: preferences load/save (dirs + toml) and
+# install-source detection. Off for wasm builds.
+fs = ["serde", "dep:toml", "dep:dirs", "dep:tracing"]
+
+# Compatibility umbrella (the historical default): serde + fs plus the
+# modules that need the heavier deps (json/report, review, project_config).
 serialization = [
-    "dep:serde",
-    "dep:serde_json",
-    "dep:toml",
-    "dep:dirs",
-    "dep:tracing",
+    "serde",
+    "fs",
     "dep:anyhow",
     "dep:thiserror",
     "dep:regex",
@@ -23,7 +31,7 @@ serialization = [
     "dep:sha2",
 ]
 
-schemars-gen = ["dep:schemars", "serialization"]
+schemars-gen = ["dep:schemars", "serde"]
 
 [dependencies]
 cgmath = { workspace = true }

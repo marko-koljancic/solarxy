@@ -4050,21 +4050,21 @@ dependencies = [
 name = "solarxy-formats"
 version = "0.6.0"
 dependencies = [
- "anyhow",
  "cgmath",
  "gltf",
  "ply-rs-bw",
  "solarxy-core",
  "stl_io",
+ "thiserror 2.0.17",
  "tobj",
  "tracing",
+ "urlencoding",
 ]
 
 [[package]]
 name = "solarxy-renderer"
 version = "0.6.0"
 dependencies = [
- "anyhow",
  "bytemuck",
  "cgmath",
  "exr",
@@ -4073,9 +4073,9 @@ dependencies = [
  "pollster",
  "solarxy-core",
  "solarxy-formats",
+ "thiserror 2.0.17",
  "tracing",
  "wgpu",
- "winit",
 ]
 
 [[package]]

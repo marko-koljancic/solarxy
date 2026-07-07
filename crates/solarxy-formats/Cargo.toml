@@ -8,12 +8,22 @@ repository.workspace = true
 authors.workspace = true
 description = "3D model format loaders (OBJ, STL, PLY, glTF) for Solarxy"
 
+[features]
+# Path-based loaders (`load_model`, per-format `load_*`) and `DirResolver`.
+# Off for wasm builds; the byte-first `load_*_bytes` API is always available.
+default = ["std-fs"]
+std-fs = []
+
 [dependencies]
-solarxy-core = { path = "../solarxy-core" }
-anyhow = { workspace = true }
+# Raw model types + kernels only; no serde/fs surface is used here.
+solarxy-core = { path = "../solarxy-core", default-features = false }
+thiserror = { workspace = true }
 cgmath = { workspace = true }
 tobj = { version = "4.0.3", default-features = false }
 stl_io = "0.7"
 ply-rs-bw = "3.0.3"
 gltf = "1.4"
+# Percent-decoding for glTF URIs handed to the AssetResolver (matches the
+# gltf importer's own handling; already in the tree via gltf).
+urlencoding = "2"
 tracing = "0.1"

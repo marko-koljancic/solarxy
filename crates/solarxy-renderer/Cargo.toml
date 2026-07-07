@@ -8,17 +8,26 @@ repository.workspace = true
 authors.workspace = true
 description = "wgpu-based PBR renderer for Solarxy"
 
+[features]
+# Path-based entry points (load_model_any, load_texture, load_binary,
+# ModelScene::new, IblState::from_hdri). Off for wasm builds; the byte-fed
+# APIs (upload_model, from_hdr_bytes/from_exr_bytes, Texture::from_bytes)
+# are always available.
+default = ["std-fs"]
+std-fs = ["solarxy-formats/std-fs"]
+
 [dependencies]
-solarxy-core    = { path = "../solarxy-core" }
-solarxy-formats = { path = "../solarxy-formats" }
+# `serde` (not the full `serialization` umbrella): the renderer reaches
+# preferences enums, view_config, and validation types, never file IO.
+solarxy-core    = { path = "../solarxy-core", default-features = false, features = ["serde"] }
+solarxy-formats = { path = "../solarxy-formats", default-features = false }
 wgpu        = "27.0.1"
-winit       = "0.30.12"
 cgmath      = { workspace = true }
 bytemuck    = { version = "1.24", features = ["derive"] }
 half        = "2.0"
 exr         = "1.0"
 tracing     = "0.1"
-anyhow      = { workspace = true }
+thiserror   = { workspace = true }
 
 [dev-dependencies]
 pollster = "0.4.0"

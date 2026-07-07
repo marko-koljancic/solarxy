@@ -11,6 +11,7 @@ use wgpu::util::DeviceExt;
 
 use super::geometry::{self, RawImageData, RawMaterialData, RawModelData};
 use super::{material, model, texture};
+use crate::error::RendererError;
 use crate::validation::ViewerValidation;
 
 pub fn is_supported_model_extension(path: &Path) -> bool {
@@ -52,18 +53,22 @@ mod extension_tests {
     }
 }
 
+#[cfg(feature = "std-fs")]
 pub fn load_model_any(
     file_path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     edge_geometry_layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<(
-    model::Model,
-    model::NormalsGeometry,
-    ModelStats,
-    ViewerValidation,
-)> {
+) -> Result<
+    (
+        model::Model,
+        model::NormalsGeometry,
+        ModelStats,
+        ViewerValidation,
+    ),
+    RendererError,
+> {
     let raw = solarxy_formats::load_model(file_path)?;
 
     upload_model(raw, file_path, device, queue, layout, edge_geometry_layout)
@@ -91,20 +96,26 @@ fn take_thumbnail(
     })
 }
 
+/// Upload a CPU-side [`RawModelData`] into GPU meshes, materials, and
+/// textures. The byte-level seam a node graph or web shell feeds directly;
+/// `load_model_any` is the filesystem wrapper over it.
 #[allow(clippy::unnecessary_wraps)]
-fn upload_model(
+pub fn upload_model(
     mut raw: RawModelData,
     file_path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     edge_geometry_layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<(
-    model::Model,
-    model::NormalsGeometry,
-    ModelStats,
-    ViewerValidation,
-)> {
+) -> Result<
+    (
+        model::Model,
+        model::NormalsGeometry,
+        ModelStats,
+        ViewerValidation,
+    ),
+    RendererError,
+> {
     let has_uvs = raw.meshes.iter().any(|m| m.tex_coords.is_some());
 
     let file_ext = Path::new(file_path)
@@ -383,17 +394,21 @@ fn upload_model(
     ))
 }
 
-pub fn load_binary(file_path: &str) -> anyhow::Result<Vec<u8>> {
-    let path = std::path::Path::new(file_path);
-    Ok(std::fs::read(path)?)
+#[cfg(feature = "std-fs")]
+pub fn load_binary(file_path: &str) -> Result<Vec<u8>, RendererError> {
+    std::fs::read(file_path).map_err(|source| RendererError::Io {
+        path: file_path.to_string(),
+        source,
+    })
 }
 
+#[cfg(feature = "std-fs")]
 pub fn load_texture(
     file_path: &str,
     is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     let data = load_binary(file_path)?;
     texture::Texture::from_bytes(device, queue, &data, file_path, is_normal_map)
 }
@@ -499,7 +514,7 @@ fn create_default_texture_colored(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     rgba: [u8; 4],
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     let img =
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
     texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)
@@ -509,7 +524,7 @@ fn create_default_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     is_normal_map: bool,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     let color = if is_normal_map {
         image::Rgba([128u8, 128, 255, 255])
     } else {
@@ -524,7 +539,7 @@ fn create_default_texture(
 fn create_default_orm_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -539,7 +554,7 @@ fn create_default_orm_texture(
 fn create_default_emissive_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -559,7 +574,7 @@ fn load_or_fallback_texture(
     is_linear: bool,
     mat_name: &str,
     kind: &str,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     if let Some(data) = embedded {
         texture::Texture::from_raw_rgba(
             device,
@@ -576,12 +591,24 @@ fn load_or_fallback_texture(
         })
     } else {
         match path {
+            #[cfg(feature = "std-fs")]
             Some(p) => {
                 let p_str = p.to_string_lossy();
                 load_texture(&p_str, is_linear, device, queue).or_else(|e| {
                     tracing::warn!("Failed to load {kind} texture '{}': {e}", p.display());
                     create_default_texture(device, queue, is_linear)
                 })
+            }
+            // Without std-fs there is no filesystem to chase texture paths
+            // into; a path-only reference degrades to the default texture
+            // (web asset delivery replaces this in the import pipeline).
+            #[cfg(not(feature = "std-fs"))]
+            Some(p) => {
+                tracing::warn!(
+                    "No filesystem to load {kind} texture '{}'; using default",
+                    p.display()
+                );
+                create_default_texture(device, queue, is_linear)
             }
             _ => {
                 if kind == "emissive" {
@@ -600,7 +627,7 @@ fn load_or_create_orm(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     mat: &RawMaterialData,
-) -> anyhow::Result<texture::Texture> {
+) -> Result<texture::Texture, RendererError> {
     let mr_tex = if mat.metallic_roughness_texture_data.is_some()
         || mat.metallic_roughness_texture_path.is_some()
     {

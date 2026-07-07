@@ -1,16 +1,20 @@
 //! Image-based lighting: the irradiance + prefiltered specular cubemaps and
 //! BRDF LUT used by the PBR shader.
 //!
-//! [`IblState`] has three constructors — [`IblState::fallback`],
-//! [`IblState::from_sky_colors`], and [`IblState::from_hdri`]. Any
-//! IBL-derived CPU data (e.g. the L0 ambient SH coefficient) must be
-//! computed in **all three**; `solarxy-app/src/state/update.rs::rebuild_light_bind_group`
-//! is the single chokepoint that pushes IBL-derived uniforms to the GPU.
+//! [`IblState`] construction: [`IblState::fallback`],
+//! [`IblState::from_sky_colors`], and the HDRI family
+//! ([`IblState::from_hdri`] on std-fs, [`IblState::from_hdr_bytes`] /
+//! [`IblState::from_exr_bytes`] anywhere). Any IBL-derived CPU data (e.g.
+//! the L0 ambient SH coefficient) must be computed in **all** constructors;
+//! `solarxy-app/src/state/update.rs::rebuild_light_bind_group` is the
+//! single chokepoint that pushes IBL-derived uniforms to the GPU.
 
+#[cfg(feature = "std-fs")]
 use std::path::Path;
 
 use half::f16;
 
+use crate::error::RendererError;
 use crate::skybox::EquirectTexture;
 
 pub struct BrdfLut {
@@ -216,22 +220,61 @@ impl IblState {
     /// # Errors
     /// Returns `Err` if the image fails to decode or the file extension is
     /// not one of the supported HDRI formats.
+    /// Build IBL state from an HDRI file on disk (`.hdr` or `.exr`).
+    #[cfg(feature = "std-fs")]
     pub fn from_hdri(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         path: &Path,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, RendererError> {
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let (width, height, mut pixels) = match ext.as_str() {
+        let (width, height, pixels) = match ext.as_str() {
             "hdr" => load_hdr(path)?,
             "exr" => load_exr(path)?,
-            _ => anyhow::bail!("Unsupported IBL format: .{}", ext),
+            _ => {
+                return Err(RendererError::Unsupported(format!(
+                    "Unsupported IBL format: .{ext}"
+                )));
+            }
         };
+        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+    }
+
+    /// Build IBL state from in-memory Radiance `.hdr` bytes.
+    pub fn from_hdr_bytes(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+    ) -> Result<Self, RendererError> {
+        let (width, height, pixels) = decode_hdr_bytes(bytes)?;
+        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+    }
+
+    /// Build IBL state from in-memory `OpenEXR` bytes.
+    pub fn from_exr_bytes(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+    ) -> Result<Self, RendererError> {
+        let (width, height, pixels) = decode_exr_bytes(bytes)?;
+        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+    }
+
+    /// Shared HDRI-construction core: sanitize, convolve, prefilter, and
+    /// assemble. Every HDRI entry point funnels through here so the
+    /// IBL-derived CPU data stays consistent across constructors.
+    fn from_hdr_pixels(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        mut pixels: Vec<[f32; 3]>,
+    ) -> Self {
         sanitize_hdr_pixels(&mut pixels);
 
         let irradiance = convolve_equirect(width, height, &pixels);
@@ -241,13 +284,13 @@ impl IblState {
             generate_prefiltered_equirect(device, queue, width, height, &pixels);
         let equirect = EquirectTexture::from_hdr_pixels(device, queue, width, height, &pixels);
 
-        Ok(Self::from_parts(
+        Self::from_parts(
             device,
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
             Some(equirect),
-        ))
+        )
     }
 
     fn from_parts(
@@ -769,8 +812,26 @@ fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits as f32 * 2.328_306_4e-10
 }
 
-fn load_hdr(path: &Path) -> anyhow::Result<(u32, u32, Vec<[f32; 3]>)> {
-    let img = image::ImageReader::open(path)?.decode()?;
+#[cfg(feature = "std-fs")]
+fn load_hdr(path: &Path) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
+    let bytes = std::fs::read(path).map_err(|source| RendererError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    decode_hdr_bytes(&bytes)
+}
+
+#[cfg(feature = "std-fs")]
+fn load_exr(path: &Path) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
+    let bytes = std::fs::read(path).map_err(|source| RendererError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    decode_exr_bytes(&bytes)
+}
+
+fn decode_hdr_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
+    let img = image::load_from_memory(bytes)?;
     let rgb32f = img.to_rgb32f();
     let w = rgb32f.width();
     let h = rgb32f.height();
@@ -778,22 +839,33 @@ fn load_hdr(path: &Path) -> anyhow::Result<(u32, u32, Vec<[f32; 3]>)> {
     Ok((w, h, pixels))
 }
 
-fn load_exr(path: &Path) -> anyhow::Result<(u32, u32, Vec<[f32; 3]>)> {
+fn decode_exr_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
+    use exr::prelude::{ReadChannels, ReadLayers};
+
     // The set-pixel closure only receives the absolute pixel position, so
     // the row stride (image width) is carried in the pixel-storage tuple.
     // `Vec2::width()` aliases `.x()` in the `exr` crate — indexing the
     // buffer with it instead of the real width scrambles every row but the
     // first, which is the historical "broken EXR background" bug.
-    let image = exr::prelude::read_first_rgba_layer_from_file(
-        path,
-        |resolution, _| {
-            let width = resolution.width();
-            (width, vec![[0.0_f32; 3]; width * resolution.height()])
-        },
-        |(width, pixels), pos, (r, g, b, _a): (f32, f32, f32, f32)| {
-            pixels[pos.y() * *width + pos.x()] = [r, g, b];
-        },
-    )?;
+    // This is the same reader chain as the crate's
+    // `read_first_rgba_layer_from_file` convenience, fed from a buffer.
+    let image = exr::prelude::read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .rgba_channels(
+            |resolution, _| {
+                let width = resolution.width();
+                (width, vec![[0.0_f32; 3]; width * resolution.height()])
+            },
+            |(width, pixels): &mut (usize, Vec<[f32; 3]>),
+             pos,
+             (r, g, b, _a): (f32, f32, f32, f32)| {
+                pixels[pos.y() * *width + pos.x()] = [r, g, b];
+            },
+        )
+        .first_valid_layer()
+        .all_attributes()
+        .from_buffered(std::io::Cursor::new(bytes))?;
 
     let w = image.layer_data.size.width() as u32;
     let h = image.layer_data.size.height() as u32;

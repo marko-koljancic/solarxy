@@ -1,6 +1,12 @@
-use std::io::BufReader;
+//! PLY loading (binary and ASCII). PLY is self-contained, so the byte API
+//! takes only a mesh name; the filesystem companion-texture heuristic
+//! (`stem_0.jpg` and friends) applies to the path loader only.
+
+use std::io::Cursor;
+
 use ply_rs_bw::ply::Property;
 
+use crate::FormatsError;
 use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
@@ -29,6 +35,7 @@ fn ply_prop_to_indices(prop: &Property) -> Vec<u32> {
     }
 }
 
+#[cfg(feature = "std-fs")]
 pub fn find_companion_texture(ply_path: &str) -> Option<std::path::PathBuf> {
     let path = std::path::Path::new(ply_path);
     let parent = path.parent()?;
@@ -46,24 +53,43 @@ pub fn find_companion_texture(ply_path: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
-    let file = std::fs::File::open(file_path)?;
-    let mut reader = BufReader::new(file);
+/// Parse PLY bytes. `name` becomes the single mesh's name. No companion
+/// texture lookup happens in byte mode.
+pub fn load_ply_bytes(bytes: &[u8], name: &str) -> Result<RawModelData, FormatsError> {
+    parse_ply(bytes, name, None)
+}
+
+/// Load a PLY from disk, with the historical companion-texture heuristic.
+#[cfg(feature = "std-fs")]
+pub fn load_ply(file_path: &str) -> Result<RawModelData, FormatsError> {
+    let bytes = crate::read_file(file_path)?;
+    let companion = find_companion_texture(file_path);
+    parse_ply(&bytes, file_path, companion)
+}
+
+fn parse_ply(
+    bytes: &[u8],
+    name: &str,
+    companion_tex: Option<std::path::PathBuf>,
+) -> Result<RawModelData, FormatsError> {
+    let mut reader = Cursor::new(bytes);
     let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
-    let ply = parser.read_ply(&mut reader)?;
+    let ply = parser.read_ply(&mut reader).map_err(FormatsError::Ply)?;
 
     let ply_vertices = ply
         .payload
         .get("vertex")
-        .ok_or_else(|| anyhow::anyhow!("PLY file has no 'vertex' element"))?;
+        .ok_or_else(|| FormatsError::Invalid("PLY file has no 'vertex' element".to_string()))?;
 
     let ply_faces = ply
         .payload
         .get("face")
-        .ok_or_else(|| anyhow::anyhow!("PLY file has no 'face' element"))?;
+        .ok_or_else(|| FormatsError::Invalid("PLY file has no 'face' element".to_string()))?;
 
     if ply_vertices.is_empty() || ply_faces.is_empty() {
-        anyhow::bail!("PLY file contains no geometry");
+        return Err(FormatsError::Invalid(
+            "PLY file contains no geometry".to_string(),
+        ));
     }
 
     let (has_normals, has_uvs, uv_keys) = if let Some(first) = ply_vertices.first() {
@@ -219,11 +245,7 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
     };
 
     let mut materials = Vec::new();
-    let companion_tex = if has_uvs {
-        find_companion_texture(file_path)
-    } else {
-        None
-    };
+    let companion_tex = if has_uvs { companion_tex } else { None };
     let mat_name = if companion_tex.is_some() {
         "ply_textured"
     } else {
@@ -262,7 +284,7 @@ pub fn load_ply(file_path: &str) -> anyhow::Result<RawModelData> {
 
     Ok(RawModelData {
         meshes: vec![RawMeshData {
-            name: file_path.to_string(),
+            name: name.to_string(),
             positions,
             indices,
             normals,

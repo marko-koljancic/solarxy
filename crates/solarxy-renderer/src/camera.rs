@@ -1,7 +1,7 @@
 //! Orbit camera + the `CameraUniform` GPU struct that drives every shader's
 //! view/projection matrices and material-override switching.
 
-use winit::{event::MouseButton, keyboard::KeyCode};
+use super::input::{CameraKey, PointerButton};
 use super::model;
 use solarxy_core::preferences::ProjectionMode;
 
@@ -230,43 +230,42 @@ impl CameraController {
         }
     }
 
-    pub fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
+    pub fn handle_key(&mut self, code: CameraKey, is_pressed: bool) -> bool {
         match code {
-            KeyCode::ArrowUp => {
+            CameraKey::ArrowUp => {
                 self.is_forward_pressed = is_pressed;
                 true
             }
-            KeyCode::ArrowLeft => {
+            CameraKey::ArrowLeft => {
                 self.is_left_pressed = is_pressed;
                 true
             }
-            KeyCode::ArrowDown => {
+            CameraKey::ArrowDown => {
                 self.is_backward_pressed = is_pressed;
                 true
             }
-            KeyCode::ArrowRight => {
+            CameraKey::ArrowRight => {
                 self.is_right_pressed = is_pressed;
                 true
             }
-            _ => false,
         }
     }
 
-    pub fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+    pub fn handle_mouse_button(&mut self, button: PointerButton, pressed: bool) {
         match button {
-            MouseButton::Left => {
+            PointerButton::Left => {
                 self.is_left_mouse_pressed = pressed;
                 if !pressed {
                     self.last_mouse_pos = None;
                 }
             }
-            MouseButton::Middle => {
+            PointerButton::Middle => {
                 self.is_middle_mouse_pressed = pressed;
                 if !pressed {
                     self.last_mouse_pos = None;
                 }
             }
-            _ => {}
+            PointerButton::Right | PointerButton::Other => {}
         }
     }
 

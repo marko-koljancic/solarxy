@@ -55,46 +55,96 @@ impl State {
         (buffer, padded_row_bytes, width, height)
     }
 
-    /// Map the staging buffer, strip row padding, swizzle BGRA→RGBA if the
-    /// surface needs it, and return the captured image. `None` on a map
-    /// failure or a malformed pixel buffer.
-    pub(super) fn read_capture(
-        &self,
+    /// Arm the async readback on a freshly-encoded capture: request the
+    /// map (after the copy's submission) and stash the buffer plus the
+    /// modal context. Completion is polled by [`State::poll_pending_capture`]
+    /// on later frames — no blocking wait (WebGPU has none, and desktop
+    /// avoids the frame hitch).
+    pub(super) fn arm_pending_capture(
+        &mut self,
         buffer: wgpu::Buffer,
         padded_row_bytes: u32,
         width: u32,
         height: u32,
-    ) -> Option<image::RgbaImage> {
-        let slice = buffer.slice(..);
+    ) {
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+        self.pending_capture = Some(super::PendingCapture {
+            buffer,
+            padded_row_bytes,
+            width,
+            height,
+            receiver: rx,
+            filename: self.screenshot_filename(),
+            review_active: self.review.active,
+            expand_review: self.screenshot_expand_review,
         });
-        let _ = self.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        });
+    }
 
-        if !matches!(rx.recv(), Ok(Ok(()))) {
-            tracing::error!("Failed to map capture buffer");
-            return None;
+    /// Check the in-flight capture readback; on completion hand the image
+    /// to the screenshot modal. Called once per frame.
+    pub(super) fn poll_pending_capture(&mut self) {
+        if self.pending_capture.is_none() {
+            return;
+        }
+        let _ = self.device.poll(wgpu::PollType::Poll);
+
+        let ready = match &self.pending_capture {
+            Some(pending) => match pending.receiver.try_recv() {
+                Ok(Ok(())) => true,
+                // Not resolved yet — try again next frame.
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    tracing::error!("Failed to map capture buffer");
+                    false
+                }
+            },
+            None => false,
+        };
+
+        let Some(pending) = self.pending_capture.take() else {
+            return;
+        };
+        if !ready {
+            return;
         }
 
-        let data = slice.get_mapped_range();
-        let bytes_per_pixel = 4u32;
-        let unpadded_row_bytes = width * bytes_per_pixel;
+        if let Some(image) = Self::process_mapped_capture(&pending, self.config.format) {
+            self.gui.set_screenshot_capture(
+                image,
+                pending.filename,
+                pending.review_active,
+                pending.expand_review,
+            );
+        }
+    }
 
-        let mut pixels = Vec::with_capacity((unpadded_row_bytes * height) as usize);
-        for row in 0..height {
-            let start = (row * padded_row_bytes) as usize;
+    /// Strip row padding from the (already mapped) staging buffer, swizzle
+    /// BGRA→RGBA if the surface needs it, and return the captured image.
+    /// `None` on a malformed pixel buffer.
+    fn process_mapped_capture(
+        pending: &super::PendingCapture,
+        surface_format: wgpu::TextureFormat,
+    ) -> Option<image::RgbaImage> {
+        let data = pending.buffer.slice(..).get_mapped_range();
+        let bytes_per_pixel = 4u32;
+        let unpadded_row_bytes = pending.width * bytes_per_pixel;
+
+        let mut pixels = Vec::with_capacity((unpadded_row_bytes * pending.height) as usize);
+        for row in 0..pending.height {
+            let start = (row * pending.padded_row_bytes) as usize;
             let end = start + unpadded_row_bytes as usize;
             pixels.extend_from_slice(&data[start..end]);
         }
         drop(data);
-        buffer.unmap();
+        pending.buffer.unmap();
 
         let needs_swizzle = matches!(
-            self.config.format,
+            surface_format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
         if needs_swizzle {
@@ -103,7 +153,7 @@ impl State {
             }
         }
 
-        let image = image::RgbaImage::from_raw(width, height, pixels);
+        let image = image::RgbaImage::from_raw(pending.width, pending.height, pixels);
         if image.is_none() {
             tracing::error!("Failed to create image from captured pixel data");
         }

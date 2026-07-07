@@ -23,6 +23,7 @@ use winit::keyboard::KeyCode;
 use solarxy_renderer::camera_state::CameraState;
 use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
+use solarxy_renderer::input::{CameraKey, PointerButton};
 use solarxy_core::preferences::{
     self, BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
     NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
@@ -30,6 +31,27 @@ use solarxy_core::preferences::{
 use solarxy_core::validation::IssueScope;
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
+
+/// winit-to-renderer input mapping: the renderer is windowing-agnostic and
+/// consumes its own [`CameraKey`] / [`PointerButton`] enums.
+fn to_camera_key(code: KeyCode) -> Option<CameraKey> {
+    match code {
+        KeyCode::ArrowUp => Some(CameraKey::ArrowUp),
+        KeyCode::ArrowDown => Some(CameraKey::ArrowDown),
+        KeyCode::ArrowLeft => Some(CameraKey::ArrowLeft),
+        KeyCode::ArrowRight => Some(CameraKey::ArrowRight),
+        _ => None,
+    }
+}
+
+fn to_pointer_button(button: MouseButton) -> PointerButton {
+    match button {
+        MouseButton::Left => PointerButton::Left,
+        MouseButton::Middle => PointerButton::Middle,
+        MouseButton::Right => PointerButton::Right,
+        _ => PointerButton::Other,
+    }
+}
 
 /// The ordered background list the `B` key cycles through: every builtin
 /// (skipping `HDRI Sky` until an HDRI is loaded) followed by every user
@@ -68,9 +90,11 @@ impl State {
 
     pub fn handle_key(&mut self, _event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if !is_pressed {
-            self.for_each_target_cam(|cam| {
-                cam.handle_key(code, is_pressed);
-            });
+            if let Some(key) = to_camera_key(code) {
+                self.for_each_target_cam(|cam| {
+                    cam.handle_key(key, is_pressed);
+                });
+            }
             return;
         }
         match code {
@@ -400,9 +424,11 @@ impl State {
             KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
             KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
             _ => {
-                self.for_each_target_cam(|cam| {
-                    cam.handle_key(code, is_pressed);
-                });
+                if let Some(key) = to_camera_key(code) {
+                    self.for_each_target_cam(|cam| {
+                        cam.handle_key(key, is_pressed);
+                    });
+                }
             }
         }
     }
@@ -890,7 +916,8 @@ impl State {
                 _ => {}
             }
         } else {
-            self.for_each_target_cam(|cam| cam.handle_mouse_button(button, pressed));
+            let mapped = to_pointer_button(button);
+            self.for_each_target_cam(|cam| cam.handle_mouse_button(mapped, pressed));
         }
     }
 

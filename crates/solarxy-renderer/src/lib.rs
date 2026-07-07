@@ -2,7 +2,8 @@
 //! SSAO, bloom, shadow, composite, camera, per-frame draw orchestration
 //! ([`frame`]), and per-model GPU scene state ([`scene`]).
 //!
-//! This crate has **no winit, no egui** — input and UI live in `solarxy-app`.
+//! This crate has **no winit, no egui** — input and UI live in the shells;
+//! they map their native events onto the [`input`] enums at the boundary.
 //! The app drives a [`frame::Renderer`] each frame; everything below that is
 //! implementation detail.
 //!
@@ -57,9 +58,11 @@ pub mod bloom;
 pub mod camera;
 pub mod camera_state;
 pub mod composite;
+pub mod error;
 pub mod frame;
 pub mod geometry;
 pub mod ibl;
+pub mod input;
 pub mod light;
 pub mod material;
 pub mod model;

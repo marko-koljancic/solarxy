@@ -99,6 +99,10 @@ pub struct UvOverlapResources {
     pub stats_dirty: bool,
     pub staging_buffer: Option<wgpu::Buffer>,
     pub readback_pending: bool,
+    /// `Some` once `map_async` has been requested on `staging_buffer`;
+    /// polled non-blocking each frame (blocking waits do not exist on
+    /// WebGPU, and skipping them avoids a desktop frame hitch too).
+    pub map_receiver: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 
 pub struct ValidationColorResources {
@@ -130,7 +134,315 @@ pub struct Renderer {
     pub target_height: u32,
 }
 
+/// Startup inputs for [`Renderer::new`] the shell owns: preference-derived
+/// toggles, background-derived colors, and the UV-checker texture bytes.
+/// Everything else (targets, pipelines, IBL, post-FX state) is built inside.
+pub struct RendererInit<'a> {
+    pub msaa_sample_count: u32,
+    /// Initial gradient-pass colors (the shell's background policy).
+    pub gradient_top: [f32; 4],
+    pub gradient_bottom: [f32; 4],
+    /// Sky colors feeding the initial `IblState::from_sky_colors`.
+    pub sky_top: [f32; 3],
+    pub sky_bottom: [f32; 3],
+    pub wireframe_color: [f32; 4],
+    pub wireframe_line_width: f32,
+    pub bloom_enabled: bool,
+    pub ssao_enabled: bool,
+    pub tone_mode: ToneMode,
+    pub exposure: f32,
+    pub ibl_mode: IblMode,
+    /// PNG bytes for the UV-checker texture (an asset the shell ships).
+    pub uv_checker_png: &'a [u8],
+}
+
 impl Renderer {
+    /// Build the full renderer: bind-group layouts, every pipeline, render
+    /// targets, IBL (BRDF LUT + sky convolution), post-FX state, UV/overlap
+    /// resources, validation colors, and overdraw resources. Pure code
+    /// motion from the desktop shell's former field-by-field assembly.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
+        init: &RendererInit<'_>,
+    ) -> Result<Self, crate::error::RendererError> {
+        use wgpu::util::DeviceExt;
+
+        let width = config.width;
+        let height = config.height;
+        let msaa_sample_count = init.msaa_sample_count;
+
+        let depth_texture = texture::Texture::create_depth_texture(
+            device,
+            width,
+            height,
+            "depth_texture",
+            msaa_sample_count,
+        );
+        let msaa_hdr_view =
+            texture::create_msaa_hdr_texture(device, width, height, msaa_sample_count);
+        let (hdr_resolve_texture, hdr_resolve_view) =
+            texture::create_hdr_resolve_texture(device, width, height);
+        let layouts = Arc::new(BindGroupLayouts::new(device));
+        let pipelines = Pipelines::new(device, config, &layouts, msaa_sample_count);
+
+        let gradient_uniform = GradientUniform {
+            top_color: init.gradient_top,
+            bottom_color: init.gradient_bottom,
+            uv_y_offset: 0.0,
+            uv_y_scale: 1.0,
+            _pad: [0.0; 2],
+        };
+        let gradient_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Gradient Uniform"),
+            contents: bytemuck::bytes_of(&gradient_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let gradient_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Gradient Bind Group"),
+            layout: &layouts.background,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gradient_buffer.as_entire_binding(),
+            }],
+        });
+
+        let brdf_lut = BrdfLut::generate(device, queue);
+        let ibl = IblState::from_sky_colors(device, queue, init.sky_top, init.sky_bottom);
+        let ibl_fallback = IblState::fallback(device, queue);
+
+        let wireframe_params_data = WireframeParams {
+            color: init.wireframe_color,
+            line_width: init.wireframe_line_width,
+            screen_width: width as f32,
+            screen_height: height as f32,
+            _pad: 0.0,
+        };
+        let wireframe_params_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Wireframe Params Uniform"),
+                contents: bytemuck::bytes_of(&wireframe_params_data),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let wireframe_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Wireframe Params Bind Group"),
+            layout: &layouts.wireframe_params,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wireframe_params_buffer.as_entire_binding(),
+            }],
+        });
+
+        let shared_samplers = SharedSamplers::new(device);
+
+        let checker_texture = texture::Texture::from_bytes(
+            device,
+            queue,
+            init.uv_checker_png,
+            "uv_checker_texture",
+            false,
+        )?;
+        let uv_checker_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UV Checker Bind Group"),
+            layout: &layouts.uv_checker,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&checker_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&shared_samplers.linear_repeat),
+                },
+            ],
+        });
+
+        let bloom = BloomState::new(
+            device,
+            &layouts,
+            &hdr_resolve_view,
+            shared_samplers.linear_clamp.clone(),
+            width,
+            height,
+        );
+
+        let composite = CompositeState::new(
+            device,
+            &layouts,
+            &hdr_resolve_view,
+            &bloom.ping_view,
+            &bloom.sampler,
+            init.bloom_enabled,
+            init.ssao_enabled,
+            init.tone_mode,
+            init.exposure,
+        );
+
+        let ssao = SsaoState::new(device, queue, &layouts, width, height);
+
+        let uv_cam = UvCameraState::new(device, &layouts.camera);
+
+        let yellow = [1.0, 0.85, 0.0];
+        let boundary_verts: [crate::model::GizmoVertex; 8] = [
+            crate::model::GizmoVertex {
+                position: [0.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [1.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [1.0, 1.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [1.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [1.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [0.0, 0.0, 0.0],
+                color: yellow,
+            },
+            crate::model::GizmoVertex {
+                position: [0.0, 1.0, 0.0],
+                color: yellow,
+            },
+        ];
+        let uv_boundary_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("UV Boundary Buffer"),
+            contents: bytemuck::cast_slice(&boundary_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let (count_tex, count_view) =
+            texture::create_overlap_count_texture(device, width, height, false);
+        let (stats_tex, stats_view) = texture::create_overlap_count_texture(device, 512, 512, true);
+        let overlap_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("UV Overlap Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let overlap_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UV Overlap Overlay Bind Group"),
+            layout: &layouts.uv_overlap_read,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&count_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&overlap_sampler),
+                },
+            ],
+        });
+
+        let validation_colors = {
+            use crate::validation::IssueCategory;
+            let mut buffers = Vec::new();
+            let mut bind_groups = Vec::new();
+            for cat in IssueCategory::ALL {
+                let color = cat.color();
+                let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Validation Color {cat:?}")),
+                    contents: bytemuck::cast_slice(&color),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("Validation Color BG {cat:?}")),
+                    layout: &layouts.validation_color,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buf.as_entire_binding(),
+                    }],
+                });
+                buffers.push(buf);
+                bind_groups.push(bg);
+            }
+            ValidationColorResources {
+                bind_groups,
+                buffers,
+            }
+        };
+
+        let overdraw = crate::overdraw::OverdrawResources::new(device, &layouts, width, height);
+
+        Ok(Self {
+            targets: RenderTargets {
+                depth_texture,
+                msaa_hdr_view,
+                _hdr_resolve_texture: hdr_resolve_texture,
+                hdr_resolve_view,
+            },
+            post: PostProcessing {
+                bloom,
+                bloom_enabled: init.bloom_enabled,
+                ssao,
+                ssao_enabled: init.ssao_enabled,
+                composite,
+                tone_mode: init.tone_mode,
+                exposure: init.exposure,
+            },
+            ibl_res: IblResources {
+                ibl,
+                ibl_fallback,
+                brdf_lut,
+                ibl_mode: init.ibl_mode,
+                last_active_ibl_mode: match init.ibl_mode {
+                    IblMode::Off => IblMode::Full,
+                    other => other,
+                },
+            },
+            wire: WireframeResources {
+                _gradient_buffer: gradient_buffer,
+                gradient_bind_group,
+                wireframe_params_buffer,
+                wireframe_params_bind_group,
+                _checker_texture: checker_texture,
+                uv_checker_bind_group,
+            },
+            layouts,
+            pipelines,
+            uv_cam,
+            uv_boundary_buf,
+            uv_overlap: UvOverlapResources {
+                count_texture: count_tex,
+                count_view,
+                overlay_bind_group: overlap_bind_group,
+                sampler: overlap_sampler,
+                stats_texture: stats_tex,
+                stats_view,
+                overlap_pct: None,
+                stats_dirty: false,
+                staging_buffer: None,
+                readback_pending: false,
+                map_receiver: None,
+            },
+            validation_colors,
+            overdraw,
+            skybox_bind_group: None,
+            shared_samplers,
+            msaa_sample_count,
+            target_width: width,
+            target_height: height,
+        })
+    }
+
     pub fn draw_background_gradient<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         pass.set_pipeline(&self.pipelines.overlay.background);
         pass.set_bind_group(0, &self.wire.gradient_bind_group, &[]);

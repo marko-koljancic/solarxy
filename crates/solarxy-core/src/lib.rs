@@ -20,10 +20,15 @@
 //!
 //! # Feature flags
 //!
-//! - `serialization` (default): gates `preferences`, `json`, `report`,
-//!   `install_source`, `project_config`, `review`, and `view_config`.
-//!   Disable for a pure-computation build — only [`aabb`], [`geometry`],
-//!   and [`validation`] remain.
+//! - `serde`: wasm-safe serde derives + JSON — gates `preferences` (types
+//!   only) and `view_config`, and enables the serde derives on validation
+//!   types. No filesystem access.
+//! - `fs` (implies `serde`): file IO — preferences `config_path`/`load`/
+//!   `save` (dirs + toml) and `install_source`. Off for wasm builds.
+//! - `serialization` (default; implies `serde` + `fs`): the historical
+//!   umbrella — additionally gates `json`, `report`, `project_config`, and
+//!   `review`. Disable everything for a pure-computation build — only
+//!   [`aabb`], [`geometry`], and [`validation`] remain.
 //! - `schemars-gen`: adds `schemars::JsonSchema` derives on the public
 //!   on-disk types (used to regenerate `schemas/*.json`).
 #![warn(clippy::pedantic)]
@@ -53,11 +58,11 @@
 
 pub mod aabb;
 pub mod geometry;
-#[cfg(feature = "serialization")]
+#[cfg(feature = "fs")]
 pub mod install_source;
 #[cfg(feature = "serialization")]
 pub mod json;
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 pub mod preferences;
 #[cfg(feature = "serialization")]
 pub mod project_config;
@@ -66,7 +71,7 @@ pub mod report;
 #[cfg(feature = "serialization")]
 pub mod review;
 pub mod validation;
-#[cfg(feature = "serialization")]
+#[cfg(feature = "serde")]
 pub mod view_config;
 
 pub use aabb::AABB;

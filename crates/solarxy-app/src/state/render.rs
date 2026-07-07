@@ -53,6 +53,7 @@ impl State {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.poll_overlap_stats();
+        self.poll_pending_capture();
 
         let viewport_present = self.gui.viewport_tab_present();
         if !viewport_present {
@@ -680,16 +681,10 @@ impl State {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        if let Some((buffer, padded_row_bytes, width, height)) = capture
-            && let Some(image) = self.read_capture(buffer, padded_row_bytes, width, height)
-        {
-            let filename = self.screenshot_filename();
-            self.gui.set_screenshot_capture(
-                image,
-                filename,
-                self.review.active,
-                self.screenshot_expand_review,
-            );
+        // Arm the async readback; `poll_pending_capture` delivers the image
+        // to the screenshot modal a frame or two later.
+        if let Some((buffer, padded_row_bytes, width, height)) = capture {
+            self.arm_pending_capture(buffer, padded_row_bytes, width, height);
         }
 
         self.handle_screenshot_modal();

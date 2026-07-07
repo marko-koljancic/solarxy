@@ -1,12 +1,90 @@
+//! glTF/GLB loading. `load_gltf_bytes` parses from memory: GLB and
+//! data-URI assets are self-contained; external `.bin` buffers resolve
+//! through the [`AssetResolver`]; external image files are recorded as
+//! texture paths without decoding (byte-mode callers own image delivery).
+//! `load_gltf` (std-fs) keeps the crate's full filesystem importer.
+
+use std::path::{Path, PathBuf};
+
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
+use crate::{AssetResolver, FormatsError};
 use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
-pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
+/// Load a glTF or GLB from disk via the gltf crate's importer (buffers and
+/// images resolved from the file's directory).
+#[cfg(feature = "std-fs")]
+pub fn load_gltf(file_path: &str) -> Result<RawModelData, FormatsError> {
     let (document, buffers, images) = ::gltf::import(file_path)?;
+    let images: Vec<Option<::gltf::image::Data>> = images.into_iter().map(Some).collect();
+    let parent_dir = Path::new(file_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    Ok(build_model(&document, &buffers, &images, Some(&parent_dir)))
+}
 
-    let mut materials = extract_materials(&document, &images, file_path);
-    let (meshes, polygon_count) = extract_meshes(&document, &buffers);
+/// Parse glTF/GLB bytes. External buffers come from `resolver` (URIs
+/// percent-decoded first); external images are not decoded — their URIs are
+/// recorded as texture paths and the material falls back appropriately.
+pub fn load_gltf_bytes(
+    bytes: &[u8],
+    resolver: &mut dyn AssetResolver,
+) -> Result<RawModelData, FormatsError> {
+    let ::gltf::Gltf { document, blob } = ::gltf::Gltf::from_slice(bytes)?;
+    let mut blob = blob;
+
+    let mut buffers: Vec<::gltf::buffer::Data> = Vec::new();
+    for buffer in document.buffers() {
+        let data = match buffer.source() {
+            ::gltf::buffer::Source::Uri(uri) if !uri.starts_with("data:") => {
+                let rel = percent_decode(uri);
+                let mut raw = resolver
+                    .read(&rel)
+                    .ok_or_else(|| FormatsError::MissingAsset(rel.clone()))?;
+                if raw.len() < buffer.length() {
+                    return Err(FormatsError::Invalid(format!(
+                        "glTF buffer '{rel}' is {} bytes, expected at least {}",
+                        raw.len(),
+                        buffer.length()
+                    )));
+                }
+                // The gltf importer pads to 4-byte alignment; match it.
+                while raw.len() % 4 != 0 {
+                    raw.push(0);
+                }
+                ::gltf::buffer::Data(raw)
+            }
+            source => ::gltf::buffer::Data::from_source_and_blob(source, None, &mut blob)?,
+        };
+        buffers.push(data);
+    }
+
+    // Per-image decode: buffer views and data URIs succeed with no base
+    // path; external file URIs land as None (path recorded by
+    // resolve_texture, no decode in byte mode).
+    let images: Vec<Option<::gltf::image::Data>> = document
+        .images()
+        .map(|img| ::gltf::image::Data::from_source(img.source(), None, &buffers).ok())
+        .collect();
+
+    Ok(build_model(&document, &buffers, &images, None))
+}
+
+/// Percent-decode a glTF URI the same way the gltf importer does for
+/// relative references ("my%20buffer.bin" names a file "my buffer.bin").
+fn percent_decode(uri: &str) -> String {
+    urlencoding::decode(uri).map_or_else(|_| uri.to_string(), std::borrow::Cow::into_owned)
+}
+
+fn build_model(
+    document: &::gltf::Document,
+    buffers: &[::gltf::buffer::Data],
+    images: &[Option<::gltf::image::Data>],
+    texture_base: Option<&Path>,
+) -> RawModelData {
+    let mut materials = extract_materials(document, images, texture_base);
+    let (meshes, polygon_count) = extract_meshes(document, buffers);
 
     if materials.is_empty() && meshes.iter().any(|m| m.material_index.is_some()) {
         materials.push(RawMaterialData {
@@ -41,49 +119,45 @@ pub fn load_gltf(file_path: &str) -> anyhow::Result<RawModelData> {
         });
     }
 
-    Ok(RawModelData {
+    RawModelData {
         meshes,
         materials,
         polygon_count,
-    })
+    }
 }
 
 fn extract_materials(
     document: &::gltf::Document,
-    images: &[::gltf::image::Data],
-    file_path: &str,
+    images: &[Option<::gltf::image::Data>],
+    texture_base: Option<&Path>,
 ) -> Vec<RawMaterialData> {
-    let parent_dir = std::path::Path::new(file_path)
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-
     document
         .materials()
         .map(|mat| {
             let pbr = mat.pbr_metallic_roughness();
 
             let (diffuse_path, diffuse_data) = match pbr.base_color_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                Some(info) => resolve_texture(&info.texture(), images, texture_base),
                 None => (None, None),
             };
 
             let (normal_path, normal_data) = match mat.normal_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                Some(info) => resolve_texture(&info.texture(), images, texture_base),
                 None => (None, None),
             };
 
             let (mr_path, mr_data) = match pbr.metallic_roughness_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                Some(info) => resolve_texture(&info.texture(), images, texture_base),
                 None => (None, None),
             };
 
             let (occ_path, occ_data) = match mat.occlusion_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                Some(info) => resolve_texture(&info.texture(), images, texture_base),
                 None => (None, None),
             };
 
             let (emissive_path, emissive_data) = match mat.emissive_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, parent_dir),
+                Some(info) => resolve_texture(&info.texture(), images, texture_base),
                 None => (None, None),
             };
 
@@ -138,18 +212,22 @@ fn extract_materials(
 
 fn resolve_texture(
     texture: &::gltf::Texture,
-    images: &[::gltf::image::Data],
-    parent_dir: &std::path::Path,
-) -> (Option<std::path::PathBuf>, Option<RawImageData>) {
+    images: &[Option<::gltf::image::Data>],
+    texture_base: Option<&Path>,
+) -> (Option<PathBuf>, Option<RawImageData>) {
     let image = texture.source();
-    let decoded = image_data_to_raw(&images[image.index()]);
+    let decoded = images
+        .get(image.index())
+        .and_then(Option::as_ref)
+        .and_then(image_data_to_raw);
 
     match image.source() {
         ::gltf::image::Source::Uri { uri, .. } => {
             if uri.starts_with("data:") {
                 (None, decoded)
             } else {
-                (Some(parent_dir.join(uri)), decoded)
+                let path = texture_base.map_or_else(|| PathBuf::from(uri), |base| base.join(uri));
+                (Some(path), decoded)
             }
         }
         ::gltf::image::Source::View { .. } => (None, decoded),

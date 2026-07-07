@@ -301,11 +301,11 @@ impl Pipelines {
         .blend_alpha()
         .depth_write(false)
         .depth_compare(wgpu::CompareFunction::LessEqual)
-        .depth_bias(wgpu::DepthBiasState {
-            constant: -8,
-            slope_scale: -1.0,
-            clamp: 0.0,
-        })
+        // No depth bias: WebGPU requires depthBias == 0 for line topologies
+        // (native wgpu tolerated the -8 nudge). LessEqual with depth-write
+        // off already lets on-edge lines pass; if desktop QA shows edge
+        // z-fighting, the offset moves into vs_validation as a clip-space
+        // nudge instead.
         .topology(wgpu::PrimitiveTopology::LineList)
         .sample_count(sample_count)
         .build();
