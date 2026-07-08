@@ -1,0 +1,25 @@
+[package]
+name = "solarxy-scenefile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The .slxy self-contained scene file: the schema-owned scene/manifest types, the ZIP container with content-addressed asset blobs, SHA-256 integrity, and the schema-version migration gate for Solarxy Web."
+
+[features]
+# schemars `JsonSchema` derives plus the schema emitter, off by default so
+# normal and wasm builds stay lean (mirrors the solarxy-core precedent).
+schemars-gen = ["dep:schemars"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+# default-features off keeps this pure-Rust with Stored (uncompressed)
+# entries, so the whole .slxy read/write path compiles to wasm32 for the
+# web boundary. Deflate is a later size optimization, not a v0 requirement.
+zip = { version = "2", default-features = false }
+schemars = { workspace = true, optional = true }

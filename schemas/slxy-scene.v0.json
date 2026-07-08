@@ -1,0 +1,459 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AssetRecordJson": {
+      "description": "One semantic asset record in `scene.json`. `id` and `sha256` are the same content hash today; `role` distinguishes imports from future environment/texture assets.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "import_settings": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "original_name": {
+          "type": "string"
+        },
+        "role": {
+          "default": "import",
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "original_name",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "CameraJson": {
+      "description": "The orbit camera state (aspect is viewport-derived and not persisted).",
+      "properties": {
+        "distance": {
+          "type": "number"
+        },
+        "fov_y": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "target": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "yaw": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "distance",
+        "fov_y",
+        "pitch",
+        "target",
+        "yaw"
+      ],
+      "type": "object"
+    },
+    "CanvasViewportJson": {
+      "description": "One context's canvas pan/zoom.",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "zoom": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "zoom"
+      ],
+      "type": "object"
+    },
+    "EdgeJson": {
+      "description": "One edge. `from`/`to` are `[node_id, port_key]` pairs.",
+      "properties": {
+        "from": {
+          "items": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "to": {
+          "items": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "from",
+        "id",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EditorJson": {
+      "description": "Editor-only state: the cook mode and per-context canvas viewports.",
+      "properties": {
+        "canvas_viewports": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CanvasViewportJson"
+          },
+          "description": "Canvas pan/zoom per context, keyed by `\"root\"` or a geo node id.",
+          "type": "object"
+        },
+        "cook_mode": {
+          "default": "auto",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "EnvironmentJson": {
+      "description": "The lighting environment. Reserved for the Phase-6 HDRI/IBL flow; defaults are inert.",
+      "properties": {
+        "background": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "hdri_asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ibl_mode": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "GraphJson": {
+      "description": "The node graph: the root canvas plus one entry per subflow, keyed by the owning `geo` node id.",
+      "properties": {
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EdgeJson"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/NodeJson"
+          },
+          "type": "array"
+        },
+        "subflows": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubGraphJson"
+          },
+          "default": {},
+          "description": "Subflows keyed by the owning `geo` node id (string).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "MetaJson": {
+      "description": "Document metadata. Timestamps are ISO-8601 strings supplied by the host (the format layer never reads a clock).",
+      "properties": {
+        "created": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NodeJson": {
+      "description": "One node instance. Params are plain JSON literals keyed by param id (the schema-v1 shape; the `{\"$expr\": \"...\"}` object form is reserved for the future expression variant). The display name is surfaced top-level for readability; the mapping layer keeps it authoritative there.",
+      "properties": {
+        "bypass": {
+          "description": "Present (and true) only when the node is bypassed.",
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "port_order": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Explicit edge order per variadic input port (edge id strings); omitted for nodes with no variadic ports.",
+          "type": "object"
+        },
+        "position": {
+          "description": "Canvas position `[x, y]`.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "type_version": {
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "position",
+        "type",
+        "type_version"
+      ],
+      "type": "object"
+    },
+    "PaneJson": {
+      "description": "One viewport pane: its camera, display flags, inspection mode, and background. `display` and `background` are still opaque JSON (Phase 6 gives them structure).",
+      "properties": {
+        "background": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "camera": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CameraJson"
+            }
+          ],
+          "default": {
+            "distance": 0.0,
+            "fov_y": 0.0,
+            "pitch": 0.0,
+            "target": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "yaw": 0.0
+          }
+        },
+        "display": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "inspection": {
+          "default": "shaded",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ReviewJson": {
+      "description": "Review annotations. The annotation shape is owned by `solarxy_core::review` (which has its own schema); the format carries each annotation opaquely so it survives save/load ahead of the Phase-7 review UI.",
+      "properties": {
+        "annotations": {
+          "items": true,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SubGraphJson": {
+      "description": "One subflow's contents plus its display node.",
+      "properties": {
+        "active_output": {
+          "description": "The node id whose output this subflow displays, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edges": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EdgeJson"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/NodeJson"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ViewJson": {
+      "description": "The viewport layout and per-pane state. Phase 5 is a single shaded pane with an orbit camera; the multi-pane fields exist for Phase 6.",
+      "properties": {
+        "active_pane": {
+          "default": 0,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "layout": {
+          "default": "single",
+          "type": "string"
+        },
+        "panes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PaneJson"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "description": "The whole `scene.json`.",
+  "properties": {
+    "assets": {
+      "default": [],
+      "description": "Semantic asset records (role + settings); the byte-level records live in `manifest.json`, keyed by the same content hash.",
+      "items": {
+        "$ref": "#/definitions/AssetRecordJson"
+      },
+      "type": "array"
+    },
+    "editor": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EditorJson"
+        }
+      ],
+      "default": {
+        "cook_mode": "auto"
+      }
+    },
+    "environment": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EnvironmentJson"
+        }
+      ],
+      "default": {}
+    },
+    "generator": {
+      "description": "The tool + version that wrote the file (diagnostic only).",
+      "type": "string"
+    },
+    "graph": {
+      "$ref": "#/definitions/GraphJson"
+    },
+    "meta": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/MetaJson"
+        }
+      ],
+      "default": {}
+    },
+    "min_reader": {
+      "description": "The lowest reader version able to open this file; a reader below it hard-rejects with an upgrade message.",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "review": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewJson"
+        }
+      ],
+      "default": {}
+    },
+    "schema_version": {
+      "description": "The document schema version (0 pre-beta, no guarantees; frozen at 1 at public beta).",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "units": {
+      "default": "meters",
+      "type": "string"
+    },
+    "view": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ViewJson"
+        }
+      ],
+      "default": {
+        "active_pane": 0,
+        "layout": "single",
+        "panes": [
+          {
+            "camera": {
+              "distance": 0.0,
+              "fov_y": 0.0,
+              "pitch": 0.0,
+              "target": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "yaw": 0.0
+            },
+            "inspection": "shaded"
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "generator",
+    "graph",
+    "min_reader",
+    "schema_version"
+  ],
+  "title": "SceneJson",
+  "type": "object"
+}

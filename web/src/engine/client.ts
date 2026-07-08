@@ -9,9 +9,12 @@ import type {
   DocumentSnapshot,
   EventBatch,
   GraphContext,
+  ImportJob,
   NodeId,
   ParamSource,
   RegistrySnapshot,
+  SaveExtra,
+  SlxyLoadResult,
 } from "./types";
 
 export class SolarxyClient {
@@ -87,5 +90,44 @@ export class SolarxyClient {
 
   nodeTypeCount(): number {
     return this.app.node_type_count();
+  }
+
+  // ---- Phase 5: asset staging + the import-worker pump ----
+
+  /** Stages asset bytes; returns the content id the import node references. */
+  stageAsset(name: string, mime: string, sha256: string, bytes: Uint8Array): string {
+    return this.app.stage_asset(name, mime, sha256, bytes) as string;
+  }
+
+  /** A fresh copy of the staged bytes for a hash (undefined if absent). */
+  assetBytes(hash: string): Uint8Array | undefined {
+    return this.app.asset_bytes(hash) as Uint8Array | undefined;
+  }
+
+  /** Drains the import jobs the last cook spawned (to run in the worker). */
+  takeImportJobs(): ImportJob[] {
+    return this.app.take_import_jobs() as ImportJob[];
+  }
+
+  /** Commits a worker-parsed model (transfer blob) under the generation guard. */
+  submitParsedModel(ctx: GraphContext, jobId: number, blob: Uint8Array): EventBatch {
+    return this.app.submit_parsed_model(ctx, jobId, blob) as EventBatch;
+  }
+
+  /** Reports a worker parse failure (the node badges the error). */
+  submitParseError(ctx: GraphContext, jobId: number, message: string): EventBatch {
+    return this.app.submit_parse_error(ctx, jobId, message) as EventBatch;
+  }
+
+  // ---- Phase 5: .slxy save / load ----
+
+  /** Builds .slxy archive bytes from the document + assets + host extra. */
+  saveSlxy(extra: SaveExtra): Uint8Array {
+    return this.app.save_slxy(extra) as Uint8Array;
+  }
+
+  /** Replaces the document from .slxy bytes; returns batch + view state. */
+  loadSlxy(bytes: Uint8Array): SlxyLoadResult {
+    return this.app.load_slxy(bytes) as SlxyLoadResult;
   }
 }

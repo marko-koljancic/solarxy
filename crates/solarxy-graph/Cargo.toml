@@ -12,6 +12,7 @@ authors.workspace = true
 solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
 solarxy-formats = { path = "../solarxy-formats", default-features = false }
 solarxy-kernel = { path = "../solarxy-kernel" }
+solarxy-scenefile = { path = "../solarxy-scenefile" }
 cgmath = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }

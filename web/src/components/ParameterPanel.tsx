@@ -7,8 +7,8 @@
 // A new node reusing existing param types needs zero changes here; a new
 // ParamType is a deliberate change (a new widget case).
 
-import { useMemo } from "react";
-import { dispatch, previewParam } from "../engine/session";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { dispatch, previewParam, stageFile } from "../engine/session";
 import type { GraphContext, NodeMirror, ParamSnapshot, ParamSource } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
@@ -123,6 +123,8 @@ function Field({ ctx, node, spec }: FieldProps) {
         </div>
       );
     }
+    case "assetRef":
+      return <AssetField ctx={ctx} node={node} spec={spec} label={label} />;
     case "vec2":
     case "vec3":
     case "vec4": {
@@ -157,6 +159,71 @@ function Field({ ctx, node, spec }: FieldProps) {
         </div>
       );
   }
+}
+
+/** The `assetRef` widget: a hidden file input plus a select/change/clear
+ * control. Selecting a file stages its bytes (content-addressed) and commits
+ * the asset hash as the param, which dirties the import node so the next cook
+ * yields a parse job to the worker. */
+function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
+  const [pending, setPending] = useState(false);
+  const [localName, setLocalName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const current = String(paramValue(node, spec) ?? "");
+  const accept = spec.accept.join(",");
+
+  const onFile = async (file: File) => {
+    setPending(true);
+    try {
+      const { hash, name } = await stageFile(file);
+      setLocalName(name);
+      dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", hash) });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const clear = () => {
+    setLocalName("");
+    dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", "") });
+  };
+
+  const display = localName || (current ? `${current.slice(0, 10)}…` : "no file");
+
+  return (
+    <div className="param-row">
+      {label}
+      <div className="param-asset">
+        <button
+          type="button"
+          className="param-asset-btn"
+          disabled={pending}
+          onClick={() => inputRef.current?.click()}
+        >
+          {pending ? "Staging…" : current ? "Change" : "Select File"}
+        </button>
+        <span className="param-asset-name" title={current}>
+          {display}
+        </span>
+        {current && !pending && (
+          <button type="button" className="param-asset-clear" title="Clear" onClick={clear}>
+            ×
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void onFile(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export function ParameterPanel() {

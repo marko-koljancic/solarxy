@@ -1,0 +1,304 @@
+//! The `scene.json` schema: the Rust-owned, serde + schemars image of a
+//! Solarxy document, following the plan's section 6.6 shape. These types
+//! are format, not engine: they carry plain-JSON param literals and string
+//! ids, deliberately decoupled from `solarxy-graph`'s in-memory model so
+//! the file format has a single owner here. The `solarxy-graph` mapping
+//! layer converts a live document to and from these types.
+//!
+//! Naming is `snake_case` on disk (the Rust field names serialize
+//! verbatim), distinct from the `camelCase` engine-to-JS boundary.
+//! Forward-looking
+//! sections whose features land in later phases (`view` panes beyond one,
+//! `environment`, `review` UI) are present in the schema with defaults so
+//! the format is shape-stable from day one.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+/// A JSON object node, used for param maps and the still-opaque display /
+/// background / import-settings blobs. `BTreeMap` (not `serde_json::Map`)
+/// gives deterministic key order and a `schemars` impl.
+pub type JsonObject = BTreeMap<String, serde_json::Value>;
+
+/// serde `skip_serializing_if` predicate: a `false` bool is omitted (the
+/// `bypass` field is present only when set, per section 6.6).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn default_units() -> String {
+    "meters".to_string()
+}
+
+fn default_cook_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_layout() -> String {
+    "single".to_string()
+}
+
+fn default_inspection() -> String {
+    "shaded".to_string()
+}
+
+fn default_asset_role() -> String {
+    "import".to_string()
+}
+
+/// The whole `scene.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct SceneJson {
+    /// The document schema version (0 pre-beta, no guarantees; frozen at 1
+    /// at public beta).
+    pub schema_version: u32,
+    /// The lowest reader version able to open this file; a reader below it
+    /// hard-rejects with an upgrade message.
+    pub min_reader: u32,
+    /// The tool + version that wrote the file (diagnostic only).
+    pub generator: String,
+    #[serde(default = "default_units")]
+    pub units: String,
+    pub graph: GraphJson,
+    #[serde(default)]
+    pub view: ViewJson,
+    #[serde(default)]
+    pub environment: EnvironmentJson,
+    #[serde(default)]
+    pub review: ReviewJson,
+    /// Semantic asset records (role + settings); the byte-level records
+    /// live in `manifest.json`, keyed by the same content hash.
+    #[serde(default)]
+    pub assets: Vec<AssetRecordJson>,
+    #[serde(default)]
+    pub editor: EditorJson,
+    #[serde(default)]
+    pub meta: MetaJson,
+}
+
+/// The node graph: the root canvas plus one entry per subflow, keyed by the
+/// owning `geo` node id.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct GraphJson {
+    #[serde(default)]
+    pub nodes: Vec<NodeJson>,
+    #[serde(default)]
+    pub edges: Vec<EdgeJson>,
+    /// Subflows keyed by the owning `geo` node id (string).
+    #[serde(default)]
+    pub subflows: BTreeMap<String, SubGraphJson>,
+}
+
+/// One subflow's contents plus its display node.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct SubGraphJson {
+    #[serde(default)]
+    pub nodes: Vec<NodeJson>,
+    #[serde(default)]
+    pub edges: Vec<EdgeJson>,
+    /// The node id whose output this subflow displays, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_output: Option<String>,
+}
+
+/// One node instance. Params are plain JSON literals keyed by param id (the
+/// schema-v1 shape; the `{"$expr": "..."}` object form is reserved for the
+/// future expression variant). The display name is surfaced top-level for
+/// readability; the mapping layer keeps it authoritative there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct NodeJson {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub type_id: String,
+    pub type_version: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// Present (and true) only when the node is bypassed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bypass: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: JsonObject,
+    /// Explicit edge order per variadic input port (edge id strings);
+    /// omitted for nodes with no variadic ports.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub port_order: BTreeMap<String, Vec<String>>,
+    /// Canvas position `[x, y]`.
+    pub position: [f32; 2],
+}
+
+/// One edge. `from`/`to` are `[node_id, port_key]` pairs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct EdgeJson {
+    pub id: String,
+    pub from: (String, String),
+    pub to: (String, String),
+}
+
+/// The viewport layout and per-pane state. Phase 5 is a single shaded pane
+/// with an orbit camera; the multi-pane fields exist for Phase 6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct ViewJson {
+    #[serde(default = "default_layout")]
+    pub layout: String,
+    #[serde(default)]
+    pub active_pane: u32,
+    #[serde(default)]
+    pub panes: Vec<PaneJson>,
+}
+
+impl Default for ViewJson {
+    fn default() -> Self {
+        Self {
+            layout: default_layout(),
+            active_pane: 0,
+            panes: vec![PaneJson::default()],
+        }
+    }
+}
+
+/// One viewport pane: its camera, display flags, inspection mode, and
+/// background. `display` and `background` are still opaque JSON (Phase 6
+/// gives them structure).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct PaneJson {
+    #[serde(default)]
+    pub camera: CameraJson,
+    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
+    pub display: JsonObject,
+    #[serde(default = "default_inspection")]
+    pub inspection: String,
+    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
+    pub background: JsonObject,
+}
+
+impl Default for PaneJson {
+    fn default() -> Self {
+        Self {
+            camera: CameraJson::default(),
+            display: JsonObject::new(),
+            inspection: default_inspection(),
+            background: JsonObject::new(),
+        }
+    }
+}
+
+/// The orbit camera state (aspect is viewport-derived and not persisted).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct CameraJson {
+    pub target: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub fov_y: f32,
+}
+
+/// The lighting environment. Reserved for the Phase-6 HDRI/IBL flow;
+/// defaults are inert.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct EnvironmentJson {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ibl_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdri_asset: Option<String>,
+    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
+    pub background: JsonObject,
+}
+
+/// Review annotations. The annotation shape is owned by
+/// `solarxy_core::review` (which has its own schema); the format carries
+/// each annotation opaquely so it survives save/load ahead of the Phase-7
+/// review UI.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct ReviewJson {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<serde_json::Value>,
+}
+
+/// One semantic asset record in `scene.json`. `id` and `sha256` are the
+/// same content hash today; `role` distinguishes imports from future
+/// environment/texture assets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct AssetRecordJson {
+    pub id: String,
+    #[serde(default = "default_asset_role")]
+    pub role: String,
+    pub sha256: String,
+    pub original_name: String,
+    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
+    pub import_settings: JsonObject,
+}
+
+/// Editor-only state: the cook mode and per-context canvas viewports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct EditorJson {
+    #[serde(default = "default_cook_mode")]
+    pub cook_mode: String,
+    /// Canvas pan/zoom per context, keyed by `"root"` or a geo node id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub canvas_viewports: BTreeMap<String, CanvasViewportJson>,
+}
+
+impl Default for EditorJson {
+    fn default() -> Self {
+        Self {
+            cook_mode: default_cook_mode(),
+            canvas_viewports: BTreeMap::new(),
+        }
+    }
+}
+
+/// One context's canvas pan/zoom.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct CanvasViewportJson {
+    pub x: f32,
+    pub y: f32,
+    pub zoom: f32,
+}
+
+/// Document metadata. Timestamps are ISO-8601 strings supplied by the host
+/// (the format layer never reads a clock).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+pub struct MetaJson {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub project_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub created: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub modified: String,
+}
+
+/// The known top-level keys of `scene.json`, for unknown-field warnings on
+/// read (the format does not `deny_unknown_fields`; it warns instead).
+pub const SCENE_TOP_LEVEL_KEYS: &[&str] = &[
+    "schema_version",
+    "min_reader",
+    "generator",
+    "units",
+    "graph",
+    "view",
+    "environment",
+    "review",
+    "assets",
+    "editor",
+    "meta",
+];

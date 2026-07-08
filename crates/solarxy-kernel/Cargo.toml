@@ -12,3 +12,4 @@ authors.workspace = true
 solarxy-core = { path = "../solarxy-core", default-features = false }
 cgmath = { workspace = true }
 thiserror = { workspace = true }
+bytemuck = "1"

@@ -1,7 +1,7 @@
 // The application shell: header, the 3D viewport (left), and the
 // registry-driven node editor (right) with a subflow breadcrumb.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { NodePalette } from "./components/NodePalette";
 import { ParameterPanel } from "./components/ParameterPanel";
@@ -9,7 +9,7 @@ import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
-import { explicitSave } from "./engine/session";
+import { explicitSave, importDroppedFiles, openScene } from "./engine/session";
 import { NodeCanvas } from "./flow/NodeCanvas";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { descriptorFor } from "./registry/datatypes";
@@ -38,7 +38,21 @@ function Breadcrumb() {
 export function App() {
   const registry = useMirror((s) => s.registry);
   const dirty = useMirror((s) => s.dirty);
+  const [dropActive, setDropActive] = useState(false);
   useKeyboard();
+
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+  const onDragOver = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDropActive(true);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    setDropActive(false);
+    void importDroppedFiles(Array.from(e.dataTransfer.files));
+  };
 
   // Warn before leaving with unsaved changes (the autosave still runs).
   useEffect(() => {
@@ -53,14 +67,25 @@ export function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      onDragOver={onDragOver}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={onDrop}
+    >
+      {dropActive && (
+        <div className="drop-overlay">Drop a model to import (.obj .gltf .glb .stl .ply)</div>
+      )}
       <header className="app-header">
         <span className="brand">Solarxy</span>
         <span className="sub">Web</span>
         {dirty && <span className="dirty-dot" title="unsaved changes" />}
         <Toolbar />
         <span className="spacer" />
-        <button className="tbtn" title="Save scene" onClick={() => void explicitSave()}>
+        <button className="tbtn" title="Open a .slxy scene" onClick={() => void openScene()}>
+          Open
+        </button>
+        <button className="tbtn" title="Save scene as .slxy" onClick={() => void explicitSave()}>
           Save
         </button>
         <span className="stat">

@@ -6,7 +6,7 @@ import { clearAutosaves } from "../persistence/opfs";
 import { isBooted, restoreDocument, takeRecovery } from "../engine/session";
 
 export function RecoveryPrompt() {
-  const [rec, setRec] = useState<{ json: string; when: number } | null>(null);
+  const [rec, setRec] = useState<{ bytes: Uint8Array; when: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +46,7 @@ export function RecoveryPrompt() {
           <button
             className="btn primary"
             onClick={() => {
-              restoreDocument(rec.json);
+              restoreDocument(rec.bytes);
               setRec(null);
             }}
           >

@@ -54,6 +54,7 @@ mod error;
 pub mod merge;
 pub mod primitives;
 pub mod set;
+pub mod transfer;
 pub mod transform;
 
 pub use error::KernelError;

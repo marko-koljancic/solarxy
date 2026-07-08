@@ -18,6 +18,9 @@ use crate::params::AssetId;
 pub struct AssetEntry {
     /// The original file name (for display and extension sniffing).
     pub name: String,
+    /// The MIME type reported at stage time (recorded in the `.slxy`
+    /// manifest; may be empty when the source did not provide one).
+    pub mime: String,
     pub bytes: Arc<Vec<u8>>,
 }
 
@@ -34,14 +37,21 @@ impl AssetTable {
     }
 
     /// Stages bytes, returning their content id. Re-staging identical
-    /// content returns the same id without storing twice.
-    pub fn stage(&mut self, name: impl Into<String>, bytes: Vec<u8>) -> AssetId {
+    /// content returns the same id without storing twice (the first name
+    /// and mime win, since identity is the content hash).
+    pub fn stage(
+        &mut self,
+        name: impl Into<String>,
+        mime: impl Into<String>,
+        bytes: Vec<u8>,
+    ) -> AssetId {
         let digest = Sha256::digest(&bytes);
         let id = AssetId(format!("{digest:x}"));
         self.entries
             .entry(id.clone())
             .or_insert_with(|| AssetEntry {
                 name: name.into(),
+                mime: mime.into(),
                 bytes: Arc::new(bytes),
             });
         id
@@ -75,14 +85,15 @@ mod tests {
     #[test]
     fn staging_is_content_addressed_and_idempotent() {
         let mut table = AssetTable::new();
-        let a = table.stage("cube.obj", b"v 0 0 0".to_vec());
-        let b = table.stage("copy-of-cube.obj", b"v 0 0 0".to_vec());
-        // Same content, same id, first name wins, one entry.
+        let a = table.stage("cube.obj", "model/obj", b"v 0 0 0".to_vec());
+        let b = table.stage("copy-of-cube.obj", "text/plain", b"v 0 0 0".to_vec());
+        // Same content, same id, first name and mime win, one entry.
         assert_eq!(a, b);
         assert_eq!(table.len(), 1);
         assert_eq!(table.get(&a).unwrap().name, "cube.obj");
+        assert_eq!(table.get(&a).unwrap().mime, "model/obj");
 
-        let c = table.stage("other.obj", b"v 1 1 1".to_vec());
+        let c = table.stage("other.obj", "model/obj", b"v 1 1 1".to_vec());
         assert_ne!(a, c);
         assert_eq!(table.len(), 2);
         // The id is the SHA-256 hex digest.

@@ -6,9 +6,18 @@
 //! a budget and render, and routes pointer gestures to the camera and
 //! Rust-side picking. Cooked geometry never crosses into JavaScript.
 
+use std::collections::BTreeMap;
+
 use solarxy_core::raycast::screen_to_world_ray;
+use solarxy_graph::assets::AssetTable;
+use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult};
+use solarxy_graph::document::GraphContext;
+use solarxy_graph::engine::SceneSidecar;
 use solarxy_graph::{Command, Engine, EventBatch};
+use solarxy_kernel::transfer;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::camera::OrbitCamera;
 use crate::render::WebRenderer;
@@ -109,6 +118,10 @@ impl SolarxyApp {
 
         let mut engine = Engine::new().map_err(|e| JsError::new(&format!("engine: {e}")))?;
         engine.set_clock(web_now);
+        // Imports run off the main thread: cooks yield a ParseModel job the
+        // frontend pumps to the import worker (`take_import_jobs` ->
+        // `submit_parsed_model`), rather than parsing inline.
+        engine.set_async_jobs(true);
 
         log(&format!(
             "solarxy-web: booted ({width}x{height}, {} node types)",
@@ -167,13 +180,8 @@ impl SolarxyApp {
         let deadline = web_now() + COOK_BUDGET_MS;
         let events = self.engine.cook(&mut || web_now() < deadline);
 
-        // Drain async jobs inline (imports are Phase 5; native-style resolve
-        // keeps the protocol exercised without a worker).
-        let jobs = self.engine.take_jobs();
-        for (ctx, job, request) in jobs {
-            let result = self.engine.resolve_job(&request);
-            self.engine.submit_job_result(ctx, job, result);
-        }
+        // Import jobs spawned by this cook accumulate as Pending; the
+        // frontend drains them to the worker via `take_import_jobs`.
 
         // Apply the fresh scene delta to the renderer.
         let delta = self.engine.take_scene_delta();
@@ -300,6 +308,198 @@ impl SolarxyApp {
     pub fn object_count(&self) -> usize {
         self.renderer.object_count()
     }
+
+    // ---- Phase 5: asset staging + the import-worker pump ----
+
+    /// Stages asset bytes into the engine, returning the content id (its
+    /// SHA-256 hex) the import node's `file` param references. The `_sha256`
+    /// the caller computed for its OPFS cache is not trusted; the engine
+    /// recomputes and the returned id is authoritative.
+    pub fn stage_asset(
+        &mut self,
+        name: String,
+        mime: String,
+        _sha256: String,
+        bytes: Vec<u8>,
+    ) -> String {
+        self.engine.stage_asset(name, mime, bytes).0
+    }
+
+    /// The staged bytes for an asset id, as a `Uint8Array`, or `undefined`.
+    /// Lets the frontend feed the worker after a scene load, when its own
+    /// JS-side byte cache is cold.
+    pub fn asset_bytes(&self, hash: String) -> Option<js_sys::Uint8Array> {
+        self.engine
+            .asset_bytes(&solarxy_graph::params::AssetId(hash))
+            .map(js_sys::Uint8Array::from)
+    }
+
+    /// Drains the import jobs the last cook spawned into a JS array of
+    /// `{ ctx, jobId, hash, name, format, options, sidecars }`. The frontend
+    /// gathers each job's bytes, posts them to the import worker, and returns
+    /// the result through `submit_parsed_model` / `submit_parse_error`.
+    pub fn take_import_jobs(&mut self) -> Result<JsValue, JsError> {
+        let manifest = self.engine.asset_manifest();
+        let payloads: Vec<ImportJobDto> = self
+            .engine
+            .take_jobs()
+            .into_iter()
+            .map(|(ctx, job, req)| {
+                let (asset, format, options) = match req {
+                    JobRequest::ParseModel {
+                        asset,
+                        format,
+                        options,
+                    } => (asset, format, options),
+                };
+                let name = manifest
+                    .iter()
+                    .find(|(h, _)| *h == asset.0)
+                    .map_or_else(String::new, |(_, n)| n.clone());
+                // OBJ/glTF resolve companions (mtl, bin, textures) by name;
+                // hand the worker the other staged files as candidate
+                // sidecars. Self-contained STL/PLY need none.
+                let sidecars = if matches!(format.as_str(), "obj" | "gltf" | "glb") {
+                    manifest
+                        .iter()
+                        .filter(|(h, _)| *h != asset.0)
+                        .map(|(h, n)| AssetRefDto {
+                            hash: h.clone(),
+                            name: n.clone(),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                ImportJobDto {
+                    ctx,
+                    job_id: job.0 as f64,
+                    hash: asset.0,
+                    name,
+                    format,
+                    options,
+                    sidecars,
+                }
+            })
+            .collect();
+        to_js(&payloads)
+    }
+
+    /// Commits a worker-parsed model (the transfer blob from
+    /// `parse_model_job`) under the per-node generation guard, returning the
+    /// cook `EventBatch`. A superseded result is dropped inside the engine.
+    pub fn submit_parsed_model(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        blob: Vec<u8>,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let set =
+            transfer::unpack(&blob).map_err(|e| JsError::new(&format!("bad model blob: {e}")))?;
+        let events =
+            self.engine
+                .submit_job_result(ctx, JobId(job_id as u64), JobResult::Model(Ok(set)));
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
+    }
+
+    /// Reports a worker parse failure for a job: the import node badges the
+    /// error while keep-last-good holds the last valid geometry.
+    pub fn submit_parse_error(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        message: String,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::Model(Err(message)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
+    }
+
+    // ---- Phase 5: .slxy save / load ----
+
+    /// Builds `.slxy` archive bytes from the current document, its referenced
+    /// assets, and the host `extra` (generator, canvas viewports, meta). The
+    /// camera comes from this app's orbit camera.
+    pub fn save_slxy(&self, extra: JsValue) -> Result<Vec<u8>, JsError> {
+        let extra: SaveExtra = serde_wasm_bindgen::from_value(extra).unwrap_or_default();
+        let mut sidecar = SceneSidecar {
+            generator: if extra.generator.is_empty() {
+                "solarxy-web".to_string()
+            } else {
+                extra.generator
+            },
+            ..SceneSidecar::default()
+        };
+        if let Some(pane) = sidecar.view.panes.first_mut() {
+            pane.camera = self.camera_json();
+        }
+        sidecar.canvas_viewports = extra
+            .canvas_viewports
+            .into_iter()
+            .map(|(k, v)| (k, v.into()))
+            .collect();
+        sidecar.meta = extra.meta.into();
+        self.engine
+            .save_slxy(&sidecar)
+            .map_err(|e| JsError::new(&format!("save .slxy: {e}")))
+    }
+
+    /// Replaces the document from `.slxy` bytes: stages the embedded assets,
+    /// applies the saved camera, and returns `{ batch, warnings,
+    /// canvasViewports, meta }` for the mirror and the frontend view state.
+    pub fn load_slxy(&mut self, bytes: Vec<u8>) -> Result<JsValue, JsError> {
+        let loaded = self
+            .engine
+            .load_slxy(&bytes)
+            .map_err(|e| JsError::new(&format!("load .slxy: {e}")))?;
+        if let Some(pane) = loaded.sidecar.view.panes.first() {
+            self.apply_camera_json(&pane.camera);
+        }
+        let result = LoadResultDto {
+            batch: loaded.batch,
+            warnings: loaded.warnings,
+            canvas_viewports: loaded
+                .sidecar
+                .canvas_viewports
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            meta: loaded.sidecar.meta.into(),
+        };
+        to_js(&result)
+    }
+
+    fn camera_json(&self) -> solarxy_scenefile::CameraJson {
+        let c = &self.camera;
+        solarxy_scenefile::CameraJson {
+            target: [c.target.x, c.target.y, c.target.z],
+            yaw: c.yaw,
+            pitch: c.pitch,
+            distance: c.distance,
+            fov_y: c.fov_y.0,
+        }
+    }
+
+    fn apply_camera_json(&mut self, c: &solarxy_scenefile::CameraJson) {
+        self.camera.target = cgmath::Point3::new(c.target[0], c.target[1], c.target[2]);
+        self.camera.yaw = c.yaw;
+        self.camera.pitch = c.pitch;
+        self.camera.distance = c.distance;
+        self.camera.fov_y = cgmath::Rad(c.fov_y);
+    }
 }
 
 /// Serializes a value to a `JsValue` via serde-wasm-bindgen, using the
@@ -309,4 +509,156 @@ fn to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsError> {
     value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|e| JsError::new(&format!("serialize: {e}")))
+}
+
+/// The import-worker parse entry: a GPU-free wasm export the worker calls in
+/// a second, headless instantiation of this same module. It parses `files`
+/// (a JS array of `{ name, bytes }`, the primary model first, then any
+/// sidecars) into a finished [`solarxy_kernel::GeometrySet`] and returns it
+/// as a transfer blob (`Uint8Array`) to move back to the main instance.
+/// Never touches wgpu, so instantiating it in a worker creates no device.
+#[wasm_bindgen]
+pub fn parse_model_job(
+    format: String,
+    options_json: String,
+    files: JsValue,
+) -> Result<js_sys::Uint8Array, JsError> {
+    let files = read_files(&files)?;
+    let (name, bytes) = files
+        .first()
+        .ok_or_else(|| JsError::new("parse_model_job: no files provided"))?;
+    let options: ImportOptions = serde_json::from_str(&options_json)
+        .map_err(|e| JsError::new(&format!("bad import options: {e}")))?;
+
+    // Rebuild a temporary asset table so the resolver can find sidecars by
+    // name (content-addressed staging; ids are irrelevant here).
+    let mut table = AssetTable::new();
+    for (n, b) in &files {
+        table.stage(n.clone(), String::new(), b.clone());
+    }
+
+    let set = solarxy_graph::nodes::parse_model(&format, bytes, name, &table, &options)
+        .map_err(|e| JsError::new(&e))?;
+    Ok(js_sys::Uint8Array::from(transfer::pack(&set).as_slice()))
+}
+
+/// Reads a JS array of `{ name: string, bytes: Uint8Array }` into owned
+/// `(name, bytes)` pairs.
+fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {
+    let array: js_sys::Array = files
+        .clone()
+        .dyn_into()
+        .map_err(|_| JsError::new("parse_model_job: files must be an array"))?;
+    let mut out = Vec::with_capacity(array.length() as usize);
+    for item in array.iter() {
+        let name = js_sys::Reflect::get(&item, &JsValue::from_str("name"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        let bytes = js_sys::Reflect::get(&item, &JsValue::from_str("bytes"))
+            .ok()
+            .and_then(|v| v.dyn_into::<js_sys::Uint8Array>().ok())
+            .map(|u| u.to_vec())
+            .unwrap_or_default();
+        out.push((name, bytes));
+    }
+    Ok(out)
+}
+
+// ---- boundary DTOs (camelCase; the engine/scene-file types stay
+// snake_case on disk, so these bridge to the JS convention) ----
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportJobDto {
+    ctx: GraphContext,
+    job_id: f64,
+    hash: String,
+    name: String,
+    format: String,
+    options: ImportOptions,
+    sidecars: Vec<AssetRefDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssetRefDto {
+    hash: String,
+    name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct SaveExtra {
+    generator: String,
+    canvas_viewports: BTreeMap<String, ViewportDto>,
+    meta: MetaDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadResultDto {
+    batch: EventBatch,
+    warnings: Vec<String>,
+    canvas_viewports: BTreeMap<String, ViewportDto>,
+    meta: MetaDto,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct ViewportDto {
+    x: f32,
+    y: f32,
+    zoom: f32,
+}
+
+impl From<ViewportDto> for solarxy_scenefile::CanvasViewportJson {
+    fn from(v: ViewportDto) -> Self {
+        Self {
+            x: v.x,
+            y: v.y,
+            zoom: v.zoom,
+        }
+    }
+}
+impl From<solarxy_scenefile::CanvasViewportJson> for ViewportDto {
+    fn from(v: solarxy_scenefile::CanvasViewportJson) -> Self {
+        Self {
+            x: v.x,
+            y: v.y,
+            zoom: v.zoom,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct MetaDto {
+    name: String,
+    description: String,
+    project_id: String,
+    created: String,
+    modified: String,
+}
+
+impl From<MetaDto> for solarxy_scenefile::MetaJson {
+    fn from(m: MetaDto) -> Self {
+        Self {
+            name: m.name,
+            description: m.description,
+            project_id: m.project_id,
+            created: m.created,
+            modified: m.modified,
+        }
+    }
+}
+impl From<solarxy_scenefile::MetaJson> for MetaDto {
+    fn from(m: solarxy_scenefile::MetaJson) -> Self {
+        Self {
+            name: m.name,
+            description: m.description,
+            project_id: m.project_id,
+            created: m.created,
+            modified: m.modified,
+        }
+    }
 }

@@ -61,8 +61,10 @@ impl From<AlphaMode> for u32 {
 /// One PBR material inside a [`RawModelData`].
 /// Holds factor scalars, optional textures (path or in-memory bytes), and the
 /// PBR alpha mode. `solarxy-renderer/src/resources.rs` consumes this and
-/// produces a `MaterialUniform` + GPU textures.
-#[derive(Debug, Clone, PartialEq)]
+/// produces a `MaterialUniform` + GPU textures. `Default` is a convenience
+/// for constructing a bare material (all factors zeroed, no textures); the
+/// render path never relies on the default values.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<PathBuf>,

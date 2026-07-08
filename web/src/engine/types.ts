@@ -198,6 +198,66 @@ export interface RegistrySnapshot {
   coercions: CoercionEntry[];
 }
 
+/** The per-import finishing options (camelCase; mirrors Rust ImportOptions).
+ * A format-specific toggle is null for formats that do not declare it. */
+export interface ImportOptions {
+  scale: number;
+  centerToOrigin: boolean;
+  recomputeNormals: boolean | null;
+  preserveMaterials: boolean | null;
+}
+
+/** A staged asset reference: its content hash and original file name. */
+export interface AssetRef {
+  hash: string;
+  name: string;
+}
+
+/** One import parse job drained from the engine, to run in the worker. */
+export interface ImportJob {
+  ctx: GraphContext;
+  jobId: number;
+  hash: string;
+  name: string;
+  format: string;
+  options: ImportOptions;
+  /** Candidate companion files (mtl, bin, textures) the resolver matches by name. */
+  sidecars: AssetRef[];
+}
+
+/** One context's canvas pan/zoom. */
+export interface CanvasViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+/** Document metadata carried in a .slxy. */
+export interface SceneMeta {
+  name: string;
+  description: string;
+  projectId: string;
+  created: string;
+  modified: string;
+}
+
+/** The result of loading a .slxy: the replace batch plus the view state the
+ * frontend restores (canvas viewports, metadata). The camera is applied
+ * Rust-side. */
+export interface SlxyLoadResult {
+  batch: EventBatch;
+  warnings: string[];
+  canvasViewports: Record<string, CanvasViewport>;
+  meta: SceneMeta;
+}
+
+/** The host `extra` passed to save_slxy (camera comes from the app itself). */
+export interface SaveExtra {
+  generator: string;
+  canvasViewports: Record<string, CanvasViewport>;
+  meta: SceneMeta;
+}
+
 /** Whether two contexts refer to the same graph. */
 export function ctxEq(a: GraphContext, b: GraphContext): boolean {
   if (a === "root" || b === "root") return a === b;

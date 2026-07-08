@@ -28,7 +28,10 @@ use crate::registry::{Arity, Registry};
 pub use snapshot::{DocumentSnapshot, RegistrySnapshot};
 
 mod scene;
+mod scenefile;
 mod undo;
+
+pub use scenefile::{LoadedScene, SceneSidecar};
 
 use undo::{Transaction, UndoOp, UndoStack};
 
@@ -349,9 +352,39 @@ impl Engine {
     }
 
     /// Stages asset bytes, returning the content id an import node's
-    /// `file` param should reference.
-    pub fn stage_asset(&mut self, name: impl Into<String>, bytes: Vec<u8>) -> AssetId {
-        self.assets.stage(name, bytes)
+    /// `file` param should reference. `mime` is recorded for the `.slxy`
+    /// manifest (empty is acceptable when the source provided none).
+    pub fn stage_asset(
+        &mut self,
+        name: impl Into<String>,
+        mime: impl Into<String>,
+        bytes: Vec<u8>,
+    ) -> AssetId {
+        self.assets.stage(name, mime, bytes)
+    }
+
+    /// The staged bytes behind an asset id, if present. Introspection for
+    /// the boundary (OPFS cache checks) and tests; geometry never crosses,
+    /// but asset bytes do.
+    #[must_use]
+    pub fn asset_bytes(&self, id: &AssetId) -> Option<&[u8]> {
+        self.assets.get(id).map(|e| e.bytes.as_slice())
+    }
+
+    /// The number of staged assets (introspection / tests).
+    #[must_use]
+    pub fn asset_count(&self) -> usize {
+        self.assets.len()
+    }
+
+    /// `(content-hash, original-name)` for every staged asset (the boundary
+    /// uses it to hand the import worker a job's sidecar candidates).
+    #[must_use]
+    pub fn asset_manifest(&self) -> Vec<(String, String)> {
+        self.assets
+            .entries()
+            .map(|(id, entry)| (id.0.clone(), entry.name.clone()))
+            .collect()
     }
 
     /// Applies one command, returning the events it produced. Each apply is
@@ -1319,13 +1352,21 @@ impl Engine {
     #[must_use]
     pub fn resolve_job(&self, request: &JobRequest) -> JobResult {
         match request {
-            JobRequest::ParseModel { asset, format } => {
+            JobRequest::ParseModel {
+                asset,
+                format,
+                options,
+            } => {
                 let Some(entry) = self.assets.get(asset) else {
                     return JobResult::Model(Err("asset not staged".to_string()));
                 };
-                let parsed =
-                    crate::nodes::parse_bytes(format, &entry.bytes, &entry.name, &self.assets)
-                        .map(solarxy_kernel::GeometrySet::from_raw);
+                let parsed = crate::nodes::parse_model(
+                    format,
+                    &entry.bytes,
+                    &entry.name,
+                    &self.assets,
+                    options,
+                );
                 JobResult::Model(parsed)
             }
         }

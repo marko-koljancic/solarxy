@@ -944,7 +944,7 @@ const TRI_STL: &str = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nve
 fn async_import_fixture() -> (Engine, GraphContext, NodeId, JobId, crate::cook::JobRequest) {
     let mut e = engine();
     e.set_async_jobs(true);
-    let asset = e.stage_asset("tri.stl", TRI_STL.as_bytes().to_vec());
+    let asset = e.stage_asset("tri.stl", "model/stl", TRI_STL.as_bytes().to_vec());
 
     let geo = e.doc.mint_node_id();
     e.doc.create_subflow(geo);
@@ -1155,4 +1155,152 @@ fn spot_light_angle_resolves_to_radians_in_the_scene() {
     assert_eq!(lights[0].kind, LightKind::Spot);
     // Default angle 45 degrees -> the outer cone in radians.
     assert!((lights[0].outer_cone - 45.0_f32.to_radians()).abs() < 1e-4);
+}
+
+// Phase-5 .slxy round-trip fidelity (graph, params, positions, view/camera,
+// assets, bypass, type_version, variadic port_order, cook_mode).
+
+#[test]
+fn slxy_round_trip_preserves_full_document_and_assets() {
+    let (mut e, ctx) = subflow_engine();
+    let obj = b"o cube\nv 0 0 0\n".to_vec();
+    let asset = e.stage_asset("cube.obj", "model/obj", obj.clone());
+
+    // box a, box b -> variadic merge; plus an import node referencing the asset.
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let m = add(&mut e, ctx, "merge");
+    let imp = add(&mut e, ctx, "import_obj");
+
+    // Connect a then b into merge's variadic `inputs` (order a, b).
+    for src in [a, b] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: src,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: m,
+                port: "inputs".into(),
+            },
+        })
+        .unwrap();
+    }
+
+    // Params: a merge name, the import file ref + a non-default scale.
+    e.apply(Command::SetParam {
+        ctx,
+        node: m,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("Combined".into())),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: imp,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset.clone())),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: imp,
+        key: "scale".into(),
+        value: ParamSource::Literal(ParamValue::Float(2.5)),
+    })
+    .unwrap();
+
+    // Presentation: a moved node, a bypassed node, manual cook mode.
+    e.apply(Command::MoveNodes {
+        ctx,
+        moves: vec![(a, [42.0, -7.0])],
+    })
+    .unwrap();
+    e.apply(Command::SetBypass {
+        ctx,
+        node: b,
+        bypassed: true,
+    })
+    .unwrap();
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Manual,
+    })
+    .unwrap();
+
+    // Save with a host sidecar carrying a camera and a document name.
+    let mut sidecar = SceneSidecar {
+        generator: "solarxy-test 0.0.0".into(),
+        ..Default::default()
+    };
+    sidecar.view.panes[0].camera = solarxy_scenefile::CameraJson {
+        target: [1.0, 2.0, 3.0],
+        yaw: 0.9,
+        pitch: 0.3,
+        distance: 12.0,
+        fov_y: 0.8,
+    };
+    sidecar.meta.name = "My Scene".into();
+
+    let bytes = e.save_slxy(&sidecar).expect("save .slxy");
+
+    // Load into a fresh engine (ids are preserved, so a/b/m/imp stay valid).
+    let mut e2 = engine();
+    let loaded = e2.load_slxy(&bytes).expect("load .slxy");
+
+    assert!(
+        loaded.warnings.is_empty(),
+        "clean round-trip has no warnings: {:?}",
+        loaded.warnings
+    );
+    assert!(
+        loaded
+            .batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::DocumentReplaced))
+    );
+
+    let g = e2.doc.graph(ctx).unwrap();
+    assert_eq!(g.node_count(), 4);
+    assert_eq!(g.edge_count(), 2);
+
+    // Params round-tripped through the plain-literal shape + re-typing.
+    assert_eq!(
+        g.node(m).unwrap().params["name"],
+        ParamSource::Literal(ParamValue::Text("Combined".into()))
+    );
+    assert_eq!(
+        g.node(imp).unwrap().params["file"],
+        ParamSource::Literal(ParamValue::Asset(asset.clone()))
+    );
+    assert_eq!(
+        g.node(imp).unwrap().params["scale"],
+        ParamSource::Literal(ParamValue::Float(2.5))
+    );
+
+    // Position, bypass, type_version.
+    assert!((g.node(a).unwrap().position[0] - 42.0).abs() < 1e-6);
+    assert!((g.node(a).unwrap().position[1] - (-7.0)).abs() < 1e-6);
+    assert!(g.node(b).unwrap().bypassed);
+    assert_eq!(g.node(m).unwrap().type_version, 1);
+
+    // Variadic port order: inputs are [edge from a, edge from b].
+    let inputs = &g.node(m).unwrap().port_order["inputs"];
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(g.edge(inputs[0]).unwrap().from, a);
+    assert_eq!(g.edge(inputs[1]).unwrap().from, b);
+
+    // Cook mode.
+    assert_eq!(e2.cook_mode(), CookMode::Manual);
+
+    // Asset bytes restaged (content-addressed id matches, bytes identical).
+    assert_eq!(e2.asset_count(), 1);
+    assert_eq!(e2.asset_bytes(&asset), Some(obj.as_slice()));
+
+    // The host sidecar (camera + meta) came back for the boundary to apply.
+    assert_eq!(loaded.sidecar.meta.name, "My Scene");
+    let cam = &loaded.sidecar.view.panes[0].camera;
+    assert!((cam.distance - 12.0).abs() < 1e-6);
+    assert!((cam.target[1] - 2.0).abs() < 1e-6);
 }

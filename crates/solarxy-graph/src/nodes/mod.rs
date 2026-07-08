@@ -31,7 +31,7 @@ mod imports;
 mod lights;
 mod note_node;
 
-pub use imports::parse_bytes;
+pub use imports::{parse_bytes, parse_model};
 
 use crate::GraphError;
 use crate::registry::{NodeTypeDescriptor, Registry};

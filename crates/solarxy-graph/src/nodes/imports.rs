@@ -15,7 +15,7 @@ use solarxy_kernel::transform::{RotateOrder, bake_transform, compose_trs};
 
 use super::common::{geometry_output, params_with};
 use crate::assets::AssetTable;
-use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, JobRequest, Outputs};
+use crate::cook::{CookCtx, CookError, CookOutcome, ImportOptions, Inputs, JobRequest, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
@@ -181,9 +181,9 @@ pub fn ply_descriptor() -> NodeTypeDescriptor {
     descriptor_for(&PLY)
 }
 
-/// The shared import cook. Dispatches by the node's format (from the
-/// resolved `file` accept-list is not available here, so the format is
-/// carried via the type id, recovered from the `scale`-independent path).
+/// The shared import cook. The format is the staged asset's file extension
+/// (all four import nodes share this body); the resolved finishing options
+/// travel with the async job so the worker returns finished geometry.
 fn cook_import(
     p: &ResolvedParams,
     _in: &Inputs,
@@ -205,23 +205,33 @@ fn cook_import(
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
+    let options = import_options(p, &format);
 
-    // On the web, hand heavy parsing to the import worker.
+    // On the web, hand heavy parsing (and its finishing) to the worker.
     if cx.async_jobs {
         return Ok(CookOutcome::Pending(JobRequest::ParseModel {
             asset: asset.clone(),
             format,
+            options,
         }));
     }
 
-    // Native / test path: parse inline.
-    let bytes = (*entry.bytes).clone();
-    let name = entry.name.clone();
-    let raw = parse_bytes(&format, &bytes, &name, cx.assets)
+    // Native / test path: parse and finish inline.
+    let set = parse_model(&format, &entry.bytes, &entry.name, cx.assets, &options)
         .map_err(|message| CookError::Failed { message })?;
-    let mut set = GeometrySet::from_raw(raw);
-    apply_import_options(&mut set, p);
     Ok(CookOutcome::Done(Outputs::geometry(set)))
+}
+
+/// Reads the resolved finishing options for an import. Format-specific
+/// toggles are read only for the format that declares them (so this never
+/// touches a param the node's descriptor lacks).
+fn import_options(p: &ResolvedParams, format: &str) -> ImportOptions {
+    ImportOptions {
+        scale: p.f32("scale"),
+        center_to_origin: p.bool("center_to_origin"),
+        recompute_normals: (format == "stl").then(|| p.bool("recompute_normals")),
+        preserve_materials: matches!(format, "gltf" | "glb").then(|| p.bool("preserve_materials")),
+    }
 }
 
 /// Parses staged bytes for a format via the `solarxy-formats` byte loaders.
@@ -245,12 +255,47 @@ pub fn parse_bytes(
     .map_err(|e| e.to_string())
 }
 
+/// Parses staged bytes and finishes the result: the full import. Both the
+/// native host ([`crate::engine::Engine::resolve_job`]) and the web import
+/// worker call this, so the inline and off-thread paths produce identical
+/// geometry.
+pub fn parse_model(
+    format: &str,
+    bytes: &[u8],
+    name: &str,
+    assets: &AssetTable,
+    options: &ImportOptions,
+) -> Result<GeometrySet, String> {
+    let raw = parse_bytes(format, bytes, name, assets)?;
+    let mut set = GeometrySet::from_raw(raw);
+    finish_import_set(&mut set, options);
+    Ok(set)
+}
+
+/// Applies the resolved finishing options to a freshly parsed set: the
+/// format toggles first (recompute STL normals; drop glTF materials for a
+/// neutral look), then the common uniform scale and recenter.
+fn finish_import_set(set: &mut GeometrySet, o: &ImportOptions) {
+    if o.recompute_normals == Some(true) {
+        for m in &mut set.meshes {
+            m.recompute_normals();
+        }
+    }
+    if o.preserve_materials == Some(false) {
+        // Neutralize: drop material bindings so the renderer's default
+        // (clay) material is used, and release the material table.
+        for m in &mut set.meshes {
+            m.material_index = None;
+        }
+        set.materials.clear();
+    }
+    apply_scale_center(set, o.scale, o.center_to_origin);
+}
+
 /// Applies the common `scale` and `center_to_origin` options by baking a
 /// transform (scale about the origin, then recenter). Failures (a zero
 /// scale is excluded by the hard range) fall back to the unscaled set.
-fn apply_import_options(set: &mut GeometrySet, p: &ResolvedParams) {
-    let scale = p.f32("scale");
-    let center = p.bool("center_to_origin");
+fn apply_scale_center(set: &mut GeometrySet, scale: f32, center: bool) {
     if (scale - 1.0).abs() < f32::EPSILON && !center {
         return;
     }
@@ -284,7 +329,7 @@ mod tests {
     #[test]
     fn stl_import_cooks_inline_and_applies_scale() {
         let mut assets = AssetTable::new();
-        let id = assets.stage("tri.stl", TRI_STL.as_bytes().to_vec());
+        let id = assets.stage("tri.stl", "model/stl", TRI_STL.as_bytes().to_vec());
 
         let mut stored = BTreeMap::new();
         stored.insert(
@@ -328,7 +373,7 @@ mod tests {
     #[test]
     fn async_mode_returns_a_pending_job() {
         let mut assets = AssetTable::new();
-        let id = assets.stage("tri.stl", TRI_STL.as_bytes().to_vec());
+        let id = assets.stage("tri.stl", "model/stl", TRI_STL.as_bytes().to_vec());
         let mut stored = BTreeMap::new();
         stored.insert(
             "file".to_string(),
@@ -347,7 +392,11 @@ mod tests {
     #[test]
     fn bad_bytes_are_a_cook_error() {
         let mut assets = AssetTable::new();
-        let id = assets.stage("bad.ply", b"not a ply file".to_vec());
+        let id = assets.stage(
+            "bad.ply",
+            "application/octet-stream",
+            b"not a ply file".to_vec(),
+        );
         let mut stored = BTreeMap::new();
         stored.insert(
             "file".to_string(),
@@ -360,5 +409,83 @@ mod tests {
             cook_import(&resolved, &Inputs::default(), &mut cx),
             Err(CookError::Failed { .. })
         ));
+    }
+
+    fn plain_options() -> ImportOptions {
+        ImportOptions {
+            scale: 1.0,
+            center_to_origin: false,
+            recompute_normals: None,
+            preserve_materials: None,
+        }
+    }
+
+    fn bare_tri() -> solarxy_kernel::KernelMesh {
+        solarxy_kernel::KernelMesh::new(
+            "m",
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        )
+    }
+
+    #[test]
+    fn recompute_normals_toggle_controls_stl_normals() {
+        // Some(true) fills normals from topology.
+        let mut set = GeometrySet::from_mesh(bare_tri());
+        assert!(set.meshes[0].normals.is_none());
+        finish_import_set(
+            &mut set,
+            &ImportOptions {
+                recompute_normals: Some(true),
+                ..plain_options()
+            },
+        );
+        assert!(set.meshes[0].normals.is_some());
+
+        // Some(false) leaves the mesh's (absent) normals untouched.
+        let mut kept = GeometrySet::from_mesh(bare_tri());
+        finish_import_set(
+            &mut kept,
+            &ImportOptions {
+                recompute_normals: Some(false),
+                ..plain_options()
+            },
+        );
+        assert!(kept.meshes[0].normals.is_none());
+    }
+
+    #[test]
+    fn preserve_materials_false_neutralizes_gltf_materials() {
+        let material = std::sync::Arc::new(solarxy_core::RawMaterialData {
+            name: "brass".to_string(),
+            ..Default::default()
+        });
+
+        let mut mesh = bare_tri();
+        mesh.material_index = Some(0);
+        let mut set = GeometrySet::from_parts(vec![mesh], vec![material.clone()]);
+        finish_import_set(
+            &mut set,
+            &ImportOptions {
+                preserve_materials: Some(false),
+                ..plain_options()
+            },
+        );
+        assert!(set.materials.is_empty(), "materials dropped");
+        assert_eq!(set.meshes[0].material_index, None, "binding cleared");
+
+        // Some(true) keeps materials and bindings.
+        let mut mesh2 = bare_tri();
+        mesh2.material_index = Some(0);
+        let mut kept = GeometrySet::from_parts(vec![mesh2], vec![material]);
+        finish_import_set(
+            &mut kept,
+            &ImportOptions {
+                preserve_materials: Some(true),
+                ..plain_options()
+            },
+        );
+        assert_eq!(kept.materials.len(), 1);
+        assert_eq!(kept.meshes[0].material_index, Some(0));
     }
 }

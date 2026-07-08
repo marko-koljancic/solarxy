@@ -160,16 +160,37 @@ pub enum CookOutcome {
     Pending(JobRequest),
 }
 
-/// One async work order (the import worker protocol; Phase 5 moves the
-/// execution to a real web worker, the protocol is frozen here).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The resolved per-import finishing options that ride along with a parse
+/// job so the fulfiller (native inline, or the web import worker) returns
+/// already-finished geometry: the common uniform scale and recenter, plus
+/// the format-specific toggles. A format-specific field is `Some` only for
+/// the format that declares it (`recompute_normals` on STL,
+/// `preserve_materials` on glTF). PLY's `vertex_colors` is reserved until
+/// the renderer grows a per-vertex color channel, so it is not carried yet.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOptions {
+    pub scale: f32,
+    pub center_to_origin: bool,
+    pub recompute_normals: Option<bool>,
+    pub preserve_materials: Option<bool>,
+}
+
+/// One async work order (the import worker protocol; Phase 5 runs the
+/// execution in a real web worker). The `options` travel with the request
+/// so the worker's parsed result is finished (scaled, recentered, toggles
+/// applied) before it transfers back, keeping the native and web paths
+/// bit-identical.
+#[derive(Debug, Clone, PartialEq)]
 pub enum JobRequest {
-    /// Parse a staged model file into raw model data.
+    /// Parse a staged model file into a finished geometry set.
     ParseModel {
         asset: AssetId,
         /// Lowercase extension without the dot (`obj`, `gltf`, `glb`,
         /// `stl`, `ply`).
         format: String,
+        /// The resolved finishing options for this import.
+        options: ImportOptions,
     },
 }
 

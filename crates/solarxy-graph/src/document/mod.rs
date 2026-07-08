@@ -383,6 +383,28 @@ impl Document {
         &mut self.review
     }
 
+    /// The set of staged asset ids referenced by an `AssetRef` param on any
+    /// node across every context (root + all subflows). This is the
+    /// reachable set the `.slxy` writer embeds, so staged bytes no longer
+    /// referenced by any node are dropped at save time (GC-at-save).
+    #[must_use]
+    pub fn referenced_assets(&self) -> std::collections::BTreeSet<crate::params::AssetId> {
+        use crate::params::{ParamSource, ParamValue};
+        let mut ids = std::collections::BTreeSet::new();
+        for graph in std::iter::once(&self.root).chain(self.subflows.values()) {
+            for node in graph.nodes() {
+                for src in node.params.values() {
+                    if let ParamSource::Literal(ParamValue::Asset(id)) = src
+                        && !id.0.is_empty()
+                    {
+                        ids.insert(id.clone());
+                    }
+                }
+            }
+        }
+        ids
+    }
+
     pub fn graph(&self, ctx: GraphContext) -> Result<&Graph, GraphError> {
         match ctx {
             GraphContext::Root => Ok(&self.root),
