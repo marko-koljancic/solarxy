@@ -8,6 +8,15 @@ fn engine() -> Engine {
     Engine::new().expect("builtin registry is valid")
 }
 
+/// A deterministic host clock for the cook-duration test: each call returns
+/// the next integer millisecond, so a single node's two samples (before and
+/// after its compute) differ by exactly 1.0. Only the duration test reads
+/// it, so the shared counter has one consumer.
+static CLOCK_TICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn tick_now() -> f64 {
+    CLOCK_TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as f64
+}
+
 /// Adds a node in a fresh subflow and returns (engine, subflow ctx).
 fn subflow_engine() -> (Engine, GraphContext) {
     let mut e = engine();
@@ -261,6 +270,41 @@ fn snapshot_and_registry_snapshot_serialize() {
 }
 
 #[test]
+fn registry_snapshot_carries_the_coercion_matrix() {
+    use crate::engine::snapshot::CoercionKind;
+    use crate::registry::coerce::DataType;
+    let e = engine();
+    let reg = e.registry_snapshot();
+
+    let find = |from: DataType, to: DataType| {
+        reg.coercions
+            .iter()
+            .find(|c| c.from == from && c.to == to)
+            .map(|c| c.kind)
+    };
+    // Same, lossless, and lossy cells are all present and labeled.
+    assert!(matches!(
+        find(DataType::Float, DataType::Float),
+        Some(CoercionKind::Same)
+    ));
+    assert!(matches!(
+        find(DataType::Int, DataType::Float),
+        Some(CoercionKind::Lossless)
+    ));
+    assert!(matches!(
+        find(DataType::Float, DataType::Int),
+        Some(CoercionKind::Lossy)
+    ));
+    // A forbidden cell is simply absent (frontend treats missing as reject).
+    assert!(find(DataType::Geometry, DataType::Float).is_none());
+
+    // It serializes with camelCase kinds and snake_case data types.
+    let json = serde_json::to_string(&reg).unwrap();
+    assert!(json.contains("\"lossy\""));
+    assert!(json.contains("\"geometry\""));
+}
+
+#[test]
 fn command_round_trips_through_serde() {
     let cmd = Command::SetParam {
         ctx: GraphContext::Root,
@@ -283,6 +327,59 @@ fn command_round_trips_through_serde() {
 }
 
 #[test]
+fn command_boundary_json_shape_is_camelcase() {
+    // The wasm boundary contract the frontend depends on: camelCase variant
+    // tags and fields, and the `root` / `{subflow: id}` context shape.
+    let cmd = Command::AddNode {
+        ctx: GraphContext::Root,
+        node_type: "box".into(),
+        position: [1.0, 2.0],
+    };
+    let v = serde_json::to_value(&cmd).unwrap();
+    assert_eq!(v["type"], "addNode");
+    assert_eq!(v["nodeType"], "box");
+    assert_eq!(v["ctx"], "root");
+
+    let cmd2 = Command::AddNode {
+        ctx: GraphContext::Subflow(NodeId(5)),
+        node_type: "sphere".into(),
+        position: [0.0, 0.0],
+    };
+    let v2 = serde_json::to_value(&cmd2).unwrap();
+    assert_eq!(v2["ctx"]["subflow"], 5);
+
+    // And it deserializes back from that shape (JS -> Rust).
+    let back: Command = serde_json::from_value(v2).unwrap();
+    assert!(matches!(
+        back,
+        Command::AddNode {
+            ctx: GraphContext::Subflow(NodeId(5)),
+            ..
+        }
+    ));
+
+    // The event mirror is camelCase too (typeId, not type_id).
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let batch = serde_json::to_value(
+        e.apply(Command::AddNode {
+            ctx: GraphContext::Subflow(geo),
+            node_type: "box".into(),
+            position: [0.0, 0.0],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let node_added = batch["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|ev| ev["type"] == "nodeAdded")
+        .unwrap();
+    assert_eq!(node_added["node"]["typeId"], "box");
+}
+
+#[test]
 fn cook_mode_toggles_and_reports() {
     let mut e = engine();
     assert_eq!(e.cook_mode(), CookMode::Auto);
@@ -298,6 +395,61 @@ fn cook_mode_toggles_and_reports() {
         }
     )));
     assert_eq!(e.cook_mode(), CookMode::Manual);
+}
+
+#[test]
+fn manual_mode_freezes_cooking_until_cook_now() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    // Auto: the box cooks on the frame.
+    e.cook(&mut || true);
+    assert_eq!(e.node_geometry_points(box_id), 24);
+    assert!(e.dirty_nodes().is_empty());
+
+    // Switch to manual, then edit: the node goes stale but does not cook.
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Manual,
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    assert_eq!(
+        e.dirty_nodes(),
+        vec![box_id],
+        "the edit marks the node stale"
+    );
+    let events = e.cook(&mut || true);
+    assert!(
+        events.is_empty(),
+        "manual mode does not cook without CookNow"
+    );
+    assert_eq!(e.dirty_nodes(), vec![box_id], "still stale");
+
+    // CookNow arms a cook; the next frame drains the stale set.
+    e.apply(Command::CookNow).unwrap();
+    e.cook(&mut || true);
+    assert!(e.dirty_nodes().is_empty(), "CookNow drains the stale set");
+
+    // Switching back to Auto re-cooks any stale set automatically.
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(4.0)),
+    })
+    .unwrap();
+    assert_eq!(e.dirty_nodes(), vec![box_id]);
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Auto,
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(e.dirty_nodes().is_empty(), "Auto cooks the stale set");
 }
 
 // Undo / redo.
@@ -862,6 +1014,127 @@ fn stale_job_result_is_dropped_by_the_generation_guard() {
     let fresh_result = e.resolve_job(&fresh_request);
     e.submit_job_result(ctx, fresh_job, fresh_result);
     assert_eq!(e.node_geometry_points(node), 3);
+}
+
+// Phase-4 additions: picking, document save/load, host-clocked durations.
+
+#[test]
+fn pick_returns_the_geo_container_under_the_ray() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    add(&mut e, sub, "box"); // origin-centered, claims display
+    e.cook(&mut || true);
+
+    // A ray down the +Z axis toward the origin hits the box's geo.
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+    // The same ray reversed points away: no hit.
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]), None);
+    // A ray that misses the box entirely.
+    assert_eq!(e.pick([100.0, 100.0, 100.0], [1.0, 0.0, 0.0]), None);
+    // A degenerate (zero-length) direction is rejected.
+    assert_eq!(e.pick([0.0, 0.0, 5.0], [0.0, 0.0, 0.0]), None);
+}
+
+#[test]
+fn save_and_load_document_round_trips_and_emits_replaced() {
+    // Build a root geo with a box in its subflow, plus a param edit.
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_id = add(&mut e, sub, "box");
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.apply(Command::SetCookMode {
+        mode: CookMode::Manual,
+    })
+    .unwrap();
+
+    // Save, JSON round-trip, load into a fresh engine.
+    let file = e.save_document();
+    let json = serde_json::to_string(&file).unwrap();
+    let restored: DocumentFile = serde_json::from_str(&json).unwrap();
+
+    let mut e2 = engine();
+    let rev_before = e2.revision();
+    let batch = e2.load_document(&restored);
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::DocumentReplaced)),
+        "load emits a single DocumentReplaced"
+    );
+    assert!(e2.revision() > rev_before, "load advances the revision");
+
+    // Structure, params, display flag, and cook mode restored.
+    {
+        assert!(
+            e2.document()
+                .graph(GraphContext::Root)
+                .unwrap()
+                .node(geo)
+                .is_some()
+        );
+        let g = e2.document().graph(sub).unwrap();
+        assert_eq!(g.active_output, Some(box_id));
+        assert_eq!(
+            g.node(box_id).unwrap().params["width"],
+            ParamSource::Literal(ParamValue::Float(3.0))
+        );
+    }
+    assert_eq!(e2.cook_mode(), CookMode::Manual);
+
+    // The loaded document cooks and picks like the original.
+    e2.cook(&mut || true);
+    assert_eq!(e2.pick([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]), Some(geo));
+
+    // A freshly minted node gets a brand-new id (the mint resumed past the
+    // loaded ids), so it is distinct from the loaded box.
+    let extra = add(&mut e2, sub, "sphere");
+    assert_ne!(extra, box_id);
+    assert_ne!(extra, geo);
+}
+
+#[test]
+fn cook_durations_use_the_installed_clock() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_clock(tick_now);
+    let box_id = add(&mut e, ctx, "box");
+    let events = e.cook(&mut || true);
+    // The box's success status carries a real (non-zero) millisecond time.
+    let ms = events.iter().find_map(|ev| match ev {
+        EngineEvent::CookStatus {
+            node,
+            status: CookStatus::Ok { ms },
+        } if *node == box_id => Some(*ms),
+        _ => None,
+    });
+    assert!(
+        matches!(ms, Some(m) if m > 0.0),
+        "installed clock yields a non-zero cook duration, got {ms:?}"
+    );
+}
+
+#[test]
+fn cook_status_ms_stays_zero_without_a_clock() {
+    // The native/test default (no clock) preserves the Phase-3 behavior.
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let events = e.cook(&mut || true);
+    let ms = events.iter().find_map(|ev| match ev {
+        EngineEvent::CookStatus {
+            node,
+            status: CookStatus::Ok { ms },
+        } if *node == box_id => Some(*ms),
+        _ => None,
+    });
+    assert_eq!(ms, Some(0.0));
 }
 
 #[test]

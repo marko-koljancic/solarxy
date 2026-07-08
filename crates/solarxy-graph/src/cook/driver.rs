@@ -74,6 +74,12 @@ pub struct CookEngine {
     /// Whether cook bodies may offload to async jobs (true on web with an
     /// import worker; false natively, where imports parse inline).
     async_jobs: bool,
+    /// Optional host wall-clock, in milliseconds. A `fn` pointer (not a
+    /// closure) so the driver stays wasm-safe and the struct stays
+    /// `Debug`/`Default`: the web host installs `performance.now`, native
+    /// callers a monotonic source, and tests a deterministic tick. When
+    /// unset, per-node cook durations stay `0` (the Phase-3 behavior).
+    clock: Option<fn() -> f64>,
 }
 
 impl CookEngine {
@@ -86,6 +92,33 @@ impl CookEngine {
     /// default; native cooks parse imports inline.
     pub fn set_async_jobs(&mut self, enabled: bool) {
         self.async_jobs = enabled;
+    }
+
+    /// Installs a host wall-clock (milliseconds) so successful cooks report
+    /// their real duration in `CookStatus::Ok { ms }` and `NodeCookStats`.
+    /// Without one, durations stay `0`.
+    pub fn set_clock(&mut self, clock: fn() -> f64) {
+        self.clock = Some(clock);
+    }
+
+    /// The current host time in milliseconds, or `0.0` when no clock is
+    /// installed.
+    fn now(&self) -> f64 {
+        self.clock.map_or(0.0, |f| f())
+    }
+
+    /// Clears all per-node cook bookkeeping (state, cached outputs, status,
+    /// stats, generations, in-flight jobs) while preserving configuration
+    /// (the async-jobs flag and the installed clock). Used when a whole new
+    /// document is loaded, so the next cook rebuilds every node from clean.
+    pub fn reset(&mut self) {
+        self.state.clear();
+        self.outputs.clear();
+        self.status.clear();
+        self.stats.clear();
+        self.generation.clear();
+        self.jobs.clear();
+        self.next_job = 0;
     }
 
     /// Registers a freshly added node (starts `Dirty`).
@@ -240,8 +273,10 @@ impl CookEngine {
 
         // Bypass short-circuits the compute entirely.
         if data.bypassed {
+            let start = self.now();
             let outcome = self.resolve_bypass(graph, desc, node);
-            self.commit_outputs(node, outcome, report);
+            let elapsed = self.now() - start;
+            self.commit_outputs(node, outcome, elapsed, report);
             self.state.insert(node, CookState::Clean);
             return;
         }
@@ -266,11 +301,14 @@ impl CookEngine {
             }
         };
 
-        // Compute.
+        // Compute (timed against the host clock, if installed).
         let mut cx = CookCtx::new(assets, self.async_jobs);
-        match (desc.cook)(&resolved, &inputs, &mut cx) {
+        let start = self.now();
+        let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
+        let elapsed = self.now() - start;
+        match outcome {
             Ok(CookOutcome::Done(outputs)) => {
-                self.commit_outputs(node, outputs, report);
+                self.commit_outputs(node, outputs, elapsed, report);
                 self.state.insert(node, CookState::Clean);
             }
             Ok(CookOutcome::Pending(request)) => {
@@ -380,14 +418,21 @@ impl CookEngine {
 
     /// Commits a successful cook's outputs with keep-last-good: a
     /// renderable-empty result retains the previous output (and would
-    /// badge a warning); a non-empty result replaces it.
-    fn commit_outputs(&mut self, node: NodeId, outputs: Outputs, report: &mut CookReport) {
+    /// badge a warning); a non-empty result replaces it. `elapsed_ms` is the
+    /// host-clocked compute time (0.0 when no clock is installed).
+    fn commit_outputs(
+        &mut self,
+        node: NodeId,
+        outputs: Outputs,
+        elapsed_ms: f64,
+        report: &mut CookReport,
+    ) {
         let keep_last_good = outputs.is_renderable_empty() && self.outputs.contains_key(&node);
         if !keep_last_good {
             self.outputs.insert(node, Arc::new(outputs));
         }
-        self.emit_stats(node, report);
-        self.set_status(node, CookStatus::Ok { ms: 0.0 }, report);
+        self.emit_stats(node, elapsed_ms, report);
+        self.set_status(node, CookStatus::Ok { ms: elapsed_ms }, report);
     }
 
     /// Commits a cook failure. `InputRequired` clears the cache (explicit
@@ -434,7 +479,9 @@ impl CookEngine {
         let super::JobResult::Model(model) = result;
         match model {
             Ok(set) => {
-                self.commit_outputs(node, Outputs::geometry(set), &mut report);
+                // Async wall-time is not charged to a cook budget; the
+                // commit itself is effectively instantaneous.
+                self.commit_outputs(node, Outputs::geometry(set), 0.0, &mut report);
             }
             Err(message) => {
                 self.commit_error(node, &CookError::Failed { message }, &mut report);
@@ -450,10 +497,11 @@ impl CookEngine {
     }
 
     /// Emits a coalesced stats change (geometry shape only; duration is
-    /// ignored so an unchanged mesh does not spam events). Duration is
-    /// left at zero here; a wall-clock source is a later refinement.
-    fn emit_stats(&mut self, node: NodeId, report: &mut CookReport) {
-        let stats = self.outputs.get(&node).map_or(
+    /// ignored by `same_shape` so an unchanged mesh does not spam events).
+    /// `elapsed_ms` records the last cook's wall-time on the stored stats
+    /// for the info popover; it is `0.0` when no clock is installed.
+    fn emit_stats(&mut self, node: NodeId, elapsed_ms: f64, report: &mut CookReport) {
+        let mut stats = self.outputs.get(&node).map_or(
             NodeCookStats {
                 duration_us: 0,
                 points: 0,
@@ -463,6 +511,7 @@ impl CookEngine {
             },
             |o| stats_from_outputs(o),
         );
+        stats.duration_us = (elapsed_ms * 1000.0).max(0.0).round() as u64;
         let changed = self
             .stats
             .get(&node)

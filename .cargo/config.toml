@@ -9,3 +9,9 @@ rustflags = ["-C", "target-feature=+avx2,+fma"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "target-cpu=apple-m1"]
+
+# getrandom 0.3 (pulled transitively on wasm32, e.g. via ahash) requires an
+# explicit backend selection. Only solarxy-web targets wasm32 in this
+# workspace; the flag is inert for every native build.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

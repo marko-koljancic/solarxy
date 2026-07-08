@@ -20,7 +20,7 @@ use crate::GraphError;
 use crate::assets::AssetTable;
 use crate::cook::state::{CookState, CookStatus};
 use crate::cook::{CookEngine, JobId, JobRequest, JobResult};
-use crate::document::{Document, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
+use crate::document::{Document, DocumentData, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
 use crate::params::{AssetId, ParamSource};
 use crate::registry::resolve::param_source_from_json;
 use crate::registry::{Arity, Registry};
@@ -33,20 +33,25 @@ mod undo;
 use undo::{Transaction, UndoOp, UndoStack};
 
 /// Cook scheduling mode (node catalog / boundary design).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CookMode {
     /// Recook dirtied nodes on the next frame automatically.
+    #[default]
     Auto,
     /// Accumulate a stale set; recook only on `CookNow`.
     Manual,
 }
 
 /// A command from the shell. The serde form is the wasm-boundary contract
-/// (Phase 4 adds tsify on top); it round-trips losslessly for clipboard
-/// and undo tests.
+/// (variant tags and all fields are camelCase for idiomatic JS); it
+/// round-trips losslessly for clipboard and undo tests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Command {
     AddNode {
         ctx: GraphContext,
@@ -161,7 +166,11 @@ impl From<PortRefDto> for PortRef {
 /// in JavaScript, so only `Serialize` is derived. Batched with a monotonic
 /// revision so a mirror can detect desync and resnapshot.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum EngineEvent {
     NodeAdded {
         ctx: GraphContext,
@@ -235,6 +244,25 @@ pub struct EventBatch {
     pub events: Vec<EngineEvent>,
 }
 
+/// A whole-document save file: the graph data plus the editor's cook mode.
+/// The Phase-4 web host serializes this to JSON for OPFS autosave and the
+/// explicit save/load path; Phase 5's `.slxy` ZIP embeds the same
+/// `DocumentData` as its `document.json`, wrapping asset payloads around it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentFile {
+    /// The save-format version (1 in Phase 4), for forward migration.
+    #[serde(default = "one")]
+    pub format_version: u32,
+    pub document: DocumentData,
+    #[serde(default)]
+    pub cook_mode: CookMode,
+}
+
+fn one() -> u32 {
+    1
+}
+
 /// A command failure (a structurally illegal request). Cook failures are
 /// data, delivered as `CookStatus::Error` events, not errors here.
 #[derive(Debug, thiserror::Error)]
@@ -258,6 +286,9 @@ pub struct Engine {
     cook: CookEngine,
     assets: AssetTable,
     cook_mode: CookMode,
+    /// In `Manual` mode, cooking is suppressed until a `CookNow` arms this;
+    /// it disarms once the stale set drains. Ignored in `Auto`.
+    manual_cook_requested: bool,
     revision: u64,
     /// Transient preview overlays (param drags): consulted by the resolver
     /// path, never written to the document or the undo stack.
@@ -284,6 +315,7 @@ impl Engine {
             cook: CookEngine::new(),
             assets: AssetTable::new(),
             cook_mode: CookMode::Auto,
+            manual_cook_requested: false,
             revision: 0,
             previews: BTreeMap::new(),
             scene: SceneDelta::default(),
@@ -296,6 +328,14 @@ impl Engine {
     /// Off by default: native cooks parse imports inline.
     pub fn set_async_jobs(&mut self, enabled: bool) {
         self.cook.set_async_jobs(enabled);
+    }
+
+    /// Installs a host wall-clock (milliseconds), so successful cooks report
+    /// their real duration in `CookStatus::Ok { ms }` (the badge tooltip and
+    /// info-popover cook time). The web host passes `performance.now`;
+    /// without one, durations stay `0` (the native/test default).
+    pub fn set_clock(&mut self, clock: fn() -> f64) {
+        self.cook.set_clock(clock);
     }
 
     #[must_use]
@@ -390,6 +430,9 @@ impl Engine {
             } => self.reorder_variadic(ctx, node, &port, order, events, inv),
             Command::SetCookMode { mode } => {
                 self.cook_mode = mode;
+                // Leaving Manual re-cooks the stale set automatically (Auto
+                // ignores the flag); entering Manual freezes until CookNow.
+                self.manual_cook_requested = false;
                 events.push(EngineEvent::CookModeChanged { mode });
                 Ok(())
             }
@@ -437,10 +480,13 @@ impl Engine {
                 doc.review_mut().remove(id);
                 Ok(())
             }),
-            // CookNow is a no-op here (the frame loop cooks); the
-            // transaction/undo commands are intercepted in `apply`.
-            Command::CookNow
-            | Command::BeginTransaction { .. }
+            // CookNow arms a manual-mode cook (drains on the next frames).
+            Command::CookNow => {
+                self.manual_cook_requested = true;
+                Ok(())
+            }
+            // The transaction/undo commands are intercepted in `apply`.
+            Command::BeginTransaction { .. }
             | Command::EndTransaction
             | Command::Undo
             | Command::Redo => Ok(()),
@@ -1194,8 +1240,16 @@ impl Engine {
     /// Cooks every context that has dirty work, under `should_continue`
     /// (native callers pass a wall-clock deadline; the web host a frame
     /// budget). Returns the cook events (status + coalesced stats).
+    ///
+    /// In `Manual` cook mode the stale set accumulates untouched (the
+    /// viewport keeps its last cooked scene) until a `CookNow` arms a cook;
+    /// the arm clears once the stale set drains.
     pub fn cook(&mut self, should_continue: &mut dyn FnMut() -> bool) -> Vec<EngineEvent> {
+        if self.cook_mode == CookMode::Manual && !self.manual_cook_requested {
+            return Vec::new();
+        }
         let mut events = Vec::new();
+        let mut remaining = 0usize;
         // Root first, then each subflow in id order (deterministic).
         let mut contexts = vec![GraphContext::Root];
         contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
@@ -1207,6 +1261,7 @@ impl Engine {
                 ctx,
                 should_continue,
             );
+            remaining += report.remaining_dirty;
             for (node, status) in report.status_changed {
                 events.push(EngineEvent::CookStatus { node, status });
             }
@@ -1224,7 +1279,30 @@ impl Engine {
                 self.pending_jobs.push((ctx, job, request));
             }
         }
+        // A manual cook stays armed until the stale set fully drains.
+        if remaining == 0 {
+            self.manual_cook_requested = false;
+        }
         events
+    }
+
+    /// The nodes currently dirty (stale) across all contexts, for the
+    /// manual-mode stale badges and header count.
+    #[must_use]
+    pub fn dirty_nodes(&self) -> Vec<NodeId> {
+        let mut ids = Vec::new();
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            if let Ok(graph) = self.doc.graph(ctx) {
+                for node in graph.nodes() {
+                    if self.cook.state(node.id) == CookState::Dirty {
+                        ids.push(node.id);
+                    }
+                }
+            }
+        }
+        ids
     }
 
     /// Drains the async jobs the last cook spawned. The host dispatches each
@@ -1285,6 +1363,61 @@ impl Engine {
     pub fn take_scene_delta(&mut self) -> SceneDelta {
         self.scene = scene::build_scene_delta(&self.doc, &self.registry, &self.cook);
         std::mem::take(&mut self.scene)
+    }
+
+    /// Picks the root `geo` container the ray hits nearest over the
+    /// committed, world-transformed display geometry (single-pane picking;
+    /// pane-awareness is Phase 6). Runs in Rust over CPU-retained geometry,
+    /// so nothing crosses into JavaScript. The host builds the ray from the
+    /// cursor via `solarxy_core::raycast::screen_to_world_ray`.
+    #[must_use]
+    pub fn pick(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<NodeId> {
+        scene::pick_node(&self.doc, &self.registry, &self.cook, origin, direction)
+    }
+
+    /// Serializes the whole document plus the editor cook mode (the autosave
+    /// / explicit-save path). Geometry is not included; the frontend cooks
+    /// after a load.
+    #[must_use]
+    pub fn save_document(&self) -> DocumentFile {
+        DocumentFile {
+            format_version: 1,
+            document: self.doc.to_data(),
+            cook_mode: self.cook_mode,
+        }
+    }
+
+    /// Replaces the whole document from a save file (autosave recovery,
+    /// scene open). Resets cook state (preserving the async flag and clock),
+    /// re-registers and dirties every node so the next cook rebuilds the
+    /// scene, clears undo/previews/pending jobs, advances the revision, and
+    /// emits a single `DocumentReplaced` for a full mirror resnapshot.
+    pub fn load_document(&mut self, file: &DocumentFile) -> EventBatch {
+        self.doc = Document::from_data(&file.document);
+        self.cook_mode = file.cook_mode;
+        // Arm a cook so the loaded scene populates the viewport once even in
+        // Manual mode (there is no last-cooked scene to keep after a load).
+        self.manual_cook_requested = true;
+        self.cook.reset();
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            let ids: Vec<NodeId> = self
+                .doc
+                .graph(ctx)
+                .map(|g| g.nodes().map(|n| n.id).collect())
+                .unwrap_or_default();
+            for id in ids {
+                self.cook.insert_node(id);
+                self.mark_dirty(ctx, id);
+            }
+        }
+        self.undo = UndoStack::default();
+        self.previews.clear();
+        self.pending_jobs.clear();
+        self.scene = SceneDelta::default();
+        self.revision += 1;
+        self.batch(vec![EngineEvent::DocumentReplaced])
     }
 
     /// The full UI mirror (recovery after desync / structural undo).

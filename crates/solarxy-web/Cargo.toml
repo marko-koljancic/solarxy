@@ -1,0 +1,51 @@
+[package]
+name = "solarxy-web"
+description = "The Solarxy web shell: the wasm-bindgen boundary that hosts the WebGPU canvas, drives the frame loop, and serializes Commands and Events between the Rust core (solarxy-graph + solarxy-renderer) and the React frontend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# cdylib for the wasm artifact; rlib so native `cargo build`/`test` can link
+# the (mostly wasm-gated) crate as an ordinary library.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Native-safe: these compile on every target, so `cargo build --workspace`
+# stays green. The wasm-only host lives behind cfg(target_arch = "wasm32").
+solarxy-graph = { path = "../solarxy-graph" }
+solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
+wgpu = "27.0.1"
+cgmath = { workspace = true }
+bytemuck = { version = "1", features = ["derive"] }
+wasm-bindgen = "=0.2.126"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+# Backend selection for getrandom on wasm32; pairs with the
+# getrandom_backend="wasm_js" rustflag in the workspace .cargo/config.toml.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Performance",
+    "console",
+    "Gpu",
+]
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

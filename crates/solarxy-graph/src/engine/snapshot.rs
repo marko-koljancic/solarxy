@@ -18,6 +18,7 @@ use crate::registry::{Arity, BypassBehavior, NodeTypeDescriptor, PortSpec, Regis
 
 /// One node as the UI mirror sees it (no geometry).
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeMirror {
     pub id: NodeId,
     pub type_id: String,
@@ -44,6 +45,7 @@ impl NodeMirror {
 
 /// One edge as the mirror sees it.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EdgeMirror {
     pub id: EdgeId,
     pub from: NodeId,
@@ -66,6 +68,7 @@ impl From<&Edge> for EdgeMirror {
 
 /// One graph context's contents.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphMirror {
     pub nodes: Vec<NodeMirror>,
     pub edges: Vec<EdgeMirror>,
@@ -121,6 +124,33 @@ impl DocumentSnapshot {
 #[derive(Debug, Clone, Serialize)]
 pub struct RegistrySnapshot {
     pub nodes: Vec<NodeTypeSnapshot>,
+    /// Every legal wire coercion (`Same`/`Lossless`/`Lossy`); pairs absent
+    /// from this list are forbidden. The frontend reads it to preview a
+    /// connection's ring (plain vs warning) or its rejection without a
+    /// round-trip; the engine's `validate_connection` remains the single
+    /// source of legality.
+    pub coercions: Vec<CoercionEntry>,
+}
+
+/// One legal cell of the wire-coercion matrix.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoercionEntry {
+    pub from: crate::registry::coerce::DataType,
+    pub to: crate::registry::coerce::DataType,
+    pub kind: CoercionKind,
+}
+
+/// How a legal wire coercion presents in the UI.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CoercionKind {
+    /// Identical endpoint types (no ring).
+    Same,
+    /// Allowed, no information lost (plain ring).
+    Lossless,
+    /// Allowed, information lost (filled warning ring).
+    Lossy,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -294,11 +324,25 @@ impl NodeTypeSnapshot {
 impl RegistrySnapshot {
     #[must_use]
     pub fn capture(registry: &Registry) -> Self {
+        use crate::registry::coerce::{Coercion, DataType, can_coerce};
+        let mut coercions = Vec::new();
+        for from in DataType::ALL {
+            for to in DataType::ALL {
+                let kind = match can_coerce(from, to) {
+                    Coercion::Same => CoercionKind::Same,
+                    Coercion::Lossless => CoercionKind::Lossless,
+                    Coercion::Lossy => CoercionKind::Lossy,
+                    Coercion::Forbidden => continue,
+                };
+                coercions.push(CoercionEntry { from, to, kind });
+            }
+        }
         Self {
             nodes: registry
                 .descriptors()
                 .map(NodeTypeSnapshot::from_descriptor)
                 .collect(),
+            coercions,
         }
     }
 }

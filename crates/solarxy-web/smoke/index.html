@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>solarxy-web smoke</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d1017; color: #cbccc6;
+        font: 14px system-ui, sans-serif; }
+      #stage { display: flex; height: 100%; }
+      #canvas { flex: 1; display: block; }
+      #panel { width: 320px; padding: 12px; box-sizing: border-box;
+        border-left: 1px solid #1c1f26; overflow: auto; }
+      #status { white-space: pre-wrap; font-family: ui-monospace, monospace; }
+      .ok { color: #7fd962; } .bad { color: #e5484d; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="panel">
+        <h3>solarxy-web smoke (W2)</h3>
+        <div id="status">booting...</div>
+      </div>
+    </div>
+    <script type="module">
+      const statusEl = document.getElementById("status");
+      const set = (msg, cls) => {
+        statusEl.textContent = msg;
+        statusEl.className = cls || "";
+        // A machine-readable marker the Chrome automation greps for.
+        console.log("SMOKE_STATUS " + (cls || "info") + " :: " + msg);
+      };
+      try {
+        if (!navigator.gpu) throw new Error("WebGPU unavailable (navigator.gpu missing)");
+        const mod = await import("./pkg/solarxy_web.js?v=" + Date.now());
+        await mod.default();
+        mod.start && mod.start();
+        const canvas = document.getElementById("canvas");
+        const app = await mod.SolarxyApp.create(canvas);
+        const n = app.node_type_count();
+
+        // Build a geo container with a box in its subflow (the box claims
+        // the display flag automatically), entirely via dispatched commands.
+        const b1 = app.dispatch({ type: "addNode", ctx: "root", nodeType: "geo", position: [0, 0] });
+        const geoId = b1.events.find((e) => e.type === "nodeAdded").node.id;
+        console.log("DBG geoId=" + geoId + " b1_events=" + b1.events.length);
+        const sub = { subflow: geoId };
+        const b2 = app.dispatch({ type: "addNode", ctx: sub, nodeType: "box", position: [0, 0] });
+        console.log("DBG box b2_events=" + b2.events.length);
+        app.dispatch({ type: "addNode", ctx: "root", nodeType: "directional_light", position: [0, 0] });
+
+        // Call one frame explicitly to surface any error.
+        try {
+          const fb = app.frame(16.0);
+          console.log("DBG frame ok, events=" + (fb.events ? fb.events.length : "?"));
+        } catch (fe) {
+          console.log("DBG frame THREW: " + (fe && fe.stack ? fe.stack : fe));
+        }
+
+        const loop = (t) => {
+          try { app.frame(t); } catch (e) { console.log("DBG loop frame err " + e); }
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+
+        setTimeout(() => {
+          const objs = app.object_count();
+          // Rust-side pick down the camera axis should hit the geo container.
+          const hit = app.pick(canvas.width / 2, canvas.height / 2);
+          set(
+            "BOOT OK\nWebGPU: yes\nnode types: " + n +
+            "\nrendered objects: " + objs +
+            "\npick(center) -> geo id: " + hit + " (expected " + geoId + ")",
+            objs >= 1 && hit === geoId ? "ok" : "bad"
+          );
+        }, 600);
+      } catch (e) {
+        set("BOOT FAILED\n" + (e && e.stack ? e.stack : e), "bad");
+        console.error(e);
+      }
+    </script>
+  </body>
+</html>

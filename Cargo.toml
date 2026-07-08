@@ -5,6 +5,7 @@ members = [
     "crates/solarxy-formats",
     "crates/solarxy-kernel",
     "crates/solarxy-graph",
+    "crates/solarxy-web",
     "crates/solarxy-renderer",
     "crates/solarxy-app",
     "crates/solarxy-cli",

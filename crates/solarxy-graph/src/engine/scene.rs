@@ -15,7 +15,9 @@
 //! land (N2): it keys on `type_id`, so an empty or primitive-only root
 //! yields an empty delta.
 
-use cgmath::{Matrix4, Rad, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3};
+use solarxy_core::geometry::compute_bounds;
+use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
 use solarxy_core::scene::{LightDef, SceneDelta, SceneObjectId, SceneOp};
 
 use crate::cook::CookEngine;
@@ -91,35 +93,106 @@ fn emit_geo(
             geometry: std::sync::Arc::new(set.to_cooked()),
         });
     }
-    // The geo node's transform, applied as the object transform. Resolved
-    // through the standard param path (degrees to radians for `rotate`).
-    if let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo))
-        && let Some(desc) = _registry.get("geo")
-        && let Ok(p) = resolve_params(&node.params, &desc.params)
-    {
-        let translate = p.vec3_f32("translate");
-        let rotate = p.vec3_f32("rotate"); // radians
-        let scale = p.vec3_f32("scale");
-        let uniform = p.f32("uniform_scale");
-        let scale = [scale[0] * uniform, scale[1] * uniform, scale[2] * uniform];
-        let matrix = geo_matrix(translate, rotate, scale);
-        delta.push(SceneOp::SetTransform {
-            id: object_id,
-            transform: matrix,
-        });
-    }
+    // The geo node's transform, applied as the object transform (not baked;
+    // the renderer applies it), resolved through the shared world-matrix
+    // helper so picking and rendering agree.
+    delta.push(SceneOp::SetTransform {
+        id: object_id,
+        transform: geo_world_matrix(doc, _registry, geo).into(),
+    });
 }
 
-/// Column-major `T * Rz * Ry * Rx * S` world matrix for a geo container
-/// (the container transform is not baked; the renderer applies it).
-fn geo_matrix(translate: [f32; 3], rotate: [f32; 3], scale: [f32; 3]) -> [[f32; 4]; 4] {
+/// The column-major `T * Rz * Ry * Rx * S` world matrix for a geo container,
+/// resolved through the standard param path (degrees to radians for
+/// `rotate`, `uniform_scale` folded into `scale`). Identity when the node,
+/// its descriptor, or its params are unavailable. Shared by scene lowering
+/// and picking so they can never disagree.
+pub(crate) fn geo_world_matrix(doc: &Document, registry: &Registry, geo: NodeId) -> Matrix4<f32> {
+    let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo)) else {
+        return Matrix4::identity();
+    };
+    let Some(desc) = registry.get("geo") else {
+        return Matrix4::identity();
+    };
+    let Ok(p) = resolve_params(&node.params, &desc.params) else {
+        return Matrix4::identity();
+    };
+    let translate = p.vec3_f32("translate");
+    let rotate = p.vec3_f32("rotate"); // radians
+    let scale = p.vec3_f32("scale");
+    let uniform = p.f32("uniform_scale");
+    let scale = [scale[0] * uniform, scale[1] * uniform, scale[2] * uniform];
     let t = Matrix4::from_translation(Vector3::from(translate));
     let rx = Matrix4::from_angle_x(Rad(rotate[0]));
     let ry = Matrix4::from_angle_y(Rad(rotate[1]));
     let rz = Matrix4::from_angle_z(Rad(rotate[2]));
     let s = Matrix4::from_nonuniform_scale(scale[0], scale[1], scale[2]);
-    let m = t * rz * ry * rx * s;
-    m.into()
+    t * rz * ry * rx * s
+}
+
+/// Picks the root `geo` container whose displayed, world-transformed
+/// geometry the ray hits nearest (single-pane picking; pane-awareness is
+/// Phase 6). Runs entirely in Rust over CPU-retained cooked geometry, so
+/// nothing crosses into JavaScript. Returns the producing geo node's id.
+#[must_use]
+pub fn pick_node(
+    doc: &Document,
+    registry: &Registry,
+    cook: &CookEngine,
+    origin: [f32; 3],
+    direction: [f32; 3],
+) -> Option<NodeId> {
+    let dir = Vector3::from(direction);
+    if dir.magnitude2() <= 1e-12 {
+        return None;
+    }
+    let ray = Ray {
+        origin: Point3::from(origin),
+        direction: dir.normalize(),
+    };
+    let root = doc.graph(GraphContext::Root).ok()?;
+    let mut best: Option<(f32, NodeId)> = None;
+    for node in root.nodes() {
+        if node.type_id != "geo" {
+            continue;
+        }
+        let geo = node.id;
+        let Ok(subflow) = doc.graph(GraphContext::Subflow(geo)) else {
+            continue;
+        };
+        let Some(display) = subflow.active_output else {
+            continue;
+        };
+        let Some(outputs) = cook.outputs(display) else {
+            continue;
+        };
+        let Some(Value::Geometry(set)) = outputs.get("geometry") else {
+            continue;
+        };
+        let matrix = geo_world_matrix(doc, registry, geo);
+        for mesh in &set.meshes {
+            // Transform this mesh's vertices to world space, then raycast.
+            let world: Vec<[f32; 3]> = mesh
+                .positions
+                .iter()
+                .map(|p| {
+                    let tp = matrix.transform_point(Point3::from(*p));
+                    [tp.x, tp.y, tp.z]
+                })
+                .collect();
+            let view = MeshView {
+                positions: &world,
+                indices: mesh.indices.as_slice(),
+                bounds: compute_bounds(&world),
+            };
+            if let Some(hit) = raycast_meshes(&ray, std::slice::from_ref(&view))
+                && best.is_none_or(|(d, _)| hit.distance < d)
+            {
+                best = Some((hit.distance, geo));
+            }
+        }
+    }
+    best.map(|(_, node)| node)
 }
 
 /// Resolves a light node's params into a `LightDef` (the resolver already

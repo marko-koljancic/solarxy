@@ -24,8 +24,10 @@ use crate::GraphError;
 use crate::params::ParamSource;
 use crate::topology::Topology;
 
+mod file;
 mod fragment;
 
+pub use file::{DocumentData, GraphData};
 pub use fragment::{GraphFragment, InsertMode, InsertResult, SubflowFragment};
 
 /// Stable identity of one node instance, unique document-wide.
@@ -42,10 +44,12 @@ pub struct NodeId(pub u64);
 )]
 pub struct EdgeId(pub u64);
 
-/// Which graph a command or event targets.
+/// Which graph a command or event targets. The serde form is the
+/// wasm-boundary shape: `"root"` or `{ "subflow": <nodeId> }`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
 pub enum GraphContext {
     Root,
     /// The subflow owned by this `geo` container node.

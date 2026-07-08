@@ -28,6 +28,18 @@ cargo test -p solarxy-formats --test loaders                   # Integration tes
 RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 ```
 
+**Web shell (Phase 4 of the web-expansion milestone):**
+
+```bash
+bash crates/solarxy-web/build-wasm.sh web/src/wasm/pkg          # Build wasm -> wasm-bindgen -> wasm-opt into web/
+cargo build -p solarxy-web --target wasm32-unknown-unknown      # Compile the wasm host (native build is near-empty)
+cargo clippy -p solarxy-web --target wasm32-unknown-unknown -- -D warnings
+cd web && npm install && npm run dev                            # Vite dev server (predev rebuilds the wasm)
+cd web && npm run typecheck && npm test && npm run build        # tsc + vitest + production bundle
+```
+
+The web frontend needs a served secure context (localhost qualifies) for WebGPU + OPFS. `web/src/wasm/pkg/` is the build output (gitignored); regenerate it with `build-wasm.sh`. The `getrandom_backend="wasm_js"` rustflag for `wasm32` lives in the workspace `.cargo/config.toml`.
+
 **MSRV:** Rust 1.92. **Edition:** 2024.
 
 **Feature flags** live on the inner crates, not the root:
@@ -35,20 +47,34 @@ RUST_LOG=solarxy=debug cargo r --release -- ...                # Verbose logging
 - `solarxy-cli`: `tui` (default), `analyzer` (default), `updater` (default).
 - `solarxy-app` and `solarxy-renderer`: no features — always link wgpu/winit/egui.
 - Root `solarxy` binary: **no features**. GUI is always linked; there is no headless build of this crate.
+- `solarxy-graph`: no default features; pure serde. `solarxy-web`: no default features.
+
+### Web shell internals (`solarxy-web` + `web/`)
+
+- **One core, two shells.** `solarxy-graph` (engine) and `solarxy-renderer` never depend on each other; they meet only at `solarxy_core::scene::SceneDelta`. On web both compile into one wasm instance, so cooked geometry is an in-memory `Arc` handoff and **never crosses into JavaScript** — only `Command`s, `EventBatch`es, snapshots, and asset bytes do.
+- **Mirror-and-command.** Rust owns all document state. `web/` is a display mirror: React Flow gestures dispatch `Command`s; the returned `EventBatch` (and each frame's cook batch) is applied to a zustand mirror store (`web/src/store/mirror.ts`); a monotonic `revision` detects desync and recovers by calling `snapshot()`. Boundary types are hand-authored in `web/src/engine/types.ts` and pinned to the Rust serde shapes (all camelCase) by `command_boundary_json_shape_is_camelcase`.
+- **Registry-driven UI (zero-frontend-change contract).** The palette, typed handles, and parameter panel are pure interpreters of the `RegistrySnapshot` (`web/src/registry/datatypes.ts`, `flow/FlowNode.tsx`, `components/ParameterPanel.tsx`, `components/NodePalette.tsx`). A node added in Rust needs zero `web/` changes; a new `ParamType`/`DataType` variant is a deliberate frontend change. Guarded by `web/src/registry/extensibility.test.ts`.
+- **Two Phase-4 deviations (see the milestone log):** (1) the web render is a self-contained forward pass (`crates/solarxy-web/src/render.rs`) rather than the PBR pipeline, because `render_main_pass` is still `ModelScene`-coupled; (2) the tsify `.d.ts` layer is deferred in favor of the hand-authored `types.ts`. Both are documented follow-ups.
+- **Persistence.** OPFS autosave (ring of 3, debounced 2s / max 15s) via `web/src/persistence/opfs.ts`; recovery prompt on load; `beforeunload` guard; explicit save via the File System Access API (download fallback). Phase-4 persists the JSON `DocumentFile`; Phase 5 upgrades to `.slxy` with assets.
 
 ## Architecture
 
-**7-crate workspace:**
+**10-crate workspace + the `web/` frontend** (the web-expansion milestone added `solarxy-kernel`, `solarxy-graph`, `solarxy-web`, and `web/`):
 
 | Crate | Role |
 |-------|------|
 | `solarxy` (root) | Thin GUI entrypoint. `src/main.rs` parses its own small `GuiArgs`, sets up tracing, loads preferences, calls `solarxy_app::run_viewer`. |
-| `solarxy-core` | Pure data types: `AABB`, `geometry`, `validation`, `preferences`, `report`, `view_config`, `json`, `install_source`, `project_config`, `review`. No GPU, no winit, no egui. |
-| `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Integration tests under `crates/solarxy-formats/tests/loaders.rs` + `tests/fixtures/`. |
-| `solarxy-renderer` | All wgpu state: pipelines, bind groups, shaders, IBL, SSAO, bloom, shadow, composite, camera, per-frame draw (`frame.rs`), per-model GPU scene (`scene.rs`). No winit, no egui. |
-| `solarxy-app` | winit `ApplicationHandler` + egui + `State`. Owns input, sidebar, menu, HUD, toasts, console, dialogs. Depends on `solarxy-renderer`. |
+| `solarxy-core` | Pure data types: `AABB`, `geometry`, `validation`, `preferences`, `report`, `view_config`, `json`, `install_source`, `project_config`, `review`, and `scene` (the GPU-free `SceneDelta`/`CookedGeometry`/`LightDef` engine-renderer contract) + `raycast` (Moller-Trumbore, used by web picking). Feature-gated: `serde` (wasm-facing), `fs`, `serialization`. No GPU, no winit, no egui. |
+| `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Byte-first `load_*_bytes` API always available; `std-fs` (default) adds the path wrappers, off for wasm. |
+| `solarxy-kernel` | Pure-CPU parametric geometry: `GeometrySet`/`KernelMesh` (per-buffer `Arc`, converged with `core::scene`), the 7 primitive generators, transform bake, merge. wasm-clean, no wgpu/fs. |
+| `solarxy-graph` | The headless studio core: document/topology/cook engine/registry (23 MVP nodes + typed-port coercion matrix + declarative param schemas)/undo/review, and the `Engine` facade (`Command` in, `EventBatch` out, budgeted resumable cook, `take_scene_delta`, `pick`, JSON `save_document`/`load_document`). Mirror-and-command model. No wgpu, no winit. |
+| `solarxy-renderer` | All wgpu state: pipelines, bind groups, shaders, IBL, SSAO, bloom, shadow, composite, camera, per-frame draw (`frame.rs`), per-model GPU scene (`scene.rs`), the multi-object `SceneObjects` path (`scene_objects.rs`, consumes `SceneDelta`). Winit/egui-decoupled (`Renderer::new` takes a shell-owned `SurfaceConfiguration`); compiles to `wasm32`. |
+| `solarxy-app` | winit `ApplicationHandler` + egui + `State`. Owns input, sidebar, menu, HUD, toasts, console, dialogs. Depends on `solarxy-renderer`. Not yet wired to `solarxy-graph` (next milestone). |
+| `solarxy-web` | The `wasm-bindgen` boundary + WebGPU host (cdylib): the `SolarxyApp` class (dispatch/frame/pick/snapshot/save/load/camera), a self-contained forward renderer (MVP), serde-wasm-bindgen at the boundary. All wasm-only code is `cfg(target_arch = "wasm32")`, so native `cargo build --workspace` stays green; the real host builds for `wasm32`. |
 | `solarxy-validate` | Validation orchestration + pipeline adapters (GitHub Actions / generic-JSON). Library API consumed by `solarxy-cli` and by external vendors who want structured validation results without a subprocess. `thiserror` per library convention; feature-gated `clap` derive (`features = ["clap"]`). |
 | `solarxy-cli` | clap `Args`, analyze TUI (`tui_analysis`), analyzer (`calc/analyze.rs`), its own `[[bin]]` at `src/bin/solarxy-cli.rs`. `--mode view` spawns the `solarxy` GUI binary as a subprocess. |
+
+`web/` is the Vite + React 19 + `@xyflow/react` + zustand frontend: a display mirror of the Rust-owned document (mirror-and-command), with the registry-driven palette/parameter-panel/typed-handles (a node added in Rust needs zero frontend changes). See the "Web shell" section below and the workspace-root `SOLARXY-WEB-*` docs.
 
 Version is single-sourced in `[workspace.package]` and inherited via `version.workspace = true`. The `dist` profile inherits from `release` with `lto = "fat"`.
 
