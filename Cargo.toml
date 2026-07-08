@@ -3,6 +3,8 @@ members = [
     ".",
     "crates/solarxy-core",
     "crates/solarxy-formats",
+    "crates/solarxy-kernel",
+    "crates/solarxy-graph",
     "crates/solarxy-renderer",
     "crates/solarxy-app",
     "crates/solarxy-cli",

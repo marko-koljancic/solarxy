@@ -1,0 +1,84 @@
+//! The `plane` primitive (node catalog part II, section 13).
+
+use solarxy_kernel::primitives::generate_plane;
+
+use super::common::{geometry_output, params_with};
+use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
+use crate::params::ParamValue;
+use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
+use crate::registry::resolve::ResolvedParams;
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+
+fn dimension(key: &str, label: &str) -> ParamSpec {
+    ParamSpec::new(
+        key,
+        label,
+        "geometry",
+        ParamType::Float,
+        ParamValue::Float(1.0),
+    )
+    .hard(0.001, 10000.0)
+    .soft(0.01, 100.0)
+    .unit(Unit::Meters)
+}
+
+fn segments(key: &str, label: &str) -> ParamSpec {
+    ParamSpec::new(key, label, "geometry", ParamType::Int, ParamValue::Int(1)).hard(1.0, 1024.0)
+}
+
+#[must_use]
+pub fn descriptor() -> NodeTypeDescriptor {
+    NodeTypeDescriptor {
+        type_id: "plane",
+        version: 1,
+        display_name: "Plane",
+        category: Category::Primitives,
+        contexts: ContextMask::SUBFLOW,
+        inputs: vec![],
+        outputs: vec![geometry_output()],
+        params: params_with(
+            "Plane",
+            vec![
+                dimension("width", "Width"),
+                dimension("height", "Height"),
+                segments("width_segments", "Width Segments"),
+                segments("height_segments", "Height Segments"),
+            ],
+        ),
+        bypass: BypassBehavior::Mute,
+        doc: "A flat subdivided rectangle in the XY plane facing +Z.",
+        search_aliases: &["quad", "grid", "ground"],
+        cook,
+        migrate: None,
+    }
+}
+
+#[allow(clippy::unnecessary_wraps)] // signature matches CookFn
+fn cook(p: &ResolvedParams, _in: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+    let set = solarxy_kernel::GeometrySet::from_mesh(generate_plane(
+        p.f32("width"),
+        p.f32("height"),
+        p.u32("width_segments"),
+        p.u32("height_segments"),
+    ));
+    Ok(CookOutcome::Done(Outputs::geometry(set)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn cooks_at_defaults() {
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        assert!(matches!(
+            cook(&resolved, &Inputs::default(), &mut cx),
+            Ok(CookOutcome::Done(_))
+        ));
+    }
+}

@@ -1,0 +1,1391 @@
+//! The engine facade: the single entry point a shell (native or web)
+//! drives. It owns the document, registry, cook engine, and asset table,
+//! turns [`Command`]s into document mutations plus [`EngineEvent`]
+//! batches, cooks under a budget, and lowers displayed geometry to a
+//! `solarxy_core::scene::SceneDelta`.
+//!
+//! Rust owns all document state; a frontend mirrors it via events and
+//! mutates only by dispatching commands (the mirror-and-command model).
+//! The monotonic `revision` on every batch lets a desynced mirror recover
+//! by taking a full [`snapshot`](Engine::snapshot).
+
+pub mod snapshot;
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use solarxy_core::scene::SceneDelta;
+
+use crate::GraphError;
+use crate::assets::AssetTable;
+use crate::cook::state::{CookState, CookStatus};
+use crate::cook::{CookEngine, JobId, JobRequest, JobResult};
+use crate::document::{Document, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
+use crate::params::{AssetId, ParamSource};
+use crate::registry::resolve::param_source_from_json;
+use crate::registry::{Arity, Registry};
+
+pub use snapshot::{DocumentSnapshot, RegistrySnapshot};
+
+mod scene;
+mod undo;
+
+use undo::{Transaction, UndoOp, UndoStack};
+
+/// Cook scheduling mode (node catalog / boundary design).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CookMode {
+    /// Recook dirtied nodes on the next frame automatically.
+    Auto,
+    /// Accumulate a stale set; recook only on `CookNow`.
+    Manual,
+}
+
+/// A command from the shell. The serde form is the wasm-boundary contract
+/// (Phase 4 adds tsify on top); it round-trips losslessly for clipboard
+/// and undo tests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Command {
+    AddNode {
+        ctx: GraphContext,
+        node_type: String,
+        position: [f32; 2],
+    },
+    RemoveNodes {
+        ctx: GraphContext,
+        ids: Vec<NodeId>,
+    },
+    Connect {
+        ctx: GraphContext,
+        from: PortRefDto,
+        to: PortRefDto,
+    },
+    Disconnect {
+        ctx: GraphContext,
+        edge: EdgeId,
+    },
+    SetParam {
+        ctx: GraphContext,
+        node: NodeId,
+        key: String,
+        value: ParamSource,
+    },
+    MoveNodes {
+        ctx: GraphContext,
+        moves: Vec<(NodeId, [f32; 2])>,
+    },
+    SetActiveOutput {
+        ctx: GraphContext,
+        node: Option<NodeId>,
+    },
+    SetSelection {
+        ctx: GraphContext,
+        ids: Vec<NodeId>,
+    },
+    SetBypass {
+        ctx: GraphContext,
+        node: NodeId,
+        bypassed: bool,
+    },
+    ReorderVariadicInput {
+        ctx: GraphContext,
+        node: NodeId,
+        port: String,
+        order: Vec<EdgeId>,
+    },
+    SetCookMode {
+        mode: CookMode,
+    },
+    CookNow,
+    /// Reinserts a copied fragment with fresh ids at `position` (offset
+    /// from the fragment's own layout). Context-illegal nodes are skipped.
+    PasteNodes {
+        ctx: GraphContext,
+        fragment: crate::document::GraphFragment,
+        position: [f32; 2],
+    },
+    /// Copies then pastes the given nodes in place with a small offset.
+    DuplicateNodes {
+        ctx: GraphContext,
+        ids: Vec<NodeId>,
+    },
+    /// Adds a review annotation anchored to a node.
+    AddAnnotation {
+        anchor: crate::review::ReviewAnchor,
+        text: String,
+        category: crate::review::ReviewCategory,
+    },
+    /// Edits an annotation's text and/or category.
+    EditAnnotation {
+        id: crate::review::AnnotationId,
+        text: String,
+        category: crate::review::ReviewCategory,
+    },
+    /// Toggles an annotation's resolved flag.
+    ResolveAnnotation {
+        id: crate::review::AnnotationId,
+        resolved: bool,
+    },
+    DeleteAnnotation {
+        id: crate::review::AnnotationId,
+    },
+    /// Groups following commands into one undo step until `EndTransaction`
+    /// (drags, marquee moves).
+    BeginTransaction {
+        label: String,
+    },
+    EndTransaction,
+    Undo,
+    Redo,
+}
+
+/// Serde-friendly [`PortRef`] (the internal type is not serialized).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortRefDto {
+    pub node: NodeId,
+    pub port: String,
+}
+
+impl From<PortRefDto> for PortRef {
+    fn from(d: PortRefDto) -> Self {
+        PortRef {
+            node: d.node,
+            port: d.port,
+        }
+    }
+}
+
+/// One engine-emitted event. Output-only: the frontend deserializes these
+/// in JavaScript, so only `Serialize` is derived. Batched with a monotonic
+/// revision so a mirror can detect desync and resnapshot.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum EngineEvent {
+    NodeAdded {
+        ctx: GraphContext,
+        node: snapshot::NodeMirror,
+    },
+    NodeRemoved {
+        ctx: GraphContext,
+        id: NodeId,
+    },
+    ParamChanged {
+        ctx: GraphContext,
+        node: NodeId,
+        key: String,
+        value: ParamSource,
+    },
+    EdgeAdded {
+        ctx: GraphContext,
+        edge: snapshot::EdgeMirror,
+    },
+    EdgeRemoved {
+        ctx: GraphContext,
+        id: EdgeId,
+    },
+    NodesMoved {
+        ctx: GraphContext,
+        moves: Vec<(NodeId, [f32; 2])>,
+    },
+    ActiveOutputChanged {
+        ctx: GraphContext,
+        node: Option<NodeId>,
+    },
+    SelectionChanged {
+        ctx: GraphContext,
+        ids: Vec<NodeId>,
+    },
+    BypassChanged {
+        ctx: GraphContext,
+        node: NodeId,
+        bypassed: bool,
+    },
+    VariadicReordered {
+        ctx: GraphContext,
+        node: NodeId,
+        port: String,
+        order: Vec<EdgeId>,
+    },
+    CookStatus {
+        node: NodeId,
+        status: CookStatus,
+    },
+    NodeStats {
+        node: NodeId,
+        points: u64,
+        prims: u64,
+        meshes: u32,
+    },
+    CookModeChanged {
+        mode: CookMode,
+    },
+    /// The review annotation set changed; the mirror re-reads it from the
+    /// snapshot (annotations are few, so a coarse signal is cheap).
+    ReviewChanged,
+    /// Full-resnapshot signal (structural undo, scene load).
+    DocumentReplaced,
+}
+
+/// A coalesced batch of events plus the monotonic document revision.
+#[derive(Debug, Clone, Serialize)]
+pub struct EventBatch {
+    pub revision: u64,
+    pub events: Vec<EngineEvent>,
+}
+
+/// A command failure (a structurally illegal request). Cook failures are
+/// data, delivered as `CookStatus::Error` events, not errors here.
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error(transparent)]
+    Graph(#[from] GraphError),
+    #[error("unknown node type '{0}'")]
+    UnknownNodeType(String),
+    #[error("port '{port}' does not exist on node type '{type_id}'")]
+    UnknownPort { type_id: String, port: String },
+    #[error("node type '{type_id}' is not allowed in this context")]
+    ContextIllegal { type_id: String },
+    #[error("param '{key}' rejected: {reason}")]
+    InvalidParam { key: String, reason: String },
+}
+
+/// The engine.
+pub struct Engine {
+    doc: Document,
+    registry: Registry,
+    cook: CookEngine,
+    assets: AssetTable,
+    cook_mode: CookMode,
+    revision: u64,
+    /// Transient preview overlays (param drags): consulted by the resolver
+    /// path, never written to the document or the undo stack.
+    previews: BTreeMap<(NodeId, String), ParamSource>,
+    scene: SceneDelta,
+    undo: UndoStack,
+    /// Async jobs spawned by the last cook, awaiting dispatch by the host
+    /// (each tagged with the context it was spawned in, for `submit`).
+    pending_jobs: Vec<(GraphContext, JobId, JobRequest)>,
+}
+
+impl Engine {
+    /// Builds an engine over the builtin registry.
+    pub fn new() -> Result<Self, GraphError> {
+        Ok(Self::with_registry(crate::builtin_registry()?))
+    }
+
+    /// Builds an engine over a supplied registry (tests).
+    #[must_use]
+    pub fn with_registry(registry: Registry) -> Self {
+        Self {
+            doc: Document::new(),
+            registry,
+            cook: CookEngine::new(),
+            assets: AssetTable::new(),
+            cook_mode: CookMode::Auto,
+            revision: 0,
+            previews: BTreeMap::new(),
+            scene: SceneDelta::default(),
+            undo: UndoStack::default(),
+            pending_jobs: Vec::new(),
+        }
+    }
+
+    /// Enables async import offloading (the web host has an import worker).
+    /// Off by default: native cooks parse imports inline.
+    pub fn set_async_jobs(&mut self, enabled: bool) {
+        self.cook.set_async_jobs(enabled);
+    }
+
+    #[must_use]
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    #[must_use]
+    pub fn document(&self) -> &Document {
+        &self.doc
+    }
+
+    /// Stages asset bytes, returning the content id an import node's
+    /// `file` param should reference.
+    pub fn stage_asset(&mut self, name: impl Into<String>, bytes: Vec<u8>) -> AssetId {
+        self.assets.stage(name, bytes)
+    }
+
+    /// Applies one command, returning the events it produced. Each apply is
+    /// an implicit transaction (unless one is explicitly open); the
+    /// revision advances once per call.
+    pub fn apply(&mut self, cmd: Command) -> Result<EventBatch, EngineError> {
+        // Undo-stack control commands are handled here, not in dispatch.
+        match cmd {
+            Command::Undo => return self.run_undo(),
+            Command::Redo => return self.run_redo(),
+            Command::BeginTransaction { label } => {
+                self.undo.begin(label);
+                self.revision += 1;
+                return Ok(self.batch(Vec::new()));
+            }
+            Command::EndTransaction => {
+                self.undo.end();
+                self.revision += 1;
+                return Ok(self.batch(Vec::new()));
+            }
+            _ => {}
+        }
+        let mut events = Vec::new();
+        let mut inv = Vec::new();
+        self.dispatch(cmd, &mut events, &mut inv)?;
+        self.undo.push_command("edit", inv);
+        self.revision += 1;
+        Ok(self.batch(events))
+    }
+
+    fn batch(&self, events: Vec<EngineEvent>) -> EventBatch {
+        EventBatch {
+            revision: self.revision,
+            events,
+        }
+    }
+
+    fn dispatch(
+        &mut self,
+        cmd: Command,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        match cmd {
+            Command::AddNode {
+                ctx,
+                node_type,
+                position,
+            } => self.add_node(ctx, &node_type, position, events, inv),
+            Command::RemoveNodes { ctx, ids } => self.remove_nodes(ctx, &ids, events, inv),
+            Command::Connect { ctx, from, to } => {
+                self.connect(ctx, from.into(), to.into(), events, inv)
+            }
+            Command::Disconnect { ctx, edge } => self.disconnect(ctx, edge, events, inv),
+            Command::SetParam {
+                ctx,
+                node,
+                key,
+                value,
+            } => self.set_param(ctx, node, &key, value, events, inv),
+            Command::MoveNodes { ctx, moves } => self.move_nodes(ctx, moves, events, inv),
+            Command::SetActiveOutput { ctx, node } => {
+                self.set_active_output(ctx, node, events, inv)
+            }
+            Command::SetSelection { ctx, ids } => self.set_selection(ctx, ids, events, inv),
+            Command::SetBypass {
+                ctx,
+                node,
+                bypassed,
+            } => self.set_bypass(ctx, node, bypassed, events, inv),
+            Command::ReorderVariadicInput {
+                ctx,
+                node,
+                port,
+                order,
+            } => self.reorder_variadic(ctx, node, &port, order, events, inv),
+            Command::SetCookMode { mode } => {
+                self.cook_mode = mode;
+                events.push(EngineEvent::CookModeChanged { mode });
+                Ok(())
+            }
+            Command::PasteNodes {
+                ctx,
+                fragment,
+                position,
+            } => self.paste_nodes(ctx, &fragment, position, events, inv),
+            Command::DuplicateNodes { ctx, ids } => self.duplicate_nodes(ctx, &ids, events, inv),
+            Command::AddAnnotation {
+                anchor,
+                text,
+                category,
+            } => self.review_mutate(events, inv, |doc| {
+                let id = doc.mint_annotation_id();
+                doc.review_mut().insert(crate::review::Annotation {
+                    id,
+                    anchor,
+                    text,
+                    category,
+                    resolved: false,
+                });
+                Ok(())
+            }),
+            Command::EditAnnotation { id, text, category } => {
+                self.review_mutate(events, inv, |doc| {
+                    let a = doc
+                        .review_mut()
+                        .get_mut(id)
+                        .ok_or(GraphError::UnknownContext)?;
+                    a.text = text;
+                    a.category = category;
+                    Ok(())
+                })
+            }
+            Command::ResolveAnnotation { id, resolved } => self.review_mutate(events, inv, |doc| {
+                let a = doc
+                    .review_mut()
+                    .get_mut(id)
+                    .ok_or(GraphError::UnknownContext)?;
+                a.resolved = resolved;
+                Ok(())
+            }),
+            Command::DeleteAnnotation { id } => self.review_mutate(events, inv, |doc| {
+                doc.review_mut().remove(id);
+                Ok(())
+            }),
+            // CookNow is a no-op here (the frame loop cooks); the
+            // transaction/undo commands are intercepted in `apply`.
+            Command::CookNow
+            | Command::BeginTransaction { .. }
+            | Command::EndTransaction
+            | Command::Undo
+            | Command::Redo => Ok(()),
+        }
+    }
+
+    fn add_node(
+        &mut self,
+        ctx: GraphContext,
+        node_type: &str,
+        position: [f32; 2],
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let desc = self
+            .registry
+            .get(node_type)
+            .ok_or_else(|| EngineError::UnknownNodeType(node_type.to_string()))?;
+        if !desc.contexts.allows(ctx) {
+            return Err(EngineError::ContextIllegal {
+                type_id: node_type.to_string(),
+            });
+        }
+        let id = self.doc.mint_node_id();
+        let mut node = NodeData::new(id, node_type, desc.version);
+        node.position = position;
+        // Subflow-owning container nodes open their own canvas.
+        if node_type == "geo" {
+            self.doc.create_subflow(id);
+        }
+        let mirror = snapshot::NodeMirror::from_public(&node);
+        let graph = self.doc.graph_mut(ctx)?;
+        // First subflow node claims the display flag.
+        let claim_display = matches!(ctx, GraphContext::Subflow(_))
+            && graph.active_output.is_none()
+            && desc.default_output().is_some();
+        let prev_active = graph.active_output;
+        graph.add_node(node);
+        if claim_display {
+            graph.active_output = Some(id);
+            events.push(EngineEvent::ActiveOutputChanged {
+                ctx,
+                node: Some(id),
+            });
+        }
+        self.cook.insert_node(id);
+        self.mark_dirty(ctx, id);
+        events.push(EngineEvent::NodeAdded { ctx, node: mirror });
+        // Inverse: restore the prior display flag (if we claimed it), then
+        // remove the node.
+        if claim_display {
+            inv.push(UndoOp::SetActiveOutput {
+                ctx,
+                node: prev_active,
+            });
+        }
+        inv.push(UndoOp::RemoveNodes { ctx, ids: vec![id] });
+        Ok(())
+    }
+
+    fn remove_nodes(
+        &mut self,
+        ctx: GraphContext,
+        ids: &[NodeId],
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        inv.push(self.remove_nodes_core(ctx, ids, events)?);
+        Ok(())
+    }
+
+    /// Removes nodes with their edges and subflows, returning the
+    /// `RestoreFragment` inverse. Shared by the command and undo/redo.
+    fn remove_nodes_core(
+        &mut self,
+        ctx: GraphContext,
+        ids: &[NodeId],
+        events: &mut Vec<EngineEvent>,
+    ) -> Result<UndoOp, EngineError> {
+        // Verify all ids exist before mutating, so the whole op is
+        // all-or-nothing.
+        {
+            let graph = self.doc.graph(ctx)?;
+            for &id in ids {
+                if graph.node(id).is_none() {
+                    return Err(GraphError::UnknownNode(id).into());
+                }
+            }
+        }
+        let set: std::collections::BTreeSet<NodeId> = ids.iter().copied().collect();
+        // Capture the removed slice, its boundary edges, and the prior
+        // display flag for one RestoreFragment inverse.
+        let fragment = crate::document::GraphFragment::capture(&self.doc, ctx, ids);
+        let (boundary, prev_active) = {
+            let graph = self.doc.graph(ctx)?;
+            let boundary: Vec<(Edge, bool)> = graph
+                .edges()
+                .filter(|e| set.contains(&e.from) ^ set.contains(&e.to))
+                .map(|e| {
+                    let variadic = graph
+                        .node(e.to)
+                        .is_some_and(|n| n.port_order.contains_key(&e.to_port));
+                    (e.clone(), variadic)
+                })
+                .collect();
+            (boundary, graph.active_output)
+        };
+
+        for &id in ids {
+            let graph = self.doc.graph_mut(ctx)?;
+            // Mark the removed node's downstream dirty before it vanishes.
+            let downstream = graph.downstream(id);
+            let (_node, removed_edges) = graph.remove_node(id)?;
+            // A removed geo container drops its whole subflow.
+            self.doc.remove_subflow(id);
+            for edge in &removed_edges {
+                events.push(EngineEvent::EdgeRemoved { ctx, id: edge.id });
+            }
+            self.cook.forget_node(id);
+            for down in downstream {
+                self.mark_dirty(ctx, down);
+            }
+            self.previews.retain(|(n, _), _| *n != id);
+            events.push(EngineEvent::NodeRemoved { ctx, id });
+        }
+        Ok(UndoOp::RestoreFragment {
+            ctx,
+            fragment,
+            boundary_edges: boundary,
+            active_output: prev_active,
+        })
+    }
+
+    fn connect(
+        &mut self,
+        ctx: GraphContext,
+        from: PortRef,
+        to: PortRef,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        // Type-check against the descriptors before mutating the graph.
+        let to_variadic = self.validate_connection(&from, &to)?;
+        let id = self.doc.mint_edge_id();
+        let to_node = to.node;
+        let edge = Edge {
+            id,
+            from: from.node,
+            from_port: from.port,
+            to: to.node,
+            to_port: to.port,
+        };
+        let mirror = snapshot::EdgeMirror::from(&edge);
+        self.doc.graph_mut(ctx)?.connect(edge, to_variadic)?;
+        self.mark_dirty(ctx, to_node);
+        events.push(EngineEvent::EdgeAdded { ctx, edge: mirror });
+        inv.push(UndoOp::RemoveEdge { ctx, edge: id });
+        Ok(())
+    }
+
+    /// Validates a prospective connection against the port types and the
+    /// coercion matrix; returns whether the target port is variadic.
+    fn validate_connection(&self, from: &PortRef, to: &PortRef) -> Result<bool, EngineError> {
+        let from_node = self.node_type(from.node)?;
+        let to_node = self.node_type(to.node)?;
+        let from_desc = self
+            .registry
+            .get(&from_node)
+            .ok_or_else(|| EngineError::UnknownNodeType(from_node.clone()))?;
+        let to_desc = self
+            .registry
+            .get(&to_node)
+            .ok_or_else(|| EngineError::UnknownNodeType(to_node.clone()))?;
+        let out = from_desc
+            .output(&from.port)
+            .ok_or_else(|| EngineError::UnknownPort {
+                type_id: from_node.clone(),
+                port: from.port.clone(),
+            })?;
+        let inp = to_desc
+            .input(&to.port)
+            .ok_or_else(|| EngineError::UnknownPort {
+                type_id: to_node.clone(),
+                port: to.port.clone(),
+            })?;
+        if !crate::registry::coerce::can_coerce(out.data_type, inp.data_type).is_legal() {
+            return Err(GraphError::TypeMismatch {
+                from: format!("{:?}", out.data_type),
+                to: format!("{:?}", inp.data_type),
+            }
+            .into());
+        }
+        Ok(matches!(inp.arity, Arity::Variadic { .. }))
+    }
+
+    fn disconnect(
+        &mut self,
+        ctx: GraphContext,
+        edge: EdgeId,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        inv.push(self.disconnect_core(ctx, edge, events)?);
+        Ok(())
+    }
+
+    /// Removes one edge, returning the `RestoreEdge` inverse (with its
+    /// original id, which variadic `port_order` references). Shared by the
+    /// command and undo/redo.
+    fn disconnect_core(
+        &mut self,
+        ctx: GraphContext,
+        edge: EdgeId,
+        events: &mut Vec<EngineEvent>,
+    ) -> Result<UndoOp, EngineError> {
+        // The target's variadic-ness for exact restore (before removal).
+        let to_variadic = {
+            let graph = self.doc.graph(ctx)?;
+            let e = graph.edge(edge).ok_or(GraphError::UnknownEdge(edge))?;
+            graph
+                .node(e.to)
+                .is_some_and(|n| n.port_order.contains_key(&e.to_port))
+        };
+        let removed = self.doc.graph_mut(ctx)?.disconnect(edge)?;
+        self.mark_dirty(ctx, removed.to);
+        events.push(EngineEvent::EdgeRemoved { ctx, id: edge });
+        Ok(UndoOp::RestoreEdge {
+            ctx,
+            edge: removed,
+            to_variadic,
+        })
+    }
+
+    fn set_param(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+        value: ParamSource,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let type_id = self.node_type_in(ctx, node)?;
+        let desc = self
+            .registry
+            .get(&type_id)
+            .ok_or_else(|| EngineError::UnknownNodeType(type_id.clone()))?;
+        let spec = desc.param(key).ok_or_else(|| EngineError::InvalidParam {
+            key: key.to_string(),
+            reason: "no such param on this node type".to_string(),
+        })?;
+        // Conform a literal to the spec type on write (the authoritative
+        // value; a mistyped write is a command error, not silent).
+        let conformed = match &value {
+            ParamSource::Literal(v) => {
+                let c = crate::registry::resolve::conform_value(v, &spec.ty).map_err(|reason| {
+                    EngineError::InvalidParam {
+                        key: key.to_string(),
+                        reason,
+                    }
+                })?;
+                ParamSource::Literal(c)
+            }
+            ParamSource::Expression { .. } => value.clone(),
+        };
+        // The authoritative value clears any transient preview overlay.
+        self.previews.remove(&(node, key.to_string()));
+        let graph = self.doc.graph_mut(ctx)?;
+        let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+        let prev = node_data.params.insert(key.to_string(), conformed.clone());
+        self.mark_dirty(ctx, node);
+        events.push(EngineEvent::ParamChanged {
+            ctx,
+            node,
+            key: key.to_string(),
+            value: conformed,
+        });
+        inv.push(UndoOp::RestoreParam {
+            ctx,
+            node,
+            key: key.to_string(),
+            prev,
+        });
+        Ok(())
+    }
+
+    fn move_nodes(
+        &mut self,
+        ctx: GraphContext,
+        moves: Vec<(NodeId, [f32; 2])>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let graph = self.doc.graph_mut(ctx)?;
+        let mut prev = Vec::with_capacity(moves.len());
+        for &(node, pos) in &moves {
+            let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+            prev.push((node, node_data.position));
+            node_data.position = pos;
+        }
+        events.push(EngineEvent::NodesMoved { ctx, moves });
+        inv.push(UndoOp::MoveNodes { ctx, moves: prev });
+        Ok(())
+    }
+
+    fn set_active_output(
+        &mut self,
+        ctx: GraphContext,
+        node: Option<NodeId>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let graph = self.doc.graph_mut(ctx)?;
+        if let Some(n) = node
+            && graph.node(n).is_none()
+        {
+            return Err(GraphError::UnknownNode(n).into());
+        }
+        let prev = graph.active_output;
+        graph.active_output = node;
+        // Changing the display node changes which cone must cook.
+        if let Some(n) = node {
+            self.mark_dirty(ctx, n);
+        }
+        events.push(EngineEvent::ActiveOutputChanged { ctx, node });
+        inv.push(UndoOp::SetActiveOutput { ctx, node: prev });
+        Ok(())
+    }
+
+    fn set_selection(
+        &mut self,
+        ctx: GraphContext,
+        ids: Vec<NodeId>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let graph = self.doc.graph_mut(ctx)?;
+        let prev = graph.selection.clone();
+        graph.selection.clone_from(&ids);
+        events.push(EngineEvent::SelectionChanged { ctx, ids });
+        inv.push(UndoOp::SetSelection { ctx, ids: prev });
+        Ok(())
+    }
+
+    fn set_bypass(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        bypassed: bool,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let graph = self.doc.graph_mut(ctx)?;
+        let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+        let prev = node_data.bypassed;
+        node_data.bypassed = bypassed;
+        self.mark_dirty(ctx, node);
+        events.push(EngineEvent::BypassChanged {
+            ctx,
+            node,
+            bypassed,
+        });
+        inv.push(UndoOp::SetBypass {
+            ctx,
+            node,
+            bypassed: prev,
+        });
+        Ok(())
+    }
+
+    fn reorder_variadic(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        port: &str,
+        order: Vec<EdgeId>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let prev = self
+            .doc
+            .graph_mut(ctx)?
+            .reorder_variadic(node, port, order.clone())?;
+        self.mark_dirty(ctx, node);
+        events.push(EngineEvent::VariadicReordered {
+            ctx,
+            node,
+            port: port.to_string(),
+            order,
+        });
+        inv.push(UndoOp::ReorderVariadic {
+            ctx,
+            node,
+            port: port.to_string(),
+            order: prev,
+        });
+        Ok(())
+    }
+
+    // Review annotations.
+
+    /// Applies a review-store mutation with a whole-store snapshot inverse
+    /// (annotations are few, so this is cheap and exact), emitting
+    /// `ReviewChanged`.
+    fn review_mutate(
+        &mut self,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+        f: impl FnOnce(&mut Document) -> Result<(), GraphError>,
+    ) -> Result<(), EngineError> {
+        let before = self.doc.review().clone();
+        f(&mut self.doc)?;
+        inv.push(UndoOp::RestoreReview { store: before });
+        events.push(EngineEvent::ReviewChanged);
+        Ok(())
+    }
+
+    // Clipboard.
+
+    /// Captures a fragment of the given nodes for the clipboard (the
+    /// frontend serializes it to `application/x-solarxy-nodes`). Not a
+    /// command: it produces data, not a mutation.
+    #[must_use]
+    pub fn copy_nodes(&self, ctx: GraphContext, ids: &[NodeId]) -> crate::document::GraphFragment {
+        crate::document::GraphFragment::capture(&self.doc, ctx, ids)
+    }
+
+    // Infallible today, but Result-typed to match the handler shape and to
+    // leave room for a hard "nothing legal to paste" error later.
+    #[allow(clippy::unnecessary_wraps)]
+    fn paste_nodes(
+        &mut self,
+        ctx: GraphContext,
+        fragment: &crate::document::GraphFragment,
+        position: [f32; 2],
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        // Context legality is checked per node against the registry.
+        let registry = &self.registry;
+        let ctx_ok = |type_id: &str| {
+            registry
+                .get(type_id)
+                .is_some_and(|d| d.contexts.allows(ctx))
+        };
+        let result = fragment.insert_into(
+            &mut self.doc,
+            ctx,
+            crate::document::InsertMode::Remap,
+            &ctx_ok,
+        );
+        // Offset the pasted nodes so they do not sit exactly on the source,
+        // and register + dirty them.
+        for &id in &result.inserted {
+            if let Ok(graph) = self.doc.graph_mut(ctx)
+                && let Some(node) = graph.node_mut(id)
+            {
+                node.position[0] += position[0];
+                node.position[1] += position[1];
+            }
+            self.cook.insert_node(id);
+            self.mark_dirty(ctx, id);
+            if let Some(mirror) = self
+                .doc
+                .graph(ctx)
+                .ok()
+                .and_then(|g| g.node(id))
+                .map(snapshot::NodeMirror::from_public)
+            {
+                events.push(EngineEvent::NodeAdded { ctx, node: mirror });
+            }
+        }
+        for edge in self.pasted_edge_mirrors(ctx, &result) {
+            events.push(EngineEvent::EdgeAdded { ctx, edge });
+        }
+        // Inverse: remove exactly the pasted nodes.
+        if !result.inserted.is_empty() {
+            inv.push(UndoOp::RemoveNodes {
+                ctx,
+                ids: result.inserted,
+            });
+        }
+        Ok(())
+    }
+
+    /// Edge mirrors for the freshly pasted internal edges.
+    fn pasted_edge_mirrors(
+        &self,
+        ctx: GraphContext,
+        result: &crate::document::InsertResult,
+    ) -> Vec<snapshot::EdgeMirror> {
+        let Ok(graph) = self.doc.graph(ctx) else {
+            return Vec::new();
+        };
+        result
+            .edge_map
+            .values()
+            .filter_map(|new_id| graph.edge(*new_id).map(snapshot::EdgeMirror::from))
+            .collect()
+    }
+
+    fn duplicate_nodes(
+        &mut self,
+        ctx: GraphContext,
+        ids: &[NodeId],
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let fragment = self.copy_nodes(ctx, ids);
+        // A small in-place offset so the duplicate is visible.
+        self.paste_nodes(ctx, &fragment, [24.0, 24.0], events, inv)
+    }
+
+    // Undo / redo.
+
+    fn run_undo(&mut self) -> Result<EventBatch, EngineError> {
+        self.revision += 1;
+        let Some(txn) = self.undo.pop_undo() else {
+            return Ok(self.batch(Vec::new()));
+        };
+        let (redo, events) = self.apply_transaction(txn)?;
+        self.undo.push_redo(redo);
+        Ok(self.batch(events))
+    }
+
+    fn run_redo(&mut self) -> Result<EventBatch, EngineError> {
+        self.revision += 1;
+        let Some(txn) = self.undo.pop_redo() else {
+            return Ok(self.batch(Vec::new()));
+        };
+        let (undo, events) = self.apply_transaction(txn)?;
+        self.undo.push_undo(undo);
+        Ok(self.batch(events))
+    }
+
+    /// Applies a transaction's inverse ops in reverse order, collecting the
+    /// opposite transaction (for the redo/undo stack). A structural
+    /// transaction emits one `DocumentReplaced`; a scalar-only one emits
+    /// precise inverse events.
+    fn apply_transaction(
+        &mut self,
+        txn: Transaction,
+    ) -> Result<(Transaction, Vec<EngineEvent>), EngineError> {
+        let mut precise = Vec::new();
+        let mut opposite = Transaction::new(txn.label.clone());
+        let structural = txn.structural;
+        for op in txn.ops.into_iter().rev() {
+            let inverse = self.apply_undo_op(op, &mut precise)?;
+            opposite.structural |= inverse.is_structural();
+            opposite.ops.push(inverse);
+        }
+        let events = if structural {
+            vec![EngineEvent::DocumentReplaced]
+        } else {
+            precise
+        };
+        Ok((opposite, events))
+    }
+
+    /// Applies one inverse op, returning the op that reverses it (so undo
+    /// and redo are symmetric). Emits precise events into `events`.
+    fn apply_undo_op(
+        &mut self,
+        op: UndoOp,
+        events: &mut Vec<EngineEvent>,
+    ) -> Result<UndoOp, EngineError> {
+        match op {
+            UndoOp::RestoreParam {
+                ctx,
+                node,
+                key,
+                prev,
+            } => {
+                let graph = self.doc.graph_mut(ctx)?;
+                let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+                let current = match &prev {
+                    Some(v) => node_data.params.insert(key.clone(), v.clone()),
+                    None => node_data.params.remove(&key),
+                };
+                self.mark_dirty(ctx, node);
+                // Precise event: the restored value, or the default when
+                // the param returned to unset.
+                let value = prev.clone().unwrap_or_else(|| {
+                    self.registry
+                        .get(&self.node_type_in(ctx, node).unwrap_or_default())
+                        .and_then(|d| d.param(&key))
+                        .map_or(
+                            ParamSource::Literal(crate::params::ParamValue::Bool(false)),
+                            |s| ParamSource::Literal(s.default.clone()),
+                        )
+                });
+                events.push(EngineEvent::ParamChanged {
+                    ctx,
+                    node,
+                    key: key.clone(),
+                    value,
+                });
+                Ok(UndoOp::RestoreParam {
+                    ctx,
+                    node,
+                    key,
+                    prev: current,
+                })
+            }
+            UndoOp::MoveNodes { ctx, moves } => {
+                let graph = self.doc.graph_mut(ctx)?;
+                let mut prev = Vec::with_capacity(moves.len());
+                for (node, pos) in &moves {
+                    if let Some(n) = graph.node_mut(*node) {
+                        prev.push((*node, n.position));
+                        n.position = *pos;
+                    }
+                }
+                events.push(EngineEvent::NodesMoved {
+                    ctx,
+                    moves: moves.clone(),
+                });
+                Ok(UndoOp::MoveNodes { ctx, moves: prev })
+            }
+            UndoOp::SetBypass {
+                ctx,
+                node,
+                bypassed,
+            } => {
+                let graph = self.doc.graph_mut(ctx)?;
+                let n = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+                let prev = n.bypassed;
+                n.bypassed = bypassed;
+                self.mark_dirty(ctx, node);
+                events.push(EngineEvent::BypassChanged {
+                    ctx,
+                    node,
+                    bypassed,
+                });
+                Ok(UndoOp::SetBypass {
+                    ctx,
+                    node,
+                    bypassed: prev,
+                })
+            }
+            UndoOp::SetActiveOutput { ctx, node } => {
+                let graph = self.doc.graph_mut(ctx)?;
+                let prev = graph.active_output;
+                graph.active_output = node;
+                if let Some(n) = node {
+                    self.mark_dirty(ctx, n);
+                }
+                events.push(EngineEvent::ActiveOutputChanged { ctx, node });
+                Ok(UndoOp::SetActiveOutput { ctx, node: prev })
+            }
+            UndoOp::SetSelection { ctx, ids } => {
+                let graph = self.doc.graph_mut(ctx)?;
+                let prev = graph.selection.clone();
+                graph.selection.clone_from(&ids);
+                events.push(EngineEvent::SelectionChanged {
+                    ctx,
+                    ids: ids.clone(),
+                });
+                Ok(UndoOp::SetSelection { ctx, ids: prev })
+            }
+            UndoOp::ReorderVariadic {
+                ctx,
+                node,
+                port,
+                order,
+            } => {
+                let prev = self
+                    .doc
+                    .graph_mut(ctx)?
+                    .reorder_variadic(node, &port, order.clone())?;
+                self.mark_dirty(ctx, node);
+                events.push(EngineEvent::VariadicReordered {
+                    ctx,
+                    node,
+                    port: port.clone(),
+                    order,
+                });
+                Ok(UndoOp::ReorderVariadic {
+                    ctx,
+                    node,
+                    port,
+                    order: prev,
+                })
+            }
+            UndoOp::RemoveNodes { ctx, ids } => self.remove_nodes_core(ctx, &ids, events),
+            UndoOp::RemoveEdge { ctx, edge } => self.disconnect_core(ctx, edge, events),
+            UndoOp::RestoreEdge {
+                ctx,
+                edge,
+                to_variadic,
+            } => {
+                let id = edge.id;
+                let to = edge.to;
+                self.doc
+                    .graph_mut(ctx)?
+                    .connect(edge.clone(), to_variadic)?;
+                self.mark_dirty(ctx, to);
+                events.push(EngineEvent::EdgeAdded {
+                    ctx,
+                    edge: snapshot::EdgeMirror::from(&edge),
+                });
+                Ok(UndoOp::RemoveEdge { ctx, edge: id })
+            }
+            UndoOp::RestoreFragment {
+                ctx,
+                fragment,
+                boundary_edges,
+                active_output,
+            } => {
+                let ids: Vec<NodeId> = fragment.nodes.iter().map(|n| n.id).collect();
+                // Restore nodes + internal edges + owned subflows verbatim.
+                fragment.insert_into(&mut self.doc, ctx, undo::UNDO_INSERT, &|_| true);
+                // Re-add boundary edges (to surviving outside nodes).
+                for (edge, variadic) in &boundary_edges {
+                    let _ = self.doc.graph_mut(ctx)?.connect(edge.clone(), *variadic);
+                }
+                // Re-register cook state and dirty the restored cone.
+                for &id in &ids {
+                    self.cook.insert_node(id);
+                    self.mark_dirty(ctx, id);
+                }
+                if let Ok(graph) = self.doc.graph_mut(ctx) {
+                    graph.active_output = active_output;
+                }
+                Ok(UndoOp::RemoveNodes { ctx, ids })
+            }
+            UndoOp::RestoreReview { store } => {
+                let current = self.doc.review().clone();
+                *self.doc.review_mut() = store;
+                events.push(EngineEvent::ReviewChanged);
+                Ok(UndoOp::RestoreReview { store: current })
+            }
+        }
+    }
+
+    /// A transient preview value for a param drag: no event, no undo entry,
+    /// no document write. It only dirty-marks so the next cook previews it,
+    /// and the resolver path consults it until the authoritative `SetParam`
+    /// clears it.
+    pub fn preview_param(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+        value: ParamSource,
+    ) {
+        self.previews.insert((node, key.to_string()), value);
+        self.mark_dirty(ctx, node);
+    }
+
+    /// Cooks every context that has dirty work, under `should_continue`
+    /// (native callers pass a wall-clock deadline; the web host a frame
+    /// budget). Returns the cook events (status + coalesced stats).
+    pub fn cook(&mut self, should_continue: &mut dyn FnMut() -> bool) -> Vec<EngineEvent> {
+        let mut events = Vec::new();
+        // Root first, then each subflow in id order (deterministic).
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            let report = self.cook.cook_until(
+                &self.doc,
+                &self.registry,
+                &self.assets,
+                ctx,
+                should_continue,
+            );
+            for (node, status) in report.status_changed {
+                events.push(EngineEvent::CookStatus { node, status });
+            }
+            for (node, stats) in report.stats_changed {
+                events.push(EngineEvent::NodeStats {
+                    node,
+                    points: stats.points,
+                    prims: stats.prims,
+                    meshes: stats.meshes,
+                });
+            }
+            // Async jobs spawned this pass are queued for the host to
+            // dispatch (tagged with their context for `submit_job_result`).
+            for (job, request) in report.jobs {
+                self.pending_jobs.push((ctx, job, request));
+            }
+        }
+        events
+    }
+
+    /// Drains the async jobs the last cook spawned. The host dispatches each
+    /// (to the import worker on web, or resolves it inline via
+    /// [`Engine::resolve_job`] natively) and feeds the result back through
+    /// [`Engine::submit_job_result`] with the same context.
+    pub fn take_jobs(&mut self) -> Vec<(GraphContext, JobId, JobRequest)> {
+        std::mem::take(&mut self.pending_jobs)
+    }
+
+    /// Fulfills a job synchronously from the staged asset table (the native
+    /// path, and the deterministic test harness). On web the import worker
+    /// does this off-thread instead.
+    #[must_use]
+    pub fn resolve_job(&self, request: &JobRequest) -> JobResult {
+        match request {
+            JobRequest::ParseModel { asset, format } => {
+                let Some(entry) = self.assets.get(asset) else {
+                    return JobResult::Model(Err("asset not staged".to_string()));
+                };
+                let parsed =
+                    crate::nodes::parse_bytes(format, &entry.bytes, &entry.name, &self.assets)
+                        .map(solarxy_kernel::GeometrySet::from_raw);
+                JobResult::Model(parsed)
+            }
+        }
+    }
+
+    /// Feeds an async job result back under the generation guard, cooking
+    /// its downstream and returning the resulting events.
+    pub fn submit_job_result(
+        &mut self,
+        ctx: GraphContext,
+        job: JobId,
+        result: JobResult,
+    ) -> Vec<EngineEvent> {
+        let mut events = Vec::new();
+        let Ok(graph) = self.doc.graph(ctx) else {
+            return events;
+        };
+        let report = self.cook.submit_job_result(&graph.clone(), job, result);
+        for (node, status) in report.status_changed {
+            events.push(EngineEvent::CookStatus { node, status });
+        }
+        for (node, stats) in report.stats_changed {
+            events.push(EngineEvent::NodeStats {
+                node,
+                points: stats.points,
+                prims: stats.prims,
+                meshes: stats.meshes,
+            });
+        }
+        events
+    }
+
+    /// Drains the accumulated scene delta for the renderer, rebuilding it
+    /// from the current committed display outputs and light nodes.
+    pub fn take_scene_delta(&mut self) -> SceneDelta {
+        self.scene = scene::build_scene_delta(&self.doc, &self.registry, &self.cook);
+        std::mem::take(&mut self.scene)
+    }
+
+    /// The full UI mirror (recovery after desync / structural undo).
+    #[must_use]
+    pub fn snapshot(&self) -> DocumentSnapshot {
+        DocumentSnapshot::capture(&self.doc)
+    }
+
+    /// The static registry snapshot (fetched once at startup; drives the
+    /// palette + parameter panel).
+    #[must_use]
+    pub fn registry_snapshot(&self) -> RegistrySnapshot {
+        RegistrySnapshot::capture(&self.registry)
+    }
+
+    #[must_use]
+    pub fn cook_mode(&self) -> CookMode {
+        self.cook_mode
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The cook state of a node (test/inspection helper).
+    #[must_use]
+    pub fn cook_state(&self, node: NodeId) -> CookState {
+        self.cook.state(node)
+    }
+
+    /// The committed vertex count on a node's default geometry output
+    /// (0 if the node has no committed geometry). Inspection helper.
+    #[must_use]
+    pub fn node_geometry_points(&self, node: NodeId) -> u64 {
+        self.cook
+            .outputs(node)
+            .and_then(|o| o.get("geometry"))
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .map_or(0, |g| g.point_count())
+    }
+
+    /// Parses a schema-v1 JSON param source under a node's declared type
+    /// (the load / SetParam-from-JSON path).
+    pub fn param_source_from_json(
+        &self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+        json: &serde_json::Value,
+    ) -> Result<ParamSource, EngineError> {
+        let type_id = self.node_type_in(ctx, node)?;
+        let desc = self
+            .registry
+            .get(&type_id)
+            .ok_or_else(|| EngineError::UnknownNodeType(type_id.clone()))?;
+        let spec = desc.param(key).ok_or_else(|| EngineError::InvalidParam {
+            key: key.to_string(),
+            reason: "no such param".to_string(),
+        })?;
+        param_source_from_json(json, &spec.ty).map_err(|reason| EngineError::InvalidParam {
+            key: key.to_string(),
+            reason,
+        })
+    }
+
+    // Helpers.
+
+    fn mark_dirty(&mut self, ctx: GraphContext, node: NodeId) {
+        if let Ok(graph) = self.doc.graph(ctx) {
+            self.cook.mark_dirty(graph, node);
+        }
+    }
+
+    /// The type id of a node found in any context (used by connect, whose
+    /// `PortRef` carries only the node id).
+    fn node_type(&self, node: NodeId) -> Result<String, EngineError> {
+        // Search root then subflows.
+        if let Ok(root) = self.doc.graph(GraphContext::Root)
+            && let Some(n) = root.node(node)
+        {
+            return Ok(n.type_id.clone());
+        }
+        for owner in self.doc.subflow_owners() {
+            if let Ok(g) = self.doc.graph(GraphContext::Subflow(owner))
+                && let Some(n) = g.node(node)
+            {
+                return Ok(n.type_id.clone());
+            }
+        }
+        Err(GraphError::UnknownNode(node).into())
+    }
+
+    fn node_type_in(&self, ctx: GraphContext, node: NodeId) -> Result<String, EngineError> {
+        let graph = self.doc.graph(ctx)?;
+        graph
+            .node(node)
+            .map(|n| n.type_id.clone())
+            .ok_or_else(|| GraphError::UnknownNode(node).into())
+    }
+}
+
+#[cfg(test)]
+mod tests;

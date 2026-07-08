@@ -4063,6 +4063,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-graph"
+version = "0.6.0"
+dependencies = [
+ "cgmath",
+ "serde",
+ "serde_json",
+ "sha2",
+ "solarxy-core",
+ "solarxy-formats",
+ "solarxy-kernel",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "solarxy-kernel"
+version = "0.6.0"
+dependencies = [
+ "cgmath",
+ "solarxy-core",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "solarxy-renderer"
 version = "0.6.0"
 dependencies = [

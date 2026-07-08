@@ -1,0 +1,14 @@
+[package]
+name = "solarxy-kernel"
+description = "Parametric geometry kernel for the Solarxy node engine: primitive generators, transform baking, merge concatenation, and the GeometrySet payload type."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+solarxy-core = { path = "../solarxy-core", default-features = false }
+cgmath = { workspace = true }
+thiserror = { workspace = true }
