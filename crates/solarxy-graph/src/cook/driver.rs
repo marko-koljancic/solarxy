@@ -20,6 +20,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use solarxy_core::validation::ValidationResult;
+use solarxy_kernel::GeometrySet;
+
 use super::state::{CookState, CookStatus, NodeCookStats};
 use super::{CookCtx, CookError, CookOutcome, InputSlot, Inputs, JobId, JobRequest, Outputs};
 use crate::assets::AssetTable;
@@ -31,10 +34,14 @@ use crate::registry::{Arity, BypassBehavior, Registry};
 /// One in-flight async job, tagged with the generation it was spawned at.
 /// The request itself travels to the host in [`CookReport::jobs`]; the
 /// engine only needs to relate the result back to its node and generation.
+/// A `ValidateGeometry` job additionally retains the geometry it was
+/// spawned over, so the validate node's passthrough output commits without
+/// the geometry ever crossing back from the worker.
 #[derive(Debug, Clone)]
 struct PendingJob {
     node: NodeId,
     generation: u64,
+    passthrough: Option<Arc<GeometrySet>>,
 }
 
 /// What one cook pass did. `stats_changed` and `status_changed` are
@@ -54,6 +61,10 @@ pub struct CookReport {
     /// Async jobs to dispatch (host posts them to the worker; native
     /// callers resolve them synchronously and feed `submit_job_result`).
     pub jobs: Vec<(JobId, JobRequest)>,
+    /// Nodes whose cached validation result changed this pass: `Some` is a
+    /// fresh result (badge + report events), `None` a cleared one (the
+    /// node recooked without validating, was bypassed, or lost its input).
+    pub validation_changed: Vec<(NodeId, Option<Arc<ValidationResult>>)>,
 }
 
 /// Per-node cook bookkeeping and the keep-last-good output cache. Holds
@@ -64,6 +75,10 @@ pub struct CookEngine {
     state: BTreeMap<NodeId, CookState>,
     /// Keep-last-good output cache: a node's last committed outputs.
     outputs: BTreeMap<NodeId, Arc<Outputs>>,
+    /// Per-node validation cache: the last validation result a node's cook
+    /// produced (validate node, import load validation). Read by the scene
+    /// lowering to attach the effective result to each object.
+    validation: BTreeMap<NodeId, Arc<ValidationResult>>,
     status: BTreeMap<NodeId, CookStatus>,
     stats: BTreeMap<NodeId, NodeCookStats>,
     /// Monotonic per-node generation, bumped on every (re)cook or
@@ -114,6 +129,7 @@ impl CookEngine {
     pub fn reset(&mut self) {
         self.state.clear();
         self.outputs.clear();
+        self.validation.clear();
         self.status.clear();
         self.stats.clear();
         self.generation.clear();
@@ -131,6 +147,7 @@ impl CookEngine {
     pub fn forget_node(&mut self, node: NodeId) {
         self.state.remove(&node);
         self.outputs.remove(&node);
+        self.validation.remove(&node);
         self.status.remove(&node);
         self.stats.remove(&node);
         self.generation.remove(&node);
@@ -152,6 +169,14 @@ impl CookEngine {
     #[must_use]
     pub fn outputs(&self, node: NodeId) -> Option<&Arc<Outputs>> {
         self.outputs.get(&node)
+    }
+
+    /// The node's cached validation result, if its last cook produced one
+    /// (validate node, import load validation). The `Arc` is stable until
+    /// the node recooks, so consumers may dedupe by pointer identity.
+    #[must_use]
+    pub fn validation(&self, node: NodeId) -> Option<&Arc<ValidationResult>> {
+        self.validation.get(&node)
     }
 
     #[must_use]
@@ -271,12 +296,14 @@ impl CookEngine {
         report.cooked.push(node);
         let generation = *self.generation.entry(node).or_insert(0);
 
-        // Bypass short-circuits the compute entirely.
+        // Bypass short-circuits the compute entirely (and clears any
+        // cached validation: a bypassed validate node stops reporting).
         if data.bypassed {
             let start = self.now();
             let outcome = self.resolve_bypass(graph, desc, node);
             let elapsed = self.now() - start;
             self.commit_outputs(node, outcome, elapsed, report);
+            self.commit_validation(node, None, report);
             self.state.insert(node, CookState::Clean);
             return;
         }
@@ -309,13 +336,27 @@ impl CookEngine {
         match outcome {
             Ok(CookOutcome::Done(outputs)) => {
                 self.commit_outputs(node, outputs, elapsed, report);
+                self.commit_validation(node, cx.take_validation(), report);
                 self.state.insert(node, CookState::Clean);
             }
             Ok(CookOutcome::Pending(request)) => {
-                // Park the node; its result must match this generation.
+                // Park the node; its result must match this generation. A
+                // validate job retains its geometry so the passthrough
+                // output can commit when the result arrives.
+                let passthrough = match &request {
+                    JobRequest::ValidateGeometry { geometry, .. } => Some(Arc::clone(geometry)),
+                    JobRequest::ParseModel { .. } => None,
+                };
                 let job = JobId(self.next_job);
                 self.next_job += 1;
-                self.jobs.insert(job, PendingJob { node, generation });
+                self.jobs.insert(
+                    job,
+                    PendingJob {
+                        node,
+                        generation,
+                        passthrough,
+                    },
+                );
                 self.state.insert(node, CookState::Pending(generation));
                 self.set_status(node, CookStatus::Pending, report);
                 report.jobs.push((job, request));
@@ -438,9 +479,12 @@ impl CookEngine {
     /// Commits a cook failure. `InputRequired` clears the cache (explicit
     /// disconnect is user intent, no keep-last-good); every other error
     /// keeps the last good geometry in the viewport (transient failure).
+    /// Cached validation follows the outputs: cleared on `InputRequired`,
+    /// retained through transient failures.
     fn commit_error(&mut self, node: NodeId, err: &CookError, report: &mut CookReport) {
         if matches!(err, CookError::InputRequired { .. }) {
             self.outputs.remove(&node);
+            self.commit_validation(node, None, report);
         }
         self.set_status(
             node,
@@ -449,6 +493,30 @@ impl CookEngine {
             },
             report,
         );
+    }
+
+    /// Commits a cook's validation side-channel: `Some` replaces the
+    /// node's cached result (fresh `Arc`, so downstream pointer-dedupe
+    /// sees the change), `None` clears it. Emits a `validation_changed`
+    /// entry only when something actually changed.
+    fn commit_validation(
+        &mut self,
+        node: NodeId,
+        validation: Option<ValidationResult>,
+        report: &mut CookReport,
+    ) {
+        match validation {
+            Some(result) => {
+                let arc = Arc::new(result);
+                self.validation.insert(node, Arc::clone(&arc));
+                report.validation_changed.push((node, Some(arc)));
+            }
+            None => {
+                if self.validation.remove(&node).is_some() {
+                    report.validation_changed.push((node, None));
+                }
+            }
+        }
     }
 
     /// Submits an async job's result under the generation guard. A result
@@ -476,14 +544,25 @@ impl CookEngine {
             return report;
         }
 
-        let super::JobResult::Model(model) = result;
-        match model {
-            Ok(set) => {
+        match result {
+            super::JobResult::Model(Ok(parsed)) => {
                 // Async wall-time is not charged to a cook budget; the
                 // commit itself is effectively instantaneous.
-                self.commit_outputs(node, Outputs::geometry(set), 0.0, &mut report);
+                self.commit_outputs(node, Outputs::geometry(parsed.set), 0.0, &mut report);
+                self.commit_validation(node, parsed.validation, &mut report);
             }
-            Err(message) => {
+            super::JobResult::Report(Ok(result)) => {
+                // The parked validate node: passthrough geometry retained
+                // at spawn plus the worker's report.
+                let geometry = pending
+                    .passthrough
+                    .unwrap_or_else(|| Arc::new(GeometrySet::empty()));
+                let mut outputs = Outputs::single("geometry", Value::Geometry(geometry));
+                outputs.insert("report", Value::Report(Arc::new(result.report.clone())));
+                self.commit_outputs(node, outputs, 0.0, &mut report);
+                self.commit_validation(node, Some(result), &mut report);
+            }
+            super::JobResult::Model(Err(message)) | super::JobResult::Report(Err(message)) => {
                 self.commit_error(node, &CookError::Failed { message }, &mut report);
             }
         }

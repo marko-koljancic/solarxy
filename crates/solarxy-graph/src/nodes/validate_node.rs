@@ -10,7 +10,7 @@ use solarxy_core::ValidationReport;
 use solarxy_core::validation::{ValidationConfig, ValidationThresholds, validate_raw_model_with_config};
 
 use super::common::{geometry_output, params_with};
-use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
+use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, JobRequest, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{ParamSpec, ParamType, Pred};
@@ -75,8 +75,14 @@ fn check(key: &str, label: &str) -> ParamSpec {
     )
 }
 
+/// Above this input triangle count the validate node offloads to an async
+/// `ValidateGeometry` job (the web worker) instead of validating inline on
+/// the cook thread. Below it, inline validation is cheap enough to keep the
+/// realtime UX contract.
+const ASYNC_TRIANGLE_THRESHOLD: u64 = 250_000;
+
 #[allow(clippy::unnecessary_wraps)] // signature matches CookFn
-fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         // Connected-but-empty upstream: pass empty through, empty report.
         let mut out = Outputs::geometry(solarxy_kernel::GeometrySet::empty());
@@ -99,7 +105,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
         uv_presence: p.bool("uvs"),
         index_buffer: p.bool("topology"),
     };
-    let thresholds = ValidationThresholds::default();
     let budget = p.i64("triangle_budget");
     let budget = if p.bool("budget") && budget > 0 {
         Some(budget.min(i64::from(u32::MAX)) as u32)
@@ -107,11 +112,27 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
         None
     };
 
+    // Heavy inputs validate off-thread: the geometry rides the request as
+    // an `Arc`, the driver retains it for the passthrough commit, and the
+    // result arrives through the same generation-guarded job protocol as
+    // imports.
+    if cx.async_jobs && input.triangle_count() > ASYNC_TRIANGLE_THRESHOLD {
+        return Ok(CookOutcome::Pending(JobRequest::ValidateGeometry {
+            geometry: Arc::clone(input),
+            config,
+            budget,
+        }));
+    }
+
     // The GeometrySet -> RawModelData adapter (round-trip tested in the
     // kernel), then the existing pipeline.
     let raw = input.to_raw();
+    let thresholds = ValidationThresholds::default();
     let result = validate_raw_model_with_config(&raw, "", &config, &thresholds, budget);
-    let report = Arc::new(result.report);
+    let report = Arc::new(result.report.clone());
+    // The full result (report + degenerate-face lists) rides the driver's
+    // validation cache for the per-object overlay.
+    cx.set_validation(result);
 
     // Pass the input geometry through unchanged, plus the report.
     let mut out = Outputs::single("geometry", Value::Geometry(Arc::clone(input)));
@@ -169,5 +190,64 @@ mod tests {
         let mesh = KernelMesh::new("broken", vec![[0.0; 3], [0.0; 3], [0.0; 3]], vec![0, 1, 2]);
         let (_points, issues) = run(GeometrySet::from_mesh(mesh));
         assert!(issues > 0, "a degenerate triangle should be reported");
+    }
+
+    #[test]
+    fn inline_cook_records_the_full_result_on_the_side_channel() {
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        // One degenerate triangle so the result carries degenerate faces.
+        let mesh = KernelMesh::new("d", vec![[0.0; 3], [1.0, 0.0, 0.0]], vec![0, 0, 0]);
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(GeometrySet::from_mesh(mesh)))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(_) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("inline path cooks synchronously");
+        };
+        let result = cx.take_validation().expect("side-channel recorded");
+        assert!(result.degenerate_faces.iter().any(|f| !f.is_empty()));
+    }
+
+    #[test]
+    fn heavy_input_parks_pending_with_a_validate_job() {
+        // 250_001 (degenerate) triangles over three vertices: cheap to
+        // build, over the async threshold.
+        let count = ASYNC_TRIANGLE_THRESHOLD as u32 + 1;
+        let indices: Vec<u32> = (0..count * 3).map(|i| i % 3).collect();
+        let mesh = KernelMesh::new(
+            "big",
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices,
+        );
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(GeometrySet::from_mesh(mesh)))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        // Async available: the node must offload rather than block a cook.
+        let mut cx = CookCtx::new(&assets, true);
+        match cook(&resolved, &inputs, &mut cx).unwrap() {
+            CookOutcome::Pending(JobRequest::ValidateGeometry { budget, .. }) => {
+                assert!(budget.is_none(), "budget check defaults to un-budgeted");
+            }
+            _ => panic!("expected Pending(ValidateGeometry)"),
+        }
+        // Async unavailable: the same input validates inline.
+        let mut cx = CookCtx::new(&assets, false);
+        assert!(matches!(
+            cook(&resolved, &inputs, &mut cx).unwrap(),
+            CookOutcome::Done(_)
+        ));
     }
 }

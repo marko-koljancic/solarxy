@@ -230,6 +230,24 @@ pub enum EngineEvent {
         prims: u64,
         meshes: u32,
     },
+    /// A node's validation counts changed (validate node cook, import load
+    /// validation). Zero counts on a clean result AND on a cleared one
+    /// (bypass, lost input), so the badge lifecycle is one event.
+    ValidationSummary {
+        node: NodeId,
+        errors: usize,
+        warnings: usize,
+    },
+    /// The full issue list behind a fresh [`EngineEvent::ValidationSummary`],
+    /// capped at [`REPORT_EVENT_ISSUE_CAP`] rows (`truncated` flags the
+    /// cut; the summary carries the uncapped counts).
+    ValidationReport {
+        node: NodeId,
+        errors: usize,
+        warnings: usize,
+        truncated: bool,
+        issues: Vec<solarxy_core::validation::ValidationIssue>,
+    },
     CookModeChanged {
         mode: CookMode,
     },
@@ -245,6 +263,50 @@ pub enum EngineEvent {
 pub struct EventBatch {
     pub revision: u64,
     pub events: Vec<EngineEvent>,
+}
+
+/// The most issues a single [`EngineEvent::ValidationReport`] carries; a
+/// pathological mesh truncates the list (flagged) while the summary keeps
+/// the real counts.
+pub const REPORT_EVENT_ISSUE_CAP: usize = 2000;
+
+/// Turns one validation-cache change into its boundary events: a fresh
+/// result emits the summary plus the capped issue list; a cleared one
+/// emits a zeroed summary (one badge lifecycle, no tombstone event).
+fn push_validation_events(
+    events: &mut Vec<EngineEvent>,
+    node: NodeId,
+    validation: Option<&solarxy_core::validation::ValidationResult>,
+) {
+    match validation {
+        Some(v) => {
+            let errors = v.report.error_count();
+            let warnings = v.report.warning_count();
+            events.push(EngineEvent::ValidationSummary {
+                node,
+                errors,
+                warnings,
+            });
+            events.push(EngineEvent::ValidationReport {
+                node,
+                errors,
+                warnings,
+                truncated: v.report.issues.len() > REPORT_EVENT_ISSUE_CAP,
+                issues: v
+                    .report
+                    .issues
+                    .iter()
+                    .take(REPORT_EVENT_ISSUE_CAP)
+                    .cloned()
+                    .collect(),
+            });
+        }
+        None => events.push(EngineEvent::ValidationSummary {
+            node,
+            errors: 0,
+            warnings: 0,
+        }),
+    }
 }
 
 /// A whole-document save file: the graph data plus the editor's cook mode.
@@ -1306,6 +1368,9 @@ impl Engine {
                     meshes: stats.meshes,
                 });
             }
+            for (node, validation) in report.validation_changed {
+                push_validation_events(&mut events, node, validation.as_deref());
+            }
             // Async jobs spawned this pass are queued for the host to
             // dispatch (tagged with their context for `submit_job_result`).
             for (job, request) in report.jobs {
@@ -1338,6 +1403,43 @@ impl Engine {
         ids
     }
 
+    /// The cached validation result for a node (a validate node's cook, an
+    /// import's load validation), if any. The `Arc` is stable until the
+    /// node recooks.
+    #[must_use]
+    pub fn validation(
+        &self,
+        node: NodeId,
+    ) -> Option<&std::sync::Arc<solarxy_core::validation::ValidationResult>> {
+        self.cook.validation(node)
+    }
+
+    /// A node's cooked `geometry` output, if committed. The `Arc` is
+    /// stable until the node recooks, so callers may dedupe uploads by
+    /// pointer identity (the UV pane's selected-node preview).
+    #[must_use]
+    pub fn geometry_output(
+        &self,
+        node: NodeId,
+    ) -> Option<&std::sync::Arc<solarxy_kernel::GeometrySet>> {
+        self.cook.outputs(node)?.get("geometry")?.as_geometry()
+    }
+
+    /// The UV pane's source in a context: the first selected node's
+    /// committed geometry (subflow contexts only; the root's selection is
+    /// geo containers, whose display objects the caller already holds).
+    #[must_use]
+    pub fn selected_geometry(
+        &self,
+        ctx: GraphContext,
+    ) -> Option<(NodeId, &std::sync::Arc<solarxy_kernel::GeometrySet>)> {
+        if ctx == GraphContext::Root {
+            return None;
+        }
+        let node = *self.doc.graph(ctx).ok()?.selection.first()?;
+        Some((node, self.geometry_output(node)?))
+    }
+
     /// Drains the async jobs the last cook spawned. The host dispatches each
     /// (to the import worker on web, or resolves it inline via
     /// [`Engine::resolve_job`] natively) and feeds the result back through
@@ -1360,14 +1462,33 @@ impl Engine {
                 let Some(entry) = self.assets.get(asset) else {
                     return JobResult::Model(Err("asset not staged".to_string()));
                 };
-                let parsed = crate::nodes::parse_model(
+                let parsed = crate::nodes::parse_model_validated(
                     format,
                     &entry.bytes,
                     &entry.name,
                     &self.assets,
                     options,
-                );
+                )
+                .map(|(set, validation)| crate::cook::ParsedModel {
+                    set,
+                    validation: Some(validation),
+                });
                 JobResult::Model(parsed)
+            }
+            JobRequest::ValidateGeometry {
+                geometry,
+                config,
+                budget,
+            } => {
+                let raw = geometry.to_raw();
+                let result = solarxy_core::validation::validate_raw_model_with_config(
+                    &raw,
+                    "",
+                    config,
+                    &solarxy_core::validation::ValidationThresholds::default(),
+                    *budget,
+                );
+                JobResult::Report(Ok(result))
             }
         }
     }
@@ -1395,6 +1516,9 @@ impl Engine {
                 prims: stats.prims,
                 meshes: stats.meshes,
             });
+        }
+        for (node, validation) in report.validation_changed {
+            push_validation_events(&mut events, node, validation.as_deref());
         }
         events
     }

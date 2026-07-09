@@ -9,6 +9,7 @@
 //! while keep-last-good keeps the previous geometry (a catalog delta from
 //! Minimystix's silent empty-group behavior).
 
+use solarxy_core::validation::{ValidationResult, validate_raw_model};
 use solarxy_formats::AssetResolver;
 use solarxy_kernel::GeometrySet;
 use solarxy_kernel::transform::{RotateOrder, bake_transform, compose_trs};
@@ -216,9 +217,11 @@ fn cook_import(
         }));
     }
 
-    // Native / test path: parse and finish inline.
-    let set = parse_model(&format, &entry.bytes, &entry.name, cx.assets, &options)
-        .map_err(|message| CookError::Failed { message })?;
+    // Native / test path: parse, validate, and finish inline.
+    let (set, validation) =
+        parse_model_validated(&format, &entry.bytes, &entry.name, cx.assets, &options)
+            .map_err(|message| CookError::Failed { message })?;
+    cx.set_validation(validation);
     Ok(CookOutcome::Done(Outputs::geometry(set)))
 }
 
@@ -270,6 +273,25 @@ pub fn parse_model(
     let mut set = GeometrySet::from_raw(raw);
     finish_import_set(&mut set, options);
     Ok(set)
+}
+
+/// [`parse_model`] plus the implicit load-time validation: the raw model is
+/// validated as parsed (before finishing), exactly like the desktop
+/// viewer's load validation (`validate_raw_model` with default config), so
+/// the two products report identically on the same file. Both the inline
+/// cook and the web import worker call this.
+pub fn parse_model_validated(
+    format: &str,
+    bytes: &[u8],
+    name: &str,
+    assets: &AssetTable,
+    options: &ImportOptions,
+) -> Result<(GeometrySet, ValidationResult), String> {
+    let raw = parse_bytes(format, bytes, name, assets)?;
+    let validation = validate_raw_model(&raw, format);
+    let mut set = GeometrySet::from_raw(raw);
+    finish_import_set(&mut set, options);
+    Ok((set, validation))
 }
 
 /// Applies the resolved finishing options to a freshly parsed set: the

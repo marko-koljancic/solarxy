@@ -1239,6 +1239,7 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
         pitch: 0.3,
         distance: 12.0,
         fov_y: 0.8,
+        ..solarxy_scenefile::CameraJson::default()
     };
     sidecar.meta.name = "My Scene".into();
 
@@ -1303,4 +1304,234 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     let cam = &loaded.sidecar.view.panes[0].camera;
     assert!((cam.distance - 12.0).abs() < 1e-6);
     assert!((cam.target[1] - 2.0).abs() < 1e-6);
+}
+
+// Validation systems (phase 6 W3): implicit import validation, the
+// validate node's cache + boundary events, the effective-validation
+// lowering, and the async validate-job protocol.
+
+/// An OBJ with one degenerate face (all three corners the same vertex) and
+/// no UVs, so validation reliably finds issues and a degenerate-face list.
+const DIRTY_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 1 1\nf 1 2 3\n";
+
+/// A geo container whose subflow holds one `import_obj` over the dirty
+/// OBJ (display auto-claimed by the import). Not yet cooked.
+fn dirty_import_fixture() -> (Engine, GraphContext, NodeId, NodeId) {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let import = add(&mut e, sub, "import_obj");
+    let asset = e.stage_asset("dirty.obj", "model/obj", DIRTY_OBJ.as_bytes().to_vec());
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: import,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    (e, sub, geo, import)
+}
+
+/// The `SetValidation` payload lowered for a scene object, or `None` if
+/// the op is absent (the outer level is the op's presence, the inner the
+/// attached result).
+#[allow(clippy::option_option)]
+fn attached_validation(
+    delta: &solarxy_core::scene::SceneDelta,
+    object: solarxy_core::scene::SceneObjectId,
+) -> Option<Option<std::sync::Arc<solarxy_core::validation::ValidationResult>>> {
+    delta.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetValidation { id, validation } if *id == object => {
+            Some(validation.clone())
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn import_cook_validates_implicitly_and_lowers_set_validation() {
+    use std::sync::Arc;
+    let (mut e, _sub, geo, import) = dirty_import_fixture();
+    let events = e.cook(&mut || true);
+
+    // Summary + full report events for the import node, with real counts.
+    let summary = events.iter().find_map(|ev| match ev {
+        EngineEvent::ValidationSummary {
+            node,
+            errors,
+            warnings,
+        } if *node == import => Some((*errors, *warnings)),
+        _ => None,
+    });
+    let (errors, warnings) = summary.expect("import emits a validation summary");
+    assert!(errors + warnings > 0, "the dirty OBJ has issues");
+    assert!(events.iter().any(|ev| matches!(
+        ev,
+        EngineEvent::ValidationReport {
+            node,
+            truncated: false,
+            issues,
+            ..
+        } if *node == import && !issues.is_empty()
+    )));
+
+    // The cached result keeps the degenerate-face list (`f 1 1 1`).
+    let cached = Arc::clone(e.validation(import).expect("validation cached"));
+    assert!(cached.degenerate_faces.iter().any(|f| !f.is_empty()));
+
+    // The lowering attaches the effective validation to the geo's object.
+    let delta = e.take_scene_delta();
+    let attached = attached_validation(&delta, solarxy_core::scene::SceneObjectId(geo.0))
+        .expect("SetValidation lowered")
+        .expect("effective validation present");
+    assert!(Arc::ptr_eq(&attached, &cached));
+}
+
+#[test]
+fn nearest_validate_node_wins_and_bypass_falls_back_to_the_import() {
+    use std::sync::Arc;
+    let (mut e, sub, geo, import) = dirty_import_fixture();
+    let object = solarxy_core::scene::SceneObjectId(geo.0);
+    let validate = add(&mut e, sub, "validate");
+    e.apply(Command::Connect {
+        ctx: sub,
+        from: PortRefDto {
+            node: import,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: validate,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(validate),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    // Both nodes cache a result; the displayed chain's nearest (the
+    // validate node) wins the object attachment.
+    let from_validate = Arc::clone(e.validation(validate).expect("validate caches"));
+    let from_import = Arc::clone(e.validation(import).expect("import caches"));
+    let delta = e.take_scene_delta();
+    let attached = attached_validation(&delta, object)
+        .expect("SetValidation lowered")
+        .expect("effective validation present");
+    assert!(Arc::ptr_eq(&attached, &from_validate));
+    assert!(!Arc::ptr_eq(&attached, &from_import));
+
+    // Bypassing the validate node clears its cache (zeroed summary) and
+    // the import's implicit validation becomes effective.
+    e.apply(Command::SetBypass {
+        ctx: sub,
+        node: validate,
+        bypassed: true,
+    })
+    .unwrap();
+    let events = e.cook(&mut || true);
+    assert!(events.iter().any(|ev| matches!(
+        ev,
+        EngineEvent::ValidationSummary {
+            node,
+            errors: 0,
+            warnings: 0,
+        } if *node == validate
+    )));
+    assert!(e.validation(validate).is_none());
+    let delta = e.take_scene_delta();
+    let attached = attached_validation(&delta, object)
+        .expect("SetValidation lowered")
+        .expect("effective validation present");
+    assert!(Arc::ptr_eq(&attached, &from_import));
+}
+
+#[test]
+fn heavy_validate_routes_through_the_job_protocol() {
+    let mut e = engine();
+    e.set_async_jobs(true);
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let sphere = add(&mut e, sub, "sphere");
+    // 512x512 segments is ~522k triangles, over the 250k inline threshold.
+    for key in ["width_segments", "height_segments"] {
+        e.apply(Command::SetParam {
+            ctx: sub,
+            node: sphere,
+            key: key.into(),
+            value: ParamSource::Literal(ParamValue::Int(512)),
+        })
+        .unwrap();
+    }
+    let validate = add(&mut e, sub, "validate");
+    e.apply(Command::Connect {
+        ctx: sub,
+        from: PortRefDto {
+            node: sphere,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: validate,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(validate),
+    })
+    .unwrap();
+
+    // The sphere cooks inline; the validate node parks Pending with a
+    // ValidateGeometry job.
+    e.cook(&mut || true);
+    let jobs = e.take_jobs();
+    assert_eq!(jobs.len(), 1, "one validate job spawns");
+    let (ctx, job, request) = jobs.into_iter().next().unwrap();
+    assert!(matches!(
+        request,
+        crate::cook::JobRequest::ValidateGeometry { .. }
+    ));
+
+    // Resolve natively and submit: the passthrough geometry commits and
+    // the validation summary lands.
+    let result = e.resolve_job(&request);
+    let events = e.submit_job_result(ctx, job, result);
+    assert!(e.node_geometry_points(validate) > 0, "passthrough commits");
+    assert!(events.iter().any(|ev| matches!(
+        ev,
+        EngineEvent::ValidationSummary { node, .. } if *node == validate
+    )));
+    assert!(e.validation(validate).is_some());
+}
+
+#[test]
+fn validation_result_round_trips_through_json() {
+    use solarxy_core::validation::{
+        IssueKind, IssueScope, Severity, ValidationIssue, ValidationReport, ValidationResult,
+    };
+    // The worker boundary shape: `validate_geometry_job` / the implicit
+    // import validation serialize a full result to JSON.
+    let result = ValidationResult {
+        report: ValidationReport {
+            issues: vec![ValidationIssue {
+                severity: Severity::Error,
+                scope: IssueScope::Edge {
+                    mesh_index: 2,
+                    vertices: [7, 9],
+                },
+                kind: IssueKind::NonManifoldEdge,
+                message: "shared by 3 faces".into(),
+            }],
+        },
+        degenerate_faces: vec![vec![], vec![3, 5]],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("degenerateFaces"), "camelCase boundary shape");
+    let back: ValidationResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.report.issues.len(), 1);
+    assert_eq!(back.report.error_count(), 1);
+    assert_eq!(back.degenerate_faces, result.degenerate_faces);
 }

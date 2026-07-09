@@ -28,7 +28,7 @@ use solarxy_core::preferences::{
     self, BackgroundMode, BuiltinBg, CustomBackground, IblMode, InspectionMode, MaterialOverride,
     NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
-use solarxy_core::validation::IssueScope;
+use solarxy_renderer::validation::{material_meshes_aabb, resolve_issue_aabb};
 
 use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
 
@@ -1107,58 +1107,6 @@ impl State {
     }
 }
 
-/// Resolve a validation issue's scope to an AABB for camera fly-to.
-/// Mesh-granular for every scope — the per-face / per-edge validation
-/// overlay highlights the exact defect once its mesh is framed. Raw issue
-/// mesh indices are remapped to GPU mesh indices via `raw_to_gpu`.
-fn resolve_issue_aabb(
-    scope: &IssueScope,
-    model: &solarxy_renderer::model::Model,
-    raw_to_gpu: &[Option<usize>],
-) -> Option<solarxy_core::AABB> {
-    let gpu_mesh = |raw: usize| raw_to_gpu.get(raw).copied().flatten();
-    match scope {
-        IssueScope::Model => Some(model.bounds),
-        IssueScope::Mesh(raw) | IssueScope::Face(raw, _) => {
-            gpu_mesh(*raw).and_then(|g| model.mesh_bounds.get(g).copied())
-        }
-        IssueScope::Edge { mesh_index, .. } => {
-            gpu_mesh(*mesh_index).and_then(|g| model.mesh_bounds.get(g).copied())
-        }
-        IssueScope::Material(mat) => material_meshes_aabb(model, *mat).or(Some(model.bounds)),
-    }
-}
-
-/// Union of the bounds of every mesh using `material`, or `None` when no
-/// mesh references it. Shared by validation fly-to and the Outliner's
-/// frame-material action.
-fn material_meshes_aabb(
-    model: &solarxy_renderer::model::Model,
-    material: usize,
-) -> Option<solarxy_core::AABB> {
-    let mut acc: Option<solarxy_core::AABB> = None;
-    for (i, mesh) in model.meshes.iter().enumerate() {
-        if mesh.material == material
-            && let Some(b) = model.mesh_bounds.get(i).copied()
-        {
-            acc = Some(acc.map_or(b, |a| union_aabb(a, b)));
-        }
-    }
-    acc
-}
-
-/// Smallest AABB enclosing both inputs.
-fn union_aabb(a: solarxy_core::AABB, b: solarxy_core::AABB) -> solarxy_core::AABB {
-    solarxy_core::AABB {
-        min: cgmath::Point3::new(
-            a.min.x.min(b.min.x),
-            a.min.y.min(b.min.y),
-            a.min.z.min(b.min.z),
-        ),
-        max: cgmath::Point3::new(
-            a.max.x.max(b.max.x),
-            a.max.y.max(b.max.y),
-            a.max.z.max(b.max.z),
-        ),
-    }
-}
+// `resolve_issue_aabb` / `material_meshes_aabb` moved to
+// `solarxy_renderer::validation` (phase 6 W3) so the web report panel's
+// fly-to shares the exact desktop resolution logic.

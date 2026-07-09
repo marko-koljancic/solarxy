@@ -4117,6 +4117,7 @@ version = "0.6.0"
 dependencies = [
  "cgmath",
  "gltf",
+ "image",
  "ply-rs-bw",
  "solarxy-core",
  "stl_io",
@@ -4147,6 +4148,7 @@ version = "0.6.0"
 dependencies = [
  "bytemuck",
  "cgmath",
+ "serde_json",
  "solarxy-core",
  "thiserror 2.0.17",
 ]

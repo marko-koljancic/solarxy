@@ -27,6 +27,7 @@ pub use driver::{CookEngine, CookReport};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use solarxy_core::validation::{ValidationConfig, ValidationResult};
 use solarxy_kernel::GeometrySet;
 
 use crate::assets::AssetTable;
@@ -181,7 +182,7 @@ pub struct ImportOptions {
 /// so the worker's parsed result is finished (scaled, recentered, toggles
 /// applied) before it transfers back, keeping the native and web paths
 /// bit-identical.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum JobRequest {
     /// Parse a staged model file into a finished geometry set.
     ParseModel {
@@ -192,13 +193,71 @@ pub enum JobRequest {
         /// The resolved finishing options for this import.
         options: ImportOptions,
     },
+    /// Validate cooked geometry off-thread (the validate node above its
+    /// inline triangle threshold). The geometry rides as an `Arc` so the
+    /// request costs a pointer; the web host packs it into a transfer
+    /// blob for the worker, the native path validates it directly.
+    ValidateGeometry {
+        geometry: Arc<GeometrySet>,
+        config: ValidationConfig,
+        /// The resolved triangle budget, when the budget check is on.
+        budget: Option<u32>,
+    },
+}
+
+impl PartialEq for JobRequest {
+    /// Structural equality; the `ValidateGeometry` geometry compares by
+    /// `Arc` identity (a `GeometrySet` has no cheap content equality).
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::ParseModel {
+                    asset: a,
+                    format: f,
+                    options: o,
+                },
+                Self::ParseModel {
+                    asset: a2,
+                    format: f2,
+                    options: o2,
+                },
+            ) => a == a2 && f == f2 && o == o2,
+            (
+                Self::ValidateGeometry {
+                    geometry: g,
+                    config: c,
+                    budget: b,
+                },
+                Self::ValidateGeometry {
+                    geometry: g2,
+                    config: c2,
+                    budget: b2,
+                },
+            ) => Arc::ptr_eq(g, g2) && c == c2 && b == b2,
+            _ => false,
+        }
+    }
+}
+
+/// A fulfilled parse: the finished geometry plus the implicit load-time
+/// validation run beside the parse (same code path as the desktop viewer's
+/// load validation), so import nodes badge issues with zero extra plumbing.
+#[derive(Debug)]
+pub struct ParsedModel {
+    pub set: GeometrySet,
+    pub validation: Option<ValidationResult>,
 }
 
 /// One async work result, submitted back under the generation guard.
 #[derive(Debug)]
 pub enum JobResult {
-    /// The parsed model as a geometry set, or the parse failure message.
-    Model(Result<GeometrySet, String>),
+    /// The parsed model (plus its implicit validation), or the parse
+    /// failure message.
+    Model(Result<ParsedModel, String>),
+    /// A fulfilled `ValidateGeometry`: the full validation result (the
+    /// parked validate node's passthrough geometry is retained engine-side,
+    /// so only the result crosses back).
+    Report(Result<ValidationResult, String>),
 }
 
 /// Job handle relating a spawned request to its later result.
@@ -217,6 +276,11 @@ pub struct CookCtx<'a> {
     /// when false (native Phase 3), they parse inline.
     pub async_jobs: bool,
     warnings: Vec<String>,
+    /// Side-channel for a cook that ran validation (the validate node's
+    /// inline path, an import's implicit load validation): the driver
+    /// drains it on commit into its per-node validation cache, which
+    /// feeds node badges and the per-object overlay lowering.
+    validation: Option<ValidationResult>,
 }
 
 impl<'a> CookCtx<'a> {
@@ -226,6 +290,7 @@ impl<'a> CookCtx<'a> {
             assets,
             async_jobs,
             warnings: Vec::new(),
+            validation: None,
         }
     }
 
@@ -239,6 +304,18 @@ impl<'a> CookCtx<'a> {
     #[must_use]
     pub fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
+    }
+
+    /// Records the validation result this cook produced (validate node,
+    /// import load validation). The driver caches it per node on commit.
+    pub fn set_validation(&mut self, validation: ValidationResult) {
+        self.validation = Some(validation);
+    }
+
+    /// Drains the validation result recorded during one cook.
+    #[must_use]
+    pub fn take_validation(&mut self) -> Option<ValidationResult> {
+        self.validation.take()
     }
 }
 

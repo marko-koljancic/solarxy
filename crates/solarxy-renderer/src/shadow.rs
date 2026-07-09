@@ -5,7 +5,7 @@
 use crate::bind_groups::BindGroupLayouts;
 use crate::camera::OPENGL_TO_WGPU_MATRIX;
 use crate::light::LightsUniform;
-use crate::model::Model;
+use solarxy_core::AABB;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -28,7 +28,7 @@ impl ShadowState {
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
         lights_uniform: &LightsUniform,
-        model: &Model,
+        bounds: &AABB,
         shadow_map_size: u32,
     ) -> Self {
         let shadow_map_size = shadow_map_size.clamp(512, 4096);
@@ -63,8 +63,8 @@ impl ShadowState {
         let key_pos = lights_uniform.lights[0].position;
         let light_vp = compute_light_vp(
             cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-            model.bounds.center(),
-            model.bounds.diagonal() / 2.0,
+            bounds.center(),
+            bounds.diagonal() / 2.0,
         );
         let uniform = ShadowUniform {
             light_vp: light_vp.into(),

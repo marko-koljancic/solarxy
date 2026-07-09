@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use crate::aabb::AABB;
 use crate::geometry::RawMaterialData;
+use crate::validation::ValidationResult;
 
 /// Stable identity of one renderable object in the scene, minted by the
 /// producer (the node engine derives it from the owning node). The renderer
@@ -126,6 +127,15 @@ pub enum SceneOp {
     SetVisible {
         id: SceneObjectId,
         visible: bool,
+    },
+    /// Attach or clear the object's effective validation result (the
+    /// nearest validation on the displayed chain: a validate node's
+    /// report or an import's implicit load validation). `None` clears the
+    /// overlay. The renderer dedupes by `Arc` identity, so re-sending an
+    /// unchanged result each frame is free.
+    SetValidation {
+        id: SceneObjectId,
+        validation: Option<Arc<ValidationResult>>,
     },
     Remove {
         id: SceneObjectId,

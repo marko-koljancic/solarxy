@@ -6,7 +6,7 @@
 //! conditional on the `serialization` feature so the types remain usable in
 //! pure-computation builds.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]

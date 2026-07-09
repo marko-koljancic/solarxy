@@ -1,7 +1,8 @@
-// Header controls: undo/redo, the auto/manual cook-mode toggle, the Cook
-// button (manual), and the stale count.
+// Header controls: undo/redo (SVG icons), the auto/manual cook-mode
+// toggle, the Cook button (manual), and the stale count.
 
 import { dispatch } from "../engine/session";
+import { IconRedo, IconUndo } from "../icons";
 import { useMirror } from "../store/mirror";
 
 export function Toolbar() {
@@ -10,11 +11,11 @@ export function Toolbar() {
 
   return (
     <div className="toolbar">
-      <button className="tbtn" title="Undo (Cmd/Ctrl+Z)" onClick={() => dispatch({ type: "undo" })}>
-        ↶
+      <button className="tbtn icon" title="Undo (Cmd/Ctrl+Z)" onClick={() => dispatch({ type: "undo" })}>
+        <IconUndo />
       </button>
-      <button className="tbtn" title="Redo (Cmd/Ctrl+Shift+Z)" onClick={() => dispatch({ type: "redo" })}>
-        ↷
+      <button className="tbtn icon" title="Redo (Cmd/Ctrl+Shift+Z)" onClick={() => dispatch({ type: "redo" })}>
+        <IconRedo />
       </button>
       <span className="tsep" />
       <button

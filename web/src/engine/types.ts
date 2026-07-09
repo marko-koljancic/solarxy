@@ -97,6 +97,15 @@ export type EngineEvent =
   | { type: "variadicReordered"; ctx: GraphContext; node: NodeId; port: string; order: EdgeId[] }
   | { type: "cookStatus"; node: NodeId; status: CookStatus }
   | { type: "nodeStats"; node: NodeId; points: number; prims: number; meshes: number }
+  | { type: "validationSummary"; node: NodeId; errors: number; warnings: number }
+  | {
+      type: "validationReport";
+      node: NodeId;
+      errors: number;
+      warnings: number;
+      truncated: boolean;
+      issues: ValidationIssue[];
+    }
   | { type: "cookModeChanged"; mode: CookMode }
   | { type: "reviewChanged" }
   | { type: "documentReplaced" };
@@ -225,6 +234,45 @@ export interface ImportJob {
   sidecars: AssetRef[];
 }
 
+/** The host's environment state (the Environment panel's mirror). */
+export interface EnvironmentState {
+  iblMode: string;
+  hdriHash: string | null;
+  hdriName: string | null;
+}
+
+/** One stashed geometry-validation job for the worker (the validate node
+ * above its inline triangle threshold). `blob` is the geometry transfer
+ * blob; `config` a JSON `ValidationConfig`. */
+export interface ValidateJob {
+  ctx: GraphContext;
+  jobId: number;
+  blob: Uint8Array;
+  config: string;
+  budget?: number;
+}
+
+/** Validation issue severity (core `Severity`, camelCase). */
+export type ValidationSeverity = "error" | "warning";
+
+/** Where a validation issue lives (core `IssueScope`, externally tagged).
+ * Mesh/face/edge indices are raw-model indices. */
+export type ValidationScope =
+  | "model"
+  | { mesh: number }
+  | { material: number }
+  | { face: [number, number] }
+  | { edge: { meshIndex: number; vertices: [number, number] } };
+
+/** One row of a validation report (core `ValidationIssue`). `kind` is the
+ * camelCase issue kind (e.g. "degenerateTriangles", "missingUvs"). */
+export interface ValidationIssue {
+  severity: ValidationSeverity;
+  scope: ValidationScope;
+  kind: string;
+  message: string;
+}
+
 /** One context's canvas pan/zoom. */
 export interface CanvasViewport {
   x: number;
@@ -249,6 +297,7 @@ export interface SlxyLoadResult {
   warnings: string[];
   canvasViewports: Record<string, CanvasViewport>;
   meta: SceneMeta;
+  environment: EnvironmentState;
 }
 
 /** The host `extra` passed to save_slxy (camera comes from the app itself). */
@@ -268,3 +317,81 @@ export function ctxEq(a: GraphContext, b: GraphContext): boolean {
 export function ctxKey(ctx: GraphContext): string {
   return ctx === "root" ? "root" : `sub:${ctx.subflow}`;
 }
+
+// --- Phase 6: host-owned view state (panes, cameras, display settings).
+// PaneDisplaySettings mirrors solarxy_core::view_config with camelCase
+// fields; enum VALUES keep their Rust casing ("Shaded", "GRADIENT"-style
+// BackgroundMode strings) because those serde shapes predate the boundary.
+
+export type ViewLayout =
+  | "single"
+  | "splitVertical"
+  | "splitHorizontal"
+  | "quad"
+  | "threeLeftBig";
+
+export interface PaneDisplaySettings {
+  viewMode: "Shaded" | "ShadedWireframe" | "WireframeOnly" | "Ghosted";
+  prevNonGhostedMode: string;
+  ghostedWireframe: boolean;
+  normalsMode: "Off" | "Face" | "Vertex" | "FaceAndVertex";
+  backgroundMode: unknown;
+  uvMode: "Off" | "Gradient" | "Checker";
+  boundsMode: "off" | "wholeModel" | "perMesh";
+  lineWeight: string;
+  showGrid: boolean;
+  showAxisGizmo: boolean;
+  showLocalAxes: boolean;
+  inspectionMode: "Shaded" | "MaterialId" | "TexelDensity" | "Depth" | "Overdraw" | "AoPreview";
+  materialOverride: "None" | "Clay" | "ClayDark" | "Chrome" | "Silhouette";
+  texelDensityTarget: number;
+  paneMode: "Scene3D" | "UvMap";
+  uvBg: string;
+  uvOffset: [number, number];
+  uvZoom: number;
+  showUvOverlap: boolean;
+  showValidation: boolean;
+}
+
+export interface DisplaySettingsDto {
+  turntableActive: boolean;
+  turntableRpm: number;
+  lightsLocked: boolean;
+  layout: ViewLayout;
+  splitRatio: number;
+  roughnessScale: number;
+  metallicScale: number;
+  hdriRotation: number;
+}
+
+export interface PaneRectDto {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ViewStateDto {
+  layout: ViewLayout;
+  splitRatio: number;
+  activePane: number;
+  camerasLinked: boolean;
+  paneSettings: PaneDisplaySettings[];
+  display: DisplaySettingsDto;
+  paneProjections: ("perspective" | "orthographic")[];
+  paneRects: PaneRectDto[];
+}
+
+/** Async host happenings drained once per frame. */
+export type HostEvent =
+  | { type: "paneRects"; rects: PaneRectDto[] }
+  | { type: "activePane"; pane: number }
+  | { type: "uvOverlap"; pct: number | null; pending: boolean }
+  | { type: "viewChanged" };
+
+export type ViewAxis = "top" | "bottom" | "front" | "back" | "left" | "right";
+
+export type CameraCommand =
+  | { kind: "fit" }
+  | { kind: "view"; axis: ViewAxis }
+  | { kind: "projection"; mode: "perspective" | "orthographic" };

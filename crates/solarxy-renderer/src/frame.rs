@@ -27,7 +27,8 @@ use crate::ssao::SsaoState;
 use crate::texture;
 use solarxy_core::preferences::{IblMode, ToneMode};
 
-use crate::scene::{BackgroundModeExt, ModelScene};
+use crate::environment::SceneEnvironment;
+use crate::scene::BackgroundModeExt;
 use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
 
 #[repr(C)]
@@ -105,21 +106,156 @@ pub struct UvOverlapResources {
     pub map_receiver: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 
+impl UvOverlapResources {
+    /// Arms a GPU-to-CPU readback of the 512x512 overlap stats texture:
+    /// copies it into a fresh staging buffer inside `encoder` and marks the
+    /// readback pending. Poll completion with [`UvOverlapResources::poll_readback`]
+    /// on later frames (blocking waits do not exist on WebGPU).
+    pub fn request_readback(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+        const STATS_SIZE: u32 = 512;
+        let bytes_per_row = STATS_SIZE;
+        let buffer_size = u64::from(bytes_per_row * STATS_SIZE);
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("UV Overlap Readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.stats_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(STATS_SIZE),
+                },
+            },
+            wgpu::Extent3d {
+                width: STATS_SIZE,
+                height: STATS_SIZE,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.staging_buffer = Some(staging);
+        self.readback_pending = true;
+        self.map_receiver = None;
+        self.stats_dirty = false;
+    }
+
+    /// Pumps an armed readback without blocking: requests the async map
+    /// once, then checks completion each call. Returns `true` when
+    /// `overlap_pct` was updated this call (shared by the desktop frame
+    /// tick and the web host, which forwards the change as a host event).
+    pub fn poll_readback(&mut self, device: &wgpu::Device) -> bool {
+        if !self.readback_pending {
+            return false;
+        }
+
+        // Arm once: request the async map on the staged buffer.
+        if self.map_receiver.is_none() {
+            let Some(buf) = &self.staging_buffer else {
+                self.readback_pending = false;
+                return false;
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            buf.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+            self.map_receiver = Some(rx);
+        }
+
+        // Pump the device without blocking, then check for completion.
+        let _ = device.poll(wgpu::PollType::Poll);
+        let ready = match &self.map_receiver {
+            Some(rx) => match rx.try_recv() {
+                Ok(Ok(())) => true,
+                // Not resolved yet; try again next frame.
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                // Map failed or the sender vanished: abandon this readback.
+                Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    tracing::error!("UV overlap readback map failed");
+                    false
+                }
+            },
+            None => false,
+        };
+
+        self.map_receiver = None;
+        self.readback_pending = false;
+        let Some(buf) = self.staging_buffer.take() else {
+            return false;
+        };
+        if !ready {
+            return false;
+        }
+
+        let slice = buf.slice(..);
+        let data = slice.get_mapped_range();
+        let mut total_nonzero = 0u64;
+        let mut overlap = 0u64;
+        for &byte in data.iter() {
+            if byte > 0 {
+                total_nonzero += 1;
+            }
+            if byte > 1 {
+                overlap += 1;
+            }
+        }
+        drop(data);
+        buf.unmap();
+        self.overlap_pct = if total_nonzero > 0 {
+            Some(overlap as f32 / total_nonzero as f32 * 100.0)
+        } else {
+            Some(0.0)
+        };
+        true
+    }
+}
+
 pub struct ValidationColorResources {
     pub bind_groups: Vec<wgpu::BindGroup>,
     #[allow(dead_code)]
     pub buffers: Vec<wgpu::Buffer>,
+    /// The selection tint (accent blue, translucent) drawn over the picked
+    /// object's meshes (decision 24, web picking sync).
+    pub selection_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    pub selection_buffer: wgpu::Buffer,
+}
+
+/// Per-object validation overlay GPU resources: the per-mesh issue
+/// category (index into [`ValidationColorResources`]) and the
+/// non-manifold edge index buffers, both parallel to the object's
+/// `model.meshes`. Built by `ModelScene::new` on desktop and by
+/// `SceneObjects` from `SceneOp::SetValidation` on the web.
+pub struct ObjectValidationGpu {
+    pub mesh_cat: Vec<Option<usize>>,
+    pub edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
 }
 
 /// One drawable object as the geometry passes see it: a
 /// [`crate::model::Model`] plus its per-object instance buffer (one
-/// `InstanceRaw`). The multi-object draw path iterates slices of these;
-/// `ModelScene` contributes itself as one entry and
-/// `scene_objects::SceneObjects` entries append beside it.
+/// `InstanceRaw`) and optional validation overlay resources. The
+/// multi-object draw path iterates slices of these; `ModelScene`
+/// contributes itself as one entry and `scene_objects::SceneObjects`
+/// entries append beside it.
 #[derive(Clone, Copy)]
 pub struct DrawObject<'a> {
     pub model: &'a crate::model::Model,
     pub instance_buffer: &'a wgpu::Buffer,
+    /// Validation overlay resources, or `None` when the object has no
+    /// report (the overlay pass skips it).
+    pub validation: Option<&'a ObjectValidationGpu>,
+    /// Whether the object carries the selection highlight (a translucent
+    /// accent tint drawn at the end of the main pass; the web picking-sync
+    /// direction of decision 24). Desktop passes `false`.
+    pub selected: bool,
 }
 
 pub struct Renderer {
@@ -385,9 +521,25 @@ impl Renderer {
                 buffers.push(buf);
                 bind_groups.push(bg);
             }
+            let selection_color: [f32; 4] = [0.29, 0.565, 0.886, 0.35];
+            let selection_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Selection Tint Color"),
+                contents: bytemuck::cast_slice(&selection_color),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let selection_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Selection Tint BG"),
+                layout: &layouts.validation_color,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: selection_buffer.as_entire_binding(),
+                }],
+            });
             ValidationColorResources {
                 bind_groups,
                 buffers,
+                selection_bind_group,
+                selection_buffer,
             }
         };
 
@@ -695,14 +847,14 @@ impl Renderer {
     pub fn render_shadow_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        env: &SceneEnvironment,
         objects: &[DrawObject<'_>],
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Shadow Pass"),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &scene.shadow.texture_view,
+                view: &env.shadow.texture_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -713,7 +865,7 @@ impl Renderer {
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipelines.scene.shadow);
-        pass.set_bind_group(0, &scene.shadow.pass_bind_group, &[]);
+        pass.set_bind_group(0, &env.shadow.pass_bind_group, &[]);
         for obj in objects {
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
@@ -736,7 +888,7 @@ impl Renderer {
     pub fn render_main_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        env: &SceneEnvironment,
         objects: &[DrawObject<'_>],
         cam_bg: &wgpu::BindGroup,
         cam: &Camera,
@@ -772,17 +924,17 @@ impl Renderer {
             BgKind::Solid => {}
         }
 
-        // Scene-level draws (floor, overlays) bind the ModelScene's own
+        // Scene-level draws (floor, overlays) bind the environment's own
         // instance buffer; per-object loops rebind slot 1 as they go.
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+        pass.set_vertex_buffer(1, env.instance_buffer.slice(..));
 
         if pds.uv_mode == UvMode::Off {
             match pds.view_mode {
                 ViewMode::Shaded | ViewMode::ShadedWireframe => {
-                    self.draw_opaque_meshes(&mut pass, scene, objects, cam_bg);
-                    // Floor relies on slot 1 = the scene instance buffer.
-                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-                    self.draw_floor(&mut pass, scene, cam_bg);
+                    self.draw_opaque_meshes(&mut pass, env, objects, cam_bg);
+                    // Floor relies on slot 1 = the env instance buffer.
+                    pass.set_vertex_buffer(1, env.instance_buffer.slice(..));
+                    self.draw_floor(&mut pass, env, cam_bg);
                     if pds.view_mode == ViewMode::ShadedWireframe {
                         self.draw_edge_wireframe(
                             &mut pass,
@@ -791,7 +943,7 @@ impl Renderer {
                             cam_bg,
                         );
                     }
-                    self.draw_blend_meshes(&mut pass, scene, objects, cam_bg, cam);
+                    self.draw_blend_meshes(&mut pass, env, objects, cam_bg, cam);
                 }
                 ViewMode::WireframeOnly => {
                     self.draw_edge_wireframe(
@@ -862,39 +1014,66 @@ impl Renderer {
         }
 
         // Overlays below rely on scene-level bindings.
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+        pass.set_vertex_buffer(1, env.instance_buffer.slice(..));
 
         if pds.show_grid {
             pass.set_pipeline(&self.pipelines.overlay.grid);
             pass.set_bind_group(0, cam_bg, &[]);
-            pass.set_bind_group(1, &scene.vis.grid_params_bind_group, &[]);
-            pass.set_vertex_buffer(0, scene.vis.grid_mesh.vertex_buffer.slice(..));
+            pass.set_bind_group(1, &env.vis.grid_params_bind_group, &[]);
+            pass.set_vertex_buffer(0, env.vis.grid_mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(
-                scene.vis.grid_mesh.index_buffer.slice(..),
+                env.vis.grid_mesh.index_buffer.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
-            pass.draw_indexed(0..scene.vis.grid_mesh.num_elements, 0, 0..1);
+            pass.draw_indexed(0..env.vis.grid_mesh.num_elements, 0, 0..1);
         }
-        self.draw_normals(&mut pass, scene, cam_bg, pds);
-        self.draw_axes(&mut pass, scene, cam_bg, pds);
-        self.draw_local_axes(&mut pass, scene, cam_bg, pds);
-        self.draw_bounds(&mut pass, scene, cam_bg, pds);
+        self.draw_normals(&mut pass, env, objects, cam_bg, pds);
+        self.draw_axes(&mut pass, env, cam_bg, pds);
+        self.draw_local_axes(&mut pass, env, cam_bg, pds);
+        self.draw_bounds(&mut pass, env, cam_bg, pds);
         if pds.show_validation {
-            self.draw_validation_overlay(&mut pass, scene, cam_bg);
+            self.draw_validation_overlay(&mut pass, objects, cam_bg);
+        }
+        if objects.iter().any(|o| o.selected) {
+            self.draw_selection_tint(&mut pass, objects, cam_bg);
+        }
+    }
+
+    /// Draws the translucent accent tint over selected objects' meshes,
+    /// inside the main pass (after every scene draw).
+    fn draw_selection_tint<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        objects: &[DrawObject<'a>],
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        pass.set_pipeline(&self.pipelines.overlay.validation_overlay);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, &self.validation_colors.selection_bind_group, &[]);
+        for obj in objects.iter().filter(|o| o.selected) {
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+            }
         }
     }
 
     fn draw_opaque_meshes<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
     ) {
         pass.set_pipeline(&self.pipelines.scene.main);
         pass.set_bind_group(1, cam_bg, &[]);
-        pass.set_bind_group(2, &scene.light_bind_group, &[]);
-        pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
+        pass.set_bind_group(2, &env.light_bind_group, &[]);
+        pass.set_bind_group(3, &env.shadow.sample_bind_group, &[]);
         for obj in objects {
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
@@ -913,7 +1092,7 @@ impl Renderer {
     fn draw_blend_meshes<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
         cam: &Camera,
@@ -952,8 +1131,8 @@ impl Renderer {
             if !bound_pipeline {
                 pass.set_pipeline(&self.pipelines.scene.alpha_blend);
                 pass.set_bind_group(1, cam_bg, &[]);
-                pass.set_bind_group(2, &scene.light_bind_group, &[]);
-                pass.set_bind_group(3, &scene.shadow.sample_bind_group, &[]);
+                pass.set_bind_group(2, &env.light_bind_group, &[]);
+                pass.set_bind_group(3, &env.shadow.sample_bind_group, &[]);
                 bound_pipeline = true;
             }
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
@@ -992,24 +1171,24 @@ impl Renderer {
     fn draw_floor<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         cam_bg: &'a wgpu::BindGroup,
     ) {
         pass.set_pipeline(&self.pipelines.scene.floor);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_bind_group(1, &scene.shadow.sample_bind_group, &[]);
-        pass.set_vertex_buffer(0, scene.vis.floor_mesh.vertex_buffer.slice(..));
+        pass.set_bind_group(1, &env.shadow.sample_bind_group, &[]);
+        pass.set_vertex_buffer(0, env.vis.floor_mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(
-            scene.vis.floor_mesh.index_buffer.slice(..),
+            env.vis.floor_mesh.index_buffer.slice(..),
             wgpu::IndexFormat::Uint32,
         );
-        pass.draw_indexed(0..scene.vis.floor_mesh.num_elements, 0, 0..1);
+        pass.draw_indexed(0..env.vis.floor_mesh.num_elements, 0, 0..1);
     }
 
     fn draw_axes<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         cam_bg: &'a wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
@@ -1018,30 +1197,30 @@ impl Renderer {
         }
         pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_vertex_buffer(0, scene.vis.axes_vertex_buf.slice(..));
+        pass.set_vertex_buffer(0, env.vis.axes_vertex_buf.slice(..));
         pass.draw(0..6, 0..1);
     }
 
     fn draw_local_axes<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         cam_bg: &'a wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
-        if !pds.show_local_axes || scene.vis.local_axes_vertex_count == 0 {
+        if !pds.show_local_axes || env.vis.local_axes_vertex_count == 0 {
             return;
         }
         pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_vertex_buffer(0, scene.vis.local_axes_vertex_buf.slice(..));
-        pass.draw(0..scene.vis.local_axes_vertex_count, 0..1);
+        pass.set_vertex_buffer(0, env.vis.local_axes_vertex_buf.slice(..));
+        pass.draw(0..env.vis.local_axes_vertex_count, 0..1);
     }
 
     fn draw_bounds<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
         cam_bg: &'a wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
@@ -1053,13 +1232,13 @@ impl Renderer {
         match pds.bounds_mode {
             BoundsMode::Off => {}
             BoundsMode::WholeModel => {
-                pass.set_vertex_buffer(0, scene.vis.bounds_whole_buf.slice(..));
-                pass.draw(0..scene.vis.bounds_whole_count, 0..1);
+                pass.set_vertex_buffer(0, env.vis.bounds_whole_buf.slice(..));
+                pass.draw(0..env.vis.bounds_whole_count, 0..1);
             }
             BoundsMode::PerMesh => {
-                if scene.vis.bounds_per_mesh_count > 0 {
-                    pass.set_vertex_buffer(0, scene.vis.bounds_per_mesh_buf.slice(..));
-                    pass.draw(0..scene.vis.bounds_per_mesh_count, 0..1);
+                if env.vis.bounds_per_mesh_count > 0 {
+                    pass.set_vertex_buffer(0, env.vis.bounds_per_mesh_buf.slice(..));
+                    pass.draw(0..env.vis.bounds_per_mesh_count, 0..1);
                 }
             }
         }
@@ -1068,24 +1247,29 @@ impl Renderer {
     fn draw_validation_overlay<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
     ) {
         use crate::validation::IssueCategory;
 
         pass.set_pipeline(&self.pipelines.overlay.validation_overlay);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
 
-        for (i, mesh) in scene.model.meshes.iter().enumerate() {
-            if !mesh.visible {
+        for obj in objects {
+            let Some(validation) = obj.validation else {
                 continue;
-            }
-            if let Some(cat_idx) = scene.validation_mesh_cat[i] {
-                pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+            };
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for (i, mesh) in obj.model.meshes.iter().enumerate() {
+                if !mesh.visible {
+                    continue;
+                }
+                if let Some(cat_idx) = validation.mesh_cat.get(i).copied().flatten() {
+                    pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                }
             }
         }
 
@@ -1093,15 +1277,21 @@ impl Renderer {
             .iter()
             .position(|c| *c == IssueCategory::DegenerateTriangles)
             .unwrap_or(4);
-        for mesh in &scene.model.meshes {
-            if !mesh.visible {
+        for obj in objects {
+            if obj.validation.is_none() {
                 continue;
             }
-            if let Some(ref degen_buf) = mesh.degen_index_buffer {
-                pass.set_bind_group(1, &self.validation_colors.bind_groups[degen_idx], &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(degen_buf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.degen_num_elements, 0, 0..1);
+            pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+            for mesh in &obj.model.meshes {
+                if !mesh.visible {
+                    continue;
+                }
+                if let Some(ref degen_buf) = mesh.degen_index_buffer {
+                    pass.set_bind_group(1, &self.validation_colors.bind_groups[degen_idx], &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(degen_buf.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.degen_num_elements, 0, 0..1);
+                }
             }
         }
 
@@ -1110,23 +1300,32 @@ impl Renderer {
             .position(|c| *c == IssueCategory::NonManifoldEdge)
             .unwrap_or(5);
         let mut switched_to_edge = false;
-        for (mi, mesh) in scene.model.meshes.iter().enumerate() {
-            if !mesh.visible {
+        for obj in objects {
+            let Some(validation) = obj.validation else {
                 continue;
-            }
-            if let Some(Some((edge_buf, num))) =
-                scene.validation_edge_buffers.get(mi).map(|o| o.as_ref())
-            {
-                if !switched_to_edge {
-                    pass.set_pipeline(&self.pipelines.overlay.validation_edge);
-                    pass.set_bind_group(0, cam_bg, &[]);
-                    pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-                    switched_to_edge = true;
+            };
+            let mut bound_instance = false;
+            for (mi, mesh) in obj.model.meshes.iter().enumerate() {
+                if !mesh.visible {
+                    continue;
                 }
-                pass.set_bind_group(1, &self.validation_colors.bind_groups[edge_idx], &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(edge_buf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..*num, 0, 0..1);
+                if let Some(Some((edge_buf, num))) =
+                    validation.edge_buffers.get(mi).map(|o| o.as_ref())
+                {
+                    if !switched_to_edge {
+                        pass.set_pipeline(&self.pipelines.overlay.validation_edge);
+                        pass.set_bind_group(0, cam_bg, &[]);
+                        switched_to_edge = true;
+                    }
+                    if !bound_instance {
+                        pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                        bound_instance = true;
+                    }
+                    pass.set_bind_group(1, &self.validation_colors.bind_groups[edge_idx], &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..*num, 0, 0..1);
+                }
             }
         }
     }
@@ -1134,7 +1333,7 @@ impl Renderer {
     pub fn render_uv_overlap_count_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        object: &DrawObject<'_>,
         uv_cam_bg: &wgpu::BindGroup,
         count_view: &wgpu::TextureView,
     ) {
@@ -1156,8 +1355,8 @@ impl Renderer {
 
         pass.set_pipeline(&self.pipelines.uv.uv_overlap_count);
         pass.set_bind_group(0, uv_cam_bg, &[]);
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-        for mesh in &scene.model.meshes {
+        pass.set_vertex_buffer(1, object.instance_buffer.slice(..));
+        for mesh in &object.model.meshes {
             if !mesh.visible {
                 continue;
             }
@@ -1170,7 +1369,7 @@ impl Renderer {
     pub fn render_uv_map_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &ModelScene,
+        object: &DrawObject<'_>,
         uv_cam_bg: &wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
@@ -1223,7 +1422,7 @@ impl Renderer {
             timestamp_writes: None,
         });
 
-        pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
+        pass.set_vertex_buffer(1, object.instance_buffer.slice(..));
 
         match pds.uv_bg {
             UvMapBackground::Dark => {
@@ -1236,16 +1435,16 @@ impl Renderer {
                 pass.set_pipeline(&self.pipelines.uv.uv_map_checker);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
                 pass.set_bind_group(1, &self.wire.uv_checker_bind_group, &[]);
-                pass.draw_model_simple(&scene.model, 0..1);
+                pass.draw_model_simple(object.model, 0..1);
             }
             UvMapBackground::Texture => {
                 pass.set_pipeline(&self.pipelines.uv.uv_map_texture);
                 pass.set_bind_group(0, uv_cam_bg, &[]);
-                for mesh in &scene.model.meshes {
+                for mesh in &object.model.meshes {
                     if !mesh.visible {
                         continue;
                     }
-                    let material = &scene.model.materials[mesh.material];
+                    let material = &object.model.materials[mesh.material];
                     pass.set_bind_group(1, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1257,7 +1456,7 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.uv.uv_map_wire);
         pass.set_bind_group(0, uv_cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
-        for mesh in &scene.model.meshes {
+        for mesh in &object.model.meshes {
             if !mesh.visible {
                 continue;
             }
@@ -1284,29 +1483,36 @@ impl Renderer {
     fn draw_normals<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        scene: &'a ModelScene,
+        env: &'a SceneEnvironment,
+        objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
         pds: &PaneDisplaySettings,
     ) {
         if pds.normals_mode == NormalsMode::Off {
             return;
         }
+        // The normal-arrow segments are parallel to the primary object's
+        // meshes (the loaded model on desktop) — its visibility flags
+        // gate the per-mesh draws.
+        let Some(primary) = objects.first() else {
+            return;
+        };
         pass.set_pipeline(&self.pipelines.overlay.normals);
         pass.set_bind_group(0, cam_bg, &[]);
         if matches!(
             pds.normals_mode,
             NormalsMode::Face | NormalsMode::FaceAndVertex
-        ) && scene.vis.face_normals_count > 0
+        ) && env.vis.face_normals_count > 0
         {
-            pass.set_bind_group(1, &scene.vis.face_normals_params_bind_group, &[]);
-            pass.set_vertex_buffer(0, scene.vis.face_normals_buf.slice(..));
-            // One draw per visible mesh — the segments are parallel to
-            // `model.meshes`, so a hidden mesh's normals are skipped.
-            for (mesh, seg) in scene
+            pass.set_bind_group(1, &env.vis.face_normals_params_bind_group, &[]);
+            pass.set_vertex_buffer(0, env.vis.face_normals_buf.slice(..));
+            // One draw per visible mesh — a hidden mesh's normals are
+            // skipped.
+            for (mesh, seg) in primary
                 .model
                 .meshes
                 .iter()
-                .zip(&scene.vis.face_normals_segments)
+                .zip(&env.vis.face_normals_segments)
             {
                 if mesh.visible && !seg.is_empty() {
                     pass.draw(seg.clone(), 0..1);
@@ -1316,15 +1522,15 @@ impl Renderer {
         if matches!(
             pds.normals_mode,
             NormalsMode::Vertex | NormalsMode::FaceAndVertex
-        ) && scene.vis.vertex_normals_count > 0
+        ) && env.vis.vertex_normals_count > 0
         {
-            pass.set_bind_group(1, &scene.vis.vertex_normals_params_bind_group, &[]);
-            pass.set_vertex_buffer(0, scene.vis.vertex_normals_buf.slice(..));
-            for (mesh, seg) in scene
+            pass.set_bind_group(1, &env.vis.vertex_normals_params_bind_group, &[]);
+            pass.set_vertex_buffer(0, env.vis.vertex_normals_buf.slice(..));
+            for (mesh, seg) in primary
                 .model
                 .meshes
                 .iter()
-                .zip(&scene.vis.vertex_normals_segments)
+                .zip(&env.vis.vertex_normals_segments)
             {
                 if mesh.visible && !seg.is_empty() {
                     pass.draw(seg.clone(), 0..1);

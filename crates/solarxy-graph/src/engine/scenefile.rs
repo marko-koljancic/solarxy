@@ -306,20 +306,30 @@ pub struct LoadedScene {
 }
 
 impl Engine {
-    /// Serializes the whole document, the staged bytes of every referenced
-    /// asset, and the host sidecar into `.slxy` archive bytes. Only assets a
-    /// live `AssetRef` still points at are embedded (GC-at-save).
+    /// Serializes the whole document, the staged asset bytes, and the host
+    /// sidecar into `.slxy` archive bytes.
+    ///
+    /// Every staged asset is embedded, not just the ones a live `AssetRef`
+    /// points at: model parsers resolve companion files (OBJ's `.mtl` and
+    /// textures, glTF's `.bin` and images) by NAME through the resolver, so
+    /// an unreferenced staged asset may still be load-bearing. The
+    /// param-reachability walk (`Document::referenced_assets`) marks the
+    /// primary models (`role: "import"`); everything else records as
+    /// `role: "companion"`. True garbage collection needs resolver
+    /// read-tracking through the worker (a recorded follow-up).
     pub fn save_slxy(&self, sidecar: &SceneSidecar) -> Result<Vec<u8>, sf::SceneFileError> {
         let referenced = self.doc.referenced_assets();
-        let mut records = Vec::with_capacity(referenced.len());
-        let mut blobs = Vec::with_capacity(referenced.len());
-        for id in &referenced {
-            let Some(entry) = self.assets.get(id) else {
-                continue; // a dangling ref (no staged bytes) simply drops out
+        let mut records = Vec::with_capacity(self.assets.len());
+        let mut blobs = Vec::with_capacity(self.assets.len());
+        for (id, entry) in self.assets.entries() {
+            let role = if referenced.contains(id) {
+                "import"
+            } else {
+                "companion"
             };
             records.push(sf::AssetRecordJson {
                 id: id.0.clone(),
-                role: "import".to_string(),
+                role: role.to_string(),
                 sha256: id.0.clone(),
                 original_name: entry.name.clone(),
                 import_settings: sf::JsonObject::new(),

@@ -1,6 +1,8 @@
-//! Split-viewport layout math: pane rectangles for `F1`/`F2`/`F3`, the
-//! divider hit-rect for the (currently fixed-50/50) split, and the
-//! cursor→pane hit test.
+//! Split-viewport layout adapters: the pure pane math lives in
+//! `solarxy_renderer::panes` (moved there in web-milestone phase 6 so both
+//! shells share it); this module anchors it to the egui-dock Viewport tab
+//! rect and the window scale factor, and converts the divider rects to
+//! egui's logical coordinate space.
 //!
 //! Post-egui_dock the pane rects + the wgpu HDR render-target dims are
 //! both anchored to the **Viewport tab's** rect (when the dock has
@@ -9,6 +11,8 @@
 //! back to full-surface dims before `egui_dock` has laid out (first frame
 //! after launch) or after a `WindowEvent::Resized` invalidates the
 //! cached rect.
+
+use solarxy_renderer::panes;
 
 use super::view_state::ViewLayout;
 use super::{Pane, State, compute_target_dimensions, hit_test_pane};
@@ -54,132 +58,24 @@ impl State {
     }
 
     pub(super) fn compute_panes(&self) -> Vec<Pane> {
-        let (origin_x, origin_y) = self.viewport_origin_px();
         let (base_w, base_h) = self.viewport_base_size_px();
-        let w = base_w as f32;
-        let h = base_h as f32;
-        let ratio = self.view.display.split_ratio;
-        match self.view.display.layout {
-            ViewLayout::Single => vec![Pane {
-                x: origin_x,
-                y: origin_y,
-                width: w,
-                height: h,
-            }],
-            ViewLayout::SplitVertical => {
-                let split = (w * ratio).floor();
-                vec![
-                    Pane {
-                        x: origin_x,
-                        y: origin_y,
-                        width: (split - 1.0).max(1.0),
-                        height: h,
-                    },
-                    Pane {
-                        x: origin_x + split + 1.0,
-                        y: origin_y,
-                        width: (w - split - 1.0).max(1.0),
-                        height: h,
-                    },
-                ]
-            }
-            ViewLayout::SplitHorizontal => {
-                let split = (h * ratio).floor();
-                vec![
-                    Pane {
-                        x: origin_x,
-                        y: origin_y,
-                        width: w,
-                        height: (split - 1.0).max(1.0),
-                    },
-                    Pane {
-                        x: origin_x,
-                        y: origin_y + split + 1.0,
-                        width: w,
-                        height: (h - split - 1.0).max(1.0),
-                    },
-                ]
-            }
-
-            ViewLayout::Quad => {
-                let sx = (w * 0.5).floor();
-                let sy = (h * 0.5).floor();
-                let left_w = (sx - 1.0).max(1.0);
-                let right_w = (w - sx - 1.0).max(1.0);
-                let top_h = (sy - 1.0).max(1.0);
-                let bot_h = (h - sy - 1.0).max(1.0);
-                let rx = origin_x + sx + 1.0;
-                let by = origin_y + sy + 1.0;
-                vec![
-                    Pane {
-                        x: origin_x,
-                        y: origin_y,
-                        width: left_w,
-                        height: top_h,
-                    },
-                    Pane {
-                        x: rx,
-                        y: origin_y,
-                        width: right_w,
-                        height: top_h,
-                    },
-                    Pane {
-                        x: origin_x,
-                        y: by,
-                        width: left_w,
-                        height: bot_h,
-                    },
-                    Pane {
-                        x: rx,
-                        y: by,
-                        width: right_w,
-                        height: bot_h,
-                    },
-                ]
-            }
-            ViewLayout::ThreeLeftBig => {
-                let sx = (w * 0.5).floor();
-                let sy = (h * 0.5).floor();
-                let left_w = (sx - 1.0).max(1.0);
-                let right_w = (w - sx - 1.0).max(1.0);
-                let top_h = (sy - 1.0).max(1.0);
-                let bot_h = (h - sy - 1.0).max(1.0);
-                let rx = origin_x + sx + 1.0;
-                let by = origin_y + sy + 1.0;
-                vec![
-                    Pane {
-                        x: origin_x,
-                        y: origin_y,
-                        width: left_w,
-                        height: h,
-                    },
-                    Pane {
-                        x: rx,
-                        y: origin_y,
-                        width: right_w,
-                        height: top_h,
-                    },
-                    Pane {
-                        x: rx,
-                        y: by,
-                        width: right_w,
-                        height: bot_h,
-                    },
-                ]
-            }
-        }
+        panes::compute_panes(
+            self.view.display.layout,
+            self.view.display.split_ratio,
+            self.viewport_origin_px(),
+            (base_w as f32, base_h as f32),
+        )
     }
 
     /// `true` when the cursor is inside some pane's 3D **content** rect —
     /// not its toolbar strip, not an inter-pane gap. The camera-input
     /// gate uses this so toolbar clicks don't orbit the scene.
     pub(crate) fn pointer_in_pane_content(&self) -> bool {
-        let (cx, cy) = self.input.cursor_pos;
+        let cursor = self.input.cursor_pos;
         let toolbar_h = self.pane_toolbar_height_px();
-        self.compute_panes().iter().any(|p| {
-            let c = p.content(toolbar_h);
-            cx >= c.x && cx < c.x + c.width && cy >= c.y && cy < c.y + c.height
-        })
+        self.compute_panes()
+            .iter()
+            .any(|p| p.content(toolbar_h).contains(cursor))
     }
 
     pub(super) fn active_pane_index(&self) -> usize {
@@ -190,13 +86,14 @@ impl State {
         hit_test_pane(&panes, self.input.cursor_pos)
     }
 
-    pub(super) fn compute_divider_rect(&self) -> Option<egui::Rect> {
+    /// The visible split divider in egui's logical coordinate space.
+    fn divider_inputs(&self) -> ((f32, f32), (f32, f32), f32) {
         let surface_size = (self.config.width, self.config.height);
+        let ppp = self.window.scale_factor() as f32;
         let viewport = self
             .gui
             .viewport_rect_for_surface(surface_size)
             .unwrap_or_else(|| {
-                let ppp = self.window.scale_factor() as f32;
                 egui::Rect::from_min_size(
                     egui::pos2(0.0, 0.0),
                     egui::vec2(
@@ -205,37 +102,41 @@ impl State {
                     ),
                 )
             });
-        let ppp = self.window.scale_factor() as f32;
-        let ratio = self.view.display.split_ratio;
-        match self.view.display.layout {
-            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => None,
-            ViewLayout::SplitVertical => {
-                let cx = (viewport.width() * ratio).floor();
-                Some(egui::Rect::from_min_size(
-                    egui::pos2(viewport.min.x + (cx - 1.0), viewport.min.y),
-                    egui::vec2(2.0 / ppp, viewport.height()),
-                ))
-            }
-            ViewLayout::SplitHorizontal => {
-                let cy = (viewport.height() * ratio).floor();
-                Some(egui::Rect::from_min_size(
-                    egui::pos2(viewport.min.x, viewport.min.y + (cy - 1.0)),
-                    egui::vec2(viewport.width(), 2.0 / ppp),
-                ))
-            }
-        }
+        (
+            (viewport.min.x, viewport.min.y),
+            (viewport.width(), viewport.height()),
+            ppp,
+        )
+    }
+
+    pub(super) fn compute_divider_rect(&self) -> Option<egui::Rect> {
+        let (origin, size, ppp) = self.divider_inputs();
+        let r = panes::divider_rect(
+            self.view.display.layout,
+            self.view.display.split_ratio,
+            origin,
+            size,
+            2.0 / ppp,
+        )?;
+        Some(egui::Rect::from_min_size(
+            egui::pos2(r.x, r.y),
+            egui::vec2(r.width, r.height),
+        ))
     }
 
     pub(super) fn compute_divider_hit_rect(&self) -> Option<egui::Rect> {
-        let visible = self.compute_divider_rect()?;
-        let ppp = self.window.scale_factor() as f32;
-        let pad_logical = 3.0 / ppp;
-        Some(visible.expand2(match self.view.display.layout {
-            ViewLayout::SplitVertical => egui::vec2(pad_logical, 0.0),
-            ViewLayout::SplitHorizontal => egui::vec2(0.0, pad_logical),
-            ViewLayout::Single | ViewLayout::Quad | ViewLayout::ThreeLeftBig => {
-                egui::vec2(0.0, 0.0)
-            }
-        }))
+        let (origin, size, ppp) = self.divider_inputs();
+        let r = panes::divider_hit_rect(
+            self.view.display.layout,
+            self.view.display.split_ratio,
+            origin,
+            size,
+            2.0 / ppp,
+            3.0 / ppp,
+        )?;
+        Some(egui::Rect::from_min_size(
+            egui::pos2(r.x, r.y),
+            egui::vec2(r.width, r.height),
+        ))
     }
 }

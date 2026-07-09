@@ -8,10 +8,19 @@
 // ParamType is a deliberate change (a new widget case).
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { dispatch, previewParam, stageFile } from "../engine/session";
-import type { GraphContext, NodeMirror, ParamSnapshot, ParamSource } from "../engine/types";
+import { dispatch, flyToIssue, previewParam, stageFile } from "../engine/session";
+import type {
+  GraphContext,
+  NodeMirror,
+  ParamSnapshot,
+  ParamSource,
+  ValidationIssue,
+} from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
-import { selectGraph, useMirror } from "../store/mirror";
+import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
+import { ColorInput } from "./inputs/ColorInput";
+import { FloatInput } from "./inputs/FloatInput";
+import { VectorInput } from "./inputs/VectorInput";
 
 /** The current value for a param: the node's override, else the default. */
 function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
@@ -48,31 +57,20 @@ function Field({ ctx, node, spec }: FieldProps) {
   switch (spec.paramType) {
     case "float":
     case "int": {
-      const num = Number(value);
-      const step = spec.step ?? (spec.paramType === "int" ? 1 : 0.01);
-      const hasSlider = spec.soft !== null;
+      const isInt = spec.paramType === "int";
       return (
         <div className="param-row">
           {label}
-          <div className="param-input-group">
-            {hasSlider && spec.soft && (
-              <input
-                type="range"
-                min={spec.soft[0]}
-                max={spec.soft[1]}
-                step={step}
-                value={num}
-                onChange={(e) => preview(Number(e.target.value))}
-                onPointerUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
-              />
-            )}
-            <input
-              type="number"
-              step={step}
-              value={num}
-              onChange={(e) => commit(spec.paramType === "int" ? Math.round(Number(e.target.value)) : Number(e.target.value))}
-            />
-          </div>
+          <FloatInput
+            value={Number(value)}
+            int={isInt}
+            soft={spec.soft}
+            min={spec.hard?.[0]}
+            max={spec.hard?.[1]}
+            step={spec.step ?? undefined}
+            onPreview={preview}
+            onCommit={commit}
+          />
         </div>
       );
     }
@@ -80,14 +78,23 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <input type="checkbox" checked={Boolean(value)} onChange={(e) => commit(e.target.checked)} />
+          <input
+            type="checkbox"
+            className="checkbox-input"
+            checked={Boolean(value)}
+            onChange={(e) => commit(e.target.checked)}
+          />
         </div>
       );
     case "enum":
       return (
         <div className="param-row">
           {label}
-          <select value={String(value)} onChange={(e) => commit(e.target.value)}>
+          <select
+            className="input-field select-input"
+            value={String(value)}
+            onChange={(e) => commit(e.target.value)}
+          >
             {spec.enumVariants.map(([key, lbl]) => (
               <option key={key} value={key}>
                 {lbl}
@@ -100,29 +107,21 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <input type="text" value={String(value ?? "")} onChange={(e) => commit(e.target.value)} />
-        </div>
-      );
-    case "color": {
-      const c = (Array.isArray(value) ? value : [0, 0, 0, 1]) as number[];
-      const hex = `#${[0, 1, 2].map((i) => Math.round(Math.min(1, Math.max(0, c[i] ?? 0)) * 255).toString(16).padStart(2, "0")).join("")}`;
-      return (
-        <div className="param-row">
-          {label}
           <input
-            type="color"
-            value={hex}
-            onChange={(e) => {
-              const v = e.target.value;
-              const r = parseInt(v.slice(1, 3), 16) / 255;
-              const g = parseInt(v.slice(3, 5), 16) / 255;
-              const b = parseInt(v.slice(5, 7), 16) / 255;
-              commit([r, g, b, c[3] ?? 1]);
-            }}
+            type="text"
+            className="input-field text-input"
+            value={String(value ?? "")}
+            onChange={(e) => commit(e.target.value)}
           />
         </div>
       );
-    }
+    case "color":
+      return (
+        <div className="param-row">
+          {label}
+          <ColorInput value={(Array.isArray(value) ? value : [0, 0, 0, 1]) as number[]} onCommit={commit} />
+        </div>
+      );
     case "assetRef":
       return <AssetField ctx={ctx} node={node} spec={spec} label={label} />;
     case "vec2":
@@ -133,21 +132,13 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <div className="param-vec">
-            {Array.from({ length: n }, (_, i) => (
-              <input
-                key={i}
-                type="number"
-                step={spec.step ?? 0.01}
-                value={arr[i] ?? 0}
-                onChange={(e) => {
-                  const next = [...arr];
-                  next[i] = Number(e.target.value);
-                  commit(next);
-                }}
-              />
-            ))}
-          </div>
+          <VectorInput
+            value={arr}
+            size={n as 2 | 3 | 4}
+            step={spec.step ?? undefined}
+            onPreview={preview}
+            onCommit={commit}
+          />
         </div>
       );
     }
@@ -231,6 +222,7 @@ export function ParameterPanel() {
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
+  const reports = useMirror((s) => s.reports);
 
   const selectedId = graph.selection[0];
   const node = useMemo(
@@ -276,7 +268,75 @@ export function ParameterPanel() {
           </fieldset>
         ))}
         {(desc?.params.length ?? 0) === 0 && <div className="param-empty">No parameters.</div>}
+        {reports[node.id] && (
+          <ValidationSection ctx={current} sourceNode={node.id} report={reports[node.id]} />
+        )}
       </div>
     </div>
+  );
+}
+
+/** "degenerateTriangles" -> "Degenerate Triangles". */
+function prettyKind(kind: string): string {
+  const spaced = kind.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** The selected node's validation report (validate node or import load
+ * validation): counts header plus one row per issue. A row click flies the
+ * active pane's camera to the issue's mesh and enables that pane's
+ * validation overlay (subflow contexts only: the owning geo container is
+ * the scene object). */
+function ValidationSection({
+  ctx,
+  sourceNode,
+  report,
+}: {
+  ctx: GraphContext;
+  sourceNode: number;
+  report: ValidationReportData;
+}) {
+  const objectNode = ctx === "root" ? null : ctx.subflow;
+  const clean = report.issues.length === 0;
+  return (
+    <fieldset className="param-group validation-section">
+      <legend>Validation</legend>
+      <div className="validation-summary">
+        {clean ? (
+          <span className="validation-clean">No issues found.</span>
+        ) : (
+          <>
+            {report.errors > 0 && <span className="validation-count err">{report.errors} error{report.errors === 1 ? "" : "s"}</span>}
+            {report.warnings > 0 && <span className="validation-count warn">{report.warnings} warning{report.warnings === 1 ? "" : "s"}</span>}
+          </>
+        )}
+      </div>
+      {!clean && (
+        <ul className="validation-list">
+          {report.issues.map((issue: ValidationIssue, i: number) => (
+            <li key={i}>
+              <button
+                type="button"
+                className="validation-row"
+                disabled={objectNode === null}
+                title={objectNode === null ? issue.message : `${issue.message} (click to frame)`}
+                onClick={() => {
+                  if (objectNode !== null) flyToIssue(objectNode, sourceNode, i);
+                }}
+              >
+                <span className={`validation-dot ${issue.severity}`} />
+                <span className="validation-kind">{prettyKind(issue.kind)}</span>
+                <span className="validation-msg">{issue.message}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {report.truncated && (
+        <div className="validation-truncated">
+          List truncated to {report.issues.length} rows; counts above are complete.
+        </div>
+      )}
+    </fieldset>
   );
 }

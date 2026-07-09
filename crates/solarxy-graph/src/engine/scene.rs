@@ -69,7 +69,8 @@ fn is_light(type_id: &str) -> bool {
     )
 }
 
-/// Emits the `UpsertGeometry` + `SetTransform` for one geo container.
+/// Emits the `UpsertGeometry` + `SetValidation` + `SetTransform` for one
+/// geo container.
 fn emit_geo(
     doc: &Document,
     _registry: &Registry,
@@ -93,6 +94,15 @@ fn emit_geo(
             geometry: std::sync::Arc::new(set.to_cooked()),
         });
     }
+    // The object's effective validation: the nearest cached result on the
+    // displayed chain (the display node itself, else breadth-first
+    // upstream -- a validate node's report or an import's load
+    // validation). `None` clears; the renderer dedupes by Arc identity,
+    // so re-sending per frame is free.
+    delta.push(SceneOp::SetValidation {
+        id: object_id,
+        validation: effective_validation(subflow, cook, display),
+    });
     // The geo node's transform, applied as the object transform (not baked;
     // the renderer applies it), resolved through the shared world-matrix
     // helper so picking and rendering agree.
@@ -100,6 +110,30 @@ fn emit_geo(
         id: object_id,
         transform: geo_world_matrix(doc, _registry, geo).into(),
     });
+}
+
+/// The nearest cached validation result at or upstream of `display`,
+/// breadth-first (so the most-downstream validate node wins over an
+/// import's implicit validation further up the chain).
+fn effective_validation(
+    graph: &crate::document::Graph,
+    cook: &CookEngine,
+    display: NodeId,
+) -> Option<std::sync::Arc<solarxy_core::validation::ValidationResult>> {
+    use std::collections::{BTreeSet, VecDeque};
+    let mut queue = VecDeque::from([display]);
+    let mut seen = BTreeSet::from([display]);
+    while let Some(node) = queue.pop_front() {
+        if let Some(validation) = cook.validation(node) {
+            return Some(std::sync::Arc::clone(validation));
+        }
+        for edge in graph.incoming(node) {
+            if seen.insert(edge.from) {
+                queue.push_back(edge.from);
+            }
+        }
+    }
+    None
 }
 
 /// The column-major `T * Rz * Ry * Rx * S` world matrix for a geo container,

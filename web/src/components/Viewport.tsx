@@ -1,11 +1,15 @@
 // The 3D viewport: a single WebGPU canvas driven by the Rust renderer.
-// React never draws into it; it only forwards pointer gestures to the
-// camera and Rust-side picking, and runs the rAF cook+render loop.
+// React never draws into it; it forwards pointer gestures to the host's
+// pane-aware camera routing, runs the rAF cook+render loop, and floats
+// one DOM toolbar per pane over the canvas (UX spec: panels are DOM, the
+// canvas is one WebGPU surface with Rust-side pane hit-testing).
 
 import { useEffect, useRef } from "react";
 import { bootSession, dispatch, getClient, hasPendingRecovery, runFrame } from "../engine/session";
 import type { EngineEvent } from "../engine/types";
 import { useMirror } from "../store/mirror";
+import { useViewState } from "../store/viewState";
+import { PaneToolbars } from "./PaneToolbar";
 
 /** Narrows a batch to the first nodeAdded event's node id. */
 function firstAddedId(events: EngineEvent[]): number | undefined {
@@ -72,62 +76,86 @@ export function Viewport() {
     };
   }, []);
 
-  // Pointer camera control: left = orbit, middle/right = pan, wheel = dolly.
-  // A press with no drag is a pick.
-  const drag = useRef<{ x: number; y: number; button: number; moved: boolean } | null>(null);
+  // Pointer routing: coordinates go to the host in canvas CSS px; the host
+  // hit-tests the pane and drives that pane's camera controller. A press
+  // with no drag is a pick; a double-click enters the picked geo's subflow.
+  const drag = useRef<{ moved: boolean; downAt: number } | null>(null);
+
+  const canvasPos = (e: React.PointerEvent | React.MouseEvent) => {
+    const rect = (canvasRef.current as HTMLElement).getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const pickAt = (e: React.MouseEvent): number | undefined => {
+    const p = canvasPos(e);
+    return getClient().pick(p.x, p.y);
+  };
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="viewport-canvas"
-      onPointerDown={(e) => {
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
-        drag.current = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
-      }}
-      onPointerMove={(e) => {
-        const d = drag.current;
-        if (!d) return;
-        const dx = e.clientX - d.x;
-        const dy = e.clientY - d.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
-        d.x = e.clientX;
-        d.y = e.clientY;
-        try {
-          if (d.button === 0) getClient().orbit(dx, dy);
-          else getClient().pan(dx, dy);
-        } catch {
-          /* not booted */
-        }
-      }}
-      onPointerUp={(e) => {
-        const d = drag.current;
-        drag.current = null;
-        if (!d || d.moved) return;
-        // A click: pick the geo node under the cursor.
-        try {
-          const rect = (e.target as HTMLElement).getBoundingClientRect();
-          const dpr = window.devicePixelRatio || 1;
-          const px = (e.clientX - rect.left) * dpr;
-          const py = (e.clientY - rect.top) * dpr;
-          const hit = getClient().pick(px, py);
-          if (hit !== undefined) {
-            // Picking sync: show the root canvas and select the producing geo
-            // node so the parameter panel follows.
-            useMirror.getState().setCurrent("root");
-            dispatch({ type: "setSelection", ctx: "root", ids: [hit] });
+    <>
+      <canvas
+        ref={canvasRef}
+        className="viewport-canvas"
+        onPointerEnter={() => useViewState.getState().setPointerOverViewport(true)}
+        onPointerLeave={() => useViewState.getState().setPointerOverViewport(false)}
+        onPointerDown={(e) => {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          drag.current = { moved: false, downAt: performance.now() };
+          try {
+            const p = canvasPos(e);
+            getClient().pointerDown(p.x, p.y, e.button);
+          } catch {
+            /* not booted */
           }
-        } catch {
-          /* not booted */
-        }
-      }}
-      onContextMenu={(e) => e.preventDefault()}
-      onWheel={(e) => {
-        try {
-          getClient().dolly(-e.deltaY * 0.002);
-        } catch {
-          /* not booted */
-        }
-      }}
-    />
+        }}
+        onPointerMove={(e) => {
+          if (drag.current && (Math.abs(e.movementX) + Math.abs(e.movementY) > 1)) {
+            drag.current.moved = true;
+          }
+          try {
+            const p = canvasPos(e);
+            getClient().pointerMove(p.x, p.y);
+          } catch {
+            /* not booted */
+          }
+        }}
+        onPointerUp={(e) => {
+          const d = drag.current;
+          drag.current = null;
+          try {
+            getClient().pointerUp(e.button);
+            if (!d || d.moved || e.button !== 0) return;
+            // A click: pick the geo node under the cursor (picking sync).
+            const hit = pickAt(e);
+            if (hit !== undefined) {
+              useMirror.getState().setCurrent("root");
+              dispatch({ type: "setSelection", ctx: "root", ids: [hit] });
+            }
+          } catch {
+            /* not booted */
+          }
+        }}
+        onDoubleClick={(e) => {
+          // Enter the picked geo's subflow (decision 24).
+          try {
+            const hit = pickAt(e);
+            if (hit !== undefined) {
+              useMirror.getState().setCurrent({ subflow: hit });
+            }
+          } catch {
+            /* not booted */
+          }
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        onWheel={(e) => {
+          try {
+            getClient().wheel(-e.deltaY * 0.01);
+          } catch {
+            /* not booted */
+          }
+        }}
+      />
+      <PaneToolbars />
+    </>
   );
 }

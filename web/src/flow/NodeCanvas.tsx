@@ -24,6 +24,7 @@ import type { GraphContext, GraphMirror, RegistrySnapshot } from "../engine/type
 import { connectionLegal, descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { pushToast } from "../store/toasts";
+import { useUi } from "../store/ui";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
 
 const NODE_TYPES = { solarxy: FlowNode };
@@ -67,6 +68,7 @@ export function NodeCanvas() {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
+  const resolvedTheme = useUi((s) => s.resolvedTheme);
 
   const seed = useMemo(() => toRf(graph, registry), [graph, registry]);
   const [nodes, setNodes, onNodesChange] = useNodesState(seed.nodes);
@@ -198,9 +200,9 @@ export function NodeCanvas() {
       multiSelectionKeyCode={["Meta", "Control"]}
       fitView
       proOptions={{ hideAttribution: true }}
-      colorMode="dark"
+      colorMode={resolvedTheme}
     >
-      <Background gap={18} color="#1c1f26" />
+      <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
       <MiniMap pannable zoomable className="flow-minimap" />
       <Controls showInteractive={false} />
     </ReactFlow>

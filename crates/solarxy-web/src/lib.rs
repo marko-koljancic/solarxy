@@ -29,10 +29,6 @@
 
 #[cfg(target_arch = "wasm32")]
 mod app;
-#[cfg(target_arch = "wasm32")]
-mod camera;
-#[cfg(target_arch = "wasm32")]
-mod render;
 
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;

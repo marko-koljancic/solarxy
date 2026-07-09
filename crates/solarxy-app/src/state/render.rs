@@ -256,6 +256,7 @@ impl State {
     ) {
         if let Some(scene) = &self.scene {
             if scene.model.has_uvs {
+                let uv_object = scene.draw_object();
                 self.renderer
                     .uv_cam
                     .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
@@ -274,7 +275,7 @@ impl State {
                 if pds.show_uv_overlap {
                     self.renderer.render_uv_overlap_count_pass(
                         encoder,
-                        scene,
+                        &uv_object,
                         &self.renderer.uv_cam.bind_group,
                         &self.renderer.uv_overlap.count_view,
                     );
@@ -286,7 +287,7 @@ impl State {
                             .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
                         self.renderer.render_uv_overlap_count_pass(
                             encoder,
-                            scene,
+                            &uv_object,
                             &self.renderer.uv_cam.bind_group,
                             &self.renderer.uv_overlap.stats_view,
                         );
@@ -319,7 +320,7 @@ impl State {
                 }
                 self.renderer.render_uv_map_pass(
                     encoder,
-                    scene,
+                    &uv_object,
                     &self.renderer.uv_cam.bind_group,
                     pds,
                 );
@@ -339,7 +340,7 @@ impl State {
         if let Some(scene) = &self.scene {
             let color = self.resolve_background(pds).grid_color();
             self.queue.write_buffer(
-                &scene.vis.grid_uniform_buf,
+                &scene.env.vis.grid_uniform_buf,
                 GridUniform::COLOR_OFFSET,
                 bytemuck::cast_slice(&color),
             );
@@ -401,7 +402,8 @@ impl State {
             && let Some(scene) = &self.scene
         {
             let objects = self.draw_objects(scene);
-            self.renderer.render_shadow_pass(encoder, scene, &objects);
+            self.renderer
+                .render_shadow_pass(encoder, &scene.env, &objects);
         }
 
         let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
@@ -412,7 +414,7 @@ impl State {
             }
             self.renderer.render_main_pass(
                 encoder,
-                scene,
+                &scene.env,
                 &objects,
                 cam_bg,
                 cam_data,
@@ -449,14 +451,15 @@ impl State {
         if !self.view.display.lights_locked {
             let ibl_avg = self.active_ibl().irradiance_average;
             if let Some(scene) = &mut self.scene {
-                scene.lights_uniform = lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);
+                scene.env.lights_uniform =
+                    lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);
                 self.queue.write_buffer(
-                    &scene.light_buffer,
+                    &scene.env.light_buffer,
                     0,
-                    bytemuck::cast_slice(&[scene.lights_uniform]),
+                    bytemuck::cast_slice(&[scene.env.lights_uniform]),
                 );
-                let key_pos = scene.lights_uniform.lights[0].position;
-                scene.shadow.update_light_vp(
+                let key_pos = scene.env.lights_uniform.lights[0].position;
+                scene.env.shadow.update_light_vp(
                     &self.queue,
                     cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
                     scene.model.bounds.center(),

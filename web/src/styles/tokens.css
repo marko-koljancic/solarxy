@@ -1,0 +1,158 @@
+/* Design tokens, carried from the Minimystix reference
+ * (_reference/minimystx/src/styles/variables.css) per the phase-6 design
+ * adoption decision (2026-07-08). Dark is the default theme; the light set
+ * overrides on body.light-theme; "system" resolves to one of the two in
+ * the ui store. Solarxy-specific tokens (badges, stale, handles, canvas)
+ * extend the set at the bottom of each block: the typed-handle palette and
+ * status colors are UX-spec-owned and survive the restyle. */
+
+:root,
+body,
+body.dark-theme {
+  color-scheme: dark;
+
+  --background-primary: #2a2a2a;
+  --background-secondary: #333333;
+  --background-tertiary: #3a3a3a;
+  --background-quaternary: #1e1e1e;
+
+  --node-background: #e5e7eb;
+
+  --geometry-node-background: #e3e4e6;
+  --geometry-node-border: rgba(255, 255, 255, 0.15);
+  --geometry-node-border-hover: rgba(255, 255, 255, 0.25);
+
+  --light-node-background: #f8e7b0;
+  --light-node-border: rgba(255, 255, 255, 0.15);
+  --light-node-border-hover: rgba(255, 255, 255, 0.25);
+
+  --border-primary: #404040;
+  --border-secondary: #4a4a4a;
+  --border-tertiary: #555555;
+
+  --divider-primary: #555555;
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #888888;
+  --text-tertiary: #aaaaaa;
+  --text-quaternary: #999999;
+  --text-highlight: #ffffff;
+  --text-on-accent: rgba(255, 255, 255, 0.92);
+
+  --accent-primary: #4a90e2;
+  --accent-secondary: #0098ff;
+  --accent-tertiary: #003e66;
+  --accent-blue: #4a90e2;
+  --accent-green: #5ec269;
+  --accent-yellow: #f7df1e;
+
+  --edge-color: #4a90e2;
+  --edge-outline-color: #000000;
+  --connection-line-default: #e5e7eb;
+  --connection-line-valid: #55dd99;
+  --connection-line-invalid: #ff6060;
+
+  --spacing-xxs: 0.2rem;
+  --spacing-xs: 0.4rem;
+  --spacing-sm: 0.8rem;
+  --spacing-md: 1.6rem;
+  --spacing-lg: 2.4rem;
+  --spacing-xl: 3.2rem;
+  --spacing-xxl: 4.8rem;
+
+  --header-height: 3.2rem;
+  --divider-size: 0.4rem;
+  --divider-handle-size: 2rem;
+
+  --min-pane-percentage: 20;
+  --max-pane-percentage: 80;
+
+  --theme-transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease;
+
+  --error-border: #ff4444;
+  --error-background: rgba(255, 68, 68, 0.1);
+  --error-text: #ff6666;
+
+  --input-background: var(--background-quaternary);
+  --input-border: var(--border-primary);
+  --input-border-focus: var(--accent-primary);
+  --input-border-hover: var(--border-secondary);
+  --input-text: var(--text-primary);
+  --input-placeholder: var(--text-tertiary);
+
+  /* Solarxy: status + node-canvas tokens (UX-spec-owned). */
+  --error-badge: #e5484d;
+  --warn-badge: #f5a623;
+  --stale-color: #f5a623;
+  --cooking-color: #f5a623;
+  --display-flag: #fbbf24;
+  --handle-border: var(--background-quaternary);
+  --canvas-background: #242424;
+  --canvas-dot: #3c3c3c;
+  --node-label: var(--text-primary);
+  --node-text: #1f2937;
+}
+
+body.light-theme {
+  color-scheme: light;
+
+  --background-primary: #ffffff;
+  --background-secondary: #f5f5f5;
+  --background-tertiary: #e8e8e8;
+  --background-quaternary: #e0e0e0;
+
+  --node-background: #f8f8f8;
+
+  --geometry-node-background: #e3e4e6;
+  --geometry-node-border: rgba(0, 0, 0, 0.15);
+  --geometry-node-border-hover: rgba(0, 0, 0, 0.25);
+
+  --light-node-background: #fff7de;
+  --light-node-border: rgba(0, 0, 0, 0.15);
+  --light-node-border-hover: rgba(0, 0, 0, 0.25);
+
+  --border-primary: #e0e0e0;
+  --border-secondary: #cccccc;
+  --border-tertiary: #bbbbbb;
+
+  --divider-primary: #aaaaaa;
+
+  --text-primary: #333333;
+  --text-secondary: #555555;
+  --text-tertiary: #777777;
+  --text-quaternary: #999999;
+  --text-highlight: #000000;
+  --text-on-accent: #111111;
+
+  --accent-primary: #0078d4;
+  --accent-secondary: #0098ff;
+  --accent-tertiary: #e1f0ff;
+  --accent-blue: #4ba3e3;
+  --accent-green: #5ec269;
+  --accent-yellow: #f7df1e;
+
+  --edge-color: #0078d4;
+  --edge-outline-color: #000000;
+  --connection-line-default: #434343;
+  --connection-line-valid: #55dd99;
+  --connection-line-invalid: #ff6060;
+
+  --error-border: #cc0000;
+  --error-background: rgba(204, 0, 0, 0.05);
+  --error-text: #cc0000;
+
+  /* Solarxy status/canvas tokens, light variants. */
+  --error-badge: #d1373c;
+  --warn-badge: #c77d00;
+  --stale-color: #c77d00;
+  --cooking-color: #c77d00;
+  --display-flag: #d97706;
+  --handle-border: #f5f5f5;
+  --canvas-background: #fafafa;
+  --canvas-dot: #d8d8d8;
+  --node-label: var(--text-primary);
+  --node-text: #1f2937;
+}

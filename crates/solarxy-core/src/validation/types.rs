@@ -8,6 +8,11 @@
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub enum Severity {
     Warning,
     Error,
@@ -23,6 +28,11 @@ impl fmt::Display for Severity {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub enum IssueScope {
     Mesh(usize),
     Material(usize),
@@ -56,6 +66,11 @@ impl fmt::Display for IssueScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub enum IssueKind {
     NormalMismatch,
     FlippedNormals,
@@ -79,6 +94,11 @@ pub enum IssueKind {
 /// parsing the message string; `message` is intended for display, not
 /// programmatic dispatch.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub struct ValidationIssue {
     pub severity: Severity,
     pub scope: IssueScope,
@@ -91,6 +111,11 @@ pub struct ValidationIssue {
 /// summary counts; consumers wanting structured aggregation should iterate
 /// `issues` and bucket by `kind` / `severity` themselves.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub struct ValidationReport {
     pub issues: Vec<ValidationIssue>,
 }
@@ -116,6 +141,11 @@ impl ValidationReport {
 }
 
 #[derive(Debug)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub struct ValidationResult {
     pub report: ValidationReport,
     pub degenerate_faces: Vec<Vec<u32>>,

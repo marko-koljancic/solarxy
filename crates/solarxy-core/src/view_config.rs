@@ -13,7 +13,8 @@ use crate::preferences::{
     UvMapBackground, UvMode, ViewMode,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ViewLayout {
     #[default]
     Single,
@@ -39,7 +40,8 @@ impl ViewLayout {
 /// Each pane's 3D content is the pane rect minus this strip at the top.
 pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DisplaySettings {
     pub turntable_active: bool,
     pub turntable_rpm: f32,
@@ -70,7 +72,8 @@ impl DisplaySettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum BoundsMode {
     Off,
     WholeModel,
@@ -91,7 +94,8 @@ impl std::fmt::Display for BoundsMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PaneDisplaySettings {
     pub view_mode: ViewMode,
     pub prev_non_ghosted_mode: ViewMode,

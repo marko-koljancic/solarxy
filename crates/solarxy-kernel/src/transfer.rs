@@ -7,16 +7,20 @@
 //! reconstructs the set with a single memcpy per buffer (aligned
 //! destinations via `bytemuck`, so no per-element loop).
 //!
-//! Only geometry crosses: positions, normals, UVs, indices, and the
-//! material index per mesh. Materials are dropped, because the web forward
-//! renderer does not consume them yet (a documented Phase-5 MVP boundary);
-//! bounds are recomputed by [`GeometrySet::from_parts`] on unpack. The
+//! Geometry crosses as raw buffers: positions, normals, UVs, indices, and
+//! the material index per mesh. Materials follow as a serde-JSON header per
+//! material (factors, paths, alpha mode) plus raw RGBA blobs for the five
+//! texture roles (the `*_texture_data` fields are `serde(skip)` and travel
+//! binary), so the full PBR renderer consumes worker-parsed models
+//! (phase 6; the geometry-only form was the documented Phase-5 boundary).
+//! Bounds are recomputed by [`GeometrySet::from_parts`] on unpack. The
 //! format is versionless and same-origin (both sides are the same wasm
 //! build), so endianness is fixed little-endian.
 
 use std::sync::Arc;
 
 use bytemuck::{cast_slice, cast_slice_mut};
+use solarxy_core::geometry::{RawImageData, RawMaterialData};
 use thiserror::Error;
 
 use crate::set::{AttributeMap, GeometrySet, KernelMesh};
@@ -26,13 +30,38 @@ use crate::set::{AttributeMap, GeometrySet, KernelMesh};
 pub enum TransferError {
     #[error("transfer blob truncated (wanted {wanted} more bytes at offset {at})")]
     Truncated { at: usize, wanted: usize },
+    #[error("transfer blob material header malformed: {0}")]
+    BadMaterial(String),
 }
 
 const HAS_NORMALS: u32 = 1;
 const HAS_UVS: u32 = 1 << 1;
 const HAS_MATERIAL: u32 = 1 << 2;
 
-/// Serializes a set's geometry into a transfer blob (materials dropped).
+/// The five texture roles a material can carry, in wire order.
+const TEXTURE_ROLES: usize = 5;
+
+fn texture_data_slots(m: &RawMaterialData) -> [&Option<RawImageData>; TEXTURE_ROLES] {
+    [
+        &m.diffuse_texture_data,
+        &m.normal_texture_data,
+        &m.metallic_roughness_texture_data,
+        &m.occlusion_texture_data,
+        &m.emissive_texture_data,
+    ]
+}
+
+fn texture_data_slots_mut(m: &mut RawMaterialData) -> [&mut Option<RawImageData>; TEXTURE_ROLES] {
+    [
+        &mut m.diffuse_texture_data,
+        &mut m.normal_texture_data,
+        &mut m.metallic_roughness_texture_data,
+        &mut m.occlusion_texture_data,
+        &mut m.emissive_texture_data,
+    ]
+}
+
+/// Serializes a set's geometry and materials into a transfer blob.
 #[must_use]
 pub fn pack(set: &GeometrySet) -> Vec<u8> {
     let mut out = Vec::new();
@@ -70,11 +99,35 @@ pub fn pack(set: &GeometrySet) -> Vec<u8> {
             push_u32(&mut out, mi as u32);
         }
     }
+
+    // Material section: a serde-JSON header per material (texture-data
+    // fields skipped) followed by the raw RGBA blobs for present roles.
+    push_u32(&mut out, set.materials.len() as u32);
+    for material in &set.materials {
+        let header = serde_json::to_vec(material.as_ref()).expect("material header serializes");
+        push_u32(&mut out, header.len() as u32);
+        out.extend_from_slice(&header);
+
+        let slots = texture_data_slots(material);
+        let mut flags = 0u32;
+        for (i, slot) in slots.iter().enumerate() {
+            if slot.is_some() {
+                flags |= 1 << i;
+            }
+        }
+        push_u32(&mut out, flags);
+        for slot in slots.iter().filter_map(|s| s.as_ref()) {
+            push_u32(&mut out, slot.width);
+            push_u32(&mut out, slot.height);
+            push_u32(&mut out, slot.pixels.len() as u32);
+            out.extend_from_slice(&slot.pixels);
+        }
+    }
     out
 }
 
-/// Reconstructs a set from a transfer blob (bounds recomputed, no
-/// materials). Fails only on a truncated blob.
+/// Reconstructs a set from a transfer blob (bounds recomputed). Fails on a
+/// truncated blob or a malformed material header.
 pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
     let mut r = Reader { bytes, pos: 0 };
     let mesh_count = r.u32()? as usize;
@@ -117,7 +170,36 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             attributes: AttributeMap::new(),
         });
     }
-    Ok(GeometrySet::from_parts(meshes, Vec::new()))
+
+    let material_count = r.u32()? as usize;
+    let mut materials = Vec::with_capacity(material_count);
+    for _ in 0..material_count {
+        let header_len = r.u32()? as usize;
+        let header = r.take(header_len)?;
+        let mut material: RawMaterialData = serde_json::from_slice(header)
+            .map_err(|e| TransferError::BadMaterial(e.to_string()))?;
+
+        let flags = r.u32()?;
+        for (i, slot) in texture_data_slots_mut(&mut material)
+            .into_iter()
+            .enumerate()
+        {
+            if flags & (1 << i) != 0 {
+                let width = r.u32()?;
+                let height = r.u32()?;
+                let byte_len = r.u32()? as usize;
+                let pixels = r.take(byte_len)?.to_vec();
+                *slot = Some(RawImageData {
+                    pixels,
+                    width,
+                    height,
+                });
+            }
+        }
+        materials.push(Arc::new(material));
+    }
+
+    Ok(GeometrySet::from_parts(meshes, materials))
 }
 
 fn push_u32(out: &mut Vec<u8>, v: u32) {
@@ -228,5 +310,60 @@ mod tests {
             unpack(&[0, 0]),
             Err(TransferError::Truncated { .. })
         ));
+    }
+
+    #[test]
+    fn materials_round_trip_with_texture_bytes() {
+        let mesh = KernelMesh::new(
+            "textured",
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        );
+        let material = RawMaterialData {
+            name: "steel".to_string(),
+            roughness_factor: 0.4,
+            metallic_factor: 0.9,
+            emissive_factor: [0.1, 0.2, 0.3],
+            alpha_cutoff: 0.5,
+            diffuse: Some([0.8, 0.7, 0.6]),
+            diffuse_texture_data: Some(RawImageData {
+                pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
+                width: 2,
+                height: 1,
+            }),
+            emissive_texture_data: Some(RawImageData {
+                pixels: vec![9, 9, 9, 9],
+                width: 1,
+                height: 1,
+            }),
+            ..RawMaterialData::default()
+        };
+        let set = GeometrySet::from_parts(vec![mesh], vec![Arc::new(material)]);
+
+        let back = unpack(&pack(&set)).expect("round trip");
+        assert_eq!(back.materials.len(), 1);
+        let m = &back.materials[0];
+        assert_eq!(m.name, "steel");
+        assert!((m.roughness_factor - 0.4).abs() < 1e-6);
+        assert!((m.metallic_factor - 0.9).abs() < 1e-6);
+        assert_eq!(m.diffuse, Some([0.8, 0.7, 0.6]));
+        let tex = m.diffuse_texture_data.as_ref().expect("diffuse texture");
+        assert_eq!(tex.pixels, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!((tex.width, tex.height), (2, 1));
+        let em = m.emissive_texture_data.as_ref().expect("emissive texture");
+        assert_eq!(em.pixels, vec![9, 9, 9, 9]);
+        assert!(m.normal_texture_data.is_none());
+    }
+
+    #[test]
+    fn malformed_material_header_errors() {
+        let set = GeometrySet::from_parts(vec![], vec![]);
+        let mut blob = pack(&set);
+        // Rewrite the material count to 1 and append a bogus header.
+        let count_at = blob.len() - 4;
+        blob[count_at..].copy_from_slice(&1u32.to_le_bytes());
+        blob.extend_from_slice(&3u32.to_le_bytes());
+        blob.extend_from_slice(b"{!}");
+        assert!(matches!(unpack(&blob), Err(TransferError::BadMaterial(_))));
     }
 }

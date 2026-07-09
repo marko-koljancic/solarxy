@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use tobj::LoadError;
 
 use crate::{AssetResolver, FormatsError};
+use solarxy_core::geometry::RawImageData;
 use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
 
 /// Parse OBJ bytes; `.mtl` libraries resolve through `resolver`. Texture
@@ -64,18 +65,35 @@ fn parse_obj(
         texture_base.map_or_else(|| PathBuf::from(rel), |base| base.join(rel))
     };
 
+    // Decode a referenced texture through the resolver at parse time, so
+    // the byte-first path (web worker) carries pixels rather than a path
+    // no filesystem can serve. The GPU upload prefers `*_texture_data`
+    // and falls back to the path, so the desktop path mode also benefits.
+    let tex_data = |rel: &str| -> Option<RawImageData> {
+        let bytes = resolver.borrow_mut().read(rel)?;
+        let img = image::load_from_memory(&bytes).ok()?;
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        Some(RawImageData {
+            pixels: rgba.into_raw(),
+            width,
+            height,
+        })
+    };
+
     let mut materials = Vec::new();
     for m in obj_materials.unwrap_or_default() {
         let diffuse_path = m.diffuse_texture.as_deref().map(&tex_path);
+        let diffuse_data = m.diffuse_texture.as_deref().and_then(&tex_data);
 
-        let normal_path = m.normal_texture.as_deref().map(|p| {
-            let cleaned = p
-                .split_whitespace()
+        let normal_rel = m.normal_texture.as_deref().map(|p| {
+            p.split_whitespace()
                 .filter(|s| !s.starts_with('-'))
                 .collect::<Vec<_>>()
-                .join(" ");
-            tex_path(&cleaned)
+                .join(" ")
         });
+        let normal_path = normal_rel.as_deref().map(&tex_path);
+        let normal_data = normal_rel.as_deref().and_then(&tex_data);
 
         let roughness_factor = m
             .unknown_param
@@ -97,8 +115,8 @@ fn parse_obj(
             name: m.name.clone(),
             diffuse_texture_path: diffuse_path,
             normal_texture_path: normal_path,
-            diffuse_texture_data: None,
-            normal_texture_data: None,
+            diffuse_texture_data: diffuse_data,
+            normal_texture_data: normal_data,
             metallic_roughness_texture_path: None,
             metallic_roughness_texture_data: None,
             occlusion_texture_path: None,

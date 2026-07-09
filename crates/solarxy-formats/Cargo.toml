@@ -27,3 +27,9 @@ gltf = "1.4"
 # gltf importer's own handling; already in the tree via gltf).
 urlencoding = "2"
 tracing = "0.1"
+# Texture decode for the byte-first loaders (MTL map_Kd etc.); the same
+# crate/features the renderer uses, so the wasm build gains no new weight.
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg", "webp", "tga", "tiff", "bmp"]

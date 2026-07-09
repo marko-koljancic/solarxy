@@ -25,12 +25,15 @@ use solarxy_core::geometry::{
     extract_edges,
 };
 use solarxy_core::scene::{CookedGeometry, CookedMesh, LightDef, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::validation::ValidationResult;
 
 use crate::bind_groups::BindGroupLayouts;
 use crate::error::RendererError;
+use crate::frame::ObjectValidationGpu;
 use crate::model::{CpuMesh, EdgeData, Mesh, Model, ModelVertex};
 use crate::pipelines::InstanceRaw;
 use crate::resources;
+use crate::validation::{build_mesh_category_map, build_mesh_edge_indices};
 
 /// Extra capacity factor for growable buffers (1.5x).
 fn with_headroom(bytes: u64) -> u64 {
@@ -57,6 +60,19 @@ pub struct SceneObject {
     /// small buffer write, never a geometry re-upload.
     pub instance_buffer: wgpu::Buffer,
     caps: Vec<MeshCaps>,
+    /// The last-applied cooked geometry, for pointer-identity dedupe: the
+    /// engine re-lowers the full delta each frame, so an upsert whose
+    /// attribute `Arc`s are unchanged is skipped entirely.
+    geometry: Arc<CookedGeometry>,
+    /// Cooked-mesh index to GPU-mesh index (empty meshes are skipped at
+    /// build). Validation issue scopes carry raw indices; this remaps them.
+    raw_to_gpu: Vec<Option<usize>>,
+    /// The object's effective validation result (`SetValidation`), deduped
+    /// by `Arc` identity.
+    validation: Option<Arc<ValidationResult>>,
+    /// GPU overlay resources derived from `validation` against the current
+    /// meshes (category tints + issue edge index buffers).
+    validation_gpu: Option<ObjectValidationGpu>,
 }
 
 /// The dynamic scene: objects in deterministic id order plus the last
@@ -95,6 +111,20 @@ impl SceneObjects {
         self.objects.get(&id)
     }
 
+    /// One visible object as a [`crate::frame::DrawObject`], or `None` if
+    /// absent or hidden (the selection-tint lookup).
+    pub fn draw_object(&self, id: SceneObjectId) -> Option<crate::frame::DrawObject<'_>> {
+        self.objects
+            .get(&id)
+            .filter(|o| o.visible)
+            .map(|o| crate::frame::DrawObject {
+                model: &o.model,
+                instance_buffer: &o.instance_buffer,
+                validation: o.validation_gpu.as_ref(),
+                selected: false,
+            })
+    }
+
     /// Visible objects as [`crate::frame::DrawObject`]s, in deterministic
     /// id order — appended to the draw loop beside the `ModelScene` entry
     /// (or standing alone once a shell feeds only deltas).
@@ -105,7 +135,23 @@ impl SceneObjects {
             .map(|o| crate::frame::DrawObject {
                 model: &o.model,
                 instance_buffer: &o.instance_buffer,
+                validation: o.validation_gpu.as_ref(),
+                selected: false,
             })
+    }
+
+    /// The object's effective validation result (set by `SetValidation`),
+    /// for issue lists and camera fly-to.
+    #[must_use]
+    pub fn validation(&self, id: SceneObjectId) -> Option<&Arc<ValidationResult>> {
+        self.objects.get(&id)?.validation.as_ref()
+    }
+
+    /// The object's cooked-to-GPU mesh index remap (validation issue
+    /// scopes carry raw indices).
+    #[must_use]
+    pub fn raw_to_gpu(&self, id: SceneObjectId) -> Option<&[Option<usize>]> {
+        self.objects.get(&id).map(|o| o.raw_to_gpu.as_slice())
     }
 
     /// The engine-provided light list; `None` means no `SetLights` has
@@ -159,7 +205,7 @@ impl SceneObjects {
         for op in &delta.ops {
             match op {
                 SceneOp::UpsertGeometry { id, geometry } => {
-                    self.upsert_geometry(device, queue, layouts, *id, geometry)?;
+                    self.upsert_geometry(device, queue, layouts, *id, Arc::clone(geometry))?;
                 }
                 SceneOp::SetTransform { id, transform } => {
                     if let Some(obj) = self.objects.get_mut(id) {
@@ -175,6 +221,9 @@ impl SceneObjects {
                     if let Some(obj) = self.objects.get_mut(id) {
                         obj.visible = *visible;
                     }
+                }
+                SceneOp::SetValidation { id, validation } => {
+                    self.set_validation(device, *id, validation.as_ref());
                 }
                 SceneOp::Remove { id } => {
                     self.objects.remove(id);
@@ -199,15 +248,29 @@ impl SceneObjects {
         queue: &wgpu::Queue,
         layouts: &BindGroupLayouts,
         id: SceneObjectId,
-        cooked: &CookedGeometry,
+        cooked_arc: Arc<CookedGeometry>,
     ) -> Result<(), RendererError> {
-        let built = build_meshes(cooked);
+        // Identity dedupe: the engine re-lowers the full delta each frame,
+        // so an upsert whose attribute/material `Arc`s all match the
+        // last-applied geometry is a no-op (no re-upload, and the derived
+        // validation resources stay valid).
+        if let Some(obj) = self.objects.get(&id)
+            && same_geometry(&obj.geometry, &cooked_arc)
+        {
+            return Ok(());
+        }
+        let cooked: &CookedGeometry = &cooked_arc;
+        let (built, raw_to_gpu) = build_meshes(cooked);
 
         // In-place fast path: same mesh count, same material count, and
         // every new buffer fits its recorded capacity.
         if let Some(obj) = self.objects.get_mut(&id)
             && obj.model.meshes.len() == built.len()
             && obj.model.materials.len() == cooked.materials.len().max(1)
+            && built
+                .iter()
+                .zip(&obj.model.meshes)
+                .all(|(b, m)| b.padded_uvs.is_empty() != m.uv_edge_data.is_some())
             && built.iter().zip(&obj.caps).all(|(b, caps)| {
                 b.vertex_bytes() <= caps.vertex_bytes
                     && b.index_bytes() <= caps.index_bytes
@@ -232,6 +295,11 @@ impl SceneObjects {
                         bytemuck::cast_slice(&b.edge_indices),
                     );
                 }
+                if let Some(uv) = &mesh.uv_edge_data
+                    && !b.padded_uvs.is_empty()
+                {
+                    queue.write_buffer(&uv.uv_buffer, 0, bytemuck::cast_slice(&b.padded_uvs));
+                }
             }
             for (edge_opt, b) in obj
                 .model
@@ -254,6 +322,17 @@ impl SceneObjects {
             obj.model.mesh_bounds = built.iter().map(|b| b.bounds).collect();
             obj.model.bounds = cooked.bounds;
             obj.model.has_uvs = built.iter().any(|b| b.has_uvs);
+            obj.geometry = Arc::clone(&cooked_arc);
+            obj.raw_to_gpu = raw_to_gpu;
+            // Geometry content changed: derived validation resources are
+            // stale. The same-delta `SetValidation` (lowered right after
+            // the upsert) rebuilds them against the new meshes.
+            obj.validation = None;
+            obj.validation_gpu = None;
+            for mesh in &mut obj.model.meshes {
+                mesh.degen_index_buffer = None;
+                mesh.degen_num_elements = 0;
+            }
             return Ok(());
         }
 
@@ -342,6 +421,39 @@ impl SceneObjects {
                 ],
             });
 
+            // UV-space wire resources (the UV pane), only for real UVs;
+            // shares the edge index buffer, like the desktop loader.
+            let uv_edge_data = if b.padded_uvs.is_empty() {
+                None
+            } else {
+                let uv_buffer = create_with_capacity(
+                    device,
+                    queue,
+                    "SceneObject UV Positions",
+                    edge_pos_cap,
+                    bytemuck::cast_slice(&b.padded_uvs),
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                );
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("SceneObject UV Edge Bind Group"),
+                    layout: &layouts.edge_geometry,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uv_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: edge_index.as_entire_binding(),
+                        },
+                    ],
+                });
+                Some(crate::model::UvEdgeData {
+                    uv_buffer,
+                    bind_group,
+                })
+            };
+
             meshes.push(Mesh {
                 name: b.name.clone(),
                 vertex_buffer,
@@ -355,7 +467,7 @@ impl SceneObjects {
                     num_edges: (b.edge_indices.len() / 2) as u32,
                     bind_group: edge_bind_group,
                 }),
-                uv_edge_data: None,
+                uv_edge_data,
                 degen_index_buffer: None,
                 degen_num_elements: 0,
             });
@@ -386,6 +498,12 @@ impl SceneObjects {
         if let Some(existing) = self.objects.get_mut(&id) {
             existing.model = model;
             existing.caps = caps;
+            existing.geometry = Arc::clone(&cooked_arc);
+            existing.raw_to_gpu = raw_to_gpu;
+            // Fresh meshes carry no degen buffers; drop the stale overlay
+            // resources (the same-delta `SetValidation` rebuilds them).
+            existing.validation = None;
+            existing.validation_gpu = None;
         } else {
             let transform = Matrix4::identity();
             let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -401,11 +519,133 @@ impl SceneObjects {
                     visible: true,
                     instance_buffer,
                     caps,
+                    geometry: cooked_arc,
+                    raw_to_gpu,
+                    validation: None,
+                    validation_gpu: None,
                 },
             );
         }
         Ok(())
     }
+
+    /// Applies a `SetValidation` op: dedupes by `Arc` identity, then
+    /// (re)builds the overlay resources — the per-mesh category map, the
+    /// issue edge index buffers, and the degenerate-triangle index buffers
+    /// — exactly as the desktop load path does at model upload.
+    fn set_validation(
+        &mut self,
+        device: &wgpu::Device,
+        id: SceneObjectId,
+        validation: Option<&Arc<ValidationResult>>,
+    ) {
+        let Some(obj) = self.objects.get_mut(&id) else {
+            return;
+        };
+        match (validation, &obj.validation) {
+            (None, None) => return,
+            (Some(new), Some(current)) if Arc::ptr_eq(new, current) => return,
+            _ => {}
+        }
+        // Clear the previous overlay resources in either direction.
+        obj.validation_gpu = None;
+        for mesh in &mut obj.model.meshes {
+            mesh.degen_index_buffer = None;
+            mesh.degen_num_elements = 0;
+        }
+        let Some(v) = validation else {
+            obj.validation = None;
+            return;
+        };
+
+        let gpu_mesh_count = obj.model.meshes.len();
+        let mesh_cat = build_mesh_category_map(&v.report, gpu_mesh_count, &obj.raw_to_gpu);
+        let edge_buffers: Vec<Option<(wgpu::Buffer, u32)>> =
+            build_mesh_edge_indices(&v.report, gpu_mesh_count, &obj.raw_to_gpu)
+                .into_iter()
+                .enumerate()
+                .map(|(mi, indices)| {
+                    if indices.is_empty() {
+                        None
+                    } else {
+                        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("SceneObject Validation Edge Indices {mi}")),
+                            contents: bytemuck::cast_slice(&indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+                        Some((buf, indices.len() as u32))
+                    }
+                })
+                .collect();
+
+        // Degenerate-triangle index buffers, remapped raw-to-GPU and
+        // resolved against each mesh's retained CPU index copy.
+        for (raw_idx, faces) in v.degenerate_faces.iter().enumerate() {
+            if faces.is_empty() {
+                continue;
+            }
+            let Some(Some(gpu_idx)) = obj.raw_to_gpu.get(raw_idx) else {
+                continue;
+            };
+            let Some(cpu) = obj.model.cpu_meshes.get(*gpu_idx) else {
+                continue;
+            };
+            let degen_indices: Vec<u32> = faces
+                .iter()
+                .filter_map(|&fi| {
+                    let base = fi as usize * 3;
+                    let tri = cpu.indices.get(base..base + 3)?;
+                    Some([tri[0], tri[1], tri[2]])
+                })
+                .flatten()
+                .collect();
+            if degen_indices.is_empty() {
+                continue;
+            }
+            if let Some(mesh) = obj.model.meshes.get_mut(*gpu_idx) {
+                mesh.degen_num_elements = degen_indices.len() as u32;
+                mesh.degen_index_buffer = Some(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("SceneObject Degen Index Buffer {gpu_idx}")),
+                        contents: bytemuck::cast_slice(&degen_indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    },
+                ));
+            }
+        }
+
+        obj.validation = Some(Arc::clone(v));
+        obj.validation_gpu = Some(ObjectValidationGpu {
+            mesh_cat,
+            edge_buffers,
+        });
+    }
+}
+
+/// Whether two cooked geometries are identical by attribute-buffer and
+/// material `Arc` identity (the engine's cook cache shares those `Arc`s
+/// across frames, so pointer equality means content equality).
+fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
+    fn same_opt<T>(x: Option<&Arc<T>>, y: Option<&Arc<T>>) -> bool {
+        match (x, y) {
+            (Some(x), Some(y)) => Arc::ptr_eq(x, y),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+    a.meshes.len() == b.meshes.len()
+        && a.materials.len() == b.materials.len()
+        && a.meshes.iter().zip(&b.meshes).all(|(x, y)| {
+            Arc::ptr_eq(&x.positions, &y.positions)
+                && Arc::ptr_eq(&x.indices, &y.indices)
+                && same_opt(x.normals.as_ref(), y.normals.as_ref())
+                && same_opt(x.tex_coords.as_ref(), y.tex_coords.as_ref())
+                && x.material_index == y.material_index
+        })
+        && a.materials
+            .iter()
+            .zip(&b.materials)
+            .all(|(x, y)| Arc::ptr_eq(x, y))
 }
 
 /// Create a buffer of `capacity` bytes and write `contents` into its head.
@@ -443,6 +683,10 @@ struct BuiltMesh {
     bounds: AABB,
     material_index: usize,
     has_uvs: bool,
+    /// Padded `[u, 1-v, 0, 0]` per vertex for the UV-space wire pass
+    /// (`uv_edge_data`); empty when the mesh has no real UVs. Same length
+    /// as `padded_positions`, so the edge-positions capacity covers it.
+    padded_uvs: Vec<[f32; 4]>,
 }
 
 impl BuiltMesh {
@@ -462,16 +706,21 @@ impl BuiltMesh {
 
 /// Interleave cooked meshes into `ModelVertex` data — the same normals /
 /// UV-default / tangent pipeline as `geometry::process_raw_model`, reading
-/// the `Arc`-shared attribute buffers without cloning them.
-fn build_meshes(cooked: &CookedGeometry) -> Vec<BuiltMesh> {
+/// the `Arc`-shared attribute buffers without cloning them. The second
+/// return is the cooked-to-GPU index remap (empty meshes are skipped), the
+/// same shape as the desktop loader's `raw_to_gpu`.
+fn build_meshes(cooked: &CookedGeometry) -> (Vec<BuiltMesh>, Vec<Option<usize>>) {
     let mut out = Vec::with_capacity(cooked.meshes.len());
+    let mut raw_to_gpu = Vec::with_capacity(cooked.meshes.len());
     for mesh in &cooked.meshes {
         if mesh.positions.is_empty() || mesh.indices.is_empty() {
+            raw_to_gpu.push(None);
             continue;
         }
+        raw_to_gpu.push(Some(out.len()));
         out.push(build_mesh(mesh));
     }
-    out
+    (out, raw_to_gpu)
 }
 
 fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
@@ -515,6 +764,15 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
 
     let padded_positions: Vec<[f32; 4]> =
         positions.iter().map(|p| [p[0], p[1], p[2], 0.0]).collect();
+    // The UV-space wire positions (V flipped, like the desktop loader).
+    let padded_uvs: Vec<[f32; 4]> = if has_uvs {
+        tex_coords
+            .iter()
+            .map(|uv| [uv[0], 1.0 - uv[1], 0.0, 0.0])
+            .collect()
+    } else {
+        Vec::new()
+    };
     let edge_indices = extract_edges(indices);
     let bounds = compute_bounds(positions);
 
@@ -528,6 +786,7 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
         bounds,
         material_index: mesh.material_index.unwrap_or(0),
         has_uvs,
+        padded_uvs,
     }
 }
 
@@ -552,5 +811,85 @@ pub fn cooked_from_parts(
         }],
         materials: Vec::new(),
         bounds,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cooked_mesh(name: &str, positions: Vec<[f32; 3]>, indices: Vec<u32>) -> CookedMesh {
+        CookedMesh {
+            name: name.to_string(),
+            positions: Arc::new(positions),
+            normals: None,
+            tex_coords: None,
+            indices: Arc::new(indices),
+            material_index: None,
+        }
+    }
+
+    fn tri() -> CookedMesh {
+        cooked_mesh(
+            "tri",
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        )
+    }
+
+    #[test]
+    fn build_meshes_maps_raw_to_gpu_skipping_empties() {
+        let cooked = CookedGeometry {
+            meshes: vec![
+                cooked_mesh("empty", vec![], vec![]),
+                tri(),
+                cooked_mesh("also-empty", vec![[0.0; 3]], vec![]),
+            ],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        let (built, raw_to_gpu) = build_meshes(&cooked);
+        assert_eq!(built.len(), 1);
+        assert_eq!(raw_to_gpu, vec![None, Some(0), None]);
+    }
+
+    #[test]
+    fn same_geometry_compares_by_arc_identity() {
+        let a = CookedGeometry {
+            meshes: vec![tri()],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        // Shared attribute Arcs: identical (the engine's per-frame
+        // re-lowering case).
+        let shared = CookedGeometry {
+            meshes: vec![CookedMesh {
+                name: "tri".to_string(),
+                positions: Arc::clone(&a.meshes[0].positions),
+                normals: None,
+                tex_coords: None,
+                indices: Arc::clone(&a.meshes[0].indices),
+                material_index: None,
+            }],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(same_geometry(&a, &shared));
+
+        // Equal content behind fresh Arcs: a recook; must re-upload.
+        let recooked = CookedGeometry {
+            meshes: vec![tri()],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(!same_geometry(&a, &recooked));
+
+        // Mesh-count change.
+        let grown = CookedGeometry {
+            meshes: vec![],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(!same_geometry(&a, &grown));
     }
 }

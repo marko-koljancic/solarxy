@@ -29,6 +29,10 @@ impl GridUniform {
     pub const COLOR_OFFSET: u64 = std::mem::offset_of!(Self, color) as u64;
 }
 
+/// Stand-in for the normal-arrow line lists when no `NormalsGeometry` is
+/// supplied (`new_from_parts` with `normals_geo: None`).
+static EMPTY_LINES: &[[f32; 3]] = &[];
+
 pub struct VisualizationState {
     pub grid_mesh: model::Mesh,
     pub grid_params_bind_group: wgpu::BindGroup,
@@ -61,8 +65,32 @@ impl VisualizationState {
         normals_geo: &model::NormalsGeometry,
         initial_grid_color: [f32; 3],
     ) -> Self {
-        let floor_mesh = resources::create_floor_quad(device, &model.bounds);
-        let (grid_mesh, cell_size) = resources::create_grid_quad(device, &model.bounds);
+        Self::new_from_parts(
+            device,
+            layouts,
+            &model.bounds,
+            &model.mesh_bounds,
+            Some(normals_geo),
+            initial_grid_color,
+        )
+    }
+
+    /// Build from raw parts, without a [`Model`]: `bounds` sizes the
+    /// grid/floor/axes, `mesh_bounds` feeds the per-mesh bounds and local
+    /// axes, and `normals_geo` (when present) supplies the normal-arrow
+    /// line buffers. The web host passes `None` for normals until its
+    /// per-object overlay rebuild lands; the buffers stay empty and the
+    /// draw paths early-out on their zero counts.
+    pub fn new_from_parts(
+        device: &wgpu::Device,
+        layouts: &BindGroupLayouts,
+        bounds: &AABB,
+        mesh_bounds: &[AABB],
+        normals_geo: Option<&model::NormalsGeometry>,
+        initial_grid_color: [f32; 3],
+    ) -> Self {
+        let floor_mesh = resources::create_floor_quad(device, bounds);
+        let (grid_mesh, cell_size) = resources::create_grid_quad(device, bounds);
 
         let grid_uniform = GridUniform {
             cell_size,
@@ -83,10 +111,13 @@ impl VisualizationState {
             }],
         });
 
+        let (vertex_lines, face_lines) = normals_geo.map_or((EMPTY_LINES, EMPTY_LINES), |g| {
+            (g.vertex_lines.as_slice(), g.face_lines.as_slice())
+        });
         let (vertex_normals_buf, vertex_normals_count) =
-            create_normals_buffer(device, &normals_geo.vertex_lines, "Vertex Normals Buffer");
+            create_normals_buffer(device, vertex_lines, "Vertex Normals Buffer");
         let (face_normals_buf, face_normals_count) =
-            create_normals_buffer(device, &normals_geo.face_lines, "Face Normals Buffer");
+            create_normals_buffer(device, face_lines, "Face Normals Buffer");
 
         let face_normals_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Face Normals Color Buffer"),
@@ -122,7 +153,7 @@ impl VisualizationState {
                 }],
             });
 
-        let axis_len = model.bounds.diagonal() * 0.5;
+        let axis_len = bounds.diagonal() * 0.5;
         let axes_vertices: [model::GizmoVertex; 6] = [
             model::GizmoVertex {
                 position: [0.0, 0.0, 0.0],
@@ -156,14 +187,14 @@ impl VisualizationState {
         });
 
         let mut local_axes_verts: Vec<model::GizmoVertex> = Vec::new();
-        let model_center = model.bounds.center();
-        let model_axis_len = model.bounds.diagonal() * 0.3;
+        let model_center = bounds.center();
+        let model_axis_len = bounds.diagonal() * 0.3;
         local_axes_verts.extend(axes_at_center(
             [model_center.x, model_center.y, model_center.z],
             model_axis_len,
         ));
-        if model.mesh_bounds.len() > 1 {
-            for mb in &model.mesh_bounds {
+        if mesh_bounds.len() > 1 {
+            for mb in mesh_bounds {
                 let c = mb.center();
                 let len = mb.diagonal() * 0.3;
                 local_axes_verts.extend(axes_at_center([c.x, c.y, c.z], len));
@@ -176,7 +207,7 @@ impl VisualizationState {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let whole_verts = aabb_line_vertices(&model.bounds, [1.0, 0.65, 0.0]);
+        let whole_verts = aabb_line_vertices(bounds, [1.0, 0.65, 0.0]);
         let bounds_whole_count = whole_verts.len() as u32;
         let bounds_whole_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Bounds Whole Buffer"),
@@ -186,7 +217,7 @@ impl VisualizationState {
 
         let palette = bounds_color_palette();
         let mut per_mesh_verts: Vec<model::GizmoVertex> = Vec::new();
-        for (i, mesh_aabb) in model.mesh_bounds.iter().enumerate() {
+        for (i, mesh_aabb) in mesh_bounds.iter().enumerate() {
             per_mesh_verts.extend(aabb_line_vertices(mesh_aabb, palette[i % palette.len()]));
         }
         let bounds_per_mesh_count = per_mesh_verts.len() as u32;
@@ -213,8 +244,12 @@ impl VisualizationState {
             face_normals_buf,
             vertex_normals_count,
             face_normals_count,
-            vertex_normals_segments: normals_geo.vertex_segments.clone(),
-            face_normals_segments: normals_geo.face_segments.clone(),
+            vertex_normals_segments: normals_geo
+                .map(|g| g.vertex_segments.clone())
+                .unwrap_or_default(),
+            face_normals_segments: normals_geo
+                .map(|g| g.face_segments.clone())
+                .unwrap_or_default(),
             face_normals_params_bind_group,
             vertex_normals_params_bind_group,
             axes_vertex_buf,

@@ -42,6 +42,7 @@ pub struct RawImageData {
 /// and the WGSL shaders. Conversion at the CPU↔GPU boundary in
 /// `solarxy-renderer/src/resources.rs` via `From<AlphaMode> for u32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AlphaMode {
     /// Fully opaque — no alpha test, no blending.
     #[default]
@@ -65,17 +66,23 @@ impl From<AlphaMode> for u32 {
 /// for constructing a bare material (all factors zeroed, no textures); the
 /// render path never relies on the default values.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<PathBuf>,
     pub normal_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub diffuse_texture_data: Option<RawImageData>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub normal_texture_data: Option<RawImageData>,
     pub metallic_roughness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub metallic_roughness_texture_data: Option<RawImageData>,
     pub occlusion_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub occlusion_texture_data: Option<RawImageData>,
     pub emissive_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub emissive_texture_data: Option<RawImageData>,
     pub roughness_factor: f32,
     pub metallic_factor: f32,

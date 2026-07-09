@@ -213,10 +213,10 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             label: Some("Golden Encoder"),
         });
         let objects = [scene.draw_object()];
-        renderer.render_shadow_pass(&mut encoder, &scene, &objects);
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
         renderer.render_main_pass(
             &mut encoder,
-            &scene,
+            &scene.env,
             &objects,
             &cam.bind_group,
             &cam.camera,
@@ -325,10 +325,10 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         });
         let mut objects = vec![scene.draw_object()];
         objects.extend(extra.draw_objects());
-        renderer.render_shadow_pass(&mut encoder, &scene, &objects);
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
         renderer.render_main_pass(
             &mut encoder,
-            &scene,
+            &scene.env,
             &objects,
             &cam.bind_group,
             &cam.camera,

@@ -1,32 +1,30 @@
-//! [`ModelScene`]: per-loaded-model GPU state — vertex/index buffers, bind
-//! groups, shadow state, validation map. Plus the [`lights_from_camera`] and
-//! [`create_light_bind_group`] / [`create_light_bind_group_selective`]
-//! helpers used by both `ModelScene` construction and the per-frame update.
+//! [`ModelScene`]: per-loaded-model GPU state — the model, its stats and
+//! validation resources, and the shared [`SceneEnvironment`] (lights,
+//! shadow, instance buffer, visualization). Plus the
+//! [`lights_from_camera`] and [`create_light_bind_group`] /
+//! [`create_light_bind_group_selective`] helpers used by both
+//! construction and the per-frame update.
 
 // Imports used only by the std-fs-gated `ModelScene::new` are gated with
 // it so the no-std-fs (wasm) build stays warning-free.
-#[cfg(feature = "std-fs")]
-use cgmath::Rotation3;
 use solarxy_core::preferences::{BgKind, ResolvedBackground};
 use solarxy_core::validation::ValidationReport;
 #[cfg(feature = "std-fs")]
 use wgpu::util::DeviceExt;
 
 use crate::bind_groups::BindGroupLayouts;
-#[cfg(feature = "std-fs")]
-use crate::camera::camera_from_bounds;
 use crate::camera::Camera;
+use crate::environment::SceneEnvironment;
+use crate::frame::ObjectValidationGpu;
 use crate::ibl::{BrdfLut, IblState};
 use crate::light::{LightEntry, LightsUniform};
 use crate::model::Model;
-#[cfg(feature = "std-fs")]
-use crate::pipelines::Instance;
 use crate::resources::ModelStats;
 #[cfg(feature = "std-fs")]
 use crate::resources::{self};
-use crate::shadow::ShadowState;
 #[cfg(feature = "std-fs")]
 use crate::validation;
+#[cfg(feature = "std-fs")]
 use crate::visualization::VisualizationState;
 
 pub trait BackgroundModeExt {
@@ -84,18 +82,17 @@ impl BackgroundModeExt for ResolvedBackground {
 
 pub struct ModelScene {
     pub model: Model,
-    pub lights_uniform: LightsUniform,
-    pub light_buffer: wgpu::Buffer,
-    pub light_bind_group: wgpu::BindGroup,
-    pub instance_buffer: wgpu::Buffer,
-    pub shadow: ShadowState,
-    pub vis: VisualizationState,
+    /// Scene-level GPU state (lights, shadow, instance buffer, vis) —
+    /// extracted so shells without a file-loaded model share the type.
+    pub env: SceneEnvironment,
     #[allow(dead_code)]
     pub model_path: String,
     pub stats: ModelStats,
     pub validation: ValidationReport,
-    pub validation_mesh_cat: Vec<Option<usize>>,
-    pub validation_edge_buffers: Vec<Option<(wgpu::Buffer, u32)>>,
+    /// Per-mesh overlay GPU resources for `validation` (category tints +
+    /// non-manifold edge lines), handed to the passes through
+    /// [`crate::frame::DrawObject::validation`].
+    pub validation_gpu: ObjectValidationGpu,
     /// Raw-mesh-index → GPU-mesh-index map (empty raw meshes are filtered
     /// out). Retained so a validation issue's raw `IssueScope` index can be
     /// remapped to `Model::mesh_bounds` for camera fly-to.
@@ -109,7 +106,9 @@ impl ModelScene {
     pub fn draw_object(&self) -> crate::frame::DrawObject<'_> {
         crate::frame::DrawObject {
             model: &self.model,
-            instance_buffer: &self.instance_buffer,
+            instance_buffer: &self.env.instance_buffer,
+            validation: Some(&self.validation_gpu),
+            selected: false,
         }
     }
 
@@ -137,40 +136,18 @@ impl ModelScene {
             &layouts.edge_geometry,
         )?;
 
-        let instance_data = Instance {
-            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
-            rotation: cgmath::Quaternion::from_axis_angle(
-                cgmath::Vector3::unit_z(),
-                cgmath::Deg(0.0),
-            ),
-        };
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&[instance_data.to_raw()]),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let placeholder_ibl = IblState::fallback(device, queue);
-        // Pane cameras now live in the view layer (`ViewState::cameras`);
-        // a throwaway bounds-framed camera seeds the initial light rig.
-        let initial_cam =
-            camera_from_bounds(&model.bounds, config.width as f32 / config.height as f32);
-        let lights_uniform = lights_from_camera(
-            &initial_cam,
-            &model.bounds,
-            placeholder_ibl.irradiance_average,
-        );
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[lights_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let light_bind_group =
-            create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl, brdf_lut);
-
-        let shadow = ShadowState::new(device, layouts, &lights_uniform, &model, shadow_map_size);
         let vis =
             VisualizationState::new(device, layouts, &model, &normals_geo, initial_grid_color);
+        let env = SceneEnvironment::new(
+            device,
+            queue,
+            layouts,
+            &model.bounds,
+            config.width as f32 / config.height as f32,
+            brdf_lut,
+            shadow_map_size,
+            vis,
+        );
 
         let validation_mesh_cat = validation::build_mesh_category_map(
             &viewer_validation.report,
@@ -202,17 +179,14 @@ impl ModelScene {
 
         Ok(ModelScene {
             model,
-            lights_uniform,
-            light_buffer,
-            light_bind_group,
-            instance_buffer,
-            shadow,
-            vis,
+            env,
             model_path,
             stats,
             validation: viewer_validation.report,
-            validation_mesh_cat,
-            validation_edge_buffers,
+            validation_gpu: ObjectValidationGpu {
+                mesh_cat: validation_mesh_cat,
+                edge_buffers: validation_edge_buffers,
+            },
             validation_raw_to_gpu: viewer_validation.raw_to_gpu,
         })
     }

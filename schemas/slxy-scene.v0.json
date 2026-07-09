@@ -38,8 +38,18 @@
         "fov_y": {
           "type": "number"
         },
+        "ortho_scale": {
+          "default": 0.0,
+          "description": "Half-height of the orthographic view volume; unused in perspective.",
+          "type": "number"
+        },
         "pitch": {
           "type": "number"
+        },
+        "projection": {
+          "default": "perspective",
+          "description": "`\"perspective\"` (default) or `\"orthographic\"` (phase 6, per-pane projection). Serde-default so pre-phase-6 files load unchanged.",
+          "type": "string"
         },
         "target": {
           "items": {
@@ -275,7 +285,9 @@
           "default": {
             "distance": 0.0,
             "fov_y": 0.0,
+            "ortho_scale": 0.0,
             "pitch": 0.0,
+            "projection": "perspective",
             "target": [
               0.0,
               0.0,
@@ -350,6 +362,11 @@
             "$ref": "#/definitions/PaneJson"
           },
           "type": "array"
+        },
+        "split_ratio": {
+          "default": 0.5,
+          "description": "Divider position for the two-pane layouts (phase 6); 0.5 when unset.",
+          "type": "number"
         }
       },
       "type": "object"
@@ -434,7 +451,9 @@
             "camera": {
               "distance": 0.0,
               "fov_y": 0.0,
+              "ortho_scale": 0.0,
               "pitch": 0.0,
+              "projection": "perspective",
               "target": [
                 0.0,
                 0.0,
@@ -444,7 +463,8 @@
             },
             "inspection": "shaded"
           }
-        ]
+        ],
+        "split_ratio": 0.5
       }
     }
   },

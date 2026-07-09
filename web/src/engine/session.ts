@@ -3,6 +3,7 @@
 // batch (and every frame's cook batch) is applied to the mirror store, with
 // a full resnapshot on desync.
 
+import uvCheckerUrl from "../assets/uv-checker_1k.png";
 import {
   clearAutosaves,
   openSceneFile,
@@ -12,20 +13,60 @@ import {
 } from "../persistence/opfs";
 import { useMirror } from "../store/mirror";
 import { pushToast } from "../store/toasts";
+import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
-import type { Command, EventBatch, GraphContext, NodeId, ParamSource, SaveExtra } from "./types";
+import { ctxKey } from "./types";
+import type {
+  CameraCommand,
+  Command,
+  DisplaySettingsDto,
+  EventBatch,
+  GraphContext,
+  NodeId,
+  PaneDisplaySettings,
+  ParamSource,
+  SaveExtra,
+  ViewLayout,
+} from "./types";
 
 // The import worker: created lazily on the first import job, then kept alive
-// (idle-teardown is a later refinement). It runs `parse_model_job` in a
-// second headless wasm instance and posts results back for the generation
-// guard to accept or drop.
+// (idle-teardown is a later refinement). It runs `parse_model_job` and
+// `validate_geometry_job` in a second headless wasm instance and posts
+// results back for the generation guard to accept or drop.
 let importWorker: Worker | null = null;
 
 interface WorkerResult {
+  kind: "parse" | "validate" | "hdri";
   jobId: number;
   ctx: GraphContext;
   blob?: Uint8Array;
+  /** JSON `ValidationResult`: the implicit load validation beside a parse,
+   * or the whole result of a validate job. */
+  validation?: string;
+  /** The packed `PreparedHdri` blob (hdri kind). */
+  prepared?: Uint8Array;
   error?: string;
+}
+
+// HDRI preparations are host view-state work, not engine jobs: they ride
+// the same worker but resolve through a local promise map keyed by a
+// negative token (engine job ids are non-negative).
+let hdriToken = -1;
+const hdriWaiters = new Map<number, (r: WorkerResult) => void>();
+
+/** Runs the CPU IBL stages in the worker; resolves with the packed
+ * `PreparedHdri` blob. */
+function prepareHdriInWorker(bytes: Uint8Array, format: string): Promise<Uint8Array> {
+  const worker = ensureImportWorker();
+  const token = hdriToken;
+  hdriToken -= 1;
+  return new Promise((resolve, reject) => {
+    hdriWaiters.set(token, (r) => {
+      if (r.error !== undefined || !r.prepared) reject(new Error(r.error ?? "prepare failed"));
+      else resolve(r.prepared);
+    });
+    worker.postMessage({ kind: "hdri", jobId: token, ctx: "root", bytes, format }, [bytes.buffer]);
+  });
 }
 
 function ensureImportWorker(): Worker {
@@ -37,26 +78,43 @@ function ensureImportWorker(): Worker {
 }
 
 function onWorkerResult(data: WorkerResult): void {
+  if (data.kind === "hdri") {
+    hdriWaiters.get(data.jobId)?.(data);
+    hdriWaiters.delete(data.jobId);
+    return;
+  }
   if (!client) return;
   const c = getClient();
-  const batch =
-    data.error !== undefined
-      ? c.submitParseError(data.ctx, data.jobId, data.error)
-      : data.blob
-        ? c.submitParsedModel(data.ctx, data.jobId, data.blob)
-        : null;
+  let batch = null;
+  if (data.kind === "validate") {
+    batch =
+      data.error !== undefined
+        ? c.submitValidationError(data.ctx, data.jobId, data.error)
+        : data.validation
+          ? c.submitValidationResult(data.ctx, data.jobId, data.validation)
+          : null;
+  } else {
+    batch =
+      data.error !== undefined
+        ? c.submitParseError(data.ctx, data.jobId, data.error)
+        : data.blob
+          ? c.submitParsedModel(data.ctx, data.jobId, data.blob, data.validation)
+          : null;
+  }
   if (!batch) return;
   applyToMirror(batch);
   refreshStale();
 }
 
-/** Drains the import jobs the last cook spawned and posts each to the worker
- * with its (and its sidecars') bytes pulled fresh from the engine and
- * transferred. Runs every frame; usually a no-op. */
+/** Drains the import and validate jobs the last cook spawned and posts each
+ * to the worker (import bytes pulled fresh from the engine and transferred;
+ * validate geometry pre-packed by the host). Runs every frame; usually a
+ * no-op. */
 function pumpImportJobs(): void {
   if (!client) return;
   const jobs = getClient().takeImportJobs();
-  if (jobs.length === 0) return;
+  const validateJobs = getClient().takeValidateJobs();
+  if (jobs.length === 0 && validateJobs.length === 0) return;
   const worker = ensureImportWorker();
   for (const job of jobs) {
     const files: { name: string; bytes: Uint8Array }[] = [];
@@ -72,6 +130,7 @@ function pumpImportJobs(): void {
     }
     worker.postMessage(
       {
+        kind: "parse",
         jobId: job.jobId,
         ctx: job.ctx,
         format: job.format,
@@ -79,6 +138,19 @@ function pumpImportJobs(): void {
         files,
       },
       files.map((f) => f.bytes.buffer),
+    );
+  }
+  for (const job of validateJobs) {
+    worker.postMessage(
+      {
+        kind: "validate",
+        jobId: job.jobId,
+        ctx: job.ctx,
+        blob: job.blob,
+        configJson: job.config,
+        budget: job.budget,
+      },
+      [job.blob.buffer],
     );
   }
 }
@@ -94,11 +166,27 @@ let pendingRecovery: { bytes: Uint8Array; when: number } | null = null;
 export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
   if (client) return Promise.resolve();
   if (booting) return booting;
-  booting = SolarxyClient.create(canvas).then(async (c) => {
+  booting = (async () => {
+    // The UV-checker texture ships as a Vite asset (not baked into the
+    // wasm) so the payload stays flat.
+    const checker = new Uint8Array(await (await fetch(uvCheckerUrl)).arrayBuffer());
+    const c = await SolarxyClient.create(canvas, checker);
+    // Capture any prior autosave BEFORE flipping the boot flag: the
+    // recovery prompt polls isBooted() and takes the record exactly once,
+    // so the flag must never be visible with the capture still pending.
+    pendingRecovery = await readLatestAutosave();
     client = c;
     useMirror.getState().setRegistry(c.registrySnapshot());
-    pendingRecovery = await readLatestAutosave();
-  });
+    useViewState.getState().setView(c.viewState());
+    if (import.meta.env.DEV) {
+      // Dev-only introspection hook (Chrome-automation verification).
+      (window as unknown as Record<string, unknown>).__solarxy = {
+        client: c,
+        useViewState,
+        useMirror,
+      };
+    }
+  })();
   return booting;
 }
 
@@ -140,8 +228,96 @@ export function dispatch(cmd: Command): EventBatch {
   const batch = getClient().dispatch(cmd);
   applyToMirror(batch);
   refreshStale();
+  syncSceneSelection();
   markDirtyAndAutosave();
   return batch;
+}
+
+/** Pushes the root-context selection into the host so the picked object
+ * gets its viewport tint (decision 24, node-to-viewport direction). */
+export function syncSceneSelection(): void {
+  if (!client) return;
+  const root = useMirror.getState().contexts["root"];
+  getClient().setSceneSelection(root?.selection[0]);
+}
+
+// ---- host-owned view state: actions mirror the returned DTO ----
+
+export function setViewLayout(layout: ViewLayout): void {
+  useViewState.getState().setView(getClient().setViewLayout(layout));
+}
+
+export function setSplitRatio(ratio: number): void {
+  useViewState.getState().setView(getClient().setSplitRatio(ratio));
+}
+
+export function setActivePane(pane: number): void {
+  useViewState.getState().setView(getClient().setActivePane(pane));
+}
+
+export function setPaneSettings(pane: number, settings: PaneDisplaySettings): void {
+  useViewState.getState().setView(getClient().setPaneSettings(pane, settings));
+}
+
+export function setDisplaySettings(settings: DisplaySettingsDto): void {
+  useViewState.getState().setView(getClient().setDisplaySettings(settings));
+}
+
+export function cameraCommand(pane: number, cmd: CameraCommand): void {
+  getClient().cameraCommand(pane, cmd);
+}
+
+/** Refreshes the whole view-state mirror from the host. */
+export function refreshViewState(): void {
+  useViewState.getState().setView(getClient().viewState());
+}
+
+/** Flies the active pane's camera to a validation issue's mesh (report
+ * panel row click) and mirrors the resulting view state (the host also
+ * enables that pane's validation overlay). */
+export function flyToIssue(objectNode: number, sourceNode: number, issue: number): void {
+  useViewState.getState().setView(getClient().flyToIssue(objectNode, sourceNode, issue));
+}
+
+/** Stages an HDRI file, runs the CPU IBL stages in the worker, and installs
+ * the environment (GPU finish + light rebind + skybox). */
+export async function loadHdri(file: File): Promise<void> {
+  const { hash, name } = await stageFile(file);
+  const ext = extOf(file.name);
+  const bytes = getClient().assetBytes(hash);
+  if (!bytes) throw new Error("HDRI bytes not staged");
+  const prepared = await prepareHdriInWorker(bytes, ext);
+  getClient().setEnvironmentPrepared(hash, name, prepared);
+  useViewState.getState().setEnvironment(getClient().environmentState());
+  markDirtyAndAutosave();
+  pushToast(`Environment: ${name}`, "info");
+}
+
+/** Clears the HDRI back to the procedural sky. */
+export function clearEnvironment(): void {
+  getClient().clearEnvironment();
+  useViewState.getState().setEnvironment(getClient().environmentState());
+  markDirtyAndAutosave();
+  pushToast("Environment cleared", "info");
+}
+
+/** Sets the IBL contribution mode ("off" | "diffuse" | "full"). */
+export function setIblMode(mode: string): void {
+  getClient().setIblMode(mode);
+  useViewState.getState().setEnvironment(getClient().environmentState());
+  markDirtyAndAutosave();
+}
+
+/** Re-prepares a restored scene's HDRI from its embedded asset bytes
+ * (async; the sky pops in when the worker finishes). */
+async function restoreEnvironment(hdriHash: string | null): Promise<void> {
+  useViewState.getState().setEnvironment(getClient().environmentState());
+  if (!hdriHash) return;
+  const bytes = getClient().assetBytes(hdriHash);
+  if (!bytes) return;
+  const prepared = await prepareHdriInWorker(bytes, "");
+  getClient().setEnvironmentPrepared(hdriHash, "", prepared);
+  useViewState.getState().setEnvironment(getClient().environmentState());
 }
 
 // Autosave: debounced 2s after the last mutation, forced at most every 15s.
@@ -193,6 +369,9 @@ function applyLoadedScene(bytes: Uint8Array): void {
   useMirror.getState().setCurrent("root");
   useMirror.getState().setDirty(false);
   refreshStale();
+  refreshViewState();
+  syncSceneSelection();
+  void restoreEnvironment(result.environment.hdriHash);
   if (result.warnings.length > 0) {
     pushToast(`Scene loaded with ${result.warnings.length} warning(s).`, "warn");
   }
@@ -310,10 +489,43 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
   pushToast(`Importing ${files[primaryIdx].name}…`, "info");
 }
 
-/** Runs one cook+render frame and mirrors the cook batch. In manual mode,
- * refresh the stale set each frame so a just-cooked node drops its badge. */
+/** Runs one cook+render frame, mirrors the cook batch, and drains host
+ * events (pane-rect changes). In manual mode, refresh the stale set each
+ * frame so a just-cooked node drops its badge. */
 export function runFrame(dtMs: number): void {
   applyToMirror(getClient().frame(dtMs));
   pumpImportJobs();
+  for (const ev of getClient().takeHostEvents()) {
+    if (ev.type === "paneRects") useViewState.getState().setPaneRects(ev.rects);
+    else if (ev.type === "activePane") useViewState.getState().setActivePaneMirror(ev.pane);
+    else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
+    else if (ev.type === "viewChanged") refreshViewState();
+  }
   if (useMirror.getState().cookMode === "manual") refreshStale();
+}
+
+// Mirror the node canvas's current graph context to the host (the UV
+// pane's selected-node source resolves against it). Subscribed once at
+// module scope; deduped by context key.
+let lastCtxKey = "root";
+useMirror.subscribe((s) => {
+  const key = ctxKey(s.current);
+  if (key !== lastCtxKey && client) {
+    lastCtxKey = key;
+    getClient().setCurrentContext(s.current);
+  }
+});
+
+// The engine session cannot survive hot-module replacement: the canvas
+// already holds a WebGPU context owned by the old instance. Force a full
+// reload instead of letting a zombie session linger (dev-only). The
+// beforeunload dirty guard must not block this programmatic reload, or
+// the swapped module graph boots a second app on the same canvas while
+// the old page keeps running; suppress it for the reload (the autosave
+// ring already holds the state).
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    window.addEventListener("beforeunload", (e) => e.stopImmediatePropagation(), true);
+    window.location.reload();
+  });
 }

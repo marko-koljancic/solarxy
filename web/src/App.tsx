@@ -1,15 +1,21 @@
-// The application shell: header, the 3D viewport (left), and the
-// registry-driven node editor (right) with a subflow breadcrumb.
+// The application shell (Minimystix layout, phase-6 design adoption): a
+// menu-bar header, the 3D viewport (left) and the registry-driven node
+// editor (right) behind a draggable 20-80 percent split, with the
+// parameter panel in a collapsible bottom properties drawer. The viewport
+// can maximize to the full window from the View menu.
 
 import { useEffect, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
+import { PropertiesDrawer } from "./components/layout/PropertiesDrawer";
+import { SplitPane } from "./components/layout/SplitPane";
+import { MenuBar } from "./components/menu/MenuBar";
 import { NodePalette } from "./components/NodePalette";
 import { ParameterPanel } from "./components/ParameterPanel";
 import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
-import { explicitSave, importDroppedFiles, openScene } from "./engine/session";
+import { importDroppedFiles } from "./engine/session";
 import { NodeCanvas } from "./flow/NodeCanvas";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { descriptorFor } from "./registry/datatypes";
@@ -35,9 +41,19 @@ function Breadcrumb() {
   );
 }
 
+/** The selected node's display name, for the properties drawer header. */
+function useSelectedNodeName(): string {
+  const registry = useMirror((s) => s.registry);
+  const graph = useMirror((s) => selectGraph(s, s.current));
+  const selected = graph.nodes.find((n) => n.id === graph.selection[0]);
+  if (!selected) return "";
+  return descriptorFor(registry, selected.typeId)?.displayName ?? selected.typeId;
+}
+
 export function App() {
   const registry = useMirror((s) => s.registry);
   const dirty = useMirror((s) => s.dirty);
+  const selectedName = useSelectedNodeName();
   const [dropActive, setDropActive] = useState(false);
   useKeyboard();
 
@@ -80,35 +96,38 @@ export function App() {
         <span className="brand">Solarxy</span>
         <span className="sub">Web</span>
         {dirty && <span className="dirty-dot" title="unsaved changes" />}
-        <Toolbar />
+        <MenuBar />
         <span className="spacer" />
-        <button className="tbtn" title="Open a .slxy scene" onClick={() => void openScene()}>
-          Open
-        </button>
-        <button className="tbtn" title="Save scene as .slxy" onClick={() => void explicitSave()}>
-          Save
-        </button>
+        <Toolbar />
         <span className="stat">
           {registry ? `${registry.nodes.length} node types` : "loading engine..."}
         </span>
       </header>
       <div className="app-body">
-        <div className="viewport-pane">
-          <Viewport />
-        </div>
-        <div className="node-pane">
-          <div className="node-toolbar">
-            <Breadcrumb />
-            <span className="spacer" />
-            <NodePalette />
-          </div>
-          <div className="node-canvas-host">
-            <ReactFlowProvider>
-              <NodeCanvas />
-            </ReactFlowProvider>
-          </div>
-          <ParameterPanel />
-        </div>
+        <SplitPane
+          left={
+            <div className="viewport-pane">
+              <Viewport />
+            </div>
+          }
+          right={
+            <div className="node-pane">
+              <div className="node-toolbar">
+                <Breadcrumb />
+                <span className="spacer" />
+                <NodePalette />
+              </div>
+              <div className="node-canvas-host">
+                <ReactFlowProvider>
+                  <NodeCanvas />
+                </ReactFlowProvider>
+              </div>
+              <PropertiesDrawer title={selectedName}>
+                <ParameterPanel />
+              </PropertiesDrawer>
+            </div>
+          }
+        />
       </div>
       <Toasts />
       <RecoveryPrompt />

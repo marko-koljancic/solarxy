@@ -277,18 +277,53 @@ impl IblState {
     ) -> Self {
         sanitize_hdr_pixels(&mut pixels);
 
-        let irradiance = convolve_equirect(width, height, &pixels);
-        let irradiance_average = compute_irradiance_average(&irradiance);
-        let irradiance_texture = irradiance_faces_to_texture(device, queue, &irradiance);
-        let prefiltered_texture =
-            generate_prefiltered_equirect(device, queue, width, height, &pixels);
-        let equirect = EquirectTexture::from_hdr_pixels(device, queue, width, height, &pixels);
+        let irradiance_faces = convolve_equirect(width, height, &pixels);
+        let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        Self::from_prepared(
+            device,
+            queue,
+            &PreparedHdri {
+                width,
+                height,
+                pixels,
+                irradiance_faces,
+                irradiance_average,
+            },
+        )
+    }
+
+    /// Finishes a [`PreparedHdri`] on the GPU: uploads the irradiance
+    /// faces, runs the specular prefilter, and retains the source equirect
+    /// for the skybox pass. The CPU-heavy stages (decode, sanitize,
+    /// irradiance convolution) already ran in [`PreparedHdri::prepare`],
+    /// off-thread on the web.
+    pub fn from_prepared(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        prepared: &PreparedHdri,
+    ) -> Self {
+        let irradiance_texture =
+            irradiance_faces_to_texture(device, queue, &prepared.irradiance_faces);
+        let prefiltered_texture = generate_prefiltered_equirect(
+            device,
+            queue,
+            prepared.width,
+            prepared.height,
+            &prepared.pixels,
+        );
+        let equirect = EquirectTexture::from_hdr_pixels(
+            device,
+            queue,
+            prepared.width,
+            prepared.height,
+            &prepared.pixels,
+        );
 
         Self::from_parts(
             device,
             irradiance_texture,
             prefiltered_texture,
-            irradiance_average,
+            prepared.irradiance_average,
             Some(equirect),
         )
     }
@@ -343,6 +378,157 @@ impl IblState {
             irradiance_average,
             equirect,
         }
+    }
+}
+
+/// The GPU-free product of HDRI preparation: decoded and sanitized
+/// equirect pixels plus the CPU-convolved irradiance faces and their
+/// average (the expensive stages). On the web the import worker runs
+/// [`PreparedHdri::prepare`] off-thread and ships the packed bytes to the
+/// main thread, where [`IblState::from_prepared`] finishes on the GPU.
+pub struct PreparedHdri {
+    pub width: u32,
+    pub height: u32,
+    /// Sanitized linear-RGB equirect pixels, row-major.
+    pub pixels: Vec<[f32; 3]>,
+    /// The 32x32 convolved irradiance cubemap faces.
+    pub irradiance_faces: [Vec<[f32; 3]>; 6],
+    pub irradiance_average: [f32; 3],
+}
+
+impl PreparedHdri {
+    /// Decodes `.hdr` / `.exr` bytes and runs every CPU stage of the IBL
+    /// build (sanitize, irradiance convolution, average). `format` is the
+    /// lowercase extension without the dot.
+    ///
+    /// # Errors
+    /// Returns `Err` if the bytes fail to decode or the format is not one
+    /// of the supported HDRI formats.
+    pub fn prepare(bytes: &[u8], format: &str) -> Result<Self, RendererError> {
+        // An empty format sniffs the container magic (the `.slxy` reload
+        // path only retains the content-addressed bytes).
+        let format = if format.is_empty() {
+            if bytes.starts_with(b"#?") {
+                "hdr"
+            } else if bytes.starts_with(&[0x76, 0x2f, 0x31, 0x01]) {
+                "exr"
+            } else {
+                ""
+            }
+        } else {
+            format
+        };
+        let (width, height, mut pixels) = match format {
+            "hdr" => decode_hdr_bytes(bytes)?,
+            "exr" => decode_exr_bytes(bytes)?,
+            other => {
+                return Err(RendererError::Unsupported(format!(
+                    "Unsupported IBL format: .{other}"
+                )));
+            }
+        };
+        sanitize_hdr_pixels(&mut pixels);
+        let irradiance_faces = convolve_equirect(width, height, &pixels);
+        let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        Ok(Self {
+            width,
+            height,
+            pixels,
+            irradiance_faces,
+            irradiance_average,
+        })
+    }
+
+    /// Packs into a little-endian byte blob for the worker boundary:
+    /// `width, height`, the average, the six fixed-size irradiance faces,
+    /// then the equirect pixels.
+    #[must_use]
+    pub fn pack(&self) -> Vec<u8> {
+        let face_len: usize = self.irradiance_faces.iter().map(Vec::len).sum();
+        let mut out = Vec::with_capacity(8 + 12 + face_len * 12 + self.pixels.len() * 12);
+        out.extend_from_slice(&self.width.to_le_bytes());
+        out.extend_from_slice(&self.height.to_le_bytes());
+        for c in self.irradiance_average {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        for face in &self.irradiance_faces {
+            out.extend_from_slice(&(face.len() as u32).to_le_bytes());
+            for px in face {
+                for c in px {
+                    out.extend_from_slice(&c.to_le_bytes());
+                }
+            }
+        }
+        for px in &self.pixels {
+            for c in px {
+                out.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    /// Reverses [`PreparedHdri::pack`].
+    ///
+    /// # Errors
+    /// Returns `Err` on a truncated or malformed blob.
+    pub fn unpack(bytes: &[u8]) -> Result<Self, RendererError> {
+        let bad = || RendererError::Unsupported("malformed prepared-HDRI blob".to_string());
+        let mut off = 0usize;
+        let mut take = |n: usize| -> Result<&[u8], RendererError> {
+            let end = off.checked_add(n).ok_or_else(bad)?;
+            let slice = bytes.get(off..end).ok_or_else(bad)?;
+            off = end;
+            Ok(slice)
+        };
+        let read_u32 = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        let read_f32 = |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+
+        let width = read_u32(take(4)?);
+        let height = read_u32(take(4)?);
+        let mut irradiance_average = [0.0f32; 3];
+        for c in &mut irradiance_average {
+            *c = read_f32(take(4)?);
+        }
+        let mut faces: Vec<Vec<[f32; 3]>> = Vec::with_capacity(6);
+        for _ in 0..6 {
+            let len = read_u32(take(4)?) as usize;
+            let data = take(len.checked_mul(12).ok_or_else(bad)?)?;
+            let face = data
+                .chunks_exact(12)
+                .map(|px| {
+                    [
+                        read_f32(&px[0..4]),
+                        read_f32(&px[4..8]),
+                        read_f32(&px[8..12]),
+                    ]
+                })
+                .collect();
+            faces.push(face);
+        }
+        let irradiance_faces: [Vec<[f32; 3]>; 6] = faces.try_into().map_err(|_| bad())?;
+
+        let pixel_count = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or_else(bad)?;
+        let data = take(pixel_count.checked_mul(12).ok_or_else(bad)?)?;
+        let pixels = data
+            .chunks_exact(12)
+            .map(|px| {
+                [
+                    read_f32(&px[0..4]),
+                    read_f32(&px[4..8]),
+                    read_f32(&px[8..12]),
+                ]
+            })
+            .collect();
+
+        Ok(Self {
+            width,
+            height,
+            pixels,
+            irradiance_faces,
+            irradiance_average,
+        })
     }
 }
 
@@ -978,5 +1164,69 @@ mod tests {
         for (got, want) in pixels.iter().flatten().zip(expect.iter().flatten()) {
             assert!((got - want).abs() < 1e-6, "got {got}, want {want}");
         }
+    }
+}
+
+#[cfg(test)]
+// Bitwise float equality is the point of these tests: the worker path must
+// reproduce the inline path exactly, and the codec must be lossless.
+#[allow(clippy::float_cmp)]
+mod prepared_tests {
+    use super::*;
+
+    /// A tiny synthetic 4x2 Radiance HDR file (RLE-free), enough to
+    /// exercise decode + convolve deterministically.
+    fn tiny_hdr() -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n");
+        out.extend_from_slice(b"-Y 2 +X 4\n");
+        // 8 flat RGBE pixels (r=128, g=64, b=32, e=128 -> mid grey-ish).
+        for _ in 0..8 {
+            out.extend_from_slice(&[128, 64, 32, 128]);
+        }
+        out
+    }
+
+    #[test]
+    fn prepare_matches_the_inline_hdr_path_stage_for_stage() {
+        // The worker path (prepare) must produce exactly the CPU data the
+        // inline `from_hdr_bytes` path derives, so a web-prepared IBL is
+        // bitwise-identical to a desktop-loaded one.
+        let bytes = tiny_hdr();
+        let prepared = PreparedHdri::prepare(&bytes, "hdr").expect("prepare");
+
+        let (w, h, mut pixels) = decode_hdr_bytes(&bytes).expect("decode");
+        sanitize_hdr_pixels(&mut pixels);
+        let faces = convolve_equirect(w, h, &pixels);
+        let avg = compute_irradiance_average(&faces);
+
+        assert_eq!((prepared.width, prepared.height), (w, h));
+        assert_eq!(prepared.pixels, pixels);
+        assert_eq!(prepared.irradiance_faces, faces);
+        assert_eq!(prepared.irradiance_average, avg);
+    }
+
+    #[test]
+    fn prepared_hdri_round_trips_through_the_pack_codec() {
+        let prepared = PreparedHdri::prepare(&tiny_hdr(), "hdr").expect("prepare");
+        let back = PreparedHdri::unpack(&prepared.pack()).expect("unpack");
+        assert_eq!(back.width, prepared.width);
+        assert_eq!(back.height, prepared.height);
+        assert_eq!(back.pixels, prepared.pixels);
+        assert_eq!(back.irradiance_faces, prepared.irradiance_faces);
+        assert_eq!(back.irradiance_average, prepared.irradiance_average);
+    }
+
+    #[test]
+    fn unpack_rejects_truncated_blobs() {
+        let prepared = PreparedHdri::prepare(&tiny_hdr(), "hdr").expect("prepare");
+        let packed = prepared.pack();
+        assert!(PreparedHdri::unpack(&packed[..packed.len() - 4]).is_err());
+        assert!(PreparedHdri::unpack(&[1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn prepare_rejects_unknown_formats() {
+        assert!(PreparedHdri::prepare(&[0u8; 16], "png").is_err());
     }
 }

@@ -150,8 +150,15 @@ pub struct ViewJson {
     pub layout: String,
     #[serde(default)]
     pub active_pane: u32,
+    /// Divider position for the two-pane layouts (phase 6); 0.5 when unset.
+    #[serde(default = "default_split_ratio")]
+    pub split_ratio: f32,
     #[serde(default)]
     pub panes: Vec<PaneJson>,
+}
+
+fn default_split_ratio() -> f32 {
+    0.5
 }
 
 impl Default for ViewJson {
@@ -159,6 +166,7 @@ impl Default for ViewJson {
         Self {
             layout: default_layout(),
             active_pane: 0,
+            split_ratio: default_split_ratio(),
             panes: vec![PaneJson::default()],
         }
     }
@@ -192,7 +200,7 @@ impl Default for PaneJson {
 }
 
 /// The orbit camera state (aspect is viewport-derived and not persisted).
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct CameraJson {
     pub target: [f32; 3],
@@ -200,6 +208,31 @@ pub struct CameraJson {
     pub pitch: f32,
     pub distance: f32,
     pub fov_y: f32,
+    /// `"perspective"` (default) or `"orthographic"` (phase 6, per-pane
+    /// projection). Serde-default so pre-phase-6 files load unchanged.
+    #[serde(default = "default_projection")]
+    pub projection: String,
+    /// Half-height of the orthographic view volume; unused in perspective.
+    #[serde(default)]
+    pub ortho_scale: f32,
+}
+
+fn default_projection() -> String {
+    "perspective".to_string()
+}
+
+impl Default for CameraJson {
+    fn default() -> Self {
+        Self {
+            target: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 0.0,
+            fov_y: 0.0,
+            projection: default_projection(),
+            ortho_scale: 0.0,
+        }
+    }
 }
 
 /// The lighting environment. Reserved for the Phase-6 HDRI/IBL flow;

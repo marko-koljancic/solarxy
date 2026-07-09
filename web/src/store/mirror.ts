@@ -20,6 +20,7 @@ import {
   type GraphContext,
   type GraphMirror,
   type RegistrySnapshot,
+  type ValidationIssue,
 } from "../engine/types";
 
 export interface NodeCook {
@@ -27,6 +28,18 @@ export interface NodeCook {
   points?: number;
   prims?: number;
   meshes?: number;
+  /** Validation badge counts (validate node, import load validation).
+   * Zero counts mean clean or cleared; the badge renders only when > 0. */
+  validation?: { errors: number; warnings: number };
+}
+
+/** The full issue list behind a node's validation badge (capped
+ * engine-side at 2000 rows; `truncated` flags the cut). */
+export interface ValidationReportData {
+  errors: number;
+  warnings: number;
+  truncated: boolean;
+  issues: ValidationIssue[];
 }
 
 interface MirrorState {
@@ -36,6 +49,8 @@ interface MirrorState {
   contexts: Record<string, GraphMirror>;
   /** Per-node cook status + stats. */
   cook: Record<number, NodeCook>;
+  /** Per-node validation reports (the report panel's data). */
+  reports: Record<number, ValidationReportData>;
   cookMode: CookMode;
   /** The graph the node canvas is currently showing. */
   current: GraphContext;
@@ -70,6 +85,7 @@ function graphFor(contexts: Record<string, GraphMirror>, ctx: GraphContext): Gra
 function applyEvent(
   contexts: Record<string, GraphMirror>,
   cook: Record<number, NodeCook>,
+  reports: Record<number, ValidationReportData>,
   ev: EngineEvent,
   setCookMode: (m: CookMode) => void,
 ): void {
@@ -135,6 +151,23 @@ function applyEvent(
       c.meshes = ev.meshes;
       break;
     }
+    case "validationSummary": {
+      (cook[ev.node] ??= {}).validation = { errors: ev.errors, warnings: ev.warnings };
+      // A zeroed summary is also the clear signal (bypass, lost input);
+      // drop the stale report so the panel section disappears. A clean
+      // recook re-emits an empty report right after.
+      if (ev.errors === 0 && ev.warnings === 0) delete reports[ev.node];
+      break;
+    }
+    case "validationReport": {
+      reports[ev.node] = {
+        errors: ev.errors,
+        warnings: ev.warnings,
+        truncated: ev.truncated,
+        issues: ev.issues,
+      };
+      break;
+    }
     case "cookModeChanged": {
       setCookMode(ev.mode);
       break;
@@ -152,6 +185,7 @@ export const useMirror = create<MirrorState>()(
     revision: 0,
     contexts: { root: emptyGraph() },
     cook: {},
+    reports: {},
     cookMode: "auto",
     current: "root",
     stale: [],
@@ -184,7 +218,7 @@ export const useMirror = create<MirrorState>()(
         if (batch.revision > s.revision + 1) needsResnapshot = true;
         if (!needsResnapshot) {
           for (const ev of batch.events) {
-            applyEvent(s.contexts, s.cook, ev, (m) => {
+            applyEvent(s.contexts, s.cook, s.reports, ev, (m) => {
               s.cookMode = m;
             });
           }

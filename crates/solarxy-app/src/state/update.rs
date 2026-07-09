@@ -29,18 +29,18 @@ impl State {
 
         let ibl_avg = self.active_ibl().irradiance_average;
         if let Some(scene) = &mut self.scene {
-            scene.light_bind_group = match self.renderer.ibl_res.ibl_mode {
+            scene.env.light_bind_group = match self.renderer.ibl_res.ibl_mode {
                 IblMode::Off => create_light_bind_group(
                     &self.device,
                     &self.renderer.layouts,
-                    &scene.light_buffer,
+                    &scene.env.light_buffer,
                     &self.renderer.ibl_res.ibl_fallback,
                     &self.renderer.ibl_res.brdf_lut,
                 ),
                 IblMode::Diffuse => create_light_bind_group_selective(
                     &self.device,
                     &self.renderer.layouts,
-                    &scene.light_buffer,
+                    &scene.env.light_buffer,
                     &self.renderer.ibl_res.ibl,
                     &self.renderer.ibl_res.ibl_fallback,
                     &self.renderer.ibl_res.brdf_lut,
@@ -48,18 +48,21 @@ impl State {
                 IblMode::Full => create_light_bind_group(
                     &self.device,
                     &self.renderer.layouts,
-                    &scene.light_buffer,
+                    &scene.env.light_buffer,
                     &self.renderer.ibl_res.ibl,
                     &self.renderer.ibl_res.brdf_lut,
                 ),
             };
 
-            scene.lights_uniform.ibl_avg_r = ibl_avg[0];
-            scene.lights_uniform.ibl_avg_g = ibl_avg[1];
-            scene.lights_uniform.ibl_avg_b = ibl_avg[2];
+            scene.env.lights_uniform.ibl_avg_r = ibl_avg[0];
+            scene.env.lights_uniform.ibl_avg_g = ibl_avg[1];
+            scene.env.lights_uniform.ibl_avg_b = ibl_avg[2];
             let offset = std::mem::offset_of!(LightsUniform, ibl_avg_r) as u64;
-            self.queue
-                .write_buffer(&scene.light_buffer, offset, bytemuck::cast_slice(&ibl_avg));
+            self.queue.write_buffer(
+                &scene.env.light_buffer,
+                offset,
+                bytemuck::cast_slice(&ibl_avg),
+            );
         }
     }
 
@@ -332,10 +335,10 @@ impl State {
             match pending.receiver.try_recv() {
                 Ok(Ok(mut new_scene)) => {
                     let active_ibl = self.active_ibl();
-                    new_scene.light_bind_group = create_light_bind_group(
+                    new_scene.env.light_bind_group = create_light_bind_group(
                         &self.device,
                         &self.renderer.layouts,
-                        &new_scene.light_buffer,
+                        &new_scene.env.light_buffer,
                         active_ibl,
                         &self.renderer.ibl_res.brdf_lut,
                     );
@@ -439,14 +442,14 @@ impl State {
             let ibl_avg = self.active_ibl().irradiance_average;
             let cam0 = self.view.cameras[0].as_ref().map(|c| c.camera);
             if let (Some(cam0), Some(scene)) = (cam0, &mut self.scene) {
-                scene.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);
+                scene.env.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);
                 self.queue.write_buffer(
-                    &scene.light_buffer,
+                    &scene.env.light_buffer,
                     0,
-                    bytemuck::cast_slice(&[scene.lights_uniform]),
+                    bytemuck::cast_slice(&[scene.env.lights_uniform]),
                 );
-                let key_pos = scene.lights_uniform.lights[0].position;
-                scene.shadow.update_light_vp(
+                let key_pos = scene.env.lights_uniform.lights[0].position;
+                scene.env.shadow.update_light_vp(
                     &self.queue,
                     cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
                     scene.model.bounds.center(),
