@@ -5,19 +5,22 @@
 // canvas is one WebGPU surface with Rust-side pane hit-testing).
 
 import { useEffect, useRef } from "react";
-import { bootSession, dispatch, getClient, hasPendingRecovery, runFrame } from "../engine/session";
-import type { EngineEvent } from "../engine/types";
+import {
+  bootSession,
+  dispatch,
+  getClient,
+  reanchorAnnotation,
+  runFrame,
+} from "../engine/session";
 import { useMirror } from "../store/mirror";
+import { useReview } from "../store/review";
+import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
+import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
-
-/** Narrows a batch to the first nodeAdded event's node id. */
-function firstAddedId(events: EngineEvent[]): number | undefined {
-  const ev = events.find(
-    (e): e is Extract<EngineEvent, { type: "nodeAdded" }> => e.type === "nodeAdded",
-  );
-  return ev?.node.id;
-}
+import { ReviewOverlay } from "./review/ReviewOverlay";
+import { ReviewPanel } from "./review/ReviewPanel";
+import { ReviewPopup } from "./review/ReviewPopup";
 
 export function Viewport() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -30,23 +33,39 @@ export function Viewport() {
     let raf = 0;
     let mounted = true;
 
-    bootSession(canvas).then(() => {
+    bootSession(canvas)
+      .catch((err: unknown) => {
+        // WebGPU unavailable or wasm init failed: the boot overlay shows
+        // the message (the full unsupported-browser page is Phase 8).
+        useUi
+          .getState()
+          .setBootError(err instanceof Error ? err.message : String(err));
+        throw err;
+      })
+      .then(() => {
       if (!mounted) return;
 
-      // Seed demo content on a truly fresh boot only (no prior autosave to
-      // recover and an empty document). Real content comes from the palette.
-      if (useMirror.getState().contexts["root"].nodes.length === 0 && !hasPendingRecovery()) {
-        const b = dispatch({ type: "addNode", ctx: "root", nodeType: "geo", position: [60, 60] });
-        const geoId = firstAddedId(b.events);
-        if (geoId !== undefined) {
-          dispatch({ type: "addNode", ctx: { subflow: geoId }, nodeType: "box", position: [80, 80] });
-        }
-        dispatch({ type: "addNode", ctx: "root", nodeType: "directional_light", position: [60, 220] });
-      }
-
+      // The scene starts EMPTY (maintainer decision, Phase 7b): the
+      // canvas teaching hint carries the first-run experience.
       let last = performance.now();
+      let frameFailures = 0;
       const loop = (t: number) => {
-        runFrame(t - last);
+        try {
+          runFrame(t - last);
+          frameFailures = 0;
+        } catch (err) {
+          // A thrown frame must never silently kill the loop (a lost
+          // device surfaces here). Log, toast once, and keep pumping so
+          // a recovered surface resumes rendering.
+          frameFailures += 1;
+          if (frameFailures === 1) {
+            console.error("frame failed", err);
+            pushToast(
+              `Rendering error: ${err instanceof Error ? err.message : err}`,
+              "error",
+            );
+          }
+        }
         last = t;
         raf = requestAnimationFrame(loop);
       };
@@ -125,6 +144,35 @@ export function Viewport() {
           try {
             getClient().pointerUp(e.button);
             if (!d || d.moved || e.button !== 0) return;
+            const review = useReview.getState();
+            // Click ladder: a pending re-anchor consumes the click (hit or
+            // miss); review mode pins a draft on a hit; else normal picking.
+            if (review.reanchorTarget !== null) {
+              const p = canvasPos(e);
+              const pick = getClient().pickDetailed(p.x, p.y);
+              if (pick) {
+                reanchorAnnotation(review.reanchorTarget, pick);
+                review.setReanchorTarget(null);
+                pushToast("Marker re-placed", "info");
+              } else {
+                pushToast("Click on geometry to re-place (Esc cancels)", "warn");
+              }
+              return;
+            }
+            if (review.reviewMode) {
+              const p = canvasPos(e);
+              const pick = getClient().pickDetailed(p.x, p.y);
+              if (pick) {
+                review.setDraft({
+                  pick,
+                  screen: { x: p.x, y: p.y },
+                  text: "",
+                  category: "question",
+                });
+                return;
+              }
+              // A miss in review mode falls through to normal picking.
+            }
             // A click: pick the geo node under the cursor (picking sync).
             const hit = pickAt(e);
             if (hit !== undefined) {
@@ -156,6 +204,9 @@ export function Viewport() {
         }}
       />
       <PaneToolbars />
+      <ReviewOverlay />
+      <ReviewPopup />
+      <ReviewPanel />
     </>
   );
 }

@@ -15,41 +15,51 @@ import {
   paste,
 } from "../../engine/session";
 import { clearAutosaves } from "../../persistence/opfs";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { applyDagreLayout, applyElkLayout } from "../../flow/layout";
+import { AboutModal } from "../AboutModal";
 import { EnvironmentModal } from "../EnvironmentModal";
 import { selectGraph, useMirror } from "../../store/mirror";
-import { pushToast } from "../../store/toasts";
-import { useUi, type ThemeChoice } from "../../store/ui";
+import { DESK_PRESETS, useDesks } from "../../store/desks";
+import { useReview } from "../../store/review";
+import { usePrefs, type ThemeChoice } from "../../store/prefs";
+import { useUi } from "../../store/ui";
+import { DeskSaveModal } from "../DeskSaveModal";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
 const MOD = navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl+";
 
+/** Clears the dirty flag (so the beforeunload guard stays quiet), drops
+ * the autosave ring, and reloads into a fresh scene. Confirmation happens
+ * in the styled dialog before this runs. */
 async function newScene(): Promise<void> {
-  if (useMirror.getState().dirty) {
-    const ok = window.confirm("Discard unsaved changes and start a new scene?");
-    if (!ok) return;
-    // Confirmed once here; drop the dirty flag so the beforeunload guard
-    // does not double-prompt on the reload.
-    useMirror.getState().setDirty(false);
-  }
+  useMirror.getState().setDirty(false);
   await clearAutosaves();
   window.location.reload();
 }
 
 export function MenuBar() {
-  const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
-  const theme = useUi((s) => s.theme);
+  const theme = usePrefs((s) => s.prefs.appearance.theme);
   const viewportMaximized = useUi((s) => s.viewportMaximized);
   const drawerCollapsed = useUi((s) => s.drawerCollapsed);
   const importRef = useRef<HTMLInputElement>(null);
   const [envOpen, setEnvOpen] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const selection = graph.selection;
   const hasSelection = selection.length > 0;
 
   const file: MenuEntry[] = [
-    { label: "New Scene", onClick: () => void newScene() },
+    {
+      label: "New Scene",
+      onClick: () => {
+        if (useMirror.getState().dirty) setConfirmNew(true);
+        else void newScene();
+      },
+    },
     { label: "Open Scene...", shortcut: `${MOD}O`, onClick: () => void openScene() },
     { label: "Save Scene", shortcut: `${MOD}S`, onClick: () => void explicitSave() },
     { divider: true },
@@ -86,32 +96,35 @@ export function MenuBar() {
       disabled: !hasSelection,
       onClick: () => dispatch({ type: "removeNodes", ctx: current, ids: selection }),
     },
+    { divider: true },
+    { label: "Preferences...", shortcut: `${MOD},`, onClick: () => useUi.getState().setPrefsOpen(true) },
   ];
 
-  // Registry-driven node creation, filtered to the current context.
-  const inRoot = current === "root";
-  const byCat = new Map<string, { label: string; typeId: string }[]>();
-  for (const n of registry?.nodes ?? []) {
-    if (inRoot ? !n.rootContext : !n.subflowContext) continue;
-    const g = byCat.get(n.category) ?? [];
-    g.push({ label: n.displayName, typeId: n.typeId });
-    byCat.set(n.category, g);
-  }
-  const addNode = (typeId: string) => {
-    const n = graph.nodes.length;
-    const position: [number, number] = [80 + (n % 5) * 44, 80 + Math.floor(n / 5) * 90];
-    dispatch({ type: "addNode", ctx: current, nodeType: typeId, position });
+  const setTheme = (t: ThemeChoice) => usePrefs.getState().setTheme(t);
+  const showFlowGrid = useUi((s) => s.showFlowGrid);
+  const showMinimap = useUi((s) => s.showMinimap);
+  const showFlowControls = useUi((s) => s.showFlowControls);
+  const runLayout = (algo: "dagre" | "elk") => {
+    const g = selectGraph(useMirror.getState(), current);
+    if (g.nodes.length === 0) return;
+    const done = () => window.dispatchEvent(new Event("solarxy:fitView"));
+    if (algo === "dagre") {
+      applyDagreLayout(current, g);
+      done();
+    } else {
+      void applyElkLayout(current, g).then(done);
+    }
   };
-  const nodes: MenuEntry[] = [...byCat.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([cat, list]) => ({
-      label: cat,
-      submenu: list.map((t) => ({ label: t.label, onClick: () => addNode(t.typeId) })),
-    }));
-
-  const setTheme = (t: ThemeChoice) => useUi.getState().setTheme(t);
   const view: MenuEntry[] = [
     { label: "Environment...", onClick: () => setEnvOpen(true) },
+    { label: "Save Screenshot...", shortcut: "C", onClick: () => useUi.getState().setScreenshotOpen(true) },
+    { divider: true },
+    { label: "Auto-Layout (Dagre)", shortcut: "L", onClick: () => runLayout("dagre") },
+    { label: "Auto-Layout (ELK)", onClick: () => runLayout("elk") },
+    { divider: true },
+    { label: "Canvas Grid", shortcut: "G", checked: showFlowGrid, onClick: () => useUi.getState().toggleFlowChrome("showFlowGrid") },
+    { label: "Minimap", shortcut: "M", checked: showMinimap, onClick: () => useUi.getState().toggleFlowChrome("showMinimap") },
+    { label: "Canvas Controls", shortcut: "C", checked: showFlowControls, onClick: () => useUi.getState().toggleFlowChrome("showFlowControls") },
     { divider: true },
     {
       label: "Theme",
@@ -134,14 +147,94 @@ export function MenuBar() {
     },
   ];
 
+  // Desks (Phase 7b D3): presets + user-saved arrangements, direct
+  // arrangement toggles, save-as, delete. Applying never touches the
+  // document, only chrome.
+  const userDesks = useDesks((s) => s.desks);
+  const viewportSide = useUi((s) => s.viewportSide);
+  const propertiesDock = useUi((s) => s.propertiesDock);
+  const [deskSaveOpen, setDeskSaveOpen] = useState(false);
+  const desks: MenuEntry[] = [
+    ...DESK_PRESETS.map((d) => ({
+      label: d.name,
+      onClick: () => useDesks.getState().apply(d.name),
+    })),
+    ...(userDesks.length > 0 ? [{ divider: true } as MenuEntry] : []),
+    ...userDesks.map((d) => ({
+      label: d.name,
+      onClick: () => useDesks.getState().apply(d.name),
+    })),
+    { divider: true },
+    {
+      label: "Viewport on Left",
+      checked: viewportSide === "left",
+      onClick: () => useUi.getState().setArrangement({ viewportSide: "left" }),
+    },
+    {
+      label: "Viewport on Right",
+      checked: viewportSide === "right",
+      onClick: () => useUi.getState().setArrangement({ viewportSide: "right" }),
+    },
+    {
+      label: "Properties at Bottom",
+      checked: propertiesDock === "bottom",
+      onClick: () => useUi.getState().setArrangement({ propertiesDock: "bottom" }),
+    },
+    {
+      label: "Properties on Right",
+      checked: propertiesDock === "right",
+      onClick: () => useUi.getState().setArrangement({ propertiesDock: "right" }),
+    },
+    { divider: true },
+    { label: "Save Current As...", onClick: () => setDeskSaveOpen(true) },
+    {
+      label: "Delete Desk",
+      disabled: userDesks.length === 0,
+      submenu: userDesks.map((d) => ({
+        label: d.name,
+        onClick: () => useDesks.getState().remove(d.name),
+      })),
+    },
+  ];
+
+  const reviewMode = useReview((s) => s.reviewMode);
+  const markersHidden = useReview((s) => s.markersHidden);
+  const panelOpen = useReview((s) => s.panelOpen);
+  const review: MenuEntry[] = [
+    {
+      label: "Review Mode",
+      shortcut: "⇧R",
+      checked: reviewMode,
+      onClick: () => useReview.getState().setReviewMode(!reviewMode),
+    },
+    {
+      label: "Review Panel",
+      shortcut: "N",
+      checked: panelOpen,
+      onClick: () => useReview.getState().setPanelOpen(!panelOpen),
+    },
+    {
+      label: "Show Markers",
+      checked: !markersHidden,
+      onClick: () => useReview.getState().setMarkersHidden(!markersHidden),
+    },
+  ];
+
   const help: MenuEntry[] = [
     {
-      label: "About Solarxy Web",
+      label: "Keyboard Shortcuts",
+      shortcut: "?",
+      onClick: () => useUi.getState().setShortcutsOpen(true),
+    },
+    {
+      label: "Wiki",
       onClick: () =>
-        pushToast(
-          `Solarxy Web - ${registry ? `${registry.nodes.length} node types` : "engine loading"}`,
-          "info",
-        ),
+        window.open("https://github.com/marko-koljancic/solarxy/wiki", "_blank", "noreferrer"),
+    },
+    { divider: true },
+    {
+      label: "About Solarxy Web",
+      onClick: () => setAboutOpen(true),
     },
   ];
 
@@ -149,15 +242,30 @@ export function MenuBar() {
     <nav className="menu-bar">
       <MenuItem title="File" entries={file} />
       <MenuItem title="Edit" entries={edit} />
-      <MenuItem title="Nodes" entries={nodes} />
       <MenuItem title="View" entries={view} />
+      <MenuItem title="Desks" entries={desks} />
+      <MenuItem title="Review" entries={review} />
       <MenuItem title="Help" entries={help} />
       {envOpen && <EnvironmentModal onClose={() => setEnvOpen(false)} />}
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+      {deskSaveOpen && <DeskSaveModal onClose={() => setDeskSaveOpen(false)} />}
+      {confirmNew && (
+        <ConfirmDialog
+          title="New scene"
+          message="Discard unsaved changes and start a new scene?"
+          confirmLabel="Discard & New"
+          onConfirm={() => {
+            setConfirmNew(false);
+            void newScene();
+          }}
+          onCancel={() => setConfirmNew(false)}
+        />
+      )}
       <input
         ref={importRef}
         type="file"
         multiple
-        accept=".obj,.gltf,.glb,.stl,.ply,.bin,.slxy"
+        accept=".obj,.mtl,.gltf,.glb,.stl,.ply,.bin,.slxy,.png,.jpg,.jpeg,.webp"
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);

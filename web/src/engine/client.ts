@@ -5,6 +5,7 @@
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
 import type {
+  Annotation,
   CameraCommand,
   Command,
   DisplaySettingsDto,
@@ -14,11 +15,15 @@ import type {
   GraphContext,
   HostEvent,
   ImportJob,
+  MarkerScreen,
   NodeId,
   PaneDisplaySettings,
   PaneRectDto,
   ParamSource,
+  PickDetail,
   RegistrySnapshot,
+  ScreenshotOpts,
+  ScreenshotResult,
   SaveExtra,
   SlxyLoadResult,
   ValidateJob,
@@ -55,6 +60,33 @@ export class SolarxyClient {
   /** Rust-side pane-aware pick: canvas CSS pixel -> producing geo node id. */
   pick(x: number, y: number): NodeId | undefined {
     return this.app.pick(x, y);
+  }
+
+  /** `pick` with the full hit detail (mesh/face/barycentric/world/pane):
+   * the anchor source for creating and re-placing review annotations. */
+  pickDetailed(x: number, y: number): PickDetail | undefined {
+    return (this.app.pick_detailed(x, y) ?? undefined) as PickDetail | undefined;
+  }
+
+  /** The annotation set with runtime staleness; re-read on `reviewChanged`. */
+  reviewAnnotations(): Annotation[] {
+    return this.app.review_annotations() as Annotation[];
+  }
+
+  /** Marker pin positions (canvas CSS px, per visible marker x 3D pane);
+   * polled once per animation frame while markers are shown. */
+  reviewMarkers(): MarkerScreen[] {
+    return this.app.review_markers() as MarkerScreen[];
+  }
+
+  /** Requests an active-pane screenshot (rendered at frame end). */
+  requestScreenshot(opts: ScreenshotOpts): void {
+    this.app.request_screenshot(opts);
+  }
+
+  /** Polls the in-flight capture; undefined while pending. */
+  pollScreenshot(): ScreenshotResult | undefined {
+    return (this.app.poll_screenshot() ?? undefined) as ScreenshotResult | undefined;
   }
 
   /** Marks the picked node's scene object as selected (viewport tint). */

@@ -57,6 +57,7 @@ pub mod bind_groups;
 pub mod bloom;
 pub mod camera;
 pub mod camera_state;
+pub mod capture;
 pub mod composite;
 pub mod environment;
 pub mod error;

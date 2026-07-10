@@ -11,13 +11,17 @@ import {
   copySelection,
   dispatch,
   duplicateSelection,
+  explicitSave,
   paste,
   setActivePane,
   setPaneSettings,
   setViewLayout,
 } from "../engine/session";
+import { cycleAutoLayout } from "../flow/layout";
 import { eventKeys, lookupBinding } from "../input/keymap";
 import { useMirror } from "../store/mirror";
+import { useReview } from "../store/review";
+import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { pushToast } from "../store/toasts";
 import type { PaneDisplaySettings, ViewLayout } from "../engine/types";
@@ -44,7 +48,12 @@ export function useKeyboard(): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target)) return;
-      const context = useViewState.getState().pointerOverViewport ? "viewport" : "global";
+      const vs = useViewState.getState();
+      const context = vs.pointerOverViewport
+        ? "viewport"
+        : vs.pointerOverCanvas
+          ? "canvas"
+          : "global";
       const binding = lookupBinding(eventKeys(e), context);
       if (!binding) return;
 
@@ -54,6 +63,22 @@ export function useKeyboard(): void {
       const selection = s.contexts[ctxKey]?.selection ?? [];
 
       switch (binding.id) {
+        case "save":
+          // Spec section 16: Cmd/Ctrl+S is intercepted and saves the scene.
+          e.preventDefault();
+          void explicitSave();
+          break;
+        case "shortcuts": {
+          const ui = useUi.getState();
+          ui.setShortcutsOpen(!ui.shortcutsOpen);
+          break;
+        }
+        case "preferences": {
+          e.preventDefault();
+          const ui = useUi.getState();
+          ui.setPrefsOpen(!ui.prefsOpen);
+          break;
+        }
         case "undo":
           e.preventDefault();
           dispatch({ type: "undo" });
@@ -159,6 +184,60 @@ export function useKeyboard(): void {
           if (view) {
             setActivePane(view.activePane);
             cameraCommand(view.activePane, { kind: "fit" });
+          }
+          break;
+        }
+        case "screenshot": {
+          const ui = useUi.getState();
+          ui.setScreenshotOpen(!ui.screenshotOpen);
+          break;
+        }
+        case "flow-grid":
+          useUi.getState().toggleFlowChrome("showFlowGrid");
+          break;
+        case "flow-minimap":
+          useUi.getState().toggleFlowChrome("showMinimap");
+          break;
+        case "flow-controls":
+          useUi.getState().toggleFlowChrome("showFlowControls");
+          break;
+        case "layout-cycle": {
+          e.preventDefault();
+          const g = s.contexts[ctxKey];
+          if (!g || g.nodes.length === 0) break;
+          void cycleAutoLayout(ctx, g).then((algo) => {
+            window.dispatchEvent(new Event("solarxy:fitView"));
+            pushToast(`Auto-layout: ${algo === "dagre" ? "Dagre" : "ELK"}`, "info");
+          });
+          break;
+        }
+        case "review-mode": {
+          const r = useReview.getState();
+          r.setReviewMode(!r.reviewMode);
+          pushToast(
+            r.reviewMode ? "Review mode off" : "Review mode: click geometry to pin a note",
+            "info",
+          );
+          break;
+        }
+        case "review-panel": {
+          const r = useReview.getState();
+          r.setPanelOpen(!r.panelOpen);
+          break;
+        }
+        case "review-cancel": {
+          // The cancel ladder: an open editor cancels first (its own key
+          // handler covers the focused case; this covers unfocused), then
+          // a pending re-anchor, then review mode. Otherwise leave Esc to
+          // other consumers (palette, modals).
+          const r = useReview.getState();
+          if (r.draft) r.setDraft(null);
+          else if (r.reanchorTarget !== null) {
+            r.setReanchorTarget(null);
+            pushToast("Re-anchor cancelled", "info");
+          } else if (r.reviewMode) {
+            r.setReviewMode(false);
+            pushToast("Review mode off", "info");
           }
           break;
         }

@@ -12,9 +12,12 @@ import {
   writeAutosave,
 } from "../persistence/opfs";
 import { useMirror } from "../store/mirror";
+import { usePrefs } from "../store/prefs";
+import { useReview } from "../store/review";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
+import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { ctxKey } from "./types";
 import type {
   CameraCommand,
@@ -25,6 +28,9 @@ import type {
   NodeId,
   PaneDisplaySettings,
   ParamSource,
+  PickDetail,
+  ReviewAnchor,
+  ReviewCategory,
   SaveExtra,
   ViewLayout,
 } from "./types";
@@ -93,6 +99,9 @@ function onWorkerResult(data: WorkerResult): void {
         : data.validation
           ? c.submitValidationResult(data.ctx, data.jobId, data.validation)
           : null;
+    if (data.error !== undefined) {
+      pushToast(`Validation failed: ${data.error}`, "error");
+    }
   } else {
     batch =
       data.error !== undefined
@@ -100,6 +109,11 @@ function onWorkerResult(data: WorkerResult): void {
         : data.blob
           ? c.submitParsedModel(data.ctx, data.jobId, data.blob, data.validation)
           : null;
+    // A buried hover badge is not enough for a failed import (the node
+    // often lives inside an auto-created subflow); say it out loud.
+    if (data.error !== undefined) {
+      pushToast(`Import failed: ${data.error}`, "error");
+    }
   }
   if (!batch) return;
   applyToMirror(batch);
@@ -184,6 +198,7 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
         client: c,
         useViewState,
         useMirror,
+        useReview,
       };
     }
   })();
@@ -216,6 +231,17 @@ function applyToMirror(batch: EventBatch): void {
   if (store.applyBatch(batch)) {
     store.replaceFromSnapshot(getClient().snapshot(), batch.revision);
   }
+  // The review mirror re-reads on any annotation/staleness change and on a
+  // full document replace (scene load, structural undo).
+  if (batch.events.some((e) => e.type === "reviewChanged" || e.type === "documentReplaced")) {
+    refreshReview();
+  }
+}
+
+/** Re-reads the annotation set (with runtime staleness) into the review
+ * store. */
+export function refreshReview(): void {
+  useReview.getState().setAnnotations(getClient().reviewAnnotations());
 }
 
 /** Refreshes the stale (dirty) node set into the mirror store. */
@@ -227,10 +253,41 @@ export function refreshStale(): void {
 export function dispatch(cmd: Command): EventBatch {
   const batch = getClient().dispatch(cmd);
   applyToMirror(batch);
+  toastShadowHandoff(cmd, batch);
   refreshStale();
   syncSceneSelection();
   markDirtyAndAutosave();
   return batch;
+}
+
+/** The exclusive-shadow-caster rule must be self-explanatory at the moment
+ * it acts (UX spec J3): when granting cast_shadow cascades a release onto
+ * another light, toast the name of the light that lost it. */
+function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
+  if (cmd.type !== "setParam" || cmd.key !== "cast_shadow") return;
+  const released = batch.events.filter(
+    (e) =>
+      e.type === "paramChanged" &&
+      e.key === "cast_shadow" &&
+      e.node !== cmd.node &&
+      e.value.kind === "literal" &&
+      e.value.type === "bool" &&
+      e.value.value === false,
+  );
+  if (released.length === 0) return;
+  const m = useMirror.getState();
+  const registry = m.registry;
+  const nameOf = (id: number) => {
+    const node = m.contexts["root"]?.nodes.find((n) => n.id === id);
+    const display = registry?.nodes.find((t) => t.typeId === node?.typeId)?.displayName;
+    return display ?? `light ${id}`;
+  };
+  const granted = nameOf(cmd.node);
+  const names = released
+    .map((e) => (e.type === "paramChanged" ? nameOf(e.node) : ""))
+    .filter(Boolean)
+    .join(", ");
+  pushToast(`${granted} now casts the shadow — ${names} released it`, "info");
 }
 
 /** Pushes the root-context selection into the host so the picked object
@@ -279,6 +336,72 @@ export function flyToIssue(objectNode: number, sourceNode: number, issue: number
   useViewState.getState().setView(getClient().flyToIssue(objectNode, sourceNode, issue));
 }
 
+// ---- review actions (host fills author + timestamps; the engine fills
+// anchor hashes and inherits reply anchors) ----
+
+/** The annotation author from preferences ("" = anonymous, opt-in). */
+function reviewAuthor(): string | undefined {
+  const author = usePrefs.getState().prefs.review.author.trim();
+  return author.length > 0 ? author : undefined;
+}
+
+function anchorFromPick(pick: PickDetail): ReviewAnchor {
+  return {
+    ctx: "root",
+    node: pick.node,
+    mesh: pick.mesh,
+    face: pick.face,
+    barycentric: pick.barycentric,
+    worldFallback: pick.worldPos,
+  };
+}
+
+export function addAnnotation(pick: PickDetail, text: string, category: ReviewCategory): void {
+  dispatch({
+    type: "addAnnotation",
+    anchor: anchorFromPick(pick),
+    text,
+    category,
+    author: reviewAuthor(),
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Adds a reply under `parent` (the engine inherits the parent's anchor;
+ * the node here is a placeholder the engine ignores). */
+export function replyToAnnotation(parent: number, text: string, category: ReviewCategory): void {
+  dispatch({
+    type: "addAnnotation",
+    anchor: { ctx: "root", node: 0 },
+    text,
+    category,
+    author: reviewAuthor(),
+    createdAt: new Date().toISOString(),
+    replyTo: parent,
+  });
+}
+
+export function editAnnotation(id: number, text: string, category: ReviewCategory): void {
+  dispatch({ type: "editAnnotation", id, text, category, updatedAt: new Date().toISOString() });
+}
+
+export function resolveAnnotation(id: number, resolved: boolean): void {
+  dispatch({ type: "resolveAnnotation", id, resolved, updatedAt: new Date().toISOString() });
+}
+
+export function deleteAnnotation(id: number): void {
+  dispatch({ type: "deleteAnnotation", id });
+}
+
+export function reanchorAnnotation(id: number, pick: PickDetail): void {
+  dispatch({
+    type: "reanchorAnnotation",
+    id,
+    anchor: anchorFromPick(pick),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 /** Stages an HDRI file, runs the CPU IBL stages in the worker, and installs
  * the environment (GPU finish + light rebind + skybox). */
 export async function loadHdri(file: File): Promise<void> {
@@ -320,16 +443,32 @@ async function restoreEnvironment(hdriHash: string | null): Promise<void> {
   useViewState.getState().setEnvironment(getClient().environmentState());
 }
 
-// Autosave: debounced 2s after the last mutation, forced at most every 15s.
+// Autosave: debounced after the last mutation (cadence from preferences,
+// default 2s), forced at most every 15s while edits keep arriving.
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSaveAt = 0;
 
+/** The delay before the next autosave write, or null when disabled.
+ * Pure so the gating logic is unit-testable. */
+export function autosaveDelayMs(
+  enabled: boolean,
+  debounceSec: number,
+  now: number,
+  lastSave: number,
+): number | null {
+  if (!enabled) return null;
+  const debounce = Math.max(500, debounceSec * 1000);
+  const forceIn = Math.max(0, 15000 - (now - lastSave));
+  return Math.min(debounce, forceIn);
+}
+
 function markDirtyAndAutosave(): void {
   useMirror.getState().setDirty(true);
-  const now = Date.now();
+  const { enabled, debounceSec } = usePrefs.getState().prefs.autosave;
   if (debounceTimer) clearTimeout(debounceTimer);
-  const forceIn = Math.max(0, 15000 - (now - lastSaveAt));
-  debounceTimer = setTimeout(doAutosave, Math.min(2000, forceIn));
+  const delay = autosaveDelayMs(enabled, debounceSec, Date.now(), lastSaveAt);
+  if (delay === null) return;
+  debounceTimer = setTimeout(doAutosave, delay);
 }
 
 /** The host `extra` for a `.slxy` save: generator + timestamps. The camera
@@ -400,11 +539,30 @@ export function copySelection(): void {
   clipboard = getClient().copyNodes(s.current, ids);
 }
 
-/** Pastes the clipboard fragment into the current context. */
+/** Pastes the clipboard fragment into the current context; context-illegal
+ * nodes are skipped with a toast naming the count (UX spec section 13). */
 export function paste(): void {
   if (!clipboard) return;
   const s = useMirror.getState();
-  dispatch({ type: "pasteNodes", ctx: s.current, fragment: clipboard, position: [30, 30] });
+  const wanted = Array.isArray((clipboard as { nodes?: unknown[] }).nodes)
+    ? (clipboard as { nodes: unknown[] }).nodes.length
+    : null;
+  const batch = dispatch({
+    type: "pasteNodes",
+    ctx: s.current,
+    fragment: clipboard,
+    position: [30, 30],
+  });
+  if (wanted !== null) {
+    const added = batch.events.filter((e) => e.type === "nodeAdded").length;
+    const skipped = wanted - added;
+    if (skipped > 0) {
+      pushToast(
+        `${skipped} node(s) skipped: not allowed in this context`,
+        "warn",
+      );
+    }
+  }
 }
 
 /** Duplicates the current context's selection (+24px), one undo step. */
@@ -423,6 +581,16 @@ export function previewParam(ctx: GraphContext, node: NodeId, key: string, value
   getClient().previewParam(ctx, node, key, value);
 }
 
+/** Hash-to-filename map for assets staged this session (the engine keeps
+ * names too, but does not expose a lookup; assets restored from a .slxy
+ * simply miss here and callers fall back to the hash prefix). */
+const stagedAssetNames = new Map<string, string>();
+
+/** The original filename of a staged asset, when known this session. */
+export function assetDisplayName(hash: string): string | undefined {
+  return stagedAssetNames.get(hash);
+}
+
 /** Reads a File and stages its bytes into the engine (content-addressed),
  * returning the asset hash and original name. The JS-side SHA-256 matches
  * the engine's recomputed content id, so re-staging is idempotent. */
@@ -433,6 +601,7 @@ export async function stageFile(file: File): Promise<{ hash: string; name: strin
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
   const hash = getClient().stageAsset(file.name, file.type, sha256, bytes);
+  stagedAssetNames.set(hash, file.name);
   return { hash, name: file.name };
 }
 
@@ -501,7 +670,16 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
   }
-  if (useMirror.getState().cookMode === "manual") refreshStale();
+  // Marker pins track the cameras imperatively (no React re-render).
+  const review = useReview.getState();
+  if (review.annotations.length > 0 && !review.markersHidden) {
+    applyMarkerPositions(getClient().reviewMarkers());
+  } else {
+    hideAllMarkers();
+  }
+  // Both modes: manual drives the amber stale tags + header count, auto
+  // drives the transient pending tint on queued-dirty nodes.
+  refreshStale();
 }
 
 // Mirror the node canvas's current graph context to the host (the UV

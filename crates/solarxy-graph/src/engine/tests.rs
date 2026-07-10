@@ -837,8 +837,11 @@ fn annotation_crud_and_undo() {
     let anchor = ReviewAnchor {
         ctx,
         node: box_id,
+        mesh: None,
         face: None,
         barycentric: None,
+        world_fallback: None,
+        geometry_hash: None,
     };
 
     // Add.
@@ -846,7 +849,10 @@ fn annotation_crud_and_undo() {
         .apply(Command::AddAnnotation {
             anchor: anchor.clone(),
             text: "check this face".into(),
-            category: ReviewCategory::Issue,
+            category: ReviewCategory::Warning,
+            author: None,
+            created_at: String::new(),
+            reply_to: None,
         })
         .unwrap();
     assert!(
@@ -859,8 +865,12 @@ fn annotation_crud_and_undo() {
     let id = e.document().review().iter().next().unwrap().id;
 
     // Resolve, then undo the resolve.
-    e.apply(Command::ResolveAnnotation { id, resolved: true })
-        .unwrap();
+    e.apply(Command::ResolveAnnotation {
+        id,
+        resolved: true,
+        updated_at: String::new(),
+    })
+    .unwrap();
     assert!(e.document().review().get(id).unwrap().resolved);
     e.apply(Command::Undo).unwrap();
     assert!(!e.document().review().get(id).unwrap().resolved);
@@ -873,6 +883,527 @@ fn annotation_crud_and_undo() {
     assert_eq!(
         e.document().review().get(id).unwrap().text,
         "check this face"
+    );
+}
+
+// Phase 7 review: anchoring, threading, staleness, markers, detailed picks.
+
+/// A displayable scene: a root geo whose subflow holds one default box
+/// (display flag claimed), cooked. Returns (engine, geo id, subflow ctx,
+/// box id).
+fn displayed_box() -> (Engine, NodeId, GraphContext, NodeId) {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_id = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+    (e, geo, sub, box_id)
+}
+
+/// Picks the default box's front face dead-on and returns a full anchor.
+fn picked_anchor(e: &Engine) -> crate::review::ReviewAnchor {
+    let pd = e
+        .pick_detailed([0.0, 0.0, 10.0], [0.0, 0.0, -1.0])
+        .expect("the displayed box is hit");
+    crate::review::ReviewAnchor {
+        ctx: GraphContext::Root,
+        node: pd.node,
+        mesh: Some(pd.mesh),
+        face: Some(pd.face),
+        barycentric: Some(pd.barycentric),
+        world_fallback: Some(pd.world_pos),
+        geometry_hash: None, // engine-filled on add
+    }
+}
+
+fn add_picked_note(
+    e: &mut Engine,
+    text: &str,
+    reply_to: Option<crate::review::AnnotationId>,
+) -> crate::review::AnnotationId {
+    let anchor = picked_anchor(e);
+    add_note(e, anchor, text, reply_to)
+}
+
+fn add_note(
+    e: &mut Engine,
+    anchor: crate::review::ReviewAnchor,
+    text: &str,
+    reply_to: Option<crate::review::AnnotationId>,
+) -> crate::review::AnnotationId {
+    let before: std::collections::BTreeSet<_> =
+        e.document().review().iter().map(|a| a.id).collect();
+    e.apply(Command::AddAnnotation {
+        anchor,
+        text: text.into(),
+        category: crate::review::ReviewCategory::Question,
+        author: Some("Tester".into()),
+        created_at: "2026-07-10T09:00:00Z".into(),
+        reply_to,
+    })
+    .unwrap();
+    e.document()
+        .review()
+        .iter()
+        .map(|a| a.id)
+        .find(|id| !before.contains(id))
+        .expect("add minted a new annotation")
+}
+
+#[test]
+fn add_fills_the_geometry_hash_engine_side() {
+    let (mut e, ..) = displayed_box();
+    let anchor = picked_anchor(&e);
+    let id = add_note(&mut e, anchor, "front face", None);
+    let stored = &e.document().review().get(id).unwrap().anchor;
+    assert!(
+        stored.geometry_hash.is_some(),
+        "3D anchors get their staleness reference filled on add"
+    );
+    assert!(!e.annotation_stale(id), "freshly pinned is never stale");
+}
+
+#[test]
+fn reply_inherits_the_parent_anchor_and_threading_stays_flat() {
+    let (mut e, geo, ..) = displayed_box();
+    let parent = add_picked_note(&mut e, "parent", None);
+
+    // The reply sends a deliberately different (node-only) anchor; the
+    // engine must ignore it and copy the parent's.
+    let decoy = crate::review::ReviewAnchor {
+        ctx: GraphContext::Root,
+        node: geo,
+        mesh: None,
+        face: None,
+        barycentric: None,
+        world_fallback: None,
+        geometry_hash: None,
+    };
+    let reply = add_note(&mut e, decoy.clone(), "reply", Some(parent));
+    let store = e.document().review();
+    assert_eq!(
+        store.get(reply).unwrap().anchor,
+        store.get(parent).unwrap().anchor
+    );
+    assert_eq!(store.get(reply).unwrap().reply_to, Some(parent));
+
+    // Reply-to-reply is rejected (flat threading).
+    let err = e
+        .apply(Command::AddAnnotation {
+            anchor: decoy.clone(),
+            text: "nested".into(),
+            category: crate::review::ReviewCategory::Info,
+            author: None,
+            created_at: String::new(),
+            reply_to: Some(reply),
+        })
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Graph(GraphError::InvalidReply(_))
+    ));
+
+    // Replying to a missing parent is rejected.
+    let err = e
+        .apply(Command::AddAnnotation {
+            anchor: decoy,
+            text: "orphan".into(),
+            category: crate::review::ReviewCategory::Info,
+            author: None,
+            created_at: String::new(),
+            reply_to: Some(crate::review::AnnotationId(9999)),
+        })
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Graph(GraphError::UnknownAnnotation(_))
+    ));
+}
+
+#[test]
+fn delete_cascades_to_replies_and_one_undo_restores_the_thread() {
+    let (mut e, ..) = displayed_box();
+    let parent = add_picked_note(&mut e, "parent", None);
+    add_picked_note(&mut e, "reply 1", Some(parent));
+    add_picked_note(&mut e, "reply 2", Some(parent));
+    let bystander = add_picked_note(&mut e, "unrelated", None);
+    assert_eq!(e.document().review().len(), 4);
+
+    e.apply(Command::DeleteAnnotation { id: parent }).unwrap();
+    assert_eq!(e.document().review().len(), 1);
+    assert!(e.document().review().get(bystander).is_some());
+
+    // One undo restores the whole thread (whole-store snapshot).
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(e.document().review().len(), 4);
+    e.apply(Command::Redo).unwrap();
+    assert_eq!(e.document().review().len(), 1);
+}
+
+#[test]
+fn recook_that_changes_geometry_flags_stale_and_undo_recook_clears_it() {
+    let (mut e, _geo, sub, box_id) = displayed_box();
+    let id = add_picked_note(&mut e, "watch this", None);
+    assert!(!e.annotation_stale(id));
+
+    // Widen the box: the quantized AABB (and topology-independent hash
+    // inputs) change, so the anchor must flag on the recook.
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: box_id,
+        key: "width".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    let events = e.cook(&mut || true);
+    let review_changed = events
+        .iter()
+        .filter(|ev| matches!(ev, EngineEvent::ReviewChanged))
+        .count();
+    assert_eq!(review_changed, 1, "exactly one coalesced ReviewChanged");
+    assert!(e.annotation_stale(id));
+
+    // The snapshot mirrors the runtime flag.
+    let snap = serde_json::to_value(e.snapshot()).unwrap();
+    assert_eq!(snap["annotations"][0]["needsReanchor"], true);
+
+    // Undo the param edit and recook: the original hash matches again.
+    e.apply(Command::Undo).unwrap();
+    let events = e.cook(&mut || true);
+    assert!(
+        events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::ReviewChanged))
+    );
+    assert!(!e.annotation_stale(id));
+}
+
+#[test]
+fn losing_the_display_output_flags_stale_immediately() {
+    let (mut e, _geo, sub, _box_id) = displayed_box();
+    let id = add_picked_note(&mut e, "pin", None);
+    let batch = e
+        .apply(Command::SetActiveOutput {
+            ctx: sub,
+            node: None,
+        })
+        .unwrap();
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::ReviewChanged)),
+        "the flag flips in the same batch, before any cook"
+    );
+    assert!(e.annotation_stale(id));
+}
+
+#[test]
+fn reanchor_updates_hash_clears_stale_and_propagates_to_replies() {
+    let (mut e, _geo, sub, box_id) = displayed_box();
+    let parent = add_picked_note(&mut e, "parent", None);
+    let reply = add_picked_note(&mut e, "reply", Some(parent));
+
+    // Invalidate the pin.
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: box_id,
+        key: "width".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(e.annotation_stale(parent));
+    let old_anchor = e.document().review().get(parent).unwrap().anchor.clone();
+
+    // Re-place on the recooked geometry: same batch clears the flag.
+    let fresh = picked_anchor(&e);
+    let batch = e
+        .apply(Command::ReanchorAnnotation {
+            id: parent,
+            anchor: fresh,
+            updated_at: "2026-07-10T10:00:00Z".into(),
+        })
+        .unwrap();
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::ReviewChanged))
+    );
+    assert!(!e.annotation_stale(parent));
+    let store = e.document().review();
+    let new_anchor = store.get(parent).unwrap().anchor.clone();
+    assert_ne!(new_anchor, old_anchor);
+    assert_eq!(
+        store.get(reply).unwrap().anchor,
+        new_anchor,
+        "replies follow the parent's pin"
+    );
+    assert_eq!(
+        store.get(parent).unwrap().updated_at,
+        "2026-07-10T10:00:00Z"
+    );
+
+    // Re-anchoring a reply directly is rejected.
+    let fresh = picked_anchor(&e);
+    assert!(matches!(
+        e.apply(Command::ReanchorAnnotation {
+            id: reply,
+            anchor: fresh,
+            updated_at: String::new(),
+        }),
+        Err(EngineError::Graph(GraphError::InvalidReply(_)))
+    ));
+
+    // Undo the re-anchor: the old (stale) anchor returns and the flag
+    // flips back in the same batch.
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(
+        e.document().review().get(parent).unwrap().anchor,
+        old_anchor
+    );
+    assert!(e.annotation_stale(parent));
+}
+
+#[test]
+fn markers_resolve_through_the_geo_transform_without_flagging_stale() {
+    let (mut e, geo, ..) = displayed_box();
+    let id = add_picked_note(&mut e, "front", None);
+    let markers = e.review_markers_world();
+    assert_eq!(markers.len(), 1);
+    let before = markers[0].world.expect("3D anchor has a pin");
+    assert!((before[2] - 0.5).abs() < 1e-4, "front face of the unit box");
+
+    // Moving the geo container translates the marker but must NOT flag it:
+    // the transform is applied at lowering, not baked into the geometry.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "translate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([5.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(
+        !e.annotation_stale(id),
+        "a rigid transform is not staleness"
+    );
+    let markers = e.review_markers_world();
+    let after = markers[0].world.unwrap();
+    assert!((after[0] - (before[0] + 5.0)).abs() < 1e-4);
+    assert!(!markers[0].needs_reanchor);
+
+    // Replies never appear as markers (the anchor is inherited from the
+    // parent regardless of what the host sends, so a decoy suffices; the
+    // pick ray would miss the translated geo anyway).
+    let decoy = crate::review::ReviewAnchor {
+        ctx: GraphContext::Root,
+        node: geo,
+        mesh: None,
+        face: None,
+        barycentric: None,
+        world_fallback: None,
+        geometry_hash: None,
+    };
+    add_note(&mut e, decoy, "reply", Some(id));
+    assert_eq!(e.review_markers_world().len(), 1);
+}
+
+#[test]
+fn pick_detailed_reports_the_mesh_within_a_merged_set() {
+    // Subflow: box0 at origin, box1 pushed +3x through a transform, both
+    // merged (mesh order = connection order); geo translated +5x.
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box0 = add(&mut e, sub, "box");
+    let box1 = add(&mut e, sub, "box");
+    let xform = add(&mut e, sub, "transform");
+    let merge = add(&mut e, sub, "merge");
+    let connect = |e: &mut Engine, from: NodeId, to: NodeId, port: &str| {
+        e.apply(Command::Connect {
+            ctx: sub,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".to_string(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: port.to_string(),
+            },
+        })
+        .unwrap();
+    };
+    connect(&mut e, box1, xform, "geometry");
+    connect(&mut e, box0, merge, "inputs");
+    connect(&mut e, xform, merge, "inputs");
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: xform,
+        key: "translate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([3.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(merge),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "translate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([5.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    // Dead-on at the second box: world center [8, 0, 0], front z = +0.5.
+    let pd = e
+        .pick_detailed([8.0, 0.0, 10.0], [0.0, 0.0, -1.0])
+        .expect("hit");
+    assert_eq!(pd.node, geo);
+    assert_eq!(pd.mesh, 1, "the transformed box is the second merged mesh");
+    assert!((pd.world_pos[0] - 8.0).abs() < 1e-3);
+    assert!((pd.world_pos[2] - 0.5).abs() < 1e-3);
+    assert!((pd.distance - 9.5).abs() < 1e-3);
+    let bary_sum: f32 = pd.barycentric.iter().sum();
+    assert!((bary_sum - 1.0).abs() < 1e-3);
+
+    // The first box resolves as mesh 0.
+    let pd0 = e
+        .pick_detailed([5.0, 0.0, 10.0], [0.0, 0.0, -1.0])
+        .expect("hit");
+    assert_eq!(pd0.mesh, 0);
+}
+
+#[test]
+fn annotations_round_trip_the_document_file_with_all_fields() {
+    let (mut e, ..) = displayed_box();
+    let parent = add_picked_note(&mut e, "note", None);
+    add_picked_note(&mut e, "reply", Some(parent));
+    e.apply(Command::ResolveAnnotation {
+        id: parent,
+        resolved: true,
+        updated_at: "2026-07-10T11:00:00Z".into(),
+    })
+    .unwrap();
+
+    let json = serde_json::to_string(&e.save_document()).unwrap();
+    let file: DocumentFile = serde_json::from_str(&json).unwrap();
+    let mut e2 = engine();
+    e2.load_document(&file);
+
+    let a: Vec<_> = e.document().review().iter().cloned().collect();
+    let b: Vec<_> = e2.document().review().iter().cloned().collect();
+    assert_eq!(a, b, "author, timestamps, threading, and anchors survive");
+}
+
+#[test]
+fn review_command_boundary_shape_is_camelcase() {
+    let (mut e, ..) = displayed_box();
+    let id = add_picked_note(&mut e, "note", None);
+
+    // Rust -> JS: camelCase tags and fields.
+    let cmd = Command::ReanchorAnnotation {
+        id,
+        anchor: picked_anchor(&e),
+        updated_at: "t".into(),
+    };
+    let v = serde_json::to_value(&cmd).unwrap();
+    assert_eq!(v["type"], "reanchorAnnotation");
+    assert!(v["anchor"]["worldFallback"].is_array());
+    assert_eq!(v["updatedAt"], "t");
+
+    // JS -> Rust: a minimal AddAnnotation payload (no author/createdAt/
+    // replyTo, bare anchor) deserializes through the serde defaults.
+    let js = serde_json::json!({
+        "type": "addAnnotation",
+        "anchor": { "ctx": "root", "node": 1 },
+        "text": "from js",
+        "category": "change"
+    });
+    let back: Command = serde_json::from_value(js).unwrap();
+    assert!(matches!(
+        back,
+        Command::AddAnnotation {
+            reply_to: None,
+            author: None,
+            ..
+        }
+    ));
+
+    // The snapshot mirror is camelCase with the runtime flag flattened in.
+    let snap = serde_json::to_value(e.snapshot()).unwrap();
+    let a = &snap["annotations"][0];
+    assert_eq!(a["needsReanchor"], false);
+    assert_eq!(a["createdAt"], "2026-07-10T09:00:00Z");
+    assert_eq!(a["author"], "Tester");
+    assert!(a["anchor"]["geometryHash"].is_u64());
+}
+
+#[test]
+fn granting_cast_shadow_releases_every_other_root_light_in_one_step() {
+    // The exclusive-shadow-caster rule (UX spec J3): the handoff cascades
+    // inside the same command, so it is one undo step and the batch names
+    // the released lights via their ParamChanged events.
+    let mut e = engine();
+    let a = add(&mut e, GraphContext::Root, "directional_light");
+    let b = add(&mut e, GraphContext::Root, "spot_light");
+
+    let resolved_flag = |e: &Engine, id: NodeId| -> bool {
+        let g = e.document().graph(GraphContext::Root).unwrap();
+        let n = g.node(id).unwrap();
+        let d = e.registry().get(&n.type_id).unwrap();
+        crate::registry::resolve::resolve_params(&n.params, &d.params)
+            .unwrap()
+            .bool("cast_shadow")
+    };
+    // Shadow-capable lights default the flag on.
+    assert!(resolved_flag(&e, a) && resolved_flag(&e, b));
+
+    // Granting the shadow to B releases A in the same batch.
+    let batch = e
+        .apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: b,
+            key: "cast_shadow".to_string(),
+            value: ParamSource::Literal(ParamValue::Bool(true)),
+        })
+        .unwrap();
+    assert!(!resolved_flag(&e, a), "A released the shadow");
+    assert!(resolved_flag(&e, b));
+    let released: Vec<NodeId> = batch
+        .events
+        .iter()
+        .filter_map(|ev| match ev {
+            EngineEvent::ParamChanged {
+                node,
+                key,
+                value: ParamSource::Literal(ParamValue::Bool(false)),
+                ..
+            } if key == "cast_shadow" => Some(*node),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(released, vec![a], "the batch names the released light");
+
+    // One undo restores BOTH flags (single step by construction).
+    e.apply(Command::Undo).unwrap();
+    assert!(resolved_flag(&e, a), "undo restores the released light");
+
+    // Setting the flag FALSE never cascades.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: b,
+        key: "cast_shadow".to_string(),
+        value: ParamSource::Literal(ParamValue::Bool(false)),
+    })
+    .unwrap();
+    assert!(
+        resolved_flag(&e, a),
+        "clearing a flag releases nothing else"
     );
 }
 

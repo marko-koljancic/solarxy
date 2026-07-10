@@ -19,6 +19,7 @@ import type {
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { ColorInput } from "./inputs/ColorInput";
+import { Popover, renderDoc } from "./Popover";
 import { FloatInput } from "./inputs/FloatInput";
 import { VectorInput } from "./inputs/VectorInput";
 
@@ -47,11 +48,28 @@ function Field({ ctx, node, spec }: FieldProps) {
   const preview = (v: unknown) => previewParam(ctx, node.id, spec.key, literal(spec.paramType, v));
   const unitSuffix = spec.unit === "degrees" ? "°" : spec.unit === "meters" ? " m" : "";
 
+  // Spec section 7: every param label carries a hover doc popover from its
+  // descriptor doc string.
   const label = (
-    <label className="param-label" title={spec.doc}>
-      {spec.label}
-      {unitSuffix && <span className="param-unit">{unitSuffix}</span>}
-    </label>
+    <Popover
+      title={spec.label}
+      content={
+        <>
+          {spec.doc ? renderDoc(spec.doc) : null}
+          {spec.soft && (
+            <p className="doc-popover-meta">
+              Range {spec.soft[0]}-{spec.soft[1]}
+              {unitSuffix ? ` ${unitSuffix.trim()}` : ""}
+            </p>
+          )}
+        </>
+      }
+    >
+      <label className="param-label">
+        {spec.label}
+        {unitSuffix && <span className="param-unit">{unitSuffix}</span>}
+      </label>
+    </Popover>
   );
 
   switch (spec.paramType) {
@@ -161,14 +179,28 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
   const [localName, setLocalName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const current = String(paramValue(node, spec) ?? "");
-  const accept = spec.accept.join(",");
 
-  const onFile = async (file: File) => {
+  // Multi-file staging: a multi-file model (gltf + bin + textures) selects
+  // everything at once; every file stages (the sidecar resolver matches
+  // companions by name at parse time) and the param points at the primary
+  // (the first file matching the accepted extensions).
+  const onFiles = async (files: File[]) => {
     setPending(true);
     try {
-      const { hash, name } = await stageFile(file);
-      setLocalName(name);
-      dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", hash) });
+      const exts = spec.accept.map((a) => a.toLowerCase());
+      const primary =
+        files.find((f) => exts.some((ext) => f.name.toLowerCase().endsWith(ext))) ?? files[0];
+      let primaryHash = "";
+      for (const file of files) {
+        const { hash, name } = await stageFile(file);
+        if (file === primary) {
+          primaryHash = hash;
+          setLocalName(name);
+        }
+      }
+      if (primaryHash) {
+        dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", primaryHash) });
+      }
     } finally {
       setPending(false);
     }
@@ -204,11 +236,11 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         <input
           ref={inputRef}
           type="file"
-          accept={accept}
+          multiple
           style={{ display: "none" }}
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void onFile(f);
+            const files = Array.from(e.target.files ?? []);
+            if (files.length > 0) void onFiles(files);
             e.target.value = "";
           }}
         />
@@ -229,6 +261,9 @@ export function ParameterPanel() {
     () => graph.nodes.find((n) => n.id === selectedId),
     [graph, selectedId],
   );
+  // The active tab; falls back to the first tab whenever the selection's
+  // group set no longer contains it (switching node types).
+  const [tab, setTab] = useState<string>("");
 
   if (!node) {
     return (
@@ -247,6 +282,16 @@ export function ParameterPanel() {
     g.push(p);
     groups.set(p.group, g);
   }
+  // Tabs (Minimystix underline pattern, Phase 7b D1): general first, the
+  // rest in declaration order, plus a Validation tab when a report exists.
+  const groupNames = [...groups.keys()];
+  const orderedGroups = [
+    ...groupNames.filter((g) => g.toLowerCase() === "general"),
+    ...groupNames.filter((g) => g.toLowerCase() !== "general"),
+  ];
+  const report = reports[node.id];
+  const tabs = report ? [...orderedGroups, VALIDATION_TAB] : orderedGroups;
+  const active = tabs.includes(tab) ? tab : tabs[0];
 
   return (
     <div className="param-panel">
@@ -258,22 +303,49 @@ export function ParameterPanel() {
           </span>
         )}
       </div>
+      {tabs.length > 1 && (
+        <div className="param-tabs" role="tablist">
+          {tabs.map((t) => (
+            <button
+              key={t}
+              role="tab"
+              aria-selected={t === active}
+              className={`param-tab${t === active ? " active" : ""}${t === VALIDATION_TAB && report && report.errors > 0 ? " has-errors" : ""}`}
+              onClick={() => setTab(t)}
+            >
+              {tabLabel(t)}
+              {t === VALIDATION_TAB && report && report.issues.length > 0 && (
+                <span className="param-tab-count">{report.errors + report.warnings}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="param-body">
-        {[...groups.entries()].map(([group, params]) => (
-          <fieldset key={group} className="param-group">
-            <legend>{group}</legend>
-            {params.map((p) => (
+        {active !== undefined && active !== VALIDATION_TAB && (
+          <div className="param-tab-body" role="tabpanel">
+            {(groups.get(active) ?? []).map((p) => (
               <Field key={p.key} ctx={current} node={node} spec={p} />
             ))}
-          </fieldset>
-        ))}
-        {(desc?.params.length ?? 0) === 0 && <div className="param-empty">No parameters.</div>}
-        {reports[node.id] && (
-          <ValidationSection ctx={current} sourceNode={node.id} report={reports[node.id]} />
+          </div>
         )}
+        {active === VALIDATION_TAB && report && (
+          <ValidationSection ctx={current} sourceNode={node.id} report={report} />
+        )}
+        {tabs.length === 0 && <div className="param-empty">No parameters.</div>}
       </div>
     </div>
   );
+}
+
+/** Sentinel tab name for the validation report (registry groups are
+ * lowercase, so the capitalized sentinel cannot collide). */
+const VALIDATION_TAB = "Validation";
+
+/** "general" -> "General". */
+function tabLabel(group: string): string {
+  if (group === VALIDATION_TAB) return group;
+  return group.charAt(0).toUpperCase() + group.slice(1);
 }
 
 /** "degenerateTriangles" -> "Degenerate Triangles". */
@@ -299,8 +371,7 @@ function ValidationSection({
   const objectNode = ctx === "root" ? null : ctx.subflow;
   const clean = report.issues.length === 0;
   return (
-    <fieldset className="param-group validation-section">
-      <legend>Validation</legend>
+    <div className="validation-section" role="tabpanel">
       <div className="validation-summary">
         {clean ? (
           <span className="validation-clean">No issues found.</span>
@@ -337,6 +408,6 @@ function ValidationSection({
           List truncated to {report.issues.length} rows; counts above are complete.
         </div>
       )}
-    </fieldset>
+    </div>
   );
 }

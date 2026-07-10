@@ -1,11 +1,14 @@
-// Per-pane DOM toolbars floated over the WebGPU canvas (UX spec section
-// 11): one strip per pane carrying the pane's view mode, inspection mode,
-// projection, view presets, and grid toggle. Pure interpreters of the
-// view-state mirror; every change goes through the session's view actions
-// (Rust owns the truth). Positioned from the host-computed pane rects.
+// Per-pane ghost-text viewport controls floated over the WebGPU canvas
+// (Phase 7b D2, Minimystix ViewportControls / desktop label-menu pattern):
+// frameless bracketed labels that open small local dropdowns, replacing
+// the filled toolbar strip. Pure interpreters of the view-state mirror;
+// every change goes through the session's view actions (Rust owns the
+// truth). Positioned from the host-computed pane rects.
 
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cameraCommand, setActivePane, setPaneSettings, setSplitRatio } from "../engine/session";
 import type { PaneDisplaySettings, ViewAxis, ViewStateDto } from "../engine/types";
+import { IconCheck } from "../icons";
 import { useViewState } from "../store/viewState";
 
 const VIEW_MODES = [
@@ -33,7 +36,107 @@ const VIEW_AXES: [ViewAxis, string][] = [
   ["right", "Right"],
 ];
 
-function PaneToolbar({ pane, settings, projection, active }: {
+const BACKGROUNDS = [
+  ["Gradient", "Gradient"],
+  ["White", "White"],
+  ["DarkGray", "Dark"],
+  ["AyuMirage", "Ayu"],
+  ["Black", "Black"],
+  ["HdriSky", "HDRI Sky"],
+] as const;
+
+const NORMALS = [
+  ["Off", "Off"],
+  ["Face", "Face"],
+  ["Vertex", "Vertex"],
+  ["FaceAndVertex", "Face + Vertex"],
+] as const;
+
+const BOUNDS = [
+  ["off", "Off"],
+  ["wholeModel", "Whole model"],
+  ["perMesh", "Per mesh"],
+] as const;
+
+/** One frameless bracketed label opening a local dropdown; closes on
+ * outside pointerdown, Esc, or picking a non-sticky item. */
+function GhostMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !rootRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="ghost-menu">
+      <button
+        type="button"
+        className={`ghost-label${open ? " open" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        [ {label} ]
+      </button>
+      {open && (
+        <div className="ghost-dropdown" onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GhostItem({
+  label,
+  checked,
+  onPick,
+  sticky,
+}: {
+  label: string;
+  checked?: boolean;
+  onPick: () => void;
+  /** Sticky items keep the dropdown open (checkable toggles). */
+  sticky?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="ghost-item"
+      onClick={(e) => {
+        if (sticky) e.stopPropagation();
+        onPick();
+      }}
+    >
+      <span className="ghost-check">{checked && <IconCheck size={11} />}</span>
+      {label}
+    </button>
+  );
+}
+
+function GhostHeading({ label }: { label: string }) {
+  return <div className="ghost-heading">{label}</div>;
+}
+
+function labelOf<T extends readonly (readonly [string, string])[]>(
+  table: T,
+  value: string,
+): string {
+  return table.find(([v]) => v === value)?.[1] ?? value;
+}
+
+function PaneControls({ pane, settings, projection, active }: {
   pane: number;
   settings: PaneDisplaySettings;
   projection: string;
@@ -46,146 +149,175 @@ function PaneToolbar({ pane, settings, projection, active }: {
     setPaneSettings(pane, { ...settings, ...p });
   };
 
-  // A UV pane swaps the 3D controls for the UV set: background, the
-  // overlap toggle with its live percentage (or pending indicator), and
-  // the way back to the 3D view (key 3 toggles too).
+  // A UV pane swaps the 3D controls for the UV set: the label, a Display
+  // dropdown (background, overlap toggle, exit), and the live overlap
+  // percentage when enabled.
   if (settings.paneMode === "UvMap") {
     return (
       <div
-        className={`pane-toolbar${active ? " active" : ""}`}
+        className={`pane-controls${active ? " active" : ""}`}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <span className="pane-label">UV Map</span>
-        <select
-          className="pane-select"
-          title="UV background"
-          value={settings.uvBg}
-          onChange={(e) => patch({ uvBg: e.target.value as PaneDisplaySettings["uvBg"] })}
-        >
-          <option value="Checker">Checker</option>
-          <option value="Dark">Dark</option>
-          <option value="Charcoal">Charcoal</option>
-        </select>
-        <button
-          type="button"
-          className={`pane-btn${settings.showUvOverlap ? " on" : ""}`}
-          title="Toggle the UV overlap display (key O)"
-          onClick={() => patch({ showUvOverlap: !settings.showUvOverlap })}
-        >
-          Ovl
-        </button>
+        <span className="ghost-label static">[ UV Map ]</span>
+        <GhostMenu label="Display">
+          <GhostHeading label="Background" />
+          {(["Checker", "Dark", "Charcoal"] as const).map((bg) => (
+            <GhostItem
+              key={bg}
+              label={bg}
+              checked={settings.uvBg === bg}
+              sticky
+              onPick={() => patch({ uvBg: bg })}
+            />
+          ))}
+          <GhostHeading label="Overlays" />
+          <GhostItem
+            label="UV overlap"
+            checked={settings.showUvOverlap}
+            sticky
+            onPick={() => patch({ showUvOverlap: !settings.showUvOverlap })}
+          />
+          <GhostItem label="Exit UV Layout" onPick={() => patch({ paneMode: "Scene3D" })} />
+        </GhostMenu>
         {settings.showUvOverlap && (
-          <span className="pane-overlap" title="UV overlap percentage">
+          <span className="ghost-info" title="UV overlap percentage">
             {overlapPending || overlapPct === null
               ? "computing..."
               : `${overlapPct.toFixed(1)}% overlap`}
           </span>
         )}
-        <button
-          type="button"
-          className="pane-btn"
-          title="Back to the 3D view (key 3)"
-          onClick={() => patch({ paneMode: "Scene3D" })}
-        >
-          3D
-        </button>
       </div>
     );
   }
 
   return (
-    <div className={`pane-toolbar${active ? " active" : ""}`} onPointerDown={(e) => e.stopPropagation()}>
-      <select
-        className="pane-select"
-        title="View mode"
-        value={settings.viewMode}
-        onChange={(e) => patch({ viewMode: e.target.value as PaneDisplaySettings["viewMode"] })}
-      >
+    <div
+      className={`pane-controls${active ? " active" : ""}`}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <GhostMenu label={labelOf(VIEW_MODES, settings.viewMode)}>
         {VIEW_MODES.map(([v, label]) => (
-          <option key={v} value={v}>
-            {label}
-          </option>
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.viewMode === v}
+            onPick={() => patch({ viewMode: v })}
+          />
         ))}
-      </select>
-      <select
-        className="pane-select"
-        title="Inspection mode (keys 1-7)"
-        value={settings.inspectionMode}
-        onChange={(e) =>
-          patch({ inspectionMode: e.target.value as PaneDisplaySettings["inspectionMode"] })
-        }
-      >
-        {INSPECTION_MODES.map(([v, label]) => (
-          <option key={v} value={v}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <select
-        className="pane-select"
-        title="Projection"
-        value={projection}
-        onChange={(e) => {
-          setActivePane(pane);
-          cameraCommand(pane, {
-            kind: "projection",
-            mode: e.target.value as "perspective" | "orthographic",
-          });
-        }}
-      >
-        <option value="perspective">Persp</option>
-        <option value="orthographic">Ortho</option>
-      </select>
-      <select
-        className="pane-select"
-        title="View presets"
-        value=""
-        onChange={(e) => {
-          const v = e.target.value;
-          setActivePane(pane);
-          if (v === "fit") cameraCommand(pane, { kind: "fit" });
-          else if (v) cameraCommand(pane, { kind: "view", axis: v as ViewAxis });
-          e.target.value = "";
-        }}
-      >
-        <option value="" disabled>
-          Views
-        </option>
-        <option value="fit">Fit (F)</option>
+      </GhostMenu>
+      {settings.inspectionMode !== "Shaded" && (
+        <GhostMenu label={labelOf(INSPECTION_MODES, settings.inspectionMode)}>
+          {INSPECTION_MODES.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.inspectionMode === v}
+              onPick={() => patch({ inspectionMode: v })}
+            />
+          ))}
+        </GhostMenu>
+      )}
+      {settings.inspectionMode === "Shaded" && (
+        <GhostMenu label="Inspect">
+          {INSPECTION_MODES.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.inspectionMode === v}
+              onPick={() => patch({ inspectionMode: v })}
+            />
+          ))}
+        </GhostMenu>
+      )}
+      <GhostMenu label={projection === "orthographic" ? "Ortho" : "Persp"}>
+        <GhostItem
+          label="Perspective"
+          checked={projection === "perspective"}
+          onPick={() => {
+            setActivePane(pane);
+            cameraCommand(pane, { kind: "projection", mode: "perspective" });
+          }}
+        />
+        <GhostItem
+          label="Orthographic"
+          checked={projection === "orthographic"}
+          onPick={() => {
+            setActivePane(pane);
+            cameraCommand(pane, { kind: "projection", mode: "orthographic" });
+          }}
+        />
+      </GhostMenu>
+      <GhostMenu label="Views">
+        <GhostItem
+          label="Fit view (F)"
+          onPick={() => {
+            setActivePane(pane);
+            cameraCommand(pane, { kind: "fit" });
+          }}
+        />
         {VIEW_AXES.map(([axis, label]) => (
-          <option key={axis} value={axis}>
-            {label}
-          </option>
+          <GhostItem
+            key={axis}
+            label={label}
+            onPick={() => {
+              setActivePane(pane);
+              cameraCommand(pane, { kind: "view", axis });
+            }}
+          />
         ))}
-      </select>
-      <select
-        className="pane-select"
-        title="Pane background"
-        value={typeof settings.backgroundMode === "string" ? settings.backgroundMode : "Custom"}
-        onChange={(e) => patch({ backgroundMode: e.target.value })}
-      >
-        <option value="Gradient">Gradient</option>
-        <option value="White">White</option>
-        <option value="DarkGray">Dark</option>
-        <option value="AyuMirage">Ayu</option>
-        <option value="Black">Black</option>
-        <option value="HdriSky">Sky</option>
-      </select>
-      <button
-        type="button"
-        className={`pane-btn${settings.showGrid ? " on" : ""}`}
-        title="Toggle grid"
-        onClick={() => patch({ showGrid: !settings.showGrid })}
-      >
-        Grid
-      </button>
-      <button
-        className={`pane-btn${settings.showValidation ? " on" : ""}`}
-        title="Toggle the validation overlay (issue tints + edge highlights)"
-        onClick={() => patch({ showValidation: !settings.showValidation })}
-      >
-        Val
-      </button>
+      </GhostMenu>
+      <GhostMenu label="Display">
+        <GhostItem
+          label="Grid"
+          checked={settings.showGrid}
+          sticky
+          onPick={() => patch({ showGrid: !settings.showGrid })}
+        />
+        <GhostItem
+          label="Axes"
+          checked={settings.showAxisGizmo}
+          sticky
+          onPick={() => patch({ showAxisGizmo: !settings.showAxisGizmo })}
+        />
+        <GhostItem
+          label="Validation overlay"
+          checked={settings.showValidation}
+          sticky
+          onPick={() => patch({ showValidation: !settings.showValidation })}
+        />
+        <GhostHeading label="Normals" />
+        {NORMALS.map(([v, label]) => (
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.normalsMode === v}
+            sticky
+            onPick={() => patch({ normalsMode: v })}
+          />
+        ))}
+        <GhostHeading label="Bounds" />
+        {BOUNDS.map(([v, label]) => (
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.boundsMode === v}
+            sticky
+            onPick={() => patch({ boundsMode: v })}
+          />
+        ))}
+        <GhostHeading label="Background" />
+        {BACKGROUNDS.map(([v, label]) => (
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.backgroundMode === v}
+            sticky
+            onPick={() => patch({ backgroundMode: v })}
+          />
+        ))}
+        <GhostHeading label="Pane" />
+        <GhostItem label="UV Layout (3)" onPick={() => patch({ paneMode: "UvMap" })} />
+      </GhostMenu>
     </div>
   );
 }
@@ -240,7 +372,7 @@ function PaneDivider({ view }: { view: ViewStateDto }) {
   return <div className="viewport-divider" style={style} onPointerDown={onPointerDown} />;
 }
 
-/** All pane toolbars, absolutely positioned from the host pane rects. */
+/** All pane controls, absolutely positioned from the host pane rects. */
 export function PaneToolbars() {
   const view = useViewState((s) => s.view);
   if (!view) return null;
@@ -252,7 +384,7 @@ export function PaneToolbars() {
           className="pane-toolbar-anchor"
           style={{ left: rect.x, top: rect.y, width: rect.width }}
         >
-          <PaneToolbar
+          <PaneControls
             pane={i}
             settings={view.paneSettings[i]}
             projection={view.paneProjections[i]}

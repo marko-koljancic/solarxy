@@ -13,7 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^1.1.8",
     "@xyflow/react": "^12.8.5",
+    "elkjs": "^0.9.3",
     "immer": "^10.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

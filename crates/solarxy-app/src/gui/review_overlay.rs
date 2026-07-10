@@ -287,7 +287,7 @@ fn draw_pin(
         painter.circle_stroke(
             pin.pos,
             radius + 2.0,
-            egui::Stroke::new(1.6, theme.review.selection_accent),
+            egui::Stroke::new(1.6_f32, theme.review.selection_accent),
         );
     }
     if pin.ann.stale {
@@ -355,7 +355,7 @@ fn draw_card(
     let leader_target = nearest_edge_point(card_rect, pin.pos);
     painter.line_segment(
         [pin.pos, leader_target],
-        egui::Stroke::new(1.0, with_alpha(color, 200)),
+        egui::Stroke::new(1.0_f32, with_alpha(color, 200)),
     );
 
     let bg = with_alpha(theme.bg_elevated, CARD_FILL_ALPHA);
@@ -368,7 +368,7 @@ fn draw_card(
     painter.rect_stroke(
         card_rect,
         CARD_ROUNDING,
-        egui::Stroke::new(1.0, stroke_color),
+        egui::Stroke::new(1.0_f32, stroke_color),
         egui::StrokeKind::Inside,
     );
 

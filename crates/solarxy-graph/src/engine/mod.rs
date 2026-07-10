@@ -21,11 +21,11 @@ use crate::assets::AssetTable;
 use crate::cook::state::{CookState, CookStatus};
 use crate::cook::{CookEngine, JobId, JobRequest, JobResult};
 use crate::document::{Document, DocumentData, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
-use crate::params::{AssetId, ParamSource};
+use crate::params::{AssetId, ParamSource, ParamValue};
 use crate::registry::resolve::param_source_from_json;
 use crate::registry::{Arity, Registry};
 
-pub use snapshot::{DocumentSnapshot, RegistrySnapshot};
+pub use snapshot::{AnnotationSnapshot, DocumentSnapshot, RegistrySnapshot};
 
 mod scene;
 mod scenefile;
@@ -119,25 +119,49 @@ pub enum Command {
         ctx: GraphContext,
         ids: Vec<NodeId>,
     },
-    /// Adds a review annotation anchored to a node.
+    /// Adds a review annotation. With `reply_to` set it is a reply: the
+    /// engine validates the parent (must exist, must not itself be a
+    /// reply) and inherits its anchor, ignoring the host-sent one; a
+    /// top-level 3D anchor gets its `geometry_hash` filled engine-side.
+    /// `author`/`created_at` are host-provided (see the review module doc).
     AddAnnotation {
         anchor: crate::review::ReviewAnchor,
         text: String,
         category: crate::review::ReviewCategory,
+        #[serde(default)]
+        author: Option<String>,
+        #[serde(default)]
+        created_at: String,
+        #[serde(default)]
+        reply_to: Option<crate::review::AnnotationId>,
     },
     /// Edits an annotation's text and/or category.
     EditAnnotation {
         id: crate::review::AnnotationId,
         text: String,
         category: crate::review::ReviewCategory,
+        #[serde(default)]
+        updated_at: String,
     },
     /// Toggles an annotation's resolved flag.
     ResolveAnnotation {
         id: crate::review::AnnotationId,
         resolved: bool,
+        #[serde(default)]
+        updated_at: String,
     },
+    /// Deletes an annotation and (for a top-level note) its direct replies.
     DeleteAnnotation {
         id: crate::review::AnnotationId,
+    },
+    /// Re-places an annotation's pin: replaces the anchor (the engine
+    /// refills `geometry_hash`), propagates it to replies, and clears the
+    /// runtime stale flag.
+    ReanchorAnnotation {
+        id: crate::review::AnnotationId,
+        anchor: crate::review::ReviewAnchor,
+        #[serde(default)]
+        updated_at: String,
     },
     /// Groups following commands into one undo step until `EndTransaction`
     /// (drags, marquee moves).
@@ -270,6 +294,46 @@ pub struct EventBatch {
 /// the real counts.
 pub const REPORT_EVENT_ISSUE_CAP: usize = 2000;
 
+/// A detailed pick over the displayed scene: the review workflow's anchor
+/// source ([`Engine::pick_detailed`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PickDetail {
+    /// The root `geo` container hit (anchor semantics: geometry resolves
+    /// through its subflow's display output).
+    pub node: NodeId,
+    /// Mesh index within the displayed `GeometrySet`.
+    pub mesh: u32,
+    /// Triangle index within that mesh.
+    pub face: u32,
+    /// Barycentric `[w, u, v]` on the face (Moller-Trumbore convention).
+    pub barycentric: [f32; 3],
+    /// World-space hit point.
+    pub world_pos: [f32; 3],
+    /// Distance along the ray.
+    pub distance: f32,
+}
+
+/// One top-level annotation's marker, world-resolved
+/// ([`Engine::review_markers_world`]); the host projects it per pane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReviewMarkerWorld {
+    pub id: crate::review::AnnotationId,
+    /// Pin position: the anchored point, else the stored fallback, else
+    /// `None` (node-only annotations render in the panel, not the scene).
+    pub world: Option<[f32; 3]>,
+    pub category: crate::review::ReviewCategory,
+    pub resolved: bool,
+    pub needs_reanchor: bool,
+}
+
+/// Bumps `updated_at` from a host-provided timestamp; an empty string (an
+/// omitted boundary field, older callers) leaves the existing stamp alone.
+fn touch(a: &mut crate::review::Annotation, updated_at: String) {
+    if !updated_at.is_empty() {
+        a.updated_at = updated_at;
+    }
+}
+
 /// Turns one validation-cache change into its boundary events: a fresh
 /// result emits the summary plus the capped issue list; a cleared one
 /// emits a zeroed summary (one badge lifecycle, no tombstone event).
@@ -363,6 +427,17 @@ pub struct Engine {
     /// Async jobs spawned by the last cook, awaiting dispatch by the host
     /// (each tagged with the context it was spawned in, for `submit`).
     pending_jobs: Vec<(GraphContext, JobId, JobRequest)>,
+    /// Runtime review staleness (never persisted): per top-level 3D-anchored
+    /// annotation, whether the anchored output's current [`geometry_hash`]
+    /// no longer matches the anchor's stored hash. Refreshed after every
+    /// apply/cook/job-commit; surfaced through the snapshot's
+    /// `needs_reanchor`.
+    review_stale: BTreeMap<crate::review::AnnotationId, bool>,
+    /// Current-hash memo behind the staleness refresh, keyed by geo node
+    /// with the displayed `Arc`'s pointer as the validity stamp (the `Arc`
+    /// is stable until the node recooks, so hashes recompute only for
+    /// geometry that actually changed).
+    review_hash_cache: BTreeMap<NodeId, (usize, u64)>,
 }
 
 impl Engine {
@@ -386,6 +461,8 @@ impl Engine {
             scene: SceneDelta::default(),
             undo: UndoStack::default(),
             pending_jobs: Vec::new(),
+            review_stale: BTreeMap::new(),
+            review_hash_cache: BTreeMap::new(),
         }
     }
 
@@ -472,6 +549,11 @@ impl Engine {
         let mut events = Vec::new();
         let mut inv = Vec::new();
         self.dispatch(cmd, &mut events, &mut inv)?;
+        // Non-cook commands can still change what an anchor sees (display
+        // flag moves, node/annotation edits), so staleness refreshes on
+        // every mutation, not just after cooks. Cheap: no-op without
+        // 3D-anchored annotations.
+        self.refresh_review_staleness(&mut events);
         self.undo.push_command("edit", inv);
         self.revision += 1;
         Ok(self.batch(events))
@@ -541,40 +623,118 @@ impl Engine {
                 anchor,
                 text,
                 category,
-            } => self.review_mutate(events, inv, |doc| {
-                let id = doc.mint_annotation_id();
-                doc.review_mut().insert(crate::review::Annotation {
-                    id,
-                    anchor,
-                    text,
-                    category,
-                    resolved: false,
-                });
-                Ok(())
-            }),
-            Command::EditAnnotation { id, text, category } => {
+                author,
+                created_at,
+                reply_to,
+            } => {
+                // A reply inherits its parent's anchor (validated first); a
+                // top-level 3D anchor gets its hash filled from the
+                // currently displayed output. Both resolve before the
+                // mutation closure so it stays a pure document edit.
+                let anchor = if let Some(parent_id) = reply_to {
+                    let parent = self
+                        .doc
+                        .review()
+                        .get(parent_id)
+                        .ok_or(GraphError::UnknownAnnotation(parent_id))?;
+                    if parent.reply_to.is_some() {
+                        return Err(GraphError::InvalidReply(
+                            "cannot reply to a reply (threading is flat)",
+                        )
+                        .into());
+                    }
+                    parent.anchor.clone()
+                } else {
+                    let mut anchor = anchor;
+                    if anchor.face.is_some() {
+                        anchor.geometry_hash = self.anchor_hash(&anchor);
+                    }
+                    anchor
+                };
                 self.review_mutate(events, inv, |doc| {
-                    let a = doc
-                        .review_mut()
-                        .get_mut(id)
-                        .ok_or(GraphError::UnknownContext)?;
-                    a.text = text;
-                    a.category = category;
+                    let id = doc.mint_annotation_id();
+                    doc.review_mut().insert(crate::review::Annotation {
+                        id,
+                        anchor,
+                        text,
+                        category,
+                        resolved: false,
+                        author,
+                        updated_at: created_at.clone(),
+                        created_at,
+                        reply_to,
+                    });
                     Ok(())
                 })
             }
-            Command::ResolveAnnotation { id, resolved } => self.review_mutate(events, inv, |doc| {
+            Command::EditAnnotation {
+                id,
+                text,
+                category,
+                updated_at,
+            } => self.review_mutate(events, inv, |doc| {
                 let a = doc
                     .review_mut()
                     .get_mut(id)
-                    .ok_or(GraphError::UnknownContext)?;
+                    .ok_or(GraphError::UnknownAnnotation(id))?;
+                a.text = text;
+                a.category = category;
+                touch(a, updated_at);
+                Ok(())
+            }),
+            Command::ResolveAnnotation {
+                id,
+                resolved,
+                updated_at,
+            } => self.review_mutate(events, inv, |doc| {
+                let a = doc
+                    .review_mut()
+                    .get_mut(id)
+                    .ok_or(GraphError::UnknownAnnotation(id))?;
                 a.resolved = resolved;
+                touch(a, updated_at);
                 Ok(())
             }),
             Command::DeleteAnnotation { id } => self.review_mutate(events, inv, |doc| {
-                doc.review_mut().remove(id);
+                if doc.review_mut().remove_cascade(id) == 0 {
+                    return Err(GraphError::UnknownAnnotation(id));
+                }
                 Ok(())
             }),
+            Command::ReanchorAnnotation {
+                id,
+                anchor,
+                updated_at,
+            } => {
+                let target = self
+                    .doc
+                    .review()
+                    .get(id)
+                    .ok_or(GraphError::UnknownAnnotation(id))?;
+                if target.reply_to.is_some() {
+                    return Err(GraphError::InvalidReply(
+                        "replies share their parent's anchor; re-anchor the parent",
+                    )
+                    .into());
+                }
+                let mut anchor = anchor;
+                if anchor.face.is_some() {
+                    anchor.geometry_hash = self.anchor_hash(&anchor);
+                }
+                self.review_mutate(events, inv, |doc| {
+                    let review = doc.review_mut();
+                    let a = review
+                        .get_mut(id)
+                        .ok_or(GraphError::UnknownAnnotation(id))?;
+                    a.anchor = anchor.clone();
+                    touch(a, updated_at.clone());
+                    // Replies mirror the parent's pin.
+                    for reply in review.iter_mut().filter(|r| r.reply_to == Some(id)) {
+                        reply.anchor = anchor.clone();
+                    }
+                    Ok(())
+                })
+            }
             // CookNow arms a manual-mode cook (drains on the next frames).
             Command::CookNow => {
                 self.manual_cook_requested = true;
@@ -865,6 +1025,50 @@ impl Engine {
             key: key.to_string(),
             prev,
         });
+        // The exclusive-shadow-caster rule (UX spec J3): at most one root
+        // light carries the shadow map. Granting it to one shadow-capable
+        // light clears the flag on every other one INSIDE the same command,
+        // so the whole handoff is a single undo step and the batch carries
+        // a ParamChanged per released light (the frontend toasts the name).
+        if ctx == GraphContext::Root
+            && key == "cast_shadow"
+            && scene::is_light(&type_id)
+            && matches!(
+                events.last(),
+                Some(EngineEvent::ParamChanged {
+                    value: ParamSource::Literal(ParamValue::Bool(true)),
+                    ..
+                })
+            )
+        {
+            let others: Vec<NodeId> = {
+                let graph = self.doc.graph(ctx)?;
+                graph
+                    .nodes()
+                    .filter(|n| n.id != node && scene::is_light(&n.type_id))
+                    .filter(|n| {
+                        // Currently casting (resolved through the schema:
+                        // shadow-capable lights default the flag true).
+                        self.registry.get(&n.type_id).is_some_and(|d| {
+                            d.param("cast_shadow").is_some()
+                                && crate::registry::resolve::resolve_params(&n.params, &d.params)
+                                    .is_ok_and(|p| p.bool("cast_shadow"))
+                        })
+                    })
+                    .map(|n| n.id)
+                    .collect()
+            };
+            for other in others {
+                self.set_param(
+                    ctx,
+                    other,
+                    "cast_shadow",
+                    ParamSource::Literal(ParamValue::Bool(false)),
+                    events,
+                    inv,
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -999,6 +1203,150 @@ impl Engine {
         Ok(())
     }
 
+    /// The current [`crate::review::geometry_hash`] of the output an anchor
+    /// pins to (the geo container's displayed geometry), memoized by the
+    /// displayed `Arc`'s pointer. `None` when nothing is displayed/cooked.
+    fn anchor_hash(&mut self, anchor: &crate::review::ReviewAnchor) -> Option<u64> {
+        let set = scene::display_output(&self.doc, &self.cook, anchor.node)?;
+        let stamp = std::sync::Arc::as_ptr(set).cast::<()>() as usize;
+        if let Some(&(cached_stamp, hash)) = self.review_hash_cache.get(&anchor.node)
+            && cached_stamp == stamp
+        {
+            return Some(hash);
+        }
+        let hash = crate::review::geometry_hash(set);
+        self.review_hash_cache.insert(anchor.node, (stamp, hash));
+        Some(hash)
+    }
+
+    /// Recomputes the runtime `needs_reanchor` flags: a top-level
+    /// 3D-anchored annotation is stale when its anchored output is gone or
+    /// its current hash no longer matches the anchor's stored one. Pushes a
+    /// single `ReviewChanged` when any flag flips. Cheap: early-outs with
+    /// no annotations, and current hashes are memoized per displayed `Arc`.
+    fn refresh_review_staleness(&mut self, events: &mut Vec<EngineEvent>) {
+        if self.doc.review().is_empty() {
+            if !self.review_stale.is_empty() {
+                self.review_stale.clear();
+                self.review_hash_cache.clear();
+                events.push(EngineEvent::ReviewChanged);
+            }
+            return;
+        }
+        // Collect first: hashing borrows self mutably (the memo).
+        let anchored: Vec<(crate::review::AnnotationId, crate::review::ReviewAnchor)> = self
+            .doc
+            .review()
+            .iter()
+            .filter(|a| a.reply_to.is_none() && a.anchor.face.is_some())
+            .map(|a| (a.id, a.anchor.clone()))
+            .collect();
+        let mut fresh = BTreeMap::new();
+        let mut live_nodes = std::collections::BTreeSet::new();
+        for (id, anchor) in anchored {
+            live_nodes.insert(anchor.node);
+            let stale = match (self.anchor_hash(&anchor), anchor.geometry_hash) {
+                (None, _) => true,
+                (Some(current), Some(stored)) => current != stored,
+                // No reference hash (pre-Phase-7 annotation): nothing to
+                // compare against, so never flag it.
+                (Some(_), None) => false,
+            };
+            fresh.insert(id, stale);
+        }
+        self.review_hash_cache
+            .retain(|node, _| live_nodes.contains(node));
+        if fresh != self.review_stale {
+            self.review_stale = fresh;
+            events.push(EngineEvent::ReviewChanged);
+        }
+    }
+
+    /// Whether an annotation's anchor is currently stale (runtime-derived;
+    /// see [`Engine::refresh_review_staleness`]).
+    #[must_use]
+    pub fn annotation_stale(&self, id: crate::review::AnnotationId) -> bool {
+        self.review_stale.get(&id).copied().unwrap_or(false)
+    }
+
+    /// World-space marker data for every top-level annotation: the pin
+    /// position resolved through the anchored face's barycentric point and
+    /// the geo world matrix, or the stored world fallback when the anchor
+    /// is stale or unresolvable. Replies carry no pin and are skipped.
+    #[must_use]
+    pub fn review_markers_world(&self) -> Vec<ReviewMarkerWorld> {
+        self.doc
+            .review()
+            .iter()
+            .filter(|a| a.reply_to.is_none())
+            .map(|a| {
+                let stale = self.annotation_stale(a.id);
+                let world = if stale {
+                    a.anchor.world_fallback
+                } else {
+                    self.resolve_anchor_world(&a.anchor)
+                        .or(a.anchor.world_fallback)
+                };
+                ReviewMarkerWorld {
+                    id: a.id,
+                    world,
+                    category: a.category,
+                    resolved: a.resolved,
+                    needs_reanchor: stale,
+                }
+            })
+            .collect()
+    }
+
+    /// The bary-weighted world position of a 3D anchor over the currently
+    /// displayed geometry (`None` for node-only anchors or out-of-range
+    /// pins).
+    fn resolve_anchor_world(&self, anchor: &crate::review::ReviewAnchor) -> Option<[f32; 3]> {
+        use cgmath::Transform as _;
+        let (mesh_idx, face, bary) = (anchor.mesh?, anchor.face?, anchor.barycentric?);
+        let set = scene::display_output(&self.doc, &self.cook, anchor.node)?;
+        let mesh = set.meshes.get(mesh_idx as usize)?;
+        let base = (face as usize).checked_mul(3)?;
+        let tri = mesh.indices.get(base..base + 3)?;
+        let mut p = [0.0f32; 3];
+        for (k, &vi) in tri.iter().enumerate() {
+            let v = mesh.positions.get(vi as usize)?;
+            for c in 0..3 {
+                p[c] += v[c] * bary[k];
+            }
+        }
+        let m = scene::geo_world_matrix(&self.doc, &self.registry, anchor.node);
+        let world = m.transform_point(cgmath::Point3::new(p[0], p[1], p[2]));
+        Some([world.x, world.y, world.z])
+    }
+
+    /// Every root geo container's displayed geometry with its world matrix,
+    /// ascending geo id (the renderer's `SceneObjects` draw order). Feeds
+    /// the host-side normals/bounds visualization aggregation.
+    #[must_use]
+    pub fn display_geometries(
+        &self,
+    ) -> Vec<(
+        NodeId,
+        std::sync::Arc<solarxy_kernel::GeometrySet>,
+        [[f32; 4]; 4],
+    )> {
+        let Ok(root) = self.doc.graph(GraphContext::Root) else {
+            return Vec::new();
+        };
+        let mut out: Vec<_> = root
+            .nodes()
+            .filter(|n| n.type_id == "geo")
+            .filter_map(|n| {
+                let set = scene::display_output(&self.doc, &self.cook, n.id)?;
+                let m = scene::geo_world_matrix(&self.doc, &self.registry, n.id);
+                Some((n.id, std::sync::Arc::clone(set), m.into()))
+            })
+            .collect();
+        out.sort_by_key(|(id, _, _)| *id);
+        out
+    }
+
     // Clipboard.
 
     /// Captures a fragment of the given nodes for the clipboard (the
@@ -1102,8 +1450,11 @@ impl Engine {
         let Some(txn) = self.undo.pop_undo() else {
             return Ok(self.batch(Vec::new()));
         };
-        let (redo, events) = self.apply_transaction(txn)?;
+        let (redo, mut events) = self.apply_transaction(txn)?;
         self.undo.push_redo(redo);
+        // Undoing a re-anchor (or any display-affecting edit) must flip the
+        // stale flags in the same batch.
+        self.refresh_review_staleness(&mut events);
         Ok(self.batch(events))
     }
 
@@ -1112,8 +1463,9 @@ impl Engine {
         let Some(txn) = self.undo.pop_redo() else {
             return Ok(self.batch(Vec::new()));
         };
-        let (undo, events) = self.apply_transaction(txn)?;
+        let (undo, mut events) = self.apply_transaction(txn)?;
         self.undo.push_undo(undo);
+        self.refresh_review_staleness(&mut events);
         Ok(self.batch(events))
     }
 
@@ -1381,6 +1733,8 @@ impl Engine {
         if remaining == 0 {
             self.manual_cook_requested = false;
         }
+        // Recooked outputs may no longer match anchored geometry hashes.
+        self.refresh_review_staleness(&mut events);
         events
     }
 
@@ -1520,6 +1874,8 @@ impl Engine {
         for (node, validation) in report.validation_changed {
             push_validation_events(&mut events, node, validation.as_deref());
         }
+        // An async job commit is a geometry change like any cook.
+        self.refresh_review_staleness(&mut events);
         events
     }
 
@@ -1538,6 +1894,14 @@ impl Engine {
     #[must_use]
     pub fn pick(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<NodeId> {
         scene::pick_node(&self.doc, &self.registry, &self.cook, origin, direction)
+    }
+
+    /// [`Engine::pick`] with the full hit detail (mesh, face, barycentric,
+    /// world point): the anchor source for creating and re-placing review
+    /// annotations.
+    #[must_use]
+    pub fn pick_detailed(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<PickDetail> {
+        scene::pick_node_detailed(&self.doc, &self.registry, &self.cook, origin, direction)
     }
 
     /// Serializes the whole document plus the editor cook mode (the autosave
@@ -1581,6 +1945,10 @@ impl Engine {
         self.previews.clear();
         self.pending_jobs.clear();
         self.scene = SceneDelta::default();
+        // Fresh document: staleness re-derives after the first cook (until
+        // then nothing is displayed, so no annotation is flagged).
+        self.review_stale.clear();
+        self.review_hash_cache.clear();
         self.revision += 1;
         self.batch(vec![EngineEvent::DocumentReplaced])
     }
@@ -1588,7 +1956,7 @@ impl Engine {
     /// The full UI mirror (recovery after desync / structural undo).
     #[must_use]
     pub fn snapshot(&self) -> DocumentSnapshot {
-        DocumentSnapshot::capture(&self.doc)
+        DocumentSnapshot::capture(&self.doc, &self.review_stale)
     }
 
     /// The static registry snapshot (fetched once at startup; drives the

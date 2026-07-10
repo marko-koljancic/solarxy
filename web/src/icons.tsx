@@ -24,10 +24,11 @@ function Svg({ size = 14, children }: IconProps & { children: React.ReactNode })
 }
 
 export function IconUndo(p: IconProps) {
+  // A straight left arrow with a tail (the conventional editor undo).
   return (
     <Svg {...p}>
-      <path d="M6.5 3.5 3 7l3.5 3.5" />
-      <path d="M3 7h6a4 4 0 0 1 0 8H7" />
+      <path d="M13.5 8H3" />
+      <path d="M7 3.5 2.5 8 7 12.5" />
     </Svg>
   );
 }
@@ -35,8 +36,8 @@ export function IconUndo(p: IconProps) {
 export function IconRedo(p: IconProps) {
   return (
     <Svg {...p}>
-      <path d="M9.5 3.5 13 7l-3.5 3.5" />
-      <path d="M13 7H7a4 4 0 0 0 0 8h2" />
+      <path d="M2.5 8H13" />
+      <path d="M9 3.5 13.5 8 9 12.5" />
     </Svg>
   );
 }
@@ -77,6 +78,44 @@ export function IconMaximize(p: IconProps) {
   return (
     <Svg {...p}>
       <path d="M6 3H3v3M10 3h3v3M6 13H3v-3M10 13h3v-3" />
+    </Svg>
+  );
+}
+
+export function IconEye(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+    </Svg>
+  );
+}
+
+export function IconBypass(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M4.2 11.8 11.8 4.2" />
+    </Svg>
+  );
+}
+
+export function IconTrash(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 4.5h10" />
+      <path d="M6.5 4.5V3h3v1.5" />
+      <path d="M4.5 4.5 5.2 13h5.6l.7-8.5" />
+    </Svg>
+  );
+}
+
+export function IconDive(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <path d="M8 5.5v5" />
+      <path d="M5.8 8.3 8 10.5l2.2-2.2" />
     </Svg>
   );
 }

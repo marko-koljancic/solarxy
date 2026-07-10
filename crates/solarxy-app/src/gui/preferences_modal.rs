@@ -467,7 +467,7 @@ fn paint_bg_swatch(ui: &egui::Ui, rect: egui::Rect, custom: &CustomBackground) {
     ui.painter().rect_stroke(
         rect,
         0.0,
-        egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(80)),
         egui::StrokeKind::Inside,
     );
 }

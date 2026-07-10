@@ -6,6 +6,7 @@
 // AddNode. Opens on the "+" button or Tab.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Popover, renderDoc } from "./Popover";
 import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
@@ -155,17 +156,17 @@ export function NodePalette() {
                   <div className="palette-empty">No nodes for this context.</div>
                 )}
                 {visible.map((n, i) => (
-                  <button
-                    key={n.typeId}
-                    data-index={i}
-                    className={`palette-item${i === cursor ? " cursor" : ""}`}
-                    onClick={() => add(n.typeId)}
-                    onMouseEnter={() => setCursor(i)}
-                    title={n.doc}
-                  >
-                    <span>{n.displayName}</span>
-                    <span className="palette-item-cat">{n.category}</span>
-                  </button>
+                  <Popover key={n.typeId} title={n.displayName} content={renderDoc(n.doc)}>
+                    <button
+                      data-index={i}
+                      className={`palette-item${i === cursor ? " cursor" : ""}`}
+                      onClick={() => add(n.typeId)}
+                      onMouseEnter={() => setCursor(i)}
+                    >
+                      <span>{n.displayName}</span>
+                      <span className="palette-item-cat">{n.category}</span>
+                    </button>
+                  </Popover>
                 ))}
               </div>
             </div>

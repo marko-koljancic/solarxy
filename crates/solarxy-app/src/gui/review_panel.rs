@@ -43,7 +43,7 @@ fn draw_category_chip(
         (
             egui::Color32::TRANSPARENT,
             color,
-            egui::Stroke::new(1.0, color),
+            egui::Stroke::new(1.0_f32, color),
         )
     };
     let btn = egui::Button::new(egui::RichText::new(text).color(text_color).strong())
@@ -588,7 +588,7 @@ fn draw_annotation_row(
             font_id: egui::FontId::proportional(13.0),
             color: preview_color,
             strikethrough: if ann.resolved {
-                egui::Stroke::new(1.0, theme.muted)
+                egui::Stroke::new(1.0_f32, theme.muted)
             } else {
                 egui::Stroke::NONE
             },

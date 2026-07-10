@@ -8,10 +8,18 @@
 // badges, and
 // bypass hatching.
 
+import { useEffect, useRef } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Popover, renderDoc } from "../components/Popover";
 import { descriptorFor, DATA_TYPE_COLOR, dataTypeShape } from "../registry/datatypes";
+import { assetDisplayName } from "../engine/session";
 import type { NodeMirror, PortSnapshot } from "../engine/types";
 import { useMirror } from "../store/mirror";
+import { useRadial } from "../store/radial";
+import { nodeInfoLine } from "./infoLine";
+
+/** Hover dwell before the radial opens (drag-safe dead time). */
+const RADIAL_DELAY_MS = 400;
 
 export interface FlowNodeData {
   node: NodeMirror;
@@ -40,7 +48,16 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const node = data.node;
   const registry = useMirror((s) => s.registry);
   const cook = useMirror((s) => s.cook[node.id]);
-  const stale = useMirror((s) => s.cookMode === "manual" && s.stale.includes(node.id));
+  const cookMode = useMirror((s) => s.cookMode);
+  const inStale = useMirror((s) => s.stale.includes(node.id));
+  const ctx = useMirror((s) => s.current);
+  // Empty-geo indicator: a container whose subflow has no nodes or no
+  // display flag produces nothing in the scene; render it hollow.
+  const subflow = useMirror((s) => s.contexts[`sub:${node.id}`]);
+  // Manual mode: the amber corner tag (spec sec. 8 header-count pattern).
+  // Auto mode: a subtle pending tint while the budgeted cook catches up.
+  const stale = cookMode === "manual" && inStale;
+  const pending = cookMode === "auto" && inStale;
   const validation = cook?.validation;
 
   const desc = descriptorFor(registry, node.typeId);
@@ -48,92 +65,147 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const inputs = desc?.inputs ?? [];
   const outputs = desc?.outputs ?? [];
   const isContainer = desc?.category === "container";
-  const isLight = desc?.category === "lights";
   const isDisplay = data.isDisplay;
 
   const status = cook?.status;
+  // An async job parks the node as "pending" while the worker parses --
+  // that IS the loading state (large imports), so it lights the same
+  // spinner ring as "cooking".
+  const loading = status?.state === "cooking" || status?.state === "pending";
   const badge =
     status?.state === "error"
       ? "var(--error-badge)"
-      : status?.state === "cooking"
+      : loading
         ? "var(--cooking-color)"
         : null;
 
   const shapeClass = isContainer ? "square" : "pill";
-  const fillClass = isLight ? " light-node" : "";
+  // Houdini-inspired pastel fill per registry category (a pure snapshot
+  // interpreter: new categories fall back to the neutral pill fill).
+  const fillClass = desc ? ` cat-${desc.category}` : "";
+  const emptyGeo =
+    isContainer && (!subflow || subflow.nodes.length === 0 || subflow.activeOutput === null);
+  const infoLine = nodeInfoLine(desc, node, assetDisplayName);
+
+  // Hover radial orchestration: a 400 ms dwell with no pointer buttons
+  // down opens the ring; pressing anything or leaving cancels the timer
+  // (the open ring closes itself on strays and pointerdowns).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<number | null>(null);
+  const cancelRadialTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  useEffect(() => cancelRadialTimer, []);
+  const armRadial = (e: React.PointerEvent) => {
+    if (e.buttons !== 0) return;
+    cancelRadialTimer();
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      useRadial.getState().openRadial({
+        nodeId: node.id,
+        ctx,
+        cx: rect.left + rect.width / 2,
+        cy: rect.top + rect.height / 2,
+        radius: Math.min(Math.max(rect.width, rect.height) / 2, 70),
+        isContainer,
+        bypassed: node.bypassed,
+        isDisplay,
+        bypassable: desc?.bypass.mode !== "notBypassable",
+      });
+    }, RADIAL_DELAY_MS);
+  };
 
   return (
     <div
-      className={`flow-node ${shapeClass}${fillClass}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}`}
-      title={desc?.doc}
+      ref={rootRef}
+      className={`flow-node ${shapeClass}${fillClass}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${emptyGeo ? " empty-geo" : ""}`}
+      onPointerEnter={armRadial}
+      onPointerDown={cancelRadialTimer}
+      onPointerLeave={cancelRadialTimer}
     >
       {isDisplay && <span className="display-dot" title="display flag" />}
       {stale && <span className="stale-tag" title="stale (edit not yet cooked)" />}
       {status?.state === "error" && (
-        <span className="err-tag" title={status.message}>
-          !
-        </span>
+        <Popover title="Cook error" content={<p>{status.message}</p>}>
+          <span className="err-tag">!</span>
+        </Popover>
       )}
       {validation && (validation.errors > 0 || validation.warnings > 0) && (
-        <span
-          className={`val-tag${validation.errors > 0 ? " val-err" : ""}`}
-          title={`validation: ${validation.errors} error(s), ${validation.warnings} warning(s)`}
+        <Popover
+          title="Validation"
+          content={
+            <p>
+              {validation.errors} error(s), {validation.warnings} warning(s). Select the node to
+              read the report in the parameter panel.
+            </p>
+          }
         >
-          {validation.errors > 0 ? validation.errors : validation.warnings}
-        </span>
+          <span className={`val-tag${validation.errors > 0 ? " val-err" : ""}`}>
+            {validation.errors > 0 ? validation.errors : validation.warnings}
+          </span>
+        </Popover>
       )}
 
       {inputs.map((p: PortSnapshot, i: number) => (
-        <Handle
+        <Popover
           key={`in-${p.key}`}
-          type="target"
-          position={Position.Top}
-          id={p.key}
-          style={{
-            ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType)),
-            left: handleLeft(i, inputs.length),
-          }}
           title={`${p.label} (${p.dataType}${p.variadic ? ", variadic" : ""})`}
-          isConnectable
-        />
+          content={p.doc ? renderDoc(p.doc) : <p>Input port.</p>}
+        >
+          <Handle
+            type="target"
+            position={Position.Top}
+            id={p.key}
+            style={{
+              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType)),
+              left: handleLeft(i, inputs.length),
+            }}
+            isConnectable
+          />
+        </Popover>
       ))}
 
       <div className="flow-node-body">
         {badge && <span className="cook-badge" style={{ background: badge }} />}
-        {isContainer && (
-          <button
-            className="enter-subflow"
-            title="Enter subflow (or double-click)"
-            onClick={(e) => {
-              e.stopPropagation();
-              useMirror.getState().setCurrent({ subflow: node.id });
-            }}
-          >
-            ↳
-          </button>
-        )}
+
       </div>
 
       <div className="flow-node-label">
-        <span className="flow-node-title">{title}</span>
+        <Popover title={title} content={renderDoc(desc?.doc ?? "")}>
+          <span className="flow-node-title">{title}</span>
+        </Popover>
+        {infoLine && <span className="flow-node-info">{infoLine}</span>}
+        {emptyGeo && <span className="flow-node-sub">empty</span>}
         {status?.state === "ok" && status.ms > 0 && (
           <span className="flow-node-sub">{status.ms.toFixed(1)} ms</span>
+        )}
+        {status?.state === "pending" && (
+          <span className="flow-node-sub">loading geometry...</span>
         )}
       </div>
 
       {outputs.map((p: PortSnapshot, i: number) => (
-        <Handle
+        <Popover
           key={`out-${p.key}`}
-          type="source"
-          position={Position.Bottom}
-          id={p.key}
-          style={{
-            ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType)),
-            left: handleLeft(i, outputs.length),
-          }}
           title={`${p.label} (${p.dataType})`}
-          isConnectable
-        />
+          content={p.doc ? renderDoc(p.doc) : <p>Output port.</p>}
+        >
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id={p.key}
+            style={{
+              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType)),
+              left: handleLeft(i, outputs.length),
+            }}
+            isConnectable
+          />
+        </Popover>
       ))}
     </div>
   );

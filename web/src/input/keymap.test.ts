@@ -2,7 +2,7 @@
 // stay unambiguous (no duplicate keys within a context) and documented.
 
 import { describe, expect, it } from "vitest";
-import { KEYMAP, lookupBinding } from "./keymap";
+import { formatKeys, KEY_GROUPS, KEYMAP, lookupBinding } from "./keymap";
 
 describe("keymap table", () => {
   it("has no duplicate (context, keys) pairs", () => {
@@ -36,5 +36,29 @@ describe("keymap table", () => {
     expect(lookupBinding("mod+z", "canvas")?.id).toBe("undo");
     expect(lookupBinding("mod+z", "global")?.id).toBe("undo");
     expect(lookupBinding("q", "canvas")).toBeNull();
+  });
+
+  it("assigns every binding to a known shortcuts-modal group", () => {
+    for (const b of KEYMAP) {
+      expect(KEY_GROUPS.includes(b.group), `${b.id} group '${b.group}'`).toBe(true);
+    }
+  });
+
+  it("folds the shift that produces '?' so the lookup matches", () => {
+    expect(lookupBinding("shift+?", "global")?.id).toBe("shortcuts");
+    expect(lookupBinding("?", "global")?.id).toBe("shortcuts");
+  });
+
+  it("formats keys for display (platform modifier, symbols, uppercase)", () => {
+    // The platform modifier follows the test host's navigator.platform.
+    const mac =
+      typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
+    expect(formatKeys("mod+shift+z")).toEqual(
+      mac ? ["⌘", "⇧", "Z"] : ["Ctrl", "Shift", "Z"],
+    );
+    expect(formatKeys("mod+enter")).toEqual(mac ? ["⌘", "⏎"] : ["Ctrl", "⏎"]);
+    expect(formatKeys("escape")).toEqual(["Esc"]);
+    expect(formatKeys("f4")).toEqual(["F4"]);
+    expect(formatKeys("?")).toEqual(["?"]);
   });
 });

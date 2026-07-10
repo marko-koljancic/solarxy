@@ -1,27 +1,15 @@
-// The ui store's pure pieces: theme resolution and layout clamps.
+// The ui store's pure pieces: layout clamps (theme resolution moved to the
+// preferences store; see prefs.test.ts).
 
 import { describe, expect, it } from "vitest";
 import {
   clampDrawer,
   clampSplit,
-  DRAWER_MAX_PX,
+  drawerMaxPx,
   DRAWER_MIN_PX,
-  resolveTheme,
   SPLIT_MAX_PCT,
   SPLIT_MIN_PCT,
 } from "./ui";
-
-describe("resolveTheme", () => {
-  it("passes explicit choices through", () => {
-    expect(resolveTheme("dark", false)).toBe("dark");
-    expect(resolveTheme("light", true)).toBe("light");
-  });
-
-  it("resolves system from the media query", () => {
-    expect(resolveTheme("system", true)).toBe("dark");
-    expect(resolveTheme("system", false)).toBe("light");
-  });
-});
 
 describe("layout clamps", () => {
   it("clamps the split to 20-80 percent", () => {
@@ -30,9 +18,9 @@ describe("layout clamps", () => {
     expect(clampSplit(50)).toBe(50);
   });
 
-  it("clamps the drawer to 100-600 px", () => {
+  it("clamps the drawer between the floor and ~85 percent of the window", () => {
     expect(clampDrawer(10)).toBe(DRAWER_MIN_PX);
-    expect(clampDrawer(9999)).toBe(DRAWER_MAX_PX);
+    expect(clampDrawer(99999)).toBe(drawerMaxPx());
     expect(clampDrawer(280)).toBe(280);
   });
 });

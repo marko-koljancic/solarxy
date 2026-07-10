@@ -274,7 +274,7 @@ fn draw_material_row(
     ui.painter().circle_stroke(
         swatch_center,
         swatch_radius,
-        egui::Stroke::new(1.0, theme.border),
+        egui::Stroke::new(1.0_f32, theme.border),
     );
 
     // Texture-slot presence indicator, hard right.
@@ -292,7 +292,7 @@ fn draw_material_row(
             ui.painter().rect_stroke(
                 square,
                 0.0,
-                egui::Stroke::new(1.0, theme.border),
+                egui::Stroke::new(1.0_f32, theme.border),
                 egui::StrokeKind::Inside,
             );
         }
@@ -417,7 +417,7 @@ fn draw_detail_header(
         ui.painter().rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(1.0, theme.border),
+            egui::Stroke::new(1.0_f32, theme.border),
             egui::StrokeKind::Inside,
         );
         ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).strong()).truncate());
@@ -484,12 +484,12 @@ fn draw_thumbnail_placeholder(ui: &mut egui::Ui, size: egui::Vec2, theme: &Theme
     ui.painter().rect_stroke(
         rect,
         0.0,
-        egui::Stroke::new(1.0, theme.border),
+        egui::Stroke::new(1.0_f32, theme.border),
         egui::StrokeKind::Inside,
     );
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_top()],
-        egui::Stroke::new(1.0, theme.border),
+        egui::Stroke::new(1.0_f32, theme.border),
     );
 }
 

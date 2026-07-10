@@ -87,19 +87,29 @@ impl GraphMirror {
     }
 }
 
+/// One annotation as the UI mirror sees it: the document annotation plus
+/// the engine's runtime `needs_reanchor` flag (derived, never persisted).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationSnapshot {
+    #[serde(flatten)]
+    pub annotation: crate::review::Annotation,
+    pub needs_reanchor: bool,
+}
+
 /// The full UI mirror: the root graph plus every subflow (keyed by owning
 /// geo-node id, since JSON object keys are strings) plus the review
-/// annotations.
+/// annotations with their runtime staleness.
 #[derive(Debug, Clone, Serialize)]
 pub struct DocumentSnapshot {
     pub root: GraphMirror,
     pub subflows: BTreeMap<String, GraphMirror>,
-    pub annotations: Vec<crate::review::Annotation>,
+    pub annotations: Vec<AnnotationSnapshot>,
 }
 
 impl DocumentSnapshot {
     #[must_use]
-    pub fn capture(doc: &Document) -> Self {
+    pub fn capture(doc: &Document, stale: &BTreeMap<crate::review::AnnotationId, bool>) -> Self {
         let root =
             GraphMirror::from_graph(doc.graph(GraphContext::Root).expect("root always exists"));
         let subflows = doc
@@ -110,7 +120,14 @@ impl DocumentSnapshot {
                     .map(|g| (owner.0.to_string(), GraphMirror::from_graph(g)))
             })
             .collect();
-        let annotations = doc.review().iter().cloned().collect();
+        let annotations = doc
+            .review()
+            .iter()
+            .map(|a| AnnotationSnapshot {
+                needs_reanchor: stale.get(&a.id).copied().unwrap_or(false),
+                annotation: a.clone(),
+            })
+            .collect();
         Self {
             root,
             subflows,

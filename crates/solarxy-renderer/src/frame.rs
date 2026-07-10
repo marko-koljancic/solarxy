@@ -1491,12 +1491,15 @@ impl Renderer {
         if pds.normals_mode == NormalsMode::Off {
             return;
         }
-        // The normal-arrow segments are parallel to the primary object's
-        // meshes (the loaded model on desktop) — its visibility flags
-        // gate the per-mesh draws.
-        let Some(primary) = objects.first() else {
+        if objects.is_empty() {
             return;
-        };
+        }
+        // The normal-arrow segments are parallel to the drawn objects'
+        // meshes FLATTENED in draw order (desktop passes one object, so
+        // this is exactly its mesh list; the web host aggregates every
+        // displayed object in the same order). Visibility flags gate the
+        // per-mesh draws.
+        let flat_meshes = || objects.iter().flat_map(|o| o.model.meshes.iter());
         pass.set_pipeline(&self.pipelines.overlay.normals);
         pass.set_bind_group(0, cam_bg, &[]);
         if matches!(
@@ -1504,16 +1507,19 @@ impl Renderer {
             NormalsMode::Face | NormalsMode::FaceAndVertex
         ) && env.vis.face_normals_count > 0
         {
+            // Segments zip against the flattened meshes; fewer segments
+            // than meshes is legitimate (desktop builds vis from the
+            // primary model while extra objects draw), but MORE segments
+            // than meshes means the aggregate desynced from the scene.
+            debug_assert!(
+                env.vis.face_normals_segments.len() <= flat_meshes().count(),
+                "normals segments exceed the flattened meshes"
+            );
             pass.set_bind_group(1, &env.vis.face_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, env.vis.face_normals_buf.slice(..));
             // One draw per visible mesh — a hidden mesh's normals are
             // skipped.
-            for (mesh, seg) in primary
-                .model
-                .meshes
-                .iter()
-                .zip(&env.vis.face_normals_segments)
-            {
+            for (mesh, seg) in flat_meshes().zip(&env.vis.face_normals_segments) {
                 if mesh.visible && !seg.is_empty() {
                     pass.draw(seg.clone(), 0..1);
                 }
@@ -1526,12 +1532,7 @@ impl Renderer {
         {
             pass.set_bind_group(1, &env.vis.vertex_normals_params_bind_group, &[]);
             pass.set_vertex_buffer(0, env.vis.vertex_normals_buf.slice(..));
-            for (mesh, seg) in primary
-                .model
-                .meshes
-                .iter()
-                .zip(&env.vis.vertex_normals_segments)
-            {
+            for (mesh, seg) in flat_meshes().zip(&env.vis.vertex_normals_segments) {
                 if mesh.visible && !seg.is_empty() {
                     pass.draw(seg.clone(), 0..1);
                 }

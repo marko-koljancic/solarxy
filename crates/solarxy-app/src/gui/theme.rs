@@ -139,7 +139,7 @@ pub(super) fn apply_theme(ctx: &egui::Context, theme: &Theme) {
     visuals.override_text_color = Some(theme.fg);
     visuals.hyperlink_color = theme.accent;
     visuals.selection.bg_fill = theme.selection;
-    visuals.selection.stroke = egui::Stroke::new(1.0, theme.accent);
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, theme.accent);
 
     let zero = egui::CornerRadius::ZERO;
     visuals.window_corner_radius = zero;
@@ -147,32 +147,32 @@ pub(super) fn apply_theme(ctx: &egui::Context, theme: &Theme) {
 
     visuals.widgets.noninteractive.bg_fill = theme.bg;
     visuals.widgets.noninteractive.weak_bg_fill = theme.bg;
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, theme.widget_bg);
-    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, theme.widget_bg);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     visuals.widgets.noninteractive.corner_radius = zero;
 
     visuals.widgets.inactive.bg_fill = theme.widget_bg;
     visuals.widgets.inactive.weak_bg_fill = theme.widget_bg;
     visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     visuals.widgets.inactive.corner_radius = zero;
 
     visuals.widgets.hovered.bg_fill = theme.widget_hover;
     visuals.widgets.hovered.weak_bg_fill = theme.widget_hover;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme.accent);
-    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, theme.accent);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     visuals.widgets.hovered.corner_radius = zero;
 
     visuals.widgets.active.bg_fill = theme.selection;
     visuals.widgets.active.weak_bg_fill = theme.selection;
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, theme.accent);
-    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, theme.accent);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     visuals.widgets.active.corner_radius = zero;
 
     visuals.widgets.open.bg_fill = theme.widget_hover;
     visuals.widgets.open.weak_bg_fill = theme.widget_hover;
-    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, theme.widget_bg);
-    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, theme.widget_bg);
+    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     visuals.widgets.open.corner_radius = zero;
 
     let mut style = egui::Style {

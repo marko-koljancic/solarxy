@@ -57,7 +57,7 @@ pub fn build_scene_delta(doc: &Document, registry: &Registry, cook: &CookEngine)
 }
 
 /// Whether a type id is one of the six light nodes.
-fn is_light(type_id: &str) -> bool {
+pub(crate) fn is_light(type_id: &str) -> bool {
     matches!(
         type_id,
         "point_light"
@@ -67,6 +67,23 @@ fn is_light(type_id: &str) -> bool {
             | "hemisphere_light"
             | "rect_area_light"
     )
+}
+
+/// The committed cooked geometry a `geo` container currently displays: its
+/// subflow's active output's `geometry`. Shared by scene lowering, review
+/// staleness/markers, and the visualization aggregation so they can never
+/// disagree about what "the displayed geometry" means.
+pub(crate) fn display_output<'a>(
+    doc: &Document,
+    cook: &'a CookEngine,
+    geo: NodeId,
+) -> Option<&'a std::sync::Arc<solarxy_kernel::GeometrySet>> {
+    let subflow = doc.graph(GraphContext::Subflow(geo)).ok()?;
+    let display = subflow.active_output?;
+    match cook.outputs(display)?.get("geometry")? {
+        Value::Geometry(set) => Some(set),
+        _ => None,
+    }
 }
 
 /// Emits the `UpsertGeometry` + `SetValidation` + `SetTransform` for one
@@ -86,9 +103,7 @@ fn emit_geo(
         return;
     };
     // The displayed node's cooked geometry.
-    if let Some(outputs) = cook.outputs(display)
-        && let Some(Value::Geometry(set)) = outputs.get("geometry")
-    {
+    if let Some(set) = display_output(doc, cook, geo) {
         delta.push(SceneOp::UpsertGeometry {
             id: object_id,
             geometry: std::sync::Arc::new(set.to_cooked()),
@@ -227,6 +242,69 @@ pub fn pick_node(
         }
     }
     best.map(|(_, node)| node)
+}
+
+/// [`pick_node`] with the full hit detail the review workflow anchors to:
+/// the mesh index within the displayed set, the face, the barycentric
+/// coordinate, and the world-space hit point. The per-mesh raycast means
+/// `RaycastHit::mesh_index` is always 0 relative to its one-mesh slice, so
+/// the enumerate index is tracked here instead.
+#[must_use]
+pub(crate) fn pick_node_detailed(
+    doc: &Document,
+    registry: &Registry,
+    cook: &CookEngine,
+    origin: [f32; 3],
+    direction: [f32; 3],
+) -> Option<super::PickDetail> {
+    let dir = Vector3::from(direction);
+    if dir.magnitude2() <= 1e-12 {
+        return None;
+    }
+    let ray = Ray {
+        origin: Point3::from(origin),
+        direction: dir.normalize(),
+    };
+    let root = doc.graph(GraphContext::Root).ok()?;
+    let mut best: Option<super::PickDetail> = None;
+    for node in root.nodes() {
+        if node.type_id != "geo" {
+            continue;
+        }
+        let geo = node.id;
+        let Some(set) = display_output(doc, cook, geo) else {
+            continue;
+        };
+        let matrix = geo_world_matrix(doc, registry, geo);
+        for (mesh_index, mesh) in set.meshes.iter().enumerate() {
+            let world: Vec<[f32; 3]> = mesh
+                .positions
+                .iter()
+                .map(|p| {
+                    let tp = matrix.transform_point(Point3::from(*p));
+                    [tp.x, tp.y, tp.z]
+                })
+                .collect();
+            let view = MeshView {
+                positions: &world,
+                indices: mesh.indices.as_slice(),
+                bounds: compute_bounds(&world),
+            };
+            if let Some(hit) = raycast_meshes(&ray, std::slice::from_ref(&view))
+                && best.as_ref().is_none_or(|b| hit.distance < b.distance)
+            {
+                best = Some(super::PickDetail {
+                    node: geo,
+                    mesh: u32::try_from(mesh_index).unwrap_or(u32::MAX),
+                    face: hit.face_index,
+                    barycentric: hit.barycentric,
+                    world_pos: [hit.world_pos.x, hit.world_pos.y, hit.world_pos.z],
+                    distance: hit.distance,
+                });
+            }
+        }
+    }
+    best
 }
 
 /// Resolves a light node's params into a `LightDef` (the resolver already

@@ -3,7 +3,7 @@
 // Commands; the mirror updates and re-seeds the local RF state. React never
 // owns document truth - it is a display mirror.
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Background,
   Controls,
@@ -17,17 +17,21 @@ import {
   type Node,
   type NodeChange,
   type EdgeChange,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { dispatch } from "../engine/session";
 import type { GraphContext, GraphMirror, RegistrySnapshot } from "../engine/types";
-import { connectionLegal, descriptorFor } from "../registry/datatypes";
+import { portDataType, connectionLegal, descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { pushToast } from "../store/toasts";
+import { usePrefs } from "../store/prefs";
 import { useUi } from "../store/ui";
+import { useViewState } from "../store/viewState";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
+import { NoteNode } from "./NoteNode";
 
-const NODE_TYPES = { solarxy: FlowNode };
+const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
 /** Maps a mirror graph to React Flow nodes/edges, styling each edge by its
  * coercion kind (plain for same/lossless, warning for lossy). */
@@ -37,7 +41,9 @@ function toRf(
 ): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
   const nodes = graph.nodes.map((n) => ({
     id: String(n.id),
-    type: "solarxy",
+    // The note node is the one bespoke component (on-canvas sticky);
+    // everything else renders through the generic registry interpreter.
+    type: n.typeId === "note" ? "note" : "solarxy",
     position: { x: n.position[0], y: n.position[1] },
     selected: graph.selection.includes(n.id),
     data: { node: n, isDisplay: graph.activeOutput === n.id },
@@ -45,11 +51,18 @@ function toRf(
   const edges = graph.edges.map((e) => {
     const from = graph.nodes.find((n) => n.id === e.from);
     const to = graph.nodes.find((n) => n.id === e.to);
-    let cls = "";
+    // Houdini-style typed wires: the stroke carries the SOURCE port's
+    // data-type color (the same palette as the handles); a lossy coercion
+    // keeps its dashed overlay on top of the type color.
+    const classes: string[] = [];
+    if (from) {
+      const dt = portDataType(registry, from.typeId, e.fromPort, "output");
+      if (dt) classes.push(`edge-type-${dt}`);
+    }
     if (from && to) {
       const { kind } = connectionLegal(registry, from.typeId, e.fromPort, to.typeId, e.toPort);
-      if (kind === "lossy") cls = "edge-lossy";
-      else if (kind === "lossless") cls = "edge-coerced";
+      if (kind === "lossy") classes.push("edge-lossy");
+      else if (kind === "lossless") classes.push("edge-coerced");
     }
     return {
       id: String(e.id),
@@ -58,7 +71,8 @@ function toRf(
       sourceHandle: e.fromPort,
       targetHandle: e.toPort,
       type: "default",
-      className: cls,
+      className: classes.join(" "),
+      reconnectable: true,
     };
   });
   return { nodes, edges };
@@ -68,7 +82,19 @@ export function NodeCanvas() {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
-  const resolvedTheme = useUi((s) => s.resolvedTheme);
+  const resolvedTheme = usePrefs((s) => s.resolvedTheme);
+  const showFlowGrid = useUi((s) => s.showFlowGrid);
+  const showMinimap = useUi((s) => s.showMinimap);
+  const showFlowControls = useUi((s) => s.showFlowControls);
+  const { fitView } = useReactFlow();
+
+  // Auto-layout completion fits the view (the layout module emits this
+  // after its moveNodes command lands).
+  useEffect(() => {
+    const onFit = () => void fitView({ padding: 0.2, duration: 300 });
+    window.addEventListener("solarxy:fitView", onFit);
+    return () => window.removeEventListener("solarxy:fitView", onFit);
+  }, [fitView]);
 
   const seed = useMemo(() => toRf(graph, registry), [graph, registry]);
   const [nodes, setNodes, onNodesChange] = useNodesState(seed.nodes);
@@ -139,15 +165,70 @@ export function NodeCanvas() {
     [ctx, setEdges, graph, registry],
   );
 
-  // A drop on an incompatible handle rejects with a toast (the wire also
-  // snaps back, React Flow's built-in visual feedback).
-  const onConnectEnd = useCallback(
-    (_e: MouseEvent | TouchEvent, state: { isValid: boolean | null; toHandle: { nodeId?: string } | null }) => {
-      if (state.toHandle && state.isValid === false) {
-        pushToast("Incompatible connection rejected", "error");
-      }
+  // C3: dragging an existing edge's endpoint re-routes it (one undo step:
+  // disconnect + connect inside a transaction); releasing it over empty
+  // space or an invalid handle DISCONNECTS (Houdini-style drop-to-void).
+  const reconnectedRef = useRef(false);
+
+  const onReconnect = useCallback(
+    (oldEdge: Edge, conn: Connection) => {
+      if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
+      reconnectedRef.current = true;
+      dispatch({ type: "beginTransaction", label: "reconnect" });
+      dispatch({ type: "disconnect", ctx, edge: Number(oldEdge.id) });
+      dispatch({
+        type: "connect",
+        ctx,
+        from: { node: Number(conn.source), port: conn.sourceHandle },
+        to: { node: Number(conn.target), port: conn.targetHandle },
+      });
+      dispatch({ type: "endTransaction" });
     },
-    [],
+    [ctx],
+  );
+
+  const onReconnectStart = useCallback(() => {
+    reconnectedRef.current = false;
+  }, []);
+
+  const onReconnectEnd = useCallback(
+    (_e: MouseEvent | TouchEvent, edge: Edge) => {
+      if (reconnectedRef.current) return;
+      // No valid re-target happened: the drag ended on empty space (or an
+      // illegal handle) -- disconnect the wire.
+      dispatch({ type: "disconnect", ctx, edge: Number(edge.id) });
+      pushToast("Disconnected", "info");
+    },
+    [ctx],
+  );
+
+  // A drop on an incompatible handle rejects with a toast NAMING BOTH
+  // TYPES (UX spec section 6: "Cannot connect Geometry to Float"); the
+  // wire also snaps back, React Flow's built-in visual feedback.
+  const onConnectEnd = useCallback(
+    (
+      _e: MouseEvent | TouchEvent,
+      state: {
+        isValid: boolean | null;
+        fromHandle: { nodeId?: string; id?: string | null } | null;
+        toHandle: { nodeId?: string; id?: string | null } | null;
+      },
+    ) => {
+      if (!state.toHandle || state.isValid !== false) return;
+      const typeName = (h: { nodeId?: string; id?: string | null } | null, dir: "output" | "input") => {
+        const node = graph.nodes.find((n) => n.id === Number(h?.nodeId));
+        if (!node || !h?.id) return null;
+        const dt = portDataType(registry, node.typeId, h.id, dir);
+        return dt ? dt[0].toUpperCase() + dt.slice(1) : null;
+      };
+      const from = typeName(state.fromHandle, "output");
+      const to = typeName(state.toHandle, "input");
+      pushToast(
+        from && to ? `Cannot connect ${from} to ${to}` : "Incompatible connection rejected",
+        "error",
+      );
+    },
+    [graph, registry],
   );
 
   // Only allow legal connections (coercion matrix); enforced server-side too.
@@ -185,6 +266,11 @@ export function NodeCanvas() {
   );
 
   return (
+    <div
+      className="flow-canvas-track"
+      onPointerEnter={() => useViewState.getState().setPointerOverCanvas(true)}
+      onPointerLeave={() => useViewState.getState().setPointerOverCanvas(false)}
+    >
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -193,18 +279,31 @@ export function NodeCanvas() {
       onEdgesChange={handleEdgesChange}
       onConnect={onConnect}
       onConnectEnd={onConnectEnd}
+      onReconnect={onReconnect}
+      onReconnectStart={onReconnectStart}
+      onReconnectEnd={onReconnectEnd}
+      edgesReconnectable
       isValidConnection={isValidConnection}
       onNodeDragStop={onNodeDragStop}
       onNodeDoubleClick={onNodeDoubleClick}
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Control"]}
+      zoomOnDoubleClick={false}
       fitView
       proOptions={{ hideAttribution: true }}
       colorMode={resolvedTheme}
     >
-      <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
-      <MiniMap pannable zoomable className="flow-minimap" />
-      <Controls showInteractive={false} />
+      {showFlowGrid && (
+        <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
+      )}
+      {graph.nodes.length === 0 && (
+        <div className="canvas-empty-hint">
+          Press <kbd className="key-chip">Tab</kbd> to add a node - or drag one in from the palette.
+        </div>
+      )}
+      {showMinimap && <MiniMap pannable zoomable className="flow-minimap" />}
+      {showFlowControls && <Controls showInteractive={false} />}
     </ReactFlow>
+    </div>
   );
 }

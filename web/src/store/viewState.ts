@@ -11,6 +11,8 @@ interface ViewStateStore {
   /** Whether the pointer is over the 3D viewport region (the cursor-hover
    * keymap context). */
   pointerOverViewport: boolean;
+  /** Whether the pointer is over the node canvas (the "canvas" context). */
+  pointerOverCanvas: boolean;
   /** The last UV overlap percentage (null before the first run or while a
    * fresh source is computing). */
   uvOverlapPct: number | null;
@@ -22,6 +24,7 @@ interface ViewStateStore {
   setPaneRects: (rects: PaneRectDto[]) => void;
   setActivePaneMirror: (pane: number) => void;
   setPointerOverViewport: (over: boolean) => void;
+  setPointerOverCanvas: (over: boolean) => void;
   setUvOverlap: (pct: number | null, pending: boolean) => void;
   setEnvironment: (env: EnvironmentState) => void;
 }
@@ -29,6 +32,7 @@ interface ViewStateStore {
 export const useViewState = create<ViewStateStore>((set) => ({
   view: null,
   pointerOverViewport: false,
+  pointerOverCanvas: false,
   uvOverlapPct: null,
   uvOverlapPending: false,
   environment: null,
@@ -38,6 +42,7 @@ export const useViewState = create<ViewStateStore>((set) => ({
   setActivePaneMirror: (pane) =>
     set((s) => (s.view ? { view: { ...s.view, activePane: pane } } : s)),
   setPointerOverViewport: (over) => set({ pointerOverViewport: over }),
+  setPointerOverCanvas: (over) => set({ pointerOverCanvas: over }),
   setUvOverlap: (pct, pending) => set({ uvOverlapPct: pct, uvOverlapPending: pending }),
   setEnvironment: (env) => set({ environment: env }),
 }));

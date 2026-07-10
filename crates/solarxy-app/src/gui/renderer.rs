@@ -572,7 +572,7 @@ impl EguiRenderer {
                 stripe_painter.rect_stroke(
                     ctx.content_rect(),
                     egui::CornerRadius::ZERO,
-                    egui::Stroke::new(3.0, stripe),
+                    egui::Stroke::new(3.0_f32, stripe),
                     egui::StrokeKind::Inside,
                 );
 

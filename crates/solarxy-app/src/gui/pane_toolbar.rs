@@ -199,7 +199,7 @@ pub(super) fn draw_pane_toolbars(
             ui.painter().rect_stroke(
                 rect,
                 0.0,
-                egui::Stroke::new(1.0, theme.accent),
+                egui::Stroke::new(1.0_f32, theme.accent),
                 egui::StrokeKind::Inside,
             );
         }
@@ -218,12 +218,12 @@ fn style_frameless_labels(ui: &mut egui::Ui, theme: Theme) {
     w.inactive.bg_fill = transparent;
     w.inactive.weak_bg_fill = transparent;
     w.inactive.bg_stroke = egui::Stroke::NONE;
-    w.inactive.fg_stroke = egui::Stroke::new(1.0, theme.fg);
+    w.inactive.fg_stroke = egui::Stroke::new(1.0_f32, theme.fg);
     for s in [&mut w.hovered, &mut w.active, &mut w.open] {
         s.bg_fill = transparent;
         s.weak_bg_fill = transparent;
         s.bg_stroke = egui::Stroke::NONE;
-        s.fg_stroke = egui::Stroke::new(1.0, theme.accent);
+        s.fg_stroke = egui::Stroke::new(1.0_f32, theme.accent);
     }
 }
 

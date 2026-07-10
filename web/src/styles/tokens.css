@@ -23,6 +23,15 @@ body.dark-theme {
   --geometry-node-border-hover: rgba(255, 255, 255, 0.25);
 
   --light-node-background: #f8e7b0;
+
+  /* Houdini-inspired pastel category fills (Phase 7b). Dark text stays
+   * readable on all of them; the dark theme uses slightly muted values. */
+  --node-cat-primitives: #c9dcf2;
+  --node-cat-modifiers: #c8e8d6;
+  --node-cat-import: #ddd0ee;
+  --node-cat-utility: #eed9c9;
+  --node-cat-lights: var(--light-node-background);
+  --node-cat-container: var(--node-background);
   --light-node-border: rgba(255, 255, 255, 0.15);
   --light-node-border-hover: rgba(255, 255, 255, 0.25);
 
@@ -111,6 +120,13 @@ body.light-theme {
   --geometry-node-border-hover: rgba(0, 0, 0, 0.25);
 
   --light-node-background: #fff7de;
+
+  --node-cat-primitives: #dcebfb;
+  --node-cat-modifiers: #d9f3e4;
+  --node-cat-import: #eae0f7;
+  --node-cat-utility: #f7e6d7;
+  --node-cat-lights: var(--light-node-background);
+  --node-cat-container: var(--node-background);
   --light-node-border: rgba(0, 0, 0, 0.15);
   --light-node-border-hover: rgba(0, 0, 0, 0.25);
 

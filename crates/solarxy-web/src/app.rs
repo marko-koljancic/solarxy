@@ -30,6 +30,7 @@ use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
 };
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, ViewLayout};
+use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
 use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult, ParsedModel};
@@ -41,6 +42,8 @@ use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
+use solarxy_renderer::geometry::build_normals_geometry;
+use solarxy_renderer::model::NormalsGeometry;
 use solarxy_renderer::input::PointerButton;
 use solarxy_renderer::light::LightsUniform;
 use solarxy_renderer::panes::{self, PaneRect};
@@ -153,6 +156,51 @@ struct RectDto {
     height: f32,
 }
 
+/// A detailed pick result (the review anchor source); canvas coordinates in,
+/// mesh/face/barycentric/world out.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickDetailDto {
+    node: f64,
+    mesh: u32,
+    face: u32,
+    barycentric: [f32; 3],
+    world_pos: [f32; 3],
+    distance: f32,
+    pane: usize,
+}
+
+/// One marker pin's screen position (canvas CSS px) in one pane. Deliberately
+/// minimal: category/resolved/stale ride the structure channel
+/// (`review_annotations`), which refreshes on `reviewChanged`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MarkerScreenDto {
+    id: f64,
+    pane: usize,
+    x: f32,
+    y: f32,
+}
+
+/// A screenshot request: capture resolution (physical pixels) plus the
+/// GPU-side overlay toggles (DOM layers like markers never appear in a GPU
+/// capture; compositing them is a JS concern).
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotOptsDto {
+    width: u32,
+    height: u32,
+    overlays: ScreenshotOverlaysDto,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotOverlaysDto {
+    grid: bool,
+    axes: bool,
+    validation: bool,
+}
+
 /// The Solarxy browser application: one WebGPU surface, the full renderer,
 /// the multi-object scene, the scene environment, per-pane cameras, and
 /// the headless engine.
@@ -209,6 +257,13 @@ pub struct SolarxyApp {
     /// original name), for the `.slxy` environment section. `None` when the
     /// procedural sky is active.
     hdri: Option<HdriMeta>,
+    /// A screenshot request captured this frame (rendered at frame end).
+    screenshot_request: Option<ScreenshotOptsDto>,
+    /// The in-flight screenshot readback (one at a time).
+    pending_screenshot: Option<solarxy_renderer::capture::PendingCapture>,
+    /// Whether the normals/bounds visualization aggregate is stale
+    /// (geometry changed, env rebuilt, or an overlay mode just turned on).
+    viz_dirty: bool,
 }
 
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
@@ -401,6 +456,9 @@ impl SolarxyApp {
             last_overlap: (None, false),
             last_pointer: (0.0, 0.0),
             hdri: None,
+            screenshot_request: None,
+            pending_screenshot: None,
+            viz_dirty: true,
         })
     }
 
@@ -447,15 +505,18 @@ impl SolarxyApp {
 
         // Apply the fresh scene delta to the multi-object scene.
         let delta = self.engine.take_scene_delta();
-        if !delta.ops.is_empty()
-            && let Err(e) =
+        if !delta.ops.is_empty() {
+            self.viz_dirty = true;
+            if let Err(e) =
                 self.scene_objects
                     .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
-        {
-            log(&format!("scene delta apply failed: {e}"));
+            {
+                log(&format!("scene delta apply failed: {e}"));
+            }
         }
 
         self.sync_env_bounds();
+        self.sync_visualization();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
         let dt = (dt_ms / 1000.0).clamp(0.0, 0.1) as f32;
@@ -504,6 +565,13 @@ impl SolarxyApp {
         }
 
         self.push_pane_rects_if_changed(&pane_rects);
+
+        // A requested screenshot renders offscreen at capture resolution
+        // after the on-screen frame (the next frame's target sync restores
+        // the layout dimensions).
+        if let Some(opts) = self.screenshot_request.take() {
+            self.render_screenshot(&opts);
+        }
 
         to_js(&EventBatch {
             revision: self.engine.revision(),
@@ -627,6 +695,280 @@ impl SolarxyApp {
         self.engine.pick(origin, dir).map(|n| n.0 as f64)
     }
 
+    /// [`SolarxyApp::pick`] with the full hit detail (mesh, face,
+    /// barycentric, world point, pane): the anchor source for creating and
+    /// re-placing review annotations. `undefined` on a miss.
+    pub fn pick_detailed(&self, x: f32, y: f32) -> Result<JsValue, JsError> {
+        let p = (x * self.dpr, y * self.dpr);
+        let rects = self.compute_panes();
+        let pane_idx = panes::hit_test_pane(&rects, p);
+        let detail = rects.get(pane_idx).and_then(|pane| {
+            let mut cam = self.view.cameras[pane_idx].as_ref()?.camera;
+            cam.aspect = pane.width / pane.height.max(1.0);
+            let ray = screen_to_world_ray(
+                (p.0 - pane.x, p.1 - pane.y),
+                (pane.width, pane.height),
+                cam.build_view_projection_matrix(),
+                cam.eye,
+            );
+            let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
+            let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
+            self.engine
+                .pick_detailed(origin, dir)
+                .map(|d| PickDetailDto {
+                    node: d.node.0 as f64,
+                    mesh: d.mesh,
+                    face: d.face,
+                    barycentric: d.barycentric,
+                    world_pos: d.world_pos,
+                    distance: d.distance,
+                    pane: pane_idx,
+                })
+        });
+        to_js(&detail)
+    }
+
+    /// The annotation set with runtime staleness (the review store's
+    /// structure channel): re-read by the frontend on every `reviewChanged`
+    /// event. Positions are the separate per-frame channel
+    /// ([`SolarxyApp::review_markers`]).
+    pub fn review_annotations(&self) -> Result<JsValue, JsError> {
+        let annotations: Vec<solarxy_graph::engine::AnnotationSnapshot> = self
+            .engine
+            .document()
+            .review()
+            .iter()
+            .map(|a| solarxy_graph::engine::AnnotationSnapshot {
+                needs_reanchor: self.engine.annotation_stale(a.id),
+                annotation: a.clone(),
+            })
+            .collect();
+        to_js(&annotations)
+    }
+
+    /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
+    /// clips one absolutely-positioned box per pane, so pins offset from
+    /// their pane's origin), one entry per visible (marker x 3D pane) pair,
+    /// resolved through each pane's camera (the desktop projection: clip ->
+    /// NDC -> pane pixel, small NDC slack). Called once per animation frame
+    /// by the host loop and applied to the DOM imperatively; markers absent
+    /// from the list are hidden. UV panes carry no markers.
+    pub fn review_markers(&self) -> Result<JsValue, JsError> {
+        let markers = self.engine.review_markers_world();
+        let mut out: Vec<MarkerScreenDto> = Vec::new();
+        if markers.is_empty() {
+            return to_js(&out);
+        }
+        let rects = self.compute_panes();
+        for (i, pane) in rects.iter().enumerate() {
+            if self.view.pane_settings[i].pane_mode == PaneMode::UvMap || pane.height <= 0.0 {
+                continue;
+            }
+            let Some(cam_state) = self.view.cameras[i].as_ref() else {
+                continue;
+            };
+            let mut cam = cam_state.camera;
+            cam.aspect = pane.width / pane.height.max(1.0);
+            let vp = cam.build_view_projection_matrix();
+            for m in &markers {
+                let Some(world) = m.world else { continue };
+                let clip = vp * cgmath::Vector4::new(world[0], world[1], world[2], 1.0);
+                if clip.w <= 0.0 {
+                    continue;
+                }
+                let ndc = (clip.x / clip.w, clip.y / clip.w);
+                if ndc.0.abs() > 1.05 || ndc.1.abs() > 1.05 {
+                    continue;
+                }
+                out.push(MarkerScreenDto {
+                    id: m.id.0 as f64,
+                    pane: i,
+                    x: (ndc.0 + 1.0) * 0.5 * pane.width / self.dpr,
+                    y: (1.0 - ndc.1) * 0.5 * pane.height / self.dpr,
+                });
+            }
+        }
+        to_js(&out)
+    }
+
+    /// Requests a screenshot of the active pane, rendered offscreen at the
+    /// given resolution at the end of the current frame. One capture at a
+    /// time; poll with [`SolarxyApp::poll_screenshot`].
+    pub fn request_screenshot(&mut self, opts: JsValue) -> Result<(), JsError> {
+        // The capture resizes the shared MSAA HDR chain to capture
+        // resolution for one frame, so VRAM cost is ~4x the pixel count.
+        // Empirically (Chrome/Apple GPU) captures in the 7-8M px range
+        // lose the device NONDETERMINISTICALLY, and web wgpu has no
+        // device-loss recovery yet, so the budget stays far below the
+        // failure zone: a modest supersample of typical panes. True
+        // hi-res needs tiled off-axis capture (logged follow-up); the
+        // result reports the effective size either way.
+        const MAX_CAPTURE_PIXELS: u64 = 4_000_000;
+        if self.screenshot_request.is_some() || self.pending_screenshot.is_some() {
+            return Err(JsError::new("a screenshot is already in flight"));
+        }
+        let mut opts: ScreenshotOptsDto = serde_wasm_bindgen::from_value(opts)
+            .map_err(|e| JsError::new(&format!("bad opts: {e}")))?;
+        let max = self.device.limits().max_texture_dimension_2d;
+        opts.width = opts.width.clamp(16, max);
+        opts.height = opts.height.clamp(16, max);
+        let pixels = u64::from(opts.width) * u64::from(opts.height);
+        if pixels > MAX_CAPTURE_PIXELS {
+            #[allow(clippy::cast_precision_loss)]
+            let scale = ((MAX_CAPTURE_PIXELS as f64) / (pixels as f64)).sqrt();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            {
+                opts.width = ((f64::from(opts.width) * scale) as u32).max(16);
+                opts.height = ((f64::from(opts.height) * scale) as u32).max(16);
+            }
+        }
+        self.screenshot_request = Some(opts);
+        Ok(())
+    }
+
+    /// Polls the in-flight capture. `undefined` while pending (or when no
+    /// capture is in flight); on completion returns
+    /// `{ width, height, pixels: Uint8Array }` (tightly-packed RGBA8).
+    pub fn poll_screenshot(&mut self) -> Result<JsValue, JsError> {
+        use solarxy_renderer::capture::CapturePoll;
+        let Some(pending) = &self.pending_screenshot else {
+            return Ok(JsValue::UNDEFINED);
+        };
+        match pending.poll(&self.device, self.render_format) {
+            CapturePoll::Pending => Ok(JsValue::UNDEFINED),
+            CapturePoll::Failed => {
+                self.pending_screenshot = None;
+                Err(JsError::new("screenshot readback failed"))
+            }
+            CapturePoll::Ready(pixels) => {
+                let (width, height) = (pending.width, pending.height);
+                self.pending_screenshot = None;
+                let obj = js_sys::Object::new();
+                let set = |k: &str, v: &JsValue| {
+                    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+                };
+                set("width", &JsValue::from_f64(f64::from(width)));
+                set("height", &JsValue::from_f64(f64::from(height)));
+                set(
+                    "pixels",
+                    &JsValue::from(js_sys::Uint8Array::from(pixels.as_slice())),
+                );
+                Ok(obj.into())
+            }
+        }
+    }
+
+    /// Renders the active pane offscreen at capture resolution and encodes
+    /// the readback copy. The pane's display settings are copied with the
+    /// requested overlay toggles applied; the composite always clears (a
+    /// fresh texture has no prior pane to load).
+    fn render_screenshot(&mut self, opts: &ScreenshotOptsDto) {
+        let (w, h) = (opts.width, opts.height);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Screenshot Target"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.render_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.set_target_dims(w, h);
+        let pane_idx = self.view.active_pane;
+        let full = PaneRect {
+            x: 0.0,
+            y: 0.0,
+            width: w as f32,
+            height: h as f32,
+        };
+        let mut pds = self.view.pane_settings[pane_idx];
+        if !opts.overlays.grid {
+            pds.show_grid = false;
+        }
+        if !opts.overlays.axes {
+            pds.show_axis_gizmo = false;
+            pds.show_local_axes = false;
+        }
+        if !opts.overlays.validation {
+            pds.show_validation = false;
+        }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Screenshot Encoder"),
+            });
+        let aspect = full.width / full.height.max(1.0);
+        let cam_data = self.view.cameras[pane_idx].as_ref().map(|c| c.camera);
+        let mut is_uv = false;
+        let mut scene_present = true;
+        if pds.pane_mode == PaneMode::UvMap {
+            self.render_uv_map_pane(&mut encoder, aspect, &pds);
+            is_uv = true;
+        } else if let Some(cam_data) = cam_data {
+            if let Some(cam) = self.view.cameras[pane_idx].as_mut() {
+                cam.write_with_aspect(&self.queue, aspect);
+            }
+            self.write_3d_pane_uniforms(pane_idx, &pds);
+            if pds.inspection_mode == InspectionMode::Overdraw {
+                self.render_overdraw_pane(&mut encoder, pane_idx, full, false);
+            } else {
+                self.render_3d_passes(&mut encoder, pane_idx, &cam_data, &pds);
+            }
+        } else {
+            self.renderer
+                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
+            scene_present = false;
+        }
+
+        // Composite into the offscreen target: full-rect viewport, always
+        // cleared (unlike the per-pane path, which clears only pane 0).
+        let bloom = self.renderer.post.bloom_enabled && !is_uv && scene_present;
+        let ssao = self.renderer.post.ssao_enabled && !is_uv && scene_present;
+        self.renderer.post.composite.write_params(
+            &self.queue,
+            bloom,
+            ssao,
+            self.renderer.post.tone_mode,
+            self.renderer.post.exposure,
+            pds.inspection_mode,
+        );
+        self.renderer.post.composite.render(
+            &mut encoder,
+            &self.renderer.pipelines,
+            &view,
+            ssao,
+            &self.renderer.post.ssao,
+            Some([full.x, full.y, full.width, full.height]),
+            true,
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // The readback copy rides its own submission after the composite.
+        let mut copy_encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Screenshot Copy Encoder"),
+                });
+        let (buffer, padded) = solarxy_renderer::capture::encode_capture(
+            &self.device,
+            &mut copy_encoder,
+            &texture,
+            (0, 0, w, h),
+        );
+        self.queue.submit(std::iter::once(copy_encoder.finish()));
+        self.pending_screenshot = Some(solarxy_renderer::capture::PendingCapture::arm(
+            buffer, padded, w, h,
+        ));
+    }
+
     /// Mirrors the graph context the node canvas currently shows (the UV
     /// pane's selected-node source resolves against it).
     pub fn set_current_context(&mut self, ctx: JsValue) -> Result<(), JsError> {
@@ -722,6 +1064,13 @@ impl SolarxyApp {
             if settings.show_uv_overlap && !slot.show_uv_overlap {
                 self.renderer.uv_overlap.overlap_pct = None;
                 self.renderer.uv_overlap.stats_dirty = true;
+            }
+            // A newly enabled normals/bounds overlay may need the (lazily
+            // built) visualization aggregate.
+            if settings.normals_mode != slot.normals_mode
+                || settings.bounds_mode != slot.bounds_mode
+            {
+                self.viz_dirty = true;
             }
             *slot = settings;
         }
@@ -1452,6 +1801,114 @@ impl SolarxyApp {
 
     /// Rebuilds the bounds-derived environment (grid/floor scale, shadow
     /// frustum, light-rig fit) when the scene bounds move materially.
+    /// Whether any active-layout 3D pane wants the per-mesh visualization
+    /// overlays (normal arrows, per-mesh bounds boxes).
+    fn viz_overlays_wanted(&self) -> bool {
+        use solarxy_core::preferences::{NormalsMode, PaneMode};
+        use solarxy_core::view_config::BoundsMode;
+        let count = self.view.display.layout.pane_count();
+        self.view.pane_settings[..count].iter().any(|pds| {
+            pds.pane_mode != PaneMode::UvMap
+                && (pds.normals_mode != NormalsMode::Off || pds.bounds_mode == BoundsMode::PerMesh)
+        })
+    }
+
+    /// Rebuilds `env.vis` from every displayed geometry when the aggregate
+    /// is stale and a pane actually shows it: world-baked normal lines
+    /// (positions via the object matrix, directions via its
+    /// inverse-transpose) and per-mesh world AABBs, flattened in draw order
+    /// (the renderer zips segments against the flattened scene meshes).
+    /// Lights/shadow are untouched -- only the visualization member swaps.
+    fn sync_visualization(&mut self) {
+        if !self.viz_dirty || !self.viz_overlays_wanted() {
+            return;
+        }
+        let Some(bounds) = self.scene_objects.visible_bounds() else {
+            return;
+        };
+        self.viz_dirty = false;
+        let (mesh_bounds, normals) = self.build_viz_aggregate();
+        let grid_color = self
+            .resolve_background(&self.view.pane_settings[0])
+            .grid_color();
+        self.env.vis = VisualizationState::new_from_parts(
+            &self.device,
+            &self.renderer.layouts,
+            &bounds,
+            &mesh_bounds,
+            Some(&normals),
+            grid_color,
+        );
+    }
+
+    /// The world-space visualization aggregate over
+    /// `Engine::display_geometries` (ascending geo id = the renderer's
+    /// draw order).
+    fn build_viz_aggregate(&self) -> (Vec<AABB>, NormalsGeometry) {
+        use cgmath::{Matrix3, Matrix4, SquareMatrix, Transform};
+        let mut mesh_bounds: Vec<AABB> = Vec::new();
+        let mut agg = NormalsGeometry {
+            vertex_lines: Vec::new(),
+            face_lines: Vec::new(),
+            vertex_segments: Vec::new(),
+            face_segments: Vec::new(),
+        };
+        for (_node, set, m) in self.engine.display_geometries() {
+            let matrix = Matrix4::from(m);
+            // Normal matrix: inverse-transpose of the upper 3x3 (the geo
+            // transform allows nonuniform scale).
+            let normal_matrix = Matrix3::from_cols(
+                matrix.x.truncate(),
+                matrix.y.truncate(),
+                matrix.z.truncate(),
+            )
+            .invert()
+            .map(|inv| cgmath::Matrix::transpose(&inv));
+            for mesh in &set.meshes {
+                let world: Vec<[f32; 3]> = mesh
+                    .positions
+                    .iter()
+                    .map(|p| {
+                        let tp = matrix.transform_point(Point3::from(*p));
+                        [tp.x, tp.y, tp.z]
+                    })
+                    .collect();
+                let bounds = compute_bounds(&world);
+                let world_normals: Vec<[f32; 3]> = match (&mesh.normals, normal_matrix) {
+                    (Some(ns), Some(nm)) => ns
+                        .iter()
+                        .map(|n| {
+                            let v = nm * Vector3::from(*n);
+                            let v = if v.magnitude2() > 1e-12 {
+                                v.normalize()
+                            } else {
+                                v
+                            };
+                            [v.x, v.y, v.z]
+                        })
+                        .collect(),
+                    // A singular matrix (zero scale) has no usable normal
+                    // transform; fall back to object-space directions.
+                    (Some(ns), None) => ns.to_vec(),
+                    // No stored normals: vertex arrows are empty, face
+                    // arrows still derive from the world positions.
+                    (None, _) => Vec::new(),
+                };
+                let (v_lines, f_lines) =
+                    build_normals_geometry(&world, &world_normals, &mesh.indices, &bounds);
+                let v_start = agg.vertex_lines.len() as u32;
+                agg.vertex_lines.extend(v_lines);
+                agg.vertex_segments
+                    .push(v_start..agg.vertex_lines.len() as u32);
+                let f_start = agg.face_lines.len() as u32;
+                agg.face_lines.extend(f_lines);
+                agg.face_segments.push(f_start..agg.face_lines.len() as u32);
+                mesh_bounds.push(bounds);
+            }
+        }
+        (mesh_bounds, agg)
+    }
+
     fn sync_env_bounds(&mut self) {
         let Some(bounds) = self.scene_objects.visible_bounds() else {
             return;
@@ -1494,6 +1951,9 @@ impl SolarxyApp {
         );
         self.env = env;
         self.env_bounds = bounds;
+        // The rebuilt environment starts with empty per-mesh viz data; the
+        // aggregate refills it when a pane wants overlays.
+        self.viz_dirty = true;
     }
 
     /// Lazily creates a `CameraState` for every pane slot the layout uses
@@ -1546,11 +2006,21 @@ impl SolarxyApp {
             0,
             bytemuck::cast_slice(&[self.env.lights_uniform]),
         );
-        let key = self.env.lights_uniform.lights[0].position;
+        // The shadow map follows THE flagged caster (the engine's
+        // exclusive-caster rule guarantees at most one), not blindly the
+        // first entry; the synthesized viewer rig keeps its key at entry 0
+        // flagged, so its behavior is unchanged.
+        let count =
+            (self.env.lights_uniform.count as usize).min(self.env.lights_uniform.lights.len());
+        let caster = self.env.lights_uniform.lights[..count]
+            .iter()
+            .position(|l| l.shadowed > 0.5)
+            .unwrap_or(0);
+        let key = self.env.lights_uniform.lights[caster].position;
         let key_pos = if key.iter().all(|c| c.abs() < f32::EPSILON) {
             // A positionless (directional) key: synthesize a shadow eye
             // along its direction outside the bounds.
-            let d = self.env.lights_uniform.lights[0].direction;
+            let d = self.env.lights_uniform.lights[caster].direction;
             bounds.center() - Vector3::new(d[0], d[1], d[2]) * bounds.diagonal()
         } else {
             Point3::new(key[0], key[1], key[2])
@@ -1575,6 +2045,13 @@ impl SolarxyApp {
         if width == 0 || height == 0 {
             return;
         }
+        self.set_target_dims(width, height);
+    }
+
+    /// Resizes the shared render targets to exact dimensions (the layout
+    /// sync above, and the screenshot path's capture-resolution render;
+    /// restoration after a capture is the next frame's sync call).
+    fn set_target_dims(&mut self, width: u32, height: u32) {
         if width == self.renderer.target_width && height == self.renderer.target_height {
             return;
         }

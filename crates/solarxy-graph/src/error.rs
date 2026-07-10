@@ -50,6 +50,12 @@ pub enum GraphError {
     #[error("param '{key}' rejected: {reason}")]
     InvalidParamValue { key: String, reason: String },
 
+    #[error("annotation {0:?} does not exist")]
+    UnknownAnnotation(crate::review::AnnotationId),
+
+    #[error("invalid reply: {0}")]
+    InvalidReply(&'static str),
+
     #[error("registry is invalid: {0}")]
     InvalidRegistry(String),
 }

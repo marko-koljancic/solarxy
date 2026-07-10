@@ -198,7 +198,7 @@ body.precision-drag-active {
   min-height: 0;
 }
 
-.split-left {
+.split-viewport {
   min-width: 0;
   position: relative;
 }
@@ -216,7 +216,7 @@ body.col-resizing .split-divider {
   background: var(--accent-primary);
 }
 
-.split-right {
+.split-panel {
   min-width: 0;
   display: flex;
 }
@@ -1174,57 +1174,10 @@ body.col-resizing .split-divider {
   z-index: 10;
 }
 
-.pane-toolbar {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.4rem;
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
-  backdrop-filter: blur(6px);
-  border: 1px solid transparent;
-}
-
-.pane-toolbar.active {
-  border-color: var(--accent-primary);
-}
-
-.pane-select {
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 1.1rem;
-  padding: 0.1rem 0.2rem;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  outline: none;
-  max-width: 12rem;
-}
-
-.pane-select:hover {
-  background: var(--background-quaternary);
-  color: var(--accent-primary);
-}
-
-.pane-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 1.1rem;
-  padding: 0.1rem 0.6rem;
-  border-radius: 0.3rem;
-  cursor: pointer;
-}
-
-.pane-btn:hover {
-  background: var(--background-quaternary);
-}
-
-.pane-btn.on {
-  color: var(--accent-primary);
+/* The active-pane accent (split layouts): a slim bar beside the labels. */
+.pane-controls.active {
+  box-shadow: inset 2px 0 0 var(--accent-primary);
+  padding-left: 10px;
 }
 
 /* The split-viewport divider strip (F2/F3 layouts). */
@@ -1357,4 +1310,1071 @@ body.row-resizing .viewport-divider {
 .env-hint {
   color: var(--text-secondary);
   font-size: 1.1rem;
+}
+
+/* ---- Review (Phase 7): marker overlay, popup editor, side panel ---- */
+
+/* Category colors, shared by pins and panel chips (one correlation cue). */
+:root,
+body.dark-theme,
+body.light-theme {
+  --cat-info: #4a90e2;
+  --cat-warning: #f5a623;
+  --cat-question: #9b6ef3;
+  --cat-change: #e5484d;
+}
+
+.btn.danger {
+  border-color: var(--error-badge);
+  color: var(--error-badge);
+}
+.btn.danger:hover {
+  background: var(--error-badge);
+  color: var(--text-on-accent);
+}
+
+/* One clip box per 3D pane; pins position inside via transforms. */
+.review-pane-clip {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.review-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  /* transform is patched imperatively each frame (engine/markers.ts). */
+}
+
+.review-pin-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  margin: -0.9rem 0 0 -0.9rem; /* center on the anchor point */
+  border-radius: 50%;
+  background: var(--cat-info);
+  border: 2px solid rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.review-pin.cat-warning .review-pin-dot { background: var(--cat-warning); }
+.review-pin.cat-question .review-pin-dot { background: var(--cat-question); }
+.review-pin.cat-change .review-pin-dot { background: var(--cat-change); }
+.review-pin.resolved { opacity: 0.45; }
+.review-pin.stale .review-pin-dot {
+  border-color: var(--warn-badge);
+  box-shadow: 0 0 0 2px var(--warn-badge), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.review-pin.selected .review-pin-dot {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* Hover/selected expand card with a short leader line. */
+.review-pin-card {
+  display: none;
+  position: absolute;
+  left: 1.4rem;
+  top: -0.4rem;
+  width: 20rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+.review-pin:hover .review-pin-card,
+.review-pin.selected .review-pin-card {
+  display: block;
+}
+.review-pin-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  margin-bottom: 0.3rem;
+}
+.review-pin-stale {
+  color: var(--warn-badge);
+  font-size: 1rem;
+  margin-top: 0.3rem;
+}
+.review-pin-replies {
+  color: var(--text-tertiary);
+  font-size: 1rem;
+  margin-top: 0.3rem;
+}
+
+/* The floating create/edit/reply editor. */
+.review-popup {
+  position: absolute;
+  z-index: 40;
+  width: 26rem;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.6rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.review-popup-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  font-weight: 600;
+  font-size: 1.2rem;
+}
+.review-popup-text {
+  min-height: 6.4rem;
+  resize: vertical;
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0.6rem;
+}
+.review-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+/* The review side panel (overlay drawer on the viewport's right edge). */
+.review-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30rem;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+  border-left: 1px solid var(--border-primary);
+}
+.review-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-primary);
+}
+.review-panel-head .btn {
+  padding: 0.1rem 0.7rem;
+}
+.review-panel-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+.review-search {
+  flex: 1;
+  min-width: 0;
+}
+.review-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.6rem 0;
+}
+.review-empty {
+  padding: 2rem 1.4rem;
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: 1.2rem;
+}
+
+.review-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.review-chip.on.cat-info { background: var(--cat-info); color: #fff; border-color: transparent; }
+.review-chip.on.cat-warning { background: var(--cat-warning); color: #fff; border-color: transparent; }
+.review-chip.on.cat-question { background: var(--cat-question); color: #fff; border-color: transparent; }
+.review-chip.on.cat-change { background: var(--cat-change); color: #fff; border-color: transparent; }
+/* In rows the chip is a passive badge, always tinted. */
+.review-row .review-chip { cursor: default; }
+.review-row.cat-info .review-chip { background: var(--cat-info); color: #fff; border-color: transparent; }
+.review-row.cat-warning .review-chip { background: var(--cat-warning); color: #fff; border-color: transparent; }
+.review-row.cat-question .review-chip { background: var(--cat-question); color: #fff; border-color: transparent; }
+.review-row.cat-change .review-chip { background: var(--cat-change); color: #fff; border-color: transparent; }
+
+.review-section-title {
+  padding: 0.6rem 1rem 0.3rem;
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.review-section-count {
+  color: var(--text-tertiary);
+}
+
+.review-row {
+  border-bottom: 1px solid var(--border-primary);
+}
+.review-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.7rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.review-row-head:hover {
+  background: var(--background-tertiary);
+}
+.review-row.selected .review-row-head {
+  background: var(--background-tertiary);
+}
+.review-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-row-meta {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.review-row-body {
+  padding: 0 1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.review-row-full {
+  white-space: pre-wrap;
+  font-size: 1.2rem;
+}
+.review-row-byline {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+.review-reply {
+  margin-left: 1.2rem;
+  padding: 0.5rem 0.8rem;
+  border-left: 2px solid var(--border-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 1.15rem;
+}
+.review-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.review-row-actions .btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 1.05rem;
+}
+.review-complete {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  cursor: pointer;
+}
+
+/* ---- Help popovers + the generated shortcuts modal (Phase 7 W3) ---- */
+
+.popover-anchor {
+  display: contents;
+}
+
+.doc-popover {
+  position: fixed;
+  z-index: 500;
+  max-width: 30rem;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.5rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  padding: 0.8rem 1rem;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+.doc-popover-title {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.doc-popover-body p {
+  margin: 0 0 0.4rem;
+  color: var(--text-tertiary);
+}
+.doc-popover-body p:last-child {
+  margin-bottom: 0;
+}
+.doc-popover-body code {
+  background: var(--background-primary);
+  border-radius: 0.3rem;
+  padding: 0 0.3rem;
+}
+.doc-popover-meta {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+}
+
+.modal.modal-wide {
+  width: 64rem;
+  max-width: 92vw;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 2.4rem;
+  overflow-y: auto;
+  padding: 0.6rem 0 1rem;
+}
+
+.shortcut-group-title {
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 0.6rem 0 0.4rem;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+  font-size: 1.2rem;
+}
+.shortcut-desc {
+  color: var(--text-primary);
+}
+.shortcut-context {
+  margin-left: 0.6rem;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.3rem;
+  padding: 0 0.4rem;
+  text-transform: capitalize;
+}
+.shortcut-keys {
+  display: inline-flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  background: var(--background-primary);
+  border: 1px solid var(--border-secondary);
+  border-bottom-width: 2px;
+  border-radius: 0.4rem;
+  font-family: inherit;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.shortcut-notes {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 0.8rem;
+  font-size: 1.05rem;
+  color: var(--text-secondary);
+}
+.shortcut-notes p {
+  margin: 0 0 0.3rem;
+}
+
+/* ---- Preferences modal (Phase 7 W4, Minimystix tabbed pattern) ---- */
+
+.modal.modal-prefs {
+  width: 46rem;
+  max-width: 92vw;
+  height: 54rem;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.prefs-tabs {
+  display: flex;
+  gap: 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+  margin-bottom: 1rem;
+}
+.prefs-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+.prefs-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.prefs-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.prefs-desc {
+  color: var(--text-secondary);
+  margin: 0 0 0.4rem;
+}
+.prefs-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.prefs-label {
+  width: 12rem;
+  text-align: right;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.prefs-unit {
+  color: var(--text-tertiary);
+  font-size: 1.05rem;
+}
+.prefs-dim {
+  width: 8rem;
+}
+.prefs-info {
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.4rem;
+  padding: 0.9rem 1.1rem;
+  color: var(--text-tertiary);
+  font-size: 1.1rem;
+  margin-top: 0.4rem;
+}
+.prefs-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-primary);
+  margin-top: 1rem;
+}
+.prefs-footer-right {
+  display: flex;
+  gap: 0.6rem;
+}
+
+/* Reduced motion: static states replace the shake/spinner animations
+ * (spec section 19). Anything animated opts in via these hooks. */
+body.reduce-motion * {
+  animation-duration: 0.001s !important;
+  transition-duration: 0.001s !important;
+}
+
+/* ---- Screenshot modal (Phase 7 W5) ---- */
+
+.screenshot-modal {
+  height: 56rem;
+}
+.screenshot-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.8rem;
+}
+.screenshot-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.screenshot-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.screenshot-placeholder {
+  color: var(--text-tertiary);
+}
+.modal-actions .prefs-unit {
+  margin-right: auto;
+}
+
+/* ---- Boot / loading / empty states (Phase 7 W7) ---- */
+
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-quaternary);
+}
+.boot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+  max-width: 42rem;
+  text-align: center;
+}
+.boot-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.boot-spinner {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  border: 3px solid var(--border-secondary);
+  border-top-color: var(--accent-primary);
+  animation: boot-spin 0.9s linear infinite;
+}
+@keyframes boot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.boot-note {
+  color: var(--text-secondary);
+}
+.boot-error {
+  color: var(--error-text);
+}
+
+/* Cooking spinner ring on the node body (spec sec. 8); reduce-motion
+ * collapses the animation to a static accent ring. */
+.flow-node.cooking::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  border-top-color: var(--cooking-color, var(--accent-primary));
+  animation: cook-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes cook-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+body.reduce-motion .flow-node.cooking::after {
+  border-color: var(--cooking-color, var(--accent-primary));
+  animation: none;
+}
+
+/* Queued-dirty pending tint (auto mode). */
+.flow-node.pending {
+  filter: saturate(0.7);
+  opacity: 0.82;
+}
+
+/* The empty-canvas teaching hint (UX spec J4). */
+.canvas-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-tertiary);
+  font-size: 1.4rem;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Disabled buttons read as disabled (polish; prefs Apply/Save, Save PNG). */
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ---- Phase 7b W-B chrome corrections ---- */
+
+/* Menus flush left: the menu bar loses its brand-offset margin. */
+.app-header .menu-bar {
+  margin-left: 0;
+}
+
+/* The Nodes menu inside the node-pane header. */
+.node-pane-menu {
+  margin-left: var(--spacing-sm);
+}
+
+.about-version {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+}
+.modal a {
+  color: var(--accent-primary);
+}
+
+/* ---- Phase 7b W-C1: pastel category fills ---- */
+
+.flow-node.cat-primitives { background: var(--node-cat-primitives); }
+.flow-node.cat-modifiers { background: var(--node-cat-modifiers); }
+.flow-node.cat-import { background: var(--node-cat-import); }
+.flow-node.cat-utility { background: var(--node-cat-utility); }
+.flow-node.cat-lights { background: var(--node-cat-lights); border-color: rgba(212, 175, 55, 0.55); }
+.flow-node.cat-container { background: var(--node-cat-container); }
+
+/* ---- Phase 7b W-C2: typed wires (source data-type colors, matching the
+ * handle palette in registry/datatypes.ts) ---- */
+
+.react-flow__edge.edge-type-geometry .react-flow__edge-path { stroke: #5aa0ff; }
+.react-flow__edge.edge-type-light .react-flow__edge-path { stroke: #ffcc66; }
+.react-flow__edge.edge-type-report .react-flow__edge-path { stroke: #4dd0c8; }
+.react-flow__edge.edge-type-float .react-flow__edge-path,
+.react-flow__edge.edge-type-int .react-flow__edge-path { stroke: #7fd962; }
+.react-flow__edge.edge-type-bool .react-flow__edge-path { stroke: #ff8a80; }
+.react-flow__edge.edge-type-vec2 .react-flow__edge-path,
+.react-flow__edge.edge-type-vec3 .react-flow__edge-path,
+.react-flow__edge.edge-type-vec4 .react-flow__edge-path { stroke: #b39ddb; }
+.react-flow__edge.edge-type-color .react-flow__edge-path { stroke: #f5a623; }
+.react-flow__edge.edge-type-text .react-flow__edge-path { stroke: #9aa0a6; }
+
+/* ---- Phase 7b W-C4: the note sticky ---- */
+
+.note-node {
+  position: relative;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  color: #374151;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  cursor: move;
+  opacity: 0.92;
+}
+.note-node.selected {
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+.note-swatch {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+}
+.note-text,
+.note-text-edit {
+  position: absolute;
+  inset: 0;
+  padding: 0.8rem 2rem 0.8rem 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+}
+.note-text-edit {
+  resize: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  cursor: text;
+  overflow: auto;
+}
+
+.flow-canvas-track {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Phase 7b C7-C11: radial menu, node info modal, info line, list view ---- */
+
+.radial-anchor {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+}
+.radial-seg {
+  pointer-events: auto;
+  cursor: pointer;
+  fill: var(--radial-seg-bg, rgba(30, 34, 42, 0.92));
+  stroke: var(--radial-seg-border, rgba(255, 255, 255, 0.14));
+  stroke-width: 1;
+  transition: fill 80ms ease;
+}
+.radial-seg:hover {
+  fill: var(--radial-seg-hover, rgba(52, 58, 70, 0.96));
+}
+.radial-seg.active {
+  fill: var(--radial-seg-active, rgba(43, 89, 138, 0.95));
+}
+.radial-seg.disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.radial-icon {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  color: #e6e8ee;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.radial-icon.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.radial-glyph {
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.node-info-modal {
+  position: fixed;
+  z-index: 55;
+  width: 320px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+.node-info-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.node-info-header:active {
+  cursor: grabbing;
+}
+.node-info-title {
+  font-weight: 600;
+}
+.node-info-type {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.node-info-body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.node-info-doc {
+  color: var(--text-secondary);
+  max-height: 120px;
+  overflow-y: auto;
+}
+.node-info-doc p {
+  margin: 0 0 4px;
+}
+.node-info-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.node-info-key {
+  flex: 0 0 64px;
+  color: var(--text-secondary);
+}
+.node-info-error {
+  color: var(--error-badge);
+}
+
+.flow-node-info {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.flow-node.empty-geo {
+  border-style: dashed;
+  background: transparent;
+}
+
+.flow-list {
+  height: 100%;
+  overflow: auto;
+  padding: 8px;
+}
+.flow-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.flow-list th {
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 500;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-primary);
+}
+.flow-list td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: default;
+}
+.flow-list tr.selected td {
+  background: var(--selection-bg, rgba(80, 130, 200, 0.18));
+}
+.flow-list tr:hover td {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.08));
+}
+.flow-list-type,
+.flow-list-info {
+  color: var(--text-secondary);
+}
+.flow-list-error {
+  color: var(--error-badge);
+}
+.flow-list-empty {
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.display-dot.inline {
+  position: static;
+  display: inline-block;
+  margin-right: 6px;
+}
+.view-toggle {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* ---- Phase 7b D1: properties underline tabs ---- */
+
+.param-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-primary);
+  overflow-x: auto;
+}
+.param-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.param-tab:hover {
+  color: var(--text-primary);
+}
+.param-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+}
+.param-tab.has-errors {
+  color: var(--error-badge);
+}
+.param-tab-count {
+  margin-left: 6px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--background-tertiary, rgba(128, 128, 128, 0.2));
+}
+.param-tab-body {
+  padding-top: 8px;
+}
+
+/* ---- Phase 7b D2: ghost-text viewport controls ---- */
+
+.pane-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  pointer-events: auto;
+}
+.ghost-menu {
+  position: relative;
+}
+.ghost-label {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-primary);
+  opacity: 0.7;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.ghost-label:hover,
+.ghost-label.open {
+  opacity: 1;
+  color: var(--accent-primary);
+}
+.ghost-label.static {
+  cursor: default;
+  opacity: 0.7;
+}
+.ghost-info {
+  font-size: 11px;
+  color: var(--text-primary);
+  opacity: 0.7;
+  padding: 2px 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.ghost-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 160px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px 0;
+}
+.ghost-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 4px 10px 4px 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.ghost-item:hover {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.12));
+}
+.ghost-check {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--accent-primary);
+}
+.ghost-heading {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding: 6px 10px 2px;
+}
+
+/* ---- Phase 7b D3: right-docked properties (desks) ---- */
+
+.side-panel {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  border-left: 1px solid var(--border-primary);
+  background: var(--background-secondary);
+  min-height: 0;
+}
+.side-panel-resize {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.side-panel-resize:hover {
+  background: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+}
+.side-panel-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.side-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border-primary);
+  user-select: none;
+}
+.side-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }

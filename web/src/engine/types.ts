@@ -64,12 +64,70 @@ export interface DocumentSnapshot {
   annotations: Annotation[];
 }
 
+export type ReviewCategory = "info" | "warning" | "question" | "change";
+
+/** Where an annotation pins: always a node; 3D pins add mesh/face/bary with
+ * a world fallback and the engine-filled staleness hash. */
+export interface ReviewAnchor {
+  ctx: GraphContext;
+  node: NodeId;
+  mesh?: number | null;
+  face?: number | null;
+  barycentric?: [number, number, number] | null;
+  worldFallback?: [number, number, number] | null;
+  geometryHash?: number | null;
+}
+
+/** One annotation as the mirror sees it (`AnnotationSnapshot`: the document
+ * annotation flattened together with the runtime staleness flag). */
 export interface Annotation {
   id: number;
-  anchor: { ctx: GraphContext; node: NodeId; face?: number | null; barycentric?: [number, number, number] | null };
+  anchor: ReviewAnchor;
   text: string;
-  category: "info" | "issue" | "question" | "suggestion";
+  category: ReviewCategory;
   resolved: boolean;
+  author?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Parent id for replies (flat threading; replies share the parent pin). */
+  replyTo?: number | null;
+  /** Runtime-derived: the anchored geometry changed; re-place the pin. */
+  needsReanchor: boolean;
+}
+
+/** A detailed pick (review anchor source), from `pick_detailed`. */
+export interface PickDetail {
+  node: NodeId;
+  mesh: number;
+  face: number;
+  barycentric: [number, number, number];
+  worldPos: [number, number, number];
+  distance: number;
+  pane: number;
+}
+
+/** One marker pin position (PANE-relative CSS px) in one pane, from
+ * `review_markers`; structure rides `review_annotations`. */
+export interface MarkerScreen {
+  id: number;
+  pane: number;
+  x: number;
+  y: number;
+}
+
+/** A screenshot request: capture resolution (physical px) + GPU overlay
+ * toggles. */
+export interface ScreenshotOpts {
+  width: number;
+  height: number;
+  overlays: { grid: boolean; axes: boolean; validation: boolean };
+}
+
+/** A completed capture: tightly-packed RGBA8. */
+export interface ScreenshotResult {
+  width: number;
+  height: number;
+  pixels: Uint8Array;
 }
 
 // --- Cook status/stats ---
@@ -132,6 +190,19 @@ export type Command =
   | { type: "cookNow" }
   | { type: "pasteNodes"; ctx: GraphContext; fragment: unknown; position: [number, number] }
   | { type: "duplicateNodes"; ctx: GraphContext; ids: NodeId[] }
+  | {
+      type: "addAnnotation";
+      anchor: ReviewAnchor;
+      text: string;
+      category: ReviewCategory;
+      author?: string;
+      createdAt: string;
+      replyTo?: number;
+    }
+  | { type: "editAnnotation"; id: number; text: string; category: ReviewCategory; updatedAt: string }
+  | { type: "resolveAnnotation"; id: number; resolved: boolean; updatedAt: string }
+  | { type: "deleteAnnotation"; id: number }
+  | { type: "reanchorAnnotation"; id: number; anchor: ReviewAnchor; updatedAt: string }
   | { type: "beginTransaction"; label: string }
   | { type: "endTransaction" }
   | { type: "undo" }

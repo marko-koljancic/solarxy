@@ -1,0 +1,39 @@
+// Hover-radial + node-info-modal state (Phase 7b): one radial at a time,
+// anchored to a canvas node; the info modal is modeless and draggable,
+// keyed by node id. Both are pure UI state over the mirror.
+
+import { create } from "zustand";
+import type { GraphContext } from "../engine/types";
+
+export interface RadialTarget {
+  nodeId: number;
+  ctx: GraphContext;
+  /** Node center in viewport CSS px (from the node's DOM rect). */
+  cx: number;
+  cy: number;
+  /** Ring inner radius (hugs the node's half-diagonal). */
+  radius: number;
+  isContainer: boolean;
+  bypassed: boolean;
+  isDisplay: boolean;
+  bypassable: boolean;
+}
+
+interface RadialStore {
+  target: RadialTarget | null;
+  /** The node whose info modal is open (survives radial close). */
+  infoNode: { nodeId: number; ctx: GraphContext; x: number; y: number } | null;
+  openRadial: (target: RadialTarget) => void;
+  closeRadial: () => void;
+  openInfo: (nodeId: number, ctx: GraphContext, x: number, y: number) => void;
+  closeInfo: () => void;
+}
+
+export const useRadial = create<RadialStore>((set) => ({
+  target: null,
+  infoNode: null,
+  openRadial: (target) => set({ target }),
+  closeRadial: () => set({ target: null }),
+  openInfo: (nodeId, ctx, x, y) => set({ infoNode: { nodeId, ctx, x, y }, target: null }),
+  closeInfo: () => set({ infoNode: null }),
+}));
