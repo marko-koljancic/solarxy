@@ -109,6 +109,7 @@ impl ModelScene {
             instance_buffer: &self.env.instance_buffer,
             validation: Some(&self.validation_gpu),
             selected: false,
+            cast_shadow: true,
         }
     }
 

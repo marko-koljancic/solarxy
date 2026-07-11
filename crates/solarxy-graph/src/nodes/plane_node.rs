@@ -2,7 +2,7 @@
 
 use solarxy_kernel::primitives::generate_plane;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
@@ -30,7 +30,7 @@ fn segments(key: &str, label: &str) -> ParamSpec {
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "plane",
-        version: 1,
+        version: 2,
         display_name: "Plane",
         category: Category::Primitives,
         contexts: ContextMask::SUBFLOW,
@@ -49,7 +49,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "A flat subdivided rectangle in the XY plane facing +Z.",
         search_aliases: &["quad", "grid", "ground"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

@@ -320,7 +320,11 @@ pub fn hemisphere_descriptor() -> NodeTypeDescriptor {
 
 #[must_use]
 pub fn rect_area_descriptor() -> NodeTypeDescriptor {
-    assemble(
+    // v2 dropped `rotate` / `scale` / `uniform_scale`: the v1 soft
+    // point-light approximation never read them, and keeping controls the
+    // renderer ignores is a lie in the UI. They return with a real LTC
+    // area-light model (backlog note).
+    let mut desc = assemble(
         "rect_area_light",
         "Rect Area Light",
         "A rectangular area light (rendered as a soft point-light \
@@ -336,32 +340,6 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
                 ParamValue::Vec3([0.0; 3]),
             )
             .unit(Unit::Meters),
-            ParamSpec::new(
-                "rotate",
-                "Rotate",
-                "transform",
-                ParamType::Vec3,
-                ParamValue::Vec3([0.0; 3]),
-            )
-            .unit(Unit::Degrees),
-            ParamSpec::new(
-                "scale",
-                "Scale",
-                "transform",
-                ParamType::Vec3,
-                ParamValue::Vec3([1.0; 3]),
-            )
-            .hard(0.0001, 10000.0)
-            .soft(0.01, 100.0),
-            ParamSpec::new(
-                "uniform_scale",
-                "Uniform Scale",
-                "transform",
-                ParamType::Float,
-                ParamValue::Float(1.0),
-            )
-            .hard(0.0001, 10000.0)
-            .soft(0.01, 100.0),
             color_param("color", "Color", WHITE),
             intensity(1.5),
             ParamSpec::new(
@@ -383,5 +361,8 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
             .hard(0.1, 1000.0)
             .unit(Unit::Meters),
         ],
-    )
+    );
+    desc.version = 2;
+    desc.migrate = Some(super::common::migrate_strip_rect_area_transform);
+    desc
 }

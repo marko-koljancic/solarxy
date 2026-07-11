@@ -8,15 +8,20 @@
 // badges, and
 // bypass hatching.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { InlineEdit } from "../components/InlineEdit";
 import { Popover, renderDoc } from "../components/Popover";
 import { descriptorFor, DATA_TYPE_COLOR, dataTypeShape } from "../registry/datatypes";
-import { assetDisplayName } from "../engine/session";
+import { assetDisplayName, dispatch } from "../engine/session";
 import type { NodeMirror, PortSnapshot } from "../engine/types";
 import { useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
+import { useUi } from "../store/ui";
+import { IconEye } from "../icons";
 import { nodeInfoLine } from "./infoLine";
+import { nodeLabel } from "./nodeLabel";
+import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
 const RADIAL_DELAY_MS = 400;
@@ -61,7 +66,28 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const validation = cook?.validation;
 
   const desc = descriptorFor(registry, node.typeId);
-  const title = desc?.displayName ?? node.typeId;
+  const title = nodeLabel(node, desc);
+
+  // Inline rename (Phase 8): opened by double-clicking the label (the node
+  // body keeps its container-dive double-click) or by F2 via the ui-store
+  // rename request. Committing is one ordinary setParam on `name`.
+  const [renaming, setRenaming] = useState(false);
+  const renameRequest = useUi((s) => s.renameRequest);
+  useEffect(() => {
+    if (renameRequest === node.id) {
+      setRenaming(true);
+      useUi.getState().setRenameRequest(null);
+    }
+  }, [renameRequest, node.id]);
+  const commitRename = (next: string) => {
+    dispatch({
+      type: "setParam",
+      ctx,
+      node: node.id,
+      key: "name",
+      value: { kind: "literal", type: "text", value: next },
+    });
+  };
   const inputs = desc?.inputs ?? [];
   const outputs = desc?.outputs ?? [];
   const isContainer = desc?.category === "container";
@@ -129,6 +155,28 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       onPointerLeave={cancelRadialTimer}
     >
       {isDisplay && <span className="display-dot" title="display flag" />}
+      {ctx === "root" && hasVisibleParam(desc) && (
+        // Root visibility eye (Phase 8): registry-gated (note declares no
+        // `visible`, so it gets no eye), distinct from the subflow display
+        // flag. An ordinary setParam, so it undoes like any edit.
+        <button
+          className={`visibility-eye nodrag${nodeVisible(node) ? "" : " off"}`}
+          title={nodeVisible(node) ? "Hide (stays cooked)" : "Show"}
+          onClick={(e) => {
+            e.stopPropagation();
+            dispatch({
+              type: "setParam",
+              ctx,
+              node: node.id,
+              key: "visible",
+              value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
+            });
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <IconEye size={11} />
+        </button>
+      )}
       {stale && <span className="stale-tag" title="stale (edit not yet cooked)" />}
       {status?.state === "error" && (
         <Popover title="Cook error" content={<p>{status.message}</p>}>
@@ -176,9 +224,27 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       </div>
 
       <div className="flow-node-label">
-        <Popover title={title} content={renderDoc(desc?.doc ?? "")}>
-          <span className="flow-node-title">{title}</span>
-        </Popover>
+        {renaming ? (
+          <InlineEdit
+            value={title}
+            placeholder={desc?.displayName ?? node.typeId}
+            className="flow-node-rename"
+            onCommit={commitRename}
+            onClose={() => setRenaming(false)}
+          />
+        ) : (
+          <Popover title={title} content={renderDoc(desc?.doc ?? "")}>
+            <span
+              className="flow-node-title"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setRenaming(true);
+              }}
+            >
+              {title}
+            </span>
+          </Popover>
+        )}
         {infoLine && <span className="flow-node-info">{infoLine}</span>}
         {emptyGeo && <span className="flow-node-sub">empty</span>}
         {status?.state === "ok" && status.ms > 0 && (

@@ -1,14 +1,15 @@
 //! Shared node-descriptor building blocks: the implicit `general` group,
-//! the geometry `rendering` group, and the default geometry output port.
-//! These factor out the catalog conventions (part II, section 11) so each
-//! node file declares only what is specific to it.
+//! the geo container's `rendering` group, the default geometry output
+//! port, and the Phase 8 silent-strip migrations. These factor out the
+//! catalog conventions (part II, section 11) so each node file declares
+//! only what is specific to it.
 
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::PortSpec;
+use crate::registry::{MigrateError, PortSpec};
 
 /// The cook for a node that produces no wire output: containers (`geo`),
 /// annotations (`note`), and the light nodes (whose `LightDef` is resolved
@@ -49,9 +50,12 @@ pub fn general_params(display_name: &str) -> Vec<ParamSpec> {
     ]
 }
 
-/// The `rendering` group on geometry-producing subflow nodes: the
-/// display-flag storage plus the shadow participation flags Minimystix
-/// silently resolved to false.
+/// The `rendering` group on the `geo` container only (root render flags,
+/// both wired end to end since Phase 8): additive visibility and per-object
+/// shadow participation. Subflow geometry nodes carry no copy: per-object
+/// flags are geo-level concepts, and the display flag is graph-level.
+/// `receive_shadow` was dropped in the same phase (no per-object channel
+/// into the PBR shadow term exists; see the expansion doc's backlog note).
 #[must_use]
 pub fn rendering_params() -> Vec<ParamSpec> {
     vec![
@@ -62,7 +66,10 @@ pub fn rendering_params() -> Vec<ParamSpec> {
             ParamType::Bool,
             ParamValue::Bool(true),
         )
-        .doc("Whether this node's geometry is displayed."),
+        .doc(
+            "Whether this object is displayed. Hidden objects stay cooked, \
+              so re-show is instant.",
+        ),
         ParamSpec::new(
             "cast_shadow",
             "Cast Shadow",
@@ -70,16 +77,58 @@ pub fn rendering_params() -> Vec<ParamSpec> {
             ParamType::Bool,
             ParamValue::Bool(true),
         )
-        .doc("Whether this geometry casts shadows."),
-        ParamSpec::new(
-            "receive_shadow",
-            "Receive Shadow",
-            "rendering",
-            ParamType::Bool,
-            ParamValue::Bool(true),
-        )
-        .doc("Whether this geometry receives shadows."),
+        .doc("Whether this object is drawn into the shadow map."),
     ]
+}
+
+/// Removes raw param keys before the registry-default migration sees them,
+/// so a deliberate drop produces no load warning (the dropped params never
+/// did anything; a toast about them would be noise).
+fn strip_keys(params: &mut serde_json::Map<String, serde_json::Value>, keys: &[&str]) {
+    for key in keys {
+        params.remove(*key);
+    }
+}
+
+/// v1 -> v2 for the subflow geometry nodes: their whole `rendering` group
+/// was dead by design (the display flag is graph-level; per-object flags
+/// are geo-level) and is silently stripped.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+pub fn migrate_strip_rendering_group(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 {
+        strip_keys(params, &["visible", "cast_shadow", "receive_shadow"]);
+    }
+    Ok(())
+}
+
+/// v1 -> v2 for the `geo` container: `receive_shadow` is dropped (never
+/// wired; re-adding it is an instance-flags backlog note), silently.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+pub fn migrate_strip_receive_shadow(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 {
+        strip_keys(params, &["receive_shadow"]);
+    }
+    Ok(())
+}
+
+/// v1 -> v2 for `rect_area_light`: the v1 soft point-light approximation
+/// never read `rotate` / `scale` / `uniform_scale`; they return with a
+/// real LTC area-light model (backlog note). Silently stripped.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+pub fn migrate_strip_rect_area_transform(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 {
+        strip_keys(params, &["rotate", "scale", "uniform_scale"]);
+    }
+    Ok(())
 }
 
 /// The default geometry output port, key `geometry` (every geometry node's
@@ -90,11 +139,11 @@ pub fn geometry_output() -> PortSpec {
 }
 
 /// Assembles a node's full param list: `general`, then the node-specific
-/// groups, then `rendering`.
+/// groups. (The `rendering` group is geo-container-only since Phase 8;
+/// `geo_node` appends it explicitly.)
 #[must_use]
 pub fn params_with(display_name: &str, specific: Vec<ParamSpec>) -> Vec<ParamSpec> {
     let mut params = general_params(display_name);
     params.extend(specific);
-    params.extend(rendering_params());
     params
 }

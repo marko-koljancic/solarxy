@@ -5,7 +5,7 @@
 
 use solarxy_kernel::transform::{RotateOrder, bake_transform, compose_trs};
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -35,7 +35,7 @@ fn rotate_order_from_key(key: &str) -> RotateOrder {
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "transform",
-        version: 1,
+        version: 2,
         display_name: "Transform",
         category: Category::Modifiers,
         contexts: ContextMask::SUBFLOW,
@@ -108,7 +108,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
               the transform into point positions.",
         search_aliases: &["move", "rotate", "scale", "xform"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

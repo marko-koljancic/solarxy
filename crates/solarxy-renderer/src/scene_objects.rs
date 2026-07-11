@@ -56,6 +56,9 @@ pub struct SceneObject {
     pub model: Model,
     pub transform: Matrix4<f32>,
     pub visible: bool,
+    /// Whether the object is drawn into the shadow map (`SetCastShadow`);
+    /// orthogonal to which light owns the map.
+    pub cast_shadow: bool,
     /// One `InstanceRaw` per object — a transform-only change is a single
     /// small buffer write, never a geometry re-upload.
     pub instance_buffer: wgpu::Buffer,
@@ -122,6 +125,7 @@ impl SceneObjects {
                 instance_buffer: &o.instance_buffer,
                 validation: o.validation_gpu.as_ref(),
                 selected: false,
+                cast_shadow: o.cast_shadow,
             })
     }
 
@@ -137,6 +141,7 @@ impl SceneObjects {
                 instance_buffer: &o.instance_buffer,
                 validation: o.validation_gpu.as_ref(),
                 selected: false,
+                cast_shadow: o.cast_shadow,
             })
     }
 
@@ -220,6 +225,11 @@ impl SceneObjects {
                 SceneOp::SetVisible { id, visible } => {
                     if let Some(obj) = self.objects.get_mut(id) {
                         obj.visible = *visible;
+                    }
+                }
+                SceneOp::SetCastShadow { id, cast_shadow } => {
+                    if let Some(obj) = self.objects.get_mut(id) {
+                        obj.cast_shadow = *cast_shadow;
                     }
                 }
                 SceneOp::SetValidation { id, validation } => {
@@ -517,6 +527,7 @@ impl SceneObjects {
                     model,
                     transform,
                     visible: true,
+                    cast_shadow: true,
                     instance_buffer,
                     caps,
                     geometry: cooked_arc,

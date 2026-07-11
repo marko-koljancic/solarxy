@@ -3,7 +3,7 @@
 
 use solarxy_kernel::primitives::generate_cylinder;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
@@ -14,7 +14,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor}
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "cylinder",
-        version: 1,
+        version: 2,
         display_name: "Cylinder",
         category: Category::Primitives,
         contexts: ContextMask::SUBFLOW,
@@ -76,7 +76,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "A cylinder (or capped cone when a radius is zero).",
         search_aliases: &["tube", "pipe"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

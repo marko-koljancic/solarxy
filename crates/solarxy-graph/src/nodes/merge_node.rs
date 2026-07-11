@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::registry::coerce::DataType;
 use crate::registry::resolve::ResolvedParams;
@@ -15,7 +15,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor,
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "merge",
-        version: 1,
+        version: 2,
         display_name: "Merge",
         category: Category::Modifiers,
         contexts: ContextMask::SUBFLOW,
@@ -34,7 +34,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
               deduplicating identical materials.",
         search_aliases: &["combine", "join", "union", "append"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

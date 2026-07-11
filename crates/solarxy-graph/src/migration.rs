@@ -78,21 +78,20 @@ pub fn load_node(
     }
 
     // Older: run the migration hook stepwise, then the registry default.
-    if stored_version < desc.version {
-        if let Some(migrate) = desc.migrate {
-            for from in stored_version..desc.version {
-                if let Err(e) = migrate(from, &mut raw) {
-                    warnings.push(format!(
-                        "migration of '{type_id}' from v{from} failed: {}; loading defaults",
-                        e.reason
-                    ));
-                }
+    // A clean migration is by-design behavior and produces no warning
+    // (silent-strip drops must not toast); failures and the drop/default
+    // paths below still do.
+    if stored_version < desc.version
+        && let Some(migrate) = desc.migrate
+    {
+        for from in stored_version..desc.version {
+            if let Err(e) = migrate(from, &mut raw) {
+                warnings.push(format!(
+                    "migration of '{type_id}' from v{from} failed: {}; loading defaults",
+                    e.reason
+                ));
             }
         }
-        warnings.push(format!(
-            "migrated '{type_id}' from v{stored_version} to v{}",
-            desc.version
-        ));
     }
 
     // Registry-default migration: drop params the descriptor no longer
@@ -264,7 +263,8 @@ mod tests {
             Some(&ParamSource::Literal(ParamValue::Float(3.5)))
         );
         assert!(!loaded.node.params.contains_key("size"));
-        assert!(loaded.warnings.iter().any(|w| w.contains("migrated")));
+        // A clean migration is silent (silent-strip drops must not toast).
+        assert!(loaded.warnings.is_empty());
     }
 
     #[test]
@@ -295,6 +295,105 @@ mod tests {
                 .placeholder
                 .unwrap()
                 .contains("unknown node type")
+        );
+    }
+
+    #[test]
+    fn phase8_v1_nodes_strip_their_dead_params_silently() {
+        // The real registry: v1 documents carrying values in the dropped
+        // params (users may have toggled them expecting an effect) load
+        // with zero warnings through the silent-strip migrations.
+        let reg = crate::nodes::builtin_registry().unwrap();
+
+        // A subflow geometry node drops its whole dead rendering group.
+        let loaded = load_node(
+            &reg,
+            NodeId(1),
+            "box",
+            1,
+            raw(&[
+                ("visible", serde_json::json!(false)),
+                ("cast_shadow", serde_json::json!(false)),
+                ("receive_shadow", serde_json::json!(false)),
+            ]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert!(loaded.node.placeholder.is_none());
+        assert_eq!(loaded.node.type_version, 2);
+        for key in ["visible", "cast_shadow", "receive_shadow"] {
+            assert!(!loaded.node.params.contains_key(key));
+        }
+
+        // The geo container keeps its live flags; only receive_shadow goes.
+        let loaded = load_node(
+            &reg,
+            NodeId(2),
+            "geo",
+            1,
+            raw(&[
+                ("visible", serde_json::json!(false)),
+                ("receive_shadow", serde_json::json!(true)),
+            ]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_eq!(loaded.node.type_version, 2);
+        assert_eq!(
+            loaded.node.params.get("visible"),
+            Some(&ParamSource::Literal(ParamValue::Bool(false)))
+        );
+        assert!(!loaded.node.params.contains_key("receive_shadow"));
+
+        // import_ply drops `vertex_colors` (declared in v1, never carried
+        // into the parse path) along with its dead rendering group.
+        let loaded = load_node(
+            &reg,
+            NodeId(4),
+            "import_ply",
+            1,
+            raw(&[
+                ("vertex_colors", serde_json::json!(false)),
+                ("scale", serde_json::json!(2.0)),
+            ]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_eq!(loaded.node.type_version, 2);
+        assert!(!loaded.node.params.contains_key("vertex_colors"));
+        assert_eq!(
+            loaded.node.params.get("scale"),
+            Some(&ParamSource::Literal(ParamValue::Float(2.0)))
+        );
+
+        // rect_area_light drops its unread transform params, keeps the rest
+        // (`rotate` is stripped before typing, so its stored shape never
+        // matters).
+        let loaded = load_node(
+            &reg,
+            NodeId(3),
+            "rect_area_light",
+            1,
+            raw(&[
+                ("rotate", serde_json::json!([0.0, 45.0, 0.0])),
+                ("scale", serde_json::json!([2.0, 2.0, 2.0])),
+                ("uniform_scale", serde_json::json!(3.0)),
+                ("width", serde_json::json!(25.0)),
+            ]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_eq!(loaded.node.type_version, 2);
+        for key in ["rotate", "scale", "uniform_scale"] {
+            assert!(!loaded.node.params.contains_key(key));
+        }
+        assert_eq!(
+            loaded.node.params.get("width"),
+            Some(&ParamSource::Literal(ParamValue::Float(25.0)))
         );
     }
 

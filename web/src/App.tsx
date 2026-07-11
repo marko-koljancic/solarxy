@@ -29,6 +29,7 @@ import { NodeCanvas } from "./flow/NodeCanvas";
 import { RadialMenu } from "./flow/RadialMenu";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { descriptorFor } from "./registry/datatypes";
+import { nodeLabel } from "./flow/nodeLabel";
 import { selectGraph, useMirror } from "./store/mirror";
 import { useUi } from "./store/ui";
 
@@ -40,7 +41,7 @@ function Breadcrumb() {
 
   if (current === "root") return <div className="breadcrumb">Scene</div>;
   const owner = root.nodes.find((n) => n.id === current.subflow);
-  const name = owner ? descriptorFor(registry, owner.typeId)?.displayName ?? owner.typeId : "subflow";
+  const name = owner ? nodeLabel(owner, descriptorFor(registry, owner.typeId)) : "subflow";
   return (
     <div className="breadcrumb">
       <button className="crumb-link" onClick={() => setCurrent("root")}>
@@ -52,13 +53,14 @@ function Breadcrumb() {
   );
 }
 
-/** The selected node's display name, for the properties drawer header. */
+/** The selected node's display label (its `name` param when renamed, else
+ * the type display name), for the properties drawer header. */
 function useSelectedNodeName(): string {
   const registry = useMirror((s) => s.registry);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const selected = graph.nodes.find((n) => n.id === graph.selection[0]);
   if (!selected) return "";
-  return descriptorFor(registry, selected.typeId)?.displayName ?? selected.typeId;
+  return nodeLabel(selected, descriptorFor(registry, selected.typeId));
 }
 
 export function App() {

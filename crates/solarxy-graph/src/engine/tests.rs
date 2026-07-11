@@ -1465,6 +1465,155 @@ fn scene_delta_maps_a_geo_container_and_lights() {
     assert!((lights[0].position[0] - 10.0).abs() < 1e-5);
 }
 
+// Phase 8 root visibility: hidden-but-cooked, picking and marker gates.
+
+/// Sets a root-level bool param (the visibility / shadow toggles).
+fn set_root_bool(e: &mut Engine, node: NodeId, key: &str, value: bool) {
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: key.into(),
+        value: ParamSource::Literal(ParamValue::Bool(value)),
+    })
+    .unwrap();
+}
+
+#[test]
+fn hidden_geo_emits_set_visible_false_and_stays_cooked() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let (mut e, geo, ..) = displayed_box();
+    let object_id = SceneObjectId(geo.0);
+
+    // Visible by default: the producer emits the flag every pass.
+    let delta = e.take_scene_delta();
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::SetVisible { id, visible: true } if *id == object_id
+    )));
+    let before = e.display_geometries();
+    assert_eq!(before.len(), 1);
+    let warm = std::sync::Arc::clone(&before[0].1);
+
+    // Hide: SetVisible false, while the geometry upsert remains
+    // (hidden-but-cooked, GPU-resident for instant re-show) and the
+    // visualization aggregation drops the object.
+    set_root_bool(&mut e, geo, "visible", false);
+    e.cook(&mut || true);
+    let delta = e.take_scene_delta();
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::SetVisible { id, visible: false } if *id == object_id
+    )));
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::UpsertGeometry { id, .. } if *id == object_id
+    )));
+    assert!(e.display_geometries().is_empty());
+
+    // Re-show and cook: the display output is the same Arc, proving the
+    // toggle never invalidated the cook (no staleness cliff).
+    set_root_bool(&mut e, geo, "visible", true);
+    e.cook(&mut || true);
+    let after = e.display_geometries();
+    assert_eq!(after.len(), 1);
+    assert!(std::sync::Arc::ptr_eq(&warm, &after[0].1));
+}
+
+#[test]
+fn invisible_root_light_is_flagged_for_the_renderer_gate() {
+    use solarxy_core::scene::SceneOp;
+    let mut e = engine();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    set_root_bool(&mut e, light, "visible", false);
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    // The def still lands in the list; the renderer's light loop filters
+    // on the flag (light.rs), so the contribution disappears.
+    assert_eq!(lights.len(), 1);
+    assert!(!lights[0].visible);
+}
+
+#[test]
+fn geo_cast_shadow_toggle_reaches_the_delta_and_spares_the_lights() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let (mut e, geo, ..) = displayed_box();
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    let object_id = SceneObjectId(geo.0);
+
+    // On by default.
+    let delta = e.take_scene_delta();
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::SetCastShadow { id, cast_shadow: true } if *id == object_id
+    )));
+
+    // Toggling the geo flag reaches the delta and is orthogonal to
+    // visibility (the object still renders) and to the light-side
+    // exclusive-caster rule (a geo is not a light; nothing is released).
+    set_root_bool(&mut e, geo, "cast_shadow", false);
+    let delta = e.take_scene_delta();
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::SetCastShadow { id, cast_shadow: false } if *id == object_id
+    )));
+    assert!(delta.ops.iter().any(|op| matches!(
+        op,
+        SceneOp::SetVisible { id, visible: true } if *id == object_id
+    )));
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert!(
+        lights[0].cast_shadow,
+        "the light keeps its shadow; the geo toggle is per-object participation"
+    );
+    let _ = light;
+}
+
+#[test]
+fn hidden_geo_is_not_pickable() {
+    let (mut e, geo, ..) = displayed_box();
+    let (origin, dir) = ([0.0, 0.0, 10.0], [0.0, 0.0, -1.0]);
+    assert_eq!(e.pick(origin, dir), Some(geo));
+    assert!(e.pick_detailed(origin, dir).is_some());
+
+    set_root_bool(&mut e, geo, "visible", false);
+    assert_eq!(e.pick(origin, dir), None);
+    assert!(e.pick_detailed(origin, dir).is_none());
+
+    set_root_bool(&mut e, geo, "visible", true);
+    assert_eq!(e.pick(origin, dir), Some(geo));
+}
+
+#[test]
+fn markers_hide_with_their_object_and_return_on_reshow() {
+    let (mut e, geo, ..) = displayed_box();
+    let id = add_picked_note(&mut e, "on the box", None);
+    assert_eq!(e.review_markers_world().len(), 1);
+
+    // Hiding suppresses the pin without flagging staleness (the anchored
+    // geometry is untouched; the review panel still lists the note).
+    set_root_bool(&mut e, geo, "visible", false);
+    assert!(e.review_markers_world().is_empty());
+    assert!(!e.annotation_stale(id));
+
+    set_root_bool(&mut e, geo, "visible", true);
+    assert_eq!(e.review_markers_world().len(), 1);
+    assert!(!e.annotation_stale(id));
+}
+
 // Async import job protocol (deferred-drain, generation guard).
 
 const TRI_STL: &str = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n";
@@ -1815,7 +1964,9 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     assert!((g.node(a).unwrap().position[0] - 42.0).abs() < 1e-6);
     assert!((g.node(a).unwrap().position[1] - (-7.0)).abs() < 1e-6);
     assert!(g.node(b).unwrap().bypassed);
-    assert_eq!(g.node(m).unwrap().type_version, 1);
+    // Phase 8 bumped the subflow geometry nodes to v2 (rendering-group
+    // strip); the version stored and reloaded is the current one.
+    assert_eq!(g.node(m).unwrap().type_version, 2);
 
     // Variadic port order: inputs are [edge from a, edge from b].
     let inputs = &g.node(m).unwrap().port_order["inputs"];

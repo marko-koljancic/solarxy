@@ -42,6 +42,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "bypass", keys: "b", context: "global", group: "Node Canvas", description: "Toggle bypass on selection" },
   { id: "palette", keys: "tab", context: "global", group: "Node Canvas", description: "Open the node palette", note: "When the canvas has focus" },
   { id: "display-flag", keys: "e", context: "global", group: "Node Canvas", description: "Set the display flag on the selection (subflow)" },
+  { id: "rename", keys: "f2", context: "canvas", group: "Node Canvas", description: "Rename the first selected node (inline)" },
   { id: "flow-grid", keys: "g", context: "canvas", group: "Node Canvas", description: "Toggle the canvas grid" },
   { id: "flow-minimap", keys: "m", context: "canvas", group: "Node Canvas", description: "Toggle the minimap" },
   { id: "flow-controls", keys: "c", context: "canvas", group: "Node Canvas", description: "Toggle the zoom controls" },

@@ -3,17 +3,34 @@
 // selection. Row click selects; double-clicking a container enters its
 // subflow; the Select button mirrors the Minimystix column.
 
+import { useEffect, useState } from "react";
+import { InlineEdit } from "../components/InlineEdit";
 import { dispatch } from "../engine/session";
 import { assetDisplayName } from "../engine/session";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
+import { useUi } from "../store/ui";
+import { IconEye } from "../icons";
 import { nodeInfoLine } from "./infoLine";
+import { nodeLabel } from "./nodeLabel";
+import { hasVisibleParam, nodeVisible } from "./visibility";
 
 export function FlowListView() {
   const registry = useMirror((s) => s.registry);
   const ctx = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
+
+  // Inline rename (Phase 8): double-click on the node cell or F2 via the
+  // ui-store rename request; commit is one setParam on `name`.
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const renameRequest = useUi((s) => s.renameRequest);
+  useEffect(() => {
+    if (renameRequest !== null) {
+      setRenamingId(renameRequest);
+      useUi.getState().setRenameRequest(null);
+    }
+  }, [renameRequest]);
 
   if (graph.nodes.length === 0) {
     return <div className="flow-list-empty">No nodes in this context yet.</div>;
@@ -54,11 +71,33 @@ export function FlowListView() {
                   }
                 }}
               >
-                <td>
+                <td
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingId(n.id);
+                  }}
+                >
                   {graph.activeOutput === n.id && (
                     <span className="display-dot inline" title="display flag" />
                   )}
-                  {desc?.displayName ?? n.typeId}
+                  {renamingId === n.id ? (
+                    <InlineEdit
+                      value={nodeLabel(n, desc)}
+                      placeholder={desc?.displayName ?? n.typeId}
+                      onCommit={(next) =>
+                        dispatch({
+                          type: "setParam",
+                          ctx,
+                          node: n.id,
+                          key: "name",
+                          value: { kind: "literal", type: "text", value: next },
+                        })
+                      }
+                      onClose={() => setRenamingId(null)}
+                    />
+                  ) : (
+                    nodeLabel(n, desc)
+                  )}
                 </td>
                 <td className="flow-list-type">{n.typeId}</td>
                 <td className="flow-list-info">{nodeInfoLine(desc, n, assetDisplayName) ?? ""}</td>
@@ -67,6 +106,24 @@ export function FlowListView() {
                   {n.bypassed ? " bypassed" : ""}
                 </td>
                 <td>
+                  {ctx === "root" && hasVisibleParam(desc) && (
+                    <button
+                      className={`visibility-eye list${nodeVisible(n) ? "" : " off"}`}
+                      title={nodeVisible(n) ? "Hide (stays cooked)" : "Show"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatch({
+                          type: "setParam",
+                          ctx,
+                          node: n.id,
+                          key: "visible",
+                          value: { kind: "literal", type: "bool", value: !nodeVisible(n) },
+                        });
+                      }}
+                    >
+                      <IconEye size={11} />
+                    </button>
+                  )}
                   <button
                     className="btn"
                     onClick={(e) => {

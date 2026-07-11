@@ -386,6 +386,55 @@ body.col-resizing .split-divider {
   font-weight: 400;
 }
 
+/* The Phase 8 inline rename editor (node label / list cell). */
+.inline-edit {
+  font: inherit;
+  color: var(--input-text);
+  background: var(--input-background);
+  border: 1px solid var(--input-border-focus);
+  border-radius: 2px;
+  outline: none;
+  padding: 0 0.3rem;
+  min-width: 10rem;
+  cursor: text;
+}
+
+.flow-node-rename {
+  font-size: 1.2rem;
+}
+
+/* The root visibility eye (Phase 8): bottom-left corner of the node face
+   (top-left is the stale tag's, top-right the cook error's, bottom-right
+   the validation badge's). Dimmed when the object is hidden. */
+.visibility-eye {
+  position: absolute;
+  bottom: -0.6rem;
+  left: -0.6rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+  background: var(--background-tertiary);
+  color: var(--node-label);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+}
+
+.visibility-eye.off {
+  opacity: 0.4;
+}
+
+.visibility-eye.list {
+  position: static;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-right: 0.4rem;
+}
+
 .flow-node-sub {
   color: var(--text-secondary);
   font-size: 1rem;

@@ -108,6 +108,14 @@ export function useKeyboard(): void {
           dispatch({ type: "setActiveOutput", ctx, node: selection[0] });
           break;
         }
+        case "rename": {
+          // Inline rename on the first selected node; the mounted node view
+          // (graph or list) consumes the request and opens its editor.
+          if (!selection.length) break;
+          e.preventDefault();
+          useUi.getState().setRenameRequest(selection[0]);
+          break;
+        }
         case "bypass": {
           if (!selection.length) break;
           const first = s.contexts[ctxKey]?.nodes.find((n) => n.id === selection[0]);

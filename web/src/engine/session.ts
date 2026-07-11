@@ -11,6 +11,8 @@ import {
   saveToFile,
   writeAutosave,
 } from "../persistence/opfs";
+import { nodeLabel } from "../flow/nodeLabel";
+import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { useReview } from "../store/review";
@@ -279,8 +281,8 @@ function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
   const registry = m.registry;
   const nameOf = (id: number) => {
     const node = m.contexts["root"]?.nodes.find((n) => n.id === id);
-    const display = registry?.nodes.find((t) => t.typeId === node?.typeId)?.displayName;
-    return display ?? `light ${id}`;
+    if (!node) return `light ${id}`;
+    return nodeLabel(node, registry ? descriptorFor(registry, node.typeId) : undefined);
   };
   const granted = nameOf(cmd.node);
   const names = released

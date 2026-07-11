@@ -9,7 +9,7 @@ use std::sync::Arc;
 use solarxy_core::ValidationReport;
 use solarxy_core::validation::{ValidationConfig, ValidationThresholds, validate_raw_model_with_config};
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, JobRequest, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
@@ -21,7 +21,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor,
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "validate",
-        version: 1,
+        version: 2,
         display_name: "Validate",
         category: Category::Modifiers,
         contexts: ContextMask::SUBFLOW,
@@ -61,7 +61,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
               passing the geometry through and emitting a report.",
         search_aliases: &["validate", "check", "lint", "inspect"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

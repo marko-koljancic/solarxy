@@ -17,6 +17,7 @@ import type {
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
+import { nodeLabel } from "../flow/nodeLabel";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
@@ -296,7 +297,7 @@ export function ParameterPanel() {
   return (
     <div className="param-panel">
       <div className="param-header">
-        <span className="param-title">{desc?.displayName ?? node.typeId}</span>
+        <span className="param-title">{nodeLabel(node, desc)}</span>
         {stats?.points !== undefined && (
           <span className="param-stats">
             {stats.points} pts · {stats.prims} tris · {stats.meshes} mesh

@@ -2,7 +2,7 @@
 
 use solarxy_kernel::primitives::generate_torus_knot;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
@@ -13,7 +13,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor}
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "torus_knot",
-        version: 1,
+        version: 2,
         display_name: "Torus Knot",
         category: Category::Primitives,
         contexts: ContextMask::SUBFLOW,
@@ -68,7 +68,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "A (p, q) torus knot swept as a tube.",
         search_aliases: &["knot", "pretzel"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

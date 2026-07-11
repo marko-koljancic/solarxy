@@ -71,6 +71,9 @@ interface UiState {
   showFlowControls: boolean;
   /** Per-context graph-or-list node view, keyed by ctxKey (in-memory). */
   flowView: Record<string, "graph" | "list">;
+  /** A pending inline-rename request (F2): the node whose label editor
+   * should open. Consumed by whichever node view is mounted. */
+  renameRequest: number | null;
   setSplitPct: (pct: number) => void;
   setDrawerHeight: (px: number) => void;
   toggleDrawerCollapsed: () => void;
@@ -83,6 +86,7 @@ interface UiState {
   setFlowView: (ctxKey: string, view: "graph" | "list") => void;
   setDrawerWidth: (px: number) => void;
   setArrangement: (a: Partial<{ viewportSide: ViewportSide; propertiesDock: PropertiesDock }>) => void;
+  setRenameRequest: (node: number | null) => void;
 }
 
 function loadArrangement(): { viewportSide: ViewportSide; propertiesDock: PropertiesDock } {
@@ -128,6 +132,7 @@ export const useUi = create<UiState>((set) => {
     screenshotOpen: false,
     bootError: null,
     flowView: {},
+    renameRequest: null,
     setSplitPct: (pct) => {
       const clamped = clampSplit(pct);
       localStorage.setItem(SPLIT_KEY, String(clamped));
@@ -172,5 +177,6 @@ export const useUi = create<UiState>((set) => {
         localStorage.setItem(ARRANGEMENT_KEY, JSON.stringify(next));
         return next;
       }),
+    setRenameRequest: (node) => set({ renameRequest: node }),
   };
 });

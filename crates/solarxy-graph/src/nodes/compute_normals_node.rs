@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -16,7 +16,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor,
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "compute_normals",
-        version: 1,
+        version: 2,
         display_name: "Compute Normals",
         category: Category::Modifiers,
         contexts: ContextMask::SUBFLOW,
@@ -48,7 +48,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Recomputes per-vertex normals from the triangle topology.",
         search_aliases: &["normals", "recompute", "smooth"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

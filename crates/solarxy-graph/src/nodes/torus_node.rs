@@ -2,7 +2,7 @@
 
 use solarxy_kernel::primitives::generate_torus;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
@@ -13,7 +13,7 @@ use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor}
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "torus",
-        version: 1,
+        version: 2,
         display_name: "Torus",
         category: Category::Primitives,
         contexts: ContextMask::SUBFLOW,
@@ -64,7 +64,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "A torus (donut) in the XY plane.",
         search_aliases: &["donut", "ring"],
         cook,
-        migrate: None,
+        migrate: Some(migrate_strip_rendering_group),
     }
 }
 

@@ -1272,13 +1272,16 @@ impl Engine {
     /// World-space marker data for every top-level annotation: the pin
     /// position resolved through the anchored face's barycentric point and
     /// the geo world matrix, or the stored world fallback when the anchor
-    /// is stale or unresolvable. Replies carry no pin and are skipped.
+    /// is stale or unresolvable. Replies carry no pin and are skipped, as
+    /// are annotations anchored to a hidden geo (the pins hide with the
+    /// object and return on re-show; the review panel still lists them).
     #[must_use]
     pub fn review_markers_world(&self) -> Vec<ReviewMarkerWorld> {
         self.doc
             .review()
             .iter()
             .filter(|a| a.reply_to.is_none())
+            .filter(|a| scene::geo_visible(&self.doc, &self.registry, a.anchor.node))
             .map(|a| {
                 let stale = self.annotation_stale(a.id);
                 let world = if stale {
@@ -1322,7 +1325,8 @@ impl Engine {
 
     /// Every root geo container's displayed geometry with its world matrix,
     /// ascending geo id (the renderer's `SceneObjects` draw order). Feeds
-    /// the host-side normals/bounds visualization aggregation.
+    /// the host-side normals/bounds visualization aggregation, so hidden
+    /// geos are excluded (an invisible object draws no overlays either).
     #[must_use]
     pub fn display_geometries(
         &self,
@@ -1337,6 +1341,7 @@ impl Engine {
         let mut out: Vec<_> = root
             .nodes()
             .filter(|n| n.type_id == "geo")
+            .filter(|n| scene::geo_visible(&self.doc, &self.registry, n.id))
             .filter_map(|n| {
                 let set = scene::display_output(&self.doc, &self.cook, n.id)?;
                 let m = scene::geo_world_matrix(&self.doc, &self.registry, n.id);

@@ -14,13 +14,15 @@ use solarxy_formats::AssetResolver;
 use solarxy_kernel::GeometrySet;
 use solarxy_kernel::transform::{RotateOrder, bake_transform, compose_trs};
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
 use crate::assets::AssetTable;
 use crate::cook::{CookCtx, CookError, CookOutcome, ImportOptions, Inputs, JobRequest, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{
+    BypassBehavior, Category, ContextMask, MigrateError, MigrateFn, NodeTypeDescriptor,
+};
 
 /// An [`AssetResolver`] over the in-memory [`AssetTable`], resolving a
 /// sidecar's relative path by matching a staged asset's file name. The
@@ -82,6 +84,23 @@ struct Format {
     doc: &'static str,
     aliases: &'static [&'static str],
     extra: fn() -> Vec<ParamSpec>,
+    migrate: MigrateFn,
+}
+
+/// v1 -> v2 for `import_ply`: the shared rendering-group strip plus
+/// `vertex_colors`, declared in v1 but never carried into the parse path
+/// (no end-to-end vertex-color channel exists; it returns with the
+/// renderer attribute, backlog note). Silently stripped.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+fn migrate_ply(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    migrate_strip_rendering_group(from, params)?;
+    if from == 1 {
+        params.remove("vertex_colors");
+    }
+    Ok(())
 }
 
 fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
@@ -89,7 +108,7 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
     specific.extend((f.extra)());
     NodeTypeDescriptor {
         type_id: f.type_id,
-        version: 1,
+        version: 2,
         display_name: f.display_name,
         category: Category::Import,
         contexts: ContextMask::SUBFLOW,
@@ -100,7 +119,7 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
         doc: f.doc,
         search_aliases: f.aliases,
         cook: cook_import,
-        migrate: None,
+        migrate: Some(f.migrate),
     }
 }
 
@@ -111,6 +130,7 @@ const OBJ: Format = Format {
     doc: "Loads a Wavefront OBJ (MTL and textures via the asset resolver).",
     aliases: &["obj", "wavefront", "import"],
     extra: Vec::new,
+    migrate: migrate_strip_rendering_group,
 };
 const GLTF: Format = Format {
     type_id: "import_gltf",
@@ -119,6 +139,7 @@ const GLTF: Format = Format {
     doc: "Loads a glTF or GLB model.",
     aliases: &["gltf", "glb", "import"],
     extra: gltf_extra,
+    migrate: migrate_strip_rendering_group,
 };
 const STL: Format = Format {
     type_id: "import_stl",
@@ -127,6 +148,7 @@ const STL: Format = Format {
     doc: "Loads a binary or ASCII STL mesh.",
     aliases: &["stl", "import", "print"],
     extra: stl_extra,
+    migrate: migrate_strip_rendering_group,
 };
 const PLY: Format = Format {
     type_id: "import_ply",
@@ -134,7 +156,8 @@ const PLY: Format = Format {
     accept: &[".ply"],
     doc: "Loads a binary or ASCII PLY mesh.",
     aliases: &["ply", "import", "scan"],
-    extra: ply_extra,
+    extra: Vec::new,
+    migrate: migrate_ply,
 };
 
 fn gltf_extra() -> Vec<ParamSpec> {
@@ -150,15 +173,6 @@ fn stl_extra() -> Vec<ParamSpec> {
     vec![ParamSpec::new(
         "recompute_normals",
         "Recompute Normals",
-        "object",
-        ParamType::Bool,
-        ParamValue::Bool(true),
-    )]
-}
-fn ply_extra() -> Vec<ParamSpec> {
-    vec![ParamSpec::new(
-        "vertex_colors",
-        "Vertex Colors",
         "object",
         ParamType::Bool,
         ParamValue::Bool(true),

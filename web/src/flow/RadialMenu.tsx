@@ -11,8 +11,10 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { dispatch } from "../engine/session";
 import { IconBypass, IconDive, IconEye, IconTrash } from "../icons";
-import { useMirror } from "../store/mirror";
+import { descriptorFor } from "../registry/datatypes";
+import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
+import { hasVisibleParam, nodeVisible } from "./visibility";
 
 const RING_WIDTH = 34;
 const GAP_DEG = 9;
@@ -55,6 +57,8 @@ export function RadialMenu() {
   const target = useRadial((s) => s.target);
   const closeRadial = useRadial((s) => s.closeRadial);
   const openInfo = useRadial((s) => s.openInfo);
+  const registry = useMirror((s) => s.registry);
+  const rootGraph = useMirror((s) => selectGraph(s, "root"));
 
   useEffect(() => {
     if (!target) return;
@@ -84,6 +88,13 @@ export function RadialMenu() {
   if (!target) return null;
   const t = target;
 
+  // The eye segment is context-dependent (Phase 8): in a subflow it is the
+  // display flag (a radio selecting the container's output); at root it
+  // toggles the node's `visible` param (additive per-node visibility),
+  // gated on the descriptor declaring one (note gets no eye).
+  const rootNode = t.ctx === "root" ? rootGraph.nodes.find((n) => n.id === t.nodeId) : undefined;
+  const rootEye = rootNode !== undefined && hasVisibleParam(descriptorFor(registry, rootNode.typeId));
+
   const segments: Segment[] = [
     {
       key: "info",
@@ -93,7 +104,9 @@ export function RadialMenu() {
       title: "Node info",
       onPick: (tt) => openInfo(tt.nodeId, tt.ctx, tt.cx + tt.radius + RING_WIDTH + 24, tt.cy - 40),
     },
-    {
+  ];
+  if (t.ctx !== "root") {
+    segments.push({
       key: "display",
       angle: 38,
       span: 62,
@@ -104,7 +117,28 @@ export function RadialMenu() {
         dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
         closeRadial();
       },
-    },
+    });
+  } else if (rootEye && rootNode) {
+    segments.push({
+      key: "visibility",
+      angle: 38,
+      span: 62,
+      icon: <IconEye size={13} />,
+      title: nodeVisible(rootNode) ? "Hide (stays cooked)" : "Show",
+      active: nodeVisible(rootNode),
+      onPick: (tt) => {
+        dispatch({
+          type: "setParam",
+          ctx: tt.ctx,
+          node: tt.nodeId,
+          key: "visible",
+          value: { kind: "literal", type: "bool", value: !nodeVisible(rootNode) },
+        });
+        closeRadial();
+      },
+    });
+  }
+  segments.push(
     {
       key: "bypass",
       angle: 232,
@@ -131,7 +165,7 @@ export function RadialMenu() {
         closeRadial();
       },
     },
-  ];
+  );
   if (t.isContainer) {
     segments.push({
       key: "dive",

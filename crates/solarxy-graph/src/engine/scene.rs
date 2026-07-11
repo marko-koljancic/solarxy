@@ -86,11 +86,53 @@ pub(crate) fn display_output<'a>(
     }
 }
 
-/// Emits the `UpsertGeometry` + `SetValidation` + `SetTransform` for one
-/// geo container.
+/// A geo container's resolved root render flags. Both default `true` when
+/// the node, its descriptor, or its params are unavailable (they are
+/// additive gates, so unknown means shown and casting).
+#[derive(Clone, Copy)]
+pub(crate) struct GeoRenderFlags {
+    pub visible: bool,
+    pub cast_shadow: bool,
+}
+
+/// Resolves a geo's render flags through the standard param path. Shared
+/// by scene lowering, picking, the marker projection, and the
+/// visualization aggregation so they can never disagree about what
+/// "hidden" means.
+pub(crate) fn geo_render_flags(doc: &Document, registry: &Registry, geo: NodeId) -> GeoRenderFlags {
+    let on = GeoRenderFlags {
+        visible: true,
+        cast_shadow: true,
+    };
+    let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo)) else {
+        return on;
+    };
+    let Some(desc) = registry.get("geo") else {
+        return on;
+    };
+    let Ok(p) = resolve_params(&node.params, &desc.params) else {
+        return on;
+    };
+    GeoRenderFlags {
+        visible: !matches!(p.get("visible"), Some(ParamValue::Bool(false))),
+        cast_shadow: !matches!(p.get("cast_shadow"), Some(ParamValue::Bool(false))),
+    }
+}
+
+/// The `visible` half of [`geo_render_flags`] (the picking, marker, and
+/// visualization gates).
+pub(crate) fn geo_visible(doc: &Document, registry: &Registry, geo: NodeId) -> bool {
+    geo_render_flags(doc, registry, geo).visible
+}
+
+/// Emits the `UpsertGeometry` + `SetVisible` + `SetCastShadow` +
+/// `SetValidation` + `SetTransform` for one geo container. Hidden objects
+/// still upsert (hidden-but-cooked: the geometry stays GPU-resident so
+/// re-show is instant); `SetVisible` is the render gate, never a cook
+/// gate.
 fn emit_geo(
     doc: &Document,
-    _registry: &Registry,
+    registry: &Registry,
     cook: &CookEngine,
     geo: NodeId,
     delta: &mut SceneDelta,
@@ -109,6 +151,18 @@ fn emit_geo(
             geometry: std::sync::Arc::new(set.to_cooked()),
         });
     }
+    // The geo's root render flags (the delta is rebuilt fully each pass,
+    // so re-emission is free; the renderer's handlers are bool
+    // assignments).
+    let flags = geo_render_flags(doc, registry, geo);
+    delta.push(SceneOp::SetVisible {
+        id: object_id,
+        visible: flags.visible,
+    });
+    delta.push(SceneOp::SetCastShadow {
+        id: object_id,
+        cast_shadow: flags.cast_shadow,
+    });
     // The object's effective validation: the nearest cached result on the
     // displayed chain (the display node itself, else breadth-first
     // upstream -- a validate node's report or an import's load
@@ -123,7 +177,7 @@ fn emit_geo(
     // helper so picking and rendering agree.
     delta.push(SceneOp::SetTransform {
         id: object_id,
-        transform: geo_world_matrix(doc, _registry, geo).into(),
+        transform: geo_world_matrix(doc, registry, geo).into(),
     });
 }
 
@@ -206,6 +260,10 @@ pub fn pick_node(
             continue;
         }
         let geo = node.id;
+        // Hidden objects are not click-selectable (they are not rendered).
+        if !geo_visible(doc, registry, geo) {
+            continue;
+        }
         let Ok(subflow) = doc.graph(GraphContext::Subflow(geo)) else {
             continue;
         };
@@ -272,6 +330,10 @@ pub(crate) fn pick_node_detailed(
             continue;
         }
         let geo = node.id;
+        // Hidden objects are not click-selectable (they are not rendered).
+        if !geo_visible(doc, registry, geo) {
+            continue;
+        }
         let Some(set) = display_output(doc, cook, geo) else {
             continue;
         };

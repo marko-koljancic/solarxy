@@ -256,6 +256,10 @@ pub struct DrawObject<'a> {
     /// accent tint drawn at the end of the main pass; the web picking-sync
     /// direction of decision 24). Desktop passes `false`.
     pub selected: bool,
+    /// Whether the object is drawn into the shadow map (per-object
+    /// participation; which light owns the map is the light-side
+    /// exclusive-caster rule). Desktop passes `true`.
+    pub cast_shadow: bool,
 }
 
 pub struct Renderer {
@@ -867,6 +871,9 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.scene.shadow);
         pass.set_bind_group(0, &env.shadow.pass_bind_group, &[]);
         for obj in objects {
+            if !obj.cast_shadow {
+                continue;
+            }
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
                 if !mesh.visible {

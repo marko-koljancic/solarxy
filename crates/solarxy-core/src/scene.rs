@@ -128,6 +128,13 @@ pub enum SceneOp {
         id: SceneObjectId,
         visible: bool,
     },
+    /// Whether the object is drawn into the shadow map. Orthogonal to the
+    /// light-side exclusive-caster rule: the light decides which light owns
+    /// the shadow map, the object decides whether it participates.
+    SetCastShadow {
+        id: SceneObjectId,
+        cast_shadow: bool,
+    },
     /// Attach or clear the object's effective validation result (the
     /// nearest validation on the displayed chain: a validate node's
     /// report or an import's implicit load validation). `None` clears the
