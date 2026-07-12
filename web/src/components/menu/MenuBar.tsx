@@ -1,8 +1,8 @@
-// The application menu bar (File / Edit / Nodes / View / Help), carried
-// from Minimystix's Header. Every item dispatches through the same session
-// functions the keyboard uses; the Nodes menu is a pure interpreter of the
-// registry snapshot (categories to node types), so a node added in Rust
-// appears with zero changes here.
+// The global menu bar (File / Edit / Desks / Review / Help), slimmed in
+// Phase 9: pane-scoped chrome lives on the pane bars (the node-pane Add
+// and View menus, the viewport View menu) and Theme lives in Preferences.
+// Every item dispatches through the same session functions the keyboard
+// uses.
 
 import { useRef, useState } from "react";
 import {
@@ -17,13 +17,10 @@ import {
 import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
-import { applyDagreLayout, applyElkLayout } from "../../flow/layout";
 import { AboutModal } from "../AboutModal";
-import { EnvironmentModal } from "../EnvironmentModal";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
-import { usePrefs, type ThemeChoice } from "../../store/prefs";
 import { useUi } from "../../store/ui";
 import { DeskSaveModal } from "../DeskSaveModal";
 import { MenuItem, type MenuEntry } from "./MenuItem";
@@ -42,12 +39,8 @@ async function newScene(): Promise<void> {
 export function MenuBar() {
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
-  const theme = usePrefs((s) => s.prefs.appearance.theme);
-  const viewportMaximized = useUi((s) => s.viewportMaximized);
-  const drawerCollapsed = useUi((s) => s.drawerCollapsed);
   const importRef = useRef<HTMLInputElement>(null);
   const importFolderRef = useRef<HTMLInputElement>(null);
-  const [envOpen, setEnvOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -101,53 +94,6 @@ export function MenuBar() {
     },
     { divider: true },
     { label: "Preferences...", shortcut: `${MOD},`, onClick: () => useUi.getState().setPrefsOpen(true) },
-  ];
-
-  const setTheme = (t: ThemeChoice) => usePrefs.getState().setTheme(t);
-  const showFlowGrid = useUi((s) => s.showFlowGrid);
-  const showMinimap = useUi((s) => s.showMinimap);
-  const showFlowControls = useUi((s) => s.showFlowControls);
-  const runLayout = (algo: "dagre" | "elk") => {
-    const g = selectGraph(useMirror.getState(), current);
-    if (g.nodes.length === 0) return;
-    const done = () => window.dispatchEvent(new Event("solarxy:fitView"));
-    if (algo === "dagre") {
-      applyDagreLayout(current, g);
-      done();
-    } else {
-      void applyElkLayout(current, g).then(done);
-    }
-  };
-  const view: MenuEntry[] = [
-    { label: "Environment...", onClick: () => setEnvOpen(true) },
-    { label: "Save Screenshot...", shortcut: "C", onClick: () => useUi.getState().setScreenshotOpen(true) },
-    { divider: true },
-    { label: "Auto-Layout (Dagre)", shortcut: "L", onClick: () => runLayout("dagre") },
-    { label: "Auto-Layout (ELK)", onClick: () => runLayout("elk") },
-    { divider: true },
-    { label: "Canvas Grid", shortcut: "G", checked: showFlowGrid, onClick: () => useUi.getState().toggleFlowChrome("showFlowGrid") },
-    { label: "Minimap", shortcut: "M", checked: showMinimap, onClick: () => useUi.getState().toggleFlowChrome("showMinimap") },
-    { label: "Canvas Controls", shortcut: "C", checked: showFlowControls, onClick: () => useUi.getState().toggleFlowChrome("showFlowControls") },
-    { divider: true },
-    {
-      label: "Theme",
-      submenu: (["dark", "light", "system"] as const).map((t) => ({
-        label: t[0].toUpperCase() + t.slice(1),
-        checked: theme === t,
-        onClick: () => setTheme(t),
-      })),
-    },
-    { divider: true },
-    {
-      label: "Maximize Viewport",
-      checked: viewportMaximized,
-      onClick: () => useUi.getState().toggleViewportMaximized(),
-    },
-    {
-      label: "Collapse Properties",
-      checked: drawerCollapsed,
-      onClick: () => useUi.getState().toggleDrawerCollapsed(),
-    },
   ];
 
   // Desks (Phase 7b D3): presets + user-saved arrangements, direct
@@ -245,11 +191,9 @@ export function MenuBar() {
     <nav className="menu-bar">
       <MenuItem title="File" entries={file} />
       <MenuItem title="Edit" entries={edit} />
-      <MenuItem title="View" entries={view} />
       <MenuItem title="Desks" entries={desks} />
       <MenuItem title="Review" entries={review} />
       <MenuItem title="Help" entries={help} />
-      {envOpen && <EnvironmentModal onClose={() => setEnvOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
       {deskSaveOpen && <DeskSaveModal onClose={() => setDeskSaveOpen(false)} />}
       {confirmNew && (

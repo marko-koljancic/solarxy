@@ -6,6 +6,7 @@
 import { useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Background,
+  ConnectionLineType,
   Controls,
   MiniMap,
   ReactFlow,
@@ -26,18 +27,29 @@ import { portDataType, connectionLegal, descriptorFor } from "../registry/dataty
 import { selectGraph, useMirror } from "../store/mirror";
 import { pushToast } from "../store/toasts";
 import { usePrefs } from "../store/prefs";
-import { useUi } from "../store/ui";
+import { useUi, type EdgeStyle } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
 import { NoteNode } from "./NoteNode";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
+/** Connection styles map onto xyflow's built-in edge types, so the typed
+ * color classes (edge-type-*, edge-lossy) apply to every style unchanged.
+ * The same ids drive the drag-preview connectionLineType. */
+const RF_EDGE_TYPE: Record<EdgeStyle, ConnectionLineType> = {
+  bezier: ConnectionLineType.Bezier,
+  straight: ConnectionLineType.Straight,
+  simpleBezier: ConnectionLineType.SimpleBezier,
+  smoothStep: ConnectionLineType.SmoothStep,
+};
+
 /** Maps a mirror graph to React Flow nodes/edges, styling each edge by its
  * coercion kind (plain for same/lossless, warning for lossy). */
 function toRf(
   graph: GraphMirror,
   registry: RegistrySnapshot | null,
+  edgeStyle: EdgeStyle,
 ): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
   const nodes = graph.nodes.map((n) => ({
     id: String(n.id),
@@ -70,7 +82,7 @@ function toRf(
       target: String(e.to),
       sourceHandle: e.fromPort,
       targetHandle: e.toPort,
-      type: "default",
+      type: RF_EDGE_TYPE[edgeStyle],
       className: classes.join(" "),
       reconnectable: true,
     };
@@ -86,6 +98,7 @@ export function NodeCanvas() {
   const showFlowGrid = useUi((s) => s.showFlowGrid);
   const showMinimap = useUi((s) => s.showMinimap);
   const showFlowControls = useUi((s) => s.showFlowControls);
+  const edgeStyle = useUi((s) => s.edgeStyle);
   const { fitView } = useReactFlow();
 
   // Auto-layout completion fits the view (the layout module emits this
@@ -96,7 +109,7 @@ export function NodeCanvas() {
     return () => window.removeEventListener("solarxy:fitView", onFit);
   }, [fitView]);
 
-  const seed = useMemo(() => toRf(graph, registry), [graph, registry]);
+  const seed = useMemo(() => toRf(graph, registry, edgeStyle), [graph, registry, edgeStyle]);
   const [nodes, setNodes, onNodesChange] = useNodesState(seed.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(seed.edges);
 
@@ -160,9 +173,9 @@ export function NodeCanvas() {
         to: { node: Number(conn.target), port: conn.targetHandle },
       });
       // The mirror re-seed adds the edge; keep RF responsive meanwhile.
-      setEdges((es) => addEdge({ ...conn, type: "default" }, es));
+      setEdges((es) => addEdge({ ...conn, type: RF_EDGE_TYPE[edgeStyle] }, es));
     },
-    [ctx, setEdges, graph, registry],
+    [ctx, setEdges, graph, registry, edgeStyle],
   );
 
   // C3: dragging an existing edge's endpoint re-routes it (one undo step:
@@ -288,6 +301,7 @@ export function NodeCanvas() {
       onNodeDoubleClick={onNodeDoubleClick}
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Control"]}
+      connectionLineType={RF_EDGE_TYPE[edgeStyle]}
       zoomOnDoubleClick={false}
       fitView
       proOptions={{ hideAttribution: true }}

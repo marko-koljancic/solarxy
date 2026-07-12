@@ -21,6 +21,7 @@ const PROBE: NodeTypeSnapshot = {
   version: 1,
   displayName: "Probe",
   category: "primitives",
+  categoryLabel: "Primitives",
   rootContext: false,
   subflowContext: true,
   inputs: [

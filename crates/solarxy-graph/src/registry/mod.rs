@@ -117,6 +117,23 @@ pub enum Category {
     Utility,
 }
 
+impl Category {
+    /// Title Case name for UI labels. The serde `snake_case` string stays
+    /// the stable id (CSS classes, grouping keys, snapshot `category`);
+    /// every label surface renders this instead.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Container => "Container",
+            Self::Primitives => "Primitives",
+            Self::Modifiers => "Modifiers",
+            Self::Import => "Import",
+            Self::Lights => "Lights",
+            Self::Utility => "Utility",
+        }
+    }
+}
+
 /// Which canvases a node type may appear on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextMask {

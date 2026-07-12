@@ -9,6 +9,7 @@ import dagre from "@dagrejs/dagre";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { dispatch } from "../engine/session";
 import type { GraphContext, GraphMirror } from "../engine/types";
+import { selectGraph, useMirror } from "../store/mirror";
 
 export type LayoutAlgorithm = "dagre" | "elk";
 
@@ -112,6 +113,21 @@ export async function applyElkLayout(ctx: GraphContext, graph: GraphMirror): Pro
   const { nodes, edges } = layoutInputs(graph);
   if (nodes.length === 0) return;
   applyPositions(ctx, await computeElkLayout(nodes, edges));
+}
+
+/** Menu entry point: lays out the current context and fits the view when
+ * done (the canvas listens for the fitView event). No-op on empty graphs. */
+export function runLayout(algo: LayoutAlgorithm): void {
+  const current = useMirror.getState().current;
+  const g = selectGraph(useMirror.getState(), current);
+  if (g.nodes.length === 0) return;
+  const done = () => window.dispatchEvent(new Event("solarxy:fitView"));
+  if (algo === "dagre") {
+    applyDagreLayout(current, g);
+    done();
+  } else {
+    void applyElkLayout(current, g).then(done);
+  }
 }
 
 // The L-key cycle alternates algorithms per press (Minimystix behavior).

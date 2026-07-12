@@ -10,6 +10,7 @@ export interface SubMenuEntry {
   onClick: () => void;
   checked?: boolean;
   disabled?: boolean;
+  shortcut?: string;
 }
 
 export interface MenuEntry {
@@ -87,6 +88,7 @@ export function MenuItem({ title, entries }: MenuItemProps) {
                       >
                         <span className="menu-check">{sub.checked && <IconCheck size={12} />}</span>
                         <span className="menu-label">{sub.label}</span>
+                        {sub.shortcut && <span className="menu-shortcut">{sub.shortcut}</span>}
                       </div>
                     ))}
                   </div>

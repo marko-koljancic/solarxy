@@ -21,11 +21,15 @@ import { PaneToolbars } from "./PaneToolbar";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPanel } from "./review/ReviewPanel";
 import { ReviewPopup } from "./review/ReviewPopup";
+import { ViewportMenuBar } from "./ViewportMenuBar";
 
 export function Viewport() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const setSelection = useMirror((s) => s.contexts); // subscribe so re-renders stay live
   void setSelection;
+  // Crosshair while review mode is active (a className change; the canvas
+  // element itself is never remounted).
+  const reviewMode = useReview((s) => s.reviewMode);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -110,11 +114,18 @@ export function Viewport() {
     return getClient().pick(p.x, p.y);
   };
 
+  // The menu bar sits above the canvas; every overlay (pane toolbars,
+  // review pins, popup, panel) lives inside the canvas host so their
+  // absolute canvas-CSS-px coordinates keep their origin at the canvas
+  // top-left. The canvas itself keeps a stable tree position (never
+  // remounted; the WebGPU surface would be lost).
   return (
     <>
+      <ViewportMenuBar />
+      <div className="viewport-canvas-host">
       <canvas
         ref={canvasRef}
-        className="viewport-canvas"
+        className={`viewport-canvas${reviewMode ? " review-cursor" : ""}`}
         onPointerEnter={() => useViewState.getState().setPointerOverViewport(true)}
         onPointerLeave={() => useViewState.getState().setPointerOverViewport(false)}
         onPointerDown={(e) => {
@@ -207,6 +218,7 @@ export function Viewport() {
       <ReviewOverlay />
       <ReviewPopup />
       <ReviewPanel />
+      </div>
     </>
   );
 }

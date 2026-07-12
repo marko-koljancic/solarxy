@@ -38,6 +38,7 @@ function desc(
     version: 1,
     displayName: "T",
     category,
+    categoryLabel: category[0].toUpperCase() + category.slice(1),
     rootContext: true,
     subflowContext: true,
     inputs: [],

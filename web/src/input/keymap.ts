@@ -47,6 +47,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "flow-minimap", keys: "m", context: "canvas", group: "Node Canvas", description: "Toggle the minimap" },
   { id: "flow-controls", keys: "c", context: "canvas", group: "Node Canvas", description: "Toggle the zoom controls" },
   { id: "layout-cycle", keys: "l", context: "canvas", group: "Node Canvas", description: "Auto-layout the graph (cycles Dagre / ELK)" },
+  { id: "edge-style-cycle", keys: "s", context: "canvas", group: "Node Canvas", description: "Cycle the connection style" },
   { id: "shortcuts", keys: "?", context: "global", group: "File", description: "Show keyboard shortcuts" },
   { id: "preferences", keys: "mod+,", context: "global", group: "File", description: "Open preferences" },
   // Viewport context (cursor over the 3D region). The 1-7 assignments and

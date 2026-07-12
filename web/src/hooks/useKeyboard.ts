@@ -21,7 +21,7 @@ import { cycleAutoLayout } from "../flow/layout";
 import { eventKeys, lookupBinding } from "../input/keymap";
 import { useMirror } from "../store/mirror";
 import { useReview } from "../store/review";
-import { useUi } from "../store/ui";
+import { EDGE_STYLE_LABELS, useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { pushToast } from "../store/toasts";
 import type { PaneDisplaySettings, ViewLayout } from "../engine/types";
@@ -209,6 +209,12 @@ export function useKeyboard(): void {
         case "flow-controls":
           useUi.getState().toggleFlowChrome("showFlowControls");
           break;
+        case "edge-style-cycle": {
+          const ui = useUi.getState();
+          ui.cycleEdgeStyle();
+          pushToast(`Connection style: ${EDGE_STYLE_LABELS[useUi.getState().edgeStyle]}`, "info");
+          break;
+        }
         case "layout-cycle": {
           e.preventDefault();
           const g = s.contexts[ctxKey];

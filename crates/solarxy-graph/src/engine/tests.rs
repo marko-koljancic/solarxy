@@ -267,6 +267,9 @@ fn snapshot_and_registry_snapshot_serialize() {
     assert!(json.contains("width_segments"));
     // Degrees unit is surfaced for the transform's rotate param.
     assert!(json.contains("degrees"));
+    // The Title Case category label rides beside the stable snake_case id.
+    assert!(json.contains("\"categoryLabel\":\"Primitives\""));
+    assert!(json.contains("\"category\":\"primitives\""));
 }
 
 #[test]

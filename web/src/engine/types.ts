@@ -255,6 +255,8 @@ export interface NodeTypeSnapshot {
   version: number;
   displayName: string;
   category: "container" | "primitives" | "modifiers" | "import" | "lights" | "utility";
+  /** Title Case label for the category; `category` stays the stable id. */
+  categoryLabel: string;
   rootContext: boolean;
   subflowContext: boolean;
   inputs: PortSnapshot[];

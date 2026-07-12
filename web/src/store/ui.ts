@@ -13,6 +13,20 @@ const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
 const DRAWER_KEY = "solarxy.ui.drawerHeight";
 const DRAWER_WIDTH_KEY = "solarxy.ui.drawerWidth";
 const ARRANGEMENT_KEY = "solarxy.ui.arrangement";
+const EDGE_STYLE_KEY = "solarxy.ui.edgeStyle";
+
+/** Connection styles carried from Minimystix (its "step" id is renamed to
+ * the honest smoothStep; the path function was smooth-step all along).
+ * Cycle order (S key) is array order. A browser preference, deliberately
+ * not captured by Desks. */
+export const EDGE_STYLES = ["bezier", "straight", "simpleBezier", "smoothStep"] as const;
+export type EdgeStyle = (typeof EDGE_STYLES)[number];
+export const EDGE_STYLE_LABELS: Record<EdgeStyle, string> = {
+  bezier: "Bezier",
+  straight: "Straight",
+  simpleBezier: "Simple Bezier",
+  smoothStep: "Smooth Step",
+};
 
 /** Clamp bounds carried from Minimystix (variables.css / PropertiesDrawer). */
 export const SPLIT_MIN_PCT = 20;
@@ -78,12 +92,16 @@ interface UiState {
   prefsOpen: boolean;
   /** The screenshot modal (not persisted). */
   screenshotOpen: boolean;
+  /** The node palette (not persisted; Tab and the Add menu toggle it). */
+  paletteOpen: boolean;
   /** A fatal boot failure (WebGPU unavailable, wasm init error). */
   bootError: string | null;
   /** Node-canvas chrome toggles (G / M / C; Minimystix defaults). */
   showFlowGrid: boolean;
   showMinimap: boolean;
   showFlowControls: boolean;
+  /** Connection style for canvas edges (S cycles; View menu selects). */
+  edgeStyle: EdgeStyle;
   /** Per-context graph-or-list node view, keyed by ctxKey (in-memory). */
   flowView: Record<string, "graph" | "list">;
   /** A pending inline-rename request (F2): the node whose label editor
@@ -98,8 +116,11 @@ interface UiState {
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
   setScreenshotOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
   setBootError: (message: string) => void;
   toggleFlowChrome: (key: "showFlowGrid" | "showMinimap" | "showFlowControls") => void;
+  setEdgeStyle: (style: EdgeStyle) => void;
+  cycleEdgeStyle: () => void;
   setFlowView: (ctxKey: string, view: "graph" | "list") => void;
   setDrawerWidth: (px: number) => void;
   setArrangement: (a: Partial<{ viewportSide: ViewportSide; propertiesDock: PropertiesDock }>) => void;
@@ -136,6 +157,12 @@ function loadNumber(key: string, fallback: number): number {
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
 }
 
+export function loadEdgeStyle(): EdgeStyle {
+  if (typeof localStorage === "undefined") return "bezier";
+  const raw = localStorage.getItem(EDGE_STYLE_KEY);
+  return (EDGE_STYLES as readonly string[]).includes(raw ?? "") ? (raw as EdgeStyle) : "bezier";
+}
+
 export const useUi = create<UiState>((set) => {
   return {
     ...loadFlowChrome(),
@@ -143,11 +170,13 @@ export const useUi = create<UiState>((set) => {
     splitPct: clampSplit(loadNumber(SPLIT_KEY, 55)),
     drawerHeight: clampDrawer(loadNumber(DRAWER_KEY, 280)),
     drawerWidth: clampDrawerWidth(loadNumber(DRAWER_WIDTH_KEY, 340)),
+    edgeStyle: loadEdgeStyle(),
     drawerCollapsed: false,
     viewportMaximized: false,
     shortcutsOpen: false,
     prefsOpen: false,
     screenshotOpen: false,
+    paletteOpen: false,
     bootError: null,
     flowView: {},
     renameRequest: null,
@@ -167,6 +196,7 @@ export const useUi = create<UiState>((set) => {
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPrefsOpen: (open) => set({ prefsOpen: open }),
     setScreenshotOpen: (open) => set({ screenshotOpen: open }),
+    setPaletteOpen: (open) => set({ paletteOpen: open }),
     setBootError: (message) => set({ bootError: message }),
     toggleFlowChrome: (key) =>
       set((s) => {
@@ -180,6 +210,16 @@ export const useUi = create<UiState>((set) => {
           }),
         );
         return { [key]: !s[key] };
+      }),
+    setEdgeStyle: (style) => {
+      localStorage.setItem(EDGE_STYLE_KEY, style);
+      set({ edgeStyle: style });
+    },
+    cycleEdgeStyle: () =>
+      set((s) => {
+        const next = EDGE_STYLES[(EDGE_STYLES.indexOf(s.edgeStyle) + 1) % EDGE_STYLES.length];
+        localStorage.setItem(EDGE_STYLE_KEY, next);
+        return { edgeStyle: next };
       }),
     setFlowView: (key, view) => set((s) => ({ flowView: { ...s.flowView, [key]: view } })),
     setDrawerWidth: (px) => {

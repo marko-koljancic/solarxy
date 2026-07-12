@@ -5,13 +5,11 @@
 // can maximize to the full window from the View menu.
 
 import { useEffect, useState } from "react";
-import { ReactFlowProvider } from "@xyflow/react";
 import { PropertiesDrawer } from "./components/layout/PropertiesDrawer";
 import { PropertiesSide } from "./components/layout/PropertiesSide";
 import { SplitPane } from "./components/layout/SplitPane";
 import { MenuBar } from "./components/menu/MenuBar";
-import { NodesMenu } from "./components/menu/NodesMenu";
-import { NodePalette } from "./components/NodePalette";
+import { NodePane } from "./components/NodePane";
 import { ParameterPanel } from "./components/ParameterPanel";
 import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { PreferencesModal } from "./components/preferences/PreferencesModal";
@@ -23,36 +21,14 @@ import { Viewport } from "./components/Viewport";
 import { NodeInfoModal } from "./components/NodeInfoModal";
 import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
 import { importDroppedFiles } from "./engine/session";
-import { ctxKey } from "./engine/types";
 import { collectDroppedFiles } from "./persistence/dropEntries";
-import { FlowListView } from "./flow/FlowListView";
-import { NodeCanvas } from "./flow/NodeCanvas";
 import { RadialMenu } from "./flow/RadialMenu";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { descriptorFor } from "./registry/datatypes";
 import { nodeLabel } from "./flow/nodeLabel";
 import { selectGraph, useMirror } from "./store/mirror";
+import { useReview } from "./store/review";
 import { useUi } from "./store/ui";
-
-function Breadcrumb() {
-  const current = useMirror((s) => s.current);
-  const registry = useMirror((s) => s.registry);
-  const root = useMirror((s) => selectGraph(s, "root"));
-  const setCurrent = useMirror((s) => s.setCurrent);
-
-  if (current === "root") return <div className="breadcrumb">Scene</div>;
-  const owner = root.nodes.find((n) => n.id === current.subflow);
-  const name = owner ? nodeLabel(owner, descriptorFor(registry, owner.typeId)) : "subflow";
-  return (
-    <div className="breadcrumb">
-      <button className="crumb-link" onClick={() => setCurrent("root")}>
-        Scene
-      </button>
-      <span className="crumb-sep">›</span>
-      <span>{name}</span>
-    </div>
-  );
-}
 
 /** The selected node's display label (its `name` param when renamed, else
  * the type display name), for the properties drawer header. */
@@ -67,13 +43,12 @@ function useSelectedNodeName(): string {
 export function App() {
   const registry = useMirror((s) => s.registry);
   const dirty = useMirror((s) => s.dirty);
-  const current = useMirror((s) => s.current);
   const selectedName = useSelectedNodeName();
   const shortcutsOpen = useUi((s) => s.shortcutsOpen);
   const prefsOpen = useUi((s) => s.prefsOpen);
   const screenshotOpen = useUi((s) => s.screenshotOpen);
   const bootError = useUi((s) => s.bootError);
-  const flowView = useUi((s) => s.flowView[ctxKey(current)] ?? "graph");
+  const reviewMode = useReview((s) => s.reviewMode);
   const viewportSide = useUi((s) => s.viewportSide);
   const propertiesDock = useUi((s) => s.propertiesDock);
   const [dropActive, setDropActive] = useState(false);
@@ -123,6 +98,15 @@ export function App() {
       <header className="app-header">
         <MenuBar />
         {dirty && <span className="dirty-dot" title="unsaved changes" />}
+        {reviewMode && (
+          <button
+            className="review-pill"
+            title="Review mode is active; click to exit"
+            onClick={() => useReview.getState().setReviewMode(false)}
+          >
+            Review
+          </button>
+        )}
         <span className="spacer" />
         <Toolbar />
       </header>
@@ -135,39 +119,13 @@ export function App() {
             </div>
           }
           panel={
-            <div className="node-pane">
-              <div className="node-toolbar">
-                <Breadcrumb />
-                <NodesMenu />
-                <button
-                  className="btn view-toggle"
-                  title={flowView === "graph" ? "Switch to list view" : "Switch to graph view"}
-                  onClick={() =>
-                    useUi
-                      .getState()
-                      .setFlowView(ctxKey(current), flowView === "graph" ? "list" : "graph")
-                  }
-                >
-                  {flowView === "graph" ? "List" : "Graph"}
-                </button>
-                <span className="spacer" />
-                <NodePalette />
-              </div>
-              <div className="node-canvas-host">
-                {flowView === "list" ? (
-                  <FlowListView />
-                ) : (
-                  <ReactFlowProvider>
-                    <NodeCanvas />
-                  </ReactFlowProvider>
-                )}
-              </div>
+            <NodePane>
               {propertiesDock === "bottom" && (
                 <PropertiesDrawer title={selectedName}>
                   <ParameterPanel />
                 </PropertiesDrawer>
               )}
-            </div>
+            </NodePane>
           }
         />
         {propertiesDock === "right" && (

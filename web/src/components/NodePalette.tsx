@@ -10,6 +10,7 @@ import { Popover, renderDoc } from "./Popover";
 import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
+import { useUi } from "../store/ui";
 
 const ALL_CATEGORY = "All";
 
@@ -24,7 +25,10 @@ export function NodePalette() {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
-  const [open, setOpen] = useState(false);
+  // Open state lives in the ui store since Phase 9: the Add menu's
+  // "Search Nodes..." entry toggles it from outside this component.
+  const open = useUi((s) => s.paletteOpen);
+  const setOpen = (o: boolean) => useUi.getState().setPaletteOpen(o);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState(ALL_CATEGORY);
   const [cursor, setCursor] = useState(0);
@@ -35,11 +39,12 @@ export function NodePalette() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement)?.tagName?.match(/INPUT|TEXTAREA|SELECT/);
+      const ui = useUi.getState();
       if (e.key === "Tab" && !typing) {
         e.preventDefault();
-        setOpen((o) => !o);
+        ui.setPaletteOpen(!ui.paletteOpen);
       } else if (e.key === "Escape") {
-        setOpen(false);
+        ui.setPaletteOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -61,9 +66,15 @@ export function NodePalette() {
     [registry, inRoot],
   );
 
+  // Id/label pairs: filtering stays keyed by the stable snake_case id, the
+  // buttons render the Title Case label from the snapshot.
   const categories = useMemo(() => {
-    const cats = [...new Set(contextNodes.map((n) => n.category))].sort();
-    return [ALL_CATEGORY, ...cats];
+    const labels = new Map(contextNodes.map((n) => [n.category, n.categoryLabel]));
+    const cats = [...labels.keys()].sort();
+    return [
+      { id: ALL_CATEGORY, label: ALL_CATEGORY },
+      ...cats.map((id) => ({ id, label: labels.get(id) ?? id })),
+    ];
   }, [contextNodes]);
 
   const visible = useMemo(
@@ -94,13 +105,17 @@ export function NodePalette() {
       setCursor((c) => Math.max(0, c - 1));
     } else if (e.key === "ArrowRight" && !query) {
       e.preventDefault();
-      setCategory((c) => categories[(categories.indexOf(c) + 1) % categories.length]);
+      setCategory((c) => {
+        const i = categories.findIndex((cat) => cat.id === c);
+        return categories[(i + 1) % categories.length].id;
+      });
       setCursor(0);
     } else if (e.key === "ArrowLeft" && !query) {
       e.preventDefault();
-      setCategory(
-        (c) => categories[(categories.indexOf(c) - 1 + categories.length) % categories.length],
-      );
+      setCategory((c) => {
+        const i = categories.findIndex((cat) => cat.id === c);
+        return categories[(i - 1 + categories.length) % categories.length].id;
+      });
       setCursor(0);
     } else if (e.key === "Enter") {
       e.preventDefault();
@@ -118,9 +133,6 @@ export function NodePalette() {
 
   return (
     <>
-      <button className="palette-trigger" onClick={() => setOpen((o) => !o)} title="Add node (Tab)">
-        + Add
-      </button>
       {open && (
         <div className="palette-backdrop" onClick={() => setOpen(false)}>
           <div className="palette" onClick={(e) => e.stopPropagation()}>
@@ -139,15 +151,15 @@ export function NodePalette() {
               <div className="palette-cats">
                 {categories.map((cat) => (
                   <button
-                    key={cat}
-                    className={`palette-cat-btn${cat === category ? " active" : ""}`}
+                    key={cat.id}
+                    className={`palette-cat-btn${cat.id === category ? " active" : ""}`}
                     onClick={() => {
-                      setCategory(cat);
+                      setCategory(cat.id);
                       setCursor(0);
                       inputRef.current?.focus();
                     }}
                   >
-                    {cat}
+                    {cat.label}
                   </button>
                 ))}
               </div>
@@ -164,7 +176,7 @@ export function NodePalette() {
                       onMouseEnter={() => setCursor(i)}
                     >
                       <span>{n.displayName}</span>
-                      <span className="palette-item-cat">{n.category}</span>
+                      <span className="palette-item-cat">{n.categoryLabel}</span>
                     </button>
                   </Popover>
                 ))}

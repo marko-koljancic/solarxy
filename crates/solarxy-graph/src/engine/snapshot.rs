@@ -177,6 +177,8 @@ pub struct NodeTypeSnapshot {
     pub version: u32,
     pub display_name: String,
     pub category: crate::registry::Category,
+    /// Title Case label for the category; `category` stays the stable id.
+    pub category_label: String,
     pub root_context: bool,
     pub subflow_context: bool,
     pub inputs: Vec<PortSnapshot>,
@@ -322,6 +324,7 @@ impl NodeTypeSnapshot {
             version: desc.version,
             display_name: desc.display_name.to_string(),
             category: desc.category,
+            category_label: desc.category.display_name().to_string(),
             root_context: desc.contexts.root,
             subflow_context: desc.contexts.subflow,
             inputs: desc.inputs.iter().map(PortSnapshot::from).collect(),
