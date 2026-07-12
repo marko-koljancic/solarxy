@@ -62,8 +62,12 @@ pub enum FormatsError {
     #[error("glTF error: {0}")]
     Gltf(#[from] ::gltf::Error),
     /// A required external asset (buffer, MTL) was not provided by the
-    /// [`AssetResolver`].
-    #[error("missing external asset '{0}'")]
+    /// [`AssetResolver`]. The message is user-facing (import error badges
+    /// and toasts), so it says what to do about it.
+    #[error(
+        "missing external asset '{0}': the model references this companion \
+         file; import or place it alongside the model"
+    )]
     MissingAsset(String),
     /// Structurally valid file with unusable content (no geometry, missing
     /// required elements).

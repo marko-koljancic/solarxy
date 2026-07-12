@@ -21,6 +21,7 @@ import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { Viewport } from "./components/Viewport";
 import { NodeInfoModal } from "./components/NodeInfoModal";
+import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
 import { importDroppedFiles } from "./engine/session";
 import { ctxKey } from "./engine/types";
 import { collectDroppedFiles } from "./persistence/dropEntries";
@@ -178,6 +179,7 @@ export function App() {
       <Toasts />
       <RadialMenu />
       <NodeInfoModal />
+      <MissingSidecarsModal />
       <RecoveryPrompt />
       {(bootError !== null || !registry) && (
         <div className="boot-overlay">

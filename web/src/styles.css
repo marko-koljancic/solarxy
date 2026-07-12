@@ -1176,6 +1176,35 @@ body.col-resizing .split-divider {
   gap: 0.8rem;
 }
 
+/* The missing-sidecars import prompt. */
+.sidecar-intro strong {
+  color: var(--text-primary);
+}
+
+.sidecar-group {
+  margin: 0 0 1.2rem;
+}
+
+.sidecar-group-title {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
+}
+
+.sidecar-list {
+  margin: 0;
+  padding: 0.4rem 0.8rem;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.4rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
+
 .btn {
   background: var(--background-primary);
   border: 1px solid var(--border-primary);

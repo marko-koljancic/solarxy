@@ -16,6 +16,7 @@ import {
 } from "../../engine/session";
 import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { DIRECTORY_PICKER } from "../directoryPicker";
 import { applyDagreLayout, applyElkLayout } from "../../flow/layout";
 import { AboutModal } from "../AboutModal";
 import { EnvironmentModal } from "../EnvironmentModal";
@@ -45,6 +46,7 @@ export function MenuBar() {
   const viewportMaximized = useUi((s) => s.viewportMaximized);
   const drawerCollapsed = useUi((s) => s.drawerCollapsed);
   const importRef = useRef<HTMLInputElement>(null);
+  const importFolderRef = useRef<HTMLInputElement>(null);
   const [envOpen, setEnvOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -64,6 +66,7 @@ export function MenuBar() {
     { label: "Save Scene", shortcut: `${MOD}S`, onClick: () => void explicitSave() },
     { divider: true },
     { label: "Import Model...", onClick: () => importRef.current?.click() },
+    { label: "Import Model Folder...", onClick: () => importFolderRef.current?.click() },
   ];
 
   const withBypass = () => {
@@ -272,6 +275,18 @@ export function MenuBar() {
           if (files.length) void importDroppedFiles(files);
           e.target.value = "";
         }}
+      />
+      <input
+        ref={importFolderRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) void importDroppedFiles(files);
+          e.target.value = "";
+        }}
+        {...DIRECTORY_PICKER}
       />
     </nav>
   );

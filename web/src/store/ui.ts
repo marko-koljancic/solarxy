@@ -5,6 +5,9 @@
 
 import { create } from "zustand";
 
+import type { SidecarRefs } from "../engine/sidecars";
+import type { GraphContext } from "../engine/types";
+
 const SPLIT_KEY = "solarxy.ui.splitPct";
 const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
 const DRAWER_KEY = "solarxy.ui.drawerHeight";
@@ -45,6 +48,18 @@ export function clampDrawerWidth(px: number): number {
 export type ViewportSide = "left" | "right";
 export type PropertiesDock = "bottom" | "right";
 
+/** A pending missing-sidecars prompt (multi-file model import preflight):
+ * the primary model references companion files that are not staged. The
+ * modal stages what the user adds and then runs the deferred completion. */
+export interface SidecarPrompt {
+  primaryName: string;
+  primaryHash: string;
+  missing: SidecarRefs;
+  complete:
+    | { kind: "setParam"; ctx: GraphContext; node: number; key: string }
+    | { kind: "createImportNode" };
+}
+
 interface UiState {
   /** Viewport share of the horizontal split, in percent (20-80). */
   splitPct: number;
@@ -74,6 +89,8 @@ interface UiState {
   /** A pending inline-rename request (F2): the node whose label editor
    * should open. Consumed by whichever node view is mounted. */
   renameRequest: number | null;
+  /** The missing-sidecars import prompt (not persisted). */
+  sidecarPrompt: SidecarPrompt | null;
   setSplitPct: (pct: number) => void;
   setDrawerHeight: (px: number) => void;
   toggleDrawerCollapsed: () => void;
@@ -87,6 +104,7 @@ interface UiState {
   setDrawerWidth: (px: number) => void;
   setArrangement: (a: Partial<{ viewportSide: ViewportSide; propertiesDock: PropertiesDock }>) => void;
   setRenameRequest: (node: number | null) => void;
+  setSidecarPrompt: (prompt: SidecarPrompt | null) => void;
 }
 
 function loadArrangement(): { viewportSide: ViewportSide; propertiesDock: PropertiesDock } {
@@ -133,6 +151,7 @@ export const useUi = create<UiState>((set) => {
     bootError: null,
     flowView: {},
     renameRequest: null,
+    sidecarPrompt: null,
     setSplitPct: (pct) => {
       const clamped = clampSplit(pct);
       localStorage.setItem(SPLIT_KEY, String(clamped));
@@ -178,5 +197,6 @@ export const useUi = create<UiState>((set) => {
         return next;
       }),
     setRenameRequest: (node) => set({ renameRequest: node }),
+    setSidecarPrompt: (prompt) => set({ sidecarPrompt: prompt }),
   };
 });

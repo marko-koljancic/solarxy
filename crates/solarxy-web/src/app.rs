@@ -1206,6 +1206,23 @@ impl SolarxyApp {
             .map(js_sys::Uint8Array::from)
     }
 
+    /// Every staged asset as `[{ hash, name }]`. The sidecar preflight
+    /// diffs a model's referenced companions against it, so the check is
+    /// authoritative across reloads and `.slxy` restores (a JS-side cache
+    /// of staged names would go cold on both).
+    pub fn asset_manifest(&self) -> Result<JsValue, JsError> {
+        let manifest: Vec<AssetRefDto> = self
+            .engine
+            .asset_manifest()
+            .iter()
+            .map(|(h, n)| AssetRefDto {
+                hash: h.clone(),
+                name: n.clone(),
+            })
+            .collect();
+        to_js(&manifest)
+    }
+
     /// Drains the import jobs the last cook spawned into a JS array of
     /// `{ ctx, jobId, hash, name, format, options, sidecars }`. The frontend
     /// gathers each job's bytes, posts them to the import worker, and returns

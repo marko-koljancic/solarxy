@@ -15,11 +15,13 @@ import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
+import { useUi } from "../store/ui";
 import { useReview } from "../store/review";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
+import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
 import { ctxKey } from "./types";
 import type {
   CameraCommand,
@@ -619,11 +621,21 @@ function extOf(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "";
 }
 
+/** Every staged asset's name from the engine manifest (the sidecar
+ * preflight's authoritative staged set; a JS-side cache would go cold on
+ * reloads and `.slxy` restores). */
+export function stagedManifestNames(): string[] {
+  return getClient()
+    .assetManifest()
+    .map((a) => a.name);
+}
+
 /** Stages dropped files and creates the matching import node referencing the
  * primary model. Companion files (mtl/bin/textures) are staged too and
  * resolved by name at parse time, so a multi-file `.gltf` just works. When
- * the current context is the root, a Geo container is created and entered
- * first (import nodes live in subflows). */
+ * the primary references companions that are still missing (a lone `.gltf`
+ * was dropped), the missing-sidecars dialog opens instead and node creation
+ * defers to its completion. */
 export async function importDroppedFiles(files: File[]): Promise<void> {
   // A dropped `.slxy` opens the scene rather than importing a model.
   if (files.length === 1 && extOf(files[0].name) === "slxy") {
@@ -635,8 +647,30 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
     pushToast("No model file in the drop (.obj / .gltf / .glb / .stl / .ply).", "warn");
     return;
   }
+  const primary = files[primaryIdx];
   const staged = await Promise.all(files.map(stageFile));
-  const nodeType = IMPORT_NODE[extOf(files[primaryIdx].name)];
+
+  const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+  const missing = missingSidecars(refs, stagedManifestNames());
+  if (hasMissing(missing)) {
+    useUi.getState().setSidecarPrompt({
+      primaryName: primary.name,
+      primaryHash: staged[primaryIdx].hash,
+      missing,
+      complete: { kind: "createImportNode" },
+    });
+    return;
+  }
+  completeModelImport(staged[primaryIdx].hash, primary.name);
+}
+
+/** The import-node creation tail of [`importDroppedFiles`], also run by the
+ * missing-sidecars dialog on completion: creates the matching import node
+ * (inside a fresh Geo container when at root) and points its `file` param
+ * at the staged primary. */
+export function completeModelImport(primaryHash: string, primaryName: string): void {
+  const nodeType = IMPORT_NODE[extOf(primaryName)];
+  if (!nodeType) return;
 
   let ctx = useMirror.getState().current;
   if (ctx === "root") {
@@ -655,9 +689,9 @@ export async function importDroppedFiles(files: File[]): Promise<void> {
     ctx,
     node: added.node.id,
     key: "file",
-    value: { kind: "literal", type: "asset", value: staged[primaryIdx].hash },
+    value: { kind: "literal", type: "asset", value: primaryHash },
   });
-  pushToast(`Importing ${files[primaryIdx].name}…`, "info");
+  pushToast(`Importing ${primaryName}…`, "info");
 }
 
 /** Runs one cook+render frame, mirrors the cook batch, and drains host

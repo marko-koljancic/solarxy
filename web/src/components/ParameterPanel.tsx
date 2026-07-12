@@ -8,7 +8,17 @@
 // ParamType is a deliberate change (a new widget case).
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { dispatch, flyToIssue, previewParam, stageFile } from "../engine/session";
+import {
+  assetDisplayName,
+  dispatch,
+  flyToIssue,
+  previewParam,
+  stagedManifestNames,
+  stageFile,
+} from "../engine/session";
+import { hasMissing, missingSidecars, referencedSidecars } from "../engine/sidecars";
+import { useUi } from "../store/ui";
+import { DIRECTORY_PICKER } from "./directoryPicker";
 import type {
   GraphContext,
   NodeMirror,
@@ -177,14 +187,17 @@ function Field({ ctx, node, spec }: FieldProps) {
  * yields a parse job to the worker. */
 function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
   const [pending, setPending] = useState(false);
-  const [localName, setLocalName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
   const current = String(paramValue(node, spec) ?? "");
 
   // Multi-file staging: a multi-file model (gltf + bin + textures) selects
-  // everything at once; every file stages (the sidecar resolver matches
-  // companions by name at parse time) and the param points at the primary
-  // (the first file matching the accepted extensions).
+  // everything at once (or via the folder picker); every file stages (the
+  // sidecar resolver matches companions by name at parse time) and the
+  // param points at the primary (the first file matching the accepted
+  // extensions). If the primary references companions that are still
+  // missing, the missing-sidecars dialog opens and the param write defers
+  // to its completion, so the import never has to fail on a lone .gltf.
   const onFiles = async (files: File[]) => {
     setPending(true);
     try {
@@ -193,26 +206,38 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
         files.find((f) => exts.some((ext) => f.name.toLowerCase().endsWith(ext))) ?? files[0];
       let primaryHash = "";
       for (const file of files) {
-        const { hash, name } = await stageFile(file);
-        if (file === primary) {
-          primaryHash = hash;
-          setLocalName(name);
-        }
+        const { hash } = await stageFile(file);
+        if (file === primary) primaryHash = hash;
       }
-      if (primaryHash) {
-        dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", primaryHash) });
+      if (!primaryHash) return;
+      const refs = referencedSidecars(primary.name, new Uint8Array(await primary.arrayBuffer()));
+      const missing = missingSidecars(refs, stagedManifestNames());
+      if (hasMissing(missing)) {
+        useUi.getState().setSidecarPrompt({
+          primaryName: primary.name,
+          primaryHash,
+          missing,
+          complete: { kind: "setParam", ctx, node: node.id, key: spec.key },
+        });
+        return;
       }
+      dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", primaryHash) });
     } finally {
       setPending(false);
     }
   };
 
   const clear = () => {
-    setLocalName("");
     dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal("assetRef", "") });
   };
 
-  const display = localName || (current ? `${current.slice(0, 10)}…` : "no file");
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) void onFiles(files);
+    e.target.value = "";
+  };
+
+  const display = current ? assetDisplayName(current) ?? `${current.slice(0, 10)}…` : "no file";
 
   return (
     <div className="param-row">
@@ -225,6 +250,15 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
           onClick={() => inputRef.current?.click()}
         >
           {pending ? "Staging…" : current ? "Change" : "Select File"}
+        </button>
+        <button
+          type="button"
+          className="param-asset-btn"
+          disabled={pending}
+          title="Import a whole model folder (gltf + bin + textures)"
+          onClick={() => folderRef.current?.click()}
+        >
+          Folder…
         </button>
         <span className="param-asset-name" title={current}>
           {display}
@@ -239,11 +273,15 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
           type="file"
           multiple
           style={{ display: "none" }}
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            if (files.length > 0) void onFiles(files);
-            e.target.value = "";
-          }}
+          onChange={onInputChange}
+        />
+        <input
+          ref={folderRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={onInputChange}
+          {...DIRECTORY_PICKER}
         />
       </div>
     </div>

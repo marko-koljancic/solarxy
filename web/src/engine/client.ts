@@ -6,6 +6,7 @@ import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
 import type {
   Annotation,
+  AssetRef,
   CameraCommand,
   Command,
   DisplaySettingsDto,
@@ -191,6 +192,12 @@ export class SolarxyClient {
   /** A fresh copy of the staged bytes for a hash (undefined if absent). */
   assetBytes(hash: string): Uint8Array | undefined {
     return this.app.asset_bytes(hash) as Uint8Array | undefined;
+  }
+
+  /** Every staged asset as `{hash, name}` (the sidecar preflight's
+   * authoritative staged-name source). */
+  assetManifest(): AssetRef[] {
+    return this.app.asset_manifest() as AssetRef[];
   }
 
   /** Drains the import jobs the last cook spawned (to run in the worker).
