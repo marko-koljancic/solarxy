@@ -24,6 +24,7 @@ import { cycleAutoLayout } from "../flow/layout";
 import { eventKeys, lookupBinding } from "../input/keymap";
 import { useMirror } from "../store/mirror";
 import { useReview } from "../store/review";
+import { usePrefs } from "../store/prefs";
 import { EDGE_STYLE_LABELS, useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { pushToast } from "../store/toasts";
@@ -204,6 +205,21 @@ export function useKeyboard(): void {
         case "tool-move":
           setTool("move");
           break;
+        case "tool-rotate":
+          setTool("rotate");
+          break;
+        case "tool-scale":
+          setTool("scale");
+          break;
+        case "gizmo-orientation": {
+          // Writes the same pref the View menu's radio does, so the two can
+          // never disagree about which frame the handles are in.
+          const { prefs, setPrefs } = usePrefs.getState();
+          const next = prefs.viewport.orientation === "world" ? "local" : "world";
+          setPrefs({ ...prefs, viewport: { ...prefs.viewport, orientation: next } });
+          pushToast(`Gizmo orientation: ${next === "world" ? "World" : "Local"}`, "info");
+          break;
+        }
         case "screenshot": {
           const ui = useUi.getState();
           ui.setScreenshotOpen(!ui.screenshotOpen);

@@ -26,6 +26,7 @@ import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
+import { GizmoReadout } from "./GizmoReadout";
 import { ToolColumn } from "./ToolColumn";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPopup } from "./review/ReviewPopup";
@@ -35,6 +36,16 @@ import { ViewportMenuBar } from "./ViewportMenuBar";
 function canvasPos(e: PointerEvent | MouseEvent): { x: number; y: number } {
   const rect = viewportCanvas().getBoundingClientRect();
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+/** Bit 0 = snap. A bitfield rather than a bool so shift-for-precision can land
+ * later without changing the wasm signature.
+ *
+ * metaKey counts too: on macOS Ctrl-click is the secondary click, so Cmd is the
+ * modifier a Mac user's hand actually reaches for. */
+const MOD_SNAP = 1 << 0;
+function pointerMods(e: PointerEvent): number {
+  return e.ctrlKey || e.metaKey ? MOD_SNAP : 0;
 }
 
 
@@ -142,7 +153,7 @@ export function Viewport() {
       if (drag && Math.abs(e.movementX) + Math.abs(e.movementY) > 1) drag.moved = true;
       try {
         const p = canvasPos(e);
-        getClient().pointerMove(p.x, p.y);
+        getClient().pointerMove(p.x, p.y, pointerMods(e));
       } catch {
         /* not booted */
       }
@@ -252,6 +263,7 @@ export function Viewport() {
       <ViewportMenuBar />
       <div className="viewport-canvas-host" ref={hostRef}>
         <ToolColumn />
+        <GizmoReadout />
         <PaneToolbars />
         <ReviewOverlay />
         <ReviewPopup />

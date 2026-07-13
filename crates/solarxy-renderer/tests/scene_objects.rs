@@ -247,6 +247,8 @@ fn set_lights_stores_and_flags_dirty_once() {
         shadow_map_size: 1024,
         shadow_bias: 0.0,
         visible: true,
+        show_helper: false,
+        helper_size: 1.0,
     };
     scene
         .apply(

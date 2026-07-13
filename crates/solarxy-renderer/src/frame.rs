@@ -17,6 +17,10 @@ use crate::camera::Camera;
 /// shafts, three cones and three quads -- a few hundred vertices -- so a fixed
 /// allocation is honest here; `write_manipulator` refuses to overrun it.
 const MANIPULATOR_BUF_BYTES: u64 = 64 * 1024;
+/// Light helpers get their own budget: they are N-per-scene (eight lights, each
+/// a wire sphere or a cone) rather than one selection-attached gizmo, so sharing
+/// the manipulator's buffer would make one starve the other.
+const LIGHT_HELPER_BUF_BYTES: u64 = 256 * 1024;
 use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
@@ -285,6 +289,8 @@ pub struct Renderer {
     /// scene's bounds move materially -- a gizmo must survive that.
     manipulator_line_buf: wgpu::Buffer,
     manipulator_line_count: u32,
+    light_helper_buf: wgpu::Buffer,
+    light_helper_count: u32,
     manipulator_tri_buf: wgpu::Buffer,
     manipulator_tri_count: u32,
     pub uv_overlap: UvOverlapResources,
@@ -618,6 +624,13 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             manipulator_tri_count: 0,
+            light_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Light Helpers"),
+                size: LIGHT_HELPER_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            light_helper_count: 0,
             uv_overlap: UvOverlapResources {
                 count_texture: count_tex,
                 count_view,
@@ -1076,6 +1089,7 @@ impl Renderer {
             self.draw_selection_tint(&mut pass, objects, cam_bg);
         }
         // Last, so it sits over everything; its pipelines ignore depth anyway.
+        self.draw_light_helpers(&mut pass, cam_bg);
         self.draw_manipulator(&mut pass, cam_bg);
     }
 
@@ -1101,6 +1115,52 @@ impl Renderer {
         }
     }
 
+    /// Draws the light helpers. Its own draw, on its own buffer, because helpers
+    /// are shown per their light's `show_helper` param and have nothing to do
+    /// with whether a manipulator is up.
+    fn draw_light_helpers<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if self.light_helper_count == 0 {
+            return;
+        }
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
+        pass.set_vertex_buffer(0, self.light_helper_buf.slice(..));
+        pass.draw(0..self.light_helper_count, 0..1);
+    }
+
+    /// Uploads this frame's light helpers. Unlike the manipulator, these are
+    /// sized in WORLD units, so they do NOT depend on the pane: one write per
+    /// frame, not one per pane.
+    pub fn write_light_helpers(
+        &mut self,
+        queue: &wgpu::Queue,
+        lights: &[solarxy_core::scene::LightDef],
+    ) {
+        let lines = crate::helpers::build_light_helpers(lights);
+        if lines.is_empty() {
+            self.light_helper_count = 0;
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&lines);
+        if bytes.len() as u64 > LIGHT_HELPER_BUF_BYTES {
+            // Loud, not silent: a vanished helper with no explanation is exactly
+            // the kind of thing that costs an afternoon.
+            tracing::warn!(
+                bytes = bytes.len(),
+                budget = LIGHT_HELPER_BUF_BYTES,
+                "light helpers exceeded their vertex buffer; not drawing"
+            );
+            self.light_helper_count = 0;
+            return;
+        }
+        queue.write_buffer(&self.light_helper_buf, 0, bytes);
+        self.light_helper_count = u32::try_from(lines.len()).unwrap_or(0);
+    }
+
     /// Sets (or clears) the manipulator for this frame. Pull-based, like every
     /// other overlay: the host decides, the renderer draws.
     pub fn set_manipulator(&mut self, state: Option<crate::manipulator::ManipulatorState>) {
@@ -1123,16 +1183,35 @@ impl Renderer {
         };
         state.scale =
             crate::manipulator::GIZMO_PX * camera.world_per_pixel(state.origin(), pane_height_px);
+        // Per pane for the same reason the scale is: each pane has its own
+        // camera, so the view-aligned ring faces a different way in each.
+        state.view_dir = camera.forward();
         self.manipulator = Some(state);
 
         let (lines, tris) = state.build_vertices();
-        // The gizmo is a fixed handful of vertices, so the buffers are sized
-        // once at startup; guard anyway rather than corrupt the draw.
+        // The gizmo is a bounded handful of vertices (the rotate tool's four
+        // 64-segment rings are the worst case), so the buffers are sized once at
+        // startup. Guard anyway rather than corrupt the draw -- but LOUDLY: this
+        // used to zero the counts silently, which presents as "the gizmo
+        // mysteriously vanished" and gives the next person nothing to go on.
         let line_bytes = bytemuck::cast_slice(&lines);
         let tri_bytes = bytemuck::cast_slice(&tris);
         if line_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
             || tri_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
         {
+            debug_assert!(
+                false,
+                "manipulator overflowed its {MANIPULATOR_BUF_BYTES}-byte buffers \
+                 ({} line bytes, {} tri bytes): raise MANIPULATOR_BUF_BYTES",
+                line_bytes.len(),
+                tri_bytes.len()
+            );
+            tracing::warn!(
+                line_bytes = line_bytes.len(),
+                tri_bytes = tri_bytes.len(),
+                budget = MANIPULATOR_BUF_BYTES,
+                "manipulator geometry exceeded its vertex buffers; not drawing"
+            );
             self.manipulator_line_count = 0;
             self.manipulator_tri_count = 0;
             return;

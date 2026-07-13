@@ -70,11 +70,14 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "screenshot", keys: "c", context: "viewport", group: "Viewport & Layout", description: "Screenshot the active pane" },
   { id: "uv-overlap-toggle", keys: "o", context: "viewport", group: "Inspection", description: "Toggle the UV overlap display (UV pane)" },
   // Viewport tools (Maya-style Q/W/E/R; Blender's G/R/S collide with the grid,
-  // connection-style and review bindings). Rotate (E) and Scale (R) arrive in
-  // Phase 12 and are deliberately UNBOUND until then, matching their disabled
-  // buttons: a key that silently does nothing is worse than no key.
+  // connection-style and review bindings). E is free over the viewport because
+  // Phase 11 narrowed the display-flag binding to the canvas context, which was
+  // always where it belonged.
   { id: "tool-select", keys: "q", context: "viewport", group: "Viewport & Layout", description: "Tool: Select" },
   { id: "tool-move", keys: "w", context: "viewport", group: "Viewport & Layout", description: "Tool: Move (translate gizmo)" },
+  { id: "tool-rotate", keys: "e", context: "viewport", group: "Viewport & Layout", description: "Tool: Rotate (rotation rings)" },
+  { id: "tool-scale", keys: "r", context: "viewport", group: "Viewport & Layout", description: "Tool: Scale (scale handles)" },
+  { id: "gizmo-orientation", keys: "x", context: "viewport", group: "Viewport & Layout", description: "Toggle gizmo orientation (world / local)" },
   // Review (Phase 7): mode toggle over the viewport, panel anywhere; Esc
   // walks the cancel ladder (gizmo drag > draft > re-anchor > review mode >
   // maximized panel).

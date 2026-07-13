@@ -199,6 +199,12 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     client = c;
     useMirror.getState().setRegistry(c.registrySnapshot());
     useViewState.getState().setView(c.viewState());
+    // The host caches the gizmo's snap steps and orientation; push the current
+    // prefs in once, then keep it in step for the rest of the session.
+    pushGizmoSettings();
+    usePrefs.subscribe((state, prev) => {
+      if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
+    });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
       (window as unknown as Record<string, unknown>).__solarxy = {
@@ -285,11 +291,21 @@ export function applyViewportBatch(batch: EventBatch | null): void {
   markDirtyAndAutosave();
 }
 
-/** Selects the viewport tool (Q/W/E/R, or the tool column). */
+/** Selects the viewport tool (Q/W/E/R, or the tool column).
+ *
+ * Switching mid-drag abandons that drag, and the host rolls it back rather than
+ * dropping it, so the returned batch has to reach the mirror. */
 export function setTool(tool: ToolMode): void {
   if (!client) return;
-  getClient().setTool(tool);
+  applyViewportBatch(getClient().setTool(tool));
   useViewState.getState().setToolMode(tool);
+}
+
+/** Pushes the gizmo's drag ergonomics into the host. Called on boot and on any
+ * prefs change; the drag loop runs in Rust and never crosses back to ask. */
+export function pushGizmoSettings(): void {
+  if (!client) return;
+  getClient().setGizmoSettings(usePrefs.getState().prefs.viewport);
 }
 
 /** Escape during a gizmo drag: rolls it back. */
@@ -743,6 +759,11 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
   }
+  // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
+  // which stays void so the drag keeps costing zero boundary crossings; the
+  // frame loop is already crossing anyway for the cook.
+  useViewState.getState().setGizmoReadout(getClient().gizmoReadout());
+
   // Marker pins track the cameras imperatively (no React re-render).
   const review = useReview.getState();
   if (review.annotations.length > 0 && !review.markersHidden) {

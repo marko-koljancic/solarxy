@@ -3,33 +3,18 @@
 //! a pivot and bakes it into point positions; normals via inverse
 //! transpose. Required geometry input; missing input is a hard error.
 
-use solarxy_kernel::transform::{RotateOrder, bake_transform, compose_trs};
+use solarxy_kernel::transform::{bake_transform, compose_trs};
 
-use super::common::{geometry_output, migrate_strip_rendering_group, params_with};
+use super::common::{
+    geometry_output, migrate_strip_rendering_group, params_with, rotate_order_from_key,
+    rotate_order_param,
+};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
-use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Unit};
+use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
-
-fn rotate_order_variants() -> Vec<EnumVariant> {
-    ["xyz", "xzy", "yxz", "yzx", "zxy", "zyx"]
-        .into_iter()
-        .map(|k| EnumVariant::new(k, k.to_uppercase()))
-        .collect()
-}
-
-fn rotate_order_from_key(key: &str) -> RotateOrder {
-    match key {
-        "xzy" => RotateOrder::Xzy,
-        "yxz" => RotateOrder::Yxz,
-        "yzx" => RotateOrder::Yzx,
-        "zxy" => RotateOrder::Zxy,
-        "zyx" => RotateOrder::Zyx,
-        _ => RotateOrder::Xyz,
-    }
-}
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -64,15 +49,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamValue::Vec3([0.0; 3]),
                 )
                 .unit(Unit::Degrees),
-                ParamSpec::new(
-                    "rotate_order",
-                    "Rotate Order",
-                    "transform",
-                    ParamType::Enum {
-                        variants: rotate_order_variants(),
-                    },
-                    ParamValue::Enum("xyz".to_string()),
-                ),
+                rotate_order_param(),
                 ParamSpec::new(
                     "scale",
                     "Scale",

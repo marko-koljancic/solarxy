@@ -63,6 +63,7 @@ pub mod environment;
 pub mod error;
 pub mod frame;
 pub mod geometry;
+pub mod helpers;
 pub mod ibl;
 pub mod input;
 pub mod light;

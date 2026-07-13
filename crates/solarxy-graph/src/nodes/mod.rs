@@ -8,7 +8,9 @@
 //! palette, handles, and parameter panel pick it up from the snapshot with
 //! no frontend change.
 
-mod common;
+// The scene lowering reaches in for `rotate_order_from_key`: the geo's world
+// matrix must read the same order the transform node's cook does.
+pub(crate) mod common;
 
 // Primitives (subflow).
 mod box_node;

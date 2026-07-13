@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toggleMaximize } from "../dock/api";
 import { cameraCommand, setActivePane, setViewLayout } from "../engine/session";
 import type { ViewLayout } from "../engine/types";
+import { usePrefs, type GizmoOrientation } from "../store/prefs";
 import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { EnvironmentModal } from "./EnvironmentModal";
@@ -20,8 +21,14 @@ const PANE_LAYOUTS: { layout: ViewLayout; label: string; shortcut: string }[] = 
   { layout: "threeLeftBig", label: "Three Left Big", shortcut: "F5" },
 ];
 
+const ORIENTATIONS: { value: GizmoOrientation; label: string }[] = [
+  { value: "world", label: "World Axes" },
+  { value: "local", label: "Object Axes" },
+];
+
 export function ViewportMenuBar() {
   const view = useViewState((s) => s.view);
+  const orientation = usePrefs((s) => s.prefs.viewport.orientation);
   const [envOpen, setEnvOpen] = useState(false);
 
   const entries: MenuEntry[] = [
@@ -41,6 +48,19 @@ export function ViewportMenuBar() {
         shortcut: p.shortcut,
         checked: view?.layout === p.layout,
         onClick: () => setViewLayout(p.layout),
+      })),
+    },
+    {
+      // Writes the same pref the X hotkey and the Preferences Viewport tab do,
+      // so the three can never disagree about which frame the handles are in.
+      label: "Gizmo Orientation",
+      submenu: ORIENTATIONS.map((o) => ({
+        label: o.label,
+        checked: orientation === o.value,
+        onClick: () => {
+          const { prefs, setPrefs } = usePrefs.getState();
+          setPrefs({ ...prefs, viewport: { ...prefs.viewport, orientation: o.value } });
+        },
       })),
     },
     { divider: true },

@@ -12,6 +12,22 @@ export type ThemeChoice = "dark" | "light" | "system";
 export type ResolvedTheme = "dark" | "light";
 export type MotionChoice = "system" | "reduce" | "none";
 export type ScreenshotResolution = "viewport" | "1.5x" | "2x" | "4x" | "custom";
+export type GizmoOrientation = "world" | "local";
+
+/** The viewport gizmo's drag ergonomics. Pushed into the Rust host (which owns
+ * the drag loop) rather than read from it: the drag never crosses back into JS,
+ * so it cannot ask. */
+export interface GizmoPrefs {
+  /** Which frame the Move and Rotate handles align to. Scale is always local
+   * (a world-axis scale on a rotated object would need a shear param). */
+  orientation: GizmoOrientation;
+  /** World units a translate drag snaps to while Ctrl is held. */
+  snapTranslate: number;
+  /** Degrees a rotate drag snaps to. */
+  snapRotate: number;
+  /** The increment a scale drag snaps to. */
+  snapScale: number;
+}
 
 export interface ScreenshotPrefs {
   resolution: ScreenshotResolution;
@@ -42,6 +58,7 @@ export interface Prefs {
     debounceSec: number;
   };
   screenshot: ScreenshotPrefs;
+  viewport: GizmoPrefs;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -53,6 +70,12 @@ export const DEFAULT_PREFS: Prefs = {
     customWidth: 1920,
     customHeight: 1080,
     overlays: { grid: true, axes: true, validation: true },
+  },
+  viewport: {
+    orientation: "world",
+    snapTranslate: 0.5,
+    snapRotate: 15,
+    snapScale: 0.1,
   },
 };
 
@@ -146,6 +169,9 @@ export const usePrefs = create<PrefsStore>()(
               ...p?.screenshot?.overlays,
             },
           },
+          // Backfilled by the same deep merge, so no version bump is needed for
+          // the group added in Phase 12.
+          viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
         };
         if (!p) {
           const migrated = legacyTheme();

@@ -2,7 +2,7 @@
 // copy edited locally, dirty star in the title, footer with Reset to
 // Defaults (nested confirm) on the left and Cancel / Apply / Save on the
 // right. Four tabs per the ratified scope: Appearance, Review, Autosave,
-// Screenshot. Esc and backdrop-click dismiss.
+// Screenshot, Viewport. Esc and backdrop-click dismiss.
 
 import { useEffect, useState } from "react";
 import {
@@ -10,12 +10,13 @@ import {
   usePrefs,
   type MotionChoice,
   type Prefs,
+  type GizmoOrientation,
   type ScreenshotResolution,
   type ThemeChoice,
 } from "../../store/prefs";
 import { ConfirmDialog } from "../ConfirmDialog";
 
-const TABS = ["Appearance", "Review", "Autosave", "Screenshot"] as const;
+const TABS = ["Appearance", "Review", "Autosave", "Screenshot", "Viewport"] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -185,6 +186,67 @@ function ScreenshotTab({ draft, patch }: TabProps) {
   );
 }
 
+/** The gizmo's drag ergonomics. These are pushed into the Rust host (which owns
+ * the drag loop and never crosses back into JS to ask), so a change here takes
+ * effect on the very next drag. */
+function ViewportTab({ draft, patch }: TabProps) {
+  const v = draft.viewport;
+  const setV = (p: Partial<typeof v>) => patch({ viewport: { ...v, ...p } });
+
+  return (
+    <>
+      <p className="prefs-desc">
+        Transform gizmo orientation and the increments Ctrl-drag snaps to.
+      </p>
+      <Row label="Handle orientation">
+        <select
+          className="input-field"
+          value={v.orientation}
+          onChange={(e) => setV({ orientation: e.target.value as GizmoOrientation })}
+        >
+          <option value="world">World axes</option>
+          <option value="local">Object axes</option>
+        </select>
+      </Row>
+      <Row label="Snap: move (m)">
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          step={0.1}
+          value={v.snapTranslate}
+          onChange={(e) => setV({ snapTranslate: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Row>
+      <Row label="Snap: rotate (deg)">
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          step={1}
+          value={v.snapRotate}
+          onChange={(e) => setV({ snapRotate: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Row>
+      <Row label="Snap: scale">
+        <input
+          className="input-field"
+          type="number"
+          min={0}
+          step={0.05}
+          value={v.snapScale}
+          onChange={(e) => setV({ snapScale: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Row>
+      <div className="prefs-info">
+        Hold Ctrl (or Cmd) while dragging a handle to snap. A step of 0 disables snapping for that
+        tool. The Scale tool always uses the object's own axes: a world-axis scale on a rotated
+        object would shear it, and there is no shear parameter.
+      </div>
+    </>
+  );
+}
+
 interface TabProps {
   draft: Prefs;
   patch: (p: Partial<Prefs>) => void;
@@ -218,8 +280,10 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
       <ReviewTab draft={draft} patch={patch} />
     ) : tab === "Autosave" ? (
       <AutosaveTab draft={draft} patch={patch} />
-    ) : (
+    ) : tab === "Screenshot" ? (
       <ScreenshotTab draft={draft} patch={patch} />
+    ) : (
+      <ViewportTab draft={draft} patch={patch} />
     );
 
   return (

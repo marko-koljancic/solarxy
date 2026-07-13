@@ -2293,7 +2293,7 @@ fn gizmo_target_at_root_drives_the_geo_itself() {
     assert_eq!(t.ctx, GraphContext::Root);
     assert_eq!(t.node, geo);
     assert!(!t.append_pending, "root never appends anything");
-    assert!(t.current.iter().all(|v| v.abs() < 1e-6));
+    assert!(t.translate.iter().all(|v| v.abs() < 1e-6));
     // Identity parent: a world delta maps straight onto the geo's translate.
     assert!((t.parent[0][0] - 1.0).abs() < 1e-6 && t.parent[0][1].abs() < 1e-6);
     assert!((t.parent[3][3] - 1.0).abs() < 1e-6 && t.parent[3][0].abs() < 1e-6);
@@ -2327,7 +2327,7 @@ fn gizmo_target_in_a_subflow_reports_append_pending_over_a_box() {
     let t = e.gizmo_target(sub).expect("the subflow has a display node");
     assert!(t.append_pending, "a box tail is not a transform");
     assert_eq!(t.node, box_id, "the DISPLAY node until the drag mints one");
-    assert!(t.current.iter().all(|v| v.abs() < 1e-6));
+    assert!(t.translate.iter().all(|v| v.abs() < 1e-6));
 }
 
 #[test]
@@ -2540,14 +2540,14 @@ fn clear_preview_releases_a_cancelled_drag() {
         ParamSource::Literal(ParamValue::Vec3([5.0, 0.0, 0.0])),
     );
     select(&mut e, GraphContext::Root, vec![geo]);
-    let live = e.gizmo_target(GraphContext::Root).unwrap().current;
+    let live = e.gizmo_target(GraphContext::Root).unwrap().translate;
     assert!(
         (live[0] - 5.0).abs() < 1e-6,
         "the preview is live: {live:?}"
     );
 
     e.clear_preview(GraphContext::Root, geo, "translate");
-    let cleared = e.gizmo_target(GraphContext::Root).unwrap().current;
+    let cleared = e.gizmo_target(GraphContext::Root).unwrap().translate;
     assert!(
         cleared.iter().all(|v| v.abs() < 1e-6),
         "the object snapped back to the document: {cleared:?}"
@@ -2584,4 +2584,246 @@ fn gizmo_command_boundary_json_shape_is_camelcase() {
     assert_eq!(ev["type"], "transformTargetReady");
     assert_eq!(ev["ctx"]["subflow"], 3);
     assert_eq!(ev["node"], 9);
+}
+
+/// The invariant the whole `geo` v3 unification exists to establish: the
+/// container's world matrix and the `transform` node's baked matrix are the
+/// SAME composition, for every order. Before this, `geo` hardcoded
+/// `T * Rz * Ry * Rx * S` (ZYX) while `transform` defaulted to XYZ, so typing
+/// the same angles into each gave two different orientations. A rotate gizmo
+/// has to decompose back into the target's order, which is what made the
+/// divergence load-bearing rather than merely untidy.
+#[test]
+fn geo_and_transform_compose_rotation_identically() {
+    use solarxy_kernel::transform::{RotateOrder, compose_trs};
+
+    let orders = [
+        ("xyz", RotateOrder::Xyz),
+        ("xzy", RotateOrder::Xzy),
+        ("yxz", RotateOrder::Yxz),
+        ("yzx", RotateOrder::Yzx),
+        ("zxy", RotateOrder::Zxy),
+        ("zyx", RotateOrder::Zyx),
+    ];
+    let degrees = [30.0_f64, 40.0, 50.0];
+    let translate = [1.0_f64, 2.0, 3.0];
+    let scale = [2.0_f64, 0.5, 1.5];
+
+    for (key, order) in orders {
+        let mut e = engine();
+        let geo = add(&mut e, GraphContext::Root, "geo");
+        for (k, v) in [
+            ("translate", ParamValue::Vec3(translate)),
+            ("rotate", ParamValue::Vec3(degrees)),
+            ("scale", ParamValue::Vec3(scale)),
+            ("rotate_order", ParamValue::Enum(key.to_string())),
+        ] {
+            e.apply(Command::SetParam {
+                ctx: GraphContext::Root,
+                node: geo,
+                key: k.to_string(),
+                value: ParamSource::Literal(v),
+            })
+            .unwrap();
+        }
+
+        let got = e.geo_world_matrix(geo).unwrap();
+        // The kernel function the `transform` node's cook calls, fed the same
+        // params (a geo's pivot is its origin).
+        let want = compose_trs(
+            [1.0, 2.0, 3.0],
+            [
+                (degrees[0] as f32).to_radians(),
+                (degrees[1] as f32).to_radians(),
+                (degrees[2] as f32).to_radians(),
+            ],
+            order,
+            [2.0, 0.5, 1.5],
+            [0.0; 3],
+        );
+        for c in 0..4 {
+            for r in 0..4 {
+                assert!(
+                    (got[c][r] - want[c][r]).abs() < 1e-5,
+                    "{key}: [{c}][{r}] {} != {}",
+                    got[c][r],
+                    want[c][r]
+                );
+            }
+        }
+    }
+}
+
+/// A fresh geo defaults to XYZ, matching `transform`. Pins the unification
+/// against a regression back to the old hardcoded ZYX.
+#[test]
+fn a_fresh_geo_rotates_xyz_like_a_transform_node() {
+    use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
+
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "rotate".to_string(),
+        // Two nonzero lanes, so the order is observable at all.
+        value: ParamSource::Literal(ParamValue::Vec3([90.0, 90.0, 0.0])),
+    })
+    .unwrap();
+
+    let got = e.geo_world_matrix(geo).unwrap();
+    let xyz = rotation_matrix(
+        [90f32.to_radians(), 90f32.to_radians(), 0.0],
+        RotateOrder::Xyz,
+    );
+    let zyx = rotation_matrix(
+        [90f32.to_radians(), 90f32.to_radians(), 0.0],
+        RotateOrder::Zyx,
+    );
+
+    let close = |m: cgmath::Matrix3<f32>| {
+        (0..3).all(|c| (0..3).all(|r| (got[c][r] - m[c][r]).abs() < 1e-5))
+    };
+    assert!(close(xyz), "a fresh geo must compose XYZ");
+    assert!(!close(zyx), "and must no longer compose the old ZYX");
+}
+
+/// `resolve_params` hands back RADIANS; a `SetParam` writes DEGREES. The gizmo
+/// straddles that conversion, so `GizmoTarget` must speak the units it writes
+/// back, or every rotate drag would be off by a factor of 57.
+#[test]
+fn gizmo_target_reports_rotation_in_degrees_not_radians() {
+    let (mut e, geo, _sub, _box_id) = displayed_box();
+    select(&mut e, GraphContext::Root, vec![geo]);
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "rotate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([90.0, 0.0, 0.0])),
+    })
+    .unwrap();
+
+    let t = e.gizmo_target(GraphContext::Root).unwrap();
+    assert!(
+        (t.rotate[0] - 90.0).abs() < 1e-3,
+        "degrees, got {:?} (radians would read ~1.57)",
+        t.rotate
+    );
+    assert_eq!(t.rotate_order, solarxy_kernel::transform::RotateOrder::Xyz);
+}
+
+/// A `transform` rotates and scales about its PIVOT, not its origin: a point at
+/// the pivot maps to `translate + pivot`. The rings and cubes have to be drawn
+/// around that point, or they would spin about a centre they do not surround.
+#[test]
+fn the_gizmo_anchors_on_the_pivot_a_transform_actually_rotates_about() {
+    let (mut e, geo, sub, _box_id) = displayed_box();
+    let node = e
+        .apply(Command::EnsureTransformTarget { geo })
+        .unwrap()
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+
+    for (key, value) in [
+        ("translate", ParamValue::Vec3([1.0, 0.0, 0.0])),
+        ("pivot", ParamValue::Vec3([0.0, 5.0, 0.0])),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: sub,
+            node,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+
+    let t = e.gizmo_target(sub).unwrap();
+    assert!((t.pivot[1] - 5.0).abs() < 1e-6, "the pivot round-trips");
+    // Column 3 of a column-major matrix is its translation: translate + pivot.
+    let origin = [t.anchor[3][0], t.anchor[3][1], t.anchor[3][2]];
+    assert!(
+        (origin[0] - 1.0).abs() < 1e-5 && (origin[1] - 5.0).abs() < 1e-5,
+        "the gizmo must sit at translate + pivot, got {origin:?}"
+    );
+}
+
+/// Local-orientation handles ride the object's own axes. The basis must carry
+/// the rotation and NOT the scale: a scaled basis would stretch the handles
+/// with the object, defeating the screen-constant sizing.
+#[test]
+fn the_gizmo_basis_carries_rotation_but_never_scale() {
+    let (mut e, geo, _sub, _box_id) = displayed_box();
+    select(&mut e, GraphContext::Root, vec![geo]);
+    for (key, value) in [
+        ("rotate", ParamValue::Vec3([0.0, 90.0, 0.0])),
+        ("scale", ParamValue::Vec3([5.0, 5.0, 5.0])),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+
+    let t = e.gizmo_target(GraphContext::Root).unwrap();
+    // Under a 90-degree Y rotation the local +X axis points down world -Z.
+    let local_x = t.basis[0];
+    assert!(
+        local_x[0].abs() < 1e-5 && (local_x[2] + 1.0).abs() < 1e-5,
+        "local +X should be world -Z, got {local_x:?}"
+    );
+    // Unit length despite the 5x scale.
+    let length = (local_x[0].powi(2) + local_x[1].powi(2) + local_x[2].powi(2)).sqrt();
+    assert!(
+        (length - 1.0).abs() < 1e-5,
+        "basis must be orthonormal, got {length}"
+    );
+}
+
+/// Inside a subflow the handles must compose the container's rotation with the
+/// transform node's own: the node's angles are expressed in the geo's frame.
+#[test]
+fn a_subflow_basis_composes_the_container_and_the_node() {
+    let (mut e, geo, sub, _box_id) = displayed_box();
+    let node = e
+        .apply(Command::EnsureTransformTarget { geo })
+        .unwrap()
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+
+    // Container turned 90 about Y; node turned another 90 about Y. Composed,
+    // the object faces 180, so its local +X points down world -X.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "rotate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 90.0, 0.0])),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node,
+        key: "rotate".to_string(),
+        value: ParamSource::Literal(ParamValue::Vec3([0.0, 90.0, 0.0])),
+    })
+    .unwrap();
+
+    let t = e.gizmo_target(sub).unwrap();
+    let local_x = t.basis[0];
+    assert!(
+        (local_x[0] + 1.0).abs() < 1e-4 && local_x[2].abs() < 1e-4,
+        "90 + 90 about Y sends local +X to world -X, got {local_x:?}"
+    );
 }

@@ -4,6 +4,7 @@
 
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
+import type { GizmoPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
@@ -117,10 +118,27 @@ export class SolarxyClient {
 
   // ---- pointer routing (CSS px relative to the canvas) ----
 
-  /** Selects the viewport tool. The only gizmo call that crosses the boundary:
-   * the drag itself runs entirely in Rust. */
-  setTool(tool: ToolMode): void {
-    this.app.set_tool(tool);
+  /** Selects the viewport tool. Returns a rollback batch when the switch
+   * abandoned a live drag, else null. */
+  setTool(tool: ToolMode): EventBatch | null {
+    return this.app.set_tool(tool) as EventBatch | null;
+  }
+
+  /** The gizmo's drag ergonomics, pushed from the prefs store. Pushed rather
+   * than polled: the drag loop never crosses back into JS to ask. */
+  setGizmoSettings(s: GizmoPrefs): void {
+    this.app.set_gizmo_settings(
+      s.orientation,
+      s.snapTranslate,
+      s.snapRotate,
+      s.snapScale,
+    );
+  }
+
+  /** The live drag's delta text ("X +1.250 m"), or null when nothing is
+   * dragging. POLLED once per frame, so `pointerMove` can stay void. */
+  gizmoReadout(): string | null {
+    return this.app.gizmo_readout() ?? null;
   }
 
   /** Escape during a gizmo drag: rolls it back. Returns the rollback batch, or
@@ -136,9 +154,12 @@ export class SolarxyClient {
   }
 
   /** Void on purpose: this is the hot path, and a live gizmo drag streams
-   * straight into the engine's preview lane without crossing back into JS. */
-  pointerMove(x: number, y: number): void {
-    this.app.pointer_move(x, y);
+   * straight into the engine's preview lane without crossing back into JS.
+   *
+   * `mods` is a bitfield (bit 0 = snap / Ctrl), not a bool, so shift-for-
+   * precision can land later without changing the wasm signature. */
+  pointerMove(x: number, y: number, mods: number): void {
+    this.app.pointer_move(x, y, mods);
   }
 
   /** Returns the commit batch when it ended a gizmo drag, else null. */

@@ -13,11 +13,15 @@ pub mod snapshot;
 
 use std::collections::BTreeMap;
 
+use cgmath::{Matrix3, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use serde::{Deserialize, Serialize};
 use solarxy_core::scene::SceneDelta;
+use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
 
 use crate::GraphError;
 use crate::assets::AssetTable;
+use crate::nodes::common::rotate_order_from_key;
+use crate::registry::resolve::ResolvedParams;
 use crate::cook::state::{CookState, CookStatus};
 use crate::cook::{CookEngine, JobId, JobRequest, JobResult};
 use crate::document::{Document, DocumentData, Edge, EdgeId, GraphContext, NodeData, NodeId, PortRef};
@@ -442,25 +446,126 @@ pub enum EngineError {
 /// The host reads this once per frame to place the manipulator, and again at
 /// drag start to know what to write; all of the POLICY (which node, which space,
 /// whether a node must be appended first) is decided engine-side.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+///
+/// Carries the target's whole transform, not just its translate: a rotate drag
+/// has to decompose back into the target's own `rotate_order`, and a scale drag
+/// writes two different params depending on the handle.
+///
+/// Not `Serialize`: this never crosses the wasm boundary. The drag loop runs
+/// entirely in the host and streams into the preview lane, so the only thing JS
+/// ever sees of a gizmo is the `EventBatch` on commit.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GizmoTarget {
     /// Where a `SetParam` for this drag must be addressed.
     pub ctx: GraphContext,
-    /// The node whose `translate` the drag writes. On the append path this is
-    /// still the DISPLAY node: the real target is minted by
-    /// [`Command::EnsureTransformTarget`] when the drag actually starts, so a
-    /// mere hover never mutates the document.
+    /// The node the drag writes. On the append path this is still the DISPLAY
+    /// node: the real target is minted by [`Command::EnsureTransformTarget`]
+    /// when the drag actually starts, so a mere hover never mutates the
+    /// document.
     pub node: NodeId,
     /// The target's current translate, previews included (so the handle tracks
     /// the object mid-drag).
-    pub current: [f32; 3],
-    /// World matrix placing the manipulator.
+    pub translate: [f32; 3],
+    /// The current rotate, in **degrees**. Deliberately not radians: this is
+    /// what a `SetParam` writes, and `resolve_params` owns the conversion in
+    /// the other direction. Handing back radians here would put a silent
+    /// 57x error one careless assignment away.
+    pub rotate: [f32; 3],
+    /// The order the target composes its rotation in, so a rotate drag can
+    /// decompose its result back into the angles this node actually means.
+    pub rotate_order: RotateOrder,
+    /// The current per-axis scale.
+    pub scale: [f32; 3],
+    /// The current uniform-scale factor (the centre handle's param).
+    pub uniform_scale: f32,
+    /// The target's local pivot. Zero on a `geo` (its pivot is its origin).
+    pub pivot: [f32; 3],
+    /// World matrix placing the manipulator, **pivot included**: rotation and
+    /// scale happen about `translate + pivot`, so that is where the rings and
+    /// cubes have to sit or they would spin about a point they are not drawn
+    /// around.
     pub anchor: [[f32; 4]; 4],
+    /// The target's own orthonormal orientation basis, for local-space handles.
+    /// Identity-equivalent when nothing upstream is rotated.
+    pub basis: [[f32; 3]; 3],
+    /// The PARENT's orthonormal basis alone (identity at root, the container's
+    /// rotation in a subflow). A rotate drag turns about a world axis but writes
+    /// a param expressed in the parent's frame, so it needs this to conjugate
+    /// the delta into that frame; `basis` (which already has the node's own
+    /// rotation folded in) cannot do that job.
+    pub parent_basis: [[f32; 3]; 3],
     /// Maps a world-space delta into the target's own space. Identity at root.
     pub parent: [[f32; 4]; 4],
     /// True when the subflow's tail is not a usable `transform`, so the drag
     /// must append one before it can preview anything.
     pub append_pending: bool,
+}
+
+/// A node's transform params, preview-resolved, in **document units**.
+///
+/// The unit trap this type exists to close: `resolve_params` hands back
+/// RADIANS (it owns the degrees conversion, since every consumer downstream of
+/// it wants radians), but a `SetParam` writes DEGREES. A gizmo both reads and
+/// writes, so it straddles the conversion, and getting it backwards is a silent
+/// 57x error. `rotate_deg` is named for the unit it carries.
+#[derive(Debug, Clone, Copy)]
+struct NodeTransform {
+    translate: [f32; 3],
+    rotate_deg: [f32; 3],
+    order: RotateOrder,
+    scale: [f32; 3],
+    uniform_scale: f32,
+    /// Zero on a `geo`, which has no pivot param and rotates about its origin.
+    pivot: [f32; 3],
+}
+
+impl NodeTransform {
+    /// `has_pivot` is the caller's job because `ResolvedParams` debug-asserts on
+    /// a key the descriptor never declared, and only `transform` declares one.
+    fn read(p: &ResolvedParams, has_pivot: bool) -> Self {
+        Self {
+            translate: p.vec3_f32("translate"),
+            rotate_deg: p.vec3_f32("rotate").map(f32::to_degrees),
+            order: rotate_order_from_key(p.enum_key("rotate_order")),
+            scale: p.vec3_f32("scale"),
+            uniform_scale: p.f32("uniform_scale"),
+            pivot: if has_pivot {
+                p.vec3_f32("pivot")
+            } else {
+                [0.0; 3]
+            },
+        }
+    }
+
+    /// The orthonormal orientation basis: the rotation with the scale left out,
+    /// so local-space handles land on the object's axes without stretching with
+    /// its scale.
+    fn basis(self) -> Matrix3<f32> {
+        rotation_matrix(self.rotate_deg.map(f32::to_radians), self.order)
+    }
+
+    /// The point rotation and scale actually happen about, in the node's own
+    /// parent space. For `compose_trs` that is `translate + pivot`: feed the
+    /// pivot through the matrix and the P and P-inverse cancel.
+    fn pivot_point(self) -> Point3<f32> {
+        Point3::from([
+            self.translate[0] + self.pivot[0],
+            self.translate[1] + self.pivot[1],
+            self.translate[2] + self.pivot[2],
+        ])
+    }
+}
+
+/// The manipulator's placement frame: positioned at `center`, oriented by
+/// `basis`, and deliberately carrying **no scale**. A scaled frame would
+/// stretch the handles with the object, which is exactly what a screen-constant
+/// gizmo must not do.
+fn gizmo_frame(center: Point3<f32>, basis: Matrix3<f32>) -> Matrix4<f32> {
+    Matrix4::from_translation(Vector3::new(center.x, center.y, center.z)) * Matrix4::from(basis)
+}
+
+fn mat3_to_array(m: Matrix3<f32>) -> [[f32; 3]; 3] {
+    [m.x.into(), m.y.into(), m.z.into()]
 }
 
 /// The engine.
@@ -1870,6 +1975,20 @@ impl Engine {
     /// identity at root (the geo's translate IS world), and the geo's world
     /// matrix inside a subflow (where the transform node's translate is local to
     /// the container).
+    /// Reads a transform-carrying node's params, previews included so the gizmo
+    /// tracks the object mid-drag. Only `transform` declares a `pivot`.
+    fn node_transform(
+        &self,
+        node: NodeId,
+        params: &BTreeMap<String, ParamSource>,
+        type_id: &str,
+    ) -> Option<NodeTransform> {
+        let desc = self.registry.get(type_id)?;
+        let effective = crate::previews::effective_params(&self.previews, node, params);
+        let resolved = crate::registry::resolve::resolve_params(&effective, &desc.params).ok()?;
+        Some(NodeTransform::read(&resolved, type_id == "transform"))
+    }
+
     #[must_use]
     pub fn gizmo_target(&self, ctx: GraphContext) -> Option<GizmoTarget> {
         match ctx {
@@ -1883,22 +2002,24 @@ impl Engine {
                 if node.type_id != "geo" {
                     return None;
                 }
-                let desc = self.registry.get("geo")?;
-                let params =
-                    crate::previews::effective_params(&self.previews, selected, &node.params);
-                let p = crate::registry::resolve::resolve_params(&params, &desc.params).ok()?;
+                let xf = self.node_transform(selected, &node.params, "geo")?;
+
+                // A geo IS its own parent frame at root, so a world drag delta
+                // lands 1:1 on its translate.
                 Some(GizmoTarget {
                     ctx: GraphContext::Root,
                     node: selected,
-                    current: p.vec3_f32("translate"),
-                    anchor: scene::geo_world_matrix(
-                        &self.doc,
-                        &self.registry,
-                        &self.previews,
-                        selected,
-                    )
-                    .into(),
-                    parent: <cgmath::Matrix4<f32> as cgmath::SquareMatrix>::identity().into(),
+                    translate: xf.translate,
+                    rotate: xf.rotate_deg,
+                    rotate_order: xf.order,
+                    scale: xf.scale,
+                    uniform_scale: xf.uniform_scale,
+                    pivot: xf.pivot,
+                    anchor: gizmo_frame(xf.pivot_point(), xf.basis()).into(),
+                    basis: mat3_to_array(xf.basis()),
+                    // A geo has no parent frame: world IS its parent.
+                    parent_basis: mat3_to_array(Matrix3::identity()),
+                    parent: Matrix4::identity().into(),
                     append_pending: false,
                 })
             }
@@ -1907,31 +2028,47 @@ impl Engine {
                 let display = sub.active_output?;
                 let tail = sub.node(display)?;
 
+                let geo_node = self.doc.graph(GraphContext::Root).ok()?.node(geo)?;
+                let geo_xf = self.node_transform(geo, &geo_node.params, "geo")?;
                 let geo_matrix =
                     scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo);
 
                 // A bypassed transform passes geometry straight through, so it
                 // moves nothing: treat it as absent and append a live one.
                 let reusable = tail.type_id == "transform" && !tail.bypassed;
-                let current = if reusable {
-                    let desc = self.registry.get("transform")?;
-                    let params =
-                        crate::previews::effective_params(&self.previews, display, &tail.params);
-                    crate::registry::resolve::resolve_params(&params, &desc.params)
-                        .ok()?
-                        .vec3_f32("translate")
+                let xf = if reusable {
+                    self.node_transform(display, &tail.params, "transform")?
                 } else {
-                    [0.0; 3]
+                    // Nothing to read yet: the node is minted at drag start.
+                    NodeTransform {
+                        translate: [0.0; 3],
+                        rotate_deg: [0.0; 3],
+                        order: RotateOrder::default(),
+                        scale: [1.0; 3],
+                        uniform_scale: 1.0,
+                        pivot: [0.0; 3],
+                    }
                 };
 
-                // The gizmo sits where the transform's local origin lands in the
-                // world: through the container, then out by the local translate.
-                let local = cgmath::Matrix4::from_translation(cgmath::Vector3::from(current));
+                // The gizmo sits on the point the transform actually rotates and
+                // scales about, carried out through the container into the world.
+                let center = geo_matrix.transform_point(xf.pivot_point());
+                // The transform's rotation is expressed inside the container's
+                // frame, so the world basis is the two composed.
+                let basis = geo_xf.basis() * xf.basis();
+
                 Some(GizmoTarget {
                     ctx,
                     node: display,
-                    current,
-                    anchor: (geo_matrix * local).into(),
+                    translate: xf.translate,
+                    rotate: xf.rotate_deg,
+                    rotate_order: xf.order,
+                    scale: xf.scale,
+                    uniform_scale: xf.uniform_scale,
+                    pivot: xf.pivot,
+                    anchor: gizmo_frame(center, basis).into(),
+                    basis: mat3_to_array(basis),
+                    parent_basis: mat3_to_array(geo_xf.basis()),
                     parent: geo_matrix.into(),
                     append_pending: !reusable,
                 })

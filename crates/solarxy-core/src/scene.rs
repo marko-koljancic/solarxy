@@ -69,8 +69,10 @@ pub enum LightKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightDef {
     pub kind: LightKind,
-    /// Point / Spot / `RectArea`. Directional lights are positionless
-    /// (their shadow frustum auto-fits scene bounds).
+    /// Where the light sits. The renderer's SHADING ignores this for a
+    /// directional light (whose shadow frustum auto-fits scene bounds), but the
+    /// helper has to draw its arrow somewhere, so it is filled for every
+    /// positional type now, directional included.
     pub position: [f32; 3],
     /// Directional / Spot: unit vector the light travels along
     /// (from the light toward the scene).
@@ -98,6 +100,10 @@ pub struct LightDef {
     pub shadow_map_size: u32,
     pub shadow_bias: f32,
     pub visible: bool,
+    /// Draw the viewport helper for this light (its `show_helper` param).
+    pub show_helper: bool,
+    /// The helper's world-space size, in meters (its `helper_size` param).
+    pub helper_size: f32,
 }
 
 impl LightDef {
@@ -195,6 +201,8 @@ mod tests {
             shadow_map_size: 1024,
             shadow_bias: 0.0,
             visible: true,
+            show_helper: false,
+            helper_size: 1.0,
         }
     }
 

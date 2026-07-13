@@ -23,6 +23,9 @@ interface ViewStateStore {
   /** The active viewport tool. A mirror: Rust owns it (the drag loop reads it),
    * this drives the tool column's highlight. Not persisted. */
   toolMode: ToolMode;
+  /** The live gizmo drag's delta text ("X +1.250 m"), or null when nothing is
+   * dragging. Polled from the host once per frame. */
+  gizmoReadout: string | null;
   setView: (view: ViewStateDto) => void;
   setPaneRects: (rects: PaneRectDto[]) => void;
   setActivePaneMirror: (pane: number) => void;
@@ -31,6 +34,7 @@ interface ViewStateStore {
   setUvOverlap: (pct: number | null, pending: boolean) => void;
   setEnvironment: (env: EnvironmentState) => void;
   setToolMode: (tool: ToolMode) => void;
+  setGizmoReadout: (text: string | null) => void;
 }
 
 export const useViewState = create<ViewStateStore>((set) => ({
@@ -41,6 +45,7 @@ export const useViewState = create<ViewStateStore>((set) => ({
   uvOverlapPending: false,
   environment: null,
   toolMode: "select",
+  gizmoReadout: null,
   setView: (view) => set({ view }),
   setPaneRects: (rects) =>
     set((s) => (s.view ? { view: { ...s.view, paneRects: rects } } : s)),
@@ -51,4 +56,8 @@ export const useViewState = create<ViewStateStore>((set) => ({
   setUvOverlap: (pct, pending) => set({ uvOverlapPct: pct, uvOverlapPending: pending }),
   setEnvironment: (env) => set({ environment: env }),
   setToolMode: (tool) => set({ toolMode: tool }),
+  setGizmoReadout: (text) =>
+    // Guarded: this runs every frame, and an unconditional set would re-render
+    // every readout consumer 60 times a second for no reason.
+    set((s) => (s.gizmoReadout === text ? s : { gizmoReadout: text })),
 }));

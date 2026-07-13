@@ -15,18 +15,20 @@
 //! land (N2): it keys on `type_id`, so an empty or primitive-only root
 //! yields an empty delta.
 
-use cgmath::{InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Transform, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
 use solarxy_core::scene::{LightDef, SceneDelta, SceneObjectId, SceneOp};
 
 use crate::cook::CookEngine;
 use crate::document::{Document, GraphContext, NodeId};
+use crate::nodes::common::rotate_order_from_key;
 use crate::params::ParamValue;
+use crate::previews::{Previews, effective_params};
 use crate::registry::Registry;
 use crate::registry::coerce::Value;
-use crate::previews::{Previews, effective_params};
 use crate::registry::resolve::resolve_params;
+use solarxy_kernel::transform::compose_trs;
 
 /// Builds a full scene delta from scratch each frame. The renderer diffs
 /// against its own state, so a full rebuild is safe (and light lists are
@@ -223,11 +225,18 @@ fn effective_validation(
     None
 }
 
-/// The column-major `T * Rz * Ry * Rx * S` world matrix for a geo container,
-/// resolved through the standard param path (degrees to radians for
-/// `rotate`, `uniform_scale` folded into `scale`). Identity when the node,
-/// its descriptor, or its params are unavailable. Shared by scene lowering
-/// and picking so they can never disagree.
+/// The column-major `T * R(order) * S` world matrix for a geo container,
+/// resolved through the standard param path (degrees to radians for `rotate`,
+/// `uniform_scale` folded into `scale`). Identity when the node, its
+/// descriptor, or its params are unavailable. Shared by scene lowering and
+/// picking so they can never disagree.
+///
+/// Composed by the kernel's `compose_trs`, exactly like the `transform` node,
+/// with a zero pivot (a geo's pivot is its origin). It used to hand-roll
+/// `T * Rz * Ry * Rx * S`, which is ZYX, while `transform` defaulted to XYZ:
+/// identical angles on the two nodes meant different orientations. Old
+/// documents keep their appearance because `migrate_geo` stamps `zyx` on any
+/// geo where the order was actually observable.
 pub(crate) fn geo_world_matrix(
     doc: &Document,
     registry: &Registry,
@@ -244,17 +253,15 @@ pub(crate) fn geo_world_matrix(
     let Ok(p) = resolve_params(&params, &desc.params) else {
         return Matrix4::identity();
     };
-    let translate = p.vec3_f32("translate");
-    let rotate = p.vec3_f32("rotate"); // radians
     let scale = p.vec3_f32("scale");
     let uniform = p.f32("uniform_scale");
-    let scale = [scale[0] * uniform, scale[1] * uniform, scale[2] * uniform];
-    let t = Matrix4::from_translation(Vector3::from(translate));
-    let rx = Matrix4::from_angle_x(Rad(rotate[0]));
-    let ry = Matrix4::from_angle_y(Rad(rotate[1]));
-    let rz = Matrix4::from_angle_z(Rad(rotate[2]));
-    let s = Matrix4::from_nonuniform_scale(scale[0], scale[1], scale[2]);
-    t * rz * ry * rx * s
+    compose_trs(
+        p.vec3_f32("translate"),
+        p.vec3_f32("rotate"), // radians: the resolver owns the conversion
+        rotate_order_from_key(p.enum_key("rotate_order")),
+        [scale[0] * uniform, scale[1] * uniform, scale[2] * uniform],
+        [0.0; 3],
+    )
 }
 
 /// Picks the root `geo` container whose displayed, world-transformed
@@ -438,6 +445,9 @@ fn light_from_node(
         shadow_map_size: 1024,
         shadow_bias: f32p("bias"),
         visible: !matches!(p.get("visible"), Some(ParamValue::Bool(false))),
+        // Declared on every light since Phase 8 and read by nothing until now.
+        show_helper: boolp("show_helper"),
+        helper_size: f32p("helper_size"),
     };
 
     // The unit direction from a light's position toward its target.
@@ -464,6 +474,11 @@ fn light_from_node(
         }
         "directional_light" => {
             light.kind = LightKind::Directional;
+            // The SHADING ignores a directional light's position (its shadow
+            // frustum auto-fits the scene), which is why this was never filled.
+            // The helper arrow still has to be drawn somewhere, though, and the
+            // node has always carried the position it should be drawn at.
+            light.position = p.vec3_f32("position");
             light.direction = direction_to_target(&p);
             light.cast_shadow = boolp("cast_shadow");
             light.shadow_map_size = map_size(&p);

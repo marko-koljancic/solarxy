@@ -189,6 +189,40 @@ pub fn closest_points_ray_segment(ray: &Ray, a: Point3<f32>, b: Point3<f32>) -> 
     (t_ray, s_seg, (p_ray - closest_on_seg).magnitude())
 }
 
+/// The point on an INFINITE line closest to a ray.
+///
+/// The gizmo's axis drags need this rather than [`closest_points_ray_segment`]:
+/// a drag must be able to run past the end of the drawn arrow, so the axis is a
+/// line, not a segment. (The HIT test still uses the segment, which is what
+/// stops a click far past the arrow tip from grabbing it.)
+///
+/// Solved analytically. Faking an infinite line by stretching a segment to some
+/// huge length costs real precision: at a half-length of 1e5, an f32 carries
+/// only about 7 significant digits, so the answer lands several millimetres off
+/// and an axis drag visibly lags the cursor.
+///
+/// Returns `None` when the ray is near-parallel to the line, where the solution
+/// is unbounded and the object would shoot off to infinity.
+#[must_use]
+pub fn closest_point_ray_line(
+    ray: &Ray,
+    point: Point3<f32>,
+    dir: Vector3<f32>,
+) -> Option<Point3<f32>> {
+    let u = dir.normalize();
+    let b = ray.direction.dot(u);
+    // 1 - b^2 is the squared sine of the angle between them: zero when parallel.
+    let denom = 1.0 - b * b;
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    let w0 = ray.origin - point;
+    let d = ray.direction.dot(w0);
+    let e = u.dot(w0);
+    let s = (e - b * d) / denom;
+    Some(point + u * s)
+}
+
 /// Ray-plane intersection. Returns the distance along the ray, or `None` when
 /// the ray is parallel to the plane or the plane sits behind the origin.
 ///
@@ -229,6 +263,85 @@ pub fn intersect_quad(
     let su = d.dot(u) / uu;
     let sv = d.dot(v) / vv;
     ((0.0..=1.0).contains(&su) && (0.0..=1.0).contains(&sv)).then_some(t)
+}
+
+/// Ray-versus-ring-band: the rotate gizmo's rings.
+///
+/// A ring is the circle of radius `radius` about `center` lying in the plane
+/// with the given `normal`; the band is that circle thickened by `tolerance`
+/// (a pixel tolerance converted to world units by the caller, through the same
+/// `world_per_pixel` the vertex generator uses, so the grab zone IS the drawn
+/// ring).
+///
+/// Returns the distance along the ray to the hit point, or `None` when the ray
+/// misses the band or is edge-on to the ring's plane, where the intersection is
+/// ill-conditioned and a hit would be a coin flip.
+#[must_use]
+pub fn intersect_ring_band(
+    ray: &Ray,
+    center: Point3<f32>,
+    normal: Vector3<f32>,
+    radius: f32,
+    tolerance: f32,
+) -> Option<f32> {
+    // Edge-on: `intersect_plane` would still solve, but the solution slides
+    // wildly along the plane for a sub-pixel pointer move, so refuse it.
+    if normal.normalize().dot(ray.direction).abs() < 1e-3 {
+        return None;
+    }
+    let t = intersect_plane(ray, center, normal.normalize())?;
+    let hit = ray.origin + ray.direction * t;
+    let distance_from_center = (hit - center).magnitude();
+    ((distance_from_center - radius).abs() <= tolerance).then_some(t)
+}
+
+/// Ray-versus-oriented-box: the scale gizmo's cube handles.
+///
+/// `axes` are the box's three orthonormal local axes and `half_extents` its
+/// half-size along each. An OBB rather than an AABB because a locally-oriented
+/// gizmo's cubes sit on the object's axes, not the world's.
+///
+/// Returns the distance along the ray to the near face. The classic slab test,
+/// run in the box's own frame.
+#[must_use]
+pub fn intersect_obb(
+    ray: &Ray,
+    center: Point3<f32>,
+    axes: [Vector3<f32>; 3],
+    half_extents: [f32; 3],
+) -> Option<f32> {
+    let delta = center - ray.origin;
+    let mut t_min = f32::NEG_INFINITY;
+    let mut t_max = f32::INFINITY;
+
+    for i in 0..3 {
+        let axis = axes[i];
+        let e = axis.dot(delta);
+        let f = axis.dot(ray.direction);
+
+        if f.abs() > 1e-6 {
+            // Where the ray crosses this slab's two planes.
+            let mut t1 = (e - half_extents[i]) / f;
+            let mut t2 = (e + half_extents[i]) / f;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+            if t_min > t_max {
+                return None;
+            }
+        } else if -e - half_extents[i] > 0.0 || -e + half_extents[i] < 0.0 {
+            // Parallel to this slab AND outside it: no hit is possible.
+            return None;
+        }
+    }
+
+    // A ray starting inside the box hits at t = 0, not behind itself.
+    if t_max < 0.0 {
+        return None;
+    }
+    Some(if t_min < 0.0 { 0.0 } else { t_min })
 }
 
 /// Möller-Trumbore ray-triangle intersection.
@@ -710,6 +823,117 @@ mod tests {
             "raycast too slow: {}ms over {} tris",
             elapsed.as_millis(),
             total_tris
+        );
+    }
+
+    // ---- gizmo primitives (phase 12: rotate rings, scale cubes) ----
+
+    #[test]
+    fn a_ring_is_grabbable_on_its_band_and_not_inside_or_outside_it() {
+        // The XY-plane ring (normal +Z) of radius 1, centred at the origin.
+        let center = Point3::new(0.0, 0.0, 0.0);
+        let normal = Vector3::unit_z();
+
+        // Straight down -Z, landing exactly ON the ring at (1, 0).
+        let on = ray([1.0, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_ring_band(&on, center, normal, 1.0, 0.05).is_some());
+
+        // Through the ring's empty middle: a miss, which is what makes the
+        // three rings independently grabbable rather than one filled disc.
+        let inside = ray([0.2, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_ring_band(&inside, center, normal, 1.0, 0.05).is_none());
+
+        // Well outside the ring: also a miss.
+        let outside = ray([1.6, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_ring_band(&outside, center, normal, 1.0, 0.05).is_none());
+    }
+
+    #[test]
+    fn the_ring_band_widens_with_the_pixel_tolerance() {
+        // Same reason as the axis shafts: a ring far from the camera must stay
+        // as easy to click, and the tolerance is what carries that.
+        let center = Point3::new(0.0, 0.0, 0.0);
+        let normal = Vector3::unit_z();
+        let near_miss = ray([1.1, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_ring_band(&near_miss, center, normal, 1.0, 0.05).is_none());
+        assert!(intersect_ring_band(&near_miss, center, normal, 1.0, 0.2).is_some());
+    }
+
+    #[test]
+    fn a_ring_seen_edge_on_refuses_to_solve() {
+        // Looking along the ring's plane, the hit point slides wildly for a
+        // sub-pixel pointer move. Better to refuse than to grab a coin flip.
+        let center = Point3::new(0.0, 0.0, 0.0);
+        let normal = Vector3::unit_z();
+        let edge_on = ray([5.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        assert!(intersect_ring_band(&edge_on, center, normal, 1.0, 0.05).is_none());
+    }
+
+    #[test]
+    fn an_obb_is_hit_along_its_own_axes() {
+        let world = [Vector3::unit_x(), Vector3::unit_y(), Vector3::unit_z()];
+        let center = Point3::new(2.0, 0.0, 0.0);
+        let half = [0.25_f32; 3];
+
+        let hit = ray([2.0, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let t = intersect_obb(&hit, center, world, half).expect("dead centre");
+        // The near face sits 0.25 in front of the centre.
+        assert!((t - 4.75).abs() < 1e-4, "near face, got {t}");
+
+        let miss = ray([2.0, 1.0, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_obb(&miss, center, world, half).is_none());
+    }
+
+    #[test]
+    fn a_rotated_obb_is_hit_where_it_actually_sits_not_where_an_aabb_would_be() {
+        // The whole reason this is an OBB: under local orientation the scale
+        // cubes ride the object's axes. A box turned 45 degrees about Z reaches
+        // further along its own diagonal than its axis-aligned twin does.
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let rotated = [
+            Vector3::new(s, s, 0.0),
+            Vector3::new(-s, s, 0.0),
+            Vector3::unit_z(),
+        ];
+        let center = Point3::new(0.0, 0.0, 0.0);
+        let half = [0.5_f32, 0.5, 0.5];
+
+        // The rotated box's corner reaches out to ~0.707 along +X; the
+        // axis-aligned one stops at 0.5. A ray down -Z at x = 0.6 therefore
+        // hits the rotated box and misses the world-aligned one.
+        let probe = ray([0.6, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let world = [Vector3::unit_x(), Vector3::unit_y(), Vector3::unit_z()];
+        assert!(intersect_obb(&probe, center, rotated, half).is_some());
+        assert!(intersect_obb(&probe, center, world, half).is_none());
+    }
+
+    #[test]
+    fn an_infinite_line_solves_exactly_far_past_the_segment() {
+        // The gizmo's axis drag runs way past the drawn arrow. Faking the line
+        // with a huge segment used to cost ~4mm of f32 precision here, which the
+        // user sees as the object lagging the cursor.
+        let line_dir = Vector3::unit_x();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        for x in [1.0_f32, 37.5, 1000.0] {
+            let r = ray([x, 0.0, 5.0], [0.0, 0.0, -1.0]);
+            let p = closest_point_ray_line(&r, origin, line_dir).unwrap();
+            assert!(
+                (p.x - x).abs() < 1e-4,
+                "exact at x = {x}, got {} (off by {})",
+                p.x,
+                (p.x - x).abs()
+            );
+            assert!(p.y.abs() < 1e-4 && p.z.abs() < 1e-4, "on the line");
+        }
+    }
+
+    #[test]
+    fn a_ray_down_the_line_has_no_closest_point() {
+        // Sighting along the axis: the solution is unbounded, and a naive solve
+        // sends the object to infinity.
+        let r = ray([5.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        assert!(
+            closest_point_ray_line(&r, Point3::new(0.0, 0.0, 0.0), Vector3::unit_x()).is_none()
         );
     }
 }

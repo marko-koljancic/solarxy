@@ -63,6 +63,20 @@ impl Camera {
     /// orthographic does not (its half-height IS `ortho_scale`, see
     /// [`Camera::build_proj_matrix`]).
     #[must_use]
+    /// The camera's forward direction, and so the axis the view-aligned rotate
+    /// ring turns about. One definition, because the renderer draws that ring
+    /// and the host hit-tests it, and a disagreement between the two would let
+    /// you grab a ring somewhere other than where it is drawn.
+    pub fn forward(&self) -> cgmath::Vector3<f32> {
+        use cgmath::InnerSpace;
+        let d = self.target - self.eye;
+        if d.magnitude2() < 1e-12 {
+            cgmath::Vector3::unit_z()
+        } else {
+            d.normalize()
+        }
+    }
+
     pub fn world_per_pixel(&self, world_point: cgmath::Point3<f32>, pane_height_px: f32) -> f32 {
         use cgmath::InnerSpace;
         let height_px = pane_height_px.max(1.0);

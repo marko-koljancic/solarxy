@@ -69,20 +69,26 @@ describe("viewport tools (phase 11)", () => {
     expect(lookupBinding("w", "viewport")?.id).toBe("tool-move");
   });
 
-  it("leaves E and R unbound until Phase 12 wires rotate and scale", () => {
-    // A key that silently does nothing is worse than no key; their buttons ship
-    // disabled for the same reason.
-    expect(lookupBinding("e", "viewport")).toBeNull();
-    expect(lookupBinding("r", "viewport")).toBeNull();
+  it("binds E and R now that Phase 12 has wired rotate and scale", () => {
+    // Phase 11 left these deliberately unbound, because a key that silently does
+    // nothing is worse than no key. Their gizmos exist now, so the keys do too.
+    expect(lookupBinding("e", "viewport")?.id).toBe("tool-rotate");
+    expect(lookupBinding("r", "viewport")?.id).toBe("tool-scale");
   });
 
-  it("narrows the display flag to the canvas, which is what frees E", () => {
-    // It was always a Node Canvas action. Before Phase 11 it was `global`, so it
-    // fired over the viewport too and E could never become a tool key.
+  it("keeps E meaning two different things in two different contexts", () => {
+    // The whole reason the display flag narrowed from global to canvas in Phase
+    // 11: it freed E over the viewport for the Rotate tool. Both must resolve,
+    // and to different actions, or the narrowing bought nothing.
     const flag = KEYMAP.find((b) => b.id === "display-flag");
     expect(flag?.context).toBe("canvas");
     expect(lookupBinding("e", "canvas")?.id).toBe("display-flag");
-    // And it no longer fires when the pointer is over neither pane.
+    expect(lookupBinding("e", "viewport")?.id).toBe("tool-rotate");
+    // And it still fires nowhere when the pointer is over neither pane.
     expect(lookupBinding("e", "global")).toBeNull();
+  });
+
+  it("binds X to the gizmo orientation toggle", () => {
+    expect(lookupBinding("x", "viewport")?.id).toBe("gizmo-orientation");
   });
 });

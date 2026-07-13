@@ -24,6 +24,9 @@ solarxy-core = { path = "../solarxy-core", default-features = false, features = 
 # hit-test and drag math over the renderer's manipulator types -- be compiled and
 # TESTED by native CI instead of only by a wasm build.
 solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
+# Likewise pure CPU math: the gizmo's rotate drag composes and decomposes Euler
+# rotations through the kernel, so the kernel has to be reachable natively too.
+solarxy-kernel = { path = "../solarxy-kernel" }
 cgmath = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

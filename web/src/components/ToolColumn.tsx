@@ -5,10 +5,9 @@
 // shrinks the canvas and therefore never perturbs the Rust pane rects (which the
 // ghost toolbars and picking are positioned from).
 //
-// Rotate and Scale render DISABLED rather than absent: the column's final shape
-// is honest from day one, and a disabled control that says why beats a live one
-// that silently does nothing. Their Q/W/E/R keys are likewise unbound until
-// Phase 12 wires them.
+// All four tools are live as of Phase 12: Select (Q), Move (W), Rotate (E),
+// Scale (R). Rotate and Scale shipped disabled in Phase 11 so the column's final
+// shape was honest from day one; this is that promise being kept.
 
 import { setTool } from "../engine/session";
 import type { ToolMode } from "../engine/types";
@@ -65,8 +64,8 @@ const SCALE = (
 const TOOLS: Tool[] = [
   { mode: "select", label: "Select", hotkey: "Q", icon: CURSOR, enabled: true },
   { mode: "move", label: "Move", hotkey: "W", icon: MOVE, enabled: true },
-  { mode: "rotate", label: "Rotate", hotkey: "E", icon: ROTATE, enabled: false },
-  { mode: "scale", label: "Scale", hotkey: "R", icon: SCALE, enabled: false },
+  { mode: "rotate", label: "Rotate", hotkey: "E", icon: ROTATE, enabled: true },
+  { mode: "scale", label: "Scale", hotkey: "R", icon: SCALE, enabled: true },
 ];
 
 export function ToolColumn() {
@@ -80,11 +79,7 @@ export function ToolColumn() {
           type="button"
           className={`tool-btn${tool === t.mode ? " active" : ""}`}
           disabled={!t.enabled}
-          title={
-            t.enabled
-              ? `${t.label} (${t.hotkey})`
-              : `${t.label} (${t.hotkey}) - arrives in Phase 12`
-          }
+          title={`${t.label} (${t.hotkey})`}
           aria-label={t.label}
           aria-pressed={tool === t.mode}
           onClick={() => setTool(t.mode)}

@@ -340,12 +340,16 @@ mod tests {
             false,
         );
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.node.type_version, 2);
+        // v1 walks BOTH steps: strip receive_shadow, then land on v3 (the
+        // rotate-order unification). This geo has no `rotate`, so nothing is
+        // stamped and it takes the new XYZ default.
+        assert_eq!(loaded.node.type_version, 3);
         assert_eq!(
             loaded.node.params.get("visible"),
             Some(&ParamSource::Literal(ParamValue::Bool(false)))
         );
         assert!(!loaded.node.params.contains_key("receive_shadow"));
+        assert!(!loaded.node.params.contains_key("rotate_order"));
 
         // import_ply drops `vertex_colors` (declared in v1, never carried
         // into the parse path) along with its dead rendering group.
