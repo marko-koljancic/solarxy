@@ -66,6 +66,7 @@ pub mod geometry;
 pub mod ibl;
 pub mod input;
 pub mod light;
+pub mod manipulator;
 pub mod material;
 pub mod model;
 pub mod overdraw;

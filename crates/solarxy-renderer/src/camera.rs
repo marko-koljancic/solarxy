@@ -47,6 +47,37 @@ impl Camera {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * self.build_proj_matrix() * self.build_view_matrix()
     }
+
+    /// World units per screen pixel at `world_point`, for a pane `pane_height_px`
+    /// tall.
+    ///
+    /// This is the whole of "constant screen size": a manipulator handle drawn
+    /// `N * world_per_pixel` long occupies N pixels no matter how far the camera
+    /// is, and a click tolerance of `M * world_per_pixel` is M pixels wide. Both
+    /// the vertex generator and the hit tester call this one function, so the
+    /// grab zones can never drift out of step with what the user sees -- the
+    /// same reason `geo_world_matrix` is shared between scene lowering and
+    /// picking.
+    ///
+    /// Perspective scales with the point's depth along the view axis;
+    /// orthographic does not (its half-height IS `ortho_scale`, see
+    /// [`Camera::build_proj_matrix`]).
+    #[must_use]
+    pub fn world_per_pixel(&self, world_point: cgmath::Point3<f32>, pane_height_px: f32) -> f32 {
+        use cgmath::InnerSpace;
+        let height_px = pane_height_px.max(1.0);
+        match self.projection {
+            ProjectionMode::Perspective => {
+                let forward = (self.target - self.eye).normalize();
+                // Depth along the view axis, not the raw distance: a handle off
+                // to the side of the frustum must not shrink.
+                let depth = (world_point - self.eye).dot(forward).max(1e-4);
+                let half_fov = cgmath::Rad::from(cgmath::Deg(self.fovy * 0.5)).0;
+                2.0 * depth * half_fov.tan() / height_px
+            }
+            ProjectionMode::Orthographic => 2.0 * self.ortho_scale / height_px,
+        }
+    }
 }
 
 pub fn camera_from_bounds(bounds: &model::AABB, aspect: f32) -> Camera {
@@ -538,5 +569,43 @@ mod tests {
         );
         assert!(cam2.eye.z.is_finite());
         assert!(cam2.ortho_scale.is_finite());
+    }
+
+    #[test]
+    fn world_per_pixel_is_the_constant_screen_size_contract() {
+        // A perspective camera 10 units back, 60 degree vertical fov, 800px pane.
+        let mut cam = Camera {
+            eye: cgmath::Point3::new(0.0, 0.0, 10.0),
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
+            up: cgmath::Vector3::unit_y(),
+            aspect: 1.0,
+            fovy: 60.0,
+            znear: 0.1,
+            zfar: 100.0,
+            projection: ProjectionMode::Perspective,
+            ortho_scale: 1.0,
+        };
+
+        // The visible half-height at the origin is 10 * tan(30deg); a pixel is
+        // that span over half the pane.
+        let wpp = cam.world_per_pixel(cgmath::Point3::new(0.0, 0.0, 0.0), 800.0);
+        let expected = 2.0 * 10.0 * (30.0f32).to_radians().tan() / 800.0;
+        assert!((wpp - expected).abs() < 1e-6, "{wpp} vs {expected}");
+
+        // Twice as far away => a handle must be twice as large in world units to
+        // cover the same pixels.
+        let far = cam.world_per_pixel(cgmath::Point3::new(0.0, 0.0, -10.0), 800.0);
+        assert!((far / wpp - 2.0).abs() < 1e-4, "ratio {}", far / wpp);
+
+        // Orthographic ignores depth entirely: its half-height IS ortho_scale.
+        cam.projection = ProjectionMode::Orthographic;
+        cam.ortho_scale = 4.0;
+        let near_o = cam.world_per_pixel(cgmath::Point3::new(0.0, 0.0, 0.0), 800.0);
+        let far_o = cam.world_per_pixel(cgmath::Point3::new(0.0, 0.0, -50.0), 800.0);
+        assert!((near_o - 2.0 * 4.0 / 800.0).abs() < 1e-6);
+        assert!(
+            (near_o - far_o).abs() < 1e-9,
+            "ortho does not scale with depth"
+        );
     }
 }

@@ -9,12 +9,12 @@ import { markerKey, registerMarker } from "../../engine/markers";
 import type { Annotation } from "../../engine/types";
 import { repliesOf, useReview } from "../../store/review";
 import { useViewState } from "../../store/viewState";
+import { setReviewPanelOpen } from "../../dock/api";
 import { CATEGORY_GLYPHS, relativeTime, shortPreview } from "./visuals";
 
 function Pin({ a, pane, replies }: { a: Annotation; pane: number; replies: Annotation[] }) {
   const selected = useReview((s) => s.selected === a.id);
   const setSelected = useReview((s) => s.setSelected);
-  const setPanelOpen = useReview((s) => s.setPanelOpen);
   const classes = [
     "review-pin",
     `cat-${a.category}`,
@@ -33,7 +33,8 @@ function Pin({ a, pane, replies }: { a: Annotation; pane: number; replies: Annot
       onClick={(e) => {
         e.stopPropagation();
         setSelected(selected ? null : a.id);
-        if (!selected) setPanelOpen(true);
+        // Selecting a pin reveals the panel (the dock owns its existence).
+        if (!selected) setReviewPanelOpen(true);
       }}
     >
       <span className="review-pin-dot">{CATEGORY_GLYPHS[a.category]}</span>

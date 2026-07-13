@@ -167,6 +167,13 @@ impl UndoStack {
         self.flush_open();
     }
 
+    /// Takes the open transaction WITHOUT committing it, for a cancelled drag.
+    /// The caller applies its inverse ops and discards the result, so neither
+    /// stack is touched.
+    pub(super) fn take_open(&mut self) -> Option<Transaction> {
+        self.open.take()
+    }
+
     fn flush_open(&mut self) {
         if let Some(txn) = self.open.take()
             && !txn.is_empty()

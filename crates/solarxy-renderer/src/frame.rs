@@ -12,6 +12,11 @@ use cgmath::prelude::*;
 
 use crate::bind_groups::BindGroupLayouts;
 use crate::camera::Camera;
+
+/// Vertex budget for the manipulator's two buffers. The translate gizmo is three
+/// shafts, three cones and three quads -- a few hundred vertices -- so a fixed
+/// allocation is honest here; `write_manipulator` refuses to overrun it.
+const MANIPULATOR_BUF_BYTES: u64 = 64 * 1024;
 use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
@@ -271,6 +276,17 @@ pub struct Renderer {
     pub pipelines: Pipelines,
     pub uv_cam: UvCameraState,
     pub uv_boundary_buf: wgpu::Buffer,
+    /// The transform manipulator this frame, or `None` when no tool is active.
+    /// Pull-based: the host sets it, the renderer draws it. `solarxy-app` never
+    /// calls `set_manipulator`, so the desktop is unaffected.
+    manipulator: Option<crate::manipulator::ManipulatorState>,
+    /// Growable CPU-fed vertex buffers for the manipulator. They live HERE and
+    /// not in `VisualizationState`, which is destroyed and rebuilt whenever the
+    /// scene's bounds move materially -- a gizmo must survive that.
+    manipulator_line_buf: wgpu::Buffer,
+    manipulator_line_count: u32,
+    manipulator_tri_buf: wgpu::Buffer,
+    manipulator_tri_count: u32,
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
@@ -587,6 +603,21 @@ impl Renderer {
             pipelines,
             uv_cam,
             uv_boundary_buf,
+            manipulator: None,
+            manipulator_line_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Manipulator Lines"),
+                size: MANIPULATOR_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            manipulator_line_count: 0,
+            manipulator_tri_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Manipulator Tris"),
+                size: MANIPULATOR_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            manipulator_tri_count: 0,
             uv_overlap: UvOverlapResources {
                 count_texture: count_tex,
                 count_view,
@@ -1044,6 +1075,72 @@ impl Renderer {
         if objects.iter().any(|o| o.selected) {
             self.draw_selection_tint(&mut pass, objects, cam_bg);
         }
+        // Last, so it sits over everything; its pipelines ignore depth anyway.
+        self.draw_manipulator(&mut pass, cam_bg);
+    }
+
+    /// Draws the transform manipulator, if the host set one this frame.
+    fn draw_manipulator<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if self.manipulator.is_none() {
+            return;
+        }
+        pass.set_bind_group(0, cam_bg, &[]);
+        if self.manipulator_tri_count > 0 {
+            pass.set_pipeline(&self.pipelines.overlay.manipulator_tris);
+            pass.set_vertex_buffer(0, self.manipulator_tri_buf.slice(..));
+            pass.draw(0..self.manipulator_tri_count, 0..1);
+        }
+        if self.manipulator_line_count > 0 {
+            pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
+            pass.set_vertex_buffer(0, self.manipulator_line_buf.slice(..));
+            pass.draw(0..self.manipulator_line_count, 0..1);
+        }
+    }
+
+    /// Sets (or clears) the manipulator for this frame. Pull-based, like every
+    /// other overlay: the host decides, the renderer draws.
+    pub fn set_manipulator(&mut self, state: Option<crate::manipulator::ManipulatorState>) {
+        self.manipulator = state;
+        if state.is_none() {
+            self.manipulator_line_count = 0;
+            self.manipulator_tri_count = 0;
+        }
+    }
+
+    /// Regenerates the manipulator's vertices for ONE pane.
+    ///
+    /// Per pane, not per frame, because the screen-constant scale depends on the
+    /// pane's camera and height: the same gizmo is a different world size in a
+    /// wide perspective pane than in a small orthographic one. Call this
+    /// immediately before that pane's main pass.
+    pub fn write_manipulator(&mut self, queue: &wgpu::Queue, camera: &Camera, pane_height_px: f32) {
+        let Some(mut state) = self.manipulator else {
+            return;
+        };
+        state.scale =
+            crate::manipulator::GIZMO_PX * camera.world_per_pixel(state.origin(), pane_height_px);
+        self.manipulator = Some(state);
+
+        let (lines, tris) = state.build_vertices();
+        // The gizmo is a fixed handful of vertices, so the buffers are sized
+        // once at startup; guard anyway rather than corrupt the draw.
+        let line_bytes = bytemuck::cast_slice(&lines);
+        let tri_bytes = bytemuck::cast_slice(&tris);
+        if line_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
+            || tri_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
+        {
+            self.manipulator_line_count = 0;
+            self.manipulator_tri_count = 0;
+            return;
+        }
+        queue.write_buffer(&self.manipulator_line_buf, 0, line_bytes);
+        queue.write_buffer(&self.manipulator_tri_buf, 0, tri_bytes);
+        self.manipulator_line_count = u32::try_from(lines.len()).unwrap_or(0);
+        self.manipulator_tri_count = u32::try_from(tris.len()).unwrap_or(0);
     }
 
     /// Draws the translucent accent tint over selected objects' meshes,

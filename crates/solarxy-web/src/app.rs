@@ -24,7 +24,7 @@ use solarxy_core::preferences::{
     BackgroundMode, IblMode, InspectionMode, PaneMode, ProjectionMode, ResolvedBackground,
     ToneMode, UvMapBackground,
 };
-use solarxy_core::raycast::screen_to_world_ray;
+use solarxy_core::raycast::{Ray, screen_to_world_ray};
 use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
@@ -35,9 +35,13 @@ use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
 use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult, ParsedModel};
 use solarxy_graph::document::GraphContext;
-use solarxy_graph::engine::SceneSidecar;
+use solarxy_graph::engine::{EngineEvent, GizmoTarget, SceneSidecar};
+use solarxy_graph::params::{ParamSource, ParamValue};
 use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
+use solarxy_renderer::manipulator::{self, ManipulatorState};
+
+use crate::gizmo::{self, GizmoState, ToolMode};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::environment::SceneEnvironment;
@@ -227,6 +231,9 @@ pub struct SolarxyApp {
     /// scaled into physical canvas px for pane hit-testing and picking.
     dpr: f32,
     pointer_buttons_down: u32,
+    /// The viewport tool, plus any hover highlight and drag in flight. The drag
+    /// loop runs entirely host-side; JS only ever calls `set_tool`.
+    gizmo: GizmoState,
     /// The scene object tinted as selected in the viewports (decision 24),
     /// or `None`.
     selected_object: Option<SceneObjectId>,
@@ -459,6 +466,7 @@ impl SolarxyApp {
             screenshot_request: None,
             pending_screenshot: None,
             viz_dirty: true,
+            gizmo: GizmoState::default(),
         })
     }
 
@@ -514,6 +522,15 @@ impl SolarxyApp {
                 log(&format!("scene delta apply failed: {e}"));
             }
         }
+
+        // The manipulator is pull-based: recompute what it should be, every
+        // frame, from the engine's own view of the world. A selection change or
+        // an undo therefore moves or removes it with no extra plumbing.
+        let manip = self
+            .engine
+            .gizmo_target(self.current_ctx)
+            .and_then(|target| self.gizmo.manipulator(&target));
+        self.renderer.set_manipulator(manip);
 
         self.sync_env_bounds();
         self.sync_visualization();
@@ -579,10 +596,17 @@ impl SolarxyApp {
         })
     }
 
-    /// Resizes the surface and render targets.
-    pub fn resize(&mut self, width: u32, height: u32) {
+    /// Resizes the surface and render targets. `dpr` is the LIVE device pixel
+    /// ratio: it is not constant for the session (browser zoom and a move to a
+    /// different-density monitor both change it), and every pointer coordinate,
+    /// pane rect, and marker projection is scaled by it, so the shell re-reads
+    /// it on each resize and pushes it through here.
+    pub fn resize(&mut self, width: u32, height: u32, dpr: f32) {
         if width == 0 || height == 0 {
             return;
+        }
+        if dpr > 0.0 {
+            self.dpr = dpr;
         }
         self.config.width = width;
         self.config.height = height;
@@ -596,13 +620,39 @@ impl SolarxyApp {
 
     // ---- pointer routing (CSS px in; pane-aware) ----
 
+    /// Selects the active viewport tool ("select" | "move" | "rotate" | "scale").
+    /// The only JS surface the gizmo needs: the drag itself never crosses the
+    /// boundary.
+    pub fn set_tool(&mut self, tool: &str) {
+        self.gizmo.tool = ToolMode::parse(tool);
+        if !self.gizmo.tool.manipulates() {
+            self.gizmo.hovered = None;
+            self.gizmo.drag = None;
+        }
+    }
+
     /// Pointer button down. `button`: 0 left, 1 middle, 2 right.
-    pub fn pointer_down(&mut self, x: f32, y: f32, button: u32) {
+    ///
+    /// Returns an `EventBatch` when the press STARTED a gizmo drag that mutated
+    /// the document (the append path mints a transform node), else `null`.
+    pub fn pointer_down(&mut self, x: f32, y: f32, button: u32) -> Result<JsValue, JsError> {
         let p = (x * self.dpr, y * self.dpr);
         if self.pointer_buttons_down == 0 {
             self.set_hovered_pane(panes::hit_test_pane(&self.compute_panes(), p));
         }
         self.pointer_buttons_down |= 1 << button;
+
+        // The gizmo gets first refusal on a LEFT press, and only on a left press:
+        // middle and right always reach the camera, so orbit and pan can never be
+        // stolen by a tool. In Select mode this whole branch is skipped and the
+        // behaviour is bit-for-bit what it was.
+        if button == 0
+            && self.gizmo.tool.manipulates()
+            && let Some(batch) = self.begin_gizmo_drag(p)?
+        {
+            return Ok(batch);
+        }
+
         let active = self.view.active_pane;
         if let Some(cam) = self.view.cameras[active].as_mut() {
             cam.handle_mouse_move(p.0, p.1);
@@ -610,16 +660,32 @@ impl SolarxyApp {
                 cam.handle_mouse_button(btn, true);
             }
         }
+        Ok(JsValue::NULL)
     }
 
     /// Pointer move; updates the hovered (active) pane while no drag is in
     /// flight, and feeds the active pane's camera controller.
+    ///
+    /// Deliberately returns nothing: this is the hot path, and a live gizmo drag
+    /// streams straight into the engine's preview lane without crossing into JS
+    /// at all.
     pub fn pointer_move(&mut self, x: f32, y: f32) {
         let p = (x * self.dpr, y * self.dpr);
         let last = std::mem::replace(&mut self.last_pointer, p);
         if self.pointer_buttons_down == 0 {
             self.set_hovered_pane(panes::hit_test_pane(&self.compute_panes(), p));
         }
+
+        // A live drag owns the pointer entirely.
+        if self.gizmo.drag.is_some() {
+            self.update_gizmo_drag(p);
+            return;
+        }
+        // Otherwise, with a tool armed, keep the hover highlight fresh.
+        if self.gizmo.tool.manipulates() && self.pointer_buttons_down == 0 {
+            self.update_gizmo_hover(p);
+        }
+
         let active = self.view.active_pane;
         if self.view.pane_settings[active].pane_mode == PaneMode::UvMap {
             // Drag pans the UV view (screen px scaled by the visible UV
@@ -650,14 +716,43 @@ impl SolarxyApp {
         }
     }
 
-    pub fn pointer_up(&mut self, button: u32) {
+    /// Pointer button up. Returns the commit `EventBatch` when it ended a gizmo
+    /// drag, else `null`.
+    pub fn pointer_up(&mut self, button: u32) -> Result<JsValue, JsError> {
         self.pointer_buttons_down &= !(1 << button);
+
+        if button == 0 && self.gizmo.drag.is_some() {
+            return self.commit_gizmo_drag();
+        }
+
         let active = self.view.active_pane;
         if let Some(cam) = self.view.cameras[active].as_mut()
             && let Some(btn) = map_button(button)
         {
             cam.handle_mouse_button(btn, false);
         }
+        Ok(JsValue::NULL)
+    }
+
+    /// Escape during a drag: the document returns to where the drag started and
+    /// the object snaps back. Returns the rollback `EventBatch`, or `null` when
+    /// no drag was in flight.
+    pub fn cancel_gizmo_drag(&mut self) -> Result<JsValue, JsError> {
+        let Some(drag) = self.gizmo.drag.take() else {
+            return Ok(JsValue::NULL);
+        };
+        // Two halves, and BOTH are needed: the transaction rollback undoes the
+        // document (an appended transform node), while clearing the preview
+        // releases the transient value the drag was streaming. Skip the second
+        // and the viewport would keep asserting the dragged position forever,
+        // disagreeing with the parameter panel.
+        self.engine
+            .clear_preview(drag.target.ctx, drag.target.node, "translate");
+        let batch = self
+            .engine
+            .apply(Command::CancelTransaction)
+            .map_err(|e| JsError::new(&format!("{e}")))?;
+        to_js(&batch)
     }
 
     /// Wheel zoom on the active pane; positive zooms in.
@@ -1553,6 +1648,216 @@ impl SolarxyApp {
     }
 }
 
+// The gizmo drag loop. Lives entirely in Rust: `pointer_move` runs at pointer
+// rate, and a boundary crossing per move would be a waste.
+impl SolarxyApp {
+    /// The pane under a point, its camera, and a world ray through it. Exactly
+    /// the recipe `pick` uses, so the gizmo grabs what the user sees.
+    fn pane_ray(&self, p: (f32, f32)) -> Option<(usize, PaneRect, Camera, Ray)> {
+        let rects = self.compute_panes();
+        let idx = panes::hit_test_pane(&rects, p);
+        let pane = *rects.get(idx)?;
+        // A UV pane has no 3D scene to manipulate.
+        if self.view.pane_settings[idx].pane_mode == PaneMode::UvMap {
+            return None;
+        }
+        let mut cam = self.view.cameras[idx].as_ref()?.camera;
+        cam.aspect = pane.width / pane.height.max(1.0);
+        let ray = screen_to_world_ray(
+            (p.0 - pane.x, p.1 - pane.y),
+            (pane.width, pane.height),
+            cam.build_view_projection_matrix(),
+            cam.eye,
+        );
+        Some((idx, pane, cam, ray))
+    }
+
+    /// The manipulator as it stands under a given pointer position: the engine's
+    /// target, scaled for that pane. `None` when no gizmo is showing there.
+    fn manipulator_at(
+        &self,
+        p: (f32, f32),
+    ) -> Option<(GizmoTarget, ManipulatorState, Camera, Ray, f32)> {
+        let target = self.engine.gizmo_target(self.current_ctx)?;
+        let (_, pane, cam, ray) = self.pane_ray(p)?;
+        let mut state = self.gizmo.manipulator(&target)?;
+        // CSS px, not physical: `GIZMO_PX` and `HIT_PX` are the sizes the USER
+        // sees, and pane rects are physical. Divide by the dpr or the gizmo comes
+        // out half-size on a retina display (it did).
+        let world_per_px = cam.world_per_pixel(state.origin(), pane.height / self.dpr);
+        state.scale = manipulator::GIZMO_PX * world_per_px;
+        Some((target, state, cam, ray, world_per_px))
+    }
+
+    fn update_gizmo_hover(&mut self, p: (f32, f32)) {
+        self.gizmo.hovered = self
+            .manipulator_at(p)
+            .and_then(|(_, state, _, ray, wpp)| gizmo::hit_test(&ray, &state, wpp));
+    }
+
+    /// Left press with a tool armed: grab a handle, if one is under the cursor.
+    ///
+    /// On the APPEND path this mints a transform node before the drag can preview
+    /// anything, which is why it happens inside the drag's transaction: the node
+    /// and the move then undo together, in one step.
+    fn begin_gizmo_drag(&mut self, p: (f32, f32)) -> Result<Option<JsValue>, JsError> {
+        let Some((target, state, _, ray, wpp)) = self.manipulator_at(p) else {
+            return Ok(None);
+        };
+        let Some(handle) = gizmo::hit_test(&ray, &state, wpp) else {
+            return Ok(None); // a miss falls through to the camera, as before
+        };
+        let Some(grab_world) = gizmo::solve_drag_point(&ray, &state, handle) else {
+            return Ok(None);
+        };
+
+        let mut events = Vec::new();
+        let begin = self
+            .engine
+            .apply(Command::BeginTransaction {
+                label: "move".to_string(),
+            })
+            .map_err(|e| JsError::new(&format!("{e}")))?;
+        events.extend(begin.events);
+
+        // Resolve the real target. On the reuse path this is a no-op that simply
+        // reports the tail transform; on the append path it creates one.
+        let mut target = target;
+        if target.append_pending {
+            let GraphContext::Subflow(geo) = target.ctx else {
+                return Ok(None);
+            };
+            let batch = self
+                .engine
+                .apply(Command::EnsureTransformTarget { geo })
+                .map_err(|e| JsError::new(&format!("{e}")))?;
+            // The paired event is the ONLY channel carrying the id (the reuse
+            // path emits no NodeAdded).
+            let node = batch.events.iter().find_map(|ev| match ev {
+                EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+                _ => None,
+            });
+            let Some(node) = node else {
+                return Ok(None);
+            };
+            target.node = node;
+            target.append_pending = false;
+            target.current = [0.0; 3];
+            events.extend(batch.events);
+        }
+
+        self.gizmo.drag = Some(gizmo::Drag {
+            handle,
+            target,
+            start_local: target.current,
+            grab_world,
+        });
+        self.gizmo.hovered = Some(handle);
+
+        let revision = self.engine.revision();
+        Ok(Some(to_js(&EventBatch { revision, events })?))
+    }
+
+    /// Pointer move during a drag: solve, and stream into the preview lane. No
+    /// document write, no undo entry, no event, no JS traffic.
+    fn update_gizmo_drag(&mut self, p: (f32, f32)) {
+        let Some(drag) = self.gizmo.drag else {
+            return;
+        };
+        // Rebuild the manipulator at the drag's ANCHOR, not at a freshly resolved
+        // target: re-resolving mid-drag would move the gizmo's own origin under
+        // the maths and the object would accelerate away from the cursor.
+        let Some((_, pane, cam, ray)) = self.pane_ray(p) else {
+            return;
+        };
+        let mut state = ManipulatorState {
+            anchor: cgmath::Matrix4::from(drag.target.anchor),
+            tool: manipulator::ManipulatorTool::Translate,
+            hovered: self.gizmo.hovered,
+            active: Some(drag.handle),
+            scale: 1.0,
+        };
+        state.scale =
+            manipulator::GIZMO_PX * cam.world_per_pixel(state.origin(), pane.height / self.dpr);
+
+        let Some(world_now) = gizmo::solve_drag_point(&ray, &state, drag.handle) else {
+            return; // degenerate view angle: hold still rather than jump
+        };
+        let Some(next) = gizmo::drag_to_local(&drag, world_now) else {
+            return;
+        };
+
+        self.engine.preview_param(
+            drag.target.ctx,
+            drag.target.node,
+            "translate",
+            ParamSource::Literal(ParamValue::Vec3([
+                f64::from(next[0]),
+                f64::from(next[1]),
+                f64::from(next[2]),
+            ])),
+        );
+    }
+
+    /// Release: commit the dragged value as ONE authoritative `SetParam` inside the
+    /// open transaction, then close it. That is the whole "one undo step per
+    /// drag" contract -- the `SetParam` also clears the preview.
+    fn commit_gizmo_drag(&mut self) -> Result<JsValue, JsError> {
+        let Some(drag) = self.gizmo.drag.take() else {
+            return Ok(JsValue::NULL);
+        };
+        let mut events = Vec::new();
+
+        // Whatever the preview lane last resolved to IS the final value.
+        let final_value = self
+            .engine
+            .gizmo_target(drag.target.ctx)
+            .map_or(drag.start_local, |t| t.current);
+
+        // A click on a handle that never moved is not an edit. Committing it
+        // would push an undo step that visibly does nothing (and, on the append
+        // path, would leave a transform node behind for a click). Roll it back
+        // instead, which is exactly what Escape does.
+        let moved = final_value
+            .iter()
+            .zip(drag.start_local)
+            .any(|(a, b)| (a - b).abs() > 1e-6);
+        if !moved {
+            self.engine
+                .clear_preview(drag.target.ctx, drag.target.node, "translate");
+            let batch = self
+                .engine
+                .apply(Command::CancelTransaction)
+                .map_err(|e| JsError::new(&format!("{e}")))?;
+            return to_js(&batch);
+        }
+
+        let set = self
+            .engine
+            .apply(Command::SetParam {
+                ctx: drag.target.ctx,
+                node: drag.target.node,
+                key: "translate".to_string(),
+                value: ParamSource::Literal(ParamValue::Vec3([
+                    f64::from(final_value[0]),
+                    f64::from(final_value[1]),
+                    f64::from(final_value[2]),
+                ])),
+            })
+            .map_err(|e| JsError::new(&format!("{e}")))?;
+        events.extend(set.events);
+
+        let end = self
+            .engine
+            .apply(Command::EndTransaction)
+            .map_err(|e| JsError::new(&format!("{e}")))?;
+        events.extend(end.events);
+
+        let revision = self.engine.revision();
+        to_js(&EventBatch { revision, events })
+    }
+}
+
 // Internal orchestration: the web port of the desktop per-pane render loop.
 impl SolarxyApp {
     fn compute_panes(&self) -> Vec<PaneRect> {
@@ -2167,6 +2472,11 @@ impl SolarxyApp {
         if let Some(cam) = self.view.cameras[i].as_mut() {
             cam.write_with_aspect(&self.queue, pane_aspect);
         }
+        // The gizmo's world size is per-pane (a pane's camera and height decide
+        // how many world units a pixel is), so it is re-written before each
+        // pane's pass rather than once per frame.
+        self.renderer
+            .write_manipulator(&self.queue, &cam_data, pane.height / self.dpr);
         if is_split && i >= 1 {
             self.setup_pane_lighting(&cam_data);
         }

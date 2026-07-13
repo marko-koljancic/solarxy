@@ -28,6 +28,7 @@ import type {
   SaveExtra,
   SlxyLoadResult,
   ValidateJob,
+  ToolMode,
   ViewLayout,
   ViewStateDto,
 } from "./types";
@@ -107,22 +108,42 @@ export class SolarxyClient {
     return this.app.copy_nodes(ctx, new Float64Array(ids));
   }
 
-  resize(width: number, height: number): void {
-    this.app.resize(width, height);
+  /** Resizes the surface. `dpr` is the live device pixel ratio (browser zoom
+   * and monitor changes move it), which the host scales every pointer
+   * coordinate and pane rect by. */
+  resize(width: number, height: number, dpr: number): void {
+    this.app.resize(width, height, dpr);
   }
 
   // ---- pointer routing (CSS px relative to the canvas) ----
 
-  pointerDown(x: number, y: number, button: number): void {
-    this.app.pointer_down(x, y, button);
+  /** Selects the viewport tool. The only gizmo call that crosses the boundary:
+   * the drag itself runs entirely in Rust. */
+  setTool(tool: ToolMode): void {
+    this.app.set_tool(tool);
   }
 
+  /** Escape during a gizmo drag: rolls it back. Returns the rollback batch, or
+   * null when no drag was in flight. */
+  cancelGizmoDrag(): EventBatch | null {
+    return this.app.cancel_gizmo_drag() as EventBatch | null;
+  }
+
+  /** Returns an event batch when the press STARTED a gizmo drag that mutated
+   * the document (the append path mints a transform node), else null. */
+  pointerDown(x: number, y: number, button: number): EventBatch | null {
+    return this.app.pointer_down(x, y, button) as EventBatch | null;
+  }
+
+  /** Void on purpose: this is the hot path, and a live gizmo drag streams
+   * straight into the engine's preview lane without crossing back into JS. */
   pointerMove(x: number, y: number): void {
     this.app.pointer_move(x, y);
   }
 
-  pointerUp(button: number): void {
-    this.app.pointer_up(button);
+  /** Returns the commit batch when it ended a gizmo drag, else null. */
+  pointerUp(button: number): EventBatch | null {
+    return this.app.pointer_up(button) as EventBatch | null;
   }
 
   /** Wheel zoom on the hovered pane; positive zooms in. */

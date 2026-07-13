@@ -1,56 +1,35 @@
-// The application shell (Minimystix layout, phase-6 design adoption): a
-// menu-bar header, the 3D viewport (left) and the registry-driven node
-// editor (right) behind a draggable 20-80 percent split, with the
-// parameter panel in a collapsible bottom properties drawer. The viewport
-// can maximize to the full window from the View menu.
+// The application shell: a slim menu-bar header over a dockview dock (Phase 10).
+// The four panels (viewport, nodes, properties, review) dock, float, tab and
+// maximize freely; the arrangement persists and Desks capture it. The 3D canvas
+// is a module-level DOM node the viewport panel adopts (engine/canvas.ts), so no
+// dock gesture can ever remount it.
 
 import { useEffect, useState } from "react";
-import { PropertiesDrawer } from "./components/layout/PropertiesDrawer";
-import { PropertiesSide } from "./components/layout/PropertiesSide";
-import { SplitPane } from "./components/layout/SplitPane";
+import { Dock } from "./dock/Dock";
 import { MenuBar } from "./components/menu/MenuBar";
-import { NodePane } from "./components/NodePane";
-import { ParameterPanel } from "./components/ParameterPanel";
 import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { PreferencesModal } from "./components/preferences/PreferencesModal";
 import { ScreenshotModal } from "./components/ScreenshotModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
-import { Viewport } from "./components/Viewport";
 import { NodeInfoModal } from "./components/NodeInfoModal";
 import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
 import { importDroppedFiles } from "./engine/session";
 import { collectDroppedFiles } from "./persistence/dropEntries";
-import { RadialMenu } from "./flow/RadialMenu";
 import { useKeyboard } from "./hooks/useKeyboard";
-import { descriptorFor } from "./registry/datatypes";
-import { nodeLabel } from "./flow/nodeLabel";
-import { selectGraph, useMirror } from "./store/mirror";
+import { useMirror } from "./store/mirror";
 import { useReview } from "./store/review";
 import { useUi } from "./store/ui";
-
-/** The selected node's display label (its `name` param when renamed, else
- * the type display name), for the properties drawer header. */
-function useSelectedNodeName(): string {
-  const registry = useMirror((s) => s.registry);
-  const graph = useMirror((s) => selectGraph(s, s.current));
-  const selected = graph.nodes.find((n) => n.id === graph.selection[0]);
-  if (!selected) return "";
-  return nodeLabel(selected, descriptorFor(registry, selected.typeId));
-}
 
 export function App() {
   const registry = useMirror((s) => s.registry);
   const dirty = useMirror((s) => s.dirty);
-  const selectedName = useSelectedNodeName();
   const shortcutsOpen = useUi((s) => s.shortcutsOpen);
   const prefsOpen = useUi((s) => s.prefsOpen);
   const screenshotOpen = useUi((s) => s.screenshotOpen);
   const bootError = useUi((s) => s.bootError);
   const reviewMode = useReview((s) => s.reviewMode);
-  const viewportSide = useUi((s) => s.viewportSide);
-  const propertiesDock = useUi((s) => s.propertiesDock);
   const [dropActive, setDropActive] = useState(false);
   useKeyboard();
 
@@ -111,31 +90,9 @@ export function App() {
         <Toolbar />
       </header>
       <div className="app-body">
-        <SplitPane
-          side={viewportSide}
-          viewport={
-            <div className="viewport-pane">
-              <Viewport />
-            </div>
-          }
-          panel={
-            <NodePane>
-              {propertiesDock === "bottom" && (
-                <PropertiesDrawer title={selectedName}>
-                  <ParameterPanel />
-                </PropertiesDrawer>
-              )}
-            </NodePane>
-          }
-        />
-        {propertiesDock === "right" && (
-          <PropertiesSide title={selectedName}>
-            <ParameterPanel />
-          </PropertiesSide>
-        )}
+        <Dock />
       </div>
       <Toasts />
-      <RadialMenu />
       <NodeInfoModal />
       <MissingSidecarsModal />
       <RecoveryPrompt />

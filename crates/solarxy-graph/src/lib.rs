@@ -50,6 +50,7 @@ mod error;
 pub mod migration;
 pub mod nodes;
 pub mod params;
+pub mod previews;
 pub mod registry;
 pub mod review;
 pub mod topology;

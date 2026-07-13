@@ -62,3 +62,27 @@ describe("keymap table", () => {
     expect(formatKeys("?")).toEqual(["?"]);
   });
 });
+
+describe("viewport tools (phase 11)", () => {
+  it("binds Q and W over the viewport", () => {
+    expect(lookupBinding("q", "viewport")?.id).toBe("tool-select");
+    expect(lookupBinding("w", "viewport")?.id).toBe("tool-move");
+  });
+
+  it("leaves E and R unbound until Phase 12 wires rotate and scale", () => {
+    // A key that silently does nothing is worse than no key; their buttons ship
+    // disabled for the same reason.
+    expect(lookupBinding("e", "viewport")).toBeNull();
+    expect(lookupBinding("r", "viewport")).toBeNull();
+  });
+
+  it("narrows the display flag to the canvas, which is what frees E", () => {
+    // It was always a Node Canvas action. Before Phase 11 it was `global`, so it
+    // fired over the viewport too and E could never become a tool key.
+    const flag = KEYMAP.find((b) => b.id === "display-flag");
+    expect(flag?.context).toBe("canvas");
+    expect(lookupBinding("e", "canvas")?.id).toBe("display-flag");
+    // And it no longer fires when the pointer is over neither pane.
+    expect(lookupBinding("e", "global")).toBeNull();
+  });
+});

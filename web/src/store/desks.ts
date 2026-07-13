@@ -1,31 +1,27 @@
-// Desks (Phase 7b D3, maintainer decision 1: presets + named desks,
-// hand-rolled): a desk is a named snapshot of the app ARRANGEMENT, never
-// document state: viewport side, properties dock, splitter sizes, flow
-// chrome toggles, and the viewport pane layout name. Applying one mutates
-// the ui store and the host view layout; scene files stay portable.
+// Desks (Phase 7b D3, reshaped in Phase 10): a desk is a named snapshot of the
+// app ARRANGEMENT, never document state. Since Phase 10 the arrangement IS the
+// dock layout, plus the canvas chrome toggles and the viewport pane layout.
+// Applying one drives the dock and the host view layout; scene files stay
+// portable.
+//
+// Two layout shapes, deliberately (see dock/layouts.ts): presets and migrated
+// legacy desks are RECIPES, which survive a hand-edit and a dockview bump; desks
+// the user saves are SERIALIZED dockview layouts, because that is the whole
+// point of saving one.
 
 import { create } from "zustand";
+import { applyLayout, captureLayout } from "../dock/api";
+import { sanitizeRecipe, type DeskLayout } from "../dock/layouts";
 import { setViewLayout } from "../engine/session";
 import type { ViewLayout } from "../engine/types";
 import { useViewState } from "./viewState";
-import {
-  clampDrawer,
-  clampDrawerWidth,
-  clampSplit,
-  useUi,
-  type PropertiesDock,
-  type ViewportSide,
-} from "./ui";
+import { useUi } from "./ui";
 
 const DESKS_KEY = "solarxy.desks";
 
 export interface DeskSnapshot {
   name: string;
-  viewportSide: ViewportSide;
-  propertiesDock: PropertiesDock;
-  splitPct: number;
-  drawerHeight: number;
-  drawerWidth: number;
+  layout: DeskLayout;
   showFlowGrid: boolean;
   showMinimap: boolean;
   showFlowControls: boolean;
@@ -36,11 +32,10 @@ export interface DeskSnapshot {
 export const DESK_PRESETS: DeskSnapshot[] = [
   {
     name: "Default",
-    viewportSide: "left",
-    propertiesDock: "bottom",
-    splitPct: 55,
-    drawerHeight: 280,
-    drawerWidth: 340,
+    layout: {
+      kind: "recipe",
+      recipe: { viewportSide: "left", propertiesDock: "bottom", splitPct: 55, review: false },
+    },
     showFlowGrid: true,
     showMinimap: false,
     showFlowControls: true,
@@ -48,11 +43,10 @@ export const DESK_PRESETS: DeskSnapshot[] = [
   },
   {
     name: "Modeling",
-    viewportSide: "left",
-    propertiesDock: "right",
-    splitPct: 50,
-    drawerHeight: 280,
-    drawerWidth: 340,
+    layout: {
+      kind: "recipe",
+      recipe: { viewportSide: "left", propertiesDock: "right", splitPct: 50, review: false },
+    },
     showFlowGrid: true,
     showMinimap: false,
     showFlowControls: true,
@@ -60,11 +54,11 @@ export const DESK_PRESETS: DeskSnapshot[] = [
   },
   {
     name: "Review",
-    viewportSide: "left",
-    propertiesDock: "bottom",
-    splitPct: 70,
-    drawerHeight: 220,
-    drawerWidth: 340,
+    layout: {
+      // The Review preset now ships with the Review panel docked (Phase 10).
+      kind: "recipe",
+      recipe: { viewportSide: "left", propertiesDock: "bottom", splitPct: 70, review: true },
+    },
     showFlowGrid: false,
     showMinimap: false,
     showFlowControls: false,
@@ -72,29 +66,19 @@ export const DESK_PRESETS: DeskSnapshot[] = [
   },
 ];
 
-/** The current arrangement as a desk snapshot. Pure over the two stores'
- * states plus the host layout, for tests. */
+/** The current arrangement as a desk snapshot. Maximize is not captured:
+ * `SerializedDockview` carries no maximized state, so a desk saved while
+ * maximized restores the underlying grid, which is the intended contract. */
 export function captureDesk(
   name: string,
-  ui: {
-    viewportSide: ViewportSide;
-    propertiesDock: PropertiesDock;
-    splitPct: number;
-    drawerHeight: number;
-    drawerWidth: number;
-    showFlowGrid: boolean;
-    showMinimap: boolean;
-    showFlowControls: boolean;
-  },
+  ui: { showFlowGrid: boolean; showMinimap: boolean; showFlowControls: boolean },
   viewLayout: ViewLayout,
-): DeskSnapshot {
+): DeskSnapshot | null {
+  const json = captureLayout();
+  if (!json) return null;
   return {
     name,
-    viewportSide: ui.viewportSide,
-    propertiesDock: ui.propertiesDock,
-    splitPct: ui.splitPct,
-    drawerHeight: ui.drawerHeight,
-    drawerWidth: ui.drawerWidth,
+    layout: { kind: "serialized", json },
     showFlowGrid: ui.showFlowGrid,
     showMinimap: ui.showMinimap,
     showFlowControls: ui.showFlowControls,
@@ -102,15 +86,61 @@ export function captureDesk(
   };
 }
 
-/** Clamps a (possibly hand-edited or stale) desk to valid bounds. */
-export function sanitizeDesk(desk: DeskSnapshot): DeskSnapshot {
+const VIEW_LAYOUTS: ViewLayout[] = [
+  "single",
+  "splitVertical",
+  "splitHorizontal",
+  "quad",
+  "threeLeftBig",
+];
+
+/** The pre-Phase-10 desk shape, as stored by an existing user. */
+interface LegacyDeskSnapshot {
+  name: string;
+  viewportSide?: "left" | "right";
+  propertiesDock?: "bottom" | "right";
+  splitPct?: number;
+  showFlowGrid?: boolean;
+  showMinimap?: boolean;
+  showFlowControls?: boolean;
+  viewLayout?: ViewLayout;
+}
+
+/** Coerces a stored desk (possibly hand-edited, possibly written by the
+ * pre-docking shell) into a valid current snapshot. A legacy desk's arrangement
+ * fields synthesize forward into the equivalent recipe. */
+export function sanitizeDesk(desk: DeskSnapshot | LegacyDeskSnapshot): DeskSnapshot {
+  const legacy = desk as LegacyDeskSnapshot;
+  const current = desk as DeskSnapshot;
+
+  const layout: DeskLayout =
+    current.layout?.kind === "serialized" && current.layout.json
+      ? current.layout
+      : {
+          kind: "recipe",
+          recipe: sanitizeRecipe(
+            current.layout?.kind === "recipe"
+              ? current.layout.recipe
+              : {
+                  // Forward migration: the old shell could express nothing a
+                  // recipe cannot.
+                  viewportSide: legacy.viewportSide,
+                  propertiesDock: legacy.propertiesDock,
+                  splitPct: legacy.splitPct,
+                  review: false,
+                },
+          ),
+        };
+
   return {
-    ...desk,
-    viewportSide: desk.viewportSide === "right" ? "right" : "left",
-    propertiesDock: desk.propertiesDock === "right" ? "right" : "bottom",
-    splitPct: clampSplit(desk.splitPct),
-    drawerHeight: clampDrawer(desk.drawerHeight),
-    drawerWidth: clampDrawerWidth(desk.drawerWidth),
+    name: String(desk.name ?? "Desk"),
+    layout,
+    showFlowGrid: legacy.showFlowGrid !== false,
+    showMinimap: legacy.showMinimap === true,
+    showFlowControls: legacy.showFlowControls !== false,
+    viewLayout: VIEW_LAYOUTS.includes(legacy.viewLayout as ViewLayout)
+      ? (legacy.viewLayout as ViewLayout)
+      : "single",
   };
 }
 
@@ -119,7 +149,7 @@ function loadDesks(): DeskSnapshot[] {
   try {
     const raw = localStorage.getItem(DESKS_KEY);
     const parsed = raw ? (JSON.parse(raw) as DeskSnapshot[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(sanitizeDesk) : [];
   } catch {
     return [];
   }
@@ -139,6 +169,7 @@ export const useDesks = create<DesksStore>((set, get) => ({
     const ui = useUi.getState();
     const layout = useViewState.getState().view?.layout ?? "single";
     const desk = captureDesk(name.trim(), ui, layout);
+    if (!desk) return;
     const desks = [...get().desks.filter((d) => d.name !== desk.name), desk];
     localStorage.setItem(DESKS_KEY, JSON.stringify(desks));
     set({ desks });
@@ -149,10 +180,7 @@ export const useDesks = create<DesksStore>((set, get) => ({
     if (!desk) return;
     const d = sanitizeDesk(desk);
     const ui = useUi.getState();
-    ui.setArrangement({ viewportSide: d.viewportSide, propertiesDock: d.propertiesDock });
-    ui.setSplitPct(d.splitPct);
-    ui.setDrawerHeight(d.drawerHeight);
-    ui.setDrawerWidth(d.drawerWidth);
+    applyLayout(d.layout);
     if (ui.showFlowGrid !== d.showFlowGrid) ui.toggleFlowChrome("showFlowGrid");
     if (ui.showMinimap !== d.showMinimap) ui.toggleFlowChrome("showMinimap");
     if (ui.showFlowControls !== d.showFlowControls) ui.toggleFlowChrome("showFlowControls");

@@ -41,7 +41,9 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "cook", keys: "mod+enter", context: "global", group: "Edit", description: "Cook now (manual mode)" },
   { id: "bypass", keys: "b", context: "global", group: "Node Canvas", description: "Toggle bypass on selection" },
   { id: "palette", keys: "tab", context: "global", group: "Node Canvas", description: "Open the node palette", note: "When the canvas has focus" },
-  { id: "display-flag", keys: "e", context: "global", group: "Node Canvas", description: "Set the display flag on the selection (subflow)" },
+  // Narrowed from global to canvas in Phase 11: that is precisely what frees E
+  // over the viewport for the Rotate tool. It was always a Node Canvas action.
+  { id: "display-flag", keys: "e", context: "canvas", group: "Node Canvas", description: "Set the display flag on the selection (subflow)" },
   { id: "rename", keys: "f2", context: "canvas", group: "Node Canvas", description: "Rename the first selected node (inline)" },
   { id: "flow-grid", keys: "g", context: "canvas", group: "Node Canvas", description: "Toggle the canvas grid" },
   { id: "flow-minimap", keys: "m", context: "canvas", group: "Node Canvas", description: "Toggle the minimap" },
@@ -67,11 +69,18 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "fit", keys: "f", context: "viewport", group: "Viewport & Layout", description: "Fit view to the scene" },
   { id: "screenshot", keys: "c", context: "viewport", group: "Viewport & Layout", description: "Screenshot the active pane" },
   { id: "uv-overlap-toggle", keys: "o", context: "viewport", group: "Inspection", description: "Toggle the UV overlap display (UV pane)" },
+  // Viewport tools (Maya-style Q/W/E/R; Blender's G/R/S collide with the grid,
+  // connection-style and review bindings). Rotate (E) and Scale (R) arrive in
+  // Phase 12 and are deliberately UNBOUND until then, matching their disabled
+  // buttons: a key that silently does nothing is worse than no key.
+  { id: "tool-select", keys: "q", context: "viewport", group: "Viewport & Layout", description: "Tool: Select" },
+  { id: "tool-move", keys: "w", context: "viewport", group: "Viewport & Layout", description: "Tool: Move (translate gizmo)" },
   // Review (Phase 7): mode toggle over the viewport, panel anywhere; Esc
-  // walks the cancel ladder (draft > re-anchor > review mode).
+  // walks the cancel ladder (gizmo drag > draft > re-anchor > review mode >
+  // maximized panel).
   { id: "review-mode", keys: "shift+r", context: "viewport", group: "Review", description: "Toggle review mode (click geometry to pin a note)" },
   { id: "review-panel", keys: "n", context: "global", group: "Review", description: "Toggle the review panel" },
-  { id: "review-cancel", keys: "escape", context: "global", group: "Review", description: "Cancel the note editor / re-anchor / review mode" },
+  { id: "review-cancel", keys: "escape", context: "global", group: "Review", description: "Cancel the note editor / re-anchor / review mode, or restore a maximized panel" },
 ] as const;
 
 /** The canonical key string for a keyboard event ("mod+shift+z" form). */

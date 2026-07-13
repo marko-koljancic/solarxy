@@ -1,19 +1,27 @@
-// UI chrome state: the resizable-layout state (viewport/canvas split,
-// properties drawer, viewport maximize) and transient modal flags.
-// Persisted to localStorage; pure presentation, never document truth.
+// UI chrome state: the dock layout, canvas chrome toggles, and transient modal
+// flags. Persisted to localStorage; pure presentation, never document truth.
 // Theme moved to the preferences store (store/prefs.ts) in Phase 7 W4.
+//
+// Phase 10 retired the hand-rolled layout state (splitPct, viewportSide,
+// propertiesDock, drawerHeight, drawerWidth, drawerCollapsed, viewportMaximized):
+// dockview owns all of it now, and `dockLayout` is the one persisted arrangement.
+// The legacy keys are still READ once, to migrate an existing user's arrangement
+// forward, and never written again.
 
 import { create } from "zustand";
 
+import type { SerializedDockview } from "dockview-react";
+import type { LegacyArrangement } from "../dock/layouts";
 import type { SidecarRefs } from "../engine/sidecars";
 import type { GraphContext } from "../engine/types";
 
-const SPLIT_KEY = "solarxy.ui.splitPct";
 const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
-const DRAWER_KEY = "solarxy.ui.drawerHeight";
-const DRAWER_WIDTH_KEY = "solarxy.ui.drawerWidth";
-const ARRANGEMENT_KEY = "solarxy.ui.arrangement";
 const EDGE_STYLE_KEY = "solarxy.ui.edgeStyle";
+const DOCK_LAYOUT_KEY = "solarxy.ui.dockLayout";
+
+// Retired in Phase 10; read once by loadLegacyArrangement, never written.
+const LEGACY_SPLIT_KEY = "solarxy.ui.splitPct";
+const LEGACY_ARRANGEMENT_KEY = "solarxy.ui.arrangement";
 
 /** Connection styles carried from Minimystix (its "step" id is renamed to
  * the honest smoothStep; the path function was smooth-step all along).
@@ -28,39 +36,28 @@ export const EDGE_STYLE_LABELS: Record<EdgeStyle, string> = {
   smoothStep: "Smooth Step",
 };
 
-/** Clamp bounds carried from Minimystix (variables.css / PropertiesDrawer). */
-export const SPLIT_MIN_PCT = 20;
-export const SPLIT_MAX_PCT = 80;
-export const DRAWER_MIN_PX = 100;
-/** The drawer may take most of the window, not a fixed 600px (the
- * "properties cannot grow" complaint): capped at 85 percent of the
- * viewport height at clamp time. */
-export function drawerMaxPx(): number {
-  if (typeof window === "undefined") return 600;
-  return Math.max(300, Math.round(window.innerHeight * 0.85));
+/** Reads the pre-Phase-10 arrangement so a returning user's shell comes back the
+ * way they left it instead of snapping to the default. Returns null once the
+ * user has a dock layout (the normal case) or has never had either. */
+export function loadLegacyArrangement(): LegacyArrangement | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(LEGACY_ARRANGEMENT_KEY);
+  const rawSplit = localStorage.getItem(LEGACY_SPLIT_KEY);
+  // Absence is the common case (a fresh user, or one already migrated). Test
+  // the stored STRINGS, not Number(...) of them: Number(null) is 0, which is
+  // perfectly finite and would make every fresh user look like a legacy one.
+  if (raw === null && rawSplit === null) return null;
+  const split = Number(rawSplit);
+  try {
+    const parsed = raw ? (JSON.parse(raw) as LegacyArrangement) : {};
+    return {
+      ...parsed,
+      splitPct: rawSplit !== null && Number.isFinite(split) && split > 0 ? split : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
-
-export function clampSplit(pct: number): number {
-  return Math.min(SPLIT_MAX_PCT, Math.max(SPLIT_MIN_PCT, pct));
-}
-
-export function clampDrawer(px: number): number {
-  return Math.min(drawerMaxPx(), Math.max(DRAWER_MIN_PX, px));
-}
-
-/** Right-docked properties width bounds. */
-export const DRAWER_WIDTH_MIN_PX = 240;
-export function drawerWidthMaxPx(): number {
-  if (typeof window === "undefined") return 600;
-  return Math.max(DRAWER_WIDTH_MIN_PX, Math.round(window.innerWidth * 0.5));
-}
-
-export function clampDrawerWidth(px: number): number {
-  return Math.min(drawerWidthMaxPx(), Math.max(DRAWER_WIDTH_MIN_PX, px));
-}
-
-export type ViewportSide = "left" | "right";
-export type PropertiesDock = "bottom" | "right";
 
 /** A pending missing-sidecars prompt (multi-file model import preflight):
  * the primary model references companion files that are not staged. The
@@ -75,17 +72,9 @@ export interface SidecarPrompt {
 }
 
 interface UiState {
-  /** Viewport share of the horizontal split, in percent (20-80). */
-  splitPct: number;
-  drawerHeight: number;
-  /** Right-docked properties width, px. */
-  drawerWidth: number;
-  drawerCollapsed: boolean;
-  viewportMaximized: boolean;
-  /** Desk arrangement (Phase 7b D3): which side the 3D viewport sits on
-   * and where the properties panel docks. */
-  viewportSide: ViewportSide;
-  propertiesDock: PropertiesDock;
+  /** The serialized dockview arrangement (Phase 10). The single source of truth
+   * for the shell's geometry; `null` before the first layout settles. */
+  dockLayout: SerializedDockview | null;
   /** The generated keyboard-shortcuts modal (not persisted). */
   shortcutsOpen: boolean;
   /** The preferences modal (not persisted). */
@@ -109,10 +98,7 @@ interface UiState {
   renameRequest: number | null;
   /** The missing-sidecars import prompt (not persisted). */
   sidecarPrompt: SidecarPrompt | null;
-  setSplitPct: (pct: number) => void;
-  setDrawerHeight: (px: number) => void;
-  toggleDrawerCollapsed: () => void;
-  toggleViewportMaximized: () => void;
+  setDockLayout: (layout: SerializedDockview) => void;
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
   setScreenshotOpen: (open: boolean) => void;
@@ -122,20 +108,21 @@ interface UiState {
   setEdgeStyle: (style: EdgeStyle) => void;
   cycleEdgeStyle: () => void;
   setFlowView: (ctxKey: string, view: "graph" | "list") => void;
-  setDrawerWidth: (px: number) => void;
-  setArrangement: (a: Partial<{ viewportSide: ViewportSide; propertiesDock: PropertiesDock }>) => void;
   setRenameRequest: (node: number | null) => void;
   setSidecarPrompt: (prompt: SidecarPrompt | null) => void;
 }
 
-function loadArrangement(): { viewportSide: ViewportSide; propertiesDock: PropertiesDock } {
-  const defaults = { viewportSide: "left" as ViewportSide, propertiesDock: "bottom" as PropertiesDock };
-  if (typeof localStorage === "undefined") return defaults;
+/** The persisted dock arrangement. A corrupt blob is discarded here rather than
+ * handed to `fromJSON`, which would wedge the dock (dockview #341). */
+export function loadDockLayout(): SerializedDockview | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(DOCK_LAYOUT_KEY);
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(ARRANGEMENT_KEY);
-    return raw ? { ...defaults, ...(JSON.parse(raw) as object) } : defaults;
+    const parsed = JSON.parse(raw) as SerializedDockview;
+    return parsed && typeof parsed === "object" && "grid" in parsed ? parsed : null;
   } catch {
-    return defaults;
+    return null;
   }
 }
 
@@ -151,12 +138,6 @@ function loadFlowChrome(): { showFlowGrid: boolean; showMinimap: boolean; showFl
   }
 }
 
-function loadNumber(key: string, fallback: number): number {
-  if (typeof localStorage === "undefined") return fallback;
-  const raw = Number(localStorage.getItem(key));
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
-}
-
 export function loadEdgeStyle(): EdgeStyle {
   if (typeof localStorage === "undefined") return "bezier";
   const raw = localStorage.getItem(EDGE_STYLE_KEY);
@@ -166,13 +147,8 @@ export function loadEdgeStyle(): EdgeStyle {
 export const useUi = create<UiState>((set) => {
   return {
     ...loadFlowChrome(),
-    ...loadArrangement(),
-    splitPct: clampSplit(loadNumber(SPLIT_KEY, 55)),
-    drawerHeight: clampDrawer(loadNumber(DRAWER_KEY, 280)),
-    drawerWidth: clampDrawerWidth(loadNumber(DRAWER_WIDTH_KEY, 340)),
+    dockLayout: loadDockLayout(),
     edgeStyle: loadEdgeStyle(),
-    drawerCollapsed: false,
-    viewportMaximized: false,
     shortcutsOpen: false,
     prefsOpen: false,
     screenshotOpen: false,
@@ -181,18 +157,10 @@ export const useUi = create<UiState>((set) => {
     flowView: {},
     renameRequest: null,
     sidecarPrompt: null,
-    setSplitPct: (pct) => {
-      const clamped = clampSplit(pct);
-      localStorage.setItem(SPLIT_KEY, String(clamped));
-      set({ splitPct: clamped });
+    setDockLayout: (layout) => {
+      localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
+      set({ dockLayout: layout });
     },
-    setDrawerHeight: (px) => {
-      const clamped = clampDrawer(px);
-      localStorage.setItem(DRAWER_KEY, String(clamped));
-      set({ drawerHeight: clamped });
-    },
-    toggleDrawerCollapsed: () => set((s) => ({ drawerCollapsed: !s.drawerCollapsed })),
-    toggleViewportMaximized: () => set((s) => ({ viewportMaximized: !s.viewportMaximized })),
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPrefsOpen: (open) => set({ prefsOpen: open }),
     setScreenshotOpen: (open) => set({ screenshotOpen: open }),
@@ -222,20 +190,6 @@ export const useUi = create<UiState>((set) => {
         return { edgeStyle: next };
       }),
     setFlowView: (key, view) => set((s) => ({ flowView: { ...s.flowView, [key]: view } })),
-    setDrawerWidth: (px) => {
-      const clamped = clampDrawerWidth(px);
-      localStorage.setItem(DRAWER_WIDTH_KEY, String(clamped));
-      set({ drawerWidth: clamped });
-    },
-    setArrangement: (a) =>
-      set((s) => {
-        const next = {
-          viewportSide: a.viewportSide ?? s.viewportSide,
-          propertiesDock: a.propertiesDock ?? s.propertiesDock,
-        };
-        localStorage.setItem(ARRANGEMENT_KEY, JSON.stringify(next));
-        return next;
-      }),
     setRenameRequest: (node) => set({ renameRequest: node }),
     setSidecarPrompt: (prompt) => set({ sidecarPrompt: prompt }),
   };

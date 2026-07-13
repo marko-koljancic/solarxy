@@ -2220,3 +2220,368 @@ fn validation_result_round_trips_through_json() {
     assert_eq!(back.report.error_count(), 1);
     assert_eq!(back.degenerate_faces, result.degenerate_faces);
 }
+
+#[test]
+fn preview_param_reaches_the_cook() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    // The realtime contract (UX spec section 17 item 1): a param drag must reach
+    // the viewport, and the mechanism is the preview lane. If previews never
+    // reach the cook, a drag shows nothing until the pointer is released.
+    let (mut e, geo, sub, box_id) = displayed_box();
+
+    let before = {
+        let delta = e.take_scene_delta();
+        delta
+            .ops
+            .iter()
+            .find_map(|op| match op {
+                SceneOp::UpsertGeometry { id, geometry } if *id == SceneObjectId(geo.0) => {
+                    Some(geometry.bounds)
+                }
+                _ => None,
+            })
+            .expect("box upserted")
+    };
+
+    // Drag the box's width, the preview way (no document write, no undo entry).
+    e.preview_param(
+        sub,
+        box_id,
+        "width",
+        ParamSource::Literal(ParamValue::Float(8.0)),
+    );
+    e.cook(&mut || true);
+
+    let after = e
+        .take_scene_delta()
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::UpsertGeometry { id, geometry } if *id == SceneObjectId(geo.0) => {
+                Some(geometry.bounds)
+            }
+            _ => None,
+        })
+        .expect("box re-upserted after the preview");
+
+    let before_w = before.max.x - before.min.x;
+    let after_w = after.max.x - after.min.x;
+    assert!(
+        after_w > before_w * 2.0,
+        "the previewed width must reach the cooked geometry: {before_w} -> {after_w}"
+    );
+}
+
+// ---- Phase 11: the gizmo policy ----
+
+/// The engine's own selection is what `gizmo_target` reads, so set it the way
+/// the host does.
+fn select(e: &mut Engine, ctx: GraphContext, ids: Vec<NodeId>) {
+    e.apply(Command::SetSelection { ctx, ids }).unwrap();
+}
+
+#[test]
+fn gizmo_target_at_root_drives_the_geo_itself() {
+    // The cheap path: dragging a geo at root writes its OWN transform, which the
+    // renderer applies as the object transform. No cook, no appended node.
+    let (mut e, geo, _sub, _box_id) = displayed_box();
+    select(&mut e, GraphContext::Root, vec![geo]);
+
+    let t = e
+        .gizmo_target(GraphContext::Root)
+        .expect("a geo is selected");
+    assert_eq!(t.ctx, GraphContext::Root);
+    assert_eq!(t.node, geo);
+    assert!(!t.append_pending, "root never appends anything");
+    assert!(t.current.iter().all(|v| v.abs() < 1e-6));
+    // Identity parent: a world delta maps straight onto the geo's translate.
+    assert!((t.parent[0][0] - 1.0).abs() < 1e-6 && t.parent[0][1].abs() < 1e-6);
+    assert!((t.parent[3][3] - 1.0).abs() < 1e-6 && t.parent[3][0].abs() < 1e-6);
+}
+
+#[test]
+fn gizmo_target_at_root_needs_exactly_one_geo() {
+    let (mut e, geo, sub, box_id) = displayed_box();
+
+    // Nothing selected.
+    assert!(e.gizmo_target(GraphContext::Root).is_none());
+
+    // A light is not a geo.
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    select(&mut e, GraphContext::Root, vec![light]);
+    assert!(e.gizmo_target(GraphContext::Root).is_none());
+
+    // Multi-select is ambiguous in v1.
+    select(&mut e, GraphContext::Root, vec![geo, light]);
+    assert!(e.gizmo_target(GraphContext::Root).is_none());
+
+    // A subflow node selected in the SUBFLOW context is a different question.
+    select(&mut e, sub, vec![box_id]);
+    assert!(e.gizmo_target(sub).is_some());
+}
+
+#[test]
+fn gizmo_target_in_a_subflow_reports_append_pending_over_a_box() {
+    // The tail is a `box`, not a transform: the drag will have to append one.
+    let (e, _geo, sub, box_id) = displayed_box();
+    let t = e.gizmo_target(sub).expect("the subflow has a display node");
+    assert!(t.append_pending, "a box tail is not a transform");
+    assert_eq!(t.node, box_id, "the DISPLAY node until the drag mints one");
+    assert!(t.current.iter().all(|v| v.abs() < 1e-6));
+}
+
+#[test]
+fn ensure_transform_target_appends_and_moves_the_display_flag() {
+    let (mut e, geo, sub, box_id) = displayed_box();
+
+    let batch = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let target = batch
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .expect("the paired event carries the id");
+
+    assert_ne!(target, box_id, "a fresh node was appended");
+    let g = e.document().graph(sub).unwrap();
+    assert_eq!(g.node(target).unwrap().type_id, "transform");
+    // Without the flag moving, the appended transform would be invisible.
+    assert_eq!(g.active_output, Some(target), "the display flag followed");
+    // And it is wired downstream of the box, not floating.
+    assert!(
+        g.edges()
+            .any(|edge| edge.from == box_id && edge.to == target),
+        "the box feeds the new transform"
+    );
+}
+
+#[test]
+fn ensure_transform_target_reuses_a_tail_transform() {
+    let (mut e, geo, sub, _box_id) = displayed_box();
+
+    // First drag appends.
+    let first = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let appended = first
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+
+    // A second drag must REUSE it, not stack another transform on top.
+    let before = e.document().graph(sub).unwrap().nodes().count();
+    let second = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let reused = second
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .expect("the reuse path still reports the target");
+
+    assert_eq!(reused, appended, "the same node, dragged again");
+    assert_eq!(
+        e.document().graph(sub).unwrap().nodes().count(),
+        before,
+        "reuse mints nothing"
+    );
+    // The reuse path emits no NodeAdded at all, which is precisely why
+    // TransformTargetReady has to exist.
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::NodeAdded { .. })),
+        "nothing was added"
+    );
+}
+
+#[test]
+fn ensure_transform_target_treats_a_bypassed_tail_as_absent() {
+    // A bypassed transform passes geometry through unchanged, so dragging it
+    // would move nothing the user can see. Append a live one instead.
+    let (mut e, geo, sub, _box_id) = displayed_box();
+    let first = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let appended = first
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+
+    e.apply(Command::SetBypass {
+        ctx: sub,
+        node: appended,
+        bypassed: true,
+    })
+    .unwrap();
+
+    assert!(
+        e.gizmo_target(sub).unwrap().append_pending,
+        "a bypassed tail is not a usable target"
+    );
+    let second = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let fresh = second
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(
+        fresh, appended,
+        "a live transform was appended past the bypassed one"
+    );
+}
+
+#[test]
+fn ensure_transform_target_errors_without_a_display_node() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    // An empty subflow displays nothing, so there is nothing to transform.
+    assert!(e.gizmo_target(GraphContext::Subflow(geo)).is_none());
+    assert!(matches!(
+        e.apply(Command::EnsureTransformTarget { geo }),
+        Err(EngineError::NoDisplayNode { .. })
+    ));
+}
+
+#[test]
+fn an_append_drag_is_exactly_one_undo_step() {
+    // The whole point of running Ensure inside the drag's transaction: undoing
+    // must remove BOTH the appended node and the param change, in one press.
+    let (mut e, geo, sub, box_id) = displayed_box();
+    let before = fingerprint(&e, sub);
+
+    e.apply(Command::BeginTransaction {
+        label: "move".into(),
+    })
+    .unwrap();
+    let batch = e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    let target = batch
+        .events
+        .iter()
+        .find_map(|ev| match ev {
+            EngineEvent::TransformTargetReady { node, .. } => Some(*node),
+            _ => None,
+        })
+        .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: target,
+        key: "translate".into(),
+        value: ParamSource::Literal(ParamValue::Vec3([3.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    e.apply(Command::EndTransaction).unwrap();
+
+    e.apply(Command::Undo).unwrap();
+
+    assert_eq!(
+        fingerprint(&e, sub),
+        before,
+        "one undo restores the graph exactly: the appended node is gone with the drag"
+    );
+    assert_eq!(
+        e.document().graph(sub).unwrap().active_output,
+        Some(box_id),
+        "the display flag came back too"
+    );
+}
+
+#[test]
+fn cancel_transaction_rolls_back_an_append_without_touching_redo() {
+    // Escape mid-drag: the document returns to the start, and REDO must stay
+    // empty -- the user cancelled, they did not ask to re-apply anything.
+    let (mut e, geo, sub, _box_id) = displayed_box();
+    let before = fingerprint(&e, sub);
+
+    e.apply(Command::BeginTransaction {
+        label: "move".into(),
+    })
+    .unwrap();
+    e.apply(Command::EnsureTransformTarget { geo }).unwrap();
+    e.apply(Command::CancelTransaction).unwrap();
+
+    assert_eq!(
+        fingerprint(&e, sub),
+        before,
+        "the appended node is gone; the document is untouched"
+    );
+
+    // Redo must be a no-op: a cancelled drag left nothing to re-apply.
+    e.apply(Command::Redo).unwrap();
+    assert_eq!(
+        fingerprint(&e, sub),
+        before,
+        "redo did not resurrect the cancelled append"
+    );
+}
+
+#[test]
+fn clear_preview_releases_a_cancelled_drag() {
+    // Without this, a cancelled drag would roll the document back while the
+    // preview overlay kept asserting the dragged value, and the viewport would
+    // disagree with the parameter panel forever.
+    let (mut e, geo, _sub, _box_id) = displayed_box();
+
+    e.preview_param(
+        GraphContext::Root,
+        geo,
+        "translate",
+        ParamSource::Literal(ParamValue::Vec3([5.0, 0.0, 0.0])),
+    );
+    select(&mut e, GraphContext::Root, vec![geo]);
+    let live = e.gizmo_target(GraphContext::Root).unwrap().current;
+    assert!(
+        (live[0] - 5.0).abs() < 1e-6,
+        "the preview is live: {live:?}"
+    );
+
+    e.clear_preview(GraphContext::Root, geo, "translate");
+    let cleared = e.gizmo_target(GraphContext::Root).unwrap().current;
+    assert!(
+        cleared.iter().all(|v| v.abs() < 1e-6),
+        "the object snapped back to the document: {cleared:?}"
+    );
+}
+
+#[test]
+fn gizmo_command_boundary_json_shape_is_camelcase() {
+    // Pins the hand-authored TS mirror (web/src/engine/types.ts) to the Rust
+    // serde shapes for the Phase 11 additions, the same way the other boundary
+    // guards do for theirs.
+    let ensure = serde_json::to_value(Command::EnsureTransformTarget { geo: NodeId(7) }).unwrap();
+    assert_eq!(ensure["type"], "ensureTransformTarget");
+    assert_eq!(ensure["geo"], 7);
+
+    let cancel = serde_json::to_value(Command::CancelTransaction).unwrap();
+    assert_eq!(cancel["type"], "cancelTransaction");
+
+    // Both commands must deserialize back from exactly what the frontend sends.
+    let round: Command = serde_json::from_value(ensure).unwrap();
+    assert!(matches!(
+        round,
+        Command::EnsureTransformTarget { geo } if geo == NodeId(7)
+    ));
+    let round: Command = serde_json::from_value(cancel).unwrap();
+    assert!(matches!(round, Command::CancelTransaction));
+
+    // The paired event carries the target id on BOTH policy paths.
+    let ev = serde_json::to_value(EngineEvent::TransformTargetReady {
+        ctx: GraphContext::Subflow(NodeId(3)),
+        node: NodeId(9),
+    })
+    .unwrap();
+    assert_eq!(ev["type"], "transformTargetReady");
+    assert_eq!(ev["ctx"]["subflow"], 3);
+    assert_eq!(ev["node"], 9);
+}

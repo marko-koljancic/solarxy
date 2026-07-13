@@ -30,6 +30,11 @@
 #[cfg(target_arch = "wasm32")]
 mod app;
 
+// Deliberately NOT wasm-gated: the gizmo's hit-testing and drag solving are pure
+// math with no browser dependency, so keeping them native-visible means native
+// CI runs their tests instead of leaving them to a wasm-only build.
+pub mod gizmo;
+
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;
 

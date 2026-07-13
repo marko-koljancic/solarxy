@@ -138,6 +138,99 @@ pub fn intersect_aabb(ray: &Ray, aabb: &AABB) -> Option<(f32, f32)> {
     }
 }
 
+/// Closest approach between a ray and a finite segment.
+///
+/// Returns `(t_ray, s_seg, distance)`:
+/// - `t_ray` — distance along the ray of the closest point (clamped to `>= 0`),
+/// - `s_seg` — normalized position along the segment, clamped to `0..=1`,
+/// - `distance` — the world-space gap between those two closest points.
+///
+/// This one function serves the translate gizmo twice over: it is the hit test
+/// for an axis arrow (a capsule is "segment plus radius", so a hit is
+/// `distance <= radius`), and it is the drag solver for that axis (the pointer
+/// ray is re-parametrized against the axis line, and `s_seg` is how far along
+/// the axis the pointer now sits).
+///
+/// Degenerate cases fall back gracefully: a zero-length segment reduces to a
+/// point, and a ray parallel to the segment picks the segment start.
+#[must_use]
+pub fn closest_points_ray_segment(ray: &Ray, a: Point3<f32>, b: Point3<f32>) -> (f32, f32, f32) {
+    let seg = b - a;
+    let seg_len2 = seg.magnitude2();
+    let w0 = ray.origin - a;
+
+    // Standard segment-segment closest approach, with the ray as an
+    // infinite half-line and the segment finite.
+    let a_dot = ray.direction.dot(ray.direction); // 1.0 for a unit ray, but do not assume
+    let b_dot = ray.direction.dot(seg);
+    let c_dot = seg_len2;
+    let d_dot = ray.direction.dot(w0);
+    let e_dot = seg.dot(w0);
+
+    let denom = a_dot * c_dot - b_dot * b_dot;
+
+    // The unconstrained closest point along the segment's INFINITE line.
+    let s_line = if denom.abs() < 1e-8 || seg_len2 < 1e-12 {
+        // Parallel, or a degenerate segment: anchor at the segment start.
+        0.0
+    } else {
+        (a_dot * e_dot - b_dot * d_dot) / denom
+    };
+
+    // Clamp to the real, finite segment, then re-solve the ray parameter against
+    // that clamped point. Doing it in this order is what makes the returned gap
+    // the distance to the CAPPED segment rather than to its infinite line, which
+    // is what stops a click far out past the arrow tip from grabbing the arrow.
+    let s_seg = s_line.clamp(0.0, 1.0);
+    let closest_on_seg = a + seg * s_seg;
+    let t_ray = (ray.direction.dot(closest_on_seg - ray.origin) / a_dot.max(1e-8)).max(0.0);
+
+    let p_ray = ray.origin + ray.direction * t_ray;
+    (t_ray, s_seg, (p_ray - closest_on_seg).magnitude())
+}
+
+/// Ray-plane intersection. Returns the distance along the ray, or `None` when
+/// the ray is parallel to the plane or the plane sits behind the origin.
+///
+/// The translate gizmo's plane handles drag on exactly this: the pointer ray is
+/// intersected with the handle's plane and the hit point follows the cursor.
+#[must_use]
+pub fn intersect_plane(ray: &Ray, point: Point3<f32>, normal: Vector3<f32>) -> Option<f32> {
+    let denom = normal.dot(ray.direction);
+    if denom.abs() < 1e-6 {
+        return None; // parallel: no single intersection
+    }
+    let t = normal.dot(point - ray.origin) / denom;
+    (t >= 0.0).then_some(t)
+}
+
+/// Ray-quad intersection for a planar, axis-aligned-in-its-own-basis quad
+/// anchored at `origin` and spanned by `u` and `v` (each scaled to the quad's
+/// full extent along that edge). Returns the distance along the ray.
+///
+/// This is the plane-handle hit test: the little square between two axes.
+#[must_use]
+pub fn intersect_quad(
+    ray: &Ray,
+    origin: Point3<f32>,
+    u: Vector3<f32>,
+    v: Vector3<f32>,
+) -> Option<f32> {
+    let normal = u.cross(v);
+    if normal.magnitude2() < 1e-12 {
+        return None; // degenerate quad
+    }
+    let t = intersect_plane(ray, origin, normal.normalize())?;
+    let hit = ray.origin + ray.direction * t;
+    let d = hit - origin;
+    // Project onto each edge; inside iff both normalized coordinates are 0..=1.
+    let uu = u.magnitude2();
+    let vv = v.magnitude2();
+    let su = d.dot(u) / uu;
+    let sv = d.dot(v) / vv;
+    ((0.0..=1.0).contains(&su) && (0.0..=1.0).contains(&sv)).then_some(t)
+}
+
 /// Möller-Trumbore ray-triangle intersection.
 ///
 /// Returns `Some((t, [w, u, v]))` where `t` is distance along the ray and
@@ -254,6 +347,98 @@ mod tests {
             min: Point3::from(min),
             max: Point3::from(max),
         }
+    }
+
+    // ---- gizmo primitives (phase 11) ----
+
+    #[test]
+    fn ray_segment_hits_an_axis_arrow_dead_on() {
+        // Looking down -Z at the origin; the X axis arrow runs 0..1 along +X.
+        let r = ray([0.5, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let (t, s, dist) =
+            closest_points_ray_segment(&r, Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+        assert!(dist < 1e-5, "ray passes through the segment: {dist}");
+        assert!((s - 0.5).abs() < 1e-5, "halfway along the axis: {s}");
+        assert!((t - 5.0).abs() < 1e-4, "5 units down the ray: {t}");
+    }
+
+    #[test]
+    fn ray_segment_reports_the_gap_when_it_misses() {
+        // Same look direction, but offset 0.25 in Y: a capsule of radius 0.1
+        // must NOT be hit, one of radius 0.3 must be.
+        let r = ray([0.5, 0.25, 5.0], [0.0, 0.0, -1.0]);
+        let (_, s, dist) =
+            closest_points_ray_segment(&r, Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+        assert!((dist - 0.25).abs() < 1e-5, "gap is the Y offset: {dist}");
+        assert!((s - 0.5).abs() < 1e-5);
+        assert!(dist > 0.1 && dist < 0.3, "radius decides the hit");
+    }
+
+    #[test]
+    fn ray_segment_clamps_past_the_arrow_tip() {
+        // Aiming beyond the far end: the closest point is the tip (s == 1), and
+        // the gap is measured to the TIP, not to the infinite axis line -- which
+        // is what stops a click far out along +X from grabbing the arrow.
+        let r = ray([5.0, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let (_, s, dist) =
+            closest_points_ray_segment(&r, Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0));
+        assert!((s - 1.0).abs() < 1e-6, "clamped to the tip: {s}");
+        assert!(
+            (dist - 4.0).abs() < 1e-4,
+            "gap to the tip, not the line: {dist}"
+        );
+    }
+
+    #[test]
+    fn ray_segment_survives_a_degenerate_segment() {
+        let r = ray([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let (_, s, dist) = closest_points_ray_segment(&r, p, p);
+        assert!(dist < 1e-5);
+        assert!(s.abs() < 1e-6);
+    }
+
+    #[test]
+    fn plane_intersection_and_parallel_miss() {
+        let r = ray([0.0, 5.0, 0.0], [0.0, -1.0, 0.0]);
+        let t = intersect_plane(&r, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y());
+        assert!((t.unwrap() - 5.0).abs() < 1e-5);
+
+        // Parallel to the plane: no single intersection.
+        let parallel = ray([0.0, 5.0, 0.0], [1.0, 0.0, 0.0]);
+        assert!(
+            intersect_plane(&parallel, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y()).is_none()
+        );
+
+        // Behind the origin: not a hit.
+        let behind = ray([0.0, 5.0, 0.0], [0.0, 1.0, 0.0]);
+        assert!(intersect_plane(&behind, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y()).is_none());
+    }
+
+    #[test]
+    fn quad_hit_inside_and_miss_outside() {
+        // The XY plane handle: a unit quad at the origin spanned by +X and +Y.
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        let u = Vector3::unit_x();
+        let v = Vector3::unit_y();
+
+        let inside = ray([0.5, 0.5, 5.0], [0.0, 0.0, -1.0]);
+        assert!((intersect_quad(&inside, origin, u, v).unwrap() - 5.0).abs() < 1e-4);
+
+        // Just past the far edge in X.
+        let outside = ray([1.5, 0.5, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_quad(&outside, origin, u, v).is_none());
+
+        // Behind the quad's near edge.
+        let negative = ray([-0.2, 0.5, 5.0], [0.0, 0.0, -1.0]);
+        assert!(intersect_quad(&negative, origin, u, v).is_none());
+    }
+
+    #[test]
+    fn quad_rejects_a_degenerate_span() {
+        let r = ray([0.0, 0.0, 5.0], [0.0, 0.0, -1.0]);
+        let u = Vector3::unit_x();
+        assert!(intersect_quad(&r, Point3::new(0.0, 0.0, 0.0), u, u).is_none());
     }
 
     #[test]

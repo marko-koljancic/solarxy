@@ -28,6 +28,7 @@ use super::{CookCtx, CookError, CookOutcome, InputSlot, Inputs, JobId, JobReques
 use crate::assets::AssetTable;
 use crate::document::{Document, Graph, GraphContext, NodeId};
 use crate::registry::coerce::{Value, coerce_value};
+use crate::previews::{Previews, effective_params};
 use crate::registry::resolve::resolve_params;
 use crate::registry::{Arity, BypassBehavior, Registry};
 
@@ -205,6 +206,7 @@ impl CookEngine {
         doc: &Document,
         registry: &Registry,
         assets: &AssetTable,
+        previews: &Previews,
         ctx: GraphContext,
         should_continue: &mut dyn FnMut() -> bool,
     ) -> CookReport {
@@ -230,7 +232,7 @@ impl CookEngine {
             if !report.cooked.is_empty() && !should_continue() {
                 break;
             }
-            self.cook_one(graph, registry, assets, node, &mut report);
+            self.cook_one(graph, registry, assets, previews, node, &mut report);
         }
 
         report.remaining_dirty = self
@@ -266,6 +268,7 @@ impl CookEngine {
         graph: &Graph,
         registry: &Registry,
         assets: &AssetTable,
+        previews: &Previews,
         node: NodeId,
         report: &mut CookReport,
     ) {
@@ -318,8 +321,11 @@ impl CookEngine {
             }
         };
 
-        // Resolve params (v1 refuses expressions).
-        let resolved = match resolve_params(&data.params, &desc.params) {
+        // Resolve params (v1 refuses expressions), with any in-flight drag
+        // values laid over the stored ones: that overlay IS the preview lane,
+        // and without it a drag would not reach the viewport until release.
+        let params = effective_params(previews, node, &data.params);
+        let resolved = match resolve_params(&params, &desc.params) {
             Ok(r) => r,
             Err(fail) => {
                 self.commit_error(node, &CookError::Params(fail.to_string()), report);
@@ -804,6 +810,7 @@ mod tests {
                 &self.doc,
                 &self.registry,
                 &self.assets,
+                &Previews::new(),
                 self.ctx,
                 &mut || true,
             )
@@ -941,6 +948,7 @@ mod tests {
                 &f.doc,
                 &f.registry,
                 &f.assets,
+                &Previews::new(),
                 f.ctx,
                 &mut || false, // stop after the forced first node
             );

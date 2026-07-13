@@ -130,17 +130,13 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
     cancelRadialTimer();
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      // Identity only (Phase 10): the ring derives its screen anchor from the
+      // live xyflow transform, and its mutable flags from the mirror, so it
+      // tracks the node through pan, zoom, bypass and display changes.
       useRadial.getState().openRadial({
         nodeId: node.id,
         ctx,
-        cx: rect.left + rect.width / 2,
-        cy: rect.top + rect.height / 2,
-        radius: Math.min(Math.max(rect.width, rect.height) / 2, 70),
         isContainer,
-        bypassed: node.bypassed,
-        isDisplay,
         bypassable: desc?.bypass.mode !== "notBypassable",
       });
     }, RADIAL_DELAY_MS);

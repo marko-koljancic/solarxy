@@ -1,45 +1,80 @@
-// The ui store's pure pieces: layout clamps (theme resolution moved to the
-// preferences store; see prefs.test.ts) and the connection-style state.
+// The ui store's pure pieces: the dock-layout loader (Phase 10), the legacy
+// arrangement reader that migrates a pre-docking user forward, and the
+// connection-style state. (Theme resolution moved to the preferences store; see
+// prefs.test.ts. The layout clamps went with the hand-rolled SplitPane: dockview
+// owns the shell's geometry now, and the recipe clamp lives in dock/layouts.ts.)
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  clampDrawer,
-  clampSplit,
-  drawerMaxPx,
-  loadEdgeStyle,
-  useUi,
-  DRAWER_MIN_PX,
-  EDGE_STYLES,
-  SPLIT_MAX_PCT,
-  SPLIT_MIN_PCT,
-} from "./ui";
+import { EDGE_STYLES, loadDockLayout, loadEdgeStyle, loadLegacyArrangement, useUi } from "./ui";
 
-describe("layout clamps", () => {
-  it("clamps the split to 20-80 percent", () => {
-    expect(clampSplit(5)).toBe(SPLIT_MIN_PCT);
-    expect(clampSplit(95)).toBe(SPLIT_MAX_PCT);
-    expect(clampSplit(50)).toBe(50);
+/** The node test environment has no localStorage; a Map-backed stub lets the
+ * loaders and the setters' persistence writes be asserted directly. */
+function stubStorage(seed: Record<string, string> = {}): void {
+  const store = new Map<string, string>(Object.entries(seed));
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  });
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("dock layout persistence", () => {
+  it("returns null when nothing is stored", () => {
+    stubStorage();
+    expect(loadDockLayout()).toBeNull();
   });
 
-  it("clamps the drawer between the floor and ~85 percent of the window", () => {
-    expect(clampDrawer(10)).toBe(DRAWER_MIN_PX);
-    expect(clampDrawer(99999)).toBe(drawerMaxPx());
-    expect(clampDrawer(280)).toBe(280);
+  it("round-trips a stored layout", () => {
+    const layout = {
+      grid: { root: {}, width: 100, height: 100, orientation: "HORIZONTAL" },
+      panels: {},
+    };
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify(layout) });
+    expect(loadDockLayout()).toEqual(layout);
+  });
+
+  it("discards a corrupt blob rather than handing it to fromJSON", () => {
+    // fromJSON THROWS on a bad layout and leaves the dock with zero panels
+    // (dockview #341, reproduced in the spike), so junk is rejected up front.
+    stubStorage({ "solarxy.ui.dockLayout": "{not json" });
+    expect(loadDockLayout()).toBeNull();
+
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify({ nope: true }) });
+    expect(loadDockLayout()).toBeNull();
+  });
+});
+
+describe("legacy arrangement migration", () => {
+  it("returns null for a user who never had the pre-docking shell", () => {
+    stubStorage();
+    expect(loadLegacyArrangement()).toBeNull();
+  });
+
+  it("reads the retired keys so a returning user's arrangement is preserved", () => {
+    stubStorage({
+      "solarxy.ui.arrangement": JSON.stringify({
+        viewportSide: "right",
+        propertiesDock: "right",
+      }),
+      "solarxy.ui.splitPct": "63",
+    });
+    expect(loadLegacyArrangement()).toEqual({
+      viewportSide: "right",
+      propertiesDock: "right",
+      splitPct: 63,
+    });
+  });
+
+  it("survives a corrupt legacy blob", () => {
+    stubStorage({ "solarxy.ui.arrangement": "{nope" });
+    expect(loadLegacyArrangement()).toBeNull();
   });
 });
 
 describe("connection style", () => {
-  // The node test environment has no localStorage; a Map-backed stub lets
-  // the setters' persistence writes be asserted directly.
-  beforeEach(() => {
-    const store = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => void store.set(k, v),
-      removeItem: (k: string) => void store.delete(k),
-    });
-  });
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => stubStorage());
 
   it("falls back to bezier on a missing or invalid persisted value", () => {
     expect(loadEdgeStyle()).toBe("bezier");

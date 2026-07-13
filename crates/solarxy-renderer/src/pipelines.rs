@@ -133,6 +133,12 @@ pub struct OverlayPipelines {
     pub background: wgpu::RenderPipeline,
     pub skybox: wgpu::RenderPipeline,
     pub gizmo: wgpu::RenderPipeline,
+    /// The transform manipulator, drawn ON TOP of the scene (`depth_compare:
+    /// Always`): a handle buried inside the mesh it is meant to move is useless.
+    /// Same shader, same vertex format, same bind group as `gizmo` -- only the
+    /// depth test and the topology differ.
+    pub manipulator_lines: wgpu::RenderPipeline,
+    pub manipulator_tris: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
 }
@@ -526,6 +532,42 @@ impl Pipelines {
             .sample_count(sample_count)
             .build();
 
+        // The manipulator rides the gizmo shader unchanged; it only needs to
+        // ignore depth (so handles are never swallowed by geometry) and to draw
+        // solid arrowheads and plane quads as well as line shafts.
+        let manipulator_lines = PipelineBuilder::new(
+            device,
+            "Manipulator Lines Pipeline",
+            &gizmo_layout,
+            &gizmo_shader,
+        )
+        .vertex_entry("vs_gizmo")
+        .fragment_entry("fs_gizmo")
+        .buffers(vec![model::GizmoVertex::description()])
+        .color_format(hdr_format)
+        .topology(wgpu::PrimitiveTopology::LineList)
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
+        let manipulator_tris = PipelineBuilder::new(
+            device,
+            "Manipulator Tris Pipeline",
+            &gizmo_layout,
+            &gizmo_shader,
+        )
+        .vertex_entry("vs_gizmo")
+        .fragment_entry("fs_gizmo")
+        .buffers(vec![model::GizmoVertex::description()])
+        .color_format(hdr_format)
+        .topology(wgpu::PrimitiveTopology::TriangleList)
+        // No culling: a plane handle must read from either side.
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
         let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Map Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/uv_map.wgsl").into()),
@@ -870,6 +912,8 @@ impl Pipelines {
                 background,
                 skybox,
                 gizmo,
+                manipulator_lines,
+                manipulator_tris,
                 validation_overlay,
                 validation_edge,
             },

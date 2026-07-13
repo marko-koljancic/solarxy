@@ -1,10 +1,10 @@
 // The viewport menu bar (Phase 9): a slim DOM bar above the canvas holding
 // viewport-global actions in a View menu. Per-pane state stays on the ghost
 // toolbars floating over the scene; this bar owns only what applies to the
-// viewport as a whole. Maximize Viewport is an interim item, superseded by
-// Phase 10 docking.
+// viewport as a whole.
 
 import { useState } from "react";
+import { toggleMaximize } from "../dock/api";
 import { cameraCommand, setActivePane, setViewLayout } from "../engine/session";
 import type { ViewLayout } from "../engine/types";
 import { useUi } from "../store/ui";
@@ -22,7 +22,6 @@ const PANE_LAYOUTS: { layout: ViewLayout; label: string; shortcut: string }[] = 
 
 export function ViewportMenuBar() {
   const view = useViewState((s) => s.view);
-  const viewportMaximized = useUi((s) => s.viewportMaximized);
   const [envOpen, setEnvOpen] = useState(false);
 
   const entries: MenuEntry[] = [
@@ -53,9 +52,11 @@ export function ViewportMenuBar() {
     },
     { divider: true },
     {
-      label: "Maximize Viewport",
-      checked: viewportMaximized,
-      onClick: () => useUi.getState().toggleViewportMaximized(),
+      // Phase 10: real dock maximize, on the viewport's own group. Esc restores
+      // (the keymap's cancel ladder). The Phase 9 interim toggle is gone.
+      label: "Maximize Panel",
+      shortcut: "Esc to restore",
+      onClick: () => toggleMaximize("viewport"),
     },
   ];
 

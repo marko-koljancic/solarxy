@@ -31,6 +31,7 @@ import { useUi, type EdgeStyle } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
 import { NoteNode } from "./NoteNode";
+import { RadialMenu } from "./RadialMenu";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
@@ -318,6 +319,10 @@ export function NodeCanvas() {
       {showMinimap && <MiniMap pannable zoomable className="flow-minimap" />}
       {showFlowControls && <Controls showInteractive={false} />}
     </ReactFlow>
+    {/* The hover radial lives INSIDE the flow (Phase 10) so it can subscribe to
+        the viewport transform and stay glued to its node during pan and zoom.
+        It still portals to the body, so its stacking context is unchanged. */}
+    <RadialMenu />
     </div>
   );
 }

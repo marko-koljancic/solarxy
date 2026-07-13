@@ -4,7 +4,7 @@
 // components mutate through the session's view actions.
 
 import { create } from "zustand";
-import type { EnvironmentState, PaneRectDto, ViewStateDto } from "../engine/types";
+import type { EnvironmentState, PaneRectDto, ToolMode, ViewStateDto } from "../engine/types";
 
 interface ViewStateStore {
   view: ViewStateDto | null;
@@ -20,6 +20,9 @@ interface ViewStateStore {
   uvOverlapPending: boolean;
   /** The host's environment (IBL mode + loaded HDRI identity). */
   environment: EnvironmentState | null;
+  /** The active viewport tool. A mirror: Rust owns it (the drag loop reads it),
+   * this drives the tool column's highlight. Not persisted. */
+  toolMode: ToolMode;
   setView: (view: ViewStateDto) => void;
   setPaneRects: (rects: PaneRectDto[]) => void;
   setActivePaneMirror: (pane: number) => void;
@@ -27,6 +30,7 @@ interface ViewStateStore {
   setPointerOverCanvas: (over: boolean) => void;
   setUvOverlap: (pct: number | null, pending: boolean) => void;
   setEnvironment: (env: EnvironmentState) => void;
+  setToolMode: (tool: ToolMode) => void;
 }
 
 export const useViewState = create<ViewStateStore>((set) => ({
@@ -36,6 +40,7 @@ export const useViewState = create<ViewStateStore>((set) => ({
   uvOverlapPct: null,
   uvOverlapPending: false,
   environment: null,
+  toolMode: "select",
   setView: (view) => set({ view }),
   setPaneRects: (rects) =>
     set((s) => (s.view ? { view: { ...s.view, paneRects: rects } } : s)),
@@ -45,4 +50,5 @@ export const useViewState = create<ViewStateStore>((set) => ({
   setPointerOverCanvas: (over) => set({ pointerOverCanvas: over }),
   setUvOverlap: (pct, pending) => set({ uvOverlapPct: pct, uvOverlapPending: pending }),
   setEnvironment: (env) => set({ environment: env }),
+  setToolMode: (tool) => set({ toolMode: tool }),
 }));

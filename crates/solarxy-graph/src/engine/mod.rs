@@ -163,12 +163,32 @@ pub enum Command {
         #[serde(default)]
         updated_at: String,
     },
+    /// Resolves the node a viewport gizmo should write to inside `geo`'s
+    /// subflow, creating it if necessary (the ratified reuse-tail-transform
+    /// policy): if the subflow's display node is already a non-bypassed
+    /// `transform`, that node is the target; otherwise a fresh `transform` is
+    /// appended after the display node and the display flag moves to it.
+    ///
+    /// Either way the answer arrives as [`EngineEvent::TransformTargetReady`] --
+    /// which is why the event exists at all, since the reuse path mints nothing
+    /// and would otherwise emit no events to read the id from.
+    ///
+    /// Issued inside the drag's transaction, so appending undoes together with
+    /// the drag in one step.
+    EnsureTransformTarget {
+        geo: NodeId,
+    },
     /// Groups following commands into one undo step until `EndTransaction`
     /// (drags, marquee moves).
     BeginTransaction {
         label: String,
     },
     EndTransaction,
+    /// Rolls the open transaction back to where it began and discards it, so a
+    /// cancelled drag (Escape) leaves no document mutation AND no redo entry.
+    /// Commit-then-undo was rejected precisely because it pollutes the redo
+    /// stack with a step the user never asked for.
+    CancelTransaction,
     Undo,
     Redo,
 }
@@ -274,6 +294,13 @@ pub enum EngineEvent {
     },
     CookModeChanged {
         mode: CookMode,
+    },
+    /// The node a gizmo drag will write to (see [`Command::EnsureTransformTarget`]).
+    /// Emitted on BOTH policy paths, because the reuse path creates nothing and
+    /// so has no `NodeAdded` to carry the id.
+    TransformTargetReady {
+        ctx: GraphContext,
+        node: NodeId,
     },
     /// The review annotation set changed; the mirror re-reads it from the
     /// snapshot (annotations are few, so a coarse signal is cheap).
@@ -406,6 +433,34 @@ pub enum EngineError {
     ContextIllegal { type_id: String },
     #[error("param '{key}' rejected: {reason}")]
     InvalidParam { key: String, reason: String },
+    #[error("geo {geo:?} has no display node, so there is nothing to transform")]
+    NoDisplayNode { geo: NodeId },
+}
+
+/// What a viewport gizmo drives, resolved by [`Engine::gizmo_target`].
+///
+/// The host reads this once per frame to place the manipulator, and again at
+/// drag start to know what to write; all of the POLICY (which node, which space,
+/// whether a node must be appended first) is decided engine-side.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct GizmoTarget {
+    /// Where a `SetParam` for this drag must be addressed.
+    pub ctx: GraphContext,
+    /// The node whose `translate` the drag writes. On the append path this is
+    /// still the DISPLAY node: the real target is minted by
+    /// [`Command::EnsureTransformTarget`] when the drag actually starts, so a
+    /// mere hover never mutates the document.
+    pub node: NodeId,
+    /// The target's current translate, previews included (so the handle tracks
+    /// the object mid-drag).
+    pub current: [f32; 3],
+    /// World matrix placing the manipulator.
+    pub anchor: [[f32; 4]; 4],
+    /// Maps a world-space delta into the target's own space. Identity at root.
+    pub parent: [[f32; 4]; 4],
+    /// True when the subflow's tail is not a usable `transform`, so the drag
+    /// must append one before it can preview anything.
+    pub append_pending: bool,
 }
 
 /// The engine.
@@ -544,6 +599,7 @@ impl Engine {
                 self.revision += 1;
                 return Ok(self.batch(Vec::new()));
             }
+            Command::CancelTransaction => return self.run_cancel(),
             _ => {}
         }
         let mut events = Vec::new();
@@ -577,7 +633,9 @@ impl Engine {
                 ctx,
                 node_type,
                 position,
-            } => self.add_node(ctx, &node_type, position, events, inv),
+            } => self
+                .add_node(ctx, &node_type, position, events, inv)
+                .map(|_| ()),
             Command::RemoveNodes { ctx, ids } => self.remove_nodes(ctx, &ids, events, inv),
             Command::Connect { ctx, from, to } => {
                 self.connect(ctx, from.into(), to.into(), events, inv)
@@ -594,6 +652,9 @@ impl Engine {
                 self.set_active_output(ctx, node, events, inv)
             }
             Command::SetSelection { ctx, ids } => self.set_selection(ctx, ids, events, inv),
+            Command::EnsureTransformTarget { geo } => {
+                self.ensure_transform_target(geo, events, inv).map(|_| ())
+            }
             Command::SetBypass {
                 ctx,
                 node,
@@ -743,6 +804,7 @@ impl Engine {
             // The transaction/undo commands are intercepted in `apply`.
             Command::BeginTransaction { .. }
             | Command::EndTransaction
+            | Command::CancelTransaction
             | Command::Undo
             | Command::Redo => Ok(()),
         }
@@ -755,7 +817,7 @@ impl Engine {
         position: [f32; 2],
         events: &mut Vec<EngineEvent>,
         inv: &mut Vec<UndoOp>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<NodeId, EngineError> {
         let desc = self
             .registry
             .get(node_type)
@@ -799,7 +861,64 @@ impl Engine {
             });
         }
         inv.push(UndoOp::RemoveNodes { ctx, ids: vec![id] });
-        Ok(())
+        Ok(id)
+    }
+
+    /// The ratified reuse-tail-transform policy, executed atomically.
+    ///
+    /// Composed from the ordinary `add_node` / `connect` / `set_active_output`
+    /// helpers, each of which appends to the same `inv`. `apply` pushes that
+    /// whole `inv` as ONE undo step, so appending a transform and then dragging
+    /// it undoes together, in one press of Cmd+Z -- the same trick the exclusive
+    /// shadow-caster cascade uses.
+    fn ensure_transform_target(
+        &mut self,
+        geo: NodeId,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<NodeId, EngineError> {
+        let ctx = GraphContext::Subflow(geo);
+        let graph = self.doc.graph(ctx)?;
+        let Some(display) = graph.active_output else {
+            // Nothing is displayed, so there is nothing to transform. The host
+            // does not offer a gizmo in this state; treat it as a hard error
+            // rather than silently inventing geometry.
+            return Err(EngineError::NoDisplayNode { geo });
+        };
+
+        // Reuse: the tail already IS a transform. A BYPASSED transform is
+        // treated as absent -- dragging must move the object the user can see,
+        // and a bypassed node moves nothing.
+        let tail = graph
+            .node(display)
+            .ok_or(GraphError::UnknownNode(display))?;
+        if tail.type_id == "transform" && !tail.bypassed {
+            events.push(EngineEvent::TransformTargetReady { ctx, node: display });
+            return Ok(display);
+        }
+
+        // Append: a fresh transform downstream of the display node, which then
+        // becomes the displayed output.
+        let position = [tail.position[0] + 180.0, tail.position[1]];
+        let new = self.add_node(ctx, "transform", position, events, inv)?;
+        self.connect(
+            ctx,
+            PortRef {
+                node: display,
+                port: "geometry".to_string(),
+            },
+            PortRef {
+                node: new,
+                port: "geometry".to_string(),
+            },
+            events,
+            inv,
+        )?;
+        // Without this the appended transform is invisible: `active_output` IS
+        // the displayed node, there is no implicit "tail".
+        self.set_active_output(ctx, Some(new), events, inv)?;
+        events.push(EngineEvent::TransformTargetReady { ctx, node: new });
+        Ok(new)
     }
 
     fn remove_nodes(
@@ -1281,7 +1400,9 @@ impl Engine {
             .review()
             .iter()
             .filter(|a| a.reply_to.is_none())
-            .filter(|a| scene::geo_visible(&self.doc, &self.registry, a.anchor.node))
+            .filter(|a| {
+                scene::geo_visible(&self.doc, &self.registry, &self.previews, a.anchor.node)
+            })
             .map(|a| {
                 let stale = self.annotation_stale(a.id);
                 let world = if stale {
@@ -1318,7 +1439,7 @@ impl Engine {
                 p[c] += v[c] * bary[k];
             }
         }
-        let m = scene::geo_world_matrix(&self.doc, &self.registry, anchor.node);
+        let m = scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, anchor.node);
         let world = m.transform_point(cgmath::Point3::new(p[0], p[1], p[2]));
         Some([world.x, world.y, world.z])
     }
@@ -1341,10 +1462,10 @@ impl Engine {
         let mut out: Vec<_> = root
             .nodes()
             .filter(|n| n.type_id == "geo")
-            .filter(|n| scene::geo_visible(&self.doc, &self.registry, n.id))
+            .filter(|n| scene::geo_visible(&self.doc, &self.registry, &self.previews, n.id))
             .filter_map(|n| {
                 let set = scene::display_output(&self.doc, &self.cook, n.id)?;
-                let m = scene::geo_world_matrix(&self.doc, &self.registry, n.id);
+                let m = scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, n.id);
                 Some((n.id, std::sync::Arc::clone(set), m.into()))
             })
             .collect();
@@ -1459,6 +1580,22 @@ impl Engine {
         self.undo.push_redo(redo);
         // Undoing a re-anchor (or any display-affecting edit) must flip the
         // stale flags in the same batch.
+        self.refresh_review_staleness(&mut events);
+        Ok(self.batch(events))
+    }
+
+    /// Rolls the open transaction back and throws it away: the document returns
+    /// to where the drag started, and NOTHING lands on either stack -- no undo
+    /// entry (the user cancelled), and no redo entry (they never asked to
+    /// re-apply a cancelled drag). Reuses the same `apply_transaction` machinery
+    /// as undo, so an appended node is removed exactly as an undo would remove
+    /// it.
+    fn run_cancel(&mut self) -> Result<EventBatch, EngineError> {
+        self.revision += 1;
+        let Some(txn) = self.undo.take_open() else {
+            return Ok(self.batch(Vec::new()));
+        };
+        let (_discarded, mut events) = self.apply_transaction(txn)?;
         self.refresh_review_staleness(&mut events);
         Ok(self.batch(events))
     }
@@ -1689,6 +1826,119 @@ impl Engine {
         self.mark_dirty(ctx, node);
     }
 
+    /// Drops an in-flight preview for one param, so a CANCELLED drag does not
+    /// strand the object where the pointer left it.
+    ///
+    /// The symmetric counterpart to [`Engine::preview_param`]. Without it a
+    /// cancel would roll the DOCUMENT back while the preview overlay kept
+    /// asserting the dragged value, and the viewport would disagree with the
+    /// parameter panel indefinitely (the overlay is only otherwise cleared by an
+    /// authoritative `SetParam`).
+    pub fn clear_preview(&mut self, ctx: GraphContext, node: NodeId, key: &str) {
+        if self.previews.remove(&(node, key.to_string())).is_some() {
+            self.mark_dirty(ctx, node);
+        }
+    }
+
+    /// The geo container's world matrix, as the renderer and picking see it
+    /// (previews included, so it follows a gizmo drag).
+    #[must_use]
+    pub fn geo_world_matrix(&self, geo: NodeId) -> Option<[[f32; 4]; 4]> {
+        let root = self.doc.graph(GraphContext::Root).ok()?;
+        let node = root.node(geo)?;
+        if node.type_id != "geo" {
+            return None;
+        }
+        Some(scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo).into())
+    }
+
+    /// What a viewport gizmo should drive, given where the node canvas is.
+    ///
+    /// This is the whole of the ratified context-sensitive policy, kept engine
+    /// side so it is testable and platform-neutral; the host does routing and
+    /// arithmetic only.
+    ///
+    /// - **Root**: the selected `geo`'s OWN transform. The renderer applies it as
+    ///   the object transform, so a drag costs one small buffer write -- no cook,
+    ///   no re-upload, and it works on any geo including a heavy import.
+    /// - **Subflow**: the tail `transform` inside that geo (reuse-or-append, see
+    ///   [`Command::EnsureTransformTarget`]), which BAKES into the points. That
+    ///   is the SOP-level transform, and it is what a modeller diving into the
+    ///   subflow is asking for.
+    ///
+    /// `parent` maps a world-space drag delta into the target's own space: it is
+    /// identity at root (the geo's translate IS world), and the geo's world
+    /// matrix inside a subflow (where the transform node's translate is local to
+    /// the container).
+    #[must_use]
+    pub fn gizmo_target(&self, ctx: GraphContext) -> Option<GizmoTarget> {
+        match ctx {
+            GraphContext::Root => {
+                let root = self.doc.graph(GraphContext::Root).ok()?;
+                // Exactly one selected node, and it must be a geo.
+                let &[selected] = root.selection.as_slice() else {
+                    return None;
+                };
+                let node = root.node(selected)?;
+                if node.type_id != "geo" {
+                    return None;
+                }
+                let desc = self.registry.get("geo")?;
+                let params =
+                    crate::previews::effective_params(&self.previews, selected, &node.params);
+                let p = crate::registry::resolve::resolve_params(&params, &desc.params).ok()?;
+                Some(GizmoTarget {
+                    ctx: GraphContext::Root,
+                    node: selected,
+                    current: p.vec3_f32("translate"),
+                    anchor: scene::geo_world_matrix(
+                        &self.doc,
+                        &self.registry,
+                        &self.previews,
+                        selected,
+                    )
+                    .into(),
+                    parent: <cgmath::Matrix4<f32> as cgmath::SquareMatrix>::identity().into(),
+                    append_pending: false,
+                })
+            }
+            GraphContext::Subflow(geo) => {
+                let sub = self.doc.graph(ctx).ok()?;
+                let display = sub.active_output?;
+                let tail = sub.node(display)?;
+
+                let geo_matrix =
+                    scene::geo_world_matrix(&self.doc, &self.registry, &self.previews, geo);
+
+                // A bypassed transform passes geometry straight through, so it
+                // moves nothing: treat it as absent and append a live one.
+                let reusable = tail.type_id == "transform" && !tail.bypassed;
+                let current = if reusable {
+                    let desc = self.registry.get("transform")?;
+                    let params =
+                        crate::previews::effective_params(&self.previews, display, &tail.params);
+                    crate::registry::resolve::resolve_params(&params, &desc.params)
+                        .ok()?
+                        .vec3_f32("translate")
+                } else {
+                    [0.0; 3]
+                };
+
+                // The gizmo sits where the transform's local origin lands in the
+                // world: through the container, then out by the local translate.
+                let local = cgmath::Matrix4::from_translation(cgmath::Vector3::from(current));
+                Some(GizmoTarget {
+                    ctx,
+                    node: display,
+                    current,
+                    anchor: (geo_matrix * local).into(),
+                    parent: geo_matrix.into(),
+                    append_pending: !reusable,
+                })
+            }
+        }
+    }
+
     /// Cooks every context that has dirty work, under `should_continue`
     /// (native callers pass a wall-clock deadline; the web host a frame
     /// budget). Returns the cook events (status + coalesced stats).
@@ -1710,6 +1960,7 @@ impl Engine {
                 &self.doc,
                 &self.registry,
                 &self.assets,
+                &self.previews,
                 ctx,
                 should_continue,
             );
@@ -1887,7 +2138,8 @@ impl Engine {
     /// Drains the accumulated scene delta for the renderer, rebuilding it
     /// from the current committed display outputs and light nodes.
     pub fn take_scene_delta(&mut self) -> SceneDelta {
-        self.scene = scene::build_scene_delta(&self.doc, &self.registry, &self.cook);
+        self.scene =
+            scene::build_scene_delta(&self.doc, &self.registry, &self.cook, &self.previews);
         std::mem::take(&mut self.scene)
     }
 
@@ -1898,7 +2150,14 @@ impl Engine {
     /// cursor via `solarxy_core::raycast::screen_to_world_ray`.
     #[must_use]
     pub fn pick(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<NodeId> {
-        scene::pick_node(&self.doc, &self.registry, &self.cook, origin, direction)
+        scene::pick_node(
+            &self.doc,
+            &self.registry,
+            &self.cook,
+            &self.previews,
+            origin,
+            direction,
+        )
     }
 
     /// [`Engine::pick`] with the full hit detail (mesh, face, barycentric,
@@ -1906,7 +2165,14 @@ impl Engine {
     /// annotations.
     #[must_use]
     pub fn pick_detailed(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<PickDetail> {
-        scene::pick_node_detailed(&self.doc, &self.registry, &self.cook, origin, direction)
+        scene::pick_node_detailed(
+            &self.doc,
+            &self.registry,
+            &self.cook,
+            &self.previews,
+            origin,
+            direction,
+        )
     }
 
     /// Serializes the whole document plus the editor cook mode (the autosave

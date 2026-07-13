@@ -19,16 +19,20 @@ crate-type = ["cdylib", "rlib"]
 # stays green. The wasm-only host lives behind cfg(target_arch = "wasm32").
 solarxy-graph = { path = "../solarxy-graph" }
 solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
+# The renderer builds natively (the desktop shell depends on it), so it can sit
+# here rather than behind the wasm cfg. That is what lets `gizmo.rs` -- pure
+# hit-test and drag math over the renderer's manipulator types -- be compiled and
+# TESTED by native CI instead of only by a wasm build.
+solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
+cgmath = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
 # wasm-only: the import worker (parse_model_job) and the .slxy boundary use
 # the kernel transfer codec, the scene-file schema, and serde_json.
 solarxy-kernel = { path = "../solarxy-kernel" }
 solarxy-scenefile = { path = "../solarxy-scenefile" }
 serde_json = "1"
 wgpu = "27.0.1"
-cgmath = { workspace = true }
 bytemuck = { version = "1", features = ["derive"] }
 wasm-bindgen = "=0.2.126"
 wasm-bindgen-futures = "0.4"

@@ -1,10 +1,13 @@
-// Desk snapshots: capture/apply round-trip shape and the sanitize clamps.
+// Desk snapshots (Phase 10 shape): the forward migration of pre-docking desks,
+// and sanitize's coercion of anything stale or hand-edited.
 
 import { describe, expect, it } from "vitest";
-import { captureDesk, sanitizeDesk, type DeskSnapshot } from "./desks";
-import { DRAWER_MIN_PX, DRAWER_WIDTH_MIN_PX, SPLIT_MAX_PCT, SPLIT_MIN_PCT } from "./ui";
+import { sanitizeDesk, type DeskSnapshot } from "./desks";
+import { DEFAULT_RECIPE } from "../dock/layouts";
 
-const UI = {
+/** A desk exactly as the pre-Phase-10 shell stored it. */
+const LEGACY_DESK = {
+  name: "My Old Desk",
   viewportSide: "right" as const,
   propertiesDock: "right" as const,
   splitPct: 63,
@@ -13,44 +16,73 @@ const UI = {
   showFlowGrid: false,
   showMinimap: true,
   showFlowControls: false,
+  viewLayout: "quad" as const,
 };
 
-describe("captureDesk", () => {
-  it("snapshots the arrangement and survives a JSON round trip", () => {
-    const desk = captureDesk("My Desk", UI, "quad");
-    const back = JSON.parse(JSON.stringify(desk)) as DeskSnapshot;
-    expect(back).toEqual({
-      name: "My Desk",
-      viewportSide: "right",
-      propertiesDock: "right",
-      splitPct: 63,
-      drawerHeight: 300,
-      drawerWidth: 380,
-      showFlowGrid: false,
-      showMinimap: true,
-      showFlowControls: false,
-      viewLayout: "quad",
+describe("legacy desk migration", () => {
+  it("synthesizes a recipe from a pre-docking desk instead of dropping it", () => {
+    const desk = sanitizeDesk(LEGACY_DESK);
+    expect(desk.layout).toEqual({
+      kind: "recipe",
+      recipe: {
+        viewportSide: "right",
+        propertiesDock: "right",
+        splitPct: 63,
+        review: false,
+      },
     });
-    expect(sanitizeDesk(back)).toEqual(back);
+    // The non-arrangement fields carry over untouched.
+    expect(desk.showFlowGrid).toBe(false);
+    expect(desk.showMinimap).toBe(true);
+    expect(desk.showFlowControls).toBe(false);
+    expect(desk.viewLayout).toBe("quad");
+    expect(desk.name).toBe("My Old Desk");
+  });
+
+  it("clamps a hand-edited legacy split and falls back on bad enums", () => {
+    const wild = sanitizeDesk({
+      ...LEGACY_DESK,
+      viewportSide: "up" as never,
+      propertiesDock: "floating" as never,
+      splitPct: 5,
+    });
+    expect(wild.layout).toEqual({
+      kind: "recipe",
+      recipe: { viewportSide: "left", propertiesDock: "bottom", splitPct: 20, review: false },
+    });
+
+    const tooWide = sanitizeDesk({ ...LEGACY_DESK, splitPct: 99 });
+    expect(tooWide.layout.kind === "recipe" && tooWide.layout.recipe.splitPct).toBe(80);
   });
 });
 
 describe("sanitizeDesk", () => {
-  it("clamps out-of-range sizes and falls back on bad enums", () => {
-    const wild = {
-      ...captureDesk("x", UI, "single"),
-      viewportSide: "up" as never,
-      propertiesDock: "floating" as never,
-      splitPct: 5,
-      drawerHeight: 1,
-      drawerWidth: 1,
+  it("passes a serialized dock layout through untouched", () => {
+    const json = {
+      grid: { root: {}, width: 10, height: 10, orientation: "HORIZONTAL" },
+      panels: {},
     };
-    const clean = sanitizeDesk(wild);
-    expect(clean.viewportSide).toBe("left");
-    expect(clean.propertiesDock).toBe("bottom");
-    expect(clean.splitPct).toBe(SPLIT_MIN_PCT);
-    expect(clean.drawerHeight).toBe(DRAWER_MIN_PX);
-    expect(clean.drawerWidth).toBe(DRAWER_WIDTH_MIN_PX);
-    expect(sanitizeDesk({ ...wild, splitPct: 99 }).splitPct).toBe(SPLIT_MAX_PCT);
+    const desk: DeskSnapshot = {
+      name: "Saved",
+      layout: { kind: "serialized", json: json as never },
+      showFlowGrid: true,
+      showMinimap: false,
+      showFlowControls: true,
+      viewLayout: "single",
+    };
+    const back = JSON.parse(JSON.stringify(desk)) as DeskSnapshot;
+    expect(sanitizeDesk(back)).toEqual(desk);
+  });
+
+  it("falls back to the default recipe when a desk has no usable layout", () => {
+    const desk = sanitizeDesk({ name: "Broken" } as never);
+    expect(desk.layout).toEqual({ kind: "recipe", recipe: DEFAULT_RECIPE });
+    expect(desk.viewLayout).toBe("single");
+  });
+
+  it("rejects an unknown pane layout", () => {
+    expect(sanitizeDesk({ ...LEGACY_DESK, viewLayout: "hexview" as never }).viewLayout).toBe(
+      "single",
+    );
   });
 });

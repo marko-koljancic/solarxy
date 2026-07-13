@@ -165,6 +165,9 @@ export type EngineEvent =
       issues: ValidationIssue[];
     }
   | { type: "cookModeChanged"; mode: CookMode }
+  // The node a gizmo drag will write to. Emitted on BOTH policy paths, because
+  // the reuse path mints nothing and so carries no nodeAdded to read an id from.
+  | { type: "transformTargetReady"; ctx: GraphContext; node: NodeId }
   | { type: "reviewChanged" }
   | { type: "documentReplaced" };
 
@@ -205,6 +208,13 @@ export type Command =
   | { type: "reanchorAnnotation"; id: number; anchor: ReviewAnchor; updatedAt: string }
   | { type: "beginTransaction"; label: string }
   | { type: "endTransaction" }
+  // Resolves (creating if needed) the node a gizmo drag writes to, inside the
+  // geo's subflow. Issued inside the drag's transaction, so an appended
+  // transform undoes together with the move.
+  | { type: "ensureTransformTarget"; geo: NodeId }
+  // Escape mid-drag: rolls the open transaction back and discards it, leaving
+  // no document mutation AND no redo entry.
+  | { type: "cancelTransaction" }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -461,6 +471,10 @@ export type HostEvent =
   | { type: "activePane"; pane: number }
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
   | { type: "viewChanged" };
+
+/** The viewport tool. Rotate and Scale are Phase 12: they select, but draw and
+ * grab nothing, which is why their buttons ship disabled rather than dead. */
+export type ToolMode = "select" | "move" | "rotate" | "scale";
 
 export type ViewAxis = "top" | "bottom" | "front" | "back" | "left" | "right";
 

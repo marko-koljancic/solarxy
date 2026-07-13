@@ -90,7 +90,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     doc.graph_mut(ctx).unwrap().active_output = Some(merge);
 
     // Cook to completion (unbounded budget).
-    let report = engine.cook_until(&doc, &registry, &AssetTable::new(), ctx, &mut || true);
+    let report = engine.cook_until(
+        &doc,
+        &registry,
+        &AssetTable::new(),
+        &solarxy_graph::previews::Previews::new(),
+        ctx,
+        &mut || true,
+    );
     for (node, status) in &report.status_changed {
         if let CookStatus::Error { message } = status {
             return Err(format!("node {node:?} failed to cook: {message}").into());

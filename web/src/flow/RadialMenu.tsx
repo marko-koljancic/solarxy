@@ -6,14 +6,23 @@
 // pointer-transparent so the node underneath stays fully interactive, and
 // the ring closes when the pointer strays past a grace radius, on any
 // outside pointerdown (drag/marquee/connect starts), or on Esc.
+//
+// Phase 10: the ring TRACKS its node. It renders inside the ReactFlowProvider
+// (so it can subscribe to the viewport transform) but still portals to the body
+// (so its stacking context is unchanged), and recomputes its anchor every render
+// from the live transform instead of a stale open-time DOM rect. The band width
+// and grace distance stay screen-space constants, so the ring reads the same at
+// any zoom.
 
-import { useEffect } from "react";
+import { useStore } from "@xyflow/react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { dispatch } from "../engine/session";
 import { IconBypass, IconDive, IconEye, IconTrash } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
+import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
 const RING_WIDTH = 34;
@@ -53,23 +62,53 @@ function arcPath(cx: number, cy: number, r0: number, r1: number, a0: number, a1:
   ].join(" ");
 }
 
+/** The live screen anchor of the radial's node, or null if the node is gone
+ * (deleted while the ring was open) or has not been measured yet. */
+function useLiveAnchor(target: RadialTarget | null): RadialAnchor | null {
+  // Subscribing to the transform is what makes the ring follow pan and zoom:
+  // xyflow re-renders this component on every viewport change, and we re-measure
+  // the node below. The value itself is only a render trigger.
+  //
+  // The selector MUST return a stable reference: `useStore` is backed by
+  // useSyncExternalStore and compares snapshots with Object.is, so a selector
+  // that builds a fresh object each call never settles and React spins the
+  // render loop until the tab locks up. (It did.) A tuple field is stable.
+  useStore((s) => s.transform);
+
+  if (!target) return null;
+  // Measure the node's live screen box. Deliberately the DOM rather than
+  // xyflow's `measured`/`positionAbsolute`: those are internal bookkeeping and
+  // are legitimately empty before a node has been measured (observed: a node
+  // rendered at 48px on screen while `measured` was still `{}`), whereas the
+  // rect is always the truth and already has pan and zoom baked in.
+  const el = document.querySelector(`.react-flow__node[data-id="${target.nodeId}"]`);
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  return radialAnchor(rect);
+}
+
 export function RadialMenu() {
   const target = useRadial((s) => s.target);
   const closeRadial = useRadial((s) => s.closeRadial);
   const openInfo = useRadial((s) => s.openInfo);
   const registry = useMirror((s) => s.registry);
-  const rootGraph = useMirror((s) => selectGraph(s, "root"));
+  const graph = useMirror((s) => selectGraph(s, s.current));
+  const anchor = useLiveAnchor(target);
 
   useEffect(() => {
     if (!target) return;
-    const r1 = target.radius + 6 + RING_WIDTH;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeRadial();
     };
     const onMove = (e: MouseEvent) => {
-      const dx = e.clientX - target.cx;
-      const dy = e.clientY - target.cy;
-      if (Math.hypot(dx, dy) > r1 + GRACE_PX) closeRadial();
+      // Measured against the ring's LIVE centre (it moves under the cursor
+      // during a zoom), not a position captured when the ring opened.
+      const a = anchorRef.current;
+      if (!a) return;
+      const dx = e.clientX - a.cx;
+      const dy = e.clientY - a.cy;
+      if (Math.hypot(dx, dy) > a.radius + 6 + RING_WIDTH + GRACE_PX) closeRadial();
     };
     const onDown = (e: PointerEvent) => {
       // Any press outside the ring (a node drag, marquee, connect) closes.
@@ -85,15 +124,27 @@ export function RadialMenu() {
     };
   }, [target, closeRadial]);
 
-  if (!target) return null;
+  // The stray-close listener is registered once per target but must read the
+  // CURRENT anchor, so it goes through a ref rather than a stale closure.
+  const anchorRef = useRef<RadialAnchor | null>(anchor);
+  anchorRef.current = anchor;
+
+  if (!target || !anchor) return null;
   const t = target;
+
+  // Live node state (Phase 10): bypass and display flags come from the mirror,
+  // so the ring reflects the node as it is now, not as it was when the ring
+  // opened.
+  const node = graph.nodes.find((n) => n.id === t.nodeId);
+  if (!node) return null;
+  const desc = descriptorFor(registry, node.typeId);
+  const isDisplay = graph.activeOutput === node.id;
 
   // The eye segment is context-dependent (Phase 8): in a subflow it is the
   // display flag (a radio selecting the container's output); at root it
   // toggles the node's `visible` param (additive per-node visibility),
   // gated on the descriptor declaring one (note gets no eye).
-  const rootNode = t.ctx === "root" ? rootGraph.nodes.find((n) => n.id === t.nodeId) : undefined;
-  const rootEye = rootNode !== undefined && hasVisibleParam(descriptorFor(registry, rootNode.typeId));
+  const rootEye = t.ctx === "root" && hasVisibleParam(desc);
 
   const segments: Segment[] = [
     {
@@ -102,7 +153,13 @@ export function RadialMenu() {
       span: 62,
       icon: <span className="radial-glyph">i</span>,
       title: "Node info",
-      onPick: (tt) => openInfo(tt.nodeId, tt.ctx, tt.cx + tt.radius + RING_WIDTH + 24, tt.cy - 40),
+      onPick: (tt) =>
+        openInfo(
+          tt.nodeId,
+          tt.ctx,
+          anchor.cx + anchor.radius + RING_WIDTH + 24,
+          anchor.cy - 40,
+        ),
     },
   ];
   if (t.ctx !== "root") {
@@ -112,27 +169,27 @@ export function RadialMenu() {
       span: 62,
       icon: <IconEye size={13} />,
       title: "Set the display flag",
-      active: t.isDisplay,
+      active: isDisplay,
       onPick: (tt) => {
         dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
         closeRadial();
       },
     });
-  } else if (rootEye && rootNode) {
+  } else if (rootEye) {
     segments.push({
       key: "visibility",
       angle: 38,
       span: 62,
       icon: <IconEye size={13} />,
-      title: nodeVisible(rootNode) ? "Hide (stays cooked)" : "Show",
-      active: nodeVisible(rootNode),
+      title: nodeVisible(node) ? "Hide (stays cooked)" : "Show",
+      active: nodeVisible(node),
       onPick: (tt) => {
         dispatch({
           type: "setParam",
           ctx: tt.ctx,
           node: tt.nodeId,
           key: "visible",
-          value: { kind: "literal", type: "bool", value: !nodeVisible(rootNode) },
+          value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
         });
         closeRadial();
       },
@@ -145,11 +202,16 @@ export function RadialMenu() {
       span: 62,
       icon: <IconBypass size={13} />,
       title: t.bypassable ? "Toggle bypass" : "Not bypassable",
-      active: t.bypassed,
+      active: node.bypassed,
       disabled: !t.bypassable,
       onPick: (tt) => {
         if (tt.bypassable) {
-          dispatch({ type: "setBypass", ctx: tt.ctx, node: tt.nodeId, bypassed: !tt.bypassed });
+          dispatch({
+            type: "setBypass",
+            ctx: tt.ctx,
+            node: tt.nodeId,
+            bypassed: !node.bypassed,
+          });
         }
         closeRadial();
       },
@@ -180,7 +242,7 @@ export function RadialMenu() {
     });
   }
 
-  const r0 = t.radius + 6;
+  const r0 = anchor.radius + 6;
   const r1 = r0 + RING_WIDTH;
   const size = (r1 + 8) * 2;
   const c = size / 2;
@@ -188,7 +250,7 @@ export function RadialMenu() {
   return createPortal(
     <div
       className="radial-anchor"
-      style={{ left: t.cx - c, top: t.cy - c, width: size, height: size }}
+      style={{ left: anchor.cx - c, top: anchor.cy - c, width: size, height: size }}
     >
       <svg width={size} height={size}>
         {segments.map((seg) => {

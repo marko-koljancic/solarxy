@@ -25,6 +25,7 @@ use crate::document::{Document, GraphContext, NodeId};
 use crate::params::ParamValue;
 use crate::registry::Registry;
 use crate::registry::coerce::Value;
+use crate::previews::{Previews, effective_params};
 use crate::registry::resolve::resolve_params;
 
 /// Builds a full scene delta from scratch each frame. The renderer diffs
@@ -32,7 +33,12 @@ use crate::registry::resolve::resolve_params;
 /// tiny). `Clear`-then-rebuild is deliberately avoided: object ids are
 /// stable per geo node, so the renderer keeps unchanged uploads.
 #[must_use]
-pub fn build_scene_delta(doc: &Document, registry: &Registry, cook: &CookEngine) -> SceneDelta {
+pub fn build_scene_delta(
+    doc: &Document,
+    registry: &Registry,
+    cook: &CookEngine,
+    previews: &Previews,
+) -> SceneDelta {
     let mut delta = SceneDelta::default();
     let Ok(root) = doc.graph(GraphContext::Root) else {
         return delta;
@@ -42,9 +48,9 @@ pub fn build_scene_delta(doc: &Document, registry: &Registry, cook: &CookEngine)
 
     for node in root.nodes() {
         match node.type_id.as_str() {
-            "geo" => emit_geo(doc, registry, cook, node.id, &mut delta),
+            "geo" => emit_geo(doc, registry, cook, previews, node.id, &mut delta),
             id if is_light(id) => {
-                if let Some(light) = light_from_node(registry, node) {
+                if let Some(light) = light_from_node(registry, previews, node) {
                     lights.push(light);
                 }
             }
@@ -99,7 +105,12 @@ pub(crate) struct GeoRenderFlags {
 /// by scene lowering, picking, the marker projection, and the
 /// visualization aggregation so they can never disagree about what
 /// "hidden" means.
-pub(crate) fn geo_render_flags(doc: &Document, registry: &Registry, geo: NodeId) -> GeoRenderFlags {
+pub(crate) fn geo_render_flags(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    geo: NodeId,
+) -> GeoRenderFlags {
     let on = GeoRenderFlags {
         visible: true,
         cast_shadow: true,
@@ -110,7 +121,8 @@ pub(crate) fn geo_render_flags(doc: &Document, registry: &Registry, geo: NodeId)
     let Some(desc) = registry.get("geo") else {
         return on;
     };
-    let Ok(p) = resolve_params(&node.params, &desc.params) else {
+    let params = effective_params(previews, node.id, &node.params);
+    let Ok(p) = resolve_params(&params, &desc.params) else {
         return on;
     };
     GeoRenderFlags {
@@ -121,8 +133,13 @@ pub(crate) fn geo_render_flags(doc: &Document, registry: &Registry, geo: NodeId)
 
 /// The `visible` half of [`geo_render_flags`] (the picking, marker, and
 /// visualization gates).
-pub(crate) fn geo_visible(doc: &Document, registry: &Registry, geo: NodeId) -> bool {
-    geo_render_flags(doc, registry, geo).visible
+pub(crate) fn geo_visible(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    geo: NodeId,
+) -> bool {
+    geo_render_flags(doc, registry, previews, geo).visible
 }
 
 /// Emits the `UpsertGeometry` + `SetVisible` + `SetCastShadow` +
@@ -134,6 +151,7 @@ fn emit_geo(
     doc: &Document,
     registry: &Registry,
     cook: &CookEngine,
+    previews: &Previews,
     geo: NodeId,
     delta: &mut SceneDelta,
 ) {
@@ -154,7 +172,7 @@ fn emit_geo(
     // The geo's root render flags (the delta is rebuilt fully each pass,
     // so re-emission is free; the renderer's handlers are bool
     // assignments).
-    let flags = geo_render_flags(doc, registry, geo);
+    let flags = geo_render_flags(doc, registry, previews, geo);
     delta.push(SceneOp::SetVisible {
         id: object_id,
         visible: flags.visible,
@@ -177,7 +195,7 @@ fn emit_geo(
     // helper so picking and rendering agree.
     delta.push(SceneOp::SetTransform {
         id: object_id,
-        transform: geo_world_matrix(doc, registry, geo).into(),
+        transform: geo_world_matrix(doc, registry, previews, geo).into(),
     });
 }
 
@@ -210,14 +228,20 @@ fn effective_validation(
 /// `rotate`, `uniform_scale` folded into `scale`). Identity when the node,
 /// its descriptor, or its params are unavailable. Shared by scene lowering
 /// and picking so they can never disagree.
-pub(crate) fn geo_world_matrix(doc: &Document, registry: &Registry, geo: NodeId) -> Matrix4<f32> {
+pub(crate) fn geo_world_matrix(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    geo: NodeId,
+) -> Matrix4<f32> {
     let Some(node) = doc.graph(GraphContext::Root).ok().and_then(|g| g.node(geo)) else {
         return Matrix4::identity();
     };
     let Some(desc) = registry.get("geo") else {
         return Matrix4::identity();
     };
-    let Ok(p) = resolve_params(&node.params, &desc.params) else {
+    let params = effective_params(previews, node.id, &node.params);
+    let Ok(p) = resolve_params(&params, &desc.params) else {
         return Matrix4::identity();
     };
     let translate = p.vec3_f32("translate");
@@ -242,6 +266,7 @@ pub fn pick_node(
     doc: &Document,
     registry: &Registry,
     cook: &CookEngine,
+    previews: &Previews,
     origin: [f32; 3],
     direction: [f32; 3],
 ) -> Option<NodeId> {
@@ -261,7 +286,7 @@ pub fn pick_node(
         }
         let geo = node.id;
         // Hidden objects are not click-selectable (they are not rendered).
-        if !geo_visible(doc, registry, geo) {
+        if !geo_visible(doc, registry, previews, geo) {
             continue;
         }
         let Ok(subflow) = doc.graph(GraphContext::Subflow(geo)) else {
@@ -276,7 +301,7 @@ pub fn pick_node(
         let Some(Value::Geometry(set)) = outputs.get("geometry") else {
             continue;
         };
-        let matrix = geo_world_matrix(doc, registry, geo);
+        let matrix = geo_world_matrix(doc, registry, previews, geo);
         for mesh in &set.meshes {
             // Transform this mesh's vertices to world space, then raycast.
             let world: Vec<[f32; 3]> = mesh
@@ -312,6 +337,7 @@ pub(crate) fn pick_node_detailed(
     doc: &Document,
     registry: &Registry,
     cook: &CookEngine,
+    previews: &Previews,
     origin: [f32; 3],
     direction: [f32; 3],
 ) -> Option<super::PickDetail> {
@@ -331,13 +357,13 @@ pub(crate) fn pick_node_detailed(
         }
         let geo = node.id;
         // Hidden objects are not click-selectable (they are not rendered).
-        if !geo_visible(doc, registry, geo) {
+        if !geo_visible(doc, registry, previews, geo) {
             continue;
         }
         let Some(set) = display_output(doc, cook, geo) else {
             continue;
         };
-        let matrix = geo_world_matrix(doc, registry, geo);
+        let matrix = geo_world_matrix(doc, registry, previews, geo);
         for (mesh_index, mesh) in set.meshes.iter().enumerate() {
             let world: Vec<[f32; 3]> = mesh
                 .positions
@@ -372,11 +398,16 @@ pub(crate) fn pick_node_detailed(
 /// Resolves a light node's params into a `LightDef` (the resolver already
 /// converts angles to radians; `LightDef` stores radians). Returns `None`
 /// for a non-light node or one missing its descriptor.
-fn light_from_node(registry: &Registry, node: &crate::document::NodeData) -> Option<LightDef> {
+fn light_from_node(
+    registry: &Registry,
+    previews: &Previews,
+    node: &crate::document::NodeData,
+) -> Option<LightDef> {
     use solarxy_core::scene::LightKind;
 
     let desc = registry.get(&node.type_id)?;
-    let p = resolve_params(&node.params, &desc.params).ok()?;
+    let params = effective_params(previews, node.id, &node.params);
+    let p = resolve_params(&params, &desc.params).ok()?;
     let color = |key: &str| -> [f32; 3] {
         match p.get(key) {
             Some(ParamValue::Color(c)) => [c[0], c[1], c[2]],

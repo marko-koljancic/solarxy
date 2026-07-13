@@ -6,8 +6,10 @@
 // binding (it owns open state); everything else dispatches here.
 
 import { useEffect } from "react";
+import { exitMaximized, hasMaximizedPanel, setReviewPanelOpen } from "../dock/api";
 import {
   cameraCommand,
+  cancelGizmoDrag,
   copySelection,
   dispatch,
   duplicateSelection,
@@ -15,6 +17,7 @@ import {
   paste,
   setActivePane,
   setPaneSettings,
+  setTool,
   setViewLayout,
 } from "../engine/session";
 import { cycleAutoLayout } from "../flow/layout";
@@ -195,6 +198,12 @@ export function useKeyboard(): void {
           }
           break;
         }
+        case "tool-select":
+          setTool("select");
+          break;
+        case "tool-move":
+          setTool("move");
+          break;
         case "screenshot": {
           const ui = useUi.getState();
           ui.setScreenshotOpen(!ui.screenshotOpen);
@@ -235,16 +244,23 @@ export function useKeyboard(): void {
           break;
         }
         case "review-panel": {
-          const r = useReview.getState();
-          r.setPanelOpen(!r.panelOpen);
+          // The dock owns the panel's existence; the review store mirrors it.
+          setReviewPanelOpen(!useReview.getState().panelOpen);
           break;
         }
         case "review-cancel": {
-          // The cancel ladder: an open editor cancels first (its own key
-          // handler covers the focused case; this covers unfocused), then
-          // a pending re-anchor, then review mode. Otherwise leave Esc to
-          // other consumers (palette, modals).
+          // The cancel ladder: a live gizmo drag first (it is the most
+          // "in-flight" thing on screen and Escape must abort it without
+          // touching the document), then an open editor (its own key handler
+          // covers the focused case; this covers unfocused), then a pending
+          // re-anchor, then review mode, then a maximized panel. Otherwise leave
+          // Esc to other consumers (palette, modals).
           const r = useReview.getState();
+          if (useViewState.getState().toolMode !== "select") {
+            // A no-op when nothing is being dragged, so this never swallows Esc
+            // from the rungs below it.
+            cancelGizmoDrag();
+          }
           if (r.draft) r.setDraft(null);
           else if (r.reanchorTarget !== null) {
             r.setReanchorTarget(null);
@@ -252,6 +268,8 @@ export function useKeyboard(): void {
           } else if (r.reviewMode) {
             r.setReviewMode(false);
             pushToast("Review mode off", "info");
+          } else if (hasMaximizedPanel()) {
+            exitMaximized();
           }
           break;
         }

@@ -134,27 +134,21 @@ function Section({ title, items, all }: { title: string; items: Annotation[]; al
   );
 }
 
+/** The Review panel. Phase 10 promoted it from a canvas overlay drawer to a real
+ * dock panel, so its presence in the dock IS its open state: dockview's tab owns
+ * the title and the close button, and N adds or removes the panel. */
 export function ReviewPanel() {
-  const open = useReview((s) => s.panelOpen);
   const annotations = useReview((s) => s.annotations);
   const filters = useReview((s) => s.filters);
   const setFilters = useReview((s) => s.setFilters);
   const toggleCategory = useReview((s) => s.toggleCategory);
   const reviewMode = useReview((s) => s.reviewMode);
-  const setPanelOpen = useReview((s) => s.setPanelOpen);
 
-  if (!open) return null;
   const sections = sectionAnnotations(annotations, filters);
   const empty = annotations.length === 0;
 
   return (
-    <div className="review-panel" onPointerDown={(e) => e.stopPropagation()}>
-      <div className="review-panel-head">
-        <span>Review</span>
-        <button className="btn" onClick={() => setPanelOpen(false)} title="Close">
-          x
-        </button>
-      </div>
+    <div className="review-panel">
       <div className="review-panel-filters">
         {(Object.keys(CATEGORY_LABELS) as ReviewCategory[]).map((c) => (
           <button

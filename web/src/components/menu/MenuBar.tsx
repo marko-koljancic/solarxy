@@ -18,6 +18,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
+import { setReviewPanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -96,12 +97,11 @@ export function MenuBar() {
     { label: "Preferences...", shortcut: `${MOD},`, onClick: () => useUi.getState().setPrefsOpen(true) },
   ];
 
-  // Desks (Phase 7b D3): presets + user-saved arrangements, direct
-  // arrangement toggles, save-as, delete. Applying never touches the
-  // document, only chrome.
+  // Desks (Phase 7b D3, reshaped in Phase 10): presets + user-saved dock
+  // arrangements, save-as, delete. Applying never touches the document, only
+  // chrome. The old "Viewport on Left / Properties at Bottom" radios are gone:
+  // the user drags panels wherever they want now, and a desk captures it.
   const userDesks = useDesks((s) => s.desks);
-  const viewportSide = useUi((s) => s.viewportSide);
-  const propertiesDock = useUi((s) => s.propertiesDock);
   const [deskSaveOpen, setDeskSaveOpen] = useState(false);
   const desks: MenuEntry[] = [
     ...DESK_PRESETS.map((d) => ({
@@ -113,27 +113,6 @@ export function MenuBar() {
       label: d.name,
       onClick: () => useDesks.getState().apply(d.name),
     })),
-    { divider: true },
-    {
-      label: "Viewport on Left",
-      checked: viewportSide === "left",
-      onClick: () => useUi.getState().setArrangement({ viewportSide: "left" }),
-    },
-    {
-      label: "Viewport on Right",
-      checked: viewportSide === "right",
-      onClick: () => useUi.getState().setArrangement({ viewportSide: "right" }),
-    },
-    {
-      label: "Properties at Bottom",
-      checked: propertiesDock === "bottom",
-      onClick: () => useUi.getState().setArrangement({ propertiesDock: "bottom" }),
-    },
-    {
-      label: "Properties on Right",
-      checked: propertiesDock === "right",
-      onClick: () => useUi.getState().setArrangement({ propertiesDock: "right" }),
-    },
     { divider: true },
     { label: "Save Current As...", onClick: () => setDeskSaveOpen(true) },
     {
@@ -160,7 +139,8 @@ export function MenuBar() {
       label: "Review Panel",
       shortcut: "N",
       checked: panelOpen,
-      onClick: () => useReview.getState().setPanelOpen(!panelOpen),
+      // The dock owns the panel's existence; the store mirrors it.
+      onClick: () => setReviewPanelOpen(!panelOpen),
     },
     {
       label: "Show Markers",

@@ -13,11 +13,13 @@ import {
 } from "../persistence/opfs";
 import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
+import { syncCanvasSize } from "./canvas";
 import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { useUi } from "../store/ui";
+import { useRadial } from "../store/radial";
 import { useReview } from "../store/review";
-import { pushToast } from "../store/toasts";
+import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
@@ -36,6 +38,7 @@ import type {
   ReviewAnchor,
   ReviewCategory,
   SaveExtra,
+  ToolMode,
   ViewLayout,
 } from "./types";
 
@@ -203,6 +206,12 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
         useViewState,
         useMirror,
         useReview,
+        useToasts,
+        useRadial,
+        dispatch,
+        // Chrome freezes rAF in a background tab, so the verification harness
+        // needs to drive frames itself rather than wait for the render loop.
+        runFrame,
       };
     }
   })();
@@ -262,6 +271,31 @@ export function dispatch(cmd: Command): EventBatch {
   syncSceneSelection();
   markDirtyAndAutosave();
   return batch;
+}
+
+/** Applies a batch produced by a HOST-side interaction (a gizmo drag), through
+ * exactly the same tail as `dispatch`: the mirror, the stale set, the scene
+ * selection, and the dirty/autosave flag. A gizmo commit must dirty the document
+ * like any other edit, or the user could lose it. */
+export function applyViewportBatch(batch: EventBatch | null): void {
+  if (!batch || batch.events.length === 0) return;
+  applyToMirror(batch);
+  refreshStale();
+  syncSceneSelection();
+  markDirtyAndAutosave();
+}
+
+/** Selects the viewport tool (Q/W/E/R, or the tool column). */
+export function setTool(tool: ToolMode): void {
+  if (!client) return;
+  getClient().setTool(tool);
+  useViewState.getState().setToolMode(tool);
+}
+
+/** Escape during a gizmo drag: rolls it back. */
+export function cancelGizmoDrag(): void {
+  if (!client) return;
+  applyViewportBatch(getClient().cancelGizmoDrag());
 }
 
 /** The exclusive-shadow-caster rule must be self-explanatory at the moment
@@ -698,6 +732,9 @@ export function completeModelImport(primaryHash: string, primaryName: string): v
  * events (pane-rect changes). In manual mode, refresh the stale set each
  * frame so a just-cooked node drops its badge. */
 export function runFrame(dtMs: number): void {
+  // The surface must match the canvas BEFORE the frame is cooked and rendered:
+  // dockview can re-parent or resize the canvas at any time (Phase 10).
+  syncCanvasSize((w, h, dpr) => getClient().resize(w, h, dpr));
   applyToMirror(getClient().frame(dtMs));
   pumpImportJobs();
   for (const ev of getClient().takeHostEvents()) {
