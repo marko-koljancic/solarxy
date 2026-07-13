@@ -1,10 +1,12 @@
 //! glTF/GLB loading. `load_gltf_bytes` parses from memory: GLB and
-//! data-URI assets are self-contained; external `.bin` buffers resolve
-//! through the [`AssetResolver`]; external image files are recorded as
-//! texture paths without decoding (byte-mode callers own image delivery).
-//! `load_gltf` (std-fs) keeps the crate's full filesystem importer.
+//! data-URI assets are self-contained; external `.bin` buffers AND external
+//! image files resolve through the [`AssetResolver`] (images decode via the
+//! shared [`crate::decode_image_bytes`] path; a missing or undecodable image
+//! degrades to the default texture with a warning, it never fails the
+//! model). `load_gltf` (std-fs) keeps the crate's full filesystem importer.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
@@ -16,7 +18,10 @@ use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawMod
 #[cfg(feature = "std-fs")]
 pub fn load_gltf(file_path: &str) -> Result<RawModelData, FormatsError> {
     let (document, buffers, images) = ::gltf::import(file_path)?;
-    let images: Vec<Option<::gltf::image::Data>> = images.into_iter().map(Some).collect();
+    let images: Vec<Option<Arc<RawImageData>>> = images
+        .into_iter()
+        .map(|d| image_data_to_raw(&d).map(Arc::new))
+        .collect();
     let parent_dir = Path::new(file_path)
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -24,9 +29,10 @@ pub fn load_gltf(file_path: &str) -> Result<RawModelData, FormatsError> {
     Ok(build_model(&document, &buffers, &images, Some(&parent_dir)))
 }
 
-/// Parse glTF/GLB bytes. External buffers come from `resolver` (URIs
-/// percent-decoded first); external images are not decoded — their URIs are
-/// recorded as texture paths and the material falls back appropriately.
+/// Parse glTF/GLB bytes. External buffers and external images come from
+/// `resolver` (URIs percent-decoded first). A missing buffer is an error; a
+/// missing or undecodable image is a warning and its texture slot stays
+/// empty (the renderer falls back to the per-role default).
 pub fn load_gltf_bytes(
     bytes: &[u8],
     resolver: &mut dyn AssetResolver,
@@ -60,12 +66,46 @@ pub fn load_gltf_bytes(
         buffers.push(data);
     }
 
-    // Per-image decode: buffer views and data URIs succeed with no base
-    // path; external file URIs land as None (path recorded by
-    // resolve_texture, no decode in byte mode).
-    let images: Vec<Option<::gltf::image::Data>> = document
+    // Per-image decode: buffer-view images go through the gltf crate's
+    // decoder; data-URI and external-file images decode via the shared
+    // image path (external bytes read through the resolver). Either way a
+    // failure leaves the slot None (path still recorded by
+    // resolve_texture; renderer default texture takes over) rather than
+    // failing the whole model.
+    let images: Vec<Option<Arc<RawImageData>>> = document
         .images()
-        .map(|img| ::gltf::image::Data::from_source(img.source(), None, &buffers).ok())
+        .map(|img| match img.source() {
+            ::gltf::image::Source::Uri { uri, .. } => {
+                let bytes = if uri.starts_with("data:") {
+                    let Some(bytes) = decode_data_uri(uri) else {
+                        tracing::warn!("glTF data-URI image failed base64 decode");
+                        return None;
+                    };
+                    bytes
+                } else {
+                    let rel = percent_decode(uri);
+                    let Some(bytes) = resolver.read(&rel) else {
+                        tracing::warn!("glTF image '{rel}' not provided; using default texture");
+                        return None;
+                    };
+                    bytes
+                };
+                match crate::decode_image_bytes(&bytes) {
+                    Ok(data) => Some(Arc::new(data)),
+                    Err(e) => {
+                        tracing::warn!("glTF image failed to decode: {e}");
+                        None
+                    }
+                }
+            }
+            source @ ::gltf::image::Source::View { .. } => {
+                ::gltf::image::Data::from_source(source, None, &buffers)
+                    .ok()
+                    .as_ref()
+                    .and_then(image_data_to_raw)
+                    .map(Arc::new)
+            }
+        })
         .collect();
 
     Ok(build_model(&document, &buffers, &images, None))
@@ -77,10 +117,24 @@ fn percent_decode(uri: &str) -> String {
     urlencoding::decode(uri).map_or_else(|_| uri.to_string(), std::borrow::Cow::into_owned)
 }
 
+/// Extract the payload of a `data:<mime>;base64,<payload>` URI. glTF
+/// exporters emit base64 exclusively; a percent-encoded data URI returns
+/// `None` and degrades like an undecodable image.
+fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    let (meta, payload) = uri.split_once(',')?;
+    if !meta.ends_with(";base64") {
+        return None;
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()
+}
+
 fn build_model(
     document: &::gltf::Document,
     buffers: &[::gltf::buffer::Data],
-    images: &[Option<::gltf::image::Data>],
+    images: &[Option<Arc<RawImageData>>],
     texture_base: Option<&Path>,
 ) -> RawModelData {
     let mut materials = extract_materials(document, images, texture_base);
@@ -102,6 +156,7 @@ fn build_model(
             roughness_factor: 0.5,
             metallic_factor: 0.0,
             emissive_factor: [0.0, 0.0, 0.0],
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             ambient: None,
@@ -128,7 +183,7 @@ fn build_model(
 
 fn extract_materials(
     document: &::gltf::Document,
-    images: &[Option<::gltf::image::Data>],
+    images: &[Option<Arc<RawImageData>>],
     texture_base: Option<&Path>,
 ) -> Vec<RawMaterialData> {
     document
@@ -187,6 +242,7 @@ fn extract_materials(
                 roughness_factor: pbr.roughness_factor(),
                 metallic_factor: pbr.metallic_factor(),
                 emissive_factor,
+                base_color_factor: base_color,
                 alpha_mode,
                 alpha_cutoff,
                 ambient: None,
@@ -212,14 +268,11 @@ fn extract_materials(
 
 fn resolve_texture(
     texture: &::gltf::Texture,
-    images: &[Option<::gltf::image::Data>],
+    images: &[Option<Arc<RawImageData>>],
     texture_base: Option<&Path>,
-) -> (Option<PathBuf>, Option<RawImageData>) {
+) -> (Option<PathBuf>, Option<Arc<RawImageData>>) {
     let image = texture.source();
-    let decoded = images
-        .get(image.index())
-        .and_then(Option::as_ref)
-        .and_then(image_data_to_raw);
+    let decoded = images.get(image.index()).and_then(Option::as_ref).cloned();
 
     match image.source() {
         ::gltf::image::Source::Uri { uri, .. } => {
@@ -302,11 +355,7 @@ fn image_data_to_raw(img: &::gltf::image::Data) -> Option<RawImageData> {
             .collect(),
     };
 
-    Some(RawImageData {
-        pixels,
-        width: img.width,
-        height: img.height,
-    })
+    Some(RawImageData::new(pixels, img.width, img.height))
 }
 
 fn extract_meshes(

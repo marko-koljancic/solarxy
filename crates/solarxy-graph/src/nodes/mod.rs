@@ -23,12 +23,16 @@ mod torus_node;
 
 // Modifiers (subflow).
 mod compute_normals_node;
+mod material_node;
 mod merge_node;
+mod subdivide_node;
 mod transform_node;
+mod uv_project_node;
 mod validate_node;
 
 // Container + utility + lights (root) and imports (subflow).
 mod geo_node;
+mod import_image;
 mod imports;
 mod lights;
 mod note_node;
@@ -58,11 +62,15 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         merge_node::descriptor(),
         compute_normals_node::descriptor(),
         validate_node::descriptor(),
+        material_node::descriptor(),
+        uv_project_node::descriptor(),
+        subdivide_node::descriptor(),
         // Imports (subflow).
         imports::obj_descriptor(),
         imports::gltf_descriptor(),
         imports::stl_descriptor(),
         imports::ply_descriptor(),
+        import_image::descriptor(),
         // Container + utility (root/both).
         geo_node::descriptor(),
         note_node::descriptor(),
@@ -98,20 +106,30 @@ mod tests {
         let registry = builtin_registry().unwrap();
         for desc in registry.descriptors() {
             // Root-context nodes (geo, note, lights) are portless; only
-            // nodes that declare outputs must have a default geometry one.
+            // nodes that declare outputs must have a default output, and
+            // geometry-producing ones must default to the `geometry` port
+            // (import_image produces Image, not geometry).
             if desc.outputs.is_empty() {
                 continue;
             }
             let out = desc
                 .default_output()
                 .unwrap_or_else(|| panic!("{}: no default output", desc.type_id));
-            assert_eq!(out.key, "geometry", "{}", desc.type_id);
+            if desc
+                .outputs
+                .iter()
+                .any(|o| o.data_type == crate::registry::coerce::DataType::Geometry)
+            {
+                assert_eq!(out.key, "geometry", "{}", desc.type_id);
+            }
         }
     }
 
     #[test]
-    fn all_23_mvp_nodes_registered() {
+    fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 23, "the MVP catalog has 23 node types");
+        // The 23 MVP node types plus import_image (Phase 13) and the
+        // Phase 14 wave: material, uv_project, subdivide.
+        assert_eq!(registry.len(), 27);
     }
 }

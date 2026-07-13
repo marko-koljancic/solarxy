@@ -18,14 +18,16 @@ export const DATA_TYPE_COLOR: Record<DataType, string> = {
   vec4: "#b39ddb",
   color: "#f5a623",
   text: "#9aa0a6",
+  image: "#e879c8",
 };
 
 /** Handle shape channel for color-blind safety. */
-export type HandleShape = "round" | "diamond" | "square";
+export type HandleShape = "round" | "diamond" | "square" | "hexagon";
 
 export function dataTypeShape(dt: DataType): HandleShape {
   if (dt === "int") return "diamond";
   if (dt === "color") return "square";
+  if (dt === "image") return "hexagon";
   return "round";
 }
 

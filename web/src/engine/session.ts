@@ -49,7 +49,7 @@ import type {
 let importWorker: Worker | null = null;
 
 interface WorkerResult {
-  kind: "parse" | "validate" | "hdri";
+  kind: "parse" | "validate" | "hdri" | "decodeImage";
   jobId: number;
   ctx: GraphContext;
   blob?: Uint8Array;
@@ -58,6 +58,10 @@ interface WorkerResult {
   validation?: string;
   /** The packed `PreparedHdri` blob (hdri kind). */
   prepared?: Uint8Array;
+  /** Decoded RGBA8 (decodeImage kind). */
+  width?: number;
+  height?: number;
+  pixels?: Uint8Array;
   error?: string;
 }
 
@@ -109,6 +113,16 @@ function onWorkerResult(data: WorkerResult): void {
     if (data.error !== undefined) {
       pushToast(`Validation failed: ${data.error}`, "error");
     }
+  } else if (data.kind === "decodeImage") {
+    batch =
+      data.error !== undefined
+        ? c.submitImageError(data.ctx, data.jobId, data.error)
+        : data.pixels && data.width !== undefined && data.height !== undefined
+          ? c.submitDecodedImage(data.ctx, data.jobId, data.width, data.height, data.pixels)
+          : null;
+    if (data.error !== undefined) {
+      pushToast(`Image decode failed: ${data.error}`, "error");
+    }
   } else {
     batch =
       data.error !== undefined
@@ -135,7 +149,8 @@ function pumpImportJobs(): void {
   if (!client) return;
   const jobs = getClient().takeImportJobs();
   const validateJobs = getClient().takeValidateJobs();
-  if (jobs.length === 0 && validateJobs.length === 0) return;
+  const imageJobs = getClient().takeImageJobs();
+  if (jobs.length === 0 && validateJobs.length === 0 && imageJobs.length === 0) return;
   const worker = ensureImportWorker();
   for (const job of jobs) {
     const files: { name: string; bytes: Uint8Array }[] = [];
@@ -172,6 +187,17 @@ function pumpImportJobs(): void {
         budget: job.budget,
       },
       [job.blob.buffer],
+    );
+  }
+  for (const job of imageJobs) {
+    const bytes = getClient().assetBytes(job.hash);
+    if (!bytes) {
+      applyToMirror(getClient().submitImageError(job.ctx, job.jobId, "asset bytes not staged"));
+      continue;
+    }
+    worker.postMessage(
+      { kind: "decodeImage", jobId: job.jobId, ctx: job.ctx, name: job.name, bytes },
+      [bytes.buffer],
     );
   }
 }

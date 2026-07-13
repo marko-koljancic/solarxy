@@ -4115,6 +4115,7 @@ dependencies = [
 name = "solarxy-formats"
 version = "0.6.0"
 dependencies = [
+ "base64 0.22.1",
  "cgmath",
  "gltf",
  "image",

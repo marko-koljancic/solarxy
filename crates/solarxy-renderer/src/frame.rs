@@ -414,7 +414,7 @@ impl Renderer {
             queue,
             init.uv_checker_png,
             "uv_checker_texture",
-            false,
+            texture::TextureOpts::flat(false),
         )?;
         let uv_checker_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("UV Checker Bind Group"),

@@ -16,6 +16,7 @@ import type {
   EventBatch,
   GraphContext,
   HostEvent,
+  ImageJob,
   ImportJob,
   MarkerScreen,
   NodeId,
@@ -268,6 +269,29 @@ export class SolarxyClient {
   /** Reports a worker parse failure (the node badges the error). */
   submitParseError(ctx: GraphContext, jobId: number, message: string): EventBatch {
     return this.app.submit_parse_error(ctx, jobId, message) as EventBatch;
+  }
+
+  /** Drains the stashed image-decode jobs (call after `takeImportJobs`,
+   * which performs the engine drain). */
+  takeImageJobs(): ImageJob[] {
+    return this.app.take_image_jobs() as ImageJob[];
+  }
+
+  /** Commits a worker-decoded image (raw RGBA8 + dimensions) under the
+   * generation guard; the content hash is stamped engine-side. */
+  submitDecodedImage(
+    ctx: GraphContext,
+    jobId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array,
+  ): EventBatch {
+    return this.app.submit_decoded_image(ctx, jobId, width, height, pixels) as EventBatch;
+  }
+
+  /** Reports a worker image-decode failure (the node badges the error). */
+  submitImageError(ctx: GraphContext, jobId: number, message: string): EventBatch {
+    return this.app.submit_image_error(ctx, jobId, message) as EventBatch;
   }
 
   /** Commits a worker validation result (JSON `ValidationResult`). */

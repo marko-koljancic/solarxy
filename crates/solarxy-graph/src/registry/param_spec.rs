@@ -102,6 +102,12 @@ pub struct ParamSpec {
     pub unit: Unit,
     /// AND semantics; empty means always visible.
     pub show_if: Vec<ShowIf>,
+    /// The input-port key whose connection neutralizes this param (the
+    /// material node's map-overrides-factor semantics). Declarative so the
+    /// parameter panel can dim the row generically, with zero per-node
+    /// frontend code; validated against the node's input ports by the
+    /// registry invariants.
+    pub driven_by_port: Option<String>,
     /// Per-param documentation (hover popover; wiki reference).
     pub doc: String,
 }
@@ -126,6 +132,7 @@ impl ParamSpec {
             step: None,
             unit: Unit::None,
             show_if: Vec::new(),
+            driven_by_port: None,
             doc: String::new(),
         }
     }
@@ -170,6 +177,14 @@ impl ParamSpec {
             param: param.into(),
             pred,
         });
+        self
+    }
+
+    /// Declares that a connected edge on the named input port drives this
+    /// param's channel (the param is neutralized while connected).
+    #[must_use]
+    pub fn driven_by_port(mut self, port: impl Into<String>) -> Self {
+        self.driven_by_port = Some(port.into());
         self
     }
 

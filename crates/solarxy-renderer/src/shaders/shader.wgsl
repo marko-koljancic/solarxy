@@ -131,6 +131,8 @@ struct MaterialUniform {
     emissive: vec3<f32>,
     alpha_mode: u32,
     material_index: u32,
+    // Offset 48 (after the CPU struct's _pad); factor x map, glTF style.
+    base_color: vec4<f32>,
 }
 @group(0) @binding(8) var<uniform> material: MaterialUniform;
 
@@ -228,8 +230,9 @@ fn rotate_yaw(d: vec3<f32>, yaw: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let base_alpha = albedo_sample.a * material.base_color.a;
 
-    if material.alpha_mode == 1u && albedo_sample.a < material.alpha_cutoff {
+    if material.alpha_mode == 1u && base_alpha < material.alpha_cutoff {
         discard;
     }
 
@@ -295,7 +298,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
         let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
 
-        albedo = albedo_sample.xyz;
+        albedo = material.base_color.rgb * albedo_sample.xyz;
         ao = mix(1.0, orm_sample.r, material.ao_strength);
         roughness = clamp(
             material.roughness_factor * orm_sample.g * camera.roughness_scale,
@@ -427,6 +430,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let color = ambient + radiance_acc + emissive_color;
-    let alpha = select(albedo_sample.a, 1.0, camera.material_override != 0u);
+    let alpha = select(base_alpha, 1.0, camera.material_override != 0u);
     return vec4(color, alpha);
 }

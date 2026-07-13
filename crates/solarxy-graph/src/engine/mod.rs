@@ -2237,6 +2237,16 @@ impl Engine {
                 );
                 JobResult::Report(Ok(result))
             }
+            JobRequest::DecodeImage { asset } => {
+                let Some(entry) = self.assets.get(asset) else {
+                    return JobResult::Image(Err("asset not staged".to_string()));
+                };
+                JobResult::Image(
+                    solarxy_formats::decode_image_bytes(&entry.bytes)
+                        .map(std::sync::Arc::new)
+                        .map_err(|e| e.to_string()),
+                )
+            }
         }
     }
 

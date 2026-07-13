@@ -57,6 +57,44 @@ interface ValidateRequest {
   budget?: number;
 }
 
+/** The image-decode request (`import_image`, Phase 13). Decoded entirely
+ * by the browser (`createImageBitmap` + OffscreenCanvas readback): zero
+ * wasm involvement, native codec speed, free format support. */
+interface DecodeImageRequest {
+  kind: "decodeImage";
+  jobId: number;
+  ctx: GraphContext;
+  name: string;
+  bytes: Uint8Array;
+}
+
+/** Decode encoded image bytes to raw RGBA8. `premultiplyAlpha: "none"` and
+ * `colorSpaceConversion: "none"` keep the readback byte-faithful to the
+ * file (no fringing, no ICC drift); the 2d readback path is the standard
+ * worker-safe route to pixels. */
+async function decodeImageBytes(
+  bytes: Uint8Array,
+): Promise<{ width: number; height: number; pixels: Uint8Array }> {
+  const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]), {
+    premultiplyAlpha: "none",
+    colorSpaceConversion: "none",
+  });
+  try {
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const c2d = canvas.getContext("2d", { willReadFrequently: true });
+    if (!c2d) throw new Error("no 2d context for image readback");
+    c2d.drawImage(bitmap, 0, 0);
+    const data = c2d.getImageData(0, 0, bitmap.width, bitmap.height);
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      pixels: new Uint8Array(data.data.buffer),
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
 /** What `parse_model_job` returns: the geometry transfer blob plus the
  * implicit load validation as JSON. */
 interface ParseOutput {
@@ -72,9 +110,19 @@ function ensureReady(): Promise<void> {
 
 const ctx = self as unknown as Worker;
 
-ctx.onmessage = async (event: MessageEvent<ParseRequest | ValidateRequest | HdriRequest>) => {
+ctx.onmessage = async (
+  event: MessageEvent<ParseRequest | ValidateRequest | HdriRequest | DecodeImageRequest>,
+) => {
   const req = event.data;
   try {
+    // Image decode is pure browser API; skip the wasm init entirely.
+    if (req.kind === "decodeImage") {
+      const { width, height, pixels } = await decodeImageBytes(req.bytes);
+      ctx.postMessage({ kind: "decodeImage", jobId: req.jobId, ctx: req.ctx, width, height, pixels }, [
+        pixels.buffer,
+      ]);
+      return;
+    }
     await ensureReady();
     if (req.kind === "hdri") {
       const prepared = prepare_hdri_job(req.bytes, req.format);

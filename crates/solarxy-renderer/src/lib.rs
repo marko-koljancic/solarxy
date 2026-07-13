@@ -69,6 +69,7 @@ pub mod input;
 pub mod light;
 pub mod manipulator;
 pub mod material;
+pub mod mipmap;
 pub mod model;
 pub mod overdraw;
 pub mod panes;

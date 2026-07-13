@@ -26,9 +26,13 @@ pub struct MaterialUniform {
     pub alpha_mode: u32,
     pub material_index: u32,
     pub _pad: [f32; 3],
+    /// Factor multiplied into the base-color sample (glTF semantics);
+    /// appended at offset 48 so shaders declaring the 48-byte prefix
+    /// (shadow.wgsl) keep working.
+    pub base_color: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<MaterialUniform>() == 48);
+const _: () = assert!(std::mem::size_of::<MaterialUniform>() == 64);
 
 impl Default for MaterialUniform {
     fn default() -> Self {
@@ -41,17 +45,21 @@ impl Default for MaterialUniform {
             alpha_mode: 0,
             material_index: 0,
             _pad: [0.0; 3],
+            base_color: [1.0, 1.0, 1.0, 1.0],
         }
     }
 }
 
+/// Textures are `Arc`-shared so the content-hash [`TextureCache`]
+/// (`resources.rs`) can hand the same GPU texture to every material that
+/// references the same image.
 #[allow(dead_code)]
 pub struct Material {
     pub name: String,
-    pub diffuse_texture: super::texture::Texture,
-    pub normal_texture: super::texture::Texture,
-    pub orm_texture: super::texture::Texture,
-    pub emissive_texture: super::texture::Texture,
+    pub diffuse_texture: std::sync::Arc<super::texture::Texture>,
+    pub normal_texture: std::sync::Arc<super::texture::Texture>,
+    pub orm_texture: std::sync::Arc<super::texture::Texture>,
+    pub emissive_texture: std::sync::Arc<super::texture::Texture>,
     pub uniform: MaterialUniform,
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
@@ -62,10 +70,10 @@ impl Material {
     pub fn new(
         device: &wgpu::Device,
         name: &str,
-        diffuse_texture: super::texture::Texture,
-        normal_texture: super::texture::Texture,
-        orm_texture: super::texture::Texture,
-        emissive_texture: super::texture::Texture,
+        diffuse_texture: std::sync::Arc<super::texture::Texture>,
+        normal_texture: std::sync::Arc<super::texture::Texture>,
+        orm_texture: std::sync::Arc<super::texture::Texture>,
+        emissive_texture: std::sync::Arc<super::texture::Texture>,
         uniform: MaterialUniform,
         layout: &wgpu::BindGroupLayout,
     ) -> Self {

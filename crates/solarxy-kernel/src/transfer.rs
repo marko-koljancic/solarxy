@@ -41,7 +41,7 @@ const HAS_MATERIAL: u32 = 1 << 2;
 /// The five texture roles a material can carry, in wire order.
 const TEXTURE_ROLES: usize = 5;
 
-fn texture_data_slots(m: &RawMaterialData) -> [&Option<RawImageData>; TEXTURE_ROLES] {
+fn texture_data_slots(m: &RawMaterialData) -> [&Option<Arc<RawImageData>>; TEXTURE_ROLES] {
     [
         &m.diffuse_texture_data,
         &m.normal_texture_data,
@@ -51,7 +51,9 @@ fn texture_data_slots(m: &RawMaterialData) -> [&Option<RawImageData>; TEXTURE_RO
     ]
 }
 
-fn texture_data_slots_mut(m: &mut RawMaterialData) -> [&mut Option<RawImageData>; TEXTURE_ROLES] {
+fn texture_data_slots_mut(
+    m: &mut RawMaterialData,
+) -> [&mut Option<Arc<RawImageData>>; TEXTURE_ROLES] {
     [
         &mut m.diffuse_texture_data,
         &mut m.normal_texture_data,
@@ -116,9 +118,12 @@ pub fn pack(set: &GeometrySet) -> Vec<u8> {
             }
         }
         push_u32(&mut out, flags);
-        for slot in slots.iter().filter_map(|s| s.as_ref()) {
+        for slot in slots.iter().filter_map(|s| s.as_deref()) {
             push_u32(&mut out, slot.width);
             push_u32(&mut out, slot.height);
+            // The content hash travels with the bytes so the receiving
+            // side rebuilds the image without re-walking the pixels.
+            out.extend_from_slice(&slot.hash.to_le_bytes());
             push_u32(&mut out, slot.pixels.len() as u32);
             out.extend_from_slice(&slot.pixels);
         }
@@ -187,13 +192,12 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             if flags & (1 << i) != 0 {
                 let width = r.u32()?;
                 let height = r.u32()?;
+                let hash = r.u64()?;
                 let byte_len = r.u32()? as usize;
                 let pixels = r.take(byte_len)?.to_vec();
-                *slot = Some(RawImageData {
-                    pixels,
-                    width,
-                    height,
-                });
+                *slot = Some(Arc::new(RawImageData::from_parts(
+                    pixels, width, height, hash,
+                )));
             }
         }
         materials.push(Arc::new(material));
@@ -228,6 +232,13 @@ impl Reader<'_> {
     fn u32(&mut self) -> Result<u32, TransferError> {
         let b = self.take(4)?;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    fn u64(&mut self) -> Result<u64, TransferError> {
+        let b = self.take(8)?;
+        Ok(u64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
 
     fn vec3(&mut self, count: usize) -> Result<Vec<[f32; 3]>, TransferError> {
@@ -326,16 +337,12 @@ mod tests {
             emissive_factor: [0.1, 0.2, 0.3],
             alpha_cutoff: 0.5,
             diffuse: Some([0.8, 0.7, 0.6]),
-            diffuse_texture_data: Some(RawImageData {
-                pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
-                width: 2,
-                height: 1,
-            }),
-            emissive_texture_data: Some(RawImageData {
-                pixels: vec![9, 9, 9, 9],
-                width: 1,
-                height: 1,
-            }),
+            diffuse_texture_data: Some(Arc::new(RawImageData::new(
+                vec![1, 2, 3, 4, 5, 6, 7, 8],
+                2,
+                1,
+            ))),
+            emissive_texture_data: Some(Arc::new(RawImageData::new(vec![9, 9, 9, 9], 1, 1))),
             ..RawMaterialData::default()
         };
         let set = GeometrySet::from_parts(vec![mesh], vec![Arc::new(material)]);
@@ -350,6 +357,11 @@ mod tests {
         let tex = m.diffuse_texture_data.as_ref().expect("diffuse texture");
         assert_eq!(tex.pixels, vec![1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!((tex.width, tex.height), (2, 1));
+        assert_eq!(
+            tex.hash,
+            RawImageData::content_hash(&tex.pixels, 2, 1),
+            "content hash travels through the codec intact"
+        );
         let em = m.emissive_texture_data.as_ref().expect("emissive texture");
         assert_eq!(em.pixels, vec![9, 9, 9, 9]);
         assert!(m.normal_texture_data.is_none());

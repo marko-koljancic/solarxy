@@ -73,17 +73,20 @@ pub fn material_content_hash(mat: &RawMaterialData) -> u64 {
     mat.name.hash(h);
     mat.diffuse_texture_path.hash(h);
     mat.normal_texture_path.hash(h);
-    hash_opt_image(mat.diffuse_texture_data.as_ref(), h);
-    hash_opt_image(mat.normal_texture_data.as_ref(), h);
+    hash_opt_image(mat.diffuse_texture_data.as_deref(), h);
+    hash_opt_image(mat.normal_texture_data.as_deref(), h);
     mat.metallic_roughness_texture_path.hash(h);
-    hash_opt_image(mat.metallic_roughness_texture_data.as_ref(), h);
+    hash_opt_image(mat.metallic_roughness_texture_data.as_deref(), h);
     mat.occlusion_texture_path.hash(h);
-    hash_opt_image(mat.occlusion_texture_data.as_ref(), h);
+    hash_opt_image(mat.occlusion_texture_data.as_deref(), h);
     mat.emissive_texture_path.hash(h);
-    hash_opt_image(mat.emissive_texture_data.as_ref(), h);
+    hash_opt_image(mat.emissive_texture_data.as_deref(), h);
     hash_f32(mat.roughness_factor, h);
     hash_f32(mat.metallic_factor, h);
     for c in mat.emissive_factor {
+        hash_f32(c, h);
+    }
+    for c in mat.base_color_factor {
         hash_f32(c, h);
     }
     u32::from(mat.alpha_mode).hash(h);
@@ -134,9 +137,9 @@ fn hash_opt_rgb<H: Hasher>(v: Option<&[f32; 3]>, h: &mut H) {
 fn hash_opt_image<H: Hasher>(v: Option<&RawImageData>, h: &mut H) {
     v.is_some().hash(h);
     if let Some(img) = v {
-        img.width.hash(h);
-        img.height.hash(h);
-        img.pixels.hash(h);
+        // The image's own content hash (stamped at construction) stands in
+        // for the pixel bytes, so material dedup no longer re-walks them.
+        img.hash.hash(h);
     }
 }
 
@@ -161,6 +164,7 @@ mod tests {
             roughness_factor: roughness,
             metallic_factor: 0.0,
             emissive_factor: [0.0; 3],
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: solarxy_core::geometry::AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             ambient: None,

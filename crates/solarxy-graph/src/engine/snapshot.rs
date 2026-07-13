@@ -236,6 +236,9 @@ pub struct ParamSnapshot {
     pub soft: Option<(f64, f64)>,
     pub step: Option<f64>,
     pub unit: UnitSnapshot,
+    /// The input-port key whose connection neutralizes this param (the
+    /// panel dims the row while that port is connected).
+    pub driven_by_port: Option<String>,
     pub doc: String,
 }
 
@@ -290,6 +293,7 @@ impl From<&ParamSpec> for ParamSnapshot {
             default: crate::registry::resolve::param_value_to_json(&p.default),
             hard: p.range.map(|r| r.hard),
             soft: p.range.and_then(|r| r.soft),
+            driven_by_port: p.driven_by_port.clone(),
             step: p.step,
             unit: p.unit.into(),
             doc: p.doc.clone(),

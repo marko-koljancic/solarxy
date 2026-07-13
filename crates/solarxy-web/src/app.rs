@@ -243,6 +243,7 @@ pub struct SolarxyApp {
     /// worker: the geometry is packed to a transfer blob at drain time so
     /// `take_validate_jobs` moves plain bytes.
     pending_validate: Vec<PendingValidateJob>,
+    pending_image: Vec<PendingImageJob>,
     /// The graph context the node canvas currently shows (React mirrors it
     /// via `set_current_context`); the UV pane's selected-node source
     /// resolves against it.
@@ -293,6 +294,16 @@ struct PendingValidateJob {
     blob: Vec<u8>,
     config_json: String,
     budget: Option<u32>,
+}
+
+/// A drained `DecodeImage` job awaiting [`SolarxyApp::take_image_jobs`]:
+/// the frontend pulls the encoded bytes by hash (like the parse pump) and
+/// decodes them in the import worker via `createImageBitmap`.
+struct PendingImageJob {
+    ctx: GraphContext,
+    job_id: u64,
+    hash: String,
+    name: String,
 }
 
 #[wasm_bindgen]
@@ -458,6 +469,7 @@ impl SolarxyApp {
             pointer_buttons_down: 0,
             selected_object: None,
             pending_validate: Vec::new(),
+            pending_image: Vec::new(),
             current_ctx: GraphContext::Root,
             uv_scene: SceneObjects::new(),
             uv_use_preview: false,
@@ -1389,6 +1401,19 @@ impl SolarxyApp {
                     });
                     continue;
                 }
+                JobRequest::DecodeImage { asset } => {
+                    let name = manifest
+                        .iter()
+                        .find(|(h, _)| *h == asset.0)
+                        .map_or_else(String::new, |(_, n)| n.clone());
+                    self.pending_image.push(PendingImageJob {
+                        ctx,
+                        job_id: job.0,
+                        hash: asset.0,
+                        name,
+                    });
+                    continue;
+                }
             };
             let name = manifest
                 .iter()
@@ -1450,6 +1475,83 @@ impl SolarxyApp {
             out.push(&o);
         }
         Ok(out.into())
+    }
+
+    /// Drains the stashed image-decode jobs into a JS array of
+    /// `{ ctx, jobId, hash, name }`. The frontend pulls the encoded bytes
+    /// by hash (`asset_bytes`), posts them to the worker's decode-image
+    /// path (`createImageBitmap`), and returns the RGBA result through
+    /// `submit_decoded_image` / `submit_image_error`. Call after
+    /// `take_import_jobs` (which performs the drain from the engine).
+    pub fn take_image_jobs(&mut self) -> Result<JsValue, JsError> {
+        let out = js_sys::Array::new();
+        for job in self.pending_image.drain(..) {
+            let o = js_sys::Object::new();
+            let set = |key: &str, value: &JsValue| {
+                js_sys::Reflect::set(&o, &JsValue::from_str(key), value)
+                    .map_err(|_| JsError::new("take_image_jobs: reflect set failed"))
+                    .map(|_| ())
+            };
+            set("ctx", &to_js(&job.ctx)?)?;
+            set("jobId", &JsValue::from_f64(job.job_id as f64))?;
+            set("hash", &JsValue::from_str(&job.hash))?;
+            set("name", &JsValue::from_str(&job.name))?;
+            out.push(&o);
+        }
+        Ok(out.into())
+    }
+
+    /// Commits a worker-decoded image (raw RGBA8 plus dimensions) under
+    /// the per-node generation guard, returning the cook `EventBatch`.
+    /// The content hash is stamped here, Rust-side, so every producer
+    /// (native decode, worker decode, transfer unpack) yields identical
+    /// hashes for identical pixels.
+    pub fn submit_decoded_image(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let expected = (width as usize) * (height as usize) * 4;
+        if pixels.len() != expected {
+            return Err(JsError::new(&format!(
+                "decoded image is {} bytes, expected {expected} ({width}x{height} RGBA)",
+                pixels.len()
+            )));
+        }
+        let image = std::sync::Arc::new(solarxy_core::RawImageData::new(pixels, width, height));
+        let events =
+            self.engine
+                .submit_job_result(ctx, JobId(job_id as u64), JobResult::Image(Ok(image)));
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
+    }
+
+    /// Reports a worker image-decode failure: the `import_image` node badges
+    /// the error while keep-last-good holds the previous image.
+    pub fn submit_image_error(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        message: String,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::Image(Err(message)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
     }
 
     /// Commits a worker validation result (the JSON `ValidationResult` from

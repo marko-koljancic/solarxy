@@ -240,3 +240,102 @@ fn gltf_bytes_external_buffer_via_resolver() {
         )),
     }
 }
+
+// ---- Phase 13 texture matrix: decoded pixels through every delivery path ----
+
+/// The known texels of `texel.png` (2x2 RGBA: red, green / blue, white),
+/// exactly as every loader must decode them.
+const TEXEL_PIXELS: [u8; 16] = [
+    255, 0, 0, 255, //
+    0, 255, 0, 255, //
+    0, 0, 255, 255, //
+    255, 255, 255, 255,
+];
+
+/// Assert the model carries the quad plus a base-color texture decoded to
+/// the exact texel bytes. The single assertion every matrix case shares.
+fn assert_textured_quad(raw: &RawModelData) {
+    assert_eq!(raw.meshes.len(), 1, "meshes");
+    assert_eq!(raw.meshes[0].positions.len(), 4, "positions");
+    assert_eq!(raw.meshes[0].indices.len(), 6, "indices");
+    assert!(raw.meshes[0].tex_coords.is_some(), "tex_coords");
+    assert_eq!(raw.meshes[0].material_index, Some(0), "material_index");
+    assert_eq!(raw.materials.len(), 1, "materials");
+    let data = raw.materials[0]
+        .diffuse_texture_data
+        .as_ref()
+        .expect("base color texture must decode");
+    assert_eq!((data.width, data.height), (2, 2), "texture dimensions");
+    assert_eq!(data.pixels, TEXEL_PIXELS, "texture pixels");
+}
+
+#[test]
+fn gltf_embedded_image_decodes_in_byte_mode() {
+    let raw =
+        gltf::load_gltf_bytes(&fixture_bytes("textured_embedded.gltf"), &mut NoAssets).unwrap();
+    assert_textured_quad(&raw);
+}
+
+#[test]
+fn glb_buffer_view_image_decodes_in_byte_mode() {
+    let raw = gltf::load_gltf_bytes(&fixture_bytes("textured.glb"), &mut NoAssets).unwrap();
+    assert_textured_quad(&raw);
+}
+
+#[test]
+fn gltf_external_image_decodes_through_resolver() {
+    let mut resolver = DirResolver::new(
+        Path::new(&fixture("textured_external.gltf"))
+            .parent()
+            .unwrap(),
+    );
+    let raw =
+        gltf::load_gltf_bytes(&fixture_bytes("textured_external.gltf"), &mut resolver).unwrap();
+    assert_textured_quad(&raw);
+}
+
+/// A missing external image degrades to an empty texture slot with the URI
+/// still recorded as the texture path; it never fails the model. (The
+/// external BUFFER is still required, so the resolver serves only that.)
+#[test]
+fn gltf_missing_external_image_degrades() {
+    struct BufferOnly(Vec<u8>);
+    impl AssetResolver for BufferOnly {
+        fn read(&mut self, rel_path: &str) -> Option<Vec<u8>> {
+            (rel_path == "textured_external.bin").then(|| self.0.clone())
+        }
+    }
+    let mut resolver = BufferOnly(fixture_bytes("textured_external.bin"));
+    let raw =
+        gltf::load_gltf_bytes(&fixture_bytes("textured_external.gltf"), &mut resolver).unwrap();
+    assert_eq!(raw.meshes.len(), 1);
+    let mat = &raw.materials[0];
+    assert!(mat.diffuse_texture_data.is_none(), "no decoded pixels");
+    assert_eq!(
+        mat.diffuse_texture_path.as_deref(),
+        Some(Path::new("texel.png")),
+        "URI still recorded as the texture path"
+    );
+}
+
+#[test]
+fn gltf_external_bytes_matches_path_including_texture() {
+    let from_path = gltf::load_gltf(&fixture("textured_external.gltf")).unwrap();
+    let mut resolver = DirResolver::new(
+        Path::new(&fixture("textured_external.gltf"))
+            .parent()
+            .unwrap(),
+    );
+    let from_bytes =
+        gltf::load_gltf_bytes(&fixture_bytes("textured_external.gltf"), &mut resolver).unwrap();
+    assert_geometry_eq(&from_path, &from_bytes);
+    assert_textured_quad(&from_path);
+    assert_textured_quad(&from_bytes);
+}
+
+#[test]
+fn obj_map_kd_decodes_through_resolver() {
+    let mut resolver = DirResolver::new(Path::new(&fixture("textured.obj")).parent().unwrap());
+    let raw = obj::load_obj_bytes(&fixture_bytes("textured.obj"), &mut resolver).unwrap();
+    assert_textured_quad(&raw);
+}

@@ -29,11 +29,68 @@ pub struct RawMeshData {
 }
 
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.
+///
+/// Carries a content hash computed once at construction: the GPU texture
+/// cache key and the merge-dedup identity. Construct via [`Self::new`]
+/// (or [`Self::from_parts`] when a trusted hash travels with the bytes,
+/// e.g. the kernel transfer codec) and treat instances as immutable —
+/// images are shared behind `Arc` across materials, cook outputs, and the
+/// renderer, and a mutated pixel buffer would silently invalidate the hash.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawImageData {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// FNV-1a over dimensions and pixel bytes; see [`Self::new`].
+    pub hash: u64,
+}
+
+impl RawImageData {
+    /// Build an image and stamp its content hash.
+    #[must_use]
+    pub fn new(pixels: Vec<u8>, width: u32, height: u32) -> Self {
+        let hash = Self::content_hash(&pixels, width, height);
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// Rebuild an image whose hash was computed earlier and traveled with
+    /// the bytes (the transfer codec); callers must pass the hash exactly
+    /// as [`Self::new`] produced it.
+    #[must_use]
+    pub fn from_parts(pixels: Vec<u8>, width: u32, height: u32, hash: u64) -> Self {
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// FNV-1a 64 over `width`, `height`, then the pixel bytes. Stable
+    /// across platforms and runs (unlike `DefaultHasher`), cheap enough to
+    /// run once per decoded image, and 64 bits is plenty for a per-session
+    /// texture-identity key.
+    #[must_use]
+    pub fn content_hash(pixels: &[u8], width: u32, height: u32) -> u64 {
+        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut h = OFFSET;
+        let mut eat = |bytes: &[u8]| {
+            for &b in bytes {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(PRIME);
+            }
+        };
+        eat(&width.to_le_bytes());
+        eat(&height.to_le_bytes());
+        eat(pixels);
+        h
+    }
 }
 
 /// PBR alpha-blending mode for [`RawMaterialData`].
@@ -65,28 +122,34 @@ impl From<AlphaMode> for u32 {
 /// produces a `MaterialUniform` + GPU textures. `Default` is a convenience
 /// for constructing a bare material (all factors zeroed, no textures); the
 /// render path never relies on the default values.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawMaterialData {
     pub name: String,
     pub diffuse_texture_path: Option<PathBuf>,
     pub normal_texture_path: Option<PathBuf>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub diffuse_texture_data: Option<RawImageData>,
+    pub diffuse_texture_data: Option<std::sync::Arc<RawImageData>>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub normal_texture_data: Option<RawImageData>,
+    pub normal_texture_data: Option<std::sync::Arc<RawImageData>>,
     pub metallic_roughness_texture_path: Option<PathBuf>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub metallic_roughness_texture_data: Option<RawImageData>,
+    pub metallic_roughness_texture_data: Option<std::sync::Arc<RawImageData>>,
     pub occlusion_texture_path: Option<PathBuf>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub occlusion_texture_data: Option<RawImageData>,
+    pub occlusion_texture_data: Option<std::sync::Arc<RawImageData>>,
     pub emissive_texture_path: Option<PathBuf>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub emissive_texture_data: Option<RawImageData>,
+    pub emissive_texture_data: Option<std::sync::Arc<RawImageData>>,
     pub roughness_factor: f32,
     pub metallic_factor: f32,
     pub emissive_factor: [f32; 3],
+    /// Linear RGBA multiplied into the base-color texture sample (glTF's
+    /// `baseColorFactor`); white when a map alone drives the channel.
+    /// Defaults to white, the multiplicative identity (the one factor
+    /// whose zero default would render everything black).
+    #[cfg_attr(feature = "serde", serde(default = "white_rgba"))]
+    pub base_color_factor: [f32; 4],
     pub alpha_mode: AlphaMode,
     pub alpha_cutoff: f32,
     pub ambient: Option<[f32; 3]>,
@@ -101,6 +164,50 @@ pub struct RawMaterialData {
     pub normal_texture_name: Option<String>,
     pub shininess_texture_name: Option<String>,
     pub dissolve_texture_name: Option<String>,
+}
+
+fn white_rgba() -> [f32; 4] {
+    [1.0, 1.0, 1.0, 1.0]
+}
+
+impl Default for RawMaterialData {
+    /// Everything zeroed/empty EXCEPT `base_color_factor`, which defaults
+    /// to white: it multiplies the base-color sample, so the identity is
+    /// the only safe default (zero would render untextured materials
+    /// black).
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            diffuse_texture_path: None,
+            normal_texture_path: None,
+            diffuse_texture_data: None,
+            normal_texture_data: None,
+            metallic_roughness_texture_path: None,
+            metallic_roughness_texture_data: None,
+            occlusion_texture_path: None,
+            occlusion_texture_data: None,
+            emissive_texture_path: None,
+            emissive_texture_data: None,
+            roughness_factor: 0.0,
+            metallic_factor: 0.0,
+            emissive_factor: [0.0; 3],
+            base_color_factor: white_rgba(),
+            alpha_mode: AlphaMode::default(),
+            alpha_cutoff: 0.0,
+            ambient: None,
+            diffuse: None,
+            specular: None,
+            shininess: None,
+            dissolve: None,
+            optical_density: None,
+            ambient_texture_name: None,
+            diffuse_texture_name: None,
+            specular_texture_name: None,
+            normal_texture_name: None,
+            shininess_texture_name: None,
+            dissolve_texture_name: None,
+        }
+    }
 }
 
 /// One loaded model — the unit `solarxy-formats` produces and

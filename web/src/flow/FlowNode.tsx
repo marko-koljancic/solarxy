@@ -46,6 +46,14 @@ function handleStyle(color: string, shape: string): React.CSSProperties {
   };
   if (shape === "diamond") return { ...base, transform: "rotate(45deg)", borderRadius: 2 };
   if (shape === "square") return { ...base, borderRadius: 2 };
+  if (shape === "hexagon")
+    return {
+      ...base,
+      // A clipped hexagon reads as a "resource" (image) handle; the clip
+      // also removes the border, so the fill carries the full 11px.
+      clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+      border: "none",
+    };
   return { ...base, borderRadius: "50%" };
 }
 

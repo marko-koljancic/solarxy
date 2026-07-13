@@ -363,9 +363,24 @@ export function ParameterPanel() {
       <div className="param-body">
         {active !== undefined && active !== VALIDATION_TAB && (
           <div className="param-tab-body" role="tabpanel">
-            {(groups.get(active) ?? []).map((p) => (
-              <Field key={p.key} ctx={current} node={node} spec={p} />
-            ))}
+            {(groups.get(active) ?? []).map((p) => {
+              // Registry-driven map-overrides-factor indicator: a param
+              // declaring drivenByPort dims while that input port is
+              // connected (the map fully drives the channel; the factor
+              // value is preserved for when the map disconnects).
+              const driven =
+                p.drivenByPort != null &&
+                graph.edges.some((e) => e.to === node.id && e.toPort === p.drivenByPort);
+              if (!driven) {
+                return <Field key={p.key} ctx={current} node={node} spec={p} />;
+              }
+              return (
+                <div key={p.key} className="param-driven" title="Driven by the connected map">
+                  <Field ctx={current} node={node} spec={p} />
+                  <div className="param-driven-hint">Driven by connected map</div>
+                </div>
+              );
+            })}
           </div>
         )}
         {active === VALIDATION_TAB && report && (

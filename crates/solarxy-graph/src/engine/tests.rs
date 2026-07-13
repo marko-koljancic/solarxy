@@ -2827,3 +2827,190 @@ fn a_subflow_basis_composes_the_container_and_the_node() {
         "90 + 90 about Y sends local +X to world -X, got {local_x:?}"
     );
 }
+
+// ---- Phase 13: import_image persistence + async decode round trips ----
+
+/// A valid 1x1 red PNG (identical to the import_image unit fixture).
+fn red_png() -> Vec<u8> {
+    vec![
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+        0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ]
+}
+
+/// The async web path end to end: the cook parks the node on a
+/// `DecodeImage` job, the drained job resolves (as the worker would), and
+/// the submitted result commits the Image output under the generation
+/// guard.
+#[test]
+fn import_image_async_decode_round_trip() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_async_jobs(true);
+    let asset = e.stage_asset("red.png", "image/png", red_png());
+
+    let img = add(&mut e, ctx, "import_image");
+    e.apply(Command::SetParam {
+        ctx,
+        node: img,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let jobs = e.take_jobs();
+    assert_eq!(jobs.len(), 1, "one decode job spawned");
+    let (job_ctx, job_id, request) = &jobs[0];
+    assert!(matches!(request, JobRequest::DecodeImage { .. }));
+
+    let result = e.resolve_job(request);
+    e.submit_job_result(*job_ctx, *job_id, result);
+
+    let outputs = e.cook.outputs(img).expect("image committed");
+    let image = outputs
+        .get("image")
+        .and_then(crate::registry::coerce::Value::as_image)
+        .expect("Image value");
+    assert_eq!((image.width, image.height), (1, 1));
+    assert_eq!(image.pixels, vec![255, 0, 0, 255]);
+}
+
+/// Persistence: only the AssetRef serializes; a save/load/recook yields
+/// pixel-identical image output (equal content hash), and the staged PNG
+/// bytes ride the archive because `referenced_assets` sees the param.
+#[test]
+fn import_image_slxy_round_trip_recooks_identically() {
+    let (mut e, ctx) = subflow_engine();
+    let asset = e.stage_asset("red.png", "image/png", red_png());
+
+    let img = add(&mut e, ctx, "import_image");
+    e.apply(Command::SetParam {
+        ctx,
+        node: img,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset.clone())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let first_hash = e
+        .cook
+        .outputs(img)
+        .and_then(|o| {
+            o.get("image")
+                .and_then(crate::registry::coerce::Value::as_image)
+                .map(|i| i.hash)
+        })
+        .expect("first cook produced an image");
+
+    let bytes = e
+        .save_slxy(&SceneSidecar {
+            generator: "solarxy-test 0.0.0".into(),
+            ..Default::default()
+        })
+        .expect("save .slxy");
+
+    let mut e2 = engine();
+    let loaded = e2.load_slxy(&bytes).expect("load .slxy");
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+
+    // The staged bytes traveled inside the archive (GC-at-save kept them).
+    assert!(
+        e2.asset_manifest()
+            .iter()
+            .any(|(h, n)| *h == asset.0 && n == "red.png"),
+        "asset embedded and restored"
+    );
+
+    e2.cook(&mut || true);
+    let second = e2
+        .cook
+        .outputs(img)
+        .and_then(|o| {
+            o.get("image")
+                .and_then(crate::registry::coerce::Value::as_image)
+                .cloned()
+        })
+        .expect("recook produced an image");
+    assert_eq!(second.hash, first_hash, "pixel-identical after round trip");
+    assert_eq!(second.pixels, vec![255, 0, 0, 255]);
+}
+
+/// The Phase 14 exit-criterion chain, engine-level: a primitive through
+/// `uv_project` into `material` with an `import_image` wired into the base
+/// color map port. The cooked output must carry projected UVs and one
+/// override material whose diffuse texture is the imported image with a
+/// neutralized (white) base color factor.
+#[test]
+fn image_material_uv_project_chain_cooks_end_to_end() {
+    let (mut e, ctx) = subflow_engine();
+    let asset = e.stage_asset("red.png", "image/png", red_png());
+
+    let prim = add(&mut e, ctx, "box");
+    let uv = add(&mut e, ctx, "uv_project");
+    let img = add(&mut e, ctx, "import_image");
+    let mat = add(&mut e, ctx, "material");
+
+    for (from, from_port, to, to_port) in [
+        (prim, "geometry", uv, "geometry"),
+        (uv, "geometry", mat, "geometry"),
+        (img, "image", mat, "base_color_map"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: from_port.into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: to_port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: img,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: mat,
+        key: "material_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("textured".into())),
+    })
+    .unwrap();
+    // The cook is display-driven: flag the chain tail as the container's
+    // output.
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(mat),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let outputs = e.cook.outputs(mat).expect("chain cooked");
+    let set = outputs
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("geometry out");
+    assert!(
+        set.meshes.iter().all(|m| m.tex_coords.is_some()),
+        "uv_project wrote UVs that survive the material node"
+    );
+    assert_eq!(set.materials.len(), 1, "override-all");
+    let m = &set.materials[0];
+    assert_eq!(m.name, "textured");
+    let tex = m.diffuse_texture_data.as_ref().expect("map landed");
+    assert_eq!(tex.pixels, vec![255, 0, 0, 255]);
+    assert_eq!(
+        m.base_color_factor,
+        [1.0, 1.0, 1.0, 1.0],
+        "connected map neutralizes the factor"
+    );
+}

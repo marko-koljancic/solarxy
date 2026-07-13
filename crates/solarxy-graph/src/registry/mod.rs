@@ -405,6 +405,16 @@ impl Registry {
                         ));
                     }
                 }
+                // Every driven_by_port names an existing input port (the
+                // panel's dim-while-connected predicate must be real).
+                if let Some(port) = &p.driven_by_port
+                    && !desc.inputs.iter().any(|input| input.key == *port)
+                {
+                    violations.push(format!(
+                        "'{id}': param '{}' driven by missing input port '{port}'",
+                        p.key
+                    ));
+                }
             }
             // MVP context consistency: root-context nodes are portless
             // (lights cook at root portless; geo and note carry no ports).

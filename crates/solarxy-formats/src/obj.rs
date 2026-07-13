@@ -69,16 +69,11 @@ fn parse_obj(
     // the byte-first path (web worker) carries pixels rather than a path
     // no filesystem can serve. The GPU upload prefers `*_texture_data`
     // and falls back to the path, so the desktop path mode also benefits.
-    let tex_data = |rel: &str| -> Option<RawImageData> {
+    let tex_data = |rel: &str| -> Option<std::sync::Arc<RawImageData>> {
         let bytes = resolver.borrow_mut().read(rel)?;
-        let img = image::load_from_memory(&bytes).ok()?;
-        let rgba = img.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        Some(RawImageData {
-            pixels: rgba.into_raw(),
-            width,
-            height,
-        })
+        crate::decode_image_bytes(&bytes)
+            .ok()
+            .map(std::sync::Arc::new)
     };
 
     let mut materials = Vec::new();
@@ -111,6 +106,12 @@ fn parse_obj(
             _ => (AlphaMode::Opaque, 0.5),
         };
 
+        // MTL Kd + dissolve become the base-color factor (white when the
+        // MTL declares none), so untextured colored materials render their
+        // color instead of white.
+        let kd = m.diffuse.unwrap_or([1.0, 1.0, 1.0]);
+        let base_alpha = m.dissolve.unwrap_or(1.0);
+
         materials.push(RawMaterialData {
             name: m.name.clone(),
             diffuse_texture_path: diffuse_path,
@@ -126,6 +127,7 @@ fn parse_obj(
             roughness_factor,
             metallic_factor,
             emissive_factor: [0.0, 0.0, 0.0],
+            base_color_factor: [kd[0], kd[1], kd[2], base_alpha],
             alpha_mode,
             alpha_cutoff,
             ambient: m.ambient,

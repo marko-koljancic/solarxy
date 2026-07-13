@@ -118,6 +118,18 @@ impl AssetResolver for DirResolver {
     }
 }
 
+/// Decode an encoded image (PNG, JPEG, WebP, ...) into RGBA8
+/// [`RawImageData`]. The shared decode path for every texture that enters
+/// through bytes: OBJ `map_Kd` sidecars, glTF external images, and the
+/// `import_image` node's native cook.
+pub fn decode_image_bytes(bytes: &[u8]) -> Result<RawImageData, FormatsError> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| FormatsError::Invalid(format!("image decode failed: {e}")))?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(RawImageData::new(rgba.into_raw(), width, height))
+}
+
 /// Parse a model from bytes, dispatching on the (lowercase, dot-free)
 /// extension exactly like [`load_model`] does on paths. `name` seeds mesh
 /// names for formats that carry none (STL, PLY); `resolver` supplies

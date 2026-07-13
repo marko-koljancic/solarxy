@@ -3,8 +3,10 @@
 //!
 //! A connection is legal iff the endpoint types are the same or a listed
 //! coercion exists; the engine applies coercions at value-gather time
-//! during the cook. `Geometry`, `Light`, and `Report` coerce to and from
-//! nothing. Lossy cells (`Float -> Int` rounds half away from zero,
+//! during the cook. `Geometry`, `Light`, `Report`, and `Image` coerce to
+//! and from nothing (a Color-to-Image constant fill would require a
+//! synthesis cook; backlog note). Lossy cells (`Float -> Int` rounds half
+//! away from zero,
 //! `Color -> Vec3` drops alpha) are allowed per decision 28 and get
 //! distinct handle UX in the frontend.
 //!
@@ -14,8 +16,8 @@
 
 use std::sync::Arc;
 
-use solarxy_core::ValidationReport;
 use solarxy_core::scene::LightDef;
+use solarxy_core::{RawImageData, ValidationReport};
 use solarxy_kernel::GeometrySet;
 
 use super::scalar;
@@ -42,11 +44,15 @@ pub enum DataType {
     /// `[f32; 4]` linear RGBA.
     Color,
     Text,
+    /// `Arc<RawImageData>`: decoded RGBA8 pixels plus content hash. The
+    /// wire value between `import_image` and the `material` node's map
+    /// ports (Phase 13).
+    Image,
 }
 
 impl DataType {
     /// Every variant, in matrix row/column order.
-    pub const ALL: [DataType; 11] = [
+    pub const ALL: [DataType; 12] = [
         DataType::Geometry,
         DataType::Light,
         DataType::Report,
@@ -58,6 +64,7 @@ impl DataType {
         DataType::Vec4,
         DataType::Color,
         DataType::Text,
+        DataType::Image,
     ];
 }
 
@@ -112,7 +119,7 @@ pub fn can_coerce(from: DataType, to: DataType) -> Coercion {
         // Color row.
         (D::Color, D::Vec3) => Lossy, // drops alpha
         (D::Color, D::Vec4) => Lossless,
-        // Geometry, Light, Report, Text, Vec2: nothing beyond Same.
+        // Geometry, Light, Report, Image, Text, Vec2: nothing beyond Same.
         _ => Forbidden,
     }
 }
@@ -132,6 +139,7 @@ pub enum Value {
     Vec4([f64; 4]),
     Color([f32; 4]),
     Text(String),
+    Image(Arc<RawImageData>),
 }
 
 impl Value {
@@ -149,6 +157,7 @@ impl Value {
             Value::Vec4(_) => DataType::Vec4,
             Value::Color(_) => DataType::Color,
             Value::Text(_) => DataType::Text,
+            Value::Image(_) => DataType::Image,
         }
     }
 
@@ -166,6 +175,15 @@ impl Value {
     pub fn as_report(&self) -> Option<&Arc<ValidationReport>> {
         match self {
             Value::Report(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The image payload, if this is an Image value.
+    #[must_use]
+    pub fn as_image(&self) -> Option<&Arc<RawImageData>> {
+        match self {
+            Value::Image(i) => Some(i),
             _ => None,
         }
     }
@@ -235,18 +253,20 @@ mod tests {
         }
         // Columns and rows in DataType::ALL order:
         // Geometry Light Report Float Int Bool Vec2 Vec3 Vec4 Color Text
+        // Image
         let expected = "\
-=..........\n\
-.=.........\n\
-..=........\n\
-...=~.+++..\n\
-...+=.+++..\n\
-...++=.....\n\
-......=....\n\
-.......=.+.\n\
-........=+.\n\
-.......~+=.\n\
-..........=\n";
+=...........\n\
+.=..........\n\
+..=.........\n\
+...=~.+++...\n\
+...+=.+++...\n\
+...++=......\n\
+......=.....\n\
+.......=.+..\n\
+........=+..\n\
+.......~+=..\n\
+..........=.\n\
+...........=\n";
         assert_eq!(
             grid, expected,
             "coercion matrix changed; update the catalog first"
@@ -254,8 +274,13 @@ mod tests {
     }
 
     #[test]
-    fn geometry_light_report_coerce_to_and_from_nothing() {
-        for hard in [DataType::Geometry, DataType::Light, DataType::Report] {
+    fn geometry_light_report_image_coerce_to_and_from_nothing() {
+        for hard in [
+            DataType::Geometry,
+            DataType::Light,
+            DataType::Report,
+            DataType::Image,
+        ] {
             for other in DataType::ALL {
                 if other == hard {
                     continue;
@@ -279,6 +304,7 @@ mod tests {
             Value::Vec4([1.0, 2.0, 3.0, 4.0]),
             Value::Color([0.5, 0.25, 0.125, 0.75]),
             Value::Text("t".to_string()),
+            Value::Image(Arc::new(RawImageData::new(vec![0, 0, 0, 255], 1, 1))),
         ];
         for v in &samples {
             for to in DataType::ALL {

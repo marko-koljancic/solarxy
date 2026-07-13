@@ -54,8 +54,10 @@ mod error;
 pub mod merge;
 pub mod primitives;
 pub mod set;
+pub mod subdivide;
 pub mod transfer;
 pub mod transform;
+pub mod uv_project;
 
 pub use error::KernelError;
 pub use set::{AttributeData, AttributeMap, GeometrySet, KernelMesh};

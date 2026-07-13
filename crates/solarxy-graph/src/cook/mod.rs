@@ -82,6 +82,15 @@ impl Inputs {
             InputSlot::Absent => Vec::new(),
         }
     }
+
+    /// The image on a single-arity port, if connected.
+    #[must_use]
+    pub fn image(&self, key: &str) -> Option<&Arc<solarxy_core::RawImageData>> {
+        match self.slot(key) {
+            InputSlot::Single(v) => v.as_image(),
+            _ => None,
+        }
+    }
 }
 
 /// A compute body's outputs, keyed by output-port key.
@@ -203,6 +212,10 @@ pub enum JobRequest {
         /// The resolved triangle budget, when the budget check is on.
         budget: Option<u32>,
     },
+    /// Decode a staged encoded image (`import_image`, Phase 13). The web
+    /// worker decodes via `createImageBitmap`; the native path decodes
+    /// inline through the shared formats decoder.
+    DecodeImage { asset: AssetId },
 }
 
 impl PartialEq for JobRequest {
@@ -234,6 +247,7 @@ impl PartialEq for JobRequest {
                     budget: b2,
                 },
             ) => Arc::ptr_eq(g, g2) && c == c2 && b == b2,
+            (Self::DecodeImage { asset: a }, Self::DecodeImage { asset: a2 }) => a == a2,
             _ => false,
         }
     }
@@ -258,6 +272,9 @@ pub enum JobResult {
     /// parked validate node's passthrough geometry is retained engine-side,
     /// so only the result crosses back).
     Report(Result<ValidationResult, String>),
+    /// A fulfilled `DecodeImage`: decoded RGBA8 pixels (hash stamped at
+    /// construction), or the decode failure message.
+    Image(Result<Arc<solarxy_core::RawImageData>, String>),
 }
 
 /// Job handle relating a spawned request to its later result.

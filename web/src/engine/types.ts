@@ -227,7 +227,7 @@ export interface PortRef {
 
 export type DataType =
   | "geometry" | "light" | "report" | "float" | "int" | "bool"
-  | "vec2" | "vec3" | "vec4" | "color" | "text";
+  | "vec2" | "vec3" | "vec4" | "color" | "text" | "image";
 
 export interface PortSnapshot {
   key: string;
@@ -252,6 +252,9 @@ export interface ParamSnapshot {
   soft: [number, number] | null;
   step: number | null;
   unit: "none" | "degrees" | "meters" | "normalized";
+  /** Input-port key whose connection neutralizes this param (the panel
+   * dims the row while that port is connected). */
+  drivenByPort?: string | null;
   doc: string;
 }
 
@@ -315,6 +318,16 @@ export interface ImportJob {
   options: ImportOptions;
   /** Candidate companion files (mtl, bin, textures) the resolver matches by name. */
   sidecars: AssetRef[];
+}
+
+/** One image-decode job drained from the engine (`import_image`, Phase
+ * 13): the frontend pulls the encoded bytes by hash and the worker
+ * decodes them via `createImageBitmap`. */
+export interface ImageJob {
+  ctx: GraphContext;
+  jobId: number;
+  hash: string;
+  name: string;
 }
 
 /** The host's environment state (the Environment panel's mirror). */

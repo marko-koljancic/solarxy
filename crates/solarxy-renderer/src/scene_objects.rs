@@ -85,6 +85,9 @@ pub struct SceneObjects {
     objects: BTreeMap<SceneObjectId, SceneObject>,
     lights: Option<Vec<LightDef>>,
     lights_dirty: bool,
+    /// Content-addressed GPU textures shared across materials and cooks;
+    /// swept when objects leave the scene.
+    texture_cache: resources::TextureCache,
 }
 
 impl SceneObjects {
@@ -237,6 +240,7 @@ impl SceneObjects {
                 }
                 SceneOp::Remove { id } => {
                     self.objects.remove(id);
+                    self.texture_cache.sweep();
                 }
                 SceneOp::SetLights { lights } => {
                     self.lights = Some(lights.clone());
@@ -244,6 +248,7 @@ impl SceneObjects {
                 }
                 SceneOp::Clear => {
                     self.objects.clear();
+                    self.texture_cache.sweep();
                     self.lights = None;
                     self.lights_dirty = true;
                 }
@@ -273,7 +278,11 @@ impl SceneObjects {
         let (built, raw_to_gpu) = build_meshes(cooked);
 
         // In-place fast path: same mesh count, same material count, and
-        // every new buffer fits its recorded capacity.
+        // every new buffer fits its recorded capacity. A changed material
+        // TABLE (new `Arc`s: the material node's factor drags produce
+        // exactly this) re-uploads materials only, through the content
+        // cache, so unchanged textures cost nothing and the geometry
+        // buffers still rewrite in place.
         if let Some(obj) = self.objects.get_mut(&id)
             && obj.model.meshes.len() == built.len()
             && obj.model.materials.len() == cooked.materials.len().max(1)
@@ -288,6 +297,22 @@ impl SceneObjects {
                     && b.edge_idx_bytes() <= caps.edge_idx_bytes
             })
         {
+            let materials_unchanged = obj.geometry.materials.len() == cooked.materials.len()
+                && obj
+                    .geometry
+                    .materials
+                    .iter()
+                    .zip(&cooked.materials)
+                    .all(|(a, b)| Arc::ptr_eq(a, b));
+            if !materials_unchanged {
+                obj.model.materials = resources::upload_cooked_materials(
+                    &cooked.materials,
+                    device,
+                    queue,
+                    &layouts.texture,
+                    &mut self.texture_cache,
+                )?;
+            }
             for (mesh, b) in obj.model.meshes.iter_mut().zip(&built) {
                 queue.write_buffer(&mesh.vertex_buffer, 0, bytemuck::cast_slice(&b.vertices));
                 queue.write_buffer(&mesh.index_buffer, 0, bytemuck::cast_slice(&b.indices));
@@ -348,8 +373,13 @@ impl SceneObjects {
 
         // Full (re)build: new buffers with headroom; transform and
         // visibility survive a rebuild.
-        let materials =
-            resources::upload_cooked_materials(&cooked.materials, device, queue, &layouts.texture)?;
+        let materials = resources::upload_cooked_materials(
+            &cooked.materials,
+            device,
+            queue,
+            &layouts.texture,
+            &mut self.texture_cache,
+        )?;
         let material_thumbnails = cooked
             .materials
             .iter()

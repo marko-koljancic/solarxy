@@ -86,14 +86,47 @@ pub struct ModelStats {
 /// when the role has no source texture; the path is cloned so the
 /// caller's GPU upload retains its own copy. Used by `upload_model`.
 fn take_thumbnail(
-    data: &mut Option<solarxy_core::RawImageData>,
+    data: &mut Option<std::sync::Arc<solarxy_core::RawImageData>>,
     path: Option<&std::path::PathBuf>,
 ) -> Option<model::TextureThumbnail> {
     let image = data.take()?;
     Some(model::TextureThumbnail {
-        image: std::sync::Arc::new(image),
+        image,
         source_path: path.cloned(),
     })
+}
+
+/// A content-addressed GPU texture cache keyed by `(RawImageData.hash,
+/// linear)`. Owned by `SceneObjects` for the engine-driven path so a
+/// material-node factor drag (which rebuilds the material but reuses the
+/// same decoded image `Arc`s) re-uploads zero texture bytes, and identical
+/// images across materials share one GPU texture. Entries are dropped by
+/// [`TextureCache::sweep`] once no live material holds them.
+#[derive(Default)]
+pub struct TextureCache {
+    entries: std::collections::HashMap<(u64, bool), std::sync::Arc<texture::Texture>>,
+}
+
+impl TextureCache {
+    fn get_or_try_insert(
+        &mut self,
+        key: (u64, bool),
+        build: impl FnOnce() -> Result<texture::Texture, RendererError>,
+    ) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
+        if let Some(hit) = self.entries.get(&key) {
+            return Ok(std::sync::Arc::clone(hit));
+        }
+        let built = std::sync::Arc::new(build()?);
+        self.entries.insert(key, std::sync::Arc::clone(&built));
+        Ok(built)
+    }
+
+    /// Drops entries no longer referenced by any material (the cache holds
+    /// the only remaining `Arc`). Called on object removal and clear.
+    pub fn sweep(&mut self) {
+        self.entries
+            .retain(|_, t| std::sync::Arc::strong_count(t) > 1);
+    }
 }
 
 /// Upload a CPU-side [`RawModelData`] into GPU meshes, materials, and
@@ -132,30 +165,33 @@ pub fn upload_model(
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.diffuse_texture_data.as_ref(),
+            mat.diffuse_texture_data.as_deref(),
             mat.diffuse_texture_path.as_ref(),
             false,
             &mat.name,
             "diffuse",
+            None,
         )?;
         let normal_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.normal_texture_data.as_ref(),
+            mat.normal_texture_data.as_deref(),
             mat.normal_texture_path.as_ref(),
             true,
             &mat.name,
             "normal",
+            None,
         )?;
-        let orm_texture = load_or_create_orm(device, queue, mat)?;
+        let orm_texture = load_or_create_orm(device, queue, mat, None)?;
         let emissive_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.emissive_texture_data.as_ref(),
+            mat.emissive_texture_data.as_deref(),
             mat.emissive_texture_path.as_ref(),
             false,
             &mat.name,
             "emissive",
+            None,
         )?;
 
         let uniform = material::MaterialUniform {
@@ -167,6 +203,7 @@ pub fn upload_model(
             alpha_mode: mat.alpha_mode.into(),
             material_index: mat_idx as u32,
             _pad: [0.0; 3],
+            base_color: mat.base_color_factor,
         };
 
         gpu_materials.push(material::Material::new(
@@ -206,7 +243,11 @@ pub fn upload_model(
                 &mut mat.emissive_texture_data,
                 mat.emissive_texture_path.as_ref(),
             ),
-            base_color: mat.diffuse.unwrap_or([0.8, 0.8, 0.8]),
+            base_color: [
+                mat.base_color_factor[0],
+                mat.base_color_factor[1],
+                mat.base_color_factor[2],
+            ],
         });
     }
 
@@ -405,36 +446,40 @@ pub(crate) fn upload_cooked_materials(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    cache: &mut TextureCache,
 ) -> Result<Vec<material::Material>, RendererError> {
     let mut gpu_materials = Vec::with_capacity(materials.len().max(1));
     for (mat_idx, mat) in materials.iter().enumerate() {
         let diffuse_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.diffuse_texture_data.as_ref(),
+            mat.diffuse_texture_data.as_deref(),
             mat.diffuse_texture_path.as_ref(),
             false,
             &mat.name,
             "diffuse",
+            Some(cache),
         )?;
         let normal_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.normal_texture_data.as_ref(),
+            mat.normal_texture_data.as_deref(),
             mat.normal_texture_path.as_ref(),
             true,
             &mat.name,
             "normal",
+            Some(cache),
         )?;
-        let orm_texture = load_or_create_orm(device, queue, mat)?;
+        let orm_texture = load_or_create_orm(device, queue, mat, Some(cache))?;
         let emissive_texture = load_or_fallback_texture(
             device,
             queue,
-            mat.emissive_texture_data.as_ref(),
+            mat.emissive_texture_data.as_deref(),
             mat.emissive_texture_path.as_ref(),
             false,
             &mat.name,
             "emissive",
+            Some(cache),
         )?;
 
         let uniform = material::MaterialUniform {
@@ -446,6 +491,7 @@ pub(crate) fn upload_cooked_materials(
             alpha_mode: mat.alpha_mode.into(),
             material_index: mat_idx as u32,
             _pad: [0.0; 3],
+            base_color: mat.base_color_factor,
         };
 
         gpu_materials.push(material::Material::new(
@@ -496,7 +542,13 @@ pub fn load_texture(
     queue: &wgpu::Queue,
 ) -> Result<texture::Texture, RendererError> {
     let data = load_binary(file_path)?;
-    texture::Texture::from_bytes(device, queue, &data, file_path, is_normal_map)
+    texture::Texture::from_bytes(
+        device,
+        queue,
+        &data,
+        file_path,
+        texture::TextureOpts::material(is_normal_map),
+    )
 }
 
 pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::Mesh {
@@ -600,17 +652,24 @@ fn create_default_texture_colored(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     rgba: [u8; 4],
-) -> Result<texture::Texture, RendererError> {
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     let img =
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
-    texture::Texture::from_image(device, queue, &img, Some("default_texture"), false)
+    texture::Texture::from_image(
+        device,
+        queue,
+        &img,
+        Some("default_texture"),
+        texture::TextureOpts::flat(false),
+    )
+    .map(std::sync::Arc::new)
 }
 
 fn create_default_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     is_normal_map: bool,
-) -> Result<texture::Texture, RendererError> {
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     let color = if is_normal_map {
         image::Rgba([128u8, 128, 255, 255])
     } else {
@@ -619,13 +678,20 @@ fn create_default_texture(
 
     let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, color));
 
-    texture::Texture::from_image(device, queue, &img, Some("default_texture"), is_normal_map)
+    texture::Texture::from_image(
+        device,
+        queue,
+        &img,
+        Some("default_texture"),
+        texture::TextureOpts::flat(is_normal_map),
+    )
+    .map(std::sync::Arc::new)
 }
 
 fn create_default_orm_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> Result<texture::Texture, RendererError> {
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -633,14 +699,15 @@ fn create_default_orm_texture(
         1,
         1,
         Some("default_orm"),
-        true,
+        texture::TextureOpts::flat(true),
     )
+    .map(std::sync::Arc::new)
 }
 
 fn create_default_emissive_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> Result<texture::Texture, RendererError> {
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     texture::Texture::from_raw_rgba(
         device,
         queue,
@@ -648,10 +715,12 @@ fn create_default_emissive_texture(
         1,
         1,
         Some("default_emissive"),
-        false,
+        texture::TextureOpts::flat(false),
     )
+    .map(std::sync::Arc::new)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_or_fallback_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -660,18 +729,25 @@ fn load_or_fallback_texture(
     is_linear: bool,
     mat_name: &str,
     kind: &str,
-) -> Result<texture::Texture, RendererError> {
+    cache: Option<&mut TextureCache>,
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     if let Some(data) = embedded {
-        texture::Texture::from_raw_rgba(
-            device,
-            queue,
-            &data.pixels,
-            data.width,
-            data.height,
-            Some(mat_name),
-            is_linear,
-        )
-        .or_else(|e| {
+        let build = || {
+            texture::Texture::from_raw_rgba(
+                device,
+                queue,
+                &data.pixels,
+                data.width,
+                data.height,
+                Some(mat_name),
+                texture::TextureOpts::material(is_linear),
+            )
+        };
+        let built = match cache {
+            Some(cache) => cache.get_or_try_insert((data.hash, is_linear), build),
+            None => build().map(std::sync::Arc::new),
+        };
+        built.or_else(|e| {
             tracing::warn!("Failed to load embedded {kind} texture: {e}");
             create_default_texture(device, queue, is_linear)
         })
@@ -680,10 +756,12 @@ fn load_or_fallback_texture(
             #[cfg(feature = "std-fs")]
             Some(p) => {
                 let p_str = p.to_string_lossy();
-                load_texture(&p_str, is_linear, device, queue).or_else(|e| {
-                    tracing::warn!("Failed to load {kind} texture '{}': {e}", p.display());
-                    create_default_texture(device, queue, is_linear)
-                })
+                load_texture(&p_str, is_linear, device, queue)
+                    .map(std::sync::Arc::new)
+                    .or_else(|e| {
+                        tracing::warn!("Failed to load {kind} texture '{}': {e}", p.display());
+                        create_default_texture(device, queue, is_linear)
+                    })
             }
             // Without std-fs there is no filesystem to chase texture paths
             // into; a path-only reference degrades to the default texture
@@ -713,18 +791,20 @@ fn load_or_create_orm(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     mat: &RawMaterialData,
-) -> Result<texture::Texture, RendererError> {
+    mut cache: Option<&mut TextureCache>,
+) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
     let mr_tex = if mat.metallic_roughness_texture_data.is_some()
         || mat.metallic_roughness_texture_path.is_some()
     {
         load_or_fallback_texture(
             device,
             queue,
-            mat.metallic_roughness_texture_data.as_ref(),
+            mat.metallic_roughness_texture_data.as_deref(),
             mat.metallic_roughness_texture_path.as_ref(),
             true,
             &mat.name,
             "orm",
+            cache.as_deref_mut(),
         )?
     } else {
         return create_default_orm_texture(device, queue);
@@ -744,18 +824,24 @@ fn load_or_create_orm(
 
         if let Some(ref occ_data) = mat.occlusion_texture_data
             && let Some(composited) =
-                composite_orm_pixels(mat.metallic_roughness_texture_data.as_ref(), occ_data)
+                composite_orm_pixels(mat.metallic_roughness_texture_data.as_deref(), occ_data)
         {
-            return Ok(texture::Texture::from_raw_rgba(
-                device,
-                queue,
-                &composited.pixels,
-                composited.width,
-                composited.height,
-                Some(&mat.name),
-                true,
-            )
-            .unwrap_or(mr_tex));
+            let build = || {
+                texture::Texture::from_raw_rgba(
+                    device,
+                    queue,
+                    &composited.pixels,
+                    composited.width,
+                    composited.height,
+                    Some(&mat.name),
+                    texture::TextureOpts::material(true),
+                )
+            };
+            let built = match cache {
+                Some(cache) => cache.get_or_try_insert((composited.hash, true), build),
+                None => build().map(std::sync::Arc::new),
+            };
+            return Ok(built.unwrap_or(mr_tex));
         }
     }
 
@@ -776,9 +862,5 @@ fn composite_orm_pixels(
             pixels[i] = occ_data.pixels[i];
         }
     }
-    Some(RawImageData {
-        pixels,
-        width: mr.width,
-        height: mr.height,
-    })
+    Some(RawImageData::new(pixels, mr.width, mr.height))
 }

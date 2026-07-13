@@ -79,6 +79,7 @@ fn common_params(accept: &[&str]) -> Vec<ParamSpec> {
 /// One import node's format specifics.
 struct Format {
     type_id: &'static str,
+    version: u32,
     display_name: &'static str,
     accept: &'static [&'static str],
     doc: &'static str,
@@ -108,7 +109,7 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
     specific.extend((f.extra)());
     NodeTypeDescriptor {
         type_id: f.type_id,
-        version: 2,
+        version: f.version,
         display_name: f.display_name,
         category: Category::Import,
         contexts: ContextMask::SUBFLOW,
@@ -125,24 +126,29 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
 
 const OBJ: Format = Format {
     type_id: "import_obj",
+    // v3: gains `preserve_materials` (Phase 13); the strip migration's
+    // v2 step is a no-op and the new param default-fills on load.
+    version: 3,
     display_name: "Import OBJ",
     accept: &[".obj"],
     doc: "Loads a Wavefront OBJ (MTL and textures via the asset resolver).",
     aliases: &["obj", "wavefront", "import"],
-    extra: Vec::new,
+    extra: preserve_materials_extra,
     migrate: migrate_strip_rendering_group,
 };
 const GLTF: Format = Format {
     type_id: "import_gltf",
+    version: 2,
     display_name: "Import glTF",
     accept: &[".gltf", ".glb"],
     doc: "Loads a glTF or GLB model.",
     aliases: &["gltf", "glb", "import"],
-    extra: gltf_extra,
+    extra: preserve_materials_extra,
     migrate: migrate_strip_rendering_group,
 };
 const STL: Format = Format {
     type_id: "import_stl",
+    version: 2,
     display_name: "Import STL",
     accept: &[".stl"],
     doc: "Loads a binary or ASCII STL mesh.",
@@ -152,6 +158,7 @@ const STL: Format = Format {
 };
 const PLY: Format = Format {
     type_id: "import_ply",
+    version: 2,
     display_name: "Import PLY",
     accept: &[".ply"],
     doc: "Loads a binary or ASCII PLY mesh.",
@@ -160,7 +167,11 @@ const PLY: Format = Format {
     migrate: migrate_ply,
 };
 
-fn gltf_extra() -> Vec<ParamSpec> {
+/// The `preserve_materials` checkbox, shared by the two formats that carry
+/// materials (OBJ via MTL, glTF natively). Off replaces every material
+/// with the renderer's neutral default. STL and PLY have no materials and
+/// no checkbox.
+fn preserve_materials_extra() -> Vec<ParamSpec> {
     vec![ParamSpec::new(
         "preserve_materials",
         "Preserve Materials",
@@ -247,7 +258,8 @@ fn import_options(p: &ResolvedParams, format: &str) -> ImportOptions {
         scale: p.f32("scale"),
         center_to_origin: p.bool("center_to_origin"),
         recompute_normals: (format == "stl").then(|| p.bool("recompute_normals")),
-        preserve_materials: matches!(format, "gltf" | "glb").then(|| p.bool("preserve_materials")),
+        preserve_materials: matches!(format, "gltf" | "glb" | "obj")
+            .then(|| p.bool("preserve_materials")),
     }
 }
 
@@ -523,5 +535,32 @@ mod tests {
         );
         assert_eq!(kept.materials.len(), 1);
         assert_eq!(kept.meshes[0].material_index, Some(0));
+    }
+
+    /// `preserve_materials` is read exactly for the formats that declare
+    /// it (OBJ and glTF/GLB); STL and PLY never see it, so `import_options`
+    /// cannot touch a param their descriptors lack.
+    #[test]
+    fn import_options_reads_preserve_materials_per_format() {
+        let resolved_defaults = |desc: fn() -> crate::registry::NodeTypeDescriptor| {
+            crate::registry::resolve::resolve_params(
+                &std::collections::BTreeMap::new(),
+                &desc().params,
+            )
+            .unwrap()
+        };
+
+        let obj = import_options(&resolved_defaults(obj_descriptor), "obj");
+        assert_eq!(obj.preserve_materials, Some(true), "obj declares it");
+
+        let gltf = import_options(&resolved_defaults(gltf_descriptor), "gltf");
+        assert_eq!(gltf.preserve_materials, Some(true), "gltf declares it");
+        let glb = import_options(&resolved_defaults(gltf_descriptor), "glb");
+        assert_eq!(glb.preserve_materials, Some(true), "glb declares it");
+
+        let stl = import_options(&resolved_defaults(stl_descriptor), "stl");
+        assert_eq!(stl.preserve_materials, None, "stl has no materials");
+        let ply = import_options(&resolved_defaults(ply_descriptor), "ply");
+        assert_eq!(ply.preserve_materials, None, "ply has no materials");
     }
 }

@@ -10,6 +10,7 @@ import {
   DATA_TYPE_COLOR,
   coercionKind,
   connectionLegal,
+  dataTypeShape,
   descriptorFor,
   isSupportedParamType,
   portDataType,
@@ -26,6 +27,7 @@ const PROBE: NodeTypeSnapshot = {
   subflowContext: true,
   inputs: [
     { key: "geometry", label: "Geometry", dataType: "geometry", variadic: false, required: false, min: 0, isDefault: true, doc: "" },
+    { key: "detail_map", label: "Detail Map", dataType: "image", variadic: false, required: false, min: 0, isDefault: false, doc: "" },
   ],
   outputs: [
     { key: "geometry", label: "Geometry", dataType: "geometry", variadic: false, required: false, min: 0, isDefault: true, doc: "" },
@@ -36,7 +38,7 @@ const PROBE: NodeTypeSnapshot = {
     { key: "capped", label: "Capped", group: "geometry", paramType: "bool", enumVariants: [], accept: [], default: true, hard: null, soft: null, step: null, unit: "none", doc: "" },
     { key: "mode", label: "Mode", group: "shape", paramType: "enum", enumVariants: [["a", "Alpha"], ["b", "Beta"]], accept: [], default: "a", hard: null, soft: null, step: null, unit: "none", doc: "" },
     { key: "offset", label: "Offset", group: "shape", paramType: "vec3", enumVariants: [], accept: [], default: [0, 0, 0], hard: null, soft: null, step: 0.01, unit: "none", doc: "" },
-    { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", doc: "" },
+    { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", drivenByPort: "detail_map", doc: "" },
   ],
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
@@ -51,6 +53,7 @@ const SNAP: RegistrySnapshot = {
     { from: "geometry", to: "geometry", kind: "same" },
     { from: "float", to: "int", kind: "lossy" },
     { from: "int", to: "float", kind: "lossless" },
+    { from: "image", to: "image", kind: "same" },
   ],
 };
 
@@ -71,6 +74,25 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // The matrix still classifies lossy/lossless for the frontend rings.
     expect(coercionKind(SNAP, "float", "int")).toBe("lossy");
     expect(coercionKind(SNAP, "int", "float")).toBe("lossless");
+  });
+
+  it("speaks the Image vocabulary (Phase 13's sanctioned addition)", () => {
+    const map = portDataType(SNAP, "probe", "detail_map", "input");
+    expect(map).toBe("image");
+    // Distinct hue and the resource (hexagon) shape.
+    expect(DATA_TYPE_COLOR[map!]).toBeDefined();
+    expect(dataTypeShape(map!)).toBe("hexagon");
+    // Image wires only into Image; nothing coerces across.
+    expect(coercionKind(SNAP, "image", "image")).toBe("same");
+    expect(coercionKind(SNAP, "image", "geometry")).toBeNull();
+    expect(coercionKind(SNAP, "float", "image")).toBeNull();
+    // The map-overrides-factor link is plain snapshot data: the panel's
+    // dim predicate needs only the param's drivenByPort and the node's
+    // edges, never per-node code.
+    const probe = descriptorFor(SNAP, "probe")!;
+    const tint = probe.params.find((p) => p.key === "tint")!;
+    expect(tint.drivenByPort).toBe("detail_map");
+    expect(probe.inputs.some((i) => i.key === tint.drivenByPort)).toBe(true);
   });
 
   it("renders a widget for every one of its params (no unsupported type)", () => {

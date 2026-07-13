@@ -351,7 +351,7 @@ impl CookEngine {
                 // output can commit when the result arrives.
                 let passthrough = match &request {
                     JobRequest::ValidateGeometry { geometry, .. } => Some(Arc::clone(geometry)),
-                    JobRequest::ParseModel { .. } => None,
+                    JobRequest::ParseModel { .. } | JobRequest::DecodeImage { .. } => None,
                 };
                 let job = JobId(self.next_job);
                 self.next_job += 1;
@@ -568,7 +568,17 @@ impl CookEngine {
                 self.commit_outputs(node, outputs, 0.0, &mut report);
                 self.commit_validation(node, Some(result), &mut report);
             }
-            super::JobResult::Model(Err(message)) | super::JobResult::Report(Err(message)) => {
+            super::JobResult::Image(Ok(image)) => {
+                self.commit_outputs(
+                    node,
+                    Outputs::single("image", Value::Image(image)),
+                    0.0,
+                    &mut report,
+                );
+            }
+            super::JobResult::Model(Err(message))
+            | super::JobResult::Report(Err(message))
+            | super::JobResult::Image(Err(message)) => {
                 self.commit_error(node, &CookError::Failed { message }, &mut report);
             }
         }

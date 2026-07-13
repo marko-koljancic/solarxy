@@ -26,6 +26,9 @@ gltf = "1.4"
 # Percent-decoding for glTF URIs handed to the AssetResolver (matches the
 # gltf importer's own handling; already in the tree via gltf).
 urlencoding = "2"
+# data:-URI image payloads (embedded .gltf textures) decode through the
+# same shared image path as external files; already in the tree.
+base64 = "0.22"
 tracing = "0.1"
 # Texture decode for the byte-first loaders (MTL map_Kd etc.); the same
 # crate/features the renderer uses, so the wasm build gains no new weight.
