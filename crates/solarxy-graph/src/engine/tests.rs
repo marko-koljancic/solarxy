@@ -3014,3 +3014,268 @@ fn image_material_uv_project_chain_cooks_end_to_end() {
         "connected map neutralizes the factor"
     );
 }
+
+/// All six Phase 15 nodes: they cook, they survive a `.slxy` round trip with
+/// their params and the switch's variadic wire order intact, and an undo of the
+/// last edit restores the document exactly.
+#[test]
+fn phase15_nodes_cook_round_trip_and_undo() {
+    let (mut e, ctx) = subflow_engine();
+
+    let prim = add(&mut e, ctx, "box");
+    let arr = add(&mut e, ctx, "array");
+    let mir = add(&mut e, ctx, "mirror");
+    let del = add(&mut e, ctx, "delete");
+    let bnd = add(&mut e, ctx, "bounds");
+    let nul = add(&mut e, ctx, "null");
+    let sw = add(&mut e, ctx, "switch");
+
+    // box -> array -> mirror -> delete -> null -> switch (wire 0)
+    // box -> bounds ----------------------------> switch (wire 1)
+    // Everything sits upstream of the switch, because the cook is demand-driven
+    // from the display flag: a dead-end branch would never cook at all.
+    for (from, to, to_port) in [
+        (prim, arr, "geometry"),
+        (arr, mir, "geometry"),
+        (mir, del, "geometry"),
+        (del, nul, "geometry"),
+        (prim, bnd, "geometry"),
+        (nul, sw, "inputs"),
+        (bnd, sw, "inputs"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: to_port.into(),
+            },
+        })
+        .unwrap();
+    }
+
+    // Non-default params on every new node, so the round trip has something to
+    // lose.
+    for (node, key, value) in [
+        (arr, "count", ParamValue::Int(5)),
+        (arr, "mode", ParamValue::Enum("radial".into())),
+        (arr, "radius", ParamValue::Float(2.5)),
+        (mir, "axis", ParamValue::Enum("z".into())),
+        (mir, "offset", ParamValue::Float(1.5)),
+        (mir, "keep_original", ParamValue::Bool(false)),
+        (del, "mode", ParamValue::Enum("normal".into())),
+        (del, "angle", ParamValue::Float(30.0)),
+        (del, "invert", ParamValue::Bool(true)),
+        (bnd, "mode", ParamValue::Enum("center".into())),
+        (bnd, "marker_size", ParamValue::Float(0.4)),
+        (sw, "index", ParamValue::Int(1)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx,
+            node,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(sw),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    // Every one of the six produced geometry.
+    for (node, label) in [
+        (arr, "array"),
+        (mir, "mirror"),
+        (del, "delete"),
+        (bnd, "bounds"),
+        (nul, "null"),
+        (sw, "switch"),
+    ] {
+        let outputs = e
+            .cook
+            .outputs(node)
+            .unwrap_or_else(|| panic!("{label} cooked"));
+        assert!(
+            outputs
+                .get("geometry")
+                .and_then(crate::registry::coerce::Value::as_geometry)
+                .is_some(),
+            "{label} produced geometry"
+        );
+    }
+
+    // The switch is on index 1: the SECOND wire, which is bounds (a 0.4 marker
+    // cube), not delete. Its bounds prove which branch came through.
+    let picked = e
+        .cook
+        .outputs(sw)
+        .unwrap()
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .unwrap()
+        .clone();
+    let size = picked.bounds.size();
+    assert!(
+        (size.x - 0.4).abs() < 1e-4,
+        "switch index 1 selected the bounds marker, not delete: {:?}",
+        picked.bounds
+    );
+
+    // Round trip through .slxy: params, wire order, and the display flag.
+    let before = fingerprint(&e, ctx);
+    let bytes = e.save_slxy(&SceneSidecar::default()).expect("save .slxy");
+    let mut e2 = engine();
+    e2.load_slxy(&bytes).expect("load");
+    assert_eq!(
+        fingerprint(&e2, ctx),
+        before,
+        ".slxy round trip is lossless"
+    );
+
+    // And the loaded document still cooks to the same selection.
+    e2.cook(&mut || true);
+    let reloaded = e2
+        .cook
+        .outputs(sw)
+        .expect("switch cooked after load")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .unwrap()
+        .clone();
+    let size2 = reloaded.bounds.size();
+    assert!((size2.x - 0.4).abs() < 1e-4, "same branch after reload");
+
+    // Undo the last param edit and land back on the previous document exactly.
+    let before_edit = fingerprint(&e, ctx);
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(9)),
+    })
+    .unwrap();
+    assert_ne!(fingerprint(&e, ctx), before_edit, "the edit landed");
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(fingerprint(&e, ctx), before_edit, "undo restored it");
+}
+
+/// The Phase 15 exit chain, and the reason `material` had to land before the
+/// modeling wave: a textured material must survive duplication. box -> material
+/// -> array -> mirror, with the material assigned BEFORE the copies are made, so
+/// every copy has to carry it and merge's content-hash dedup has to collapse
+/// them back to one table entry.
+#[test]
+fn materials_survive_array_and_mirror() {
+    let (mut e, ctx) = subflow_engine();
+    let asset = e.stage_asset("red.png", "image/png", red_png());
+
+    let prim = add(&mut e, ctx, "box");
+    let img = add(&mut e, ctx, "import_image");
+    let mat = add(&mut e, ctx, "material");
+    let arr = add(&mut e, ctx, "array");
+    let mir = add(&mut e, ctx, "mirror");
+
+    for (from, from_port, to, to_port) in [
+        (prim, "geometry", mat, "geometry"),
+        (img, "image", mat, "base_color_map"),
+        (mat, "geometry", arr, "geometry"),
+        (arr, "geometry", mir, "geometry"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: from_port.into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: to_port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: img,
+        key: "file".into(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: mat,
+        key: "material_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("textured".into())),
+    })
+    .unwrap();
+    // 4 copies, stepped clear of each other on X.
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(4)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "offset".into(),
+        value: ParamSource::Literal(ParamValue::Vec3([3.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    // Mirror the whole row across x = 0, keeping the original.
+    e.apply(Command::SetParam {
+        ctx,
+        node: mir,
+        key: "keep_original".into(),
+        value: ParamSource::Literal(ParamValue::Bool(true)),
+    })
+    .unwrap();
+
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(mir),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let outputs = e.cook.outputs(mir).expect("chain cooked");
+    let set = outputs
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("geometry out");
+
+    // 4 copies from the array, doubled by the mirror.
+    assert_eq!(set.mesh_count(), 8, "array x mirror produced 8 meshes");
+
+    // The whole point: one material entry, shared by every copy, still carrying
+    // the texture. A merge that failed to dedup would give 8 identical entries;
+    // a bake that dropped materials would give 0.
+    assert_eq!(
+        set.materials.len(),
+        1,
+        "the 8 copies dedup back to one material"
+    );
+    let m = &set.materials[0];
+    assert_eq!(m.name, "textured");
+    let tex = m.diffuse_texture_data.as_ref().expect("texture survived");
+    assert_eq!(tex.pixels, vec![255, 0, 0, 255]);
+    for mesh in &set.meshes {
+        assert_eq!(mesh.material_index, Some(0), "every copy points at it");
+    }
+
+    // The mirror half really is mirrored: the row runs +X, so the reflection
+    // must reach into -X.
+    assert!(
+        set.bounds.min.x < -3.0 && set.bounds.max.x > 3.0,
+        "both halves present: {:?}",
+        set.bounds
+    );
+}

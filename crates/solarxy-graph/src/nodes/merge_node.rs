@@ -62,10 +62,16 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn variadic_inputs(sets: Vec<GeometrySet>) -> Inputs {
-        let values = sets
-            .into_iter()
-            .map(|s| Value::Geometry(Arc::new(s)))
-            .collect();
+        slots_from(
+            sets.into_iter()
+                .map(|s| Some(Value::Geometry(Arc::new(s))))
+                .collect(),
+        )
+    }
+
+    /// Holes included: a `None` is a connected wire whose upstream has no
+    /// committed value.
+    fn slots_from(values: Vec<Option<Value>>) -> Inputs {
         let mut slots = BTreeMap::new();
         slots.insert("inputs".to_string(), InputSlot::Variadic(values));
         Inputs::new(slots)
@@ -92,6 +98,39 @@ mod tests {
         assert_eq!(set.point_count(), 28);
         assert_eq!(set.mesh_count(), 2);
         assert!(cx.take_warnings().is_empty());
+    }
+
+    /// The gather keeps a hole for every connected wire whose upstream has no
+    /// committed value. Merge concatenates, so it must skip them and behave
+    /// exactly as if the wire were not there.
+    #[test]
+    fn holes_are_skipped_not_concatenated() {
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        let inputs = slots_from(vec![
+            Some(Value::Geometry(Arc::new(GeometrySet::from_mesh(
+                generate_box(1.0, 1.0, 1.0, 1, 1, 1),
+            )))),
+            None,
+            Some(Value::Geometry(Arc::new(GeometrySet::from_mesh(
+                generate_plane(1.0, 1.0, 1, 1),
+            )))),
+        ]);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("merge cooks synchronously");
+        };
+        let Some(Value::Geometry(set)) = out.get("geometry") else {
+            panic!("outputs geometry");
+        };
+        assert_eq!(
+            set.point_count(),
+            28,
+            "box + plane, the hole contributes nothing"
+        );
+        assert_eq!(set.mesh_count(), 2);
     }
 
     #[test]

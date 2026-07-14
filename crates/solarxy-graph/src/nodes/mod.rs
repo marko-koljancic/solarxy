@@ -22,13 +22,21 @@ mod torus_knot_node;
 mod torus_node;
 
 // Modifiers (subflow).
+mod array_node;
 mod compute_normals_node;
+mod delete_node;
 mod material_node;
 mod merge_node;
+mod mirror_node;
 mod subdivide_node;
 mod transform_node;
 mod uv_project_node;
 mod validate_node;
+
+// Utility (subflow).
+mod bounds_node;
+mod null_node;
+mod switch_node;
 
 // Container + utility + lights (root) and imports (subflow).
 mod geo_node;
@@ -65,6 +73,13 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         material_node::descriptor(),
         uv_project_node::descriptor(),
         subdivide_node::descriptor(),
+        array_node::descriptor(),
+        mirror_node::descriptor(),
+        delete_node::descriptor(),
+        // Utility (subflow).
+        null_node::descriptor(),
+        switch_node::descriptor(),
+        bounds_node::descriptor(),
         // Imports (subflow).
         imports::obj_descriptor(),
         imports::gltf_descriptor(),
@@ -128,8 +143,9 @@ mod tests {
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        // The 23 MVP node types plus import_image (Phase 13) and the
-        // Phase 14 wave: material, uv_project, subdivide.
-        assert_eq!(registry.len(), 27);
+        // The 23 MVP node types plus import_image (Phase 13), the Phase 14
+        // wave (material, uv_project, subdivide), and the Phase 15 modeling
+        // wave (array, mirror, delete, null, switch, bounds).
+        assert_eq!(registry.len(), 33);
     }
 }

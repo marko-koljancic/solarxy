@@ -50,8 +50,12 @@
     clippy::wildcard_imports
 )]
 
+pub mod array;
+pub mod bounds_geo;
+pub mod delete;
 mod error;
 pub mod merge;
+pub mod mirror;
 pub mod primitives;
 pub mod set;
 pub mod subdivide;

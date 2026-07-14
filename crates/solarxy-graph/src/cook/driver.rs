@@ -443,9 +443,15 @@ impl CookEngine {
                     );
                 }
                 Arity::Variadic { .. } => {
-                    let values: Vec<Value> = edges
+                    // One entry per connected edge, positionally aligned with
+                    // `port_order`: a wire whose upstream has no committed
+                    // value becomes a `None`, not a gap. Compacting here would
+                    // shift the selection under an index-based consumer
+                    // (`switch`) whenever an earlier wire errored or bypassed
+                    // to empty.
+                    let values: Vec<Option<Value>> = edges
                         .iter()
-                        .filter_map(|e| {
+                        .map(|e| {
                             self.upstream_value(e.from, &e.from_port)
                                 .and_then(|v| coerce_value(&v, port.data_type))
                         })

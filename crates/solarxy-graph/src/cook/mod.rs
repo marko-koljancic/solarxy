@@ -44,7 +44,16 @@ pub enum InputSlot {
     Single(Value),
     /// A variadic port's values in `port_order`, each coerced. May be
     /// empty (variadic `min: 0` with nothing connected).
-    Variadic(Vec<Value>),
+    ///
+    /// One entry per connected edge, positionally aligned with `port_order`.
+    /// A `None` is a connected wire whose upstream has no committed value
+    /// (it errored, is bypassed to empty, or has not cooked yet). Holes are
+    /// preserved rather than compacted away, because a node that selects an
+    /// input BY INDEX (`switch`) would otherwise silently pick the wrong
+    /// wire. Consumers that only concatenate (`merge`) skip the holes via
+    /// [`Inputs::geometry_list`]; consumers that index use
+    /// [`Inputs::geometry_slots`].
+    Variadic(Vec<Option<Value>>),
 }
 
 /// Everything gathered for one cook, keyed by input-port key.
@@ -73,12 +82,32 @@ impl Inputs {
         }
     }
 
-    /// The geometries on a variadic port, in port order.
+    /// The geometries on a variadic port, in port order, with holes skipped.
+    /// The right accessor for concatenating consumers like `merge`.
     #[must_use]
     pub fn geometry_list(&self, key: &str) -> Vec<&Arc<GeometrySet>> {
         match self.slot(key) {
-            InputSlot::Variadic(values) => values.iter().filter_map(Value::as_geometry).collect(),
+            InputSlot::Variadic(values) => values
+                .iter()
+                .filter_map(|v| v.as_ref().and_then(Value::as_geometry))
+                .collect(),
             InputSlot::Single(v) => v.as_geometry().into_iter().collect(),
+            InputSlot::Absent => Vec::new(),
+        }
+    }
+
+    /// The geometries on a variadic port, in port order, **with holes kept**.
+    /// One entry per connected wire, so `slots[i]` is the *i*th wire whatever
+    /// happened upstream of the others. The right accessor for consumers that
+    /// select by index (`switch`); see [`InputSlot::Variadic`].
+    #[must_use]
+    pub fn geometry_slots(&self, key: &str) -> Vec<Option<&Arc<GeometrySet>>> {
+        match self.slot(key) {
+            InputSlot::Variadic(values) => values
+                .iter()
+                .map(|v| v.as_ref().and_then(Value::as_geometry))
+                .collect(),
+            InputSlot::Single(v) => vec![v.as_geometry()],
             InputSlot::Absent => Vec::new(),
         }
     }
