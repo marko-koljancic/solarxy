@@ -270,6 +270,12 @@ pub struct AssetRecordJson {
     pub role: String,
     pub sha256: String,
     pub original_name: String,
+    /// Additional names the same bytes were staged under. Content-addressing
+    /// collapses byte-identical companions into one entry, so without these a
+    /// reload would forget every name but the first and report the others as
+    /// missing companions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alias_names: Vec<String>,
     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
     pub import_settings: JsonObject,
 }

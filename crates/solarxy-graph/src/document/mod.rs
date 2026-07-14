@@ -251,6 +251,49 @@ impl Graph {
         Ok(())
     }
 
+    /// Re-adds an edge at a specific position in its target's variadic
+    /// `port_order` (the undo of a disconnect).
+    ///
+    /// [`Graph::connect`] appends, which is right for a new wire and wrong for
+    /// a restored one: putting the wire back at the end silently reorders a
+    /// variadic port, changing what `merge` concatenates and which branch
+    /// `switch` selects by index. `slot` is ignored for a non-variadic target
+    /// and clamped if the order has since shrunk.
+    ///
+    /// # Errors
+    /// The same conditions as [`Graph::connect`].
+    pub fn connect_at(
+        &mut self,
+        edge: Edge,
+        to_variadic: bool,
+        slot: Option<usize>,
+    ) -> Result<(), GraphError> {
+        let (id, to, to_port) = (edge.id, edge.to, edge.to_port.clone());
+        self.connect(edge, to_variadic)?;
+
+        if !to_variadic {
+            return Ok(());
+        }
+        let Some(slot) = slot else { return Ok(()) };
+        let Some(order) = self
+            .nodes
+            .get_mut(&to)
+            .and_then(|n| n.port_order.get_mut(&to_port))
+        else {
+            return Ok(());
+        };
+        // `connect` just pushed it on the end; move it back to where it was.
+        let Some(cur) = order.iter().position(|&e| e == id) else {
+            return Ok(());
+        };
+        let target = slot.min(order.len() - 1);
+        if cur != target {
+            let e = order.remove(cur);
+            order.insert(target, e);
+        }
+        Ok(())
+    }
+
     /// Removes an edge, cleaning the target's `port_order`. Returns the
     /// removed edge for undo (which must reinsert it under the same id).
     pub fn disconnect(&mut self, id: EdgeId) -> Result<Edge, GraphError> {

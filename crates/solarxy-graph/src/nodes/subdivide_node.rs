@@ -1,25 +1,32 @@
 //! The `subdivide` node (Phase 14): linear 1-to-4 triangle subdivision
-//! with crack-free shared-edge midpoints and attribute interpolation.
-//! `scheme` is an enum with one variant so Catmull-Clark slots in later
-//! without a schema change; the iteration count is hard-capped and the
-//! kernel's output-triangle ceiling turns runaway growth into a cook
-//! error instead of a stall.
+//! with crack-free shared-edge midpoints and attribute interpolation. The
+//! iteration count is hard-capped and the kernel's output-triangle ceiling
+//! turns runaway growth into a cook error instead of a stall.
+//!
+//! v2 dropped `scheme` (Phase 15H param audit). It was an enum with a single
+//! variant, read by nothing, so the UI showed a dropdown with one option that
+//! did nothing -- exactly the dead-param class the Phase 8 audit removed. It was
+//! originally kept to reserve the key for Catmull-Clark, but a param that never
+//! had an effect must not freeze into schema v1; when a second scheme lands it
+//! comes back as an ordinary default-filling addition.
 
 use solarxy_kernel::subdivide::subdivide_linear;
 
-use super::common::{geometry_output, params_with};
+use super::common::{geometry_output, params_with, strip_keys};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
-use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType};
+use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{
+    BypassBehavior, Category, ContextMask, MigrateError, NodeTypeDescriptor, PortSpec,
+};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "subdivide",
-        version: 1,
+        version: 2,
         display_name: "Subdivide",
         category: Category::Modifiers,
         contexts: ContextMask::SUBFLOW,
@@ -30,15 +37,6 @@ pub fn descriptor() -> NodeTypeDescriptor {
         params: params_with(
             "Subdivide",
             vec![
-                ParamSpec::new(
-                    "scheme",
-                    "Scheme",
-                    "subdivision",
-                    ParamType::Enum {
-                        variants: vec![EnumVariant::new("linear", "Linear")],
-                    },
-                    ParamValue::Enum("linear".into()),
-                ),
                 ParamSpec::new(
                     "iterations",
                     "Iterations",
@@ -58,8 +56,23 @@ pub fn descriptor() -> NodeTypeDescriptor {
               interpolating normals, UVs, and attributes.",
         search_aliases: &["subdivide", "smooth", "tessellate", "refine"],
         cook: cook_subdivide,
-        migrate: None,
+        migrate: Some(migrate_drop_scheme),
     }
+}
+
+/// v1 -> v2: silently drop `scheme`.
+///
+/// Silent rather than the registry's default drop-with-warning: the param never
+/// had any effect, so a toast about losing it would be noise about nothing.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+fn migrate_drop_scheme(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 {
+        strip_keys(params, &["scheme"]);
+    }
+    Ok(())
 }
 
 fn cook_subdivide(

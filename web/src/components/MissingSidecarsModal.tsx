@@ -82,7 +82,8 @@ export function MissingSidecarsModal() {
         {optional.length > 0 && (
           <div className="sidecar-group">
             <div className="sidecar-group-title">
-              Optional (materials and textures; not yet rendered on web)
+              Optional (materials and textures; the model loads without them,
+              untextured)
             </div>
             <ul className="sidecar-list">
               {optional.map((n) => (

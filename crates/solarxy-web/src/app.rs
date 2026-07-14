@@ -556,6 +556,12 @@ impl SolarxyApp {
         self.sync_visualization();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
+        // `f64::clamp` RETURNS NaN for a NaN input (every comparison with NaN is
+        // false), so the clamp alone is not a guard. A non-finite delta reaching
+        // a camera transition integrates straight into eye/target, and the next
+        // projection panics inside cgmath with a NaN far plane. Callers are
+        // supposed to pass a real frame delta; treat anything else as one frame.
+        let dt_ms = if dt_ms.is_finite() { dt_ms } else { 16.0 };
         let dt = (dt_ms / 1000.0).clamp(0.0, 0.1) as f32;
         for cam in self.view.cameras.iter_mut().flatten() {
             cam.update(&self.queue, dt);

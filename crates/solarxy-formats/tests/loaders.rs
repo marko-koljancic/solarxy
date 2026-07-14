@@ -339,3 +339,39 @@ fn obj_map_kd_decodes_through_resolver() {
     let raw = obj::load_obj_bytes(&fixture_bytes("textured.obj"), &mut resolver).unwrap();
     assert_textured_quad(&raw);
 }
+
+/// The `DirResolver` must refuse to escape its base directory, or a malicious
+/// model's `mtllib`/`map_Kd`/glTF `uri` becomes an arbitrary local-file read
+/// (and, for the server-side `solarxy-validate` library, an LFI oracle).
+#[test]
+fn dir_resolver_rejects_path_traversal() {
+    let dir = Path::new(&fixture("textured.obj"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let mut resolver = DirResolver::new(&dir);
+
+    // A legitimate sibling still resolves.
+    assert!(
+        resolver.read("texel.png").is_some(),
+        "a normal companion beside the model must still load"
+    );
+
+    // Every escape shape is refused.
+    for evil in [
+        "../../../../etc/passwd",
+        "../Cargo.toml",
+        "/etc/hosts",
+        "..\\..\\windows\\win.ini",
+        "sub/../../Cargo.toml",
+    ] {
+        assert!(
+            resolver.read(evil).is_none(),
+            "traversal must be rejected: {evil:?}"
+        );
+    }
+
+    // And a real file just outside the base, reached by name, is not readable
+    // even though it exists (the crate's own Cargo.toml sits two levels up).
+    assert!(resolver.read("../../Cargo.toml").is_none());
+}

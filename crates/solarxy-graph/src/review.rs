@@ -168,7 +168,8 @@ const HASH_MASK: u64 = (1 << 53) - 1;
 /// FNV-1a over: mesh count; per mesh the position/index counts and an index
 /// checksum; the total triangle count; and the union AABB with each
 /// coordinate quantized to `round(c * 1e3)` so sub-millimeter float jitter
-/// does not flag re-anchoring. Truncated to 53 bits ([`HASH_MASK`]).
+/// does not flag re-anchoring. Truncated to 53 bits, so the value survives the
+/// JS number boundary intact.
 #[must_use]
 pub fn geometry_hash(set: &solarxy_kernel::GeometrySet) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

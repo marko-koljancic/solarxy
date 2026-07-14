@@ -1,0 +1,154 @@
+name: Web Release
+
+# Builds the Solarxy Web bundle and attaches it to the GitHub Release as
+# `solarxy-web-<tag>.tar.gz` (plus a `.sha256`). The VPS pulls that artifact --
+# it does not build anything, and it holds no credentials for this repo.
+#
+# UNLIKE the four package-channel jobs (homebrew / winget / flathub / ghcr),
+# this one does NOT skip prereleases. That is deliberate and load-bearing: an
+# `-rc.*` tag is how the whole deploy is rehearsed (real artifact, real download,
+# real nginx, real rollback) without touching a single irreversible channel.
+#
+# Invocation:
+#   - `workflow_call` -- from cargo-dist's release.yml via post-announce-jobs
+#     (see dist-workspace.toml). Same graph as the release, so the GITHUB_TOKEN
+#     chain restriction on `release: published` does not apply.
+#   - `workflow_dispatch` -- manual re-upload against an existing tag, for
+#     retries without re-tagging.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: cargo-dist dist-manifest JSON payload.
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v0.7.0-rc.1). The bundle uploads to that release.
+        required: true
+
+permissions:
+  contents: write        # gh release upload
+
+env:
+  # The wasm budget, on the COMPRESSED artifact. gzip is what nginx actually
+  # serves (the box has gzip_static; it has no brotli module), so gzip is what we
+  # gate on. Current: ~1.32 MB.
+  WASM_GZIP_BUDGET_BYTES: 2621440   # 2.5 MiB
+
+jobs:
+  bundle:
+    name: Build and upload the web bundle
+    runs-on: ubuntu-latest
+    env:
+      # Detect invocation mode by input presence: `github.event_name` in a
+      # reusable workflow reflects the CALLER's event, not `workflow_call`.
+      TAG: ${{ inputs.plan != '' && fromJson(inputs.plan).announcement_tag || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@1.92
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Must match the Cargo pin exactly or the generated glue and the wasm
+      # disagree at runtime, surfacing as an inscrutable boot failure.
+      # build-wasm.sh asserts this too; installing the right one here is what
+      # makes the assertion pass.
+      - name: Install wasm-bindgen-cli
+        run: |
+          VERSION=0.2.126
+          curl -fsSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin \
+              "wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen"
+          wasm-bindgen --version
+
+      - name: Install binaryen (wasm-opt)
+        run: |
+          VERSION=123
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/version_${VERSION}/binaryen-version_${VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz -C /tmp
+          echo "/tmp/binaryen-version_${VERSION}/bin" >> "$GITHUB_PATH"
+
+      # --profile dist: fat LTO. Measured, it does NOT shrink the wasm (wasm-opt
+      # -Oz already subsumes what LTO contributes -- see build-wasm.sh). It is
+      # used here because a release is infrequent and the codegen may be better;
+      # it is not a size lever. The size lever was the JS bundle.
+      - name: Build wasm (dist profile)
+        run: bash crates/solarxy-web/build-wasm.sh web/src/wasm/pkg --dist
+
+      - name: Install frontend deps
+        working-directory: web
+        run: npm ci
+
+      # `npm run build` does NOT build the wasm (only `predev` does), which is
+      # why the step above is separate and must come first.
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+
+      - name: Pre-compress assets for gzip_static
+        working-directory: web/dist
+        run: |
+          # nginx `gzip_static on` serves `<file>.gz` when it exists, so the big
+          # assets cost zero CPU per request. The ORIGINALS are kept: a client
+          # that does not send Accept-Encoding: gzip still needs them.
+          find . -type f \
+            \( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.svg' \) \
+            -exec gzip -9 -k {} \;
+          echo "--- bundle ---"
+          find . -type f | sort | while read -r f; do
+            printf '%10s  %s\n' "$(stat -c%s "$f")" "$f"
+          done
+
+      - name: Enforce the payload budget
+        working-directory: web/dist
+        run: |
+          WASM_GZ=$(find . -name '*_bg*.wasm.gz' -print -quit)
+          if [ -z "$WASM_GZ" ]; then
+            echo "::error::No compressed wasm found in the bundle. The build is broken."
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$WASM_GZ")
+          echo "wasm (gzip): $SIZE bytes / budget $WASM_GZIP_BUDGET_BYTES"
+          if [ "$SIZE" -gt "$WASM_GZIP_BUDGET_BYTES" ]; then
+            echo "::error::wasm is $SIZE bytes gzipped, over the $WASM_GZIP_BUDGET_BYTES budget."
+            exit 1
+          fi
+          # Eager JS is what actually gates cold load; report it so a regression
+          # is visible in the log even though it is not a hard gate. `elk*` is
+          # excluded because it is dynamically imported and never on the boot path.
+          JS_GZ=$(find . -name '*.js.gz' ! -name 'elk*' -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
+          echo "::notice::eager JS (gzip): ${JS_GZ} bytes; wasm (gzip): ${SIZE} bytes"
+
+      - name: Package
+        run: |
+          # A single top-level directory in the tarball, so the deploy script's
+          # `tar --strip-components=1` lands the files directly in releases/<tag>/.
+          STAGE="solarxy-web-${TAG}"
+          mkdir -p "$STAGE"
+          cp -R web/dist/. "$STAGE/"
+          tar -czf "solarxy-web-${TAG}.tar.gz" "$STAGE"
+          sha256sum "solarxy-web-${TAG}.tar.gz" > "solarxy-web-${TAG}.tar.gz.sha256"
+          cat "solarxy-web-${TAG}.tar.gz.sha256"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$TAG" \
+            "solarxy-web-${TAG}.tar.gz" \
+            "solarxy-web-${TAG}.tar.gz.sha256" \
+            --clobber

@@ -1,10 +1,10 @@
-//! Regenerates `schemas/slxy-scene.v0.json` from the canonical
+//! Regenerates `schemas/slxy-scene.v1.json` from the canonical
 //! [`solarxy_scenefile::SceneJson`] type via `schemars`. Run from the
 //! workspace root:
 //!
 //! ```text
 //! cargo run -p solarxy-scenefile --features schemars-gen --example gen_schemas \
-//!     > schemas/slxy-scene.v0.json
+//!     > schemas/slxy-scene.v1.json
 //! ```
 //!
 //! The companion test `tests/schema_drift.rs` asserts the checked-in file

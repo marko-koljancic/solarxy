@@ -4,6 +4,13 @@
     "AssetRecordJson": {
       "description": "One semantic asset record in `scene.json`. `id` and `sha256` are the same content hash today; `role` distinguishes imports from future environment/texture assets.",
       "properties": {
+        "alias_names": {
+          "description": "Additional names the same bytes were staged under. Content-addressing collapses byte-identical companions into one entry, so without these a reload would forget every name but the first and report the others as missing companions.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },

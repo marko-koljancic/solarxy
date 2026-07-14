@@ -86,7 +86,7 @@ pub fn rendering_params() -> Vec<ParamSpec> {
 /// Removes raw param keys before the registry-default migration sees them,
 /// so a deliberate drop produces no load warning (the dropped params never
 /// did anything; a toast about them would be noise).
-fn strip_keys(params: &mut serde_json::Map<String, serde_json::Value>, keys: &[&str]) {
+pub(super) fn strip_keys(params: &mut serde_json::Map<String, serde_json::Value>, keys: &[&str]) {
     for key in keys {
         params.remove(*key);
     }

@@ -9,10 +9,11 @@
 //!
 //! Self-containment is the promise: the file embeds every referenced asset,
 //! and geometry is never baked in (graphs recompute on load), so files stay
-//! small and honestly parametric. Versioning is an integer `schema_version`
-//! (0 pre-beta with no guarantees, frozen at 1 at public beta) plus a
-//! `min_reader` floor that hard-rejects files from a newer writer; unknown
-//! fields are accepted with a warning rather than rejected.
+//! small and honestly parametric. Versioning is an integer `schema_version`,
+//! **frozen at 1** as of the v0.7.0 public beta (0 was the pre-beta format and
+//! still reads, migrating up), plus a `min_reader` floor that hard-rejects files
+//! from a newer writer; unknown fields are accepted with a warning rather than
+//! rejected. See `schemas/README.md` for the change policy.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
@@ -31,17 +32,25 @@ pub use scene::{
 
 use thiserror::Error;
 
-/// The schema version this build writes (0 = pre-beta, no compatibility
-/// guarantees; frozen at 1 at public beta).
-pub const SCHEMA_VERSION_CURRENT: u32 = 0;
+/// The schema version this build writes. **Frozen at 1 for the public beta**
+/// (v0.7.0): from here on, a change to the on-disk shape needs a version bump
+/// and a migration step in `migrate_scene`, not a silent edit.
+///
+/// Version 0 was the pre-beta format and carried no compatibility guarantees.
+/// It is still readable: the `0 -> 1` migration steps it up on load.
+pub const SCHEMA_VERSION_CURRENT: u32 = 1;
 
 /// The `min_reader` floor this build writes: the lowest reader version able
 /// to open files it produces.
-pub const MIN_READER_CURRENT: u32 = 0;
+pub const MIN_READER_CURRENT: u32 = 1;
 
 /// The reader version this build implements. A file whose `min_reader`
 /// exceeds this is refused with an upgrade message.
-pub const READER_VERSION: u32 = 0;
+///
+/// Moves in lockstep with [`MIN_READER_CURRENT`]. If it did not, this build
+/// would write files (`min_reader: 1`) that its own reader then rejected as
+/// "too new".
+pub const READER_VERSION: u32 = 1;
 
 /// The two required archive entries.
 const MANIFEST_ENTRY: &str = "manifest.json";
@@ -67,6 +76,8 @@ pub enum SceneFileError {
     TooNew { required: u32, reader: u32 },
     #[error("unsupported schema_version {0}")]
     UnsupportedVersion(u32),
+    #[error("scene.json is missing the required `{0}` field; this is not a Solarxy scene")]
+    MissingVersionField(&'static str),
 }
 
 /// One embedded asset: its content hash, original name, MIME, and bytes.
@@ -170,7 +181,17 @@ pub fn read(bytes: &[u8]) -> Result<ReadResult, SceneFileError> {
         });
     }
 
-    let schema_version = read_u32(&scene_value, "schema_version");
+    // Absent must not mean zero. `read_u32` defaults to 0, which used to make a
+    // corrupt or foreign scene.json indistinguishable from a legitimate v0 file:
+    // it would be handed to the v0 migration and half-loaded. Every scene this
+    // project has ever written stamps the field, so its absence means the file is
+    // not one of ours. Tightened at the freeze, while no v1 files exist yet.
+    let schema_version = scene_value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+        .ok_or(SceneFileError::MissingVersionField("schema_version"))?;
+
     match schema_version.cmp(&SCHEMA_VERSION_CURRENT) {
         // A same-reader file from a newer schema (but within min_reader):
         // accept and warn; #[serde(default)] fields absorb the difference.
@@ -249,13 +270,29 @@ fn read_u32(value: &serde_json::Value, key: &str) -> u32 {
 }
 
 /// Steps a raw `scene.json` value up from an older `schema_version` to the
-/// current one, one version at a time. There is nothing below the current
-/// pre-beta version 0 yet, so this is the framework: when the schema moves
-/// to 1, a `0 -> 1` step slots in here (raw-JSON edits before typing).
-fn migrate_scene(_value: &mut serde_json::Value, from: u32) -> Result<(), SceneFileError> {
+/// current one, one version at a time, editing raw JSON before it is typed.
+///
+/// # 0 -> 1 (the public-beta freeze, v0.7.0)
+///
+/// Structurally a no-op, and deliberately written out rather than assumed.
+/// Every field a v0 file carries is still valid at v1; the only shape change
+/// in the freeze was `AssetRecordJson::alias_names`, which is `#[serde(default)]`
+/// and so materialises as an empty list on a v0 file with no raw edit at all.
+///
+/// The step still exists, and is still tested, because the alternative is worse:
+/// without an explicit `0` arm every pre-beta `.slxy` would fall through to the
+/// catch-all and be rejected as `UnsupportedVersion(0)`. The bump only rewrites
+/// the stamp so the file is not re-migrated on the next open.
+fn migrate_scene(value: &mut serde_json::Value, from: u32) -> Result<(), SceneFileError> {
     match from {
+        0 => {
+            // No field rewrites needed (see the doc comment). Restamp only.
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("schema_version".to_string(), serde_json::json!(1));
+            }
+            Ok(())
+        }
         v if v == SCHEMA_VERSION_CURRENT => Ok(()),
-        // No released schema precedes the current one yet.
         other => Err(SceneFileError::UnsupportedVersion(other)),
     }
 }
@@ -357,6 +394,125 @@ mod tests {
         }
     }
 
+    /// The freeze's load-bearing test. A pre-beta v0 scene must still open, and
+    /// come back stamped as v1.
+    ///
+    /// The existing tests all build `SCHEMA_VERSION_CURRENT`, so they would pass
+    /// vacuously no matter what the migration did (or did not do). This one
+    /// writes an actual v0 file and reads it back.
+    #[test]
+    fn a_v0_scene_migrates_to_v1_on_read() {
+        let cube = blob("cube.obj", b"v 0 0 0\n");
+        let mut scene = minimal_scene();
+        // A genuine pre-beta file: v0 stamps, and no `alias_names` concept.
+        scene.schema_version = 0;
+        scene.min_reader = 0;
+        scene.assets.push(AssetRecordJson {
+            id: cube.sha256.clone(),
+            role: "import".to_string(),
+            sha256: cube.sha256.clone(),
+            original_name: "cube.obj".to_string(),
+            alias_names: Vec::new(),
+            import_settings: JsonObject::new(),
+        });
+        let bytes = write(&SceneFile {
+            scene,
+            assets: vec![cube.clone()],
+        })
+        .expect("write a v0 .slxy");
+
+        let result = read(&bytes).expect("a v0 scene must still open after the freeze");
+
+        assert_eq!(
+            result.file.scene.schema_version, 1,
+            "the 0 -> 1 migration restamped it"
+        );
+        assert_eq!(
+            result.file.scene.graph.nodes.len(),
+            1,
+            "the graph survived the migration"
+        );
+        assert_eq!(result.file.assets, vec![cube], "assets survived");
+        assert!(
+            result.file.scene.assets[0].alias_names.is_empty(),
+            "the field added at the freeze defaults on a v0 file"
+        );
+    }
+
+    /// A file from the future is refused with an upgrade message rather than
+    /// half-loaded. `READER_VERSION` must move with `MIN_READER_CURRENT`, or a
+    /// build would reject its own output.
+    #[test]
+    fn a_scene_needing_a_newer_reader_is_refused() {
+        let mut scene = minimal_scene();
+        scene.min_reader = READER_VERSION + 1;
+        let bytes = write(&SceneFile {
+            scene,
+            assets: Vec::new(),
+        })
+        .expect("write");
+
+        assert!(matches!(read(&bytes), Err(SceneFileError::TooNew { .. })));
+    }
+
+    /// This build's own output must be readable by this build: if
+    /// `MIN_READER_CURRENT` and `READER_VERSION` ever drift apart, every file we
+    /// write is rejected as "too new" by our own reader.
+    #[test]
+    fn this_build_can_read_what_it_writes() {
+        let bytes = write(&SceneFile {
+            scene: minimal_scene(),
+            assets: Vec::new(),
+        })
+        .expect("write");
+        let result = read(&bytes).expect("a build must be able to open its own files");
+        assert_eq!(result.file.scene.schema_version, SCHEMA_VERSION_CURRENT);
+        assert!(result.warnings.is_empty());
+    }
+
+    /// An absent `schema_version` used to default to 0, making a corrupt or
+    /// foreign JSON indistinguishable from a legitimate pre-beta file and feeding
+    /// it to the migration. It is now an explicit error.
+    #[test]
+    fn a_scene_without_a_schema_version_is_rejected() {
+        let bytes = write(&SceneFile {
+            scene: minimal_scene(),
+            assets: Vec::new(),
+        })
+        .expect("write");
+
+        // Strip the field out of scene.json inside the archive.
+        let mut src = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).expect("open");
+        let mut out = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut out));
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for i in 0..src.len() {
+                let mut entry = src.by_index(i).expect("entry");
+                let name = entry.name().to_string();
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut buf).expect("read");
+                if name == SCENE_ENTRY {
+                    let mut v: serde_json::Value = serde_json::from_slice(&buf).expect("json");
+                    v.as_object_mut().unwrap().remove("schema_version");
+                    buf = serde_json::to_vec(&v).expect("reserialize");
+                }
+                zw.start_file(name, opts).expect("start");
+                std::io::Write::write_all(&mut zw, &buf).expect("write");
+            }
+            zw.finish().expect("finish");
+        }
+
+        assert!(
+            matches!(
+                read(&out),
+                Err(SceneFileError::MissingVersionField("schema_version"))
+            ),
+            "an absent schema_version must not silently mean 0"
+        );
+    }
+
     #[test]
     fn round_trip_preserves_scene_and_assets() {
         let cube = blob("cube.obj", b"v 0 0 0\nv 1 1 1\n");
@@ -366,6 +522,7 @@ mod tests {
             role: "import".to_string(),
             sha256: cube.sha256.clone(),
             original_name: "cube.obj".to_string(),
+            alias_names: Vec::new(),
             import_settings: JsonObject::new(),
         });
         let file = SceneFile {

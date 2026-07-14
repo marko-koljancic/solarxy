@@ -351,6 +351,34 @@ mod tests {
         assert!(!loaded.node.params.contains_key("receive_shadow"));
         assert!(!loaded.node.params.contains_key("rotate_order"));
 
+        // subdivide v1 -> v2: `scheme` was a one-variant enum read by nothing (a
+        // dropdown with a single option that did nothing), dropped by the Phase
+        // 15H param audit before the schema freeze could set it in stone.
+        let loaded = load_node(
+            &reg,
+            NodeId(3),
+            "subdivide",
+            1,
+            raw(&[
+                ("scheme", serde_json::json!("linear")),
+                ("iterations", serde_json::json!(3)),
+            ]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert!(loaded.node.placeholder.is_none());
+        assert_eq!(loaded.node.type_version, 2);
+        assert!(
+            !loaded.node.params.contains_key("scheme"),
+            "the dead param is gone"
+        );
+        assert_eq!(
+            loaded.node.params.get("iterations"),
+            Some(&ParamSource::Literal(ParamValue::Int(3))),
+            "the live param survives"
+        );
+
         // import_ply drops `vertex_colors` (declared in v1, never carried
         // into the parse path) along with its dead rendering group.
         let loaded = load_node(

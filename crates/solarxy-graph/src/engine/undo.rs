@@ -61,11 +61,19 @@ pub(super) enum UndoOp {
         ctx: GraphContext,
         edge: EdgeId,
     },
-    /// Undo of a disconnect: re-add the edge with its original id and slot.
+    /// Undo of a disconnect: re-add the edge with its original id and its
+    /// original position in the target's variadic `port_order`.
+    ///
+    /// `slot` is load-bearing, not cosmetic. `Graph::connect` appends, so
+    /// restoring without it puts the wire back at the END of the port order:
+    /// `merge` would then concatenate in a different order, and `switch`,
+    /// which selects BY INDEX, would silently read a different branch.
+    /// `None` for a single-arity target (no order to preserve).
     RestoreEdge {
         ctx: GraphContext,
         edge: Edge,
         to_variadic: bool,
+        slot: Option<usize>,
     },
     /// Undo of a remove: restore the captured fragment with original ids,
     /// then re-add any boundary edges (to surviving outside nodes).

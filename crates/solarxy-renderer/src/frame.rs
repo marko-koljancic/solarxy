@@ -17,6 +17,29 @@ use crate::camera::Camera;
 /// shafts, three cones and three quads -- a few hundred vertices -- so a fixed
 /// allocation is honest here; `write_manipulator` refuses to overrun it.
 const MANIPULATOR_BUF_BYTES: u64 = 64 * 1024;
+
+/// Clips a gizmo vertex list to what [`MANIPULATOR_BUF_BYTES`] can hold, on a
+/// whole-primitive boundary (`verts_per_prim` = 2 for lines, 3 for triangles),
+/// so a truncated list never leaves a half-primitive behind.
+///
+/// Overflow means a developer added handles without raising the budget. Clipping
+/// keeps the gizmo on screen and visibly wrong; the previous behaviour dropped it
+/// entirely, behind a `debug_assert` that does nothing in release.
+fn truncate_to_budget<V>(verts: &mut Vec<V>, verts_per_prim: usize, what: &str) {
+    let cap = MANIPULATOR_BUF_BYTES as usize / std::mem::size_of::<V>();
+    if verts.len() <= cap {
+        return;
+    }
+    let keep = (cap / verts_per_prim) * verts_per_prim;
+    tracing::error!(
+        wanted = verts.len(),
+        kept = keep,
+        budget = MANIPULATOR_BUF_BYTES,
+        "manipulator {what} vertices exceeded their buffer; clipping. \
+         Raise MANIPULATOR_BUF_BYTES."
+    );
+    verts.truncate(keep);
+}
 /// Light helpers get their own budget: they are N-per-scene (eight lights, each
 /// a wire sphere or a cone) rather than one selection-attached gizmo, so sharing
 /// the manipulator's buffer would make one starve the other.
@@ -1188,34 +1211,23 @@ impl Renderer {
         state.view_dir = camera.forward();
         self.manipulator = Some(state);
 
-        let (lines, tris) = state.build_vertices();
+        let (mut lines, mut tris) = state.build_vertices();
         // The gizmo is a bounded handful of vertices (the rotate tool's four
         // 64-segment rings are the worst case), so the buffers are sized once at
-        // startup. Guard anyway rather than corrupt the draw -- but LOUDLY: this
-        // used to zero the counts silently, which presents as "the gizmo
-        // mysteriously vanished" and gives the next person nothing to go on.
+        // startup and an overflow means someone added handles without raising
+        // the budget.
+        //
+        // On overflow, TRUNCATE to what fits rather than draw nothing. The old
+        // code zeroed both counts, so the gizmo vanished entirely -- and it
+        // guarded that with a `debug_assert`, which is a no-op in release, plus
+        // a `tracing::warn` that reaches NO subscriber on web. A release web
+        // build therefore lost the gizmo with zero diagnostics. A clipped gizmo
+        // is still usable and still visibly wrong, which is what we want.
+        truncate_to_budget(&mut lines, 2, "line");
+        truncate_to_budget(&mut tris, 3, "triangle");
+
         let line_bytes = bytemuck::cast_slice(&lines);
         let tri_bytes = bytemuck::cast_slice(&tris);
-        if line_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
-            || tri_bytes.len() as u64 > MANIPULATOR_BUF_BYTES
-        {
-            debug_assert!(
-                false,
-                "manipulator overflowed its {MANIPULATOR_BUF_BYTES}-byte buffers \
-                 ({} line bytes, {} tri bytes): raise MANIPULATOR_BUF_BYTES",
-                line_bytes.len(),
-                tri_bytes.len()
-            );
-            tracing::warn!(
-                line_bytes = line_bytes.len(),
-                tri_bytes = tri_bytes.len(),
-                budget = MANIPULATOR_BUF_BYTES,
-                "manipulator geometry exceeded its vertex buffers; not drawing"
-            );
-            self.manipulator_line_count = 0;
-            self.manipulator_tri_count = 0;
-            return;
-        }
         queue.write_buffer(&self.manipulator_line_buf, 0, line_bytes);
         queue.write_buffer(&self.manipulator_tri_buf, 0, tri_bytes);
         self.manipulator_line_count = u32::try_from(lines.len()).unwrap_or(0);

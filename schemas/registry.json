@@ -1,0 +1,5324 @@
+{
+  "nodes": [
+    {
+      "typeId": "ambient_light",
+      "version": 1,
+      "displayName": "Ambient Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Ambient Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A uniform fill light with no position or shadow; modulates the scene ambient/IBL term.",
+      "searchAliases": [
+        "light",
+        "fill",
+        "environment"
+      ]
+    },
+    {
+      "typeId": "array",
+      "version": 1,
+      "displayName": "Array",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to duplicate."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Array",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "array",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "linear",
+              "Linear"
+            ],
+            [
+              "radial",
+              "Radial"
+            ]
+          ],
+          "accept": [],
+          "default": "linear",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "count",
+          "label": "Count",
+          "group": "array",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 3,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": [
+            1.0,
+            32.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many copies in total, counting the original. 1 is a no-op."
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "group": "array",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "The step between copies: copy i is offset by i times this."
+        },
+        {
+          "key": "axis",
+          "label": "Axis",
+          "group": "array",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "x",
+              "X"
+            ],
+            [
+              "y",
+              "Y"
+            ],
+            [
+              "z",
+              "Z"
+            ]
+          ],
+          "accept": [],
+          "default": "y",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The axis the copies revolve about."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "array",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.0,
+            20.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "How far each copy sits from the axis before it revolves."
+        },
+        {
+          "key": "sweep",
+          "label": "Sweep",
+          "group": "array",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 360.0,
+          "hard": [
+            -360.0,
+            360.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": "The total angle the copies span. Each copy steps by sweep/count, so a full 360 tiles evenly without doubling up at the seam."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Duplicates the input geometry, either in a line or around a circle. Materials are preserved and shared across the copies.",
+      "searchAliases": [
+        "duplicate",
+        "repeat",
+        "clone",
+        "radial",
+        "grid"
+      ]
+    },
+    {
+      "typeId": "bounds",
+      "version": 1,
+      "displayName": "Bounds",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to measure."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Bounds",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "bounds",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "box",
+              "Box"
+            ],
+            [
+              "center",
+              "Center"
+            ]
+          ],
+          "accept": [],
+          "default": "box",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Box emits the bounding box itself; Center emits a marker at its center."
+        },
+        {
+          "key": "marker_size",
+          "label": "Marker Size",
+          "group": "bounds",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.1,
+          "hard": [
+            0.001,
+            100.0
+          ],
+          "soft": [
+            0.01,
+            1.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "The size of the center marker cube."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Emits the input's axis-aligned bounding box as geometry, or a small marker cube at its center. Useful for measuring a model and for sanity-checking where a piece of geometry actually sits.",
+      "searchAliases": [
+        "bbox",
+        "aabb",
+        "extents",
+        "measure",
+        "center"
+      ]
+    },
+    {
+      "typeId": "box",
+      "version": 2,
+      "displayName": "Box",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Box",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "depth",
+          "label": "Depth",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "width_segments",
+          "label": "Width Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height_segments",
+          "label": "Height Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "depth_segments",
+          "label": "Depth Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A rectangular box, subdivided per axis.",
+      "searchAliases": [
+        "cube",
+        "rectangle",
+        "cuboid"
+      ]
+    },
+    {
+      "typeId": "compute_normals",
+      "version": 2,
+      "displayName": "Compute Normals",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose normals to recompute."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Compute Normals",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "flip_orientation",
+          "label": "Flip Orientation",
+          "group": "geometry",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Reverses triangle winding and negates normals (fixes inside-out meshes)."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Recomputes per-vertex normals from the triangle topology.",
+      "searchAliases": [
+        "normals",
+        "recompute",
+        "smooth"
+      ]
+    },
+    {
+      "typeId": "cone",
+      "version": 2,
+      "displayName": "Cone",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Cone",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            50.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "radial_segments",
+          "label": "Radial Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height_segments",
+          "label": "Height Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A cone with an apex along +Y.",
+      "searchAliases": [
+        "pyramid",
+        "spike"
+      ]
+    },
+    {
+      "typeId": "cylinder",
+      "version": 2,
+      "displayName": "Cylinder",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Cylinder",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius_top",
+          "label": "Radius Top",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.0,
+            50.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "radius_bottom",
+          "label": "Radius Bottom",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.0,
+            50.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "radial_segments",
+          "label": "Radial Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height_segments",
+          "label": "Height Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A cylinder (or capped cone when a radius is zero).",
+      "searchAliases": [
+        "tube",
+        "pipe"
+      ]
+    },
+    {
+      "typeId": "delete",
+      "version": 1,
+      "displayName": "Delete",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to cull triangles from."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Delete",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "delete",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "bbox",
+              "Bounding Box"
+            ],
+            [
+              "normal",
+              "Normal Direction"
+            ]
+          ],
+          "accept": [],
+          "default": "bbox",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Select triangles by where they are, or by which way they face."
+        },
+        {
+          "key": "invert",
+          "label": "Invert",
+          "group": "delete",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Delete everything the selection does NOT cover."
+        },
+        {
+          "key": "center",
+          "label": "Center",
+          "group": "delete",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "The center of the region box."
+        },
+        {
+          "key": "size",
+          "label": "Size",
+          "group": "delete",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "The size of the region box. A triangle goes when its centroid is inside."
+        },
+        {
+          "key": "direction",
+          "label": "Direction",
+          "group": "delete",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The facing to match against."
+        },
+        {
+          "key": "angle",
+          "label": "Angle",
+          "group": "delete",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 45.0,
+          "hard": [
+            0.0,
+            180.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": "How far off the direction a face can point and still be selected."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Removes triangles by region or by facing. Vertices left orphaned by the removal are compacted away. Deleting everything is allowed and produces empty geometry, not an error.",
+      "searchAliases": [
+        "remove",
+        "cull",
+        "erase",
+        "filter"
+      ]
+    },
+    {
+      "typeId": "directional_light",
+      "version": 1,
+      "displayName": "Directional Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Directional Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            10.0,
+            10.0,
+            5.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "target",
+          "label": "Target",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "cast_shadow",
+          "label": "Cast Shadow",
+          "group": "light",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "map_size",
+          "label": "Shadow Map Size",
+          "group": "shadow",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "512",
+              "512"
+            ],
+            [
+              "1024",
+              "1024"
+            ],
+            [
+              "2048",
+              "2048"
+            ]
+          ],
+          "accept": [],
+          "default": "2048",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "bias",
+          "label": "Shadow Bias",
+          "group": "shadow",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0001,
+          "hard": [
+            -0.01,
+            0.01
+          ],
+          "soft": null,
+          "step": 0.0001,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A parallel light (like the sun); its shadow frustum auto-fits the scene bounds.",
+      "searchAliases": [
+        "light",
+        "sun",
+        "sky"
+      ]
+    },
+    {
+      "typeId": "geo",
+      "version": 3,
+      "displayName": "Geo",
+      "category": "container",
+      "categoryLabel": "Container",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Geo",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "translate",
+          "label": "Translate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "rotate",
+          "label": "Rotate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "rotate_order",
+          "label": "Rotate Order",
+          "group": "transform",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "xyz",
+              "XYZ"
+            ],
+            [
+              "xzy",
+              "XZY"
+            ],
+            [
+              "yxz",
+              "YXZ"
+            ],
+            [
+              "yzx",
+              "YZX"
+            ],
+            [
+              "zxy",
+              "ZXY"
+            ],
+            [
+              "zyx",
+              "ZYX"
+            ]
+          ],
+          "accept": [],
+          "default": "xyz",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "uniform_scale",
+          "label": "Uniform Scale",
+          "group": "transform",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether this object is displayed. Hidden objects stay cooked, so re-show is instant."
+        },
+        {
+          "key": "cast_shadow",
+          "label": "Cast Shadow",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether this object is drawn into the shadow map."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A container node hosting a subflow; renders its subflow's active display object with this node's transform applied.",
+      "searchAliases": [
+        "object",
+        "container",
+        "group",
+        "subflow"
+      ]
+    },
+    {
+      "typeId": "hemisphere_light",
+      "version": 1,
+      "displayName": "Hemisphere Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Hemisphere Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "sky_color",
+          "label": "Sky Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "ground_color",
+          "label": "Ground Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.2669999897480011,
+            0.2669999897480011,
+            0.2669999897480011,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A two-color sky/ground ambient light.",
+      "searchAliases": [
+        "light",
+        "sky",
+        "gradient"
+      ]
+    },
+    {
+      "typeId": "import_gltf",
+      "version": 2,
+      "displayName": "Import glTF",
+      "category": "import",
+      "categoryLabel": "Import",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Import glTF",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "file",
+          "label": "File",
+          "group": "object",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".gltf",
+            ".glb"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "object",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.001,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "center_to_origin",
+          "label": "Center to Origin",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "preserve_materials",
+          "label": "Preserve Materials",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Loads a glTF or GLB model.",
+      "searchAliases": [
+        "gltf",
+        "glb",
+        "import"
+      ]
+    },
+    {
+      "typeId": "import_image",
+      "version": 1,
+      "displayName": "Import Image",
+      "category": "import",
+      "categoryLabel": "Import",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Import Image",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "file",
+          "label": "File",
+          "group": "object",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Loads an image file as a texture value for material map inputs.",
+      "searchAliases": [
+        "image",
+        "texture",
+        "png",
+        "jpeg",
+        "webp",
+        "import"
+      ]
+    },
+    {
+      "typeId": "import_obj",
+      "version": 3,
+      "displayName": "Import OBJ",
+      "category": "import",
+      "categoryLabel": "Import",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Import OBJ",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "file",
+          "label": "File",
+          "group": "object",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".obj"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "object",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.001,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "center_to_origin",
+          "label": "Center to Origin",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "preserve_materials",
+          "label": "Preserve Materials",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Loads a Wavefront OBJ (MTL and textures via the asset resolver).",
+      "searchAliases": [
+        "obj",
+        "wavefront",
+        "import"
+      ]
+    },
+    {
+      "typeId": "import_ply",
+      "version": 2,
+      "displayName": "Import PLY",
+      "category": "import",
+      "categoryLabel": "Import",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Import PLY",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "file",
+          "label": "File",
+          "group": "object",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".ply"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "object",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.001,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "center_to_origin",
+          "label": "Center to Origin",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Loads a binary or ASCII PLY mesh.",
+      "searchAliases": [
+        "ply",
+        "import",
+        "scan"
+      ]
+    },
+    {
+      "typeId": "import_stl",
+      "version": 2,
+      "displayName": "Import STL",
+      "category": "import",
+      "categoryLabel": "Import",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Import STL",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "file",
+          "label": "File",
+          "group": "object",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".stl"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "object",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            10000.0
+          ],
+          "soft": [
+            0.001,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "center_to_origin",
+          "label": "Center to Origin",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "recompute_normals",
+          "label": "Recompute Normals",
+          "group": "object",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Loads a binary or ASCII STL mesh.",
+      "searchAliases": [
+        "stl",
+        "import",
+        "print"
+      ]
+    },
+    {
+      "typeId": "material",
+      "version": 1,
+      "displayName": "Material",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        },
+        {
+          "key": "base_color_map",
+          "label": "Base Color Map",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": ""
+        },
+        {
+          "key": "normal_map",
+          "label": "Normal Map",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": ""
+        },
+        {
+          "key": "metallic_roughness_map",
+          "label": "Metallic Roughness Map",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": ""
+        },
+        {
+          "key": "occlusion_map",
+          "label": "Occlusion Map",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": ""
+        },
+        {
+          "key": "emissive_map",
+          "label": "Emissive Map",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": ""
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Material",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "base_color",
+          "label": "Base Color",
+          "group": "material",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.800000011920929,
+            0.800000011920929,
+            0.800000011920929,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": "base_color_map",
+          "doc": ""
+        },
+        {
+          "key": "metallic",
+          "label": "Metallic",
+          "group": "material",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": "metallic_roughness_map",
+          "doc": ""
+        },
+        {
+          "key": "roughness",
+          "label": "Roughness",
+          "group": "material",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": "metallic_roughness_map",
+          "doc": ""
+        },
+        {
+          "key": "emissive",
+          "label": "Emissive",
+          "group": "material",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": "emissive_map",
+          "doc": ""
+        },
+        {
+          "key": "material_name",
+          "label": "Material Name",
+          "group": "material",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Assigns a PBR material to every mesh of the input; connected maps drive their channels, factors drive the rest.",
+      "searchAliases": [
+        "material",
+        "pbr",
+        "texture",
+        "shader",
+        "color"
+      ]
+    },
+    {
+      "typeId": "merge",
+      "version": 2,
+      "displayName": "Merge",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "inputs",
+          "label": "Inputs",
+          "dataType": "geometry",
+          "variadic": true,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry sets to concatenate, in order."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Merge",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "inputs"
+      },
+      "doc": "Concatenates its inputs into one geometry set, in port order, deduplicating identical materials.",
+      "searchAliases": [
+        "combine",
+        "join",
+        "union",
+        "append"
+      ]
+    },
+    {
+      "typeId": "mirror",
+      "version": 1,
+      "displayName": "Mirror",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to reflect."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Mirror",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "axis",
+          "label": "Axis",
+          "group": "mirror",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "x",
+              "X"
+            ],
+            [
+              "y",
+              "Y"
+            ],
+            [
+              "z",
+              "Z"
+            ]
+          ],
+          "accept": [],
+          "default": "x",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The axis the mirror plane is perpendicular to."
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "group": "mirror",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            -10000.0,
+            10000.0
+          ],
+          "soft": [
+            -10.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "Where the mirror plane sits along the axis."
+        },
+        {
+          "key": "keep_original",
+          "label": "Keep Original",
+          "group": "mirror",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Merge the reflection with the original instead of replacing it."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Reflects the input across an axis-aligned plane, flipping the winding so the reflected surface faces outward. Keep Original merges both halves, which is the usual way to build a symmetric model from one side.",
+      "searchAliases": [
+        "reflect",
+        "symmetry",
+        "flip"
+      ]
+    },
+    {
+      "typeId": "note",
+      "version": 1,
+      "displayName": "Note",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "rootContext": true,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Note",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "text",
+          "label": "Text",
+          "group": "note",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "note",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.9919999837875366,
+            0.9020000100135803,
+            0.5410000085830688,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "note",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 160.0,
+          "hard": [
+            120.0,
+            800.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "note",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 80.0,
+          "hard": [
+            60.0,
+            600.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "notBypassable"
+      },
+      "doc": "A canvas annotation. Double-click to edit; resizable.",
+      "searchAliases": [
+        "comment",
+        "annotation",
+        "sticky",
+        "label"
+      ]
+    },
+    {
+      "typeId": "null",
+      "version": 1,
+      "displayName": "Null",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to pass through unchanged."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Null",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Passes geometry through unchanged. Use it as a stable output anchor for a subflow: point the display flag at the null and it stays put while you rework the graph feeding it.",
+      "searchAliases": [
+        "out",
+        "output",
+        "anchor",
+        "passthrough"
+      ]
+    },
+    {
+      "typeId": "plane",
+      "version": 2,
+      "displayName": "Plane",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Plane",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "width_segments",
+          "label": "Width Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            1024.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height_segments",
+          "label": "Height Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            1024.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A flat subdivided rectangle in the XY plane facing +Z.",
+      "searchAliases": [
+        "quad",
+        "grid",
+        "ground"
+      ]
+    },
+    {
+      "typeId": "point_light",
+      "version": 1,
+      "displayName": "Point Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Point Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            10.0,
+            10.0,
+            5.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "range",
+          "label": "Range",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            100000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "decay",
+          "label": "Decay",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2.0,
+          "hard": [
+            0.0,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "cast_shadow",
+          "label": "Cast Shadow",
+          "group": "light",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "map_size",
+          "label": "Shadow Map Size",
+          "group": "shadow",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "512",
+              "512"
+            ],
+            [
+              "1024",
+              "1024"
+            ],
+            [
+              "2048",
+              "2048"
+            ]
+          ],
+          "accept": [],
+          "default": "1024",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "bias",
+          "label": "Shadow Bias",
+          "group": "shadow",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": -0.0001,
+          "hard": [
+            -0.01,
+            0.01
+          ],
+          "soft": null,
+          "step": 0.0001,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "An omnidirectional light with distance falloff.",
+      "searchAliases": [
+        "light",
+        "omni",
+        "bulb"
+      ]
+    },
+    {
+      "typeId": "rect_area_light",
+      "version": 2,
+      "displayName": "Rect Area Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Rect Area Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "translate",
+          "label": "Translate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 10.0,
+          "hard": [
+            0.1,
+            1000.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 10.0,
+          "hard": [
+            0.1,
+            1000.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A rectangular area light (rendered as a soft point-light approximation in v1).",
+      "searchAliases": [
+        "light",
+        "area",
+        "softbox",
+        "panel"
+      ]
+    },
+    {
+      "typeId": "sphere",
+      "version": 2,
+      "displayName": "Sphere",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Sphere",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            50.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "width_segments",
+          "label": "Width Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "height_segments",
+          "label": "Height Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 16,
+          "hard": [
+            2.0,
+            512.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A UV sphere with poles along Y.",
+      "searchAliases": [
+        "ball",
+        "globe"
+      ]
+    },
+    {
+      "typeId": "spot_light",
+      "version": 1,
+      "displayName": "Spot Light",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Spot Light",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            10.0,
+            10.0,
+            5.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "target",
+          "label": "Target",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "color",
+          "label": "Color",
+          "group": "light",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "range",
+          "label": "Range",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            100000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "decay",
+          "label": "Decay",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2.0,
+          "hard": [
+            0.0,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "angle",
+          "label": "Angle",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 45.0,
+          "hard": [
+            1.0,
+            89.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "penumbra",
+          "label": "Penumbra",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "normalized",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "cast_shadow",
+          "label": "Cast Shadow",
+          "group": "light",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "map_size",
+          "label": "Shadow Map Size",
+          "group": "shadow",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "512",
+              "512"
+            ],
+            [
+              "1024",
+              "1024"
+            ],
+            [
+              "2048",
+              "2048"
+            ]
+          ],
+          "accept": [],
+          "default": "1024",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "bias",
+          "label": "Shadow Bias",
+          "group": "shadow",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": -0.0001,
+          "hard": [
+            -0.01,
+            0.01
+          ],
+          "soft": null,
+          "step": 0.0001,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "visible",
+          "label": "Visible",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_helper",
+          "label": "Show Helper",
+          "group": "rendering",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "helper_size",
+          "label": "Helper Size",
+          "group": "rendering",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A cone light with an angle and soft-edge penumbra.",
+      "searchAliases": [
+        "light",
+        "cone",
+        "flashlight"
+      ]
+    },
+    {
+      "typeId": "subdivide",
+      "version": 2,
+      "displayName": "Subdivide",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Subdivide",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "iterations",
+          "label": "Iterations",
+          "group": "subdivision",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1,
+          "hard": [
+            1.0,
+            5.0
+          ],
+          "soft": [
+            1.0,
+            3.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Splits every triangle into four at its edge midpoints, interpolating normals, UVs, and attributes.",
+      "searchAliases": [
+        "subdivide",
+        "smooth",
+        "tessellate",
+        "refine"
+      ]
+    },
+    {
+      "typeId": "switch",
+      "version": 1,
+      "displayName": "Switch",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "inputs",
+          "label": "Inputs",
+          "dataType": "geometry",
+          "variadic": true,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The candidate geometries, in wire order. The index selects among them."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Switch",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "index",
+          "label": "Index",
+          "group": "switch",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            255.0
+          ],
+          "soft": [
+            0.0,
+            8.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which input wire to pass through, counting from 0 in wire order. Clamped to the number of connected wires."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "inputs"
+      },
+      "doc": "Passes exactly one of its inputs through, chosen by index. The index counts wires in the order they are connected, so an input that fails to cook does not shift the selection.",
+      "searchAliases": [
+        "select",
+        "choose",
+        "multiplex",
+        "if"
+      ]
+    },
+    {
+      "typeId": "torus",
+      "version": 2,
+      "displayName": "Torus",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Torus",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "tube",
+          "label": "Tube",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.2,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "radial_segments",
+          "label": "Radial Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 16,
+          "hard": [
+            3.0,
+            1024.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "tubular_segments",
+          "label": "Tubular Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            1024.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A torus (donut) in the XY plane.",
+      "searchAliases": [
+        "donut",
+        "ring"
+      ]
+    },
+    {
+      "typeId": "torus_knot",
+      "version": 2,
+      "displayName": "Torus Knot",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Torus Knot",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "tube",
+          "label": "Tube",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.2,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "p",
+          "label": "P",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2,
+          "hard": [
+            1.0,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "q",
+          "label": "Q",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 3,
+          "hard": [
+            1.0,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "tubular_segments",
+          "label": "Tubular Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 128,
+          "hard": [
+            3.0,
+            2048.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "radial_segments",
+          "label": "Radial Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            2048.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A (p, q) torus knot swept as a tube.",
+      "searchAliases": [
+        "knot",
+        "pretzel"
+      ]
+    },
+    {
+      "typeId": "transform",
+      "version": 2,
+      "displayName": "Transform",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to transform."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Transform",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "translate",
+          "label": "Translate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "rotate",
+          "label": "Rotate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "rotate_order",
+          "label": "Rotate Order",
+          "group": "transform",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "xyz",
+              "XYZ"
+            ],
+            [
+              "xzy",
+              "XZY"
+            ],
+            [
+              "yxz",
+              "YXZ"
+            ],
+            [
+              "yzx",
+              "YZX"
+            ],
+            [
+              "zxy",
+              "ZXY"
+            ],
+            [
+              "zyx",
+              "ZYX"
+            ]
+          ],
+          "accept": [],
+          "default": "xyz",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": [
+            0.0001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "uniform_scale",
+          "label": "Uniform Scale",
+          "group": "transform",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "pivot",
+          "label": "Pivot",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Translates, rotates, and scales the input geometry, baking the transform into point positions.",
+      "searchAliases": [
+        "move",
+        "rotate",
+        "scale",
+        "xform"
+      ]
+    },
+    {
+      "typeId": "uv_project",
+      "version": 1,
+      "displayName": "UV Project",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "UV Project",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "projection",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "planar",
+              "Planar"
+            ],
+            [
+              "box",
+              "Box"
+            ],
+            [
+              "cylindrical",
+              "Cylindrical"
+            ],
+            [
+              "spherical",
+              "Spherical"
+            ]
+          ],
+          "accept": [],
+          "default": "planar",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "axis",
+          "label": "Axis",
+          "group": "projection",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "x",
+              "X"
+            ],
+            [
+              "y",
+              "Y"
+            ],
+            [
+              "z",
+              "Z"
+            ]
+          ],
+          "accept": [],
+          "default": "y",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "projection",
+          "paramType": "vec2",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": 0.1,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "offset",
+          "label": "Offset",
+          "group": "projection",
+          "paramType": "vec2",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": 0.05,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Projects UVs onto the input (planar, box, cylindrical, or spherical), normalized over its bounds.",
+      "searchAliases": [
+        "uv",
+        "unwrap",
+        "project",
+        "texture",
+        "mapping"
+      ]
+    },
+    {
+      "typeId": "validate",
+      "version": 2,
+      "displayName": "Validate",
+      "category": "modifiers",
+      "categoryLabel": "Modifiers",
+      "rootContext": false,
+      "subflowContext": true,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to validate (passed through unchanged)."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": ""
+        },
+        {
+          "key": "report",
+          "label": "Report",
+          "dataType": "report",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "The validation report."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Validate",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "normals",
+          "label": "Normals",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "uvs",
+          "label": "UVs",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "topology",
+          "label": "Topology",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "materials",
+          "label": "Materials",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "budget",
+          "label": "Triangle Budget",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "triangle_budget",
+          "label": "Budget",
+          "group": "checks",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            2000000000.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Runs the Solarxy validation checks over the input geometry, passing the geometry through and emitting a report.",
+      "searchAliases": [
+        "validate",
+        "check",
+        "lint",
+        "inspect"
+      ]
+    }
+  ],
+  "coercions": [
+    {
+      "from": "geometry",
+      "to": "geometry",
+      "kind": "same"
+    },
+    {
+      "from": "light",
+      "to": "light",
+      "kind": "same"
+    },
+    {
+      "from": "report",
+      "to": "report",
+      "kind": "same"
+    },
+    {
+      "from": "float",
+      "to": "float",
+      "kind": "same"
+    },
+    {
+      "from": "float",
+      "to": "int",
+      "kind": "lossy"
+    },
+    {
+      "from": "float",
+      "to": "vec2",
+      "kind": "lossless"
+    },
+    {
+      "from": "float",
+      "to": "vec3",
+      "kind": "lossless"
+    },
+    {
+      "from": "float",
+      "to": "vec4",
+      "kind": "lossless"
+    },
+    {
+      "from": "int",
+      "to": "float",
+      "kind": "lossless"
+    },
+    {
+      "from": "int",
+      "to": "int",
+      "kind": "same"
+    },
+    {
+      "from": "int",
+      "to": "vec2",
+      "kind": "lossless"
+    },
+    {
+      "from": "int",
+      "to": "vec3",
+      "kind": "lossless"
+    },
+    {
+      "from": "int",
+      "to": "vec4",
+      "kind": "lossless"
+    },
+    {
+      "from": "bool",
+      "to": "float",
+      "kind": "lossless"
+    },
+    {
+      "from": "bool",
+      "to": "int",
+      "kind": "lossless"
+    },
+    {
+      "from": "bool",
+      "to": "bool",
+      "kind": "same"
+    },
+    {
+      "from": "vec2",
+      "to": "vec2",
+      "kind": "same"
+    },
+    {
+      "from": "vec3",
+      "to": "vec3",
+      "kind": "same"
+    },
+    {
+      "from": "vec3",
+      "to": "color",
+      "kind": "lossless"
+    },
+    {
+      "from": "vec4",
+      "to": "vec4",
+      "kind": "same"
+    },
+    {
+      "from": "vec4",
+      "to": "color",
+      "kind": "lossless"
+    },
+    {
+      "from": "color",
+      "to": "vec3",
+      "kind": "lossy"
+    },
+    {
+      "from": "color",
+      "to": "vec4",
+      "kind": "lossless"
+    },
+    {
+      "from": "color",
+      "to": "color",
+      "kind": "same"
+    },
+    {
+      "from": "text",
+      "to": "text",
+      "kind": "same"
+    },
+    {
+      "from": "image",
+      "to": "image",
+      "kind": "same"
+    }
+  ]
+}

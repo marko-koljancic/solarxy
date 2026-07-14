@@ -493,6 +493,333 @@ fn fingerprint(e: &Engine, ctx: GraphContext) -> String {
     )
 }
 
+/// Undo of a disconnect must restore the edge to its ORIGINAL slot in the
+/// variadic port order, not append it to the end.
+///
+/// `Graph::disconnect` retains the id out of `port_order`, and `Graph::connect`
+/// (which the undo path calls) pushes it back on the end. Without an explicit
+/// slot the wires silently reorder: `merge` would concatenate in a different
+/// order, and `switch` -- which selects BY INDEX -- would read a different
+/// branch entirely. `Command::Disconnect` is dispatched by the UI whenever a
+/// user deletes an edge or drags one to another handle, so this is reachable.
+#[test]
+fn undo_of_a_disconnect_restores_the_original_variadic_slot() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "sphere");
+    let c = add(&mut e, ctx, "cylinder");
+    let sw = add(&mut e, ctx, "switch");
+
+    for src in [a, b, c] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: src,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: sw,
+                port: "inputs".into(),
+            },
+        })
+        .unwrap();
+    }
+
+    let before = fingerprint(&e, ctx);
+    let first = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .incoming_to_port(sw, "inputs")[0]
+        .id;
+
+    e.apply(Command::Disconnect { ctx, edge: first }).unwrap();
+    e.apply(Command::Undo).unwrap();
+
+    assert_eq!(
+        fingerprint(&e, ctx),
+        before,
+        "undo of a disconnect must put the wire back where it was, not at the end"
+    );
+}
+
+/// The same hazard, stated in terms a user would feel: the switch's index must
+/// still select the same geometry after a disconnect-then-undo of an earlier
+/// wire.
+#[test]
+fn a_disconnect_undo_does_not_repoint_a_switch() {
+    let (mut e, ctx) = subflow_engine();
+    let boxn = add(&mut e, ctx, "box"); // 12 tris
+    let plane = add(&mut e, ctx, "plane"); // 2 tris
+    let sw = add(&mut e, ctx, "switch");
+
+    for src in [boxn, plane] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: src,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: sw,
+                port: "inputs".into(),
+            },
+        })
+        .unwrap();
+    }
+    // Index 1 = the second wire = the plane.
+    e.apply(Command::SetParam {
+        ctx,
+        node: sw,
+        key: "index".into(),
+        value: ParamSource::Literal(ParamValue::Int(1)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(sw),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let tris_before = e
+        .cook
+        .outputs(sw)
+        .unwrap()
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .unwrap()
+        .triangle_count();
+    assert_eq!(tris_before, 2, "index 1 selects the plane");
+
+    // Drop the FIRST wire (the box) and undo it.
+    let first = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .incoming_to_port(sw, "inputs")[0]
+        .id;
+    e.apply(Command::Disconnect { ctx, edge: first }).unwrap();
+    e.apply(Command::Undo).unwrap();
+    e.cook(&mut || true);
+
+    let tris_after = e
+        .cook
+        .outputs(sw)
+        .unwrap()
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .unwrap()
+        .triangle_count();
+    assert_eq!(
+        tris_after, 2,
+        "after disconnect+undo the switch must still select the plane, not the box"
+    );
+}
+
+/// Asset alias names must survive a `.slxy` round trip. The bytes are stored
+/// once (content-addressed) with one blob name, so without replaying the
+/// aliases on load the reloaded scene forgets every name but the first and the
+/// missing-companion preflight fires on a file it is already holding.
+#[test]
+fn asset_alias_names_survive_a_slxy_round_trip() {
+    let mut e = engine();
+    let png = b"\x89PNG fake pixels".to_vec();
+    let id = e.stage_asset("albedo.png", "image/png", png.clone());
+    e.stage_asset("diffuse.png", "image/png", png);
+
+    // The manifest reports BOTH names (the frontend preflight reads this).
+    let names: Vec<String> = e.asset_manifest().into_iter().map(|(_, n)| n).collect();
+    assert!(names.contains(&"albedo.png".to_string()));
+    assert!(names.contains(&"diffuse.png".to_string()));
+    assert_eq!(names.len(), 2, "one row per name, one entry of bytes");
+
+    let bytes = e.save_slxy(&SceneSidecar::default()).expect("save");
+    let mut e2 = engine();
+    e2.load_slxy(&bytes).expect("load");
+
+    let names2: Vec<String> = e2.asset_manifest().into_iter().map(|(_, n)| n).collect();
+    assert!(
+        names2.contains(&"diffuse.png".to_string()),
+        "the alias survived the round trip: {names2:?}"
+    );
+    assert_eq!(
+        e2.asset_count(),
+        1,
+        "still one content-addressed entry, not two"
+    );
+    let _ = id;
+}
+
+/// `ReorderVariadicInput` had zero usages anywhere in the repo, so
+/// `UndoOp::ReorderVariadic` had never executed.
+#[test]
+fn undo_of_a_variadic_reorder_restores_the_previous_order() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "sphere");
+    let m = add(&mut e, ctx, "merge");
+    for src in [a, b] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: src,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: m,
+                port: "inputs".into(),
+            },
+        })
+        .unwrap();
+    }
+
+    let before = fingerprint(&e, ctx);
+    let order: Vec<_> = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .incoming_to_port(m, "inputs")
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    let reversed: Vec<_> = order.iter().rev().copied().collect();
+
+    e.apply(Command::ReorderVariadicInput {
+        ctx,
+        node: m,
+        port: "inputs".into(),
+        order: reversed.clone(),
+    })
+    .unwrap();
+    assert_ne!(fingerprint(&e, ctx), before, "the reorder landed");
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(fingerprint(&e, ctx), before, "undo restored the wire order");
+}
+
+/// `EditAnnotation` had zero usages, so `UndoOp::RestoreReview` was never
+/// reached through the edit path (only via resolve/delete/reanchor).
+#[test]
+fn undo_of_an_annotation_edit_restores_the_previous_text_and_category() {
+    use crate::review::{ReviewAnchor, ReviewCategory};
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let anchor = ReviewAnchor {
+        ctx,
+        node: box_id,
+        mesh: None,
+        face: None,
+        barycentric: None,
+        world_fallback: None,
+        geometry_hash: None,
+    };
+    e.apply(Command::AddAnnotation {
+        anchor,
+        text: "original".into(),
+        category: ReviewCategory::Warning,
+        author: None,
+        created_at: String::new(),
+        reply_to: None,
+    })
+    .unwrap();
+    let id = e.document().review().iter().next().unwrap().id;
+
+    e.apply(Command::EditAnnotation {
+        id,
+        text: "edited".into(),
+        category: ReviewCategory::Question,
+        updated_at: String::new(),
+    })
+    .unwrap();
+    {
+        let a = e.document().review().get(id).unwrap();
+        assert_eq!(a.text, "edited");
+        assert_eq!(a.category, ReviewCategory::Question);
+    }
+
+    e.apply(Command::Undo).unwrap();
+    let a = e.document().review().get(id).unwrap();
+    assert_eq!(a.text, "original", "undo restored the text");
+    assert_eq!(
+        a.category,
+        ReviewCategory::Warning,
+        "undo restored the category"
+    );
+}
+
+/// `MoveNodes` and `SetSelection` were each used once, never with an `Undo`,
+/// so `UndoOp::MoveNodes` and `UndoOp::SetSelection` were never round-tripped.
+#[test]
+fn undo_of_a_move_and_a_selection_round_trips() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "sphere");
+
+    let before = fingerprint(&e, ctx);
+    e.apply(Command::MoveNodes {
+        ctx,
+        moves: vec![(a, [123.0, 456.0]), (b, [-7.0, 8.0])],
+    })
+    .unwrap();
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(fingerprint(&e, ctx), before, "undo restored the positions");
+
+    // Selection lives outside the fingerprint, so assert it directly.
+    let sel = |e: &Engine| e.document().graph(ctx).unwrap().selection.clone();
+    e.apply(Command::SetSelection {
+        ctx,
+        ids: vec![a, b],
+    })
+    .unwrap();
+    e.apply(Command::SetSelection { ctx, ids: vec![a] })
+        .unwrap();
+    assert_eq!(sel(&e), vec![a]);
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(sel(&e), vec![a, b], "undo restored the previous selection");
+}
+
+/// `PasteNodes` was used three times, never with an `Undo`: undo-of-paste (which
+/// must remove the freshly-minted ids AND their internal edges) was unverified;
+/// only undo-of-duplicate was.
+#[test]
+fn undo_of_a_paste_removes_the_pasted_nodes_and_their_edges() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let t = add(&mut e, ctx, "transform");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: a,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: t,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+
+    let before = fingerprint(&e, ctx);
+    let fragment = e.copy_nodes(ctx, &[a, t]);
+
+    e.apply(Command::PasteNodes {
+        ctx,
+        fragment,
+        position: [500.0, 500.0],
+    })
+    .unwrap();
+    assert_ne!(fingerprint(&e, ctx), before, "the paste landed");
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(
+        fingerprint(&e, ctx),
+        before,
+        "undo of a paste removes the copies and their internal edges"
+    );
+}
+
 #[test]
 fn undo_restores_a_removed_node_with_its_edges_and_order() {
     let (mut e, ctx) = subflow_engine();

@@ -48,3 +48,158 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --all-features
+
+  # The `check` job runs `cargo test` on a GPU-less ubuntu runner, where every
+  # GPU test silently skips itself -- which is how the renderer suite went unrun
+  # for the entire life of the project. macOS runners have a real Metal adapter,
+  # so run the tests there with SOLARXY_REQUIRE_GPU=1: a missing adapter becomes
+  # a hard failure instead of an invisible skip.
+  gpu-tests:
+    name: GPU tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92
+      - uses: Swatinem/rust-cache@v2
+      - name: renderer tests with a real adapter
+        run: cargo test -p solarxy-renderer --all-features
+        env:
+          SOLARXY_REQUIRE_GPU: "1"
+
+  # Desktop rendering regression gate.
+  #
+  # Deliberately NOT a committed baseline: golden pixels depend on the GPU and
+  # driver, so a baseline captured on one machine drifts against another and the
+  # gate turns flaky (or needs a tolerance wide enough to hide a real regression).
+  # Instead capture the SAME two models twice on the SAME runner -- once at the
+  # merge base, once at HEAD -- and compare. Hardware cancels out, and the
+  # question asked is the one that matters: did THIS change alter the render?
+  #
+  # An intentional rendering change is expected to fail here. That is the point:
+  # phases 13 and 14 changed desktop output on purpose and nobody looked for two
+  # phases. Put `[golden-accept]` in the commit message (or PR title) to record
+  # that the diff was adjudicated and accepted.
+  goldens:
+    name: Golden captures (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.92
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolve the base commit
+        id: base
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git rev-parse HEAD~1)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Capture at HEAD
+        run: bash scripts/capture_goldens.sh /tmp/golden-head
+
+      - name: Capture at the base commit
+        run: |
+          git worktree add /tmp/base-tree ${{ steps.base.outputs.sha }}
+          cd /tmp/base-tree
+          bash scripts/capture_goldens.sh /tmp/golden-base || {
+            echo "::notice::base commit predates the capture script; skipping the gate"
+            echo "SKIP_GOLDENS=1" >> "$GITHUB_ENV"
+          }
+
+      - name: Compare
+        if: env.SKIP_GOLDENS != '1'
+        # The PR title is attacker-controlled on a public repo: pass it through
+        # the environment rather than interpolating it into the shell, or a
+        # crafted title runs arbitrary commands on the runner.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # An intentional render change is adjudicated by the author, not waved
+          # through by a tolerance.
+          MSG=$(git log -1 --pretty=%B)
+          if printf '%s %s' "$MSG" "$PR_TITLE" | grep -qF '[golden-accept]'; then
+            echo "::notice::[golden-accept] present — reporting the diff without failing."
+            cargo run --release -p solarxy-renderer --example golden -- \
+              compare /tmp/golden-base/dragon /tmp/golden-head/dragon --tolerance 0 || true
+            cargo run --release -p solarxy-renderer --example golden -- \
+              compare /tmp/golden-base/frog /tmp/golden-head/frog --tolerance 0 || true
+            exit 0
+          fi
+          cargo run --release -p solarxy-renderer --example golden -- \
+            compare /tmp/golden-base/dragon /tmp/golden-head/dragon --tolerance 0
+          cargo run --release -p solarxy-renderer --example golden -- \
+            compare /tmp/golden-base/frog /tmp/golden-head/frog --tolerance 0
+
+      - name: Upload captures on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldens
+          path: |
+            /tmp/golden-base
+            /tmp/golden-head
+
+  # The web app had NO CI at all: no wasm build, no tsc, no vitest. The ordering
+  # below is mandatory, not stylistic -- `web/src/wasm/pkg/` is gitignored and is
+  # a VALUE import reached by the test graph (client.ts -> session.ts -> two test
+  # files), so `tsc` and `vitest` cannot even resolve their imports until the
+  # wasm has been built.
+  web:
+    name: Web (wasm + typecheck + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install wasm-bindgen-cli (must match the Cargo pin exactly)
+        run: |
+          VERSION=0.2.126
+          curl -fsSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${VERSION}/wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin \
+              "wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl/wasm-bindgen"
+          wasm-bindgen --version
+
+      - name: Install binaryen (wasm-opt)
+        run: |
+          VERSION=123
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/version_${VERSION}/binaryen-version_${VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz -C /tmp
+          echo "/tmp/binaryen-version_${VERSION}/bin" >> "$GITHUB_PATH"
+
+      - run: wasm-opt --version
+
+      - name: clippy (solarxy-web on wasm32)
+        run: cargo clippy -p solarxy-web --target wasm32-unknown-unknown -- -D warnings
+
+      # Must precede npm: tsc and vitest cannot resolve without web/src/wasm/pkg.
+      - name: Build wasm
+        run: bash crates/solarxy-web/build-wasm.sh web/src/wasm/pkg
+
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+
+      - name: typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: vitest
+        working-directory: web
+        run: npm test
+
+      - name: production build
+        working-directory: web
+        run: npx vite build

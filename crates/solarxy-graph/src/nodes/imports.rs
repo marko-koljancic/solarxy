@@ -34,13 +34,13 @@ struct TableResolver<'a> {
 
 impl AssetResolver for TableResolver<'_> {
     fn read(&mut self, rel_path: &str) -> Option<Vec<u8>> {
-        // Match by the trailing file-name component (staged assets carry
-        // their original name).
-        let wanted = rel_path.rsplit(['/', '\\']).next().unwrap_or(rel_path);
+        // Match by trailing file-name component against EVERY name the bytes
+        // are staged under, not just the first-seen one: identical bytes staged
+        // twice under different names are one content-addressed entry, and a
+        // model referencing the second name must still resolve.
         self.table
-            .entries()
-            .find(|(_, e)| e.name.rsplit(['/', '\\']).next().unwrap_or(&e.name) == wanted)
-            .map(|(_, e)| (*e.bytes).clone())
+            .find_by_name(rel_path)
+            .map(|e| (*e.bytes).clone())
     }
 }
 

@@ -305,6 +305,23 @@ jobs:
       plan: ${{ needs.plan.outputs.val }}
     secrets: inherit
 
+  # Solarxy Web. Hand-added, like the `packages: write` permission above:
+  # `allow-dirty = ["ci"]` in dist-workspace.toml means `dist generate` does not
+  # regenerate this file, so entries in `post-announce-jobs` are documentation
+  # only and the job must be wired here by hand.
+  #
+  # NOTE it does not gate on prereleases, unlike the four package-channel jobs
+  # below. An `-rc.*` tag is how the web deploy is rehearsed end to end without
+  # touching Homebrew, winget, Flathub or GHCR.
+  custom-web-release:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/web-release.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+
   custom-ghcr-publish:
     needs:
       - plan

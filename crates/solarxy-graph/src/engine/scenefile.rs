@@ -332,6 +332,7 @@ impl Engine {
                 role: role.to_string(),
                 sha256: id.0.clone(),
                 original_name: entry.name.clone(),
+                alias_names: entry.aliases.iter().cloned().collect(),
                 import_settings: sf::JsonObject::new(),
             });
             blobs.push(sf::AssetBlob {
@@ -362,6 +363,15 @@ impl Engine {
             // Content-addressed staging; the returned id equals blob.sha256.
             self.assets
                 .stage(blob.name.clone(), blob.mime.clone(), blob.bytes.clone());
+        }
+        // Replay the alias names the save captured: the blob carries one name,
+        // but byte-identical companions staged under several names collapse into
+        // one entry, and the by-name resolver needs all of them back.
+        for record in &read.file.scene.assets {
+            let id = crate::params::AssetId(record.sha256.clone());
+            for alias in &record.alias_names {
+                self.assets.add_alias(&id, alias.clone());
+            }
         }
 
         let (document, map_warnings) = scene_to_document(&read.file.scene, &self.registry);

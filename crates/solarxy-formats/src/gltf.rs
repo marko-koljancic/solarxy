@@ -16,17 +16,23 @@ use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawMod
 /// Load a glTF or GLB from disk via the gltf crate's importer (buffers and
 /// images resolved from the file's directory).
 #[cfg(feature = "std-fs")]
+#[cfg(feature = "std-fs")]
 pub fn load_gltf(file_path: &str) -> Result<RawModelData, FormatsError> {
-    let (document, buffers, images) = ::gltf::import(file_path)?;
-    let images: Vec<Option<Arc<RawImageData>>> = images
-        .into_iter()
-        .map(|d| image_data_to_raw(&d).map(Arc::new))
-        .collect();
-    let parent_dir = Path::new(file_path)
+    // Read the file and resolve external buffers/images through the byte path's
+    // hardened `DirResolver`, rather than `::gltf::import`, which resolves a
+    // glTF's `uri` references relative to the file with no `..`/absolute
+    // rejection -- the same arbitrary-file-read the OBJ loader had. Routing
+    // through `load_gltf_bytes` closes it and puts desktop on the exact loader
+    // the web app already uses.
+    let bytes = std::fs::read(file_path).map_err(|source| FormatsError::Io {
+        path: file_path.to_string(),
+        source,
+    })?;
+    let parent = Path::new(file_path)
         .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    Ok(build_model(&document, &buffers, &images, Some(&parent_dir)))
+        .unwrap_or_else(|| Path::new("."));
+    let mut resolver = crate::DirResolver::new(parent);
+    load_gltf_bytes(&bytes, &mut resolver)
 }
 
 /// Parse glTF/GLB bytes. External buffers and external images come from

@@ -676,13 +676,24 @@ impl Engine {
         self.assets.len()
     }
 
-    /// `(content-hash, original-name)` for every staged asset (the boundary
-    /// uses it to hand the import worker a job's sidecar candidates).
+    /// `(content-hash, name)` for every staged asset (the boundary uses it to
+    /// hand the import worker a job's sidecar candidates, and the frontend's
+    /// missing-sidecar preflight treats it as the authoritative staged set).
+    ///
+    /// One row per NAME, not per entry: bytes staged under several names are a
+    /// single content-addressed entry, and every one of those names has to look
+    /// staged, or the preflight reports a companion missing whose bytes it is
+    /// already holding.
     #[must_use]
     pub fn asset_manifest(&self) -> Vec<(String, String)> {
         self.assets
             .entries()
-            .map(|(id, entry)| (id.0.clone(), entry.name.clone()))
+            .flat_map(|(id, entry)| {
+                entry
+                    .names()
+                    .map(|name| (id.0.clone(), name.to_string()))
+                    .collect::<Vec<_>>()
+            })
             .collect()
     }
 
@@ -1181,13 +1192,18 @@ impl Engine {
         edge: EdgeId,
         events: &mut Vec<EngineEvent>,
     ) -> Result<UndoOp, EngineError> {
-        // The target's variadic-ness for exact restore (before removal).
-        let to_variadic = {
+        // The target's variadic-ness AND the edge's position in the port order,
+        // captured before removal: `disconnect` drops the id out of the order
+        // and `connect` would append it back on the end, silently reordering
+        // the wires (see `UndoOp::RestoreEdge`).
+        let (to_variadic, slot) = {
             let graph = self.doc.graph(ctx)?;
             let e = graph.edge(edge).ok_or(GraphError::UnknownEdge(edge))?;
-            graph
-                .node(e.to)
-                .is_some_and(|n| n.port_order.contains_key(&e.to_port))
+            let order = graph.node(e.to).and_then(|n| n.port_order.get(&e.to_port));
+            (
+                order.is_some(),
+                order.and_then(|o| o.iter().position(|&id| id == edge)),
+            )
         };
         let removed = self.doc.graph_mut(ctx)?.disconnect(edge)?;
         self.mark_dirty(ctx, removed.to);
@@ -1196,6 +1212,7 @@ impl Engine {
             ctx,
             edge: removed,
             to_variadic,
+            slot,
         })
     }
 
@@ -1486,8 +1503,8 @@ impl Engine {
         }
     }
 
-    /// Whether an annotation's anchor is currently stale (runtime-derived;
-    /// see [`Engine::refresh_review_staleness`]).
+    /// Whether an annotation's anchor is currently stale (runtime-derived: the
+    /// engine refreshes review staleness after each cook that changes geometry).
     #[must_use]
     pub fn annotation_stale(&self, id: crate::review::AnnotationId) -> bool {
         self.review_stale.get(&id).copied().unwrap_or(false)
@@ -1871,12 +1888,16 @@ impl Engine {
                 ctx,
                 edge,
                 to_variadic,
+                slot,
             } => {
                 let id = edge.id;
                 let to = edge.to;
+                // `connect_at`, not `connect`: the wire must go back where it
+                // was in the variadic order, or an index-selecting consumer
+                // silently reads a different branch.
                 self.doc
                     .graph_mut(ctx)?
-                    .connect(edge.clone(), to_variadic)?;
+                    .connect_at(edge.clone(), to_variadic, slot)?;
                 self.mark_dirty(ctx, to);
                 events.push(EngineEvent::EdgeAdded {
                     ctx,

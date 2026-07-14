@@ -6,7 +6,6 @@
 // Note nodes are excluded (they are annotations, not flow).
 
 import dagre from "@dagrejs/dagre";
-import ELK from "elkjs/lib/elk.bundled.js";
 import { dispatch } from "../engine/session";
 import type { GraphContext, GraphMirror } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
@@ -66,11 +65,18 @@ export function computeDagreLayout(
 }
 
 /** ELK position mapping (layered/DOWN, Minimystix options). Pure/async;
- * ELK already yields top-left coordinates. */
+ * ELK already yields top-left coordinates.
+ *
+ * ELK is loaded on FIRST USE, not at module load. `elk.bundled.js` is ~1.6 MB
+ * minified -- about two thirds of what the entry chunk used to be -- and it is
+ * only reachable from here: dagre is the default algorithm and ELK is behind the
+ * `L` cycle and an explicit View-menu item. A static import made every visitor
+ * download a layout engine most of them never invoke. */
 export async function computeElkLayout(
   nodes: LayoutNode[],
   edges: [number, number][],
 ): Promise<[number, [number, number]][]> {
+  const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
   const result = await elk.layout({
     id: "root",

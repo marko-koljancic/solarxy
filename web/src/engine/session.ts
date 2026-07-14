@@ -4,6 +4,7 @@
 // a full resnapshot on desync.
 
 import uvCheckerUrl from "../assets/uv-checker_1k.png";
+import { reportWorkerError } from "../telemetry";
 import {
   clearAutosaves,
   openSceneFile,
@@ -63,6 +64,10 @@ interface WorkerResult {
   height?: number;
   pixels?: Uint8Array;
   error?: string;
+  /** True when `error` is a wasm trap (our bug) rather than a bad input file
+   * (the user's). The worker distinguishes them; only the former is reported. */
+  fatal?: boolean;
+  stack?: string;
 }
 
 // HDRI preparations are host view-state work, not engine jobs: they ride
@@ -90,11 +95,24 @@ function ensureImportWorker(): Worker {
   if (!importWorker) {
     importWorker = new Worker(new URL("./importWorker.ts", import.meta.url), { type: "module" });
     importWorker.onmessage = (e: MessageEvent<WorkerResult>) => onWorkerResult(e.data);
+    // The fourth crash surface. The worker runs a SECOND wasm instance in its own
+    // realm: the React error boundary cannot see it, and neither can the main
+    // thread's `window.onerror`. Anything that escapes the worker's own try/catch
+    // arrives here or nowhere.
+    importWorker.onerror = (e: ErrorEvent) => {
+      reportWorkerError(e.message || "import worker crashed", undefined);
+    };
   }
   return importWorker;
 }
 
 function onWorkerResult(data: WorkerResult): void {
+  // A wasm trap in the worker is our bug and must be reported. A bad model file
+  // is not: it already becomes a toast, and reporting it would fill crash
+  // reporting with other people's broken glTFs. The worker tells us which.
+  if (data.fatal === true && data.error !== undefined) {
+    reportWorkerError(`import worker: ${data.error}`, data.stack);
+  }
   if (data.kind === "hdri") {
     hdriWaiters.get(data.jobId)?.(data);
     hdriWaiters.delete(data.jobId);
@@ -557,7 +575,7 @@ function markDirtyAndAutosave(): void {
 function buildSaveExtra(): SaveExtra {
   const now = new Date().toISOString();
   return {
-    generator: "solarxy-web 0.6.0",
+    generator: `solarxy-web ${__APP_VERSION__}`,
     canvasViewports: {},
     meta: { name: "", description: "", projectId: "", created: now, modified: now },
   };

@@ -50,9 +50,9 @@ impl Default for MaterialUniform {
     }
 }
 
-/// Textures are `Arc`-shared so the content-hash [`TextureCache`]
-/// (`resources.rs`) can hand the same GPU texture to every material that
-/// references the same image.
+/// Textures are `Arc`-shared so the content-hash
+/// [`TextureCache`](crate::resources::TextureCache) can hand the same GPU
+/// texture to every material that references the same image.
 #[allow(dead_code)]
 pub struct Material {
     pub name: String,

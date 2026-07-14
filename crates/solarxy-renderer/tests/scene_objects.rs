@@ -1,7 +1,9 @@
 //! Headless integration tests for `SceneObjects::apply`: upsert, the
 //! in-place fast path, capacity growth, transform/visibility/remove ops,
 //! and light-list handling. Skips (with a note) when no GPU adapter is
-//! available, so CI runners without one stay green.
+//! available, so a developer machine without one stays green -- but see
+//! `require_gpu!`: under `SOLARXY_REQUIRE_GPU=1` (which CI sets on the runners
+//! that have an adapter) a missing GPU is a hard failure, not a skip.
 
 use std::sync::Arc;
 
@@ -17,7 +19,9 @@ struct Gpu {
 
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY,
+        // Honour `WGPU_BACKEND` so a backend can be pinned (and so the
+        // require-GPU gate can be exercised by pointing at an absent backend).
+        backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
         ..Default::default()
     });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -43,11 +47,24 @@ fn gpu() -> Option<Gpu> {
     })
 }
 
+/// Yields a GPU, or skips the test -- unless `SOLARXY_REQUIRE_GPU=1`, in which
+/// case a missing adapter is a hard failure.
+///
+/// The skip is right on a developer machine without a GPU and wrong in CI: this
+/// whole suite skipped silently on every CI run for the life of the project (the
+/// only test leg was a GPU-less ubuntu runner), so no pixel was ever verified.
+/// CI sets the env var on runners that do have an adapter.
 macro_rules! require_gpu {
     () => {
         match gpu() {
             Some(g) => g,
             None => {
+                assert!(
+                    std::env::var("SOLARXY_REQUIRE_GPU").as_deref() != Ok("1"),
+                    "SOLARXY_REQUIRE_GPU=1 but no usable GPU adapter. This runner is \
+                     supposed to have one; a silent skip is what let this suite go \
+                     unrun for the whole project."
+                );
                 eprintln!("skipping: no GPU adapter available");
                 return;
             }

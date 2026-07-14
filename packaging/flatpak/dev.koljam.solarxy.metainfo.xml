@@ -64,6 +64,22 @@
   </provides>
 
   <releases>
+    <release version="0.7.0" date="2026-07-14">
+      <description>
+        <p>
+          Solarxy Web: the viewer, validator and review toolset arrive in the browser
+          on WebGPU, with node-based parametric modelling on a shared Rust core.
+          33 node types, typed ports, subflows, transform gizmos, a dockable
+          workspace, textures and materials, and the self-contained .slxy scene
+          format (schema frozen at version 1).
+        </p>
+        <p>
+          Desktop gains the renderer work the web shell required: a multi-object
+          scene path, mip-mapped texture filtering, correct base-colour factors on
+          untextured materials, and a generalised light array.
+        </p>
+      </description>
+    </release>
     <release version="0.5.0-rc.7" date="2026-04-17">
       <description>
         <p>

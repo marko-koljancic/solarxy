@@ -114,7 +114,35 @@ impl DirResolver {
 #[cfg(feature = "std-fs")]
 impl AssetResolver for DirResolver {
     fn read(&mut self, rel_path: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.base.join(rel_path)).ok()
+        // `rel_path` is attacker-controlled: it is a raw reference out of a model
+        // file (an OBJ `mtllib`/`map_Kd`, a glTF buffer/image `uri`). Joining it
+        // unchecked lets a malicious model read arbitrary local files:
+        // `../../../../etc/passwd` escapes the base, and an absolute path makes
+        // `PathBuf::join` discard the base entirely. On the desktop viewer that
+        // is arbitrary local-file read; for the `solarxy-validate` library run
+        // server-side over uploaded models it is an LFI / file-existence oracle.
+        //
+        // A companion always sits beside (or below) the model it belongs to, so
+        // a legitimate reference never needs `..`, a root, or a drive prefix.
+        // Reject all three, then confirm the resolved path is still contained by
+        // the base after canonicalization (defeats symlink escapes too).
+        let rel = std::path::Path::new(rel_path);
+        if rel.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            return None;
+        }
+        let base = self.base.canonicalize().ok()?;
+        let full = base.join(rel).canonicalize().ok()?;
+        if !full.starts_with(&base) {
+            return None;
+        }
+        std::fs::read(&full).ok()
     }
 }
 

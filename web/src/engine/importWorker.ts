@@ -149,11 +149,28 @@ ctx.onmessage = async (
       [out.blob.buffer],
     );
   } catch (err) {
+    // Two very different things land here, and conflating them loses the one
+    // that matters:
+    //
+    //   - A bad model file. Expected, the user's problem, surfaced as a toast.
+    //     Reporting these would flood crash reporting with other people's broken
+    //     glTFs.
+    //   - A wasm PANIC in the worker's engine instance. That is OUR bug, and it
+    //     arrives as a `RuntimeError` (the trap after `console_error_panic_hook`
+    //     logs the message). Swallowed as a "parse error" it would be invisible
+    //     forever, because the worker is a second wasm instance in its own realm:
+    //     the main thread's `window.onerror` cannot see it and neither can the
+    //     React error boundary.
+    //
+    // `fatal` tells the main thread which one it is. It reports the fatal ones.
+    const fatal = err instanceof WebAssembly.RuntimeError;
     ctx.postMessage({
       kind: req.kind,
       jobId: req.jobId,
       ctx: req.ctx,
       error: err instanceof Error ? err.message : String(err),
+      fatal,
+      stack: fatal && err instanceof Error ? err.stack : undefined,
     });
   }
 };

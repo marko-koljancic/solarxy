@@ -24,8 +24,12 @@ install-updater = false
 # - flathub-bump / homebrew-bump / winget-release: submit the GUI to the
 #   downstream package channels. Each gates internally on its PAT secret
 #   being set and on the tag being a stable release (no-op otherwise).
+# - web-release:   builds the Solarxy Web bundle and attaches it to the release.
+#                  Does NOT skip prereleases: an -rc.* tag is how the deploy is
+#                  rehearsed without touching any package channel.
 post-announce-jobs = [
     "./native-bundle",
+    "./web-release",
     "./ghcr-publish",
     "./flathub-bump",
     "./homebrew-bump",

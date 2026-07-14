@@ -1,10 +1,11 @@
 //! Linear and radial duplication (the `array` node's kernel, Phase 15).
 //!
 //! Both modes are compositions of machinery that already exists: each copy's
-//! placement is a [`compose_trs`] matrix, each copy is a [`bake_transform`],
-//! and the copies concatenate through [`merge`](crate::merge::merge), whose
-//! content-hash material dedup means the N copies of a textured input share
-//! one material entry rather than N identical ones.
+//! placement is a [`compose_trs`] matrix, each copy is a
+//! [`bake_transform`](crate::transform::bake_transform), and the copies
+//! concatenate through [`merge`], whose content-hash material dedup means the N
+//! copies of a textured input share one material entry rather than N identical
+//! ones.
 //!
 //! `count` includes the original, so `count == 1` is an identity copy.
 
