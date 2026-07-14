@@ -16,7 +16,6 @@ use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawMod
 /// Load a glTF or GLB from disk via the gltf crate's importer (buffers and
 /// images resolved from the file's directory).
 #[cfg(feature = "std-fs")]
-#[cfg(feature = "std-fs")]
 pub fn load_gltf(file_path: &str) -> Result<RawModelData, FormatsError> {
     // Read the file and resolve external buffers/images through the byte path's
     // hardened `DirResolver`, rather than `::gltf::import`, which resolves a
