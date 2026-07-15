@@ -1,11 +1,12 @@
-// The Houdini-style hover radial (Phase 7b, maintainer reference
-// screenshot): dark arc segments with gaps surrounding the node. Segments:
-// info (i) left, display-flag eye top-right, enter-subflow top-left
-// (containers only), bypass bottom-left, delete bottom-right. Rendered in
-// a body portal at the node's viewport position; the container is
-// pointer-transparent so the node underneath stays fully interactive, and
-// the ring closes when the pointer strays past a grace radius, on any
-// outside pointerdown (drag/marquee/connect starts), or on Esc.
+// The Houdini-style hover radial (Phase 7b; revamp D-7 revised): six
+// wedges on a 45-degree pitch with 39-degree sweeps, centred at E rename /
+// NE display / NW dive (containers) / W info / SW bypass / SE delete.
+// North and south stay OPEN so the node's wires remain visible through
+// the ring. Active segments fill accent amber. Rendered in a body portal
+// at the node's viewport position; the container is pointer-transparent
+// so the node underneath stays fully interactive, and the ring closes
+// when the pointer strays past a grace radius, on any outside pointerdown
+// (drag/marquee/connect starts), or on Esc.
 //
 // Phase 10: the ring TRACKS its node. It renders inside the ReactFlowProvider
 // (so it can subscribe to the viewport transform) but still portals to the body
@@ -18,15 +19,22 @@ import { useStore } from "@xyflow/react";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { dispatch } from "../engine/session";
-import { IconBypass, IconDive, IconEye, IconTrash } from "../icons";
+import { IconBypass, IconDive, IconEye, IconRename, IconTrash } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
+import { useUi } from "../store/ui";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
-const RING_WIDTH = 34;
-const GAP_DEG = 9;
+/** Band width (D-7: outer 96 minus inner 58). */
+const RING_WIDTH = 38;
+/** The D-7 inner radius; clears a 112x28 body's half-diagonal at zoom 1.
+ * Zoomed-in nodes grow, so the live inner radius is the larger of this
+ * and the measured node clearance. */
+const MIN_INNER_R = 58;
+/** 45deg pitch minus 39deg sweep leaves the 6deg wedge gaps. */
+const GAP_DEG = 6;
 const GRACE_PX = 44;
 
 interface Segment {
@@ -146,11 +154,25 @@ export function RadialMenu() {
   // gated on the descriptor declaring one (note gets no eye).
   const rootEye = t.ctx === "root" && hasVisibleParam(desc);
 
+  // D-7 wedge layout: E rename, NE display, NW dive, W info, SW bypass,
+  // SE delete; N and S open for the wires. Every wedge spans 45 minus the
+  // shared gap.
   const segments: Segment[] = [
+    {
+      key: "rename",
+      angle: 0,
+      span: 45,
+      icon: <IconRename size={13} />,
+      title: "Rename (F2)",
+      onPick: (tt) => {
+        useUi.getState().setRenameRequest(tt.nodeId);
+        closeRadial();
+      },
+    },
     {
       key: "info",
       angle: 180,
-      span: 62,
+      span: 45,
       icon: <span className="radial-glyph">i</span>,
       title: "Node info",
       onPick: (tt) =>
@@ -165,8 +187,8 @@ export function RadialMenu() {
   if (t.ctx !== "root") {
     segments.push({
       key: "display",
-      angle: 38,
-      span: 62,
+      angle: 45,
+      span: 45,
       icon: <IconEye size={13} />,
       title: "Set the display flag",
       active: isDisplay,
@@ -178,8 +200,8 @@ export function RadialMenu() {
   } else if (rootEye) {
     segments.push({
       key: "visibility",
-      angle: 38,
-      span: 62,
+      angle: 45,
+      span: 45,
       icon: <IconEye size={13} />,
       title: nodeVisible(node) ? "Hide (stays cooked)" : "Show",
       active: nodeVisible(node),
@@ -198,8 +220,8 @@ export function RadialMenu() {
   segments.push(
     {
       key: "bypass",
-      angle: 232,
-      span: 62,
+      angle: 225,
+      span: 45,
       icon: <IconBypass size={13} />,
       title: t.bypassable ? "Toggle bypass" : "Not bypassable",
       active: node.bypassed,
@@ -218,8 +240,8 @@ export function RadialMenu() {
     },
     {
       key: "delete",
-      angle: 308,
-      span: 62,
+      angle: 315,
+      span: 45,
       icon: <IconTrash size={13} />,
       title: "Delete node",
       onPick: (tt) => {
@@ -231,8 +253,8 @@ export function RadialMenu() {
   if (t.isContainer) {
     segments.push({
       key: "dive",
-      angle: 142,
-      span: 42,
+      angle: 135,
+      span: 45,
       icon: <IconDive size={13} />,
       title: "Enter subflow",
       onPick: (tt) => {
@@ -242,7 +264,7 @@ export function RadialMenu() {
     });
   }
 
-  const r0 = anchor.radius + 6;
+  const r0 = Math.max(MIN_INNER_R, anchor.radius + 6);
   const r1 = r0 + RING_WIDTH;
   const size = (r1 + 8) * 2;
   const c = size / 2;
@@ -273,7 +295,7 @@ export function RadialMenu() {
         return (
           <span
             key={seg.key}
-            className={`radial-icon${seg.disabled ? " disabled" : ""}`}
+            className={`radial-icon${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}`}
             style={{ left: x, top: y }}
             onClick={() => seg.onPick(t)}
             title={seg.title}

@@ -179,7 +179,8 @@ mod tests {
     use crate::registry::param_spec::{ParamSpec, ParamType};
     use crate::registry::resolve::ResolvedParams;
     use crate::registry::{
-        BypassBehavior, Category, ContextMask, MigrateError, NodeTypeDescriptor, PortSpec, Registry,
+        BypassBehavior, Category, ContextMask, MigrateError, NodeRole, NodeTypeDescriptor,
+        PortSpec, Registry,
     };
     use crate::registry::coerce::DataType;
 
@@ -229,6 +230,8 @@ mod tests {
             bypass: BypassBehavior::Mute,
             doc: "",
             search_aliases: &[],
+            glyph: "widget",
+            role: NodeRole::Standard,
             cook: stub_cook,
             migrate: Some(migrate_v1_to_v2),
         };

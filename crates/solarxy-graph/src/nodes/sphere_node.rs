@@ -7,7 +7,7 @@ use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -53,6 +53,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::Mute,
         doc: "A UV sphere with poles along Y.",
         search_aliases: &["ball", "globe"],
+        glyph: "sphere",
+        role: NodeRole::Standard,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

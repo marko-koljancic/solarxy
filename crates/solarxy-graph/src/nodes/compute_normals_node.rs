@@ -10,7 +10,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -47,6 +47,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         },
         doc: "Recomputes per-vertex normals from the triangle topology.",
         search_aliases: &["normals", "recompute", "smooth"],
+        glyph: "compute_normals",
+        role: NodeRole::Standard,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

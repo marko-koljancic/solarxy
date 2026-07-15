@@ -22,7 +22,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 /// The five optional map ports, one per `RawMaterialData` texture role.
 const MAP_PORTS: [(&str, &str); 5] = [
@@ -105,6 +105,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Assigns a PBR material to every mesh of the input; connected \
               maps drive their channels, factors drive the rest.",
         search_aliases: &["material", "pbr", "texture", "shader", "color"],
+        glyph: "material",
+        role: NodeRole::Standard,
         cook: cook_material,
         migrate: None,
     }
@@ -181,6 +183,8 @@ fn cook_material(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // exact values constructed by the tests
+
     use super::*;
     use crate::cook::InputSlot;
     use crate::registry::coerce::Value;

@@ -110,6 +110,16 @@ export function IconTrash(p: IconProps) {
   );
 }
 
+export function IconRename(p: IconProps) {
+  // A text cursor between serifs (the radial's rename wedge, D-7).
+  return (
+    <Svg {...p}>
+      <path d="M6 3h4M6 13h4M8 3v10" />
+      <path d="M11.5 6.5h2v3h-2" />
+    </Svg>
+  );
+}
+
 export function IconDive(p: IconProps) {
   return (
     <Svg {...p}>

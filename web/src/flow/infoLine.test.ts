@@ -47,6 +47,8 @@ function desc(
     bypass: { mode: "mute" },
     doc: "",
     searchAliases: [],
+    glyph: "t",
+    role: "standard",
   };
 }
 

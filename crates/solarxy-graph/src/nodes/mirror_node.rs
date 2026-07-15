@@ -12,7 +12,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -74,6 +74,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
               merges both halves, which is the usual way to build a symmetric \
               model from one side.",
         search_aliases: &["reflect", "symmetry", "flip"],
+        glyph: "mirror",
+        role: NodeRole::Standard,
         cook,
         migrate: None,
     }

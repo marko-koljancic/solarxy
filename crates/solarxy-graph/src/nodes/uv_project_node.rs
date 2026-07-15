@@ -13,7 +13,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -81,6 +81,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Projects UVs onto the input (planar, box, cylindrical, or \
               spherical), normalized over its bounds.",
         search_aliases: &["uv", "unwrap", "project", "texture", "mapping"],
+        glyph: "uv_project",
+        role: NodeRole::Standard,
         cook: cook_uv_project,
         migrate: None,
     }

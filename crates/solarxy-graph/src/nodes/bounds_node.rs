@@ -14,7 +14,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -67,6 +67,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
               small marker cube at its center. Useful for measuring a model and \
               for sanity-checking where a piece of geometry actually sits.",
         search_aliases: &["bbox", "aabb", "extents", "measure", "center"],
+        glyph: "bounds",
+        role: NodeRole::Standard,
         cook,
         migrate: None,
     }

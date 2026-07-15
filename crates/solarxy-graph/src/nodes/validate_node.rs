@@ -15,7 +15,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{ParamSpec, ParamType, Pred};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -60,6 +60,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Runs the Solarxy validation checks over the input geometry, \
               passing the geometry through and emitting a report.",
         search_aliases: &["validate", "check", "lint", "inspect"],
+        glyph: "validate",
+        role: NodeRole::Analyzer,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

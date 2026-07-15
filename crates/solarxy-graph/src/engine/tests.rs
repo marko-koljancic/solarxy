@@ -270,6 +270,11 @@ fn snapshot_and_registry_snapshot_serialize() {
     // The Title Case category label rides beside the stable snake_case id.
     assert!(json.contains("\"categoryLabel\":\"Primitives\""));
     assert!(json.contains("\"category\":\"primitives\""));
+    // Node identity for the canvas: the icon key and the silhouette family
+    // (merge is the gather-shaped exception).
+    assert!(json.contains("\"glyph\":\"box\""));
+    assert!(json.contains("\"role\":\"standard\""));
+    assert!(json.contains("\"role\":\"gather\""));
 }
 
 #[test]
@@ -3157,7 +3162,7 @@ fn a_subflow_basis_composes_the_container_and_the_node() {
 
 // ---- Phase 13: import_image persistence + async decode round trips ----
 
-/// A valid 1x1 red PNG (identical to the import_image unit fixture).
+/// A valid 1x1 red PNG (identical to the `import_image` unit fixture).
 fn red_png() -> Vec<u8> {
     vec![
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
@@ -3205,7 +3210,7 @@ fn import_image_async_decode_round_trip() {
     assert_eq!(image.pixels, vec![255, 0, 0, 255]);
 }
 
-/// Persistence: only the AssetRef serializes; a save/load/recook yields
+/// Persistence: only the `AssetRef` serializes; a save/load/recook yields
 /// pixel-identical image output (equal content hash), and the staged PNG
 /// bytes ride the archive because `referenced_assets` sees the param.
 #[test]
@@ -3271,6 +3276,7 @@ fn import_image_slxy_round_trip_recooks_identically() {
 /// override material whose diffuse texture is the imported image with a
 /// neutralized (white) base color factor.
 #[test]
+#[allow(clippy::float_cmp)] // exact values constructed by the test
 fn image_material_uv_project_chain_cooks_end_to_end() {
     let (mut e, ctx) = subflow_engine();
     let asset = e.stage_asset("red.png", "image/png", red_png());

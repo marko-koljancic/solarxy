@@ -10,7 +10,7 @@
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
 
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
@@ -94,11 +94,15 @@ fn bias_param(default: f64) -> ParamSpec {
     .show_if("cast_shadow", Pred::Truthy)
 }
 
+/// `glyph` is the icon key: the type id with its `_light` suffix dropped
+/// (`point`, `directional`, ...), passed per light like the other identity
+/// fields.
 fn assemble(
     type_id: &'static str,
     display_name: &'static str,
     doc: &'static str,
     aliases: &'static [&'static str],
+    glyph: &'static str,
     display: &str,
     specific: Vec<ParamSpec>,
 ) -> NodeTypeDescriptor {
@@ -117,6 +121,8 @@ fn assemble(
         bypass: BypassBehavior::Mute,
         doc,
         search_aliases: aliases,
+        glyph,
+        role: NodeRole::Light,
         cook: passive_cook,
         migrate: None,
     }
@@ -129,6 +135,7 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
         "Point Light",
         "An omnidirectional light with distance falloff.",
         &["light", "omni", "bulb"],
+        "point",
         "Point Light",
         vec![
             ParamSpec::new(
@@ -180,6 +187,7 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
         "A parallel light (like the sun); its shadow frustum auto-fits the \
          scene bounds.",
         &["light", "sun", "sky"],
+        "directional",
         "Directional Light",
         vec![
             ParamSpec::new(
@@ -220,6 +228,7 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
         "Spot Light",
         "A cone light with an angle and soft-edge penumbra.",
         &["light", "cone", "flashlight"],
+        "spot",
         "Spot Light",
         vec![
             ParamSpec::new(
@@ -297,6 +306,7 @@ pub fn ambient_descriptor() -> NodeTypeDescriptor {
         "A uniform fill light with no position or shadow; modulates the \
          scene ambient/IBL term.",
         &["light", "fill", "environment"],
+        "ambient",
         "Ambient Light",
         vec![color_param("color", "Color", WHITE), intensity(0.5)],
     )
@@ -309,6 +319,7 @@ pub fn hemisphere_descriptor() -> NodeTypeDescriptor {
         "Hemisphere Light",
         "A two-color sky/ground ambient light.",
         &["light", "sky", "gradient"],
+        "hemisphere",
         "Hemisphere Light",
         vec![
             color_param("sky_color", "Sky Color", WHITE),
@@ -330,6 +341,7 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
         "A rectangular area light (rendered as a soft point-light \
          approximation in v1).",
         &["light", "area", "softbox", "panel"],
+        "rect_area",
         "Rect Area Light",
         vec![
             ParamSpec::new(

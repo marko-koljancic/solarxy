@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
     "@sentry/browser": "^10.65.0",
     "@xyflow/react": "^12.8.5",
     "dockview-react": "^7.0.2",

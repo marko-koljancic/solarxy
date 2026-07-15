@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { NodeTypeSnapshot, RegistrySnapshot } from "../engine/types";
+import { GLYPH_PATHS, glyphPath, nodeRole } from "../flow/nodeVisual";
 import {
   DATA_TYPE_COLOR,
   coercionKind,
@@ -43,6 +44,10 @@ const PROBE: NodeTypeSnapshot = {
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
   searchAliases: ["probe", "novel"],
+  // Revamp D-18 identity hints: a glyph key the frontend has NO art for,
+  // so the category fallback is what the tests below exercise.
+  glyph: "probe",
+  role: "standard",
 };
 
 /** A minimal snapshot: just the real coercion cells the probe needs, plus the
@@ -103,5 +108,22 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     // And the panel would group them by `group`, preserving order.
     const groups = new Set(probe.params.map((p) => p.group));
     expect([...groups]).toEqual(["geometry", "shape"]);
+  });
+
+  it("always resolves drawable node art (revamp D-18: glyph + role hints)", () => {
+    const probe = descriptorFor(SNAP, "probe")!;
+    // "probe" is a glyph key with no frontend art: the category fallback
+    // (primitives -> box) must produce a real path, never a broken icon.
+    expect(GLYPH_PATHS[probe.glyph]).toBeUndefined();
+    expect(glyphPath(probe)).toBe(GLYPH_PATHS.box);
+    // A declared, known role resolves as-is.
+    expect(nodeRole(probe)).toBe("standard");
+    // A role variant NEWER than this frontend (arrives as an unknown
+    // string over the boundary) falls back by category, not by crash.
+    const future = { ...probe, role: "hologram" as never };
+    expect(nodeRole(future)).toBe("standard");
+    // And a declared glyph WITH art wins over the fallback.
+    const merged = { ...probe, glyph: "merge" };
+    expect(glyphPath(merged)).toBe(GLYPH_PATHS.merge);
   });
 });

@@ -12,7 +12,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -114,6 +114,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Duplicates the input geometry, either in a line or around a \
               circle. Materials are preserved and shared across the copies.",
         search_aliases: &["duplicate", "repeat", "clone", "radial", "grid"],
+        glyph: "array",
+        role: NodeRole::Standard,
         cook,
         migrate: None,
     }

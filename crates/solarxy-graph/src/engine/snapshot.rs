@@ -187,6 +187,11 @@ pub struct NodeTypeSnapshot {
     pub bypass: BypassSnapshot,
     pub doc: String,
     pub search_aliases: Vec<String>,
+    /// Stable icon key for the node's vector glyph; an unknown key falls
+    /// back to the category glyph client-side.
+    pub glyph: String,
+    /// The silhouette family the node renders with; orthogonal to `category`.
+    pub role: crate::registry::NodeRole,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -341,6 +346,8 @@ impl NodeTypeSnapshot {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            glyph: desc.glyph.to_string(),
+            role: desc.role,
         }
     }
 }

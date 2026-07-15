@@ -1,20 +1,166 @@
-/* Design tokens, carried from the Minimystix reference
- * (_reference/minimystx/src/styles/variables.css) per the phase-6 design
- * adoption decision (2026-07-08). Dark is the default theme; the light set
- * overrides on body.light-theme; "system" resolves to one of the two in
- * the ui store. Solarxy-specific tokens (badges, stale, handles, canvas)
- * extend the set at the bottom of each block: the typed-handle palette and
- * status colors are UX-spec-owned and survive the restyle. */
+/* Design tokens: the two-tier architecture from the UI/UX revamp (D-13,
+ * SOLARXY-WEB-REVAMP.md, 2026-07-15), superseding the flat Minimystix
+ * carryover. Tier 1 is a raw primitive palette with no UI meaning; tier 2
+ * is the semantic layer components read. Legacy variable names (the
+ * pre-revamp vocabulary that styles.css and the dockview remap consume)
+ * are kept as aliases onto the semantics, so the reskin lands without a
+ * call-site rename; new code should prefer the semantic names.
+ *
+ * The shipping look is the ratified evolution palette (design decisions
+ * D-1..D-3 in solarxy/design/web/solarxy-web.pen): Ayu amber accent,
+ * burnt-orange attention state (always shape-paired), Houdini-blue
+ * display flag. Dark is the default theme; the light set overrides on
+ * body.light-theme; "system" resolves to one of the two in the prefs
+ * store. The typed-handle palette in registry/datatypes.ts and the node
+ * category pastels are UX-spec-owned (D-8) and unchanged. */
+
+:root {
+  /* ---- Tier 1: primitives (theme-agnostic, no UI meaning) ---------- */
+
+  /* Neutral ramp, dark UI. */
+  --n-900: #1e1e1e;
+  --n-850: #242424;
+  --n-800: #2a2a2a;
+  --n-750: #333333;
+  --n-700: #3a3a3a;
+  --n-600: #404040;
+  --n-550: #4a4a4a;
+  --n-500: #555555;
+  --n-400: #999999;
+  --n-300: #888888;
+  --n-200: #aaaaaa;
+  --n-100: #e0e0e0;
+  --n-000: #ffffff;
+
+  /* Neutral ramp, light UI. */
+  --l-000: #ffffff;
+  --l-050: #f5f5f5;
+  --l-075: #fafafa;
+  --l-100: #e8e8e8;
+  --l-150: #e0e0e0;
+  --l-300: #bbbbbb;
+  --l-350: #cccccc;
+  --l-400: #999999;
+  --l-450: #aaaaaa;
+  --l-500: #777777;
+  --l-700: #555555;
+  --l-900: #333333;
+  --l-950: #000000;
+
+  /* Amber: the accent family (D-1, Ayu). */
+  --amber-300: #ffb454;
+  --amber-400: #e6b450;
+  --amber-600: #d9a13f;
+  --amber-650: #c88f2f;
+  --amber-700: #a8781c;
+
+  /* Burnt orange: the attention family (D-2; never without a shape). */
+  --burnt-400: #e07a3f;
+  --burnt-600: #b85c1e;
+
+  /* Houdini blue: the display family (D-3). */
+  --disp-400: #58a6ff;
+  --disp-600: #1f6feb;
+
+  /* Signal hues. */
+  --err-400: #e5484d;
+  --err-600: #d1373c;
+  --ok-400: #55dd99;
+  --ok-600: #3aa76d;
+
+  /* Typography (D-14): bundled, self-hosted families (fontsource,
+   * latin-subset woff2 via unicode-range); the system stacks remain as
+   * fallbacks. IBM Plex Mono carries all numeric-precision surfaces. */
+  --font-ui:
+    "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Motion (D-17). Zeroed under reduce-motion below; transform/opacity
+   * only, never on the cook path. */
+  --motion-fast: 90ms;
+  --motion-base: 160ms;
+  --motion-slow: 240ms;
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+body.reduce-motion {
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+}
 
 :root,
 body,
 body.dark-theme {
   color-scheme: dark;
 
-  --background-primary: #2a2a2a;
-  --background-secondary: #333333;
-  --background-tertiary: #3a3a3a;
-  --background-quaternary: #1e1e1e;
+  /* ---- Tier 2: semantic roles (dark) ------------------------------- */
+
+  --surface-canvas: var(--n-850);
+  --surface-dot: #3c3c3c;
+  --surface-app: var(--n-800);
+  --surface-raised: var(--n-750);
+  --surface-overlay: var(--n-700);
+  --surface-sunken: var(--n-900);
+
+  --ink-primary: var(--n-100);
+  --ink-secondary: var(--n-200);
+  --ink-tertiary: var(--n-300);
+  --ink-muted: var(--n-400);
+  --ink-strong: var(--n-000);
+  --ink-on-accent: #111111;
+  --ink-on-pastel: #1f2937;
+
+  --border-subtle: var(--n-600);
+  --border-default: var(--n-550);
+  --border-strong: var(--n-500);
+  --divider: var(--n-500);
+
+  --accent: var(--amber-400);
+  --accent-hover: var(--amber-300);
+  --accent-pressed: var(--amber-600);
+  --accent-subtle: color-mix(in srgb, var(--amber-400) 14%, transparent);
+  /* Safe for 1px hairlines (focus borders). On dark the accent itself
+   * clears 3:1; the light theme substitutes a darker amber. */
+  --accent-hairline: var(--amber-400);
+
+  --state-attention: var(--burnt-400);
+  /* Ink on the attention hue: dark on the bright dark-theme orange (5.6:1),
+   * white on the deeper light-theme orange (contrast matrix). */
+  --ink-on-attention: #1a1a1a;
+
+  --display: var(--disp-400);
+  --display-halo: var(--disp-400);
+
+  --status-error: var(--err-400);
+  --status-error-bg: rgba(255, 68, 68, 0.1);
+  --status-success: var(--ok-400);
+
+  /* Node anatomy (D-4/D-11/D-12): the glyph chip and the label stack. */
+  --node-chip: rgba(255, 255, 255, 0.85);
+  --node-glyph-ink: #1f2937;
+  --node-type-label: #8a8f98;
+  --node-desc: #5fb3a1;
+  --node-param: #7fa8cc;
+  --node-slot: #1f2937;
+
+  /* ---- Legacy aliases (pre-revamp vocabulary) ----------------------- */
+
+  --background-primary: var(--surface-app);
+  --background-secondary: var(--surface-raised);
+  --background-tertiary: var(--surface-overlay);
+  --background-quaternary: var(--surface-sunken);
 
   --node-background: #e5e7eb;
 
@@ -24,8 +170,9 @@ body.dark-theme {
 
   --light-node-background: #f8e7b0;
 
-  /* Houdini-inspired pastel category fills (Phase 7b). Dark text stays
-   * readable on all of them; the dark theme uses slightly muted values. */
+  /* Houdini-inspired pastel category fills (Phase 7b, ratified D-8/D-9).
+   * Dark text stays readable on all of them; the dark theme uses slightly
+   * muted values. */
   --node-cat-primitives: #c9dcf2;
   --node-cat-modifiers: #c8e8d6;
   --node-cat-import: #ddd0ee;
@@ -35,22 +182,26 @@ body.dark-theme {
   --light-node-border: rgba(255, 255, 255, 0.15);
   --light-node-border-hover: rgba(255, 255, 255, 0.25);
 
-  --border-primary: #404040;
-  --border-secondary: #4a4a4a;
-  --border-tertiary: #555555;
+  --border-primary: var(--border-subtle);
+  --border-secondary: var(--border-default);
+  --border-tertiary: var(--border-strong);
 
-  --divider-primary: #555555;
+  --divider-primary: var(--divider);
 
-  --text-primary: #e0e0e0;
-  --text-secondary: #888888;
-  --text-tertiary: #aaaaaa;
-  --text-quaternary: #999999;
-  --text-highlight: #ffffff;
-  --text-on-accent: rgba(255, 255, 255, 0.92);
+  /* Note: the legacy text scale had secondary darker than tertiary on
+   * dark; the aliases preserve those exact values. */
+  --text-primary: var(--ink-primary);
+  --text-secondary: var(--ink-tertiary);
+  --text-tertiary: var(--ink-secondary);
+  --text-quaternary: var(--ink-muted);
+  --text-highlight: var(--ink-strong);
+  --text-on-accent: var(--ink-on-accent);
 
-  --accent-primary: #4a90e2;
-  --accent-secondary: #0098ff;
-  --accent-tertiary: #003e66;
+  --accent-primary: var(--accent);
+  --accent-secondary: var(--accent-hover);
+  --accent-tertiary: var(--accent-subtle);
+  /* Legacy hues, unused in chrome (excluded from the evo application
+   * map); kept for compatibility only. */
   --accent-blue: #4a90e2;
   --accent-green: #5ec269;
   --accent-yellow: #f7df1e;
@@ -58,7 +209,7 @@ body.dark-theme {
   --edge-color: #4a90e2;
   --edge-outline-color: #000000;
   --connection-line-default: #e5e7eb;
-  --connection-line-valid: #55dd99;
+  --connection-line-valid: var(--ok-400);
   --connection-line-invalid: #ff6060;
 
   --spacing-xxs: 0.2rem;
@@ -82,36 +233,82 @@ body.dark-theme {
     border-color 0.3s ease;
 
   --error-border: #ff4444;
-  --error-background: rgba(255, 68, 68, 0.1);
+  --error-background: var(--status-error-bg);
   --error-text: #ff6666;
 
-  --input-background: var(--background-quaternary);
-  --input-border: var(--border-primary);
-  --input-border-focus: var(--accent-primary);
-  --input-border-hover: var(--border-secondary);
-  --input-text: var(--text-primary);
+  --input-background: var(--surface-sunken);
+  --input-border: var(--border-subtle);
+  --input-border-focus: var(--accent-hairline);
+  --input-border-hover: var(--border-default);
+  --input-text: var(--ink-primary);
   --input-placeholder: var(--text-tertiary);
 
-  /* Solarxy: status + node-canvas tokens (UX-spec-owned). */
-  --error-badge: #e5484d;
-  --warn-badge: #f5a623;
-  --stale-color: #f5a623;
-  --cooking-color: #f5a623;
-  --display-flag: #fbbf24;
-  --handle-border: var(--background-quaternary);
-  --canvas-background: #242424;
-  --canvas-dot: #3c3c3c;
-  --node-label: var(--text-primary);
-  --node-text: #1f2937;
+  /* Solarxy: status + node-canvas tokens (UX-spec-owned). Warn, stale and
+   * cook share the attention hue; each keeps its own shape channel (badge,
+   * corner tag, spinner arc). The display flag is Houdini-blue (D-3). */
+  --error-badge: var(--status-error);
+  --warn-badge: var(--state-attention);
+  --stale-color: var(--state-attention);
+  --cooking-color: var(--state-attention);
+  --display-flag: var(--display);
+  --handle-border: var(--surface-sunken);
+  --canvas-background: var(--surface-canvas);
+  --canvas-dot: var(--surface-dot);
+  --node-label: var(--ink-primary);
+  --node-text: var(--ink-on-pastel);
 }
 
 body.light-theme {
   color-scheme: light;
 
-  --background-primary: #ffffff;
-  --background-secondary: #f5f5f5;
-  --background-tertiary: #e8e8e8;
-  --background-quaternary: #e0e0e0;
+  /* ---- Tier 2: semantic roles (light) ------------------------------ */
+
+  --surface-canvas: var(--l-075);
+  --surface-dot: #d8d8d8;
+  --surface-app: var(--l-000);
+  --surface-raised: var(--l-050);
+  --surface-overlay: var(--l-100);
+  --surface-sunken: var(--l-150);
+
+  --ink-primary: var(--l-900);
+  --ink-secondary: var(--l-700);
+  --ink-tertiary: var(--l-500);
+  --ink-muted: var(--l-400);
+  --ink-strong: var(--l-950);
+  --ink-on-accent: #111111;
+  --ink-on-pastel: #1f2937;
+
+  --border-subtle: var(--l-150);
+  --border-default: var(--l-350);
+  --border-strong: var(--l-300);
+  --divider: var(--l-450);
+
+  --accent: var(--amber-600);
+  --accent-hover: var(--amber-400);
+  --accent-pressed: var(--amber-650);
+  --accent-subtle: color-mix(in srgb, var(--amber-600) 12%, transparent);
+  /* The light accent fails 3:1 on white for hairlines; the darker amber
+   * clears it (contrast matrix, SOLARXY-WEB-REVAMP.md). */
+  --accent-hairline: var(--amber-700);
+
+  --state-attention: var(--burnt-600);
+  --ink-on-attention: #ffffff;
+
+  --display: var(--disp-600);
+  --display-halo: var(--disp-600);
+
+  --status-error: var(--err-600);
+  --status-error-bg: rgba(204, 0, 0, 0.05);
+  --status-success: var(--ok-600);
+
+  --node-chip: rgba(255, 255, 255, 0.85);
+  --node-glyph-ink: #1f2937;
+  --node-type-label: #6b7078;
+  --node-desc: #2e7d6b;
+  --node-param: #2f6390;
+  --node-slot: #1f2937;
+
+  /* ---- Legacy aliases (light) --------------------------------------- */
 
   --node-background: #f8f8f8;
 
@@ -130,45 +327,17 @@ body.light-theme {
   --light-node-border: rgba(0, 0, 0, 0.15);
   --light-node-border-hover: rgba(0, 0, 0, 0.25);
 
-  --border-primary: #e0e0e0;
-  --border-secondary: #cccccc;
-  --border-tertiary: #bbbbbb;
+  --text-secondary: var(--ink-secondary);
+  --text-tertiary: var(--ink-tertiary);
 
-  --divider-primary: #aaaaaa;
-
-  --text-primary: #333333;
-  --text-secondary: #555555;
-  --text-tertiary: #777777;
-  --text-quaternary: #999999;
-  --text-highlight: #000000;
-  --text-on-accent: #111111;
-
-  --accent-primary: #0078d4;
-  --accent-secondary: #0098ff;
-  --accent-tertiary: #e1f0ff;
   --accent-blue: #4ba3e3;
-  --accent-green: #5ec269;
-  --accent-yellow: #f7df1e;
 
   --edge-color: #0078d4;
   --edge-outline-color: #000000;
   --connection-line-default: #434343;
-  --connection-line-valid: #55dd99;
-  --connection-line-invalid: #ff6060;
 
   --error-border: #cc0000;
-  --error-background: rgba(204, 0, 0, 0.05);
   --error-text: #cc0000;
 
-  /* Solarxy status/canvas tokens, light variants. */
-  --error-badge: #d1373c;
-  --warn-badge: #c77d00;
-  --stale-color: #c77d00;
-  --cooking-color: #c77d00;
-  --display-flag: #d97706;
-  --handle-border: #f5f5f5;
-  --canvas-background: #fafafa;
-  --canvas-dot: #d8d8d8;
-  --node-label: var(--text-primary);
-  --node-text: #1f2937;
+  --handle-border: var(--l-050);
 }

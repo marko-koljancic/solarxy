@@ -312,8 +312,26 @@ export function NodeCanvas() {
         <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
       )}
       {graph.nodes.length === 0 && (
+        // The first-session teaching hint (UX spec J4; revamp 08-02).
         <div className="canvas-empty-hint">
-          Press <kbd className="key-chip">Tab</kbd> to add a node - or drag one in from the palette.
+          <kbd className="key-chip">Tab</kbd>
+          <span className="empty-title">Press Tab to add a node</span>
+          <span className="empty-sub">
+            {current === "root"
+              ? "or drop a model file to import"
+              : "or drag one in from the palette"}
+          </span>
+        </div>
+      )}
+      {graph.nodes.length > 0 && graph.activeOutput === null && current !== "root" && (
+        // The cleared-display ghost chip (UX spec sec. 10; revamp 08-02):
+        // this subflow currently renders nothing.
+        <div className="ghost-chip-row">
+          <span className="ghost-chip">
+            <span className="ghost-dot" />
+            no display node
+          </span>
+          <span className="empty-sub">Set a node's display flag to render it</span>
         </div>
       )}
       {showMinimap && <MiniMap pannable zoomable className="flow-minimap" />}

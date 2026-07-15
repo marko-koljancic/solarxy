@@ -5,7 +5,7 @@
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -58,6 +58,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::NotBypassable,
         doc: "A canvas annotation. Double-click to edit; resizable.",
         search_aliases: &["comment", "annotation", "sticky", "label"],
+        glyph: "note",
+        role: NodeRole::Note,
         cook: passive_cook,
         migrate: None,
     }

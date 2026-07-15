@@ -7,7 +7,7 @@
 use super::common::{migrate_geo, params_with, passive_cook, rendering_params, rotate_order_param};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -77,6 +77,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "A container node hosting a subflow; renders its subflow's \
               active display object with this node's transform applied.",
         search_aliases: &["object", "container", "group", "subflow"],
+        glyph: "geo",
+        role: NodeRole::Container,
         cook: passive_cook,
         migrate: Some(migrate_geo),
     }

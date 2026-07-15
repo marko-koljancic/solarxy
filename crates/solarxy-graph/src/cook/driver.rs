@@ -663,7 +663,7 @@ mod tests {
     use crate::registry::param_spec::{ParamSpec, ParamType};
     use crate::registry::resolve::ResolvedParams;
     use crate::registry::{
-        BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec, Registry,
+        BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec, Registry,
     };
     use solarxy_kernel::primitives::generate_box;
     use solarxy_kernel::{GeometrySet, KernelMesh};
@@ -730,6 +730,8 @@ mod tests {
             bypass: BypassBehavior::Mute,
             doc: "",
             search_aliases: &[],
+            glyph: "gen",
+            role: NodeRole::Standard,
             cook: gen_cook,
             migrate: None,
         };
@@ -751,6 +753,8 @@ mod tests {
             },
             doc: "",
             search_aliases: &[],
+            glyph: "pass",
+            role: NodeRole::Standard,
             cook: pass_cook,
             migrate: None,
         };

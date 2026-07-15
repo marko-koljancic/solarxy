@@ -19,7 +19,7 @@ use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{
-    BypassBehavior, Category, ContextMask, MigrateError, NodeTypeDescriptor, PortSpec,
+    BypassBehavior, Category, ContextMask, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
 };
 
 #[must_use]
@@ -55,6 +55,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Splits every triangle into four at its edge midpoints, \
               interpolating normals, UVs, and attributes.",
         search_aliases: &["subdivide", "smooth", "tessellate", "refine"],
+        glyph: "subdivide",
+        role: NodeRole::Standard,
         cook: cook_subdivide,
         migrate: Some(migrate_drop_scheme),
     }

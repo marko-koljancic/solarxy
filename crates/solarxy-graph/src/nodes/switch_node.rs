@@ -18,7 +18,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -60,6 +60,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
               index counts wires in the order they are connected, so an input \
               that fails to cook does not shift the selection.",
         search_aliases: &["select", "choose", "multiplex", "if"],
+        glyph: "switch",
+        role: NodeRole::Branch,
         cook,
         migrate: None,
     }

@@ -20,7 +20,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -50,6 +50,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::Mute,
         doc: "Loads an image file as a texture value for material map inputs.",
         search_aliases: &["image", "texture", "png", "jpeg", "webp", "import"],
+        glyph: "import_image",
+        role: NodeRole::ImageSource,
         cook: cook_import_image,
         migrate: None,
     }

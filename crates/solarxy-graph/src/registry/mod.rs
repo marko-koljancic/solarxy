@@ -134,6 +134,23 @@ impl Category {
     }
 }
 
+/// The visual silhouette family a node renders with in the web canvas.
+/// Orthogonal to [`Category`] (which picks the fill): a pure UI hint that
+/// never affects cooking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeRole {
+    Standard,
+    Container,
+    Gather,
+    Branch,
+    Terminal,
+    Analyzer,
+    ImageSource,
+    Light,
+    Note,
+}
+
 /// Which canvases a node type may appear on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextMask {
@@ -212,6 +229,12 @@ pub struct NodeTypeDescriptor {
     /// Markdown node help; also feeds the generated wiki reference.
     pub doc: &'static str,
     pub search_aliases: &'static [&'static str],
+    /// Stable icon key the web frontend maps to vector art; by convention
+    /// the type id (lights drop their `_light` suffix). An unknown key
+    /// falls back to the category glyph client-side.
+    pub glyph: &'static str,
+    /// The silhouette family the node renders with.
+    pub role: NodeRole,
     pub cook: CookFn,
     pub migrate: Option<MigrateFn>,
 }

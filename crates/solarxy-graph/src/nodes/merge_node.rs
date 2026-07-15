@@ -9,7 +9,7 @@ use super::common::{geometry_output, migrate_strip_rendering_group, params_with}
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::registry::coerce::DataType;
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -33,6 +33,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         doc: "Concatenates its inputs into one geometry set, in port order, \
               deduplicating identical materials.",
         search_aliases: &["combine", "join", "union", "append"],
+        glyph: "merge",
+        role: NodeRole::Gather,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

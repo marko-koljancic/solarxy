@@ -263,6 +263,19 @@ export type BypassSnapshot =
   | { mode: "mute" }
   | { mode: "notBypassable" };
 
+/** The visual silhouette family a node renders with (revamp D-18);
+ * orthogonal to `category` (which picks the fill). A pure UI hint. */
+export type NodeRole =
+  | "standard"
+  | "container"
+  | "gather"
+  | "branch"
+  | "terminal"
+  | "analyzer"
+  | "imageSource"
+  | "light"
+  | "note";
+
 export interface NodeTypeSnapshot {
   typeId: string;
   version: number;
@@ -278,6 +291,12 @@ export interface NodeTypeSnapshot {
   bypass: BypassSnapshot;
   doc: string;
   searchAliases: string[];
+  /** Stable icon key (revamp D-18); an unknown key falls back to the
+   * category glyph in `flow/nodeVisual.ts`. */
+  glyph: string;
+  /** Silhouette hint (revamp D-18); a variant this frontend does not know
+   * yet falls back by category in `flow/nodeVisual.ts`. */
+  role: NodeRole;
 }
 
 export type CoercionKind = "same" | "lossless" | "lossy";

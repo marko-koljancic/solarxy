@@ -139,7 +139,9 @@
         "light",
         "fill",
         "environment"
-      ]
+      ],
+      "glyph": "ambient",
+      "role": "light"
     },
     {
       "typeId": "array",
@@ -347,7 +349,9 @@
         "clone",
         "radial",
         "grid"
-      ]
+      ],
+      "glyph": "array",
+      "role": "standard"
     },
     {
       "typeId": "bounds",
@@ -469,7 +473,9 @@
         "extents",
         "measure",
         "center"
-      ]
+      ],
+      "glyph": "bounds",
+      "role": "standard"
     },
     {
       "typeId": "box",
@@ -649,7 +655,9 @@
         "cube",
         "rectangle",
         "cuboid"
-      ]
+      ],
+      "glyph": "box",
+      "role": "standard"
     },
     {
       "typeId": "compute_normals",
@@ -739,7 +747,9 @@
         "normals",
         "recompute",
         "smooth"
-      ]
+      ],
+      "glyph": "compute_normals",
+      "role": "standard"
     },
     {
       "typeId": "cone",
@@ -879,7 +889,9 @@
       "searchAliases": [
         "pyramid",
         "spike"
-      ]
+      ],
+      "glyph": "cone",
+      "role": "standard"
     },
     {
       "typeId": "cylinder",
@@ -1040,7 +1052,9 @@
       "searchAliases": [
         "tube",
         "pipe"
-      ]
+      ],
+      "glyph": "cylinder",
+      "role": "standard"
     },
     {
       "typeId": "delete",
@@ -1230,7 +1244,9 @@
         "cull",
         "erase",
         "filter"
-      ]
+      ],
+      "glyph": "delete",
+      "role": "standard"
     },
     {
       "typeId": "directional_light",
@@ -1470,7 +1486,9 @@
         "light",
         "sun",
         "sky"
-      ]
+      ],
+      "glyph": "directional",
+      "role": "light"
     },
     {
       "typeId": "geo",
@@ -1677,7 +1695,9 @@
         "container",
         "group",
         "subflow"
-      ]
+      ],
+      "glyph": "geo",
+      "role": "container"
     },
     {
       "typeId": "hemisphere_light",
@@ -1838,7 +1858,9 @@
         "light",
         "sky",
         "gradient"
-      ]
+      ],
+      "glyph": "hemisphere",
+      "role": "light"
     },
     {
       "typeId": "import_gltf",
@@ -1970,7 +1992,9 @@
         "gltf",
         "glb",
         "import"
-      ]
+      ],
+      "glyph": "import_gltf",
+      "role": "standard"
     },
     {
       "typeId": "import_image",
@@ -2056,7 +2080,9 @@
         "jpeg",
         "webp",
         "import"
-      ]
+      ],
+      "glyph": "import_image",
+      "role": "imageSource"
     },
     {
       "typeId": "import_obj",
@@ -2187,7 +2213,9 @@
         "obj",
         "wavefront",
         "import"
-      ]
+      ],
+      "glyph": "import_obj",
+      "role": "standard"
     },
     {
       "typeId": "import_ply",
@@ -2303,7 +2331,9 @@
         "ply",
         "import",
         "scan"
-      ]
+      ],
+      "glyph": "import_ply",
+      "role": "standard"
     },
     {
       "typeId": "import_stl",
@@ -2434,7 +2464,9 @@
         "stl",
         "import",
         "print"
-      ]
+      ],
+      "glyph": "import_stl",
+      "role": "standard"
     },
     {
       "typeId": "material",
@@ -2658,7 +2690,9 @@
         "texture",
         "shader",
         "color"
-      ]
+      ],
+      "glyph": "material",
+      "role": "standard"
     },
     {
       "typeId": "merge",
@@ -2734,7 +2768,9 @@
         "join",
         "union",
         "append"
-      ]
+      ],
+      "glyph": "merge",
+      "role": "gather"
     },
     {
       "typeId": "mirror",
@@ -2873,7 +2909,9 @@
         "reflect",
         "symmetry",
         "flip"
-      ]
+      ],
+      "glyph": "mirror",
+      "role": "standard"
     },
     {
       "typeId": "note",
@@ -2997,7 +3035,9 @@
         "annotation",
         "sticky",
         "label"
-      ]
+      ],
+      "glyph": "note",
+      "role": "note"
     },
     {
       "typeId": "null",
@@ -3073,7 +3113,9 @@
         "output",
         "anchor",
         "passthrough"
-      ]
+      ],
+      "glyph": "null",
+      "role": "terminal"
     },
     {
       "typeId": "plane",
@@ -3214,7 +3256,9 @@
         "quad",
         "grid",
         "ground"
-      ]
+      ],
+      "glyph": "plane",
+      "role": "standard"
     },
     {
       "typeId": "point_light",
@@ -3474,7 +3518,9 @@
         "light",
         "omni",
         "bulb"
-      ]
+      ],
+      "glyph": "point",
+      "role": "light"
     },
     {
       "typeId": "rect_area_light",
@@ -3671,7 +3717,9 @@
         "area",
         "softbox",
         "panel"
-      ]
+      ],
+      "glyph": "rect_area",
+      "role": "light"
     },
     {
       "typeId": "sphere",
@@ -3790,7 +3838,9 @@
       "searchAliases": [
         "ball",
         "globe"
-      ]
+      ],
+      "glyph": "sphere",
+      "role": "standard"
     },
     {
       "typeId": "spot_light",
@@ -4105,7 +4155,9 @@
         "light",
         "cone",
         "flashlight"
-      ]
+      ],
+      "glyph": "spot",
+      "role": "light"
     },
     {
       "typeId": "subdivide",
@@ -4202,7 +4254,9 @@
         "smooth",
         "tessellate",
         "refine"
-      ]
+      ],
+      "glyph": "subdivide",
+      "role": "standard"
     },
     {
       "typeId": "switch",
@@ -4299,7 +4353,9 @@
         "choose",
         "multiplex",
         "if"
-      ]
+      ],
+      "glyph": "switch",
+      "role": "branch"
     },
     {
       "typeId": "torus",
@@ -4439,7 +4495,9 @@
       "searchAliases": [
         "donut",
         "ring"
-      ]
+      ],
+      "glyph": "torus",
+      "role": "standard"
     },
     {
       "typeId": "torus_knot",
@@ -4615,7 +4673,9 @@
       "searchAliases": [
         "knot",
         "pretzel"
-      ]
+      ],
+      "glyph": "torus_knot",
+      "role": "standard"
     },
     {
       "typeId": "transform",
@@ -4834,7 +4894,9 @@
         "rotate",
         "scale",
         "xform"
-      ]
+      ],
+      "glyph": "transform",
+      "role": "standard"
     },
     {
       "typeId": "uv_project",
@@ -5007,7 +5069,9 @@
         "project",
         "texture",
         "mapping"
-      ]
+      ],
+      "glyph": "uv_project",
+      "role": "standard"
     },
     {
       "typeId": "validate",
@@ -5186,7 +5250,9 @@
         "check",
         "lint",
         "inspect"
-      ]
+      ],
+      "glyph": "validate",
+      "role": "analyzer"
     }
   ],
   "coercions": [

@@ -21,7 +21,7 @@ use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{
-    BypassBehavior, Category, ContextMask, MigrateError, MigrateFn, NodeTypeDescriptor,
+    BypassBehavior, Category, ContextMask, MigrateError, MigrateFn, NodeRole, NodeTypeDescriptor,
 };
 
 /// An [`AssetResolver`] over the in-memory [`AssetTable`], resolving a
@@ -119,6 +119,8 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
         bypass: BypassBehavior::Mute,
         doc: f.doc,
         search_aliases: f.aliases,
+        glyph: f.type_id,
+        role: NodeRole::Standard,
         cook: cook_import,
         migrate: Some(f.migrate),
     }
