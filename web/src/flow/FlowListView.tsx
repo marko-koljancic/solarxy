@@ -10,7 +10,6 @@ import { assetDisplayName } from "../engine/session";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
-import { IconEye } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
 import { hasVisibleParam, nodeVisible } from "./visibility";
@@ -121,7 +120,7 @@ export function FlowListView() {
                         });
                       }}
                     >
-                      <IconEye size={11} />
+                      <span className="vis-dot" aria-hidden />
                     </button>
                   )}
                   <button

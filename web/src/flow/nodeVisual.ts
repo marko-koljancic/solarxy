@@ -1,12 +1,14 @@
 // The registry-driven node visual vocabulary (revamp R2, decisions D-4 and
-// D-10..D-12, D-18): per-type glyphs and role silhouettes, resolved from the
-// snapshot's `glyph` and `role` hints with a category fallback, so a node
-// added in Rust renders with its declared identity and a node the frontend
-// has never seen still renders sensibly (the zero-frontend-change contract).
-// All vector art is transplanted verbatim from the design source
-// (solarxy/design/web/solarxy-web.pen, the Evo/Glyph and Evo/Node sets);
-// every glyph is a 16x16 stroke path (round caps and joins, 1.5 width),
-// every shaped body a 112x28 polygon.
+// D-10..D-11, D-18; polish D-20/D-21): per-type glyphs and role
+// silhouettes, resolved from the snapshot's `glyph` and `role` hints with
+// a category fallback, so a node added in Rust renders with its declared
+// identity and a node the frontend has never seen still renders sensibly
+// (the zero-frontend-change contract). Glyph art is transplanted verbatim
+// from the design source (solarxy/design/web/solarxy-web.pen, the
+// Evo/Glyph set); every glyph is a 16x16 stroke path (round caps and
+// joins, 1.5 width). Shaped bodies are generated 112x32 outlines (D-21):
+// left-right symmetric vertex lists run through the corner-rounding
+// helper below.
 
 import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
 
@@ -102,19 +104,74 @@ export function nodeRole(desc: NodeTypeSnapshot | undefined): NodeRole {
   return KNOWN_ROLES.has(desc.role) ? desc.role : CATEGORY_ROLE[desc.category];
 }
 
-/** Shaped 112x28 body polygons (design source geometry, verbatim). Roles
- * absent here render as plain CSS rectangles. */
+/** A polygon vertex with its corner radius: [x, y, r]. */
+export type RoundedVertex = [number, number, number];
+
+function fmt(v: number): string {
+  return String(Math.round(v * 100) / 100);
+}
+
+/** A closed SVG path for a polygon with per-vertex rounded corners: each
+ * corner enters and exits `r` along its adjacent edges (clamped to half
+ * the edge so short edges cannot overshoot) and turns through a quadratic
+ * curve at the vertex. Pure, so it is unit-testable. */
+export function roundedPolygonPath(points: RoundedVertex[]): string {
+  const n = points.length;
+  const parts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const [px, py, r] = points[i];
+    const [ax, ay] = points[(i + n - 1) % n];
+    const [bx, by] = points[(i + 1) % n];
+    const din = Math.hypot(px - ax, py - ay);
+    const dout = Math.hypot(bx - px, by - py);
+    const rIn = Math.min(r, din / 2);
+    const rOut = Math.min(r, dout / 2);
+    const inX = px + ((ax - px) / din) * rIn;
+    const inY = py + ((ay - py) / din) * rIn;
+    const outX = px + ((bx - px) / dout) * rOut;
+    const outY = py + ((by - py) / dout) * rOut;
+    parts.push(`${i === 0 ? "M" : "L"} ${fmt(inX)} ${fmt(inY)}`);
+    parts.push(`Q ${fmt(px)} ${fmt(py)} ${fmt(outX)} ${fmt(outY)}`);
+  }
+  parts.push("Z");
+  return parts.join(" ");
+}
+
+/** Shaped 112x32 body outlines (D-21): every silhouette left-right
+ * symmetric with rounded corners. Roles absent here render as plain CSS
+ * rectangles. */
 export const ROLE_BODY_PATHS: Partial<Record<NodeRole, string>> = {
-  branch: "M0 14l18-14h76l18 14-18 14h-76z",
-  analyzer: "M0 0h112l-10 28h-92z",
-  imageSource: "M0 0h98l14 14v14h-112z",
-  light: "M0 0h112v16l-16 12h-80z",
+  // The two-way junction: a symmetric hexagon.
+  branch: roundedPolygonPath([
+    [0, 16, 5],
+    [18, 0, 4],
+    [94, 0, 4],
+    [112, 16, 5],
+    [94, 32, 4],
+    [18, 32, 4],
+  ]),
+  // Wide intake, narrowed readout: a symmetric trapezoid.
+  analyzer: roundedPolygonPath([
+    [0, 0, 4],
+    [112, 0, 4],
+    [102, 32, 4],
+    [10, 32, 4],
+  ]),
+  // A file ticket with both top corners chamfered (the old single-fold
+  // motif was asymmetric).
+  imageSource: roundedPolygonPath([
+    [14, 0, 3],
+    [98, 0, 3],
+    [112, 14, 3],
+    [112, 32, 4],
+    [0, 32, 4],
+    [0, 14, 3],
+  ]),
+  // A lamp dome (the old lampshade was asymmetric): heavy top rounding.
+  light: roundedPolygonPath([
+    [0, 0, 14],
+    [112, 0, 14],
+    [112, 32, 4],
+    [0, 32, 4],
+  ]),
 };
-
-/** The folded-corner accent on the imageSource file silhouette. */
-export const IMAGE_SOURCE_FOLD_PATH = "M98 0v14h14z";
-
-/** Instrument slot x positions (D-12): a vertical seam every 22px across
- * the 112px body, drawn inside shaped bodies as SVG lines and on rect
- * bodies via the CSS background in styles.css. */
-export const SLOT_XS = [22, 44, 66, 88];

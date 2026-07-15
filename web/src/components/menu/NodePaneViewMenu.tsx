@@ -1,20 +1,18 @@
 // The node-pane View menu (Phase 9): canvas chrome toggles, the connection
-// style radio, auto-layout, and the graph/list switch, relocated from the
-// old global View menu so the pane owns its own chrome.
+// style radio, and auto-layout, relocated from the old global View menu so
+// the pane owns its own chrome. The graph/list switch moved out to the
+// toolbar's right-side icon command (D-24).
 
 import { runLayout } from "../../flow/layout";
-import { ctxKey } from "../../engine/types";
-import { useMirror } from "../../store/mirror";
 import { EDGE_STYLES, EDGE_STYLE_LABELS, useUi } from "../../store/ui";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
 export function NodePaneViewMenu() {
-  const current = useMirror((s) => s.current);
   const showFlowGrid = useUi((s) => s.showFlowGrid);
   const showMinimap = useUi((s) => s.showMinimap);
   const showFlowControls = useUi((s) => s.showFlowControls);
+  const snapToGrid = useUi((s) => s.snapToGrid);
   const edgeStyle = useUi((s) => s.edgeStyle);
-  const flowView = useUi((s) => s.flowView[ctxKey(current)] ?? "graph");
 
   const entries: MenuEntry[] = [
     {
@@ -22,6 +20,11 @@ export function NodePaneViewMenu() {
       shortcut: "G",
       checked: showFlowGrid,
       onClick: () => useUi.getState().toggleFlowChrome("showFlowGrid"),
+    },
+    {
+      label: "Snap to Grid",
+      checked: snapToGrid,
+      onClick: () => useUi.getState().toggleFlowChrome("snapToGrid"),
     },
     {
       label: "Minimap",
@@ -47,13 +50,6 @@ export function NodePaneViewMenu() {
     { divider: true },
     { label: "Auto-Layout (Dagre)", shortcut: "L", onClick: () => runLayout("dagre") },
     { label: "Auto-Layout (ELK)", onClick: () => runLayout("elk") },
-    { divider: true },
-    {
-      label: "List View",
-      checked: flowView === "list",
-      onClick: () =>
-        useUi.getState().setFlowView(ctxKey(current), flowView === "list" ? "graph" : "list"),
-    },
   ];
 
   return <MenuItem title="View" entries={entries} />;

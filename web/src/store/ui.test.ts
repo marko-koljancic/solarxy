@@ -5,7 +5,14 @@
 // owns the shell's geometry now, and the recipe clamp lives in dock/layouts.ts.)
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EDGE_STYLES, loadDockLayout, loadEdgeStyle, loadLegacyArrangement, useUi } from "./ui";
+import {
+  EDGE_STYLES,
+  loadDockLayout,
+  loadEdgeStyle,
+  loadFlowView,
+  loadLegacyArrangement,
+  useUi,
+} from "./ui";
 
 /** The node test environment has no localStorage; a Map-backed stub lets the
  * loaders and the setters' persistence writes be asserted directly. */
@@ -93,5 +100,45 @@ describe("connection style", () => {
     }
     expect(seen).toEqual(["bezier", "straight", "simpleBezier", "smoothStep", "bezier"]);
     expect(localStorage.getItem("solarxy.ui.edgeStyle")).toBe("bezier");
+  });
+});
+
+describe("canvas chrome: snap to grid (D-24)", () => {
+  beforeEach(() => stubStorage());
+
+  it("defaults off and persists into the flow-chrome blob when toggled", () => {
+    useUi.setState({ snapToGrid: false });
+    useUi.getState().toggleFlowChrome("snapToGrid");
+    expect(useUi.getState().snapToGrid).toBe(true);
+    const blob = JSON.parse(localStorage.getItem("solarxy.ui.flowChrome") ?? "{}") as {
+      snapToGrid?: boolean;
+    };
+    expect(blob.snapToGrid).toBe(true);
+  });
+});
+
+describe("flow view persistence (D-24)", () => {
+  beforeEach(() => stubStorage());
+
+  it("returns an empty record when nothing is stored or the blob is corrupt", () => {
+    expect(loadFlowView()).toEqual({});
+    localStorage.setItem("solarxy.ui.flowView", "{nope");
+    expect(loadFlowView()).toEqual({});
+  });
+
+  it("keeps only well-formed graph/list entries", () => {
+    localStorage.setItem(
+      "solarxy.ui.flowView",
+      JSON.stringify({ root: "list", "sub:3": "graph", "sub:4": "sideways", junk: 7 }),
+    );
+    expect(loadFlowView()).toEqual({ root: "list", "sub:3": "graph" });
+  });
+
+  it("setFlowView writes the choice through to localStorage", () => {
+    useUi.setState({ flowView: {} });
+    useUi.getState().setFlowView("root", "list");
+    expect(JSON.parse(localStorage.getItem("solarxy.ui.flowView") ?? "{}")).toEqual({
+      root: "list",
+    });
   });
 });

@@ -1,16 +1,18 @@
 // The one generic node component: every node type renders through it, its
 // ports, fill, glyph, and silhouette derived from the registry snapshot (so
 // a node added in Rust needs no new component). Evo anatomy (revamp R2,
-// decisions D-4, D-10..D-12, D-15, D-16, D-18): a 4:1 instrument body with
-// the category pastel fill, a per-type glyph on a light chip, role
-// silhouettes (rect, container square, gather dome, branch hexagon,
-// terminal donut, analyzer trapezoid, imageSource file, light lampshade),
-// bypass and display wings on rect bodies, the display halo behind the
-// display-flag holder, and a label stack to the right (type label, name,
-// status row, param preview, authored description) with zoom-responsive
-// LOD. Rings mean selection only: stale is a tag plus body wash, cooking
-// is the arc around the chip. The UX-spec systems survive the restyle:
-// typed handles (color by DataType family plus the shape channel), cook /
+// decisions D-4, D-10..D-11, D-15, D-16, D-18; polish D-20/D-21/D-23): a
+// 3.5:1 instrument body with the category pastel fill, a per-type glyph
+// inked directly on the body in a darkened category tone, symmetric
+// rounded role silhouettes (rect, container square, gather dome, branch
+// hexagon, terminal donut, analyzer trapezoid, imageSource ticket, light
+// dome), bypass and display wings on rect bodies (hover previews the
+// wing's state color and glyph), the display halo behind the display-flag
+// holder, and a label stack to the right (type label, name, status row,
+// param preview, authored description) with zoom-responsive LOD. Rings
+// mean selection only: stale is a tag plus body wash, cooking is the arc
+// around the glyph. The UX-spec systems survive the restyle: typed
+// handles (color by DataType family plus the shape channel), cook /
 // stale / error / validation feedback, and bypass hatching.
 
 import { useEffect, useRef, useState } from "react";
@@ -23,16 +25,10 @@ import type { NodeMirror, PortSnapshot } from "../engine/types";
 import { useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
-import { IconBypass, IconEye } from "../icons";
+import { IconBypass, IconDisplay } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
-import {
-  glyphPath,
-  nodeRole,
-  IMAGE_SOURCE_FOLD_PATH,
-  ROLE_BODY_PATHS,
-  SLOT_XS,
-} from "./nodeVisual";
+import { glyphPath, nodeRole, ROLE_BODY_PATHS } from "./nodeVisual";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
@@ -90,23 +86,11 @@ function authoredDescription(node: NodeMirror): string | null {
 }
 
 /** Shaped silhouette body as inline SVG (crisp 1px stroke, which CSS
- * clip-path cannot give), with the D-12 instrument seams clipped inside. */
-function ShapedBody({ role, path }: { role: string; path: string }) {
-  const clipId = useRef(`body-${Math.random().toString(36).slice(2, 9)}`);
+ * clip-path cannot give). */
+function ShapedBody({ path }: { path: string }) {
   return (
-    <svg className="node-body-svg" viewBox="0 0 112 28" aria-hidden>
-      <defs>
-        <clipPath id={clipId.current}>
-          <path d={path} />
-        </clipPath>
-      </defs>
+    <svg className="node-body-svg" viewBox="0 0 112 32" aria-hidden>
       <path d={path} className="body-fill" />
-      <g clipPath={`url(#${clipId.current})`}>
-        {SLOT_XS.map((x) => (
-          <line key={x} x1={x} y1={0} x2={x} y2={28} className="body-slot" />
-        ))}
-      </g>
-      {role === "imageSource" && <path d={IMAGE_SOURCE_FOLD_PATH} className="body-fold" />}
       <path d={path} className="body-stroke" />
     </svg>
   );
@@ -235,9 +219,11 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       {isDisplay && <span className="display-halo" aria-hidden />}
 
       {ctx === "root" && hasVisibleParam(desc) && (
-        // Root visibility eye (Phase 8): registry-gated (note declares no
-        // `visible`, so it gets no eye), distinct from the subflow display
-        // flag. An ordinary setParam, so it undoes like any edit.
+        // Root visibility lamp (Phase 8, restyled D-23): registry-gated
+        // (note declares no `visible`, so it gets no lamp), distinct from
+        // the subflow display flag. A filled display-blue dot when
+        // visible, hollow and dimmed when hidden. An ordinary setParam,
+        // so it undoes like any edit.
         <button
           className={`visibility-eye nodrag${nodeVisible(node) ? "" : " off"}`}
           title={nodeVisible(node) ? "Hide (stays cooked)" : "Show"}
@@ -253,7 +239,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
           }}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          <IconEye size={11} />
+          <span className="vis-dot" aria-hidden />
         </button>
       )}
 
@@ -282,7 +268,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       ))}
 
       <div className="node-body">
-        {shapedPath ? <ShapedBody role={role} path={shapedPath} /> : null}
+        {shapedPath ? <ShapedBody path={shapedPath} /> : null}
         {role === "gather" && <span className="gather-dome" aria-hidden />}
 
         {showBypassWing && (
@@ -294,7 +280,9 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
               dispatch({ type: "setBypass", ctx, node: node.id, bypassed: !node.bypassed });
             }}
             onDoubleClick={(e) => e.stopPropagation()}
-          />
+          >
+            <IconBypass size={9} />
+          </button>
         )}
         {showDisplayWing && (
           <button
@@ -305,7 +293,9 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
               if (!isDisplay) dispatch({ type: "setActiveOutput", ctx, node: node.id });
             }}
             onDoubleClick={(e) => e.stopPropagation()}
-          />
+          >
+            <IconDisplay size={9} />
+          </button>
         )}
 
         {role !== "terminal" && (

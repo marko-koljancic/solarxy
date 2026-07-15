@@ -35,6 +35,21 @@ import { RadialMenu } from "./RadialMenu";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
+/** The background dot-grid pitch; snap-to-grid (D-24) locks drags to the
+ * same lattice so the two stay one concept. */
+const GRID_GAP = 18;
+
+/** Minimap tint (D-24): each node carries its category pastel so the
+ * overview map reads as a scaled-down graph, not uniform blocks. */
+function minimapNodeColor(registry: RegistrySnapshot | null) {
+  return (n: Node): string => {
+    if (n.type === "note") return "var(--background-tertiary)";
+    const data = n.data as FlowNodeData | undefined;
+    const desc = data ? descriptorFor(registry, data.node.typeId) : undefined;
+    return desc ? `var(--node-cat-${desc.category})` : "var(--geometry-node-background)";
+  };
+}
+
 /** Connection styles map onto xyflow's built-in edge types, so the typed
  * color classes (edge-type-*, edge-lossy) apply to every style unchanged.
  * The same ids drive the drag-preview connectionLineType. */
@@ -99,6 +114,7 @@ export function NodeCanvas() {
   const showFlowGrid = useUi((s) => s.showFlowGrid);
   const showMinimap = useUi((s) => s.showMinimap);
   const showFlowControls = useUi((s) => s.showFlowControls);
+  const snapToGrid = useUi((s) => s.snapToGrid);
   const edgeStyle = useUi((s) => s.edgeStyle);
   const { fitView } = useReactFlow();
 
@@ -303,13 +319,15 @@ export function NodeCanvas() {
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Control"]}
       connectionLineType={RF_EDGE_TYPE[edgeStyle]}
+      snapToGrid={snapToGrid}
+      snapGrid={[GRID_GAP, GRID_GAP]}
       zoomOnDoubleClick={false}
       fitView
       proOptions={{ hideAttribution: true }}
       colorMode={resolvedTheme}
     >
       {showFlowGrid && (
-        <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
+        <Background gap={GRID_GAP} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
       )}
       {graph.nodes.length === 0 && (
         // The first-session teaching hint (UX spec J4; revamp 08-02).
@@ -334,7 +352,14 @@ export function NodeCanvas() {
           <span className="empty-sub">Set a node's display flag to render it</span>
         </div>
       )}
-      {showMinimap && <MiniMap pannable zoomable className="flow-minimap" />}
+      {showMinimap && (
+        <MiniMap
+          pannable
+          zoomable
+          className="flow-minimap"
+          nodeColor={minimapNodeColor(registry)}
+        />
+      )}
       {showFlowControls && <Controls showInteractive={false} />}
     </ReactFlow>
     {/* The hover radial lives INSIDE the flow (Phase 10) so it can subscribe to

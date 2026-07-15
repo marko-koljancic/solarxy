@@ -263,6 +263,11 @@ body.precision-drag-active {
   background: var(--background-secondary);
 }
 
+/* The graph/list switch (D-24): the toolbar's one right-side command. */
+.node-toolbar .flow-view-toggle {
+  margin-left: auto;
+}
+
 /* The breadcrumb sits on its own row directly below the node-pane menu bar
  * (Phase 9), keeping the bar itself Blender-slim. */
 .breadcrumb-row {
@@ -324,16 +329,18 @@ body.precision-drag-active {
   stroke: var(--connection-line-valid);
 }
 
-/* ---- The Evo node system (revamp R2: D-4, D-10..D-12, D-15, D-18) ----
- * A 4:1 instrument body, category pastel fill (as --cat-fill, consumed by
- * the CSS rect bodies AND the shaped SVG bodies), a glyph on a light chip,
- * wings on rect bodies, the display halo, and the label stack to the
- * right. The .flow-node wrapper is transparent; all paint happens on
- * .node-body and its layers. */
+/* ---- The Evo node system (revamp R2: D-4, D-10..D-12, D-15, D-18;
+ * polish D-20/D-21) ----
+ * A 3.5:1 instrument body, category pastel fill (as --cat-fill, consumed
+ * by the CSS rect bodies AND the shaped SVG bodies), a glyph inked
+ * directly on the body (the chip plate and the segmentation seams are
+ * retired, D-20), wings on rect bodies, the display halo, and the label
+ * stack to the right. The .flow-node wrapper is transparent; all paint
+ * happens on .node-body and its layers. */
 .flow-node {
   position: relative;
   width: 112px;
-  height: 28px;
+  height: 32px;
   color: var(--node-text);
 }
 
@@ -350,20 +357,18 @@ body.precision-drag-active {
 .node-body {
   position: absolute;
   inset: 0;
-  border-radius: 5px;
+  border-radius: 6px;
 }
 
-/* Rect bodies (standard, gather, container): fill + border + the D-12
- * instrument treatment (top-down sheen over segmentation seams) in CSS.
- * Shaped roles draw an SVG body instead and keep this layer bare. */
+/* Rect bodies (standard, gather, container): fill + border + the top-down
+ * sheen in CSS (the D-12 segmentation seams are retired, D-20). Shaped
+ * roles draw an SVG body instead and keep this layer bare. */
 .flow-node.role-standard .node-body,
 .flow-node.role-gather .node-body,
 .flow-node.role-container .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
-  background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05)),
-    repeating-linear-gradient(90deg, transparent 0 21px, rgba(31, 41, 55, 0.08) 21px 22px);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
   box-shadow:
     0 0.1rem 0.3rem rgba(0, 0, 0, 0.2),
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
@@ -371,8 +376,6 @@ body.precision-drag-active {
 
 .flow-node.role-container .node-body {
   border-radius: 8px;
-  /* The container is a frame, not an instrument: no seams. */
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
 }
 
 .flow-node:hover .role-hover,
@@ -414,15 +417,6 @@ body.precision-drag-active {
   stroke: rgba(212, 175, 87, 0.55);
 }
 
-.node-body-svg .body-slot {
-  stroke: rgba(31, 41, 55, 0.08);
-  stroke-width: 1;
-}
-
-.node-body-svg .body-fold {
-  fill: rgba(0, 0, 0, 0.2);
-}
-
 /* Terminal (null): the donut. The pastel ring with the ink core; the
  * body ring doubles as the selection target. */
 .flow-node.role-terminal .node-body {
@@ -456,7 +450,8 @@ body.precision-drag-active {
   pointer-events: none;
 }
 
-/* The glyph chip (D-12): type identity at any zoom. */
+/* The glyph slot (D-20): type identity at any zoom. The plate is gone;
+ * the glyph inks directly on the body in a darkened category tone. */
 .node-chip {
   position: absolute;
   left: 50%;
@@ -464,8 +459,6 @@ body.precision-drag-active {
   transform: translate(-50%, -50%);
   width: 20px;
   height: 20px;
-  border-radius: 3px;
-  background: var(--node-chip);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -480,15 +473,16 @@ body.precision-drag-active {
 
 .node-glyph path {
   fill: none;
-  stroke: var(--node-glyph-ink);
+  stroke: color-mix(in srgb, var(--cat-fill, var(--geometry-node-background)) 35%, var(--node-glyph-ink));
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-/* Wings (D-4): bypass left, display right; visual 10px, hit area
- * overshot to 18x54 via the ::after pad so they stay clickable at low
- * zoom. Rect bodies only. */
+/* Wings (D-4, hover treatment D-20): bypass left, display right; visual
+ * 10px, hit area overshot via the ::after pad so they stay clickable at
+ * low zoom. Hover previews the wing's own state color and reveals its
+ * glyph; the on state is the full color. Rect bodies only. */
 .node-wing {
   position: absolute;
   top: 0;
@@ -498,6 +492,9 @@ body.precision-drag-active {
   border: none;
   cursor: pointer;
   background: rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   z-index: 2;
 }
 
@@ -507,20 +504,32 @@ body.precision-drag-active {
   inset: -13px -4px;
 }
 
-.node-wing:hover {
-  background: rgba(0, 0, 0, 0.18);
+.node-wing svg {
+  opacity: 0;
+  color: var(--node-slot);
+  transition: opacity var(--motion-fast, 90ms) ease-out;
+}
+
+.node-wing:hover svg {
+  opacity: 1;
 }
 
 .wing-bypass {
   left: 0;
-  border-radius: 5px 0 0 5px;
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px 0 0 6px;
 }
 
 .wing-display {
   right: 0;
-  border-radius: 0 5px 5px 0;
-  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+
+.wing-bypass:hover {
+  background: var(--wing-bypass-hover);
+}
+
+.wing-display:hover {
+  background: var(--wing-display-hover);
 }
 
 .wing-bypass.on {
@@ -617,19 +626,19 @@ body.precision-drag-active {
   font-size: 1.2rem;
 }
 
-/* The root visibility eye (Phase 8): bottom-left corner of the node face
-   (top-left is the stale tag's, top-right the cook error's, bottom-right
-   the validation badge's). Dimmed when the object is hidden. */
+/* The root visibility lamp (Phase 8, restyled D-23): bottom-left corner
+   of the node face (top-left is the stale tag's, top-right the cook
+   error's, bottom-right the validation badge's). A filled display-blue
+   dot when visible; hollow and dimmed when hidden. */
 .visibility-eye {
   position: absolute;
-  bottom: -0.6rem;
-  left: -0.6rem;
-  width: 1.7rem;
-  height: 1.7rem;
+  bottom: -0.5rem;
+  left: -0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
   border-radius: 50%;
   border: 1px solid var(--border-primary);
   background: var(--background-tertiary);
-  color: var(--node-label);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -638,8 +647,21 @@ body.precision-drag-active {
   z-index: 2;
 }
 
+.vis-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--display);
+  pointer-events: none;
+}
+
 .visibility-eye.off {
-  opacity: 0.4;
+  opacity: 0.5;
+}
+
+.visibility-eye.off .vis-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--node-label);
 }
 
 .visibility-eye.list {
@@ -2723,6 +2745,12 @@ body.reduce-motion .cook-arc {
 /* The active tab reads as selected the way the app's other bars do. */
 .solarxy-dock .dv-tab.dv-active-tab {
   box-shadow: inset 0 -2px 0 var(--accent-primary);
+}
+
+/* Dockview ships no inner tab padding, so labels sit flush against the
+   tab's left edge; give them breathing room (D-24). */
+.solarxy-dock .dv-default-tab {
+  padding-left: var(--spacing-sm);
 }
 
 /* The viewport tab is pinned (its drag is cancelled in Dock.tsx). Say so with

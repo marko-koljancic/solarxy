@@ -18,6 +18,7 @@ import type { GraphContext } from "../engine/types";
 const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
 const EDGE_STYLE_KEY = "solarxy.ui.edgeStyle";
 const DOCK_LAYOUT_KEY = "solarxy.ui.dockLayout";
+const FLOW_VIEW_KEY = "solarxy.ui.flowView";
 
 // Retired in Phase 10; read once by loadLegacyArrangement, never written.
 const LEGACY_SPLIT_KEY = "solarxy.ui.splitPct";
@@ -89,9 +90,13 @@ interface UiState {
   showFlowGrid: boolean;
   showMinimap: boolean;
   showFlowControls: boolean;
+  /** Snap node drags to the 18px canvas grid (View menu; default off). */
+  snapToGrid: boolean;
   /** Connection style for canvas edges (S cycles; View menu selects). */
   edgeStyle: EdgeStyle;
-  /** Per-context graph-or-list node view, keyed by ctxKey (in-memory). */
+  /** Per-context graph-or-list node view, keyed by ctxKey. Persisted;
+   * ctx keys embed document-scoped node ids, so a stale subflow entry can
+   * carry across documents. Accepted: it is only a view preference. */
   flowView: Record<string, "graph" | "list">;
   /** A pending inline-rename request (F2): the node whose label editor
    * should open. Consumed by whichever node view is mounted. */
@@ -104,7 +109,9 @@ interface UiState {
   setScreenshotOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setBootError: (message: string) => void;
-  toggleFlowChrome: (key: "showFlowGrid" | "showMinimap" | "showFlowControls") => void;
+  toggleFlowChrome: (
+    key: "showFlowGrid" | "showMinimap" | "showFlowControls" | "snapToGrid",
+  ) => void;
   setEdgeStyle: (style: EdgeStyle) => void;
   cycleEdgeStyle: () => void;
   setFlowView: (ctxKey: string, view: "graph" | "list") => void;
@@ -126,15 +133,44 @@ export function loadDockLayout(): SerializedDockview | null {
   }
 }
 
-function loadFlowChrome(): { showFlowGrid: boolean; showMinimap: boolean; showFlowControls: boolean } {
-  // Minimystix defaults: grid on, minimap OFF, controls on.
-  const defaults = { showFlowGrid: true, showMinimap: false, showFlowControls: true };
+function loadFlowChrome(): {
+  showFlowGrid: boolean;
+  showMinimap: boolean;
+  showFlowControls: boolean;
+  snapToGrid: boolean;
+} {
+  // Minimystix defaults: grid on, minimap OFF, controls on, snap OFF.
+  const defaults = {
+    showFlowGrid: true,
+    showMinimap: false,
+    showFlowControls: true,
+    snapToGrid: false,
+  };
   if (typeof localStorage === "undefined") return defaults;
   try {
     const raw = localStorage.getItem(FLOW_CHROME_KEY);
     return raw ? { ...defaults, ...(JSON.parse(raw) as object) } : defaults;
   } catch {
     return defaults;
+  }
+}
+
+/** The persisted per-context graph/list choice; malformed entries are
+ * dropped rather than trusted. */
+export function loadFlowView(): Record<string, "graph" | "list"> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(FLOW_VIEW_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, "graph" | "list"> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v === "graph" || v === "list") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 
@@ -154,7 +190,7 @@ export const useUi = create<UiState>((set) => {
     screenshotOpen: false,
     paletteOpen: false,
     bootError: null,
-    flowView: {},
+    flowView: loadFlowView(),
     renameRequest: null,
     sidecarPrompt: null,
     setDockLayout: (layout) => {
@@ -175,6 +211,7 @@ export const useUi = create<UiState>((set) => {
             showFlowGrid: next.showFlowGrid,
             showMinimap: next.showMinimap,
             showFlowControls: next.showFlowControls,
+            snapToGrid: next.snapToGrid,
           }),
         );
         return { [key]: !s[key] };
@@ -189,7 +226,12 @@ export const useUi = create<UiState>((set) => {
         localStorage.setItem(EDGE_STYLE_KEY, next);
         return { edgeStyle: next };
       }),
-    setFlowView: (key, view) => set((s) => ({ flowView: { ...s.flowView, [key]: view } })),
+    setFlowView: (key, view) =>
+      set((s) => {
+        const flowView = { ...s.flowView, [key]: view };
+        localStorage.setItem(FLOW_VIEW_KEY, JSON.stringify(flowView));
+        return { flowView };
+      }),
     setRenameRequest: (node) => set({ renameRequest: node }),
     setSidecarPrompt: (prompt) => set({ sidecarPrompt: prompt }),
   };

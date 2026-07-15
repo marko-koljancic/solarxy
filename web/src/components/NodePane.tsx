@@ -9,6 +9,7 @@ import { ctxKey } from "../engine/types";
 import { FlowListView } from "../flow/FlowListView";
 import { NodeCanvas } from "../flow/NodeCanvas";
 import { nodeLabel } from "../flow/nodeLabel";
+import { IconGraphView, IconListView } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
@@ -45,6 +46,17 @@ export function NodePane({ children }: { children?: React.ReactNode }) {
       <nav className="menu-bar node-pane-menu node-toolbar">
         <NodesMenu />
         <NodePaneViewMenu />
+        {/* The graph/list switch (D-24): a right-side icon command; the
+            icon advertises the view a click switches TO. */}
+        <button
+          className="tbtn icon flow-view-toggle"
+          title={flowView === "list" ? "Graph view" : "List view"}
+          onClick={() =>
+            useUi.getState().setFlowView(ctxKey(current), flowView === "list" ? "graph" : "list")
+          }
+        >
+          {flowView === "list" ? <IconGraphView /> : <IconListView />}
+        </button>
       </nav>
       <div className="breadcrumb-row">
         <Breadcrumb />

@@ -82,11 +82,41 @@ export function IconMaximize(p: IconProps) {
   );
 }
 
-export function IconEye(p: IconProps) {
+export function IconDisplay(p: IconProps) {
+  // A monitor: the display-flag motif (wing hover glyph, radial wedge).
   return (
     <Svg {...p}>
-      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
-      <circle cx="8" cy="8" r="2" />
+      <rect x="2" y="3" width="12" height="8" rx="1.5" />
+      <path d="M8 11v2.5M5.5 13.5h5" />
+    </Svg>
+  );
+}
+
+export function IconVisibility(p: IconProps) {
+  // The root visibility lamp (D-23): a ring with a lit core, echoing the
+  // node's vis-dot badge.
+  return (
+    <Svg {...p}>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function IconListView(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 4.5h10M3 8h10M3 11.5h10" />
+    </Svg>
+  );
+}
+
+export function IconGraphView(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="2.5" y="2.5" width="5" height="4" rx="1" />
+      <rect x="8.5" y="9.5" width="5" height="4" rx="1" />
+      <path d="M5 6.5v3.5a1.5 1.5 0 0 0 1.5 1.5h2" />
     </Svg>
   );
 }
