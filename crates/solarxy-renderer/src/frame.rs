@@ -44,6 +44,7 @@ fn truncate_to_budget<V>(verts: &mut Vec<V>, verts_per_prim: usize, what: &str) 
 /// a wire sphere or a cone) rather than one selection-attached gizmo, so sharing
 /// the manipulator's buffer would make one starve the other.
 const LIGHT_HELPER_BUF_BYTES: u64 = 256 * 1024;
+const CAMERA_HELPER_BUF_BYTES: u64 = 256 * 1024;
 use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
@@ -314,6 +315,10 @@ pub struct Renderer {
     manipulator_line_count: u32,
     light_helper_buf: wgpu::Buffer,
     light_helper_count: u32,
+    /// Camera gizmos. Written PER PANE (not once per frame like the light
+    /// helpers), because each pane hides the camera it is looking through.
+    camera_helper_buf: wgpu::Buffer,
+    camera_helper_count: u32,
     manipulator_tri_buf: wgpu::Buffer,
     manipulator_tri_count: u32,
     pub uv_overlap: UvOverlapResources,
@@ -654,6 +659,13 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             light_helper_count: 0,
+            camera_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Camera Helpers"),
+                size: CAMERA_HELPER_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            camera_helper_count: 0,
             uv_overlap: UvOverlapResources {
                 count_texture: count_tex,
                 count_view,
@@ -1113,6 +1125,7 @@ impl Renderer {
         }
         // Last, so it sits over everything; its pipelines ignore depth anyway.
         self.draw_light_helpers(&mut pass, cam_bg);
+        self.draw_camera_helpers(&mut pass, cam_bg);
         self.draw_manipulator(&mut pass, cam_bg);
     }
 
@@ -1153,6 +1166,50 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
         pass.set_vertex_buffer(0, self.light_helper_buf.slice(..));
         pass.draw(0..self.light_helper_count, 0..1);
+    }
+
+    /// Draws the camera gizmos. Its own draw/buffer, like the light helpers,
+    /// but written per pane (each pane hides its own look-through camera).
+    fn draw_camera_helpers<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if self.camera_helper_count == 0 {
+            return;
+        }
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
+        pass.set_vertex_buffer(0, self.camera_helper_buf.slice(..));
+        pass.draw(0..self.camera_helper_count, 0..1);
+    }
+
+    /// Uploads this pane's camera gizmos. Written PER PANE with the pane's
+    /// look-through camera as `skip`, so you never see the camera you are
+    /// inside. Call before rendering each 3D pane.
+    pub fn write_camera_helpers(
+        &mut self,
+        queue: &wgpu::Queue,
+        cameras: &[solarxy_core::scene::CameraDef],
+        skip: Option<solarxy_core::scene::SceneObjectId>,
+    ) {
+        let lines = crate::helpers::build_camera_helpers(cameras, skip);
+        if lines.is_empty() {
+            self.camera_helper_count = 0;
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&lines);
+        if bytes.len() as u64 > CAMERA_HELPER_BUF_BYTES {
+            tracing::warn!(
+                bytes = bytes.len(),
+                budget = CAMERA_HELPER_BUF_BYTES,
+                "camera helpers exceeded their vertex buffer; not drawing"
+            );
+            self.camera_helper_count = 0;
+            return;
+        }
+        queue.write_buffer(&self.camera_helper_buf, 0, bytes);
+        self.camera_helper_count = u32::try_from(lines.len()).unwrap_or(0);
     }
 
     /// Uploads this frame's light helpers. Unlike the manipulator, these are

@@ -19,6 +19,7 @@ const FLOW_CHROME_KEY = "solarxy.ui.flowChrome";
 const EDGE_STYLE_KEY = "solarxy.ui.edgeStyle";
 const DOCK_LAYOUT_KEY = "solarxy.ui.dockLayout";
 const FLOW_VIEW_KEY = "solarxy.ui.flowView";
+const PANE_COLORS_KEY = "solarxy.ui.paneColors";
 
 // Retired in Phase 10; read once by loadLegacyArrangement, never written.
 const LEGACY_SPLIT_KEY = "solarxy.ui.splitPct";
@@ -82,6 +83,8 @@ interface UiState {
   prefsOpen: boolean;
   /** The screenshot modal (not persisted). */
   screenshotOpen: boolean;
+  /** The turntable-export modal (not persisted). */
+  turntableOpen: boolean;
   /** The node palette (not persisted; Tab and the Add menu toggle it). */
   paletteOpen: boolean;
   /** A fatal boot failure (WebGPU unavailable, wasm init error). */
@@ -103,10 +106,15 @@ interface UiState {
   renameRequest: number | null;
   /** The missing-sidecars import prompt (not persisted). */
   sidecarPrompt: SidecarPrompt | null;
+  /** Per-pane header tint, keyed by dockview panel id (item 4). Persisted. */
+  paneColors: Record<string, string>;
+  /** The asset the preview panel shows (item 2; not persisted). */
+  assetPreview: { hash: string; name: string } | null;
   setDockLayout: (layout: SerializedDockview) => void;
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
   setScreenshotOpen: (open: boolean) => void;
+  setTurntableOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setBootError: (message: string) => void;
   toggleFlowChrome: (
@@ -117,6 +125,9 @@ interface UiState {
   setFlowView: (ctxKey: string, view: "graph" | "list") => void;
   setRenameRequest: (node: number | null) => void;
   setSidecarPrompt: (prompt: SidecarPrompt | null) => void;
+  /** Sets (or clears, with null) a pane's header tint and persists it. */
+  setPaneColor: (id: string, color: string | null) => void;
+  setAssetPreview: (asset: { hash: string; name: string } | null) => void;
 }
 
 /** The persisted dock arrangement. A corrupt blob is discarded here rather than
@@ -180,6 +191,25 @@ export function loadEdgeStyle(): EdgeStyle {
   return (EDGE_STYLES as readonly string[]).includes(raw ?? "") ? (raw as EdgeStyle) : "bezier";
 }
 
+/** The persisted per-pane header tint, keyed by dockview panel id (item 4).
+ * Pure chrome; malformed entries are dropped. */
+export function loadPaneColors(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(PANE_COLORS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export const useUi = create<UiState>((set) => {
   return {
     ...loadFlowChrome(),
@@ -188,11 +218,14 @@ export const useUi = create<UiState>((set) => {
     shortcutsOpen: false,
     prefsOpen: false,
     screenshotOpen: false,
+    turntableOpen: false,
     paletteOpen: false,
     bootError: null,
     flowView: loadFlowView(),
     renameRequest: null,
     sidecarPrompt: null,
+    paneColors: loadPaneColors(),
+    assetPreview: null,
     setDockLayout: (layout) => {
       localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
       set({ dockLayout: layout });
@@ -200,6 +233,7 @@ export const useUi = create<UiState>((set) => {
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPrefsOpen: (open) => set({ prefsOpen: open }),
     setScreenshotOpen: (open) => set({ screenshotOpen: open }),
+    setTurntableOpen: (open) => set({ turntableOpen: open }),
     setPaletteOpen: (open) => set({ paletteOpen: open }),
     setBootError: (message) => set({ bootError: message }),
     toggleFlowChrome: (key) =>
@@ -234,5 +268,14 @@ export const useUi = create<UiState>((set) => {
       }),
     setRenameRequest: (node) => set({ renameRequest: node }),
     setSidecarPrompt: (prompt) => set({ sidecarPrompt: prompt }),
+    setPaneColor: (id, color) =>
+      set((s) => {
+        const paneColors = { ...s.paneColors };
+        if (color) paneColors[id] = color;
+        else delete paneColors[id];
+        localStorage.setItem(PANE_COLORS_KEY, JSON.stringify(paneColors));
+        return { paneColors };
+      }),
+    setAssetPreview: (asset) => set({ assetPreview: asset }),
   };
 });

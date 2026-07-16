@@ -18,7 +18,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { setReviewPanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, setAssetsPanelOpen, setReviewPanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -123,6 +123,10 @@ export function MenuBar() {
         onClick: () => useDesks.getState().remove(d.name),
       })),
     },
+    { divider: true },
+    // The Assets panel (item 2): presence in the dock is its open state,
+    // the Review-panel pattern.
+    { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
   ];
 
   const reviewMode = useReview((s) => s.reviewMode);

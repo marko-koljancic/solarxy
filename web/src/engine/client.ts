@@ -9,6 +9,7 @@ import type {
   Annotation,
   AssetRef,
   CameraCommand,
+  CameraPose,
   Command,
   DisplaySettingsDto,
   DocumentSnapshot,
@@ -86,6 +87,13 @@ export class SolarxyClient {
   /** Requests an active-pane screenshot (rendered at frame end). */
   requestScreenshot(opts: ScreenshotOpts): void {
     this.app.request_screenshot(opts);
+  }
+
+  /** Requests one turntable-export frame: `pane` rendered through its
+   * render-through camera rotated by `azimuthDeg`. Uses the same capture slot
+   * as the screenshot; poll with `pollScreenshot`. */
+  requestTurntableFrame(pane: number, azimuthDeg: number, opts: ScreenshotOpts): void {
+    this.app.request_turntable_frame(pane, azimuthDeg, opts);
   }
 
   /** Polls the in-flight capture; undefined while pending. */
@@ -203,6 +211,23 @@ export class SolarxyClient {
     this.app.camera_command(pane, cmd);
   }
 
+  /** Binds a pane to look through a camera node, or -1 to clear to free view. */
+  setPaneCamera(pane: number, camera: number): ViewStateDto {
+    return this.app.set_pane_camera(pane, camera) as ViewStateDto;
+  }
+
+  setPaneCameraLock(pane: number, locked: boolean): ViewStateDto {
+    return this.app.set_pane_camera_lock(pane, locked) as ViewStateDto;
+  }
+
+  jumpToCamera(pane: number, camera: number): ViewStateDto {
+    return this.app.jump_to_camera(pane, camera) as ViewStateDto;
+  }
+
+  paneCameraPose(pane: number): CameraPose {
+    return this.app.pane_camera_pose(pane) as CameraPose;
+  }
+
   paneRects(): PaneRectDto[] {
     return this.app.pane_rects() as PaneRectDto[];
   }
@@ -241,6 +266,27 @@ export class SolarxyClient {
    * authoritative staged-name source). */
   assetManifest(): AssetRef[] {
     return this.app.asset_manifest() as AssetRef[];
+  }
+
+  /** Opens (or replaces) the live model preview on a canvas (item 2). */
+  previewOpen(canvas: HTMLCanvasElement, hash: string, name: string): void {
+    this.app.preview_open(canvas, hash, name);
+  }
+
+  previewOrbit(dx: number, dy: number): void {
+    this.app.preview_orbit(dx, dy);
+  }
+
+  previewZoom(delta: number): void {
+    this.app.preview_zoom(delta);
+  }
+
+  previewResize(width: number, height: number): void {
+    this.app.preview_resize(width, height);
+  }
+
+  previewClose(): void {
+    this.app.preview_close();
   }
 
   /** Drains the import jobs the last cook spawned (to run in the worker).

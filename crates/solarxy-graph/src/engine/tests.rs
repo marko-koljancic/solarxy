@@ -215,6 +215,46 @@ fn preview_param_does_not_leak_into_document_or_events() {
 }
 
 #[test]
+fn has_active_previews_tracks_the_preview_lane() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    // No interaction in flight to begin with.
+    assert!(!e.has_active_previews());
+
+    // A drag streams a preview: the interaction signal goes true (the host
+    // uses this to freeze the grid/floor/shadow refit during a drag).
+    e.preview_param(
+        ctx,
+        box_id,
+        "width",
+        ParamSource::Literal(ParamValue::Float(9.0)),
+    );
+    assert!(e.has_active_previews());
+
+    // An explicit cancel clears it.
+    e.clear_preview(ctx, box_id, "width");
+    assert!(!e.has_active_previews());
+
+    // And the committing SetParam clears it after a real drag, so the refit
+    // runs exactly once on release.
+    e.preview_param(
+        ctx,
+        box_id,
+        "width",
+        ParamSource::Literal(ParamValue::Float(3.0)),
+    );
+    assert!(e.has_active_previews());
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    assert!(!e.has_active_previews());
+}
+
+#[test]
 fn remove_node_drops_edges_and_forgets_cook_state() {
     let (mut e, ctx) = subflow_engine();
     let box_id = add(&mut e, ctx, "box");
@@ -1744,15 +1784,76 @@ fn granting_cast_shadow_releases_every_other_root_light_in_one_step() {
 
 #[test]
 fn take_scene_delta_is_empty_without_geo_or_lights() {
-    // Root holds no geo/light nodes yet, so only the light list op (empty)
-    // is emitted.
+    // Root holds no geo/light/camera nodes yet, so only the two list ops
+    // (empty light list, empty camera list) are emitted.
+    use solarxy_core::scene::SceneOp;
     let mut e = engine();
     let delta = e.take_scene_delta();
-    assert_eq!(delta.ops.len(), 1);
+    assert_eq!(delta.ops.len(), 2);
     assert!(matches!(
         delta.ops[0],
-        solarxy_core::scene::SceneOp::SetLights { ref lights } if lights.is_empty()
+        SceneOp::SetLights { ref lights } if lights.is_empty()
     ));
+    assert!(matches!(
+        delta.ops[1],
+        SceneOp::SetCameras { ref cameras } if cameras.is_empty()
+    ));
+}
+
+#[test]
+fn scene_delta_lowers_a_camera_node() {
+    use solarxy_core::scene::{CameraKind, SceneObjectId, SceneOp};
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    // Set an orthographic projection so we can assert the kind maps through.
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "kind".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("orthographic".to_string())),
+    })
+    .unwrap();
+    let delta = e.take_scene_delta();
+    let cameras = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => Some(cameras),
+            _ => None,
+        })
+        .expect("SetCameras op present");
+    assert_eq!(cameras.len(), 1);
+    let def = &cameras[0];
+    assert_eq!(def.id, SceneObjectId(cam.0));
+    assert_eq!(def.kind, CameraKind::Orthographic);
+}
+
+#[test]
+fn physical_camera_derives_fov_from_focal_and_sensor() {
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    for (key, val) in [("kind", ParamValue::Enum("physical".to_string()))] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: cam,
+            key: key.to_string(),
+            value: ParamSource::Literal(val),
+        })
+        .unwrap();
+    }
+    // Defaults: 50mm focal, 36mm sensor -> ~39.6 degrees vertical FOV.
+    let delta = e.take_scene_delta();
+    let cameras = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            solarxy_core::scene::SceneOp::SetCameras { cameras } => Some(cameras),
+            _ => None,
+        })
+        .unwrap();
+    let fov_deg = cameras[0].fov_y.to_degrees();
+    let expected = 2.0 * (36.0f32 / (2.0 * 50.0)).atan().to_degrees();
+    assert!((fov_deg - expected).abs() < 0.01, "fov {fov_deg} vs {expected}");
 }
 
 #[test]

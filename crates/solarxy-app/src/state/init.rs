@@ -135,6 +135,7 @@ impl State {
                         uv_zoom: 1.0,
                         show_uv_overlap: false,
                         show_validation: false,
+                        turntable_active: false,
                     };
                     [pds; 4]
                 },

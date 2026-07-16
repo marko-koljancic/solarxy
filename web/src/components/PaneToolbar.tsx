@@ -5,11 +5,34 @@
 // every change goes through the session's view actions (Rust owns the
 // truth). Positioned from the host-computed pane rects.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cameraCommand, setActivePane, setPaneSettings, setSplitRatio } from "../engine/session";
-import type { PaneDisplaySettings, ViewAxis, ViewStateDto } from "../engine/types";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  cameraCommand,
+  createCameraFromView,
+  jumpToCamera,
+  setActivePane,
+  setPaneCamera,
+  setPaneCameraLock,
+  setPaneSettings,
+  setSplitRatio,
+} from "../engine/session";
+import type {
+  NodeMirror,
+  PaneDisplaySettings,
+  PaneRectDto,
+  ViewAxis,
+  ViewStateDto,
+} from "../engine/types";
 import { IconCheck } from "../icons";
+import { selectGraph, useMirror } from "../store/mirror";
 import { useViewState } from "../store/viewState";
+
+/** A camera node's display name (its `name` param, else a fallback). */
+function cameraName(n: NodeMirror): string {
+  const p = n.params.name;
+  if (p?.kind === "literal" && p.type === "text" && p.value.trim()) return p.value;
+  return `Camera ${n.id}`;
+}
 
 const VIEW_MODES = [
   ["Shaded", "Shaded"],
@@ -25,6 +48,17 @@ const INSPECTION_MODES = [
   ["Depth", "Depth"],
   ["Overdraw", "Overdraw"],
   ["AoPreview", "AO Preview"],
+] as const;
+
+// Temporary per-pane shading overrides (item 7): the desktop set, wired to
+// the already-plumbed camera.material_override uniform. Session-only, so it
+// is never persisted to the scene (reset to None on load, host-side).
+const MATERIAL_OVERRIDES = [
+  ["None", "Textured"],
+  ["Clay", "Clay Light"],
+  ["ClayDark", "Clay Dark"],
+  ["Chrome", "Chrome"],
+  ["Silhouette", "Silhouette"],
 ] as const;
 
 const VIEW_AXES: [ViewAxis, string][] = [
@@ -144,6 +178,13 @@ function PaneControls({ pane, settings, projection, active }: {
 }) {
   const overlapPct = useViewState((s) => s.uvOverlapPct);
   const overlapPending = useViewState((s) => s.uvOverlapPending);
+  // Select the STABLE nodes array and derive with useMemo: a selector that
+  // filters inline returns a fresh array every snapshot read, which
+  // useSyncExternalStore sees as perpetually changed (React #185 loop).
+  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const cameras = useMemo(() => rootNodes.filter((n) => n.typeId === "camera"), [rootNodes]);
+  const lookThrough = useViewState((s) => s.view?.paneLookThrough?.[pane] ?? null);
+  const cameraLocked = useViewState((s) => s.view?.paneCameraLock?.[pane] ?? false);
   const patch = (p: Partial<PaneDisplaySettings>) => {
     setActivePane(pane);
     setPaneSettings(pane, { ...settings, ...p });
@@ -229,6 +270,22 @@ function PaneControls({ pane, settings, projection, active }: {
           ))}
         </GhostMenu>
       )}
+      <GhostMenu
+        label={
+          settings.materialOverride === "None"
+            ? "Override"
+            : labelOf(MATERIAL_OVERRIDES, settings.materialOverride)
+        }
+      >
+        {MATERIAL_OVERRIDES.map(([v, label]) => (
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.materialOverride === v}
+            onPick={() => patch({ materialOverride: v })}
+          />
+        ))}
+      </GhostMenu>
       <GhostMenu label={projection === "orthographic" ? "Ortho" : "Persp"}>
         <GhostItem
           label="Perspective"
@@ -244,6 +301,54 @@ function PaneControls({ pane, settings, projection, active }: {
           onPick={() => {
             setActivePane(pane);
             cameraCommand(pane, { kind: "projection", mode: "orthographic" });
+          }}
+        />
+      </GhostMenu>
+      <GhostMenu label={lookThrough !== null ? "Camera*" : "Camera"}>
+        <GhostItem
+          label="Free view"
+          checked={lookThrough === null}
+          onPick={() => {
+            setActivePane(pane);
+            setPaneCamera(pane, -1);
+          }}
+        />
+        {cameras.length > 0 && <GhostHeading label="Look through" />}
+        {cameras.map((c) => (
+          <GhostItem
+            key={c.id}
+            label={cameraName(c)}
+            checked={lookThrough === c.id}
+            onPick={() => {
+              setActivePane(pane);
+              setPaneCamera(pane, c.id);
+            }}
+          />
+        ))}
+        {lookThrough !== null && (
+          <GhostItem
+            label="Lock camera to view"
+            checked={cameraLocked}
+            sticky
+            onPick={() => setPaneCameraLock(pane, !cameraLocked)}
+          />
+        )}
+        <GhostHeading label="Bookmarks" />
+        {cameras.map((c) => (
+          <GhostItem
+            key={`jump-${c.id}`}
+            label={`Jump to ${cameraName(c)}`}
+            onPick={() => {
+              setActivePane(pane);
+              jumpToCamera(pane, c.id);
+            }}
+          />
+        ))}
+        <GhostItem
+          label="Create camera from view"
+          onPick={() => {
+            setActivePane(pane);
+            createCameraFromView(pane);
           }}
         />
       </GhostMenu>
@@ -284,6 +389,12 @@ function PaneControls({ pane, settings, projection, active }: {
           checked={settings.showValidation}
           sticky
           onPick={() => patch({ showValidation: !settings.showValidation })}
+        />
+        <GhostItem
+          label="Turntable"
+          checked={settings.turntableActive}
+          sticky
+          onPick={() => patch({ turntableActive: !settings.turntableActive })}
         />
         <GhostHeading label="Normals" />
         {NORMALS.map(([v, label]) => (
@@ -372,12 +483,43 @@ function PaneDivider({ view }: { view: ViewStateDto }) {
   return <div className="viewport-divider" style={style} onPointerDown={onPointerDown} />;
 }
 
+/** The letterbox framing gate for a look-through pane: the camera's aspect
+ * rectangle centered in the pane, everything outside it dimmed (clipped to the
+ * pane via overflow). Pure overlay; never intercepts pointer events. */
+function FramingGate({ rect, aspect }: { rect: PaneRectDto; aspect: number }) {
+  const paneAspect = rect.width / Math.max(rect.height, 1);
+  let gw = rect.width;
+  let gh = rect.height;
+  if (aspect > paneAspect) {
+    gw = rect.width;
+    gh = rect.width / aspect;
+  } else {
+    gh = rect.height;
+    gw = rect.height * aspect;
+  }
+  return (
+    <div
+      className="framing-gate-clip"
+      style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+    >
+      <div
+        className="framing-gate"
+        style={{ left: (rect.width - gw) / 2, top: (rect.height - gh) / 2, width: gw, height: gh }}
+      />
+    </div>
+  );
+}
+
 /** All pane controls, absolutely positioned from the host pane rects. */
 export function PaneToolbars() {
   const view = useViewState((s) => s.view);
   if (!view) return null;
   return (
     <>
+      {view.paneRects.map((rect, i) => {
+        const aspect = view.paneGateAspect?.[i];
+        return aspect ? <FramingGate key={`gate-${i}`} rect={rect} aspect={aspect} /> : null;
+      })}
       {view.paneRects.map((rect, i) => (
         <div
           key={i}

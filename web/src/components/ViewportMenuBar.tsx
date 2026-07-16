@@ -70,6 +70,10 @@ export function ViewportMenuBar() {
       shortcut: "C",
       onClick: () => useUi.getState().setScreenshotOpen(true),
     },
+    {
+      label: "Export Turntable...",
+      onClick: () => useUi.getState().setTurntableOpen(true),
+    },
     { divider: true },
     {
       // Phase 10: real dock maximize, on the viewport's own group. Esc restores

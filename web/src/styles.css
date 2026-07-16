@@ -2688,6 +2688,339 @@ body.reduce-motion .cook-arc {
   padding: 6px 10px 2px;
 }
 
+/* ---- Item 3: viewport right-click context menu ---- */
+.viewport-context-menu {
+  z-index: 40;
+  min-width: 184px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  user-select: none;
+}
+.ctx-heading {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding: 6px 12px 2px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 5px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ctx-item:hover:not(:disabled) {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.12));
+}
+.ctx-item.active {
+  color: var(--accent-primary);
+}
+.ctx-item:disabled {
+  color: var(--text-quaternary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.ctx-key {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-primary);
+}
+
+/* ---- Item 4: per-pane header tint + color picker ---- */
+.pane-tab-wrap {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+}
+.pane-tab-wrap > .dv-default-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+}
+/* The tint sits behind the whole tab; pastels are light in both themes, so the
+   tab text/close switch to dark ink for contrast. Header/tab only. */
+.pane-tab-wrap.tinted {
+  background: var(--pane-tint);
+}
+.pane-tab-wrap.tinted .dv-default-tab-content,
+.pane-tab-wrap.tinted .dv-default-tab-action {
+  color: var(--ink-on-pastel, #1f2937);
+}
+.pane-color-picker {
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  padding: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.pane-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  padding: 0;
+  appearance: none;
+}
+.pane-swatch.active {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+.pane-swatch-none {
+  background:
+    linear-gradient(
+      45deg,
+      transparent 44%,
+      var(--severity-error, #d9534f) 44%,
+      var(--severity-error, #d9534f) 56%,
+      transparent 56%
+    ),
+    var(--background-tertiary);
+}
+
+/* ---- Item 2: assets pane + preview ---- */
+.assets-pane {
+  height: 100%;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--surface-app);
+}
+.assets-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+.assets-empty-hint {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 10px;
+}
+.asset-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ink-primary);
+  font: inherit;
+  text-align: left;
+  user-select: none;
+}
+.asset-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-overlay);
+}
+.asset-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--ink-tertiary);
+  overflow: hidden;
+}
+.asset-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.asset-name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.asset-kind {
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.asset-preview {
+  height: 100%;
+  background: var(--surface-sunken);
+}
+.asset-preview-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+.asset-preview-2d {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  /* Checker backdrop so alpha reads. */
+  background:
+    repeating-conic-gradient(
+      color-mix(in srgb, var(--ink-primary) 7%, transparent) 0% 25%,
+      transparent 0% 50%
+    )
+    0 0 / 24px 24px;
+}
+.asset-preview-2d:active {
+  cursor: grabbing;
+}
+.asset-preview-2d img {
+  max-width: 90%;
+  max-height: 90%;
+  image-rendering: auto;
+}
+.asset-preview-hud {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  font-size: 10px;
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+.asset-preview-3d {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.asset-preview-3d:active {
+  cursor: grabbing;
+}
+
+/* ---- Item 10: device gate (MPW-styled, matches the landing look) ---- */
+.device-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f4f1ea;
+  color: #11110e;
+}
+.device-gate-soft {
+  background: rgba(17, 17, 14, 0.45);
+}
+.device-gate-card {
+  max-width: 420px;
+  background: #fbf9f4;
+  border: 1px solid #d8d2c6;
+  border-radius: 6px;
+  padding: 32px 28px;
+  text-align: left;
+}
+.device-gate-card h1 {
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 12px;
+  color: #11110e;
+}
+.device-gate-card p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #4a463e;
+  margin: 0 0 12px;
+}
+.device-gate-mark {
+  font-weight: 700;
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #11110e;
+}
+.device-gate-dot {
+  color: #d4623c;
+}
+.device-gate-hint {
+  font-size: 12px !important;
+  opacity: 0.8;
+}
+.device-gate-link {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 9999px;
+  background: #11110e;
+  color: #f4f1ea;
+  font-size: 14px;
+  text-decoration: none;
+}
+.device-gate-soft .device-gate-card .btn {
+  margin-top: 4px;
+}
+
+/* ---- Item 9b: turntable export progress ---- */
+.turntable-progress {
+  height: 6px;
+  margin: 10px 0;
+  background: var(--background-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.turntable-progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.1s linear;
+}
+
+/* ---- Item 1: camera framing gate (letterbox) ---- */
+.framing-gate-clip {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 8;
+}
+.framing-gate {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+}
+
 /* ---- Phase 7b D3: right-docked properties (desks) ---- */
 
 
@@ -2800,20 +3133,35 @@ body.reduce-motion .cook-arc {
   z-index: 9;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   user-select: none;
 }
 
+/* Blender-style grouped tool strip: each group is a rounded panel of flush
+   buttons, groups separated by a gap. Larger than the Phase 11 column so the
+   glyphs read at a glance. */
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  gap: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
+  border: 1px solid var(--border-primary);
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.4);
+}
+
 .tool-btn {
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 3.2rem;
+  height: 3.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
-  border: 1px solid var(--border-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }

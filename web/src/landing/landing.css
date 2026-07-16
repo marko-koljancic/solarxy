@@ -1,0 +1,520 @@
+/* The Solarxy landing page (item 10), in the MPW "Balanced Editorial" design
+ * language (the koljam.com system; see the mpw repo's globals.css and
+ * STITCH_DESIGN_BRIEF.md). Self-contained: the app's tokens.css is NOT loaded
+ * here. Light (warm cream) is the primary look; dark follows the MPW dark
+ * palette via prefers-color-scheme. Motion follows the MPW spec: clip-mask
+ * headline rise, floating pastel tiles, calm scroll reveals, a thin accent
+ * progress rail. prefers-reduced-motion collapses everything. */
+
+:root {
+  --paper: #f4f1ea;
+  --paper-raised: #fbf9f4;
+  --paper-sunken: #ece7dc;
+  --ink: #11110e;
+  --ink-secondary: #4a463e;
+  --hairline: #d8d2c6;
+  --hairline-ink: rgba(17, 17, 14, 0.14);
+  --accent-ink: #9a4a2e;
+  --clay-strong: #d4623c;
+  --lavender: #c9c2f0;
+  --coral: #e4aa93;
+  --peach: #f2c9a0;
+  --on-block: #11110e;
+  --nav-bg: rgba(244, 241, 234, 0.85);
+  --shadow-lift: 0 18px 40px -24px rgba(17, 17, 14, 0.45);
+
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+
+  --ease-reveal: cubic-bezier(0.21, 0.47, 0.32, 0.98);
+  --ease-rise: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16140f;
+    --paper-raised: #201e17;
+    --paper-sunken: #100f0b;
+    --ink: #f2efe7;
+    --ink-secondary: #b4ad9e;
+    --hairline: #34302a;
+    --hairline-ink: rgba(242, 239, 231, 0.14);
+    --accent-ink: #e0875a;
+    --clay-strong: #e06b43;
+    --lavender: #bcb4ea;
+    --coral: #dca28b;
+    --peach: #e4bc8e;
+    --nav-bg: rgba(22, 20, 15, 0.85);
+    --shadow-lift: 0 18px 44px -22px rgba(0, 0, 0, 0.7);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body.landing {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ---- chrome ---- */
+
+.progress-rail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 60;
+  background: transparent;
+}
+#rail-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent-ink);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 4.5rem;
+  padding: 0 clamp(1.25rem, 5vw, 6rem);
+  background: var(--nav-bg);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid transparent;
+}
+.nav.scrolled {
+  border-bottom-color: var(--hairline);
+}
+.wordmark {
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+.wordmark-dot {
+  color: var(--clay-strong);
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+.nav-link {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+}
+.nav-link:hover {
+  color: var(--accent-ink);
+}
+
+/* ---- buttons (MPW pills) ---- */
+
+.btn-ink,
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 3rem;
+  padding: 0 1.5rem;
+  border-radius: 9999px;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1rem;
+  transition: transform 0.2s var(--ease-rise), box-shadow 0.2s, background-color 0.2s, color 0.2s;
+}
+.btn-lg {
+  height: 3.5rem;
+  padding: 0 2rem;
+  font-size: 1.0625rem;
+}
+.btn-ink {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn-ink:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.btn-outline {
+  border: 1px solid var(--ink);
+  color: var(--ink);
+}
+.btn-outline:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ---- hero ---- */
+
+.hero {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 7rem clamp(1.25rem, 5vw, 6rem) 4rem;
+}
+.node-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.hero-inner {
+  position: relative;
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-ink);
+  margin-bottom: 1.5rem;
+}
+.headline {
+  font-size: clamp(2.5rem, 8vw, 8rem);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  max-width: 18ch;
+}
+.line-mask {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.08em;
+}
+.line {
+  display: block;
+  transform: translateY(112%);
+  animation: line-rise 0.75s var(--ease-rise) forwards;
+}
+.line.l2 {
+  animation-delay: 0.09s;
+}
+@keyframes line-rise {
+  to {
+    transform: translateY(0);
+  }
+}
+.sub {
+  max-width: 54ch;
+  font-size: clamp(1.125rem, 1.5vw, 1.375rem);
+  line-height: 1.5;
+  color: var(--ink-secondary);
+  margin-bottom: 2.5rem;
+}
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.device-hint {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  opacity: 0.8;
+}
+
+/* Floating pastel tiles (MPW hero ambient loop). */
+.hero-tiles {
+  position: absolute;
+  right: clamp(0rem, 4vw, 4rem);
+  top: 12%;
+  width: 200px;
+  height: 300px;
+}
+.tile {
+  position: absolute;
+  border-radius: 6px;
+  animation: tile-float 6s ease-in-out infinite;
+}
+.tile-coral {
+  width: 72px;
+  height: 72px;
+  background: var(--coral);
+  right: 0;
+  top: 0;
+}
+.tile-peach {
+  width: 48px;
+  height: 48px;
+  background: var(--peach);
+  right: 96px;
+  top: 90px;
+  animation-delay: 0.8s;
+}
+.tile-lavender {
+  width: 60px;
+  height: 60px;
+  background: var(--lavender);
+  right: 24px;
+  top: 180px;
+  animation-delay: 1.6s;
+}
+@keyframes tile-float {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.8;
+  }
+  50% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+/* ---- scroll reveals (MPW Reveal) ---- */
+
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 20px, 0);
+  transition: opacity 0.6s var(--ease-reveal), transform 0.6s var(--ease-reveal);
+  transition-delay: var(--d, 0s);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- color-block cards ---- */
+
+.cards {
+  padding: 4rem clamp(1.25rem, 5vw, 6rem);
+}
+.cards-grid {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+.card {
+  position: relative;
+  min-height: 280px;
+  border-radius: 6px;
+  padding: 2rem;
+  color: var(--on-block);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s var(--ease-rise), box-shadow 0.2s;
+}
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-lift);
+}
+.card-lavender {
+  background: var(--lavender);
+}
+.card-coral {
+  background: var(--coral);
+}
+.card-peach {
+  background: var(--peach);
+}
+.card-index {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  margin-bottom: 1.75rem;
+}
+.card h3 {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.75rem;
+}
+.card p {
+  font-size: 1rem;
+  line-height: 1.55;
+  margin-bottom: 1.5rem;
+}
+.card-meta {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+
+/* ---- stats band ---- */
+
+.band {
+  background: var(--paper-sunken);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 4rem clamp(1.25rem, 5vw, 6rem);
+}
+.band-inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 3rem;
+}
+.stat-value {
+  display: block;
+  font-size: clamp(2.125rem, 6vw, 5rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  margin-bottom: 0.5rem;
+}
+.stat-label {
+  font-size: 1rem;
+  color: var(--ink-secondary);
+  max-width: 30ch;
+  display: block;
+}
+
+/* ---- closing ---- */
+
+.closing {
+  padding: 8rem clamp(1.25rem, 5vw, 6rem);
+  text-align: center;
+}
+.closing-line {
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+  max-width: 22ch;
+  margin: 0 auto 2.5rem;
+  text-wrap: balance;
+}
+
+/* ---- footer ---- */
+
+.footer {
+  background: var(--paper-sunken);
+  border-top: 1px solid var(--hairline);
+  padding: 3rem clamp(1.25rem, 5vw, 6rem);
+}
+.footer-inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2rem;
+  justify-content: space-between;
+}
+.footer-links {
+  display: flex;
+  gap: 1.75rem;
+  flex-wrap: wrap;
+}
+.footer-links a {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+}
+.footer-links a:hover {
+  color: var(--accent-ink);
+}
+.footer-copy {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+}
+
+/* ---- node-assembly stage pieces (built by main.ts) ---- */
+
+.node-stage .n-body {
+  stroke: var(--hairline-ink);
+  stroke-width: 1;
+}
+.node-stage .n-glyph {
+  fill: #1f2937;
+  opacity: 0.75;
+}
+.node-stage .n-edge {
+  fill: none;
+  stroke-width: 1.6;
+  opacity: 0.85;
+}
+.node-stage .n-handle {
+  stroke: var(--paper);
+  stroke-width: 1;
+}
+
+/* ---- reduced motion ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .line {
+    animation: none;
+    transform: none;
+  }
+  .tile {
+    animation: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .btn-ink:hover,
+  .card:hover {
+    transform: none;
+  }
+}
+
+/* ---- small screens: the landing itself stays readable on phones ---- */
+
+@media (max-width: 640px) {
+  .hero-tiles {
+    display: none;
+  }
+  .headline {
+    max-width: none;
+  }
+}

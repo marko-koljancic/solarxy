@@ -10,7 +10,7 @@
 // canvas and lose the WebGPU surface. Consequence: pointer handlers are
 // attached imperatively rather than as React props.
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   applyViewportBatch,
   bootSession,
@@ -28,6 +28,7 @@ import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
 import { GizmoReadout } from "./GizmoReadout";
 import { ToolColumn } from "./ToolColumn";
+import { ViewportContextMenu } from "./ViewportContextMenu";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPopup } from "./review/ReviewPopup";
 import { ViewportMenuBar } from "./ViewportMenuBar";
@@ -51,6 +52,8 @@ function pointerMods(e: PointerEvent): number {
 
 export function Viewport() {
   const hostRef = useRef<HTMLDivElement>(null);
+  // The right-click context menu: screen-space anchor, or null when closed.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Crosshair while review mode is active. A class on a canvas React does not
   // render, so it is applied imperatively.
   const reviewMode = useReview((s) => s.reviewMode);
@@ -224,7 +227,13 @@ export function Viewport() {
       }
     };
 
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    // Right-click opens the viewport context menu (the camera never used the
+    // right button). setCtxMenu from useState is stable, so referencing it in
+    // this mount-only effect is safe.
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY });
+    };
 
     const onWheel = (e: WheelEvent) => {
       try {
@@ -268,6 +277,9 @@ export function Viewport() {
         <ReviewOverlay />
         <ReviewPopup />
       </div>
+      {ctxMenu && (
+        <ViewportContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
+      )}
     </div>
   );
 }

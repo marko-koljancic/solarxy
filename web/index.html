@@ -3,10 +3,133 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Solarxy Web</title>
+    <title>Solarxy - 3D modeling and inspection in your browser</title>
+    <meta
+      name="description"
+      content="Solarxy Web is an open-source, node-based 3D modeling and inspection studio built in Rust and WebGPU. Parametric geometry, validation, and review, running entirely in your browser."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@1&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/landing/landing.css" />
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body class="landing">
+    <div class="progress-rail" aria-hidden="true"><div id="rail-fill"></div></div>
+
+    <header class="nav">
+      <a class="wordmark" href="/">Solarxy<span class="wordmark-dot">.</span></a>
+      <nav class="nav-links">
+        <a class="nav-link" href="https://github.com/marko-koljancic/solarxy">GitHub</a>
+        <a class="btn-ink" href="/app">Launch app</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <svg id="node-stage" class="node-stage" aria-hidden="true"></svg>
+        <div class="hero-inner">
+          <p class="kicker reveal">Open source, Rust + WebGPU</p>
+          <h1 class="headline">
+            <span class="line-mask"><span class="line l1">Model it. Inspect it.</span></span>
+            <span class="line-mask"
+              ><span class="line l2">In the <em class="serif">browser</em>.</span></span
+            >
+          </h1>
+          <p class="sub reveal" style="--d: 0.25s">
+            Solarxy Web is a node-based 3D modeling and inspection studio. Build parametric
+            geometry on a node graph, validate and review it in a WebGPU viewport, and keep
+            every byte on your own machine.
+          </p>
+          <div class="cta-row reveal" style="--d: 0.4s">
+            <a class="btn-ink btn-lg" href="/app">Launch Solarxy</a>
+            <a class="btn-outline btn-lg" href="https://github.com/marko-koljancic/solarxy"
+              >View on GitHub</a
+            >
+          </div>
+          <p class="device-hint reveal" style="--d: 0.55s">
+            Best experienced on a desktop or tablet.
+          </p>
+          <div class="hero-tiles" aria-hidden="true">
+            <span class="tile tile-coral"></span>
+            <span class="tile tile-peach"></span>
+            <span class="tile tile-lavender"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="cards">
+        <div class="cards-grid">
+          <article class="card card-lavender reveal">
+            <span class="card-index">01</span>
+            <h3>Node-based modeling</h3>
+            <p>
+              Boxes, torus knots, arrays, mirrors, materials. Thirty-four node types on a typed
+              graph that cooks as you edit, with undo for everything.
+            </p>
+            <span class="card-meta">Parametric, always editable</span>
+          </article>
+          <article class="card card-coral reveal" style="--d: 0.12s">
+            <span class="card-index">02</span>
+            <h3>Inspection and validation</h3>
+            <p>
+              A PBR viewport with split panes, cameras, shading overrides, and a validator that
+              flags degenerate geometry before it reaches your pipeline.
+            </p>
+            <span class="card-meta">See what the mesh is really doing</span>
+          </article>
+          <article class="card card-peach reveal" style="--d: 0.24s">
+            <span class="card-index">03</span>
+            <h3>Review and share</h3>
+            <p>
+              Pin annotations to faces, resolve threads, export turntables and screenshots. One
+              self-contained .slxy file carries the whole scene.
+            </p>
+            <span class="card-meta">Feedback that sticks to geometry</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="band-inner reveal">
+          <div class="stat">
+            <span class="stat-value">100%</span>
+            <span class="stat-label">client-side. Your models never leave your machine.</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">34</span>
+            <span class="stat-label">node types, from primitives to modifiers and lights.</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">.slxy</span>
+            <span class="stat-label">one open, self-contained scene format.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing">
+        <h2 class="closing-line reveal">
+          From first node to <em class="serif">reviewed model</em>, in one tab.
+        </h2>
+        <a class="btn-ink btn-lg reveal" style="--d: 0.15s" href="/app">Launch Solarxy</a>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span class="wordmark">Solarxy<span class="wordmark-dot">.</span></span>
+        <nav class="footer-links">
+          <a href="/app">App</a>
+          <a href="https://github.com/marko-koljancic/solarxy">GitHub</a>
+          <a href="https://github.com/marko-koljancic/solarxy/wiki">Docs</a>
+          <a href="https://koljam.com">koljam.com</a>
+        </nav>
+        <span class="footer-copy">&copy; <span id="year"></span> Marko Koljancic</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/landing/main.ts"></script>
   </body>
 </html>

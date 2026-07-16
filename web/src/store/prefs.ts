@@ -8,7 +8,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type ThemeChoice = "dark" | "light" | "system";
+/** "mpw" is the MPW "Balanced Editorial" light variant (warm cream +
+ * terracotta, the koljam.com design language): it resolves to light for
+ * color-scheme purposes and additionally sets the `mpw-theme` body class,
+ * which re-tints the tier-2 tokens. The existing light theme is untouched. */
+export type ThemeChoice = "dark" | "light" | "mpw" | "system";
 export type ResolvedTheme = "dark" | "light";
 export type MotionChoice = "system" | "reduce" | "none";
 export type ScreenshotResolution = "viewport" | "1.5x" | "2x" | "4x" | "custom";
@@ -88,6 +92,7 @@ interface PrefsStore {
 
 export function resolveTheme(choice: ThemeChoice, systemDark: boolean): ResolvedTheme {
   if (choice === "system") return systemDark ? "dark" : "light";
+  if (choice === "mpw") return "light";
   return choice;
 }
 
@@ -115,6 +120,7 @@ function applyBodyClasses(prefs: Prefs): void {
   const resolved = resolveTheme(prefs.appearance.theme, systemPrefersDark());
   document.body.classList.toggle("light-theme", resolved === "light");
   document.body.classList.toggle("dark-theme", resolved === "dark");
+  document.body.classList.toggle("mpw-theme", prefs.appearance.theme === "mpw");
   document.body.classList.toggle(
     "reduce-motion",
     motionReduced(prefs.appearance.reducedMotion, systemPrefersReducedMotion()),

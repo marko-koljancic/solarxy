@@ -303,6 +303,10 @@
             "yaw": 0.0
           }
         },
+        "camera_locked": {
+          "description": "Whether the look-through pane is locked (reframes the camera).",
+          "type": "boolean"
+        },
         "display": {
           "additionalProperties": true,
           "type": "object"
@@ -310,6 +314,14 @@
         "inspection": {
           "default": "shaded",
           "type": "string"
+        },
+        "look_through": {
+          "description": "The `camera` node this pane looks through (its id), or `None` for a free view. Serde-default so older scenes load unchanged.",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"

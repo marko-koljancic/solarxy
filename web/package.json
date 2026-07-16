@@ -20,9 +20,12 @@
     "@xyflow/react": "^12.8.5",
     "dockview-react": "^7.0.2",
     "elkjs": "^0.9.3",
+    "fflate": "^0.8.3",
     "immer": "^10.1.1",
+    "mp4-muxer": "^5.2.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "webm-muxer": "^5.1.4",
     "zustand": "^5.0.6"
   },
   "devDependencies": {

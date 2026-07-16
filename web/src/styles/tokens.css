@@ -345,3 +345,39 @@ body.light-theme {
 
   --handle-border: var(--l-050);
 }
+
+/* ---- MPW "Balanced Editorial" light variant (item 10) ----------------
+ * Applied ALONGSIDE body.light-theme (prefs sets both classes), so anything
+ * not overridden here inherits the light theme: node pastels, status colors,
+ * the display blue. Values are the koljam.com design tokens (warm cream paper,
+ * near-black ink, terracotta accent; see the mpw repo's globals.css).
+ * Deliberately minimal; readability in the dense tool UI is validated in
+ * Chrome before this variant is ever made a default.
+ * Watch item: the terracotta accent sits near the burnt-orange attention
+ * hue; if bypass wings stop reading, re-tint --state-attention here. */
+body.mpw-theme {
+  --surface-canvas: #efebe0;
+  --surface-dot: #d8d2c6;
+  --surface-app: #f4f1ea;
+  --surface-raised: #fbf9f4;
+  --surface-overlay: #fbf9f4;
+  --surface-sunken: #ece7dc;
+
+  --ink-primary: #11110e;
+  --ink-secondary: #4a463e;
+  --ink-tertiary: #7a756a;
+  --ink-muted: #a09a8c;
+  --ink-strong: #0a0a08;
+  --ink-on-accent: #f4f1ea;
+
+  --border-subtle: #ece7dc;
+  --border-default: #d8d2c6;
+  --border-strong: #c9c2b4;
+  --divider: #c4bdae;
+
+  --accent: #9a4a2e;
+  --accent-hover: #b05a3a;
+  --accent-pressed: #83402a;
+  --accent-subtle: color-mix(in srgb, #9a4a2e 12%, transparent);
+  --accent-hairline: #9a4a2e;
+}

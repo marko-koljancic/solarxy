@@ -5,11 +5,13 @@
 // dock gesture can ever remount it.
 
 import { useEffect, useState } from "react";
+import { DeviceBlocked, DeviceWarning, useDeviceGate } from "./components/DeviceGate";
 import { Dock } from "./dock/Dock";
 import { MenuBar } from "./components/menu/MenuBar";
 import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { PreferencesModal } from "./components/preferences/PreferencesModal";
 import { ScreenshotModal } from "./components/ScreenshotModal";
+import { TurntableExportModal } from "./components/TurntableExportModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
@@ -28,9 +30,11 @@ export function App() {
   const shortcutsOpen = useUi((s) => s.shortcutsOpen);
   const prefsOpen = useUi((s) => s.prefsOpen);
   const screenshotOpen = useUi((s) => s.screenshotOpen);
+  const turntableOpen = useUi((s) => s.turntableOpen);
   const bootError = useUi((s) => s.bootError);
   const reviewMode = useReview((s) => s.reviewMode);
   const [dropActive, setDropActive] = useState(false);
+  const gate = useDeviceGate();
   useKeyboard();
 
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
@@ -63,6 +67,10 @@ export function App() {
     window.addEventListener("beforeunload", guard);
     return () => window.removeEventListener("beforeunload", guard);
   }, []);
+
+  // The smallest phones get the friendly message INSTEAD of the app, before
+  // any WebGPU/wasm boot begins (the Dock mounts the viewport which boots).
+  if (gate === "blocked") return <DeviceBlocked />;
 
   return (
     <div
@@ -117,6 +125,10 @@ export function App() {
       {shortcutsOpen && <ShortcutsModal onClose={() => useUi.getState().setShortcutsOpen(false)} />}
       {prefsOpen && <PreferencesModal onClose={() => useUi.getState().setPrefsOpen(false)} />}
       {screenshotOpen && <ScreenshotModal onClose={() => useUi.getState().setScreenshotOpen(false)} />}
+      {turntableOpen && (
+        <TurntableExportModal onClose={() => useUi.getState().setTurntableOpen(false)} />
+      )}
+      {gate === "warn" && <DeviceWarning />}
     </div>
   );
 }

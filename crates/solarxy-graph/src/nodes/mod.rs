@@ -39,6 +39,7 @@ mod null_node;
 mod switch_node;
 
 // Container + utility + lights (root) and imports (subflow).
+mod camera_node;
 mod geo_node;
 mod import_image;
 mod imports;
@@ -89,6 +90,7 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         // Container + utility (root/both).
         geo_node::descriptor(),
         note_node::descriptor(),
+        camera_node::camera_descriptor(),
         // Lights (root).
         lights::point_descriptor(),
         lights::directional_descriptor(),
@@ -146,6 +148,6 @@ mod tests {
         // The 23 MVP node types plus import_image (Phase 13), the Phase 14
         // wave (material, uv_project, subdivide), and the Phase 15 modeling
         // wave (array, mirror, delete, null, switch, bounds).
-        assert_eq!(registry.len(), 33);
+        assert_eq!(registry.len(), 34);
     }
 }

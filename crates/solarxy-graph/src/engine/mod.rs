@@ -670,6 +670,14 @@ impl Engine {
         self.assets.get(id).map(|e| e.bytes.as_slice())
     }
 
+    /// The staged asset table itself, for host features that parse assets
+    /// outside a cook (the asset-preview pane parses a staged model on demand
+    /// through the same `parse_model` path the import cooks use).
+    #[must_use]
+    pub fn asset_table(&self) -> &crate::assets::AssetTable {
+        &self.assets
+    }
+
     /// The number of staged assets (introspection / tests).
     #[must_use]
     pub fn asset_count(&self) -> usize {
@@ -1964,6 +1972,19 @@ impl Engine {
         if self.previews.remove(&(node, key.to_string())).is_some() {
             self.mark_dirty(ctx, node);
         }
+    }
+
+    /// True while any transient param preview is in flight: a gizmo drag, a
+    /// parameter-panel slider drag, or (later) a locked-camera reframe. Every
+    /// interactive edit streams through [`Engine::preview_param`] and clears on
+    /// the committing `SetParam`, so a non-empty preview map is the precise
+    /// "an interaction is in flight" signal. The host uses it to suppress
+    /// interactive-only churn such as the environment/grid/floor/shadow refit,
+    /// so the ground grid stays world-fixed during a drag and refits once when
+    /// the edit commits.
+    #[must_use]
+    pub fn has_active_previews(&self) -> bool {
+        !self.previews.is_empty()
     }
 
     /// The geo container's world matrix, as the renderer and picking see it

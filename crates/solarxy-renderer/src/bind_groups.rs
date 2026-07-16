@@ -108,7 +108,12 @@ impl BindGroupLayouts {
         });
         let grid_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("grid_params_bind_group_layout"),
-            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+            // Vertex reads `plane` (to place the quad in its world plane) and
+            // fragment reads cell_size/color/plane, so both stages need it.
+            entries: &[bgl_uniform_entry(
+                0,
+                wgpu::ShaderStages::VERTEX_FRAGMENT,
+            )],
         });
         let normals_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("normals_params_bind_group_layout"),

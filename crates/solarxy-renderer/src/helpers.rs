@@ -17,9 +17,79 @@
 //! gizmo handle, whose size is pure affordance.
 
 use cgmath::{InnerSpace, Point3, Vector3};
-use solarxy_core::scene::{LightDef, LightKind};
+use solarxy_core::scene::{CameraDef, LightDef, LightKind, SceneObjectId};
 
 use crate::model::GizmoVertex;
+
+/// The camera gizmo's neutral tint. Cameras have no color of their own (unlike
+/// lights), so a single cool-gray reads as "camera" without competing with the
+/// axis or light colors.
+const CAMERA_COLOR: [f32; 3] = [0.82, 0.82, 0.9];
+
+/// Builds the wireframe frustum gizmo for every camera that asks for one,
+/// except `skip` (the camera the pane is currently looking through, hidden the
+/// way Blender hides the camera you are inside). Line geometry through the same
+/// [`GizmoVertex`] overlay pipeline as the light helpers; world-unit sizing
+/// from each camera's `gizmo_size`.
+#[must_use]
+pub fn build_camera_helpers(cameras: &[CameraDef], skip: Option<SceneObjectId>) -> Vec<GizmoVertex> {
+    let mut lines = Vec::new();
+    for cam in cameras {
+        if !cam.show_gizmo || Some(cam.id) == skip {
+            continue;
+        }
+        push_camera(&mut lines, cam);
+    }
+    lines
+}
+
+/// A camera icon: the eye, a film-back rectangle at the camera's aspect with
+/// four frustum edges converging on the eye, and a small "up" wedge on top so
+/// the roll is unambiguous.
+fn push_camera(lines: &mut Vec<GizmoVertex>, cam: &CameraDef) {
+    let eye = Point3::from(cam.position);
+    let target = Point3::from(cam.target);
+    let mut forward = target - eye;
+    if forward.magnitude2() < 1e-12 {
+        forward = -Vector3::unit_z();
+    }
+    let forward = forward.normalize();
+    let mut right = forward.cross(Vector3::unit_y());
+    if right.magnitude2() < 1e-9 {
+        right = Vector3::unit_x();
+    }
+    let right = right.normalize();
+    let up = right.cross(forward).normalize();
+
+    let s = cam.gizmo_size.max(0.05);
+    let depth = s * 1.5;
+    let hh = s * 0.5;
+    let hw = hh * cam.aspect.clamp(0.2, 5.0);
+    let center = eye + forward * depth;
+    let color = CAMERA_COLOR;
+
+    let tl = center + up * hh - right * hw;
+    let tr = center + up * hh + right * hw;
+    let br = center - up * hh + right * hw;
+    let bl = center - up * hh - right * hw;
+    // The film-back rectangle.
+    push_line(lines, tl, tr, color);
+    push_line(lines, tr, br, color);
+    push_line(lines, br, bl, color);
+    push_line(lines, bl, tl, color);
+    // Frustum edges from the eye.
+    for c in [tl, tr, br, bl] {
+        push_line(lines, eye, c, color);
+    }
+    // The up wedge: a triangle above the top edge marks the camera's roll.
+    let apex = center + up * (hh * 1.6);
+    push_line(lines, tl, apex, color);
+    push_line(lines, tr, apex, color);
+    // A small cross at the eye marks the exact camera position.
+    for axis in [right, up] {
+        push_line(lines, eye - axis * (s * 0.12), eye + axis * (s * 0.12), color);
+    }
+}
 
 /// Circle resolution. Lower than the gizmo rings: a helper is a hint, not a
 /// grab target, and there can be eight of them.
@@ -370,6 +440,40 @@ mod tests {
             (deepest + 20.0).abs() < 1.0,
             "the cone should end at the range, got {deepest}"
         );
+    }
+
+    fn camera(id: u64) -> CameraDef {
+        use solarxy_core::scene::CameraKind;
+        CameraDef {
+            id: SceneObjectId(id),
+            kind: CameraKind::Perspective,
+            position: [5.0, 3.0, 5.0],
+            target: [0.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y: 0.8,
+            near: 0.1,
+            far: 100.0,
+            ortho_scale: 5.0,
+            aspect: 16.0 / 9.0,
+            show_gizmo: true,
+            gizmo_size: 1.0,
+        }
+    }
+
+    #[test]
+    fn camera_gizmo_respects_show_gizmo_and_skip() {
+        let c = camera(1);
+        assert!(!build_camera_helpers(std::slice::from_ref(&c), None).is_empty());
+
+        // Hidden gizmo draws nothing.
+        let mut off = camera(1);
+        off.show_gizmo = false;
+        assert!(build_camera_helpers(&[off], None).is_empty());
+
+        // The looked-through camera (skip) is not drawn.
+        assert!(build_camera_helpers(&[camera(7)], Some(SceneObjectId(7))).is_empty());
+        // A different camera still draws while another is skipped.
+        assert!(!build_camera_helpers(&[camera(2)], Some(SceneObjectId(7))).is_empty());
     }
 
     /// Several lights at once, each with its own shape and colour: the common

@@ -117,4 +117,9 @@ pub struct PaneDisplaySettings {
     pub uv_zoom: f32,
     pub show_uv_overlap: bool,
     pub show_validation: bool,
+    /// Live per-pane turntable spin (item 9). Session-temporary: the web host
+    /// resets it on load, so it is never restored from a saved scene. Serde
+    /// default so older pane blobs deserialize.
+    #[serde(default)]
+    pub turntable_active: bool,
 }

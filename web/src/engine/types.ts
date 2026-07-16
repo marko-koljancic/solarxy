@@ -466,6 +466,8 @@ export interface PaneDisplaySettings {
   uvZoom: number;
   showUvOverlap: boolean;
   showValidation: boolean;
+  /** Live per-pane turntable spin (item 9); session-temporary, not persisted. */
+  turntableActive: boolean;
 }
 
 export interface DisplaySettingsDto {
@@ -495,6 +497,18 @@ export interface ViewStateDto {
   display: DisplaySettingsDto;
   paneProjections: ("perspective" | "orthographic")[];
   paneRects: PaneRectDto[];
+  /** The camera node each pane looks through (id), or null for a free view. */
+  paneLookThrough: (number | null)[];
+  /** Whether each look-through pane is locked (reframes the camera). */
+  paneCameraLock: boolean[];
+  /** The look-through camera's framing aspect per pane (for the gate), or null. */
+  paneGateAspect: (number | null)[];
+}
+
+/** The current pose of a pane's camera (create-camera-from-view). */
+export interface CameraPose {
+  position: [number, number, number];
+  target: [number, number, number];
 }
 
 /** Async host happenings drained once per frame. */

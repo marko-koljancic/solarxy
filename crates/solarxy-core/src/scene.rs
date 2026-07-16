@@ -115,6 +115,44 @@ impl LightDef {
     }
 }
 
+/// The projection model of a camera node. `Physical` is a perspective camera
+/// whose `fov_y` was derived from a focal length and sensor size, so the
+/// renderer treats it exactly like `Perspective`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraKind {
+    Perspective,
+    Orthographic,
+    Physical,
+}
+
+/// One camera node's resolved runtime description. Lowered from a `camera`
+/// root node the same way [`LightDef`] is lowered from a light node, and read
+/// back by the host to drive a pane's look-through camera and its wireframe
+/// gizmo. `fov_y` is in radians (the engine's param resolver owns the
+/// degrees-to-radians conversion and the physical focal-length derivation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CameraDef {
+    /// The producing `camera` node id (the object key).
+    pub id: SceneObjectId,
+    pub kind: CameraKind,
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    /// Vertical field of view in radians (perspective / physical).
+    pub fov_y: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Orthographic half-height.
+    pub ortho_scale: f32,
+    /// The framing aspect (width / height) for the viewport gate and the
+    /// default export aspect.
+    pub aspect: f32,
+    /// Draw the wireframe camera gizmo in the viewport.
+    pub show_gizmo: bool,
+    /// The gizmo's world-space size, in meters.
+    pub gizmo_size: f32,
+}
+
 /// One scene mutation. Transforms are column-major world matrices; a
 /// transform-only change never re-uploads geometry (the param-drag and
 /// geo-node-transform fast path).
@@ -156,6 +194,12 @@ pub enum SceneOp {
     /// Replace the full light list (lights are few; diffing buys nothing).
     SetLights {
         lights: Vec<LightDef>,
+    },
+    /// Replace the full camera list (cameras are few; diffing buys nothing).
+    /// Cameras are non-drawn scene objects the host reads back to drive a
+    /// pane's look-through view and its wireframe gizmo.
+    SetCameras {
+        cameras: Vec<CameraDef>,
     },
     /// Remove every object and light (document replaced).
     Clear,

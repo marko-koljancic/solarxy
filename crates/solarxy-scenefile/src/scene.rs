@@ -186,6 +186,13 @@ pub struct PaneJson {
     pub inspection: String,
     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
     pub background: JsonObject,
+    /// The `camera` node this pane looks through (its id), or `None` for a free
+    /// view. Serde-default so older scenes load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look_through: Option<u64>,
+    /// Whether the look-through pane is locked (reframes the camera).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub camera_locked: bool,
 }
 
 impl Default for PaneJson {
@@ -195,6 +202,8 @@ impl Default for PaneJson {
             display: JsonObject::new(),
             inspection: default_inspection(),
             background: JsonObject::new(),
+            look_through: None,
+            camera_locked: false,
         }
     }
 }

@@ -422,6 +422,52 @@ export function cameraCommand(pane: number, cmd: CameraCommand): void {
   getClient().cameraCommand(pane, cmd);
 }
 
+/** Binds a pane to look through a camera node (or -1 to clear to free view). */
+export function setPaneCamera(pane: number, camera: number): void {
+  useViewState.getState().setView(getClient().setPaneCamera(pane, camera));
+}
+
+/** Toggles lock-camera-to-view for a look-through pane. */
+export function setPaneCameraLock(pane: number, locked: boolean): void {
+  useViewState.getState().setView(getClient().setPaneCameraLock(pane, locked));
+}
+
+/** Jumps a pane's free view to a camera's saved pose (bookmark). */
+export function jumpToCamera(pane: number, camera: number): void {
+  useViewState.getState().setView(getClient().jumpToCamera(pane, camera));
+}
+
+/** Authors a new camera node framed on the pane's current view, then looks
+ * through it (unlocked). The host exposes the pose; the node itself is created
+ * and framed with ordinary commands so the mirror stays the source of truth. */
+export function createCameraFromView(pane: number): void {
+  const pose = getClient().paneCameraPose(pane);
+  dispatch({ type: "beginTransaction", label: "Add Camera" });
+  const batch = dispatch({ type: "addNode", ctx: "root", nodeType: "camera", position: [0, 0] });
+  const added = batch.events.find((e) => e.type === "nodeAdded");
+  if (added && added.type === "nodeAdded") {
+    const id = added.node.id;
+    dispatch({
+      type: "setParam",
+      ctx: "root",
+      node: id,
+      key: "position",
+      value: { kind: "literal", type: "vec3", value: pose.position },
+    });
+    dispatch({
+      type: "setParam",
+      ctx: "root",
+      node: id,
+      key: "target",
+      value: { kind: "literal", type: "vec3", value: pose.target },
+    });
+    dispatch({ type: "endTransaction" });
+    useViewState.getState().setView(getClient().setPaneCamera(pane, id));
+  } else {
+    dispatch({ type: "endTransaction" });
+  }
+}
+
 /** Refreshes the whole view-state mirror from the host. */
 export function refreshViewState(): void {
   useViewState.getState().setView(getClient().viewState());

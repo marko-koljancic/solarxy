@@ -57,6 +57,7 @@ fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        turntable_active: false,
     };
     vec![
         ("shaded", base),

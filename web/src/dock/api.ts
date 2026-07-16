@@ -90,6 +90,53 @@ export function toggleMaximize(id: string): void {
   }
 }
 
+// ---- the asset panels (item 2; added and removed on demand) ----
+
+export function isAssetsPanelOpen(): boolean {
+  return api?.getPanel("assets") !== undefined;
+}
+
+/** Adds the Assets panel (tabbed beside Properties, the Review pattern) or
+ * removes it. */
+export function setAssetsPanelOpen(open: boolean): void {
+  if (!api) return;
+  const existing = api.getPanel("assets");
+  if (open) {
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const properties = api.getPanel("properties");
+    api.addPanel({
+      id: "assets",
+      component: "assets",
+      title: "Assets",
+      position: properties ? { referenceGroup: properties.api.group } : undefined,
+    });
+  } else if (existing) {
+    api.removePanel(existing);
+  }
+}
+
+/** Opens (or focuses) the asset-preview panel, tabbed beside the Assets
+ * panel so the grid and the preview sit together. */
+export function openAssetPreviewPanel(title: string): void {
+  if (!api) return;
+  const existing = api.getPanel("assetPreview");
+  if (existing) {
+    existing.setTitle(title);
+    existing.api.setActive();
+    return;
+  }
+  const anchor = api.getPanel("assets") ?? api.getPanel("properties");
+  api.addPanel({
+    id: "assetPreview",
+    component: "assetPreview",
+    title,
+    position: anchor ? { referenceGroup: anchor.api.group } : undefined,
+  });
+}
+
 // ---- the review panel (added and removed on demand, N) ----
 
 export function isReviewPanelOpen(): boolean {

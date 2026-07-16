@@ -42,6 +42,7 @@ function AppearanceTab({ draft, patch }: TabProps) {
         >
           <option value="dark">Dark</option>
           <option value="light">Light</option>
+          <option value="mpw">MPW Light</option>
           <option value="system">System</option>
         </select>
       </Row>

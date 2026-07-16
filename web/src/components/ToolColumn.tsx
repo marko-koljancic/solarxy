@@ -23,13 +23,13 @@ interface Tool {
 }
 
 const CURSOR = (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+  <svg width="19" height="19" viewBox="0 0 14 14" aria-hidden>
     <path d="M2 1 L2 11 L4.6 8.6 L6.4 12.6 L8.2 11.8 L6.4 7.9 L10 7.6 Z" fill="currentColor" />
   </svg>
 );
 
 const MOVE = (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+  <svg width="19" height="19" viewBox="0 0 14 14" aria-hidden>
     <path
       d="M7 1 V13 M1 7 H13 M7 1 L5.2 3 M7 1 L8.8 3 M7 13 L5.2 11 M7 13 L8.8 11 M1 7 L3 5.2 M1 7 L3 8.8 M13 7 L11 5.2 M13 7 L11 8.8"
       stroke="currentColor"
@@ -41,7 +41,7 @@ const MOVE = (
 );
 
 const ROTATE = (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+  <svg width="19" height="19" viewBox="0 0 14 14" aria-hidden>
     <path
       d="M11.5 5.5 A5 5 0 1 1 9 2.2"
       stroke="currentColor"
@@ -54,7 +54,7 @@ const ROTATE = (
 );
 
 const SCALE = (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+  <svg width="19" height="19" viewBox="0 0 14 14" aria-hidden>
     <path d="M2 12 L12 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     <rect x="1" y="9" width="4" height="4" fill="currentColor" />
     <rect x="9.5" y="1.5" width="3" height="3" fill="none" stroke="currentColor" strokeWidth="1.2" />
@@ -68,25 +68,38 @@ const TOOLS: Tool[] = [
   { mode: "scale", label: "Scale", hotkey: "R", icon: SCALE, enabled: true },
 ];
 
+function ToolButton({ t, active }: { t: Tool; active: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`tool-btn${active ? " active" : ""}`}
+      disabled={!t.enabled}
+      title={`${t.label} (${t.hotkey})`}
+      aria-label={t.label}
+      aria-pressed={active}
+      onClick={() => setTool(t.mode)}
+    >
+      {t.icon}
+    </button>
+  );
+}
+
 export function ToolColumn() {
   const tool = useViewState((s) => s.toolMode);
+  // Blender groups the selection tool apart from the transform trio; the first
+  // entry is Select, the rest are Move/Rotate/Scale.
+  const [select, ...transforms] = TOOLS;
 
   return (
-    <div className="tool-column">
-      {TOOLS.map((t) => (
-        <button
-          key={t.mode}
-          type="button"
-          className={`tool-btn${tool === t.mode ? " active" : ""}`}
-          disabled={!t.enabled}
-          title={`${t.label} (${t.hotkey})`}
-          aria-label={t.label}
-          aria-pressed={tool === t.mode}
-          onClick={() => setTool(t.mode)}
-        >
-          {t.icon}
-        </button>
-      ))}
+    <div className="tool-column" role="toolbar" aria-label="Transform tools">
+      <div className="tool-group">
+        <ToolButton t={select} active={tool === select.mode} />
+      </div>
+      <div className="tool-group">
+        {transforms.map((t) => (
+          <ToolButton key={t.mode} t={t} active={tool === t.mode} />
+        ))}
+      </div>
     </div>
   );
 }

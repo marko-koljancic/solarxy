@@ -22,11 +22,17 @@ const _: () = assert!(std::mem::size_of::<NormalsColor>() == 16);
 pub struct GridUniform {
     pub cell_size: f32,
     pub color: [f32; 3],
+    /// Which world plane the grid lies in: 0 = XZ ground (default), 1 = XY,
+    /// 2 = YZ. Lets an orthographic elevation view show a view-plane grid
+    /// instead of an edge-on hairline (item 6). Written per pane by the host.
+    pub plane: u32,
+    pub _pad: [u32; 3],
 }
-const _: () = assert!(std::mem::size_of::<GridUniform>() == 16);
+const _: () = assert!(std::mem::size_of::<GridUniform>() == 32);
 
 impl GridUniform {
     pub const COLOR_OFFSET: u64 = std::mem::offset_of!(Self, color) as u64;
+    pub const PLANE_OFFSET: u64 = std::mem::offset_of!(Self, plane) as u64;
 }
 
 /// Stand-in for the normal-arrow line lists when no `NormalsGeometry` is
@@ -95,6 +101,8 @@ impl VisualizationState {
         let grid_uniform = GridUniform {
             cell_size,
             color: initial_grid_color,
+            plane: 0,
+            _pad: [0; 3],
         };
         let grid_uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Uniform Buffer"),

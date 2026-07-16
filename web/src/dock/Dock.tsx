@@ -76,6 +76,7 @@ export function Dock() {
       className="solarxy-dock"
       components={DOCK_COMPONENTS}
       tabComponents={DOCK_TAB_COMPONENTS}
+      defaultTabComponent={DOCK_TAB_COMPONENTS.colored}
       onReady={onReady}
       singleTabMode="fullwidth"
     />

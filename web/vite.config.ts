@@ -1,11 +1,31 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import pkg from "./package.json" with { type: "json" };
+
+// In production nginx serves app.html at /app (the landing owns /). This
+// mirrors that in `vite dev` and `vite preview`, so the landing's Launch CTA
+// works identically in every environment.
+function appRewrite(): Plugin {
+  const handler = (req: { url?: string }, _res: unknown, next: () => void) => {
+    if (req.url === "/app" || req.url?.startsWith("/app?")) req.url = "/app.html";
+    next();
+  };
+  return {
+    name: "solarxy-app-rewrite",
+    configureServer(server) {
+      server.middlewares.use(handler);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(handler);
+    },
+  };
+}
 
 // The wasm-bindgen `--target web` output is imported as an ES module; the
 // .wasm is loaded by URL (see src/engine/client.ts). No wasm plugin needed.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), appRewrite()],
   server: { port: 5175 },
   define: {
     // The app version, single-sourced from package.json. It is stamped into the
@@ -26,6 +46,12 @@ export default defineConfig({
     // fetched separately, so the default 500 kB warning only adds noise.
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      // Two-page build (item 10): the MPW landing owns index.html at the
+      // domain root; the app moved to app.html (served at /app by nginx).
+      input: {
+        landing: resolve(import.meta.dirname, "index.html"),
+        app: resolve(import.meta.dirname, "app.html"),
+      },
       output: {
         // Split the heavy vendors so a change to app code does not invalidate
         // them in the browser cache.

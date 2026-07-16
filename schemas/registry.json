@@ -660,6 +660,307 @@
       "role": "standard"
     },
     {
+      "typeId": "camera",
+      "version": 1,
+      "displayName": "Camera",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "rootContext": true,
+      "subflowContext": false,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Camera",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            7.0,
+            5.0,
+            7.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "target",
+          "label": "Target",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "kind",
+          "label": "Projection",
+          "group": "lens",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "perspective",
+              "Perspective"
+            ],
+            [
+              "orthographic",
+              "Orthographic"
+            ],
+            [
+              "physical",
+              "Physical (lens)"
+            ]
+          ],
+          "accept": [],
+          "default": "perspective",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "fov_y",
+          "label": "Field of View",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 45.0,
+          "hard": [
+            1.0,
+            179.0
+          ],
+          "soft": [
+            10.0,
+            120.0
+          ],
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "focal_length",
+          "label": "Focal Length (mm)",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 50.0,
+          "hard": [
+            1.0,
+            2000.0
+          ],
+          "soft": [
+            14.0,
+            300.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "sensor_width",
+          "label": "Sensor Width (mm)",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 36.0,
+          "hard": [
+            1.0,
+            100.0
+          ],
+          "soft": [
+            10.0,
+            70.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "ortho_scale",
+          "label": "Ortho Scale",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 5.0,
+          "hard": [
+            0.001,
+            100000.0
+          ],
+          "soft": [
+            0.1,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "near",
+          "label": "Near Clip",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.1,
+          "hard": [
+            0.0001,
+            100000.0
+          ],
+          "soft": [
+            0.01,
+            10.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "far",
+          "label": "Far Clip",
+          "group": "lens",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1000.0,
+          "hard": [
+            0.001,
+            1000000.0
+          ],
+          "soft": [
+            10.0,
+            10000.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "aspect",
+          "label": "Aspect (W/H)",
+          "group": "framing",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.7777777777777777,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": [
+            0.5,
+            3.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "show_gizmo",
+          "label": "Show Gizmo",
+          "group": "gizmo",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        },
+        {
+          "key": "gizmo_size",
+          "label": "Gizmo Size",
+          "group": "gizmo",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.1,
+            10.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": ""
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A viewport camera you look through per pane. Perspective, orthographic, or physical (lens); lock a pane to it to frame the shot, and render through it in screenshots and turntable exports.",
+      "searchAliases": [
+        "camera",
+        "view",
+        "cam",
+        "lens"
+      ],
+      "glyph": "camera",
+      "role": "standard"
+    },
+    {
       "typeId": "compute_normals",
       "version": 2,
       "displayName": "Compute Normals",
