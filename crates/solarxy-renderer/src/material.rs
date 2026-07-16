@@ -1,8 +1,9 @@
-//! GPU-side PBR material: [`MaterialUniform`] (`#[repr(C)]`, 48 bytes) and
+//! GPU-side PBR material: [`MaterialUniform`] (`#[repr(C)]`, 64 bytes) and
 //! the bundle of textures + bind group consumed by the main shader.
 //!
-//! `MaterialUniform.alpha_mode` is `u32` for shader binding; the CPU-side
-//! enum lives in `solarxy_core::geometry::AlphaMode`, with the conversion at
+//! `MaterialUniform.alpha_mode` and `.shading_model` are `u32` for shader
+//! binding; the CPU-side enums live in `solarxy_core::geometry`
+//! (`AlphaMode`, `ShadingModel`), with the conversions at
 //! `crate::resources`.
 
 use wgpu::util::DeviceExt;
@@ -25,7 +26,14 @@ pub struct MaterialUniform {
     pub emissive: [f32; 3],
     pub alpha_mode: u32,
     pub material_index: u32,
-    pub _pad: [f32; 3],
+    /// `solarxy_core::geometry::ShadingModel` as u32 (phase 18): 0 Pbr,
+    /// 1 Matcap, 2 Toon, 3 Unlit, 4 Clay, 5 ClayDark, 6 Chrome,
+    /// 7 Silhouette. Occupies a former pad slot, so the struct stays 64
+    /// bytes and shaders declaring the 48-byte prefix keep binding.
+    pub shading_model: u32,
+    /// Toon band count (read only when `shading_model == 2`).
+    pub toon_steps: f32,
+    pub _pad: f32,
     /// Factor multiplied into the base-color sample (glTF semantics);
     /// appended at offset 48 so shaders declaring the 48-byte prefix
     /// (shadow.wgsl) keep working.
@@ -44,7 +52,9 @@ impl Default for MaterialUniform {
             emissive: [0.0, 0.0, 0.0],
             alpha_mode: 0,
             material_index: 0,
-            _pad: [0.0; 3],
+            shading_model: 0,
+            toon_steps: 3.0,
+            _pad: 0.0,
             base_color: [1.0, 1.0, 1.0, 1.0],
         }
     }

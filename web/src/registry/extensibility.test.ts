@@ -11,6 +11,7 @@ import {
   DATA_TYPE_COLOR,
   coercionKind,
   connectionLegal,
+  contextKind,
   dataTypeShape,
   descriptorFor,
   isSupportedParamType,
@@ -24,8 +25,8 @@ const PROBE: NodeTypeSnapshot = {
   displayName: "Probe",
   category: "primitives",
   categoryLabel: "Primitives",
-  rootContext: false,
-  subflowContext: true,
+  contexts: ["geo"],
+  opens: null,
   inputs: [
     { key: "geometry", label: "Geometry", dataType: "geometry", variadic: false, required: false, min: 0, isDefault: true, doc: "" },
     { key: "detail_map", label: "Detail Map", dataType: "image", variadic: false, required: false, min: 0, isDefault: false, doc: "" },
@@ -40,6 +41,7 @@ const PROBE: NodeTypeSnapshot = {
     { key: "mode", label: "Mode", group: "shape", paramType: "enum", enumVariants: [["a", "Alpha"], ["b", "Beta"]], accept: [], default: "a", hard: null, soft: null, step: null, unit: "none", doc: "" },
     { key: "offset", label: "Offset", group: "shape", paramType: "vec3", enumVariants: [], accept: [], default: [0, 0, 0], hard: null, soft: null, step: 0.01, unit: "none", doc: "" },
     { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", drivenByPort: "detail_map", doc: "" },
+    { key: "material", label: "Material", group: "shape", paramType: "nodePath", nodePath: { kind: "opens", opens: "mat" }, enumVariants: [], accept: [], default: null, hard: null, soft: null, step: null, unit: "none", doc: "" },
   ],
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
@@ -65,9 +67,36 @@ const SNAP: RegistrySnapshot = {
 describe("extensibility: a novel node renders from the snapshot alone", () => {
   it("is discoverable and context-filtered like any node", () => {
     expect(descriptorFor(SNAP, "probe")?.displayName).toBe("Probe");
-    // A subflow palette (pure filter) includes it; a root palette does not.
-    expect(SNAP.nodes.filter((n) => n.subflowContext).map((n) => n.typeId)).toContain("probe");
-    expect(SNAP.nodes.filter((n) => n.rootContext)).toHaveLength(0);
+    // A geo-network palette (pure kind filter) includes it; the root
+    // (obj) palette does not. The kinds come from the typed-context
+    // vocabulary (phase 17); a node declaring a NEW kind is still just a
+    // filter match away.
+    expect(SNAP.nodes.filter((n) => n.contexts.includes("geo")).map((n) => n.typeId)).toContain(
+      "probe",
+    );
+    expect(SNAP.nodes.filter((n) => n.contexts.includes("obj"))).toHaveLength(0);
+  });
+
+  it("derives a canvas's kind from its owner's descriptor, not its type id", () => {
+    // The root canvas is always obj.
+    expect(contextKind(SNAP, "root", [])).toBe("obj");
+    // A container the frontend has never seen: its child canvas's kind is
+    // whatever the descriptor opens.
+    const container: NodeTypeSnapshot = {
+      ...PROBE,
+      typeId: "texnet_probe",
+      contexts: ["obj"],
+      opens: "tex",
+      inputs: [],
+      outputs: [],
+    };
+    const snap: RegistrySnapshot = { nodes: [PROBE, container], coercions: SNAP.coercions };
+    const ownerNodes = [
+      { id: 7, typeId: "texnet_probe", typeVersion: 1, params: {}, position: [0, 0] as [number, number], bypassed: false, portOrder: {} },
+    ];
+    expect(contextKind(snap, { subflow: 7 }, ownerNodes)).toBe("tex");
+    // An unknown owner falls back to geo (the only pre-context child kind).
+    expect(contextKind(snap, { subflow: 99 }, ownerNodes)).toBe("geo");
   });
 
   it("has typed handles the frontend can color + validate", () => {

@@ -4120,6 +4120,7 @@ dependencies = [
  "gltf",
  "image",
  "ply-rs-bw",
+ "serde_json",
  "solarxy-core",
  "stl_io",
  "thiserror 2.0.17",
@@ -4138,8 +4139,17 @@ dependencies = [
  "sha2",
  "solarxy-core",
  "solarxy-formats",
+ "solarxy-imaging",
  "solarxy-kernel",
  "solarxy-scenefile",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "solarxy-imaging"
+version = "0.7.0"
+dependencies = [
+ "solarxy-core",
  "thiserror 2.0.17",
 ]
 

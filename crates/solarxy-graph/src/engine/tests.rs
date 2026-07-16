@@ -2,6 +2,7 @@
 //! integration, preview non-leakage, and serde round-trips.
 
 use super::*;
+use crate::document::ContextKind;
 use crate::params::ParamValue;
 
 fn engine() -> Engine {
@@ -23,7 +24,7 @@ fn subflow_engine() -> (Engine, GraphContext) {
     // A geo node exists only after N2; for 3b tests we drive a subflow
     // directly by minting one through the document.
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo);
+    e.doc.create_subflow(geo, ContextKind::Geo);
     (e, GraphContext::Subflow(geo))
 }
 
@@ -1853,7 +1854,10 @@ fn physical_camera_derives_fov_from_focal_and_sensor() {
         .unwrap();
     let fov_deg = cameras[0].fov_y.to_degrees();
     let expected = 2.0 * (36.0f32 / (2.0 * 50.0)).atan().to_degrees();
-    assert!((fov_deg - expected).abs() < 0.01, "fov {fov_deg} vs {expected}");
+    assert!(
+        (fov_deg - expected).abs() < 0.01,
+        "fov {fov_deg} vs {expected}"
+    );
 }
 
 #[test]
@@ -2063,7 +2067,7 @@ fn async_import_fixture() -> (Engine, GraphContext, NodeId, JobId, crate::cook::
     let asset = e.stage_asset("tri.stl", "model/stl", TRI_STL.as_bytes().to_vec());
 
     let geo = e.doc.mint_node_id();
-    e.doc.create_subflow(geo);
+    e.doc.create_subflow(geo, ContextKind::Geo);
     let ctx = GraphContext::Subflow(geo);
     let node = add(&mut e, ctx, "import_stl");
     e.apply(Command::SetParam {
@@ -3712,4 +3716,658 @@ fn materials_survive_array_and_mirror() {
         "both halves present: {:?}",
         set.bounds
     );
+}
+
+/// The typed-context model generalizes (phase 17): a fabricated container
+/// opens a Mat network, a Mat-placed container opens a Tex network three
+/// levels deep, placement is judged by the target graph's KIND (never its
+/// address or a special-cased type id), and a removed container's whole
+/// child-network tree survives an undo round-trip with its kinds intact.
+#[test]
+fn typed_contexts_generalize_beyond_geo() {
+    use crate::registry::{
+        BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, Registry,
+    };
+
+    #[allow(clippy::unnecessary_wraps)] // signature matches CookFn
+    fn noop_cook(
+        _p: &crate::registry::resolve::ResolvedParams,
+        _in: &crate::cook::Inputs,
+        _cx: &mut crate::cook::CookCtx,
+    ) -> Result<crate::cook::CookOutcome, crate::cook::CookError> {
+        Ok(crate::cook::CookOutcome::Done(crate::cook::Outputs::empty()))
+    }
+
+    let mk = |type_id: &'static str, contexts: ContextSet, opens: Option<ContextKind>| {
+        NodeTypeDescriptor {
+            type_id,
+            version: 1,
+            display_name: type_id,
+            category: Category::Utility,
+            contexts,
+            opens,
+            inputs: vec![],
+            outputs: vec![],
+            params: vec![],
+            bypass: BypassBehavior::Mute,
+            doc: "",
+            search_aliases: &[],
+            glyph: "probe",
+            role: NodeRole::Standard,
+            cook: noop_cook,
+            migrate: None,
+        }
+    };
+    let registry = Registry::with_descriptors(vec![
+        mk("matnet", ContextSet::OBJ, Some(ContextKind::Mat)),
+        mk("subtex", ContextSet::MAT, Some(ContextKind::Tex)),
+        mk("mat_only", ContextSet::MAT, None),
+        mk("geo_only", ContextSet::GEO, None),
+    ])
+    .expect("test registry satisfies the invariants");
+    let mut e = Engine::with_registry(registry);
+
+    // Level 1 -> 2: an obj container opens a Mat canvas, from `opens`.
+    let matnet = add(&mut e, GraphContext::Root, "matnet");
+    let mat_ctx = GraphContext::Subflow(matnet);
+    assert_eq!(e.doc.graph(mat_ctx).unwrap().kind, ContextKind::Mat);
+
+    // Placement judges the target graph's kind: a Mat node lands, a Geo
+    // node is refused, and a Mat node cannot sit at root (obj).
+    let _mat_node = add(&mut e, mat_ctx, "mat_only");
+    let refused = e.apply(Command::AddNode {
+        ctx: mat_ctx,
+        node_type: "geo_only".to_string(),
+        position: [0.0, 0.0],
+    });
+    assert!(matches!(
+        refused,
+        Err(EngineError::ContextIllegal { type_id }) if type_id == "geo_only"
+    ));
+    let refused_root = e.apply(Command::AddNode {
+        ctx: GraphContext::Root,
+        node_type: "mat_only".to_string(),
+        position: [0.0, 0.0],
+    });
+    assert!(matches!(
+        refused_root,
+        Err(EngineError::ContextIllegal { .. })
+    ));
+
+    // Level 2 -> 3: containers nest; the grandchild kind follows `opens`.
+    let subtex = add(&mut e, mat_ctx, "subtex");
+    let tex_ctx = GraphContext::Subflow(subtex);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+
+    // Remove the top container: the WHOLE tree goes (no orphaned
+    // grandchild network), and undo restores every level with its kind.
+    e.apply(Command::RemoveNodes {
+        ctx: GraphContext::Root,
+        ids: vec![matnet],
+    })
+    .unwrap();
+    assert!(e.doc.graph(mat_ctx).is_err(), "child network removed");
+    assert!(e.doc.graph(tex_ctx).is_err(), "grandchild network removed");
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(e.doc.graph(mat_ctx).unwrap().kind, ContextKind::Mat);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+    assert!(
+        e.doc.graph(mat_ctx).unwrap().node(subtex).is_some(),
+        "the nested container node itself came back"
+    );
+}
+
+/// The cross-context reference machinery (phase 17c): a geo-side node
+/// references a material network by path; editing INSIDE the referenced
+/// network re-dirties and recooks the referrer with the fresh value in the
+/// SAME pass (the reference-ordered context walk); cycles are refused at
+/// set time (direct self-reference and a two-network loop); deleting the
+/// referenced network is allowed and the referrer cooks into an error.
+#[test]
+fn cross_context_references_propagate_and_refuse_cycles() {
+    use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
+    use crate::registry::coerce::{DataType, Value};
+    use crate::registry::param_spec::{NodePathAccept, ParamSpec, ParamType};
+    use crate::registry::resolve::ResolvedParams;
+    use crate::registry::{
+        BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec, Registry,
+    };
+
+    // A Mat-context producer: emits its `value` param as a Float.
+    #[allow(clippy::unnecessary_wraps)]
+    fn mat_const_cook(
+        p: &ResolvedParams,
+        _in: &Inputs,
+        _cx: &mut CookCtx,
+    ) -> Result<CookOutcome, CookError> {
+        Ok(CookOutcome::Done(Outputs::single(
+            "value",
+            Value::Float(p.f64("value")),
+        )))
+    }
+
+    // A consumer with a NodePath param: copies the referenced network's
+    // published Float; a set-but-unresolvable reference is a cook error.
+    fn ref_consumer_cook(
+        p: &ResolvedParams,
+        _in: &Inputs,
+        cx: &mut CookCtx,
+    ) -> Result<CookOutcome, CookError> {
+        match p.node_ref("source") {
+            None => Ok(CookOutcome::Done(Outputs::single(
+                "value",
+                Value::Float(0.0),
+            ))),
+            Some(target) => match cx.referenced(target) {
+                Some(Value::Float(v)) => Ok(CookOutcome::Done(Outputs::single(
+                    "value",
+                    Value::Float(*v),
+                ))),
+                _ => Err(CookError::Failed {
+                    message: format!("reference to node {} does not resolve", target.0),
+                }),
+            },
+        }
+    }
+
+    let source_param = || {
+        ParamSpec::new(
+            "source",
+            "Source",
+            "general",
+            ParamType::NodePath {
+                accept: NodePathAccept::Opens(ContextKind::Mat),
+            },
+            ParamValue::NodeRef(None),
+        )
+    };
+    let float_out =
+        || vec![PortSpec::single("value", "Value", DataType::Float, false).default_port()];
+    let matnet = NodeTypeDescriptor {
+        type_id: "matnet",
+        version: 1,
+        display_name: "Matnet",
+        category: Category::Container,
+        contexts: ContextSet::OBJ,
+        opens: Some(ContextKind::Mat),
+        inputs: vec![],
+        outputs: vec![],
+        params: vec![],
+        bypass: BypassBehavior::Mute,
+        doc: "",
+        search_aliases: &[],
+        glyph: "matnet",
+        role: NodeRole::Container,
+        cook: |_, _, _| Ok(CookOutcome::Done(Outputs::empty())),
+        migrate: None,
+    };
+    let mat_const = NodeTypeDescriptor {
+        type_id: "mat_const",
+        version: 1,
+        display_name: "Mat Const",
+        category: Category::Utility,
+        contexts: ContextSet::MAT,
+        opens: None,
+        inputs: vec![],
+        outputs: float_out(),
+        params: vec![
+            ParamSpec::new(
+                "value",
+                "Value",
+                "general",
+                ParamType::Float,
+                ParamValue::Float(1.0),
+            ),
+            // A Mat node may itself reference another material network
+            // (the tex_ref pattern); the cycle tests set this.
+            source_param(),
+        ],
+        bypass: BypassBehavior::Mute,
+        doc: "",
+        search_aliases: &[],
+        glyph: "const",
+        role: NodeRole::Standard,
+        cook: mat_const_cook,
+        migrate: None,
+    };
+    let ref_consumer = NodeTypeDescriptor {
+        type_id: "ref_consumer",
+        version: 1,
+        display_name: "Ref Consumer",
+        category: Category::Utility,
+        contexts: ContextSet::GEO,
+        opens: None,
+        inputs: vec![],
+        outputs: float_out(),
+        params: vec![source_param()],
+        bypass: BypassBehavior::Mute,
+        doc: "",
+        search_aliases: &[],
+        glyph: "consumer",
+        role: NodeRole::Standard,
+        cook: ref_consumer_cook,
+        migrate: None,
+    };
+    let registry = Registry::with_descriptors(vec![matnet, mat_const, ref_consumer])
+        .expect("test registry satisfies the invariants");
+    let mut e = Engine::with_registry(registry);
+
+    // A geo-side network minted FIRST, so plain id-order context iteration
+    // would cook it before the material network and read a stale value;
+    // only the reference-ordered walk makes the same-pass assertion hold.
+    let geo = e.doc.mint_node_id();
+    e.doc.create_subflow(geo, ContextKind::Geo);
+    let geo_ctx = GraphContext::Subflow(geo);
+
+    let matnet1 = add(&mut e, GraphContext::Root, "matnet");
+    let mat_ctx = GraphContext::Subflow(matnet1);
+    let producer = add(&mut e, mat_ctx, "mat_const");
+    let consumer = add(&mut e, geo_ctx, "ref_consumer");
+
+    // Point the consumer at the material network.
+    e.apply(Command::SetParam {
+        ctx: geo_ctx,
+        node: consumer,
+        key: "source".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(matnet1))),
+    })
+    .unwrap();
+
+    // ONE cook pass: the referenced network cooks first, the consumer
+    // reads the fresh published value.
+    e.cook(&mut || true);
+    let committed = |e: &Engine, node: NodeId| -> Option<f64> {
+        e.cook.outputs(node).and_then(|o| match o.get("value") {
+            Some(Value::Float(v)) => Some(*v),
+            _ => None,
+        })
+    };
+    assert_eq!(committed(&e, consumer), Some(1.0));
+
+    // Editing INSIDE the referenced network dirties the referrer across
+    // contexts, and one pass delivers the fresh value.
+    e.apply(Command::SetParam {
+        ctx: mat_ctx,
+        node: producer,
+        key: "value".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(2.0)),
+    })
+    .unwrap();
+    assert_eq!(
+        e.cook.state(consumer),
+        crate::cook::state::CookState::Dirty,
+        "a /mat edit must re-dirty the geo-side referrer"
+    );
+    e.cook(&mut || true);
+    assert_eq!(committed(&e, consumer), Some(2.0));
+
+    // Cycle refusal, direct: a node inside a network cannot reference its
+    // own container.
+    let self_ref = e.apply(Command::SetParam {
+        ctx: mat_ctx,
+        node: producer,
+        key: "source".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(matnet1))),
+    });
+    assert!(matches!(self_ref, Err(EngineError::ReferenceCycle { .. })));
+
+    // Cycle refusal, two networks: A's node references B, then B's node
+    // referencing A closes the loop and is refused at set time.
+    let matnet2 = add(&mut e, GraphContext::Root, "matnet");
+    let mat2_ctx = GraphContext::Subflow(matnet2);
+    let producer2 = add(&mut e, mat2_ctx, "mat_const");
+    e.apply(Command::SetParam {
+        ctx: mat_ctx,
+        node: producer,
+        key: "source".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(matnet2))),
+    })
+    .unwrap();
+    let closes_loop = e.apply(Command::SetParam {
+        ctx: mat2_ctx,
+        node: producer2,
+        key: "source".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(matnet1))),
+    });
+    assert!(matches!(
+        closes_loop,
+        Err(EngineError::ReferenceCycle { .. })
+    ));
+
+    // Deleting the referenced network is allowed; the referrer recooks
+    // into an error badge (dangling reference), never a stale value.
+    e.apply(Command::RemoveNodes {
+        ctx: GraphContext::Root,
+        ids: vec![matnet1],
+    })
+    .unwrap();
+    assert_eq!(
+        e.cook.state(consumer),
+        crate::cook::state::CookState::Dirty,
+        "removing the target must dirty the referrer"
+    );
+    e.cook(&mut || true);
+    assert!(
+        matches!(
+            e.cook.status(consumer),
+            Some(crate::cook::state::CookStatus::Error { message }) if message.contains("does not resolve")
+        ),
+        "a dangling reference is an error badge, got {:?}",
+        e.cook.status(consumer)
+    );
+}
+
+/// Network kinds and node references survive a `.slxy` round trip (phase
+/// 17d): the file stores the kind string per subflow, and the plain param
+/// form stores a reference as the raw id number.
+#[test]
+fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
+    use crate::engine::scenefile::SceneSidecar;
+
+    let mut e = engine();
+    // A real geo container through the command path (kind from `opens`).
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let _box_node = add(&mut e, sub, "box");
+    assert_eq!(e.doc.graph(sub).unwrap().kind, ContextKind::Geo);
+
+    let bytes = e.save_slxy(&SceneSidecar::default()).expect("save");
+    // The stored form carries the kind string.
+    let mut e2 = engine();
+    e2.load_slxy(&bytes).expect("load");
+    assert_eq!(
+        e2.doc.graph(GraphContext::Subflow(geo)).unwrap().kind,
+        ContextKind::Geo,
+        "the subflow kind survives the archive"
+    );
+
+    // The plain JSON form of a NodeRef is the raw id (or null): pin the
+    // schema-v1 shape directly.
+    use crate::registry::param_spec::{NodePathAccept, ParamType};
+    let ty = ParamType::NodePath {
+        accept: NodePathAccept::TypeIs("camera".to_string()),
+    };
+    let set = crate::registry::resolve::param_value_to_json(&ParamValue::NodeRef(Some(geo)));
+    assert_eq!(set, serde_json::json!(geo.0));
+    let unset = crate::registry::resolve::param_value_to_json(&ParamValue::NodeRef(None));
+    assert!(unset.is_null());
+    let back = crate::registry::resolve::param_source_from_json(&set, &ty).expect("parse");
+    assert_eq!(back, ParamSource::Literal(ParamValue::NodeRef(Some(geo))));
+    let back_null = crate::registry::resolve::param_source_from_json(&serde_json::Value::Null, &ty)
+        .expect("parse null");
+    assert_eq!(back_null, ParamSource::Literal(ParamValue::NodeRef(None)));
+}
+
+/// The texture context cooks end to end (phase 19): a texnet opens a Tex
+/// canvas through the command path, generators and filters chain inside
+/// it, the display node publishes through `Engine::display_image`, and
+/// editing an upstream param recooks the chain (the keep-last-good fix
+/// proving out on a real image chain).
+#[test]
+fn texture_network_cooks_and_publishes_its_display_image() {
+    let mut e = engine();
+    let texnet = add(&mut e, GraphContext::Root, "texnet");
+    let tex_ctx = GraphContext::Subflow(texnet);
+    assert_eq!(e.doc.graph(tex_ctx).unwrap().kind, ContextKind::Tex);
+
+    // noise -> blur, display on blur (first node auto-claims, so move it).
+    let noise = add(&mut e, tex_ctx, "noise");
+    let blur = add(&mut e, tex_ctx, "blur");
+    e.apply(Command::Connect {
+        ctx: tex_ctx,
+        from: PortRefDto {
+            node: noise,
+            port: "image".into(),
+        },
+        to: PortRefDto {
+            node: blur,
+            port: "image".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: tex_ctx,
+        node: Some(blur),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let img = e
+        .display_image(texnet)
+        .expect("the network publishes an image");
+    assert_eq!(
+        (img.width, img.height),
+        (512, 512),
+        "generator default dims"
+    );
+    let first_hash = img.hash;
+
+    // Edit the generator: the chain recooks and the published image
+    // CHANGES (an image-only second commit must not be swallowed).
+    e.apply(Command::SetParam {
+        ctx: tex_ctx,
+        node: noise,
+        key: "seed".to_string(),
+        value: ParamSource::Literal(ParamValue::Int(42)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let img2 = e.display_image(texnet).expect("still publishing");
+    assert_ne!(
+        img2.hash, first_hash,
+        "the re-seeded noise flowed through the blur"
+    );
+
+    // A geo network does not publish an image.
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let _box_node = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+    assert!(e.display_image(geo).is_none());
+}
+
+/// The full material pipeline (phase 20): a texture network feeds a
+/// material network through `tex_ref`, whose `principled` output a
+/// geo-side `material` node consumes in Reference mode; editing the
+/// TEXTURE recooks the whole chain across three contexts in one pass, and
+/// per-slot targeting leaves unmatched meshes on their old material.
+#[test]
+fn material_network_references_flow_across_three_contexts() {
+    let mut e = engine();
+
+    // /tex: a texnet publishing a constant image.
+    let texnet = add(&mut e, GraphContext::Root, "texnet");
+    let tex_ctx = GraphContext::Subflow(texnet);
+    let constant = add(&mut e, tex_ctx, "constant");
+
+    // /mat: a matnet whose principled surface pulls the texture by path.
+    let matnet = add(&mut e, GraphContext::Root, "matnet");
+    let mat_ctx = GraphContext::Subflow(matnet);
+    let tex_ref = add(&mut e, mat_ctx, "tex_ref");
+    let principled = add(&mut e, mat_ctx, "principled");
+    e.apply(Command::SetParam {
+        ctx: mat_ctx,
+        node: tex_ref,
+        key: "texture_path".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(texnet))),
+    })
+    .unwrap();
+    e.apply(Command::Connect {
+        ctx: mat_ctx,
+        from: PortRefDto {
+            node: tex_ref,
+            port: "image".into(),
+        },
+        to: PortRefDto {
+            node: principled,
+            port: "base_color_map".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: mat_ctx,
+        node: Some(principled),
+    })
+    .unwrap();
+
+    // /geo: a box whose material node references the matnet.
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_node = add(&mut e, sub, "box");
+    let material = add(&mut e, sub, "material");
+    e.apply(Command::Connect {
+        ctx: sub,
+        from: PortRefDto {
+            node: box_node,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: material,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(material),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: material,
+        key: "mode".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("reference".to_string())),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: material,
+        key: "material_path".to_string(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(matnet))),
+    })
+    .unwrap();
+
+    e.cook(&mut || true);
+
+    // The geo's displayed geometry carries the referenced material with
+    // the texture from /tex riding the base-color role.
+    let displayed = |e: &Engine| {
+        e.cook
+            .outputs(material)
+            .and_then(|o| o.get("geometry").and_then(|v| v.as_geometry().cloned()))
+            .expect("material node committed")
+    };
+    let set = displayed(&e);
+    assert_eq!(set.materials.len(), 1);
+    let tex_hash = set.materials[0]
+        .diffuse_texture_data
+        .as_ref()
+        .expect("texture flowed from /tex through /mat into /geo")
+        .hash;
+
+    // Edit the TEXTURE (three contexts away from the geometry): the whole
+    // chain recooks in one pass and the material's texture changes.
+    e.apply(Command::SetParam {
+        ctx: tex_ctx,
+        node: constant,
+        key: "color".to_string(),
+        value: ParamSource::Literal(ParamValue::Color([1.0, 0.0, 0.0, 1.0])),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let set = displayed(&e);
+    assert_ne!(
+        set.materials[0].diffuse_texture_data.as_ref().unwrap().hash,
+        tex_hash,
+        "a /tex edit must repaint the referencing geometry in one pass"
+    );
+
+    // Per-slot targeting: a named target leaves unmatched meshes on the
+    // OLD material (appended table, not override-all).
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: material,
+        key: "target".to_string(),
+        value: ParamSource::Literal(ParamValue::Text("no_such_mesh".to_string())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let set = displayed(&e);
+    assert!(
+        set.meshes
+            .iter()
+            .all(|m| m.material_index != Some(set.materials.len() - 1)),
+        "an unmatched target assigns nothing"
+    );
+}
+
+/// The export nodes (phase 21): a geo_export taps the chain, its Save
+/// action encodes the committed geometry, and the bytes reimport through
+/// this workspace's own loaders (the round-trip acceptance criterion).
+#[test]
+fn geo_export_action_round_trips_through_the_loaders() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_node = add(&mut e, sub, "box");
+    let export = add(&mut e, sub, "geo_export");
+    e.apply(Command::Connect {
+        ctx: sub,
+        from: PortRefDto {
+            node: box_node,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: export,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(export),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    for (format, check) in [("obj", 24usize), ("stl", 0), ("ply", 24), ("glb", 24)] {
+        e.apply(Command::SetParam {
+            ctx: sub,
+            node: export,
+            key: "format".to_string(),
+            value: ParamSource::Literal(ParamValue::Enum(format.to_string())),
+        })
+        .unwrap();
+        let result = e.invoke_action(sub, export, "save").expect(format);
+        assert!(result.filename.ends_with(format));
+        assert!(!result.bytes.is_empty());
+        // Reimport through our own loaders.
+        let model = match format {
+            "obj" => {
+                solarxy_formats::obj::load_obj_bytes(&result.bytes, &mut solarxy_formats::NoAssets)
+                    .expect("obj reimport")
+            }
+            "stl" => {
+                solarxy_formats::stl::load_stl_bytes(&result.bytes, "x.stl").expect("stl reimport")
+            }
+            "ply" => {
+                solarxy_formats::ply::load_ply_bytes(&result.bytes, "x.ply").expect("ply reimport")
+            }
+            _ => solarxy_formats::gltf::load_gltf_bytes(
+                &result.bytes,
+                &mut solarxy_formats::NoAssets,
+            )
+            .expect("glb reimport"),
+        };
+        let tris: usize = model.meshes.iter().map(|m| m.indices.len() / 3).sum();
+        assert_eq!(tris, 12, "a box is 12 triangles in every format");
+        if check > 0 {
+            let verts: usize = model.meshes.iter().map(|m| m.positions.len()).sum();
+            assert_eq!(verts, check, "{format} vertex count");
+        }
+    }
+
+    // An action on a node that has none is a clean error, not a panic.
+    assert!(e.invoke_action(sub, box_node, "save").is_err());
 }

@@ -38,6 +38,19 @@ mod bounds_node;
 mod null_node;
 mod switch_node;
 
+// Material context (phase 20): the container plus the surface nodes.
+mod mat_nodes;
+
+// Output (phase 21): export taps and the render config node.
+mod export_nodes;
+
+// Texture context (phase 19): the container plus the image ops.
+mod image_adjust;
+mod image_generate;
+mod image_ops;
+pub(crate) mod image_support;
+mod texnet_node;
+
 // Container + utility + lights (root) and imports (subflow).
 mod camera_node;
 mod geo_node;
@@ -98,6 +111,33 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         lights::ambient_descriptor(),
         lights::hemisphere_descriptor(),
         lights::rect_area_descriptor(),
+        // Texture context (phase 19).
+        texnet_node::descriptor(),
+        image_generate::constant_descriptor(),
+        image_generate::ramp_descriptor(),
+        image_generate::noise_descriptor(),
+        image_adjust::levels_descriptor(),
+        image_adjust::brightness_contrast_descriptor(),
+        image_adjust::hue_saturation_descriptor(),
+        image_adjust::invert_descriptor(),
+        image_adjust::gamma_descriptor(),
+        image_ops::mix_descriptor(),
+        image_ops::blur_descriptor(),
+        image_ops::sharpen_descriptor(),
+        image_ops::pack_orm_descriptor(),
+        image_ops::height_to_normal_descriptor(),
+        // Material context (phase 20).
+        mat_nodes::matnet_descriptor(),
+        mat_nodes::principled_descriptor(),
+        mat_nodes::matcap_descriptor(),
+        mat_nodes::toon_descriptor(),
+        mat_nodes::unlit_descriptor(),
+        mat_nodes::mix_material_descriptor(),
+        mat_nodes::tex_ref_descriptor(),
+        // Output (phase 21).
+        export_nodes::geo_export_descriptor(),
+        export_nodes::image_export_descriptor(),
+        export_nodes::render_descriptor(),
     ]
 }
 
@@ -148,6 +188,6 @@ mod tests {
         // The 23 MVP node types plus import_image (Phase 13), the Phase 14
         // wave (material, uv_project, subdivide), and the Phase 15 modeling
         // wave (array, mirror, delete, null, switch, bounds).
-        assert_eq!(registry.len(), 34);
+        assert_eq!(registry.len(), 58);
     }
 }

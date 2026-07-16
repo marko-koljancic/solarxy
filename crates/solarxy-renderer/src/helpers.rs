@@ -32,7 +32,10 @@ const CAMERA_COLOR: [f32; 3] = [0.82, 0.82, 0.9];
 /// [`GizmoVertex`] overlay pipeline as the light helpers; world-unit sizing
 /// from each camera's `gizmo_size`.
 #[must_use]
-pub fn build_camera_helpers(cameras: &[CameraDef], skip: Option<SceneObjectId>) -> Vec<GizmoVertex> {
+pub fn build_camera_helpers(
+    cameras: &[CameraDef],
+    skip: Option<SceneObjectId>,
+) -> Vec<GizmoVertex> {
     let mut lines = Vec::new();
     for cam in cameras {
         if !cam.show_gizmo || Some(cam.id) == skip {
@@ -87,7 +90,12 @@ fn push_camera(lines: &mut Vec<GizmoVertex>, cam: &CameraDef) {
     push_line(lines, tr, apex, color);
     // A small cross at the eye marks the exact camera position.
     for axis in [right, up] {
-        push_line(lines, eye - axis * (s * 0.12), eye + axis * (s * 0.12), color);
+        push_line(
+            lines,
+            eye - axis * (s * 0.12),
+            eye + axis * (s * 0.12),
+            color,
+        );
     }
 }
 

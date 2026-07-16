@@ -48,11 +48,16 @@ pub enum DataType {
     /// wire value between `import_image` and the `material` node's map
     /// ports (Phase 13).
     Image,
+    /// `Arc<RawMaterialData>`: a built material description. The wire
+    /// value INSIDE material networks only (phase 20, decision C-2);
+    /// across contexts materials travel by path reference, never by
+    /// wire. Coerces to and from nothing.
+    Material,
 }
 
 impl DataType {
     /// Every variant, in matrix row/column order.
-    pub const ALL: [DataType; 12] = [
+    pub const ALL: [DataType; 13] = [
         DataType::Geometry,
         DataType::Light,
         DataType::Report,
@@ -65,6 +70,7 @@ impl DataType {
         DataType::Color,
         DataType::Text,
         DataType::Image,
+        DataType::Material,
     ];
 }
 
@@ -140,6 +146,7 @@ pub enum Value {
     Color([f32; 4]),
     Text(String),
     Image(Arc<RawImageData>),
+    Material(Arc<solarxy_core::RawMaterialData>),
 }
 
 impl Value {
@@ -158,6 +165,7 @@ impl Value {
             Value::Color(_) => DataType::Color,
             Value::Text(_) => DataType::Text,
             Value::Image(_) => DataType::Image,
+            Value::Material(_) => DataType::Material,
         }
     }
 
@@ -184,6 +192,15 @@ impl Value {
     pub fn as_image(&self) -> Option<&Arc<RawImageData>> {
         match self {
             Value::Image(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// The material payload, if this is a Material value.
+    #[must_use]
+    pub fn as_material(&self) -> Option<&Arc<solarxy_core::RawMaterialData>> {
+        match self {
+            Value::Material(m) => Some(m),
             _ => None,
         }
     }
@@ -253,20 +270,21 @@ mod tests {
         }
         // Columns and rows in DataType::ALL order:
         // Geometry Light Report Float Int Bool Vec2 Vec3 Vec4 Color Text
-        // Image
+        // Image Material
         let expected = "\
-=...........\n\
-.=..........\n\
-..=.........\n\
-...=~.+++...\n\
-...+=.+++...\n\
-...++=......\n\
-......=.....\n\
-.......=.+..\n\
-........=+..\n\
-.......~+=..\n\
-..........=.\n\
-...........=\n";
+=............\n\
+.=...........\n\
+..=..........\n\
+...=~.+++....\n\
+...+=.+++....\n\
+...++=.......\n\
+......=......\n\
+.......=.+...\n\
+........=+...\n\
+.......~+=...\n\
+..........=..\n\
+...........=.\n\
+............=\n";
         assert_eq!(
             grid, expected,
             "coercion matrix changed; update the catalog first"
@@ -274,12 +292,13 @@ mod tests {
     }
 
     #[test]
-    fn geometry_light_report_image_coerce_to_and_from_nothing() {
+    fn geometry_light_report_image_material_coerce_to_and_from_nothing() {
         for hard in [
             DataType::Geometry,
             DataType::Light,
             DataType::Report,
             DataType::Image,
+            DataType::Material,
         ] {
             for other in DataType::ALL {
                 if other == hard {

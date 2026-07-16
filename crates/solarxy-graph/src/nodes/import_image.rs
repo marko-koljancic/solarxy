@@ -20,7 +20,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -29,7 +29,10 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Import Image",
         category: Category::Import,
-        contexts: ContextMask::SUBFLOW,
+        // Placeable in geometry networks (material map wiring) AND in
+        // texture networks (the image-op source), phase 19.
+        contexts: ContextSet::GEO.or(ContextSet::TEX),
+        opens: None,
         inputs: vec![],
         outputs: vec![PortSpec::single("image", "Image", DataType::Image, false).default_port()],
         params: params_with(

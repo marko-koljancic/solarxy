@@ -2301,6 +2301,7 @@ body.reduce-motion .cook-arc {
 .react-flow__edge.edge-type-color .react-flow__edge-path { stroke: #f5a623; }
 .react-flow__edge.edge-type-text .react-flow__edge-path { stroke: #9aa0a6; }
 .react-flow__edge.edge-type-image .react-flow__edge-path { stroke: #e879c8; }
+.react-flow__edge.edge-type-material .react-flow__edge-path { stroke: #c96f4a; }
 
 /* ---- Phase 14: map-overrides-factor indicator (registry-driven via
  * ParamSnapshot.drivenByPort) ---- */
@@ -3349,4 +3350,43 @@ body.reduce-motion .cook-arc {
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.9);
   }
+}
+
+/* ---- Texture viewer pane (context-expansion phase 19) ---- */
+
+.texture-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface-sunken, var(--panel-bg));
+}
+
+.texture-viewer-status {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--ink-muted, var(--fg-muted));
+  border-bottom: 1px solid var(--border-subtle, var(--panel-border));
+  flex: 0 0 auto;
+}
+
+.texture-viewer-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* A subtle checker so alpha reads as alpha. */
+  background-image:
+    linear-gradient(45deg, rgb(128 128 128 / 12%) 25%, transparent 25%, transparent 75%, rgb(128 128 128 / 12%) 75%),
+    linear-gradient(45deg, rgb(128 128 128 / 12%) 25%, transparent 25%, transparent 75%, rgb(128 128 128 / 12%) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.texture-viewer-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
 }

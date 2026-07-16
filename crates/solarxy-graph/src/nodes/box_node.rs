@@ -7,7 +7,7 @@ use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 fn dimension(key: &str, label: &str) -> ParamSpec {
     ParamSpec::new(
@@ -33,7 +33,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Box",
         category: Category::Primitives,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],
         params: params_with(

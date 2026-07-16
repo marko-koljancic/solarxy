@@ -48,11 +48,17 @@ describe("mirror store", () => {
       revision: 1,
       events: [
         { type: "cookStatus", node: 1, status: { state: "ok", ms: 0.4 } },
-        { type: "nodeStats", node: 1, points: 24, prims: 12, meshes: 1 },
+        { type: "nodeStats", node: 1, points: 24, prims: 12, meshes: 1, image: null },
       ],
     });
     expect(needs).toBe(false);
-    expect(useMirror.getState().cook[1]).toEqual({ status: { state: "ok", ms: 0.4 }, points: 24, prims: 12, meshes: 1 });
+    expect(useMirror.getState().cook[1]).toEqual({
+      status: { state: "ok", ms: 0.4 },
+      points: 24,
+      prims: 12,
+      meshes: 1,
+      image: null,
+    });
   });
 
   it("requests a resnapshot on a revision gap and skips the events", () => {

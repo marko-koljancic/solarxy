@@ -25,7 +25,10 @@ export type ParamValue =
   | { type: "vec4"; value: [number, number, number, number] }
   | { type: "color"; value: [number, number, number, number] }
   | { type: "enum"; value: string }
-  | { type: "asset"; value: string };
+  | { type: "asset"; value: string }
+  /** A cross-context node reference: the target's stable node id, or
+   * null when unset (phase 17, references cross contexts by path). */
+  | { type: "nodeRef"; value: NodeId | null };
 
 export type ParamSource =
   | ({ kind: "literal" } & ParamValue)
@@ -154,7 +157,16 @@ export type EngineEvent =
   | { type: "bypassChanged"; ctx: GraphContext; node: NodeId; bypassed: boolean }
   | { type: "variadicReordered"; ctx: GraphContext; node: NodeId; port: string; order: EdgeId[] }
   | { type: "cookStatus"; node: NodeId; status: CookStatus }
-  | { type: "nodeStats"; node: NodeId; points: number; prims: number; meshes: number }
+  | {
+      type: "nodeStats";
+      node: NodeId;
+      points: number;
+      prims: number;
+      meshes: number;
+      /** `[width, height]` when the node's default output is an image
+       * (geometry counts stay zero for those); null otherwise. */
+      image: [number, number] | null;
+    }
   | { type: "validationSummary"; node: NodeId; errors: number; warnings: number }
   | {
       type: "validationReport";
@@ -227,7 +239,7 @@ export interface PortRef {
 
 export type DataType =
   | "geometry" | "light" | "report" | "float" | "int" | "bool"
-  | "vec2" | "vec3" | "vec4" | "color" | "text" | "image";
+  | "vec2" | "vec3" | "vec4" | "color" | "text" | "image" | "material";
 
 export interface PortSnapshot {
   key: string;
@@ -247,6 +259,8 @@ export interface ParamSnapshot {
   paramType: string;
   enumVariants: [string, string][];
   accept: string[];
+  /** The picker constraint for `nodePath` params; absent otherwise. */
+  nodePath?: { kind: "opens"; opens: ContextKind } | { kind: "typeIs"; typeIs: string };
   default: unknown;
   hard: [number, number] | null;
   soft: [number, number] | null;
@@ -276,6 +290,11 @@ export type NodeRole =
   | "light"
   | "note";
 
+/** The network kinds of the typed-context model (phase 17). The root
+ * canvas is `obj`; a container's child canvas is whatever its descriptor
+ * `opens`. */
+export type ContextKind = "obj" | "geo" | "mat" | "tex";
+
 export interface NodeTypeSnapshot {
   typeId: string;
   version: number;
@@ -283,8 +302,14 @@ export interface NodeTypeSnapshot {
   category: "container" | "primitives" | "modifiers" | "import" | "lights" | "utility";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
-  rootContext: boolean;
-  subflowContext: boolean;
+  /** The network kinds this node may be placed in. Replaces the
+   * pre-phase-17 rootContext/subflowContext booleans; the palette filters
+   * against the current canvas's kind. */
+  contexts: ContextKind[];
+  /** The child-network kind this node opens, for containers (`geo` opens
+   * `"geo"`); null otherwise. A canvas's kind derives from its owner's
+   * descriptor through this. */
+  opens: ContextKind | null;
   inputs: PortSnapshot[];
   outputs: PortSnapshot[];
   params: ParamSnapshot[];

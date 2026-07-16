@@ -136,15 +136,23 @@ fn render_node(out: &mut String, node: &solarxy_graph::engine::snapshot::NodeTyp
         node.display_name, node.type_id
     );
 
-    let contexts = match (node.root_context, node.subflow_context) {
-        (true, true) => "scene or inside a geo",
-        (true, false) => "scene",
-        _ => "inside a geo",
-    };
+    let context_names: Vec<&str> = node
+        .contexts
+        .iter()
+        .map(|k| match k {
+            solarxy_graph::document::ContextKind::Obj => "scene",
+            solarxy_graph::document::ContextKind::Geo => "inside a geo",
+            solarxy_graph::document::ContextKind::Mat => "inside a material network",
+            solarxy_graph::document::ContextKind::Tex => "inside a texture network",
+        })
+        .collect();
     let _ = writeln!(
         out,
         "`{}` · v{} · {} · placed {}\n",
-        node.type_id, node.version, node.category_label, contexts
+        node.type_id,
+        node.version,
+        node.category_label,
+        context_names.join(" or ")
     );
     let _ = writeln!(out, "{}\n", node.doc.trim());
 

@@ -7,7 +7,8 @@
 use super::common::{migrate_geo, params_with, passive_cook, rendering_params, rotate_order_param};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
+use crate::document::ContextKind;
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -23,7 +24,10 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 3,
         display_name: "Geo",
         category: Category::Container,
-        contexts: ContextMask::ROOT,
+        contexts: ContextSet::OBJ,
+        // The geo container opens a geometry network; the engine creates
+        // and kinds the child canvas from this, never from the type id.
+        opens: Some(ContextKind::Geo),
         inputs: vec![],
         outputs: vec![],
         params: {

@@ -104,6 +104,13 @@ pub struct SubGraphJson {
     /// The node id whose output this subflow displays, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_output: Option<String>,
+    /// The network kind (`"geo"`, `"mat"`, `"tex"`); absent in
+    /// pre-context files, whose subflows were all geometry networks. The
+    /// engine resolves an absent kind from the owning node's registry
+    /// descriptor on load, so this field is advisory redundancy that keeps
+    /// the file self-describing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 /// One node instance. Params are plain JSON literals keyed by param id (the

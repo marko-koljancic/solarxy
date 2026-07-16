@@ -99,6 +99,27 @@ fn edge_to_json(e: &Edge) -> sf::EdgeJson {
     }
 }
 
+/// The `.slxy` string form of a network kind (the file speaks strings so
+/// the scenefile crate never depends on the engine's enums).
+fn context_kind_to_str(kind: crate::document::ContextKind) -> String {
+    match kind {
+        crate::document::ContextKind::Obj => "obj".to_string(),
+        crate::document::ContextKind::Geo => "geo".to_string(),
+        crate::document::ContextKind::Mat => "mat".to_string(),
+        crate::document::ContextKind::Tex => "tex".to_string(),
+    }
+}
+
+fn context_kind_from_str(s: &str) -> Option<crate::document::ContextKind> {
+    match s {
+        "obj" => Some(crate::document::ContextKind::Obj),
+        "geo" => Some(crate::document::ContextKind::Geo),
+        "mat" => Some(crate::document::ContextKind::Mat),
+        "tex" => Some(crate::document::ContextKind::Tex),
+        _ => None,
+    }
+}
+
 /// Maps a whole document (already `to_data`'d) plus the host sidecar and the
 /// asset records into a [`sf::SceneJson`].
 #[must_use]
@@ -121,6 +142,7 @@ pub fn document_to_scene(
                         nodes: g.nodes.iter().map(node_to_json).collect(),
                         edges: g.edges.iter().map(edge_to_json).collect(),
                         active_output: g.active_output.map(|n| n.0.to_string()),
+                        kind: g.kind.map(context_kind_to_str),
                     },
                 )
             })
@@ -224,6 +246,9 @@ fn graph_from_json(
         edges: out_edges,
         active_output: active_output.and_then(parse_id).map(NodeId),
         selection: Vec::new(),
+        // Resolved by the caller: the root is `Obj`, a child network's
+        // kind comes from its owner's descriptor (`opens`).
+        kind: None,
     }
 }
 
@@ -238,7 +263,7 @@ pub fn scene_to_document(
     let mut warnings = Vec::new();
     let mut max_id = 0u64;
 
-    let root = graph_from_json(
+    let mut root = graph_from_json(
         &scene.graph.nodes,
         &scene.graph.edges,
         None,
@@ -246,6 +271,7 @@ pub fn scene_to_document(
         &mut warnings,
         &mut max_id,
     );
+    root.kind = Some(crate::document::ContextKind::Obj);
 
     let mut subflows = Vec::with_capacity(scene.graph.subflows.len());
     for (owner_s, sg) in &scene.graph.subflows {
@@ -256,7 +282,7 @@ pub fn scene_to_document(
             continue;
         };
         max_id = max_id.max(owner);
-        let g = graph_from_json(
+        let mut g = graph_from_json(
             &sg.nodes,
             &sg.edges,
             sg.active_output.as_deref(),
@@ -264,6 +290,21 @@ pub fn scene_to_document(
             &mut warnings,
             &mut max_id,
         );
+        // The stored kind wins when present; otherwise the kind is
+        // whatever the owner's descriptor opens (registry truth), and an
+        // unknown/placeholder owner falls back to the loader default
+        // (Geo, the only pre-context child kind).
+        g.kind = sg
+            .kind
+            .as_deref()
+            .and_then(context_kind_from_str)
+            .or_else(|| {
+                root.nodes
+                    .iter()
+                    .find(|n| n.id.0 == owner)
+                    .and_then(|n| registry.get(&n.type_id))
+                    .and_then(|d| d.opens)
+            });
         subflows.push((NodeId(owner), g));
     }
 

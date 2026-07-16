@@ -14,8 +14,9 @@ import { NodePane } from "../components/NodePane";
 import { ParameterPanel } from "../components/ParameterPanel";
 import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
+import { TextureViewer } from "../components/TextureViewer";
 import { nodeLabel } from "../flow/nodeLabel";
-import { descriptorFor } from "../registry/datatypes";
+import { contextKind, descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
@@ -64,6 +65,10 @@ function AssetPreviewPanel(_props: IDockviewPanelProps) {
   return <AssetPreview />;
 }
 
+function TexturePanel(_props: IDockviewPanelProps) {
+  return <TextureViewer />;
+}
+
 export const DOCK_COMPONENTS = {
   viewport: ViewportPanel,
   nodes: NodesPanel,
@@ -71,6 +76,7 @@ export const DOCK_COMPONENTS = {
   review: ReviewDockPanel,
   assets: AssetsPanel,
   assetPreview: AssetPreviewPanel,
+  texture: TexturePanel,
 };
 
 // Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four
@@ -153,6 +159,17 @@ function PaneColorPicker({
 /** A dockview tab wrapped so its header carries the per-pane tint and a
  * right-click color picker. Preserves the default tab's drag / close behavior
  * (we only wrap it, never reimplement it). */
+/** The automatic per-context-kind tint (decision C-9): the Nodes tab
+ * reflects which network kind its canvas shows, and the Texture viewer
+ * carries the image family's pink. A manual right-click tint wins. */
+function autoPaneColor(id: string, kind: ReturnType<typeof contextKind>): string | undefined {
+  if (id === "texture") return "#f2c9d6";
+  if (id !== "nodes") return undefined;
+  if (kind === "tex") return "#f2c9d6";
+  if (kind === "mat") return "#c9c2f0";
+  return undefined;
+}
+
 function ColoredTabInner({
   props,
   hideClose,
@@ -161,7 +178,11 @@ function ColoredTabInner({
   hideClose: boolean;
 }) {
   const id = props.api.id;
-  const color = useUi((s) => s.paneColors[id]);
+  const manual = useUi((s) => s.paneColors[id]);
+  const current = useMirror((s) => s.current);
+  const registry = useMirror((s) => s.registry);
+  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const color = manual ?? autoPaneColor(id, contextKind(registry, current, rootNodes));
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
   return (
     <div

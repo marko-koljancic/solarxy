@@ -71,6 +71,7 @@ pub mod manipulator;
 pub mod material;
 pub mod mipmap;
 pub mod model;
+pub mod outline;
 pub mod overdraw;
 pub mod panes;
 pub mod pipeline_builder;

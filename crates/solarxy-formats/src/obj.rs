@@ -130,6 +130,8 @@ fn parse_obj(
             base_color_factor: [kd[0], kd[1], kd[2], base_alpha],
             alpha_mode,
             alpha_cutoff,
+            shading_model: solarxy_core::geometry::ShadingModel::default(),
+            toon_steps: 3.0,
             ambient: m.ambient,
             diffuse: m.diffuse,
             specular: m.specular,

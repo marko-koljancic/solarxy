@@ -11,6 +11,7 @@ import {
   type MotionChoice,
   type Prefs,
   type GizmoOrientation,
+  type SelectionHighlightStyle,
   type ScreenshotResolution,
   type ThemeChoice,
 } from "../../store/prefs";
@@ -193,12 +194,51 @@ function ScreenshotTab({ draft, patch }: TabProps) {
 function ViewportTab({ draft, patch }: TabProps) {
   const v = draft.viewport;
   const setV = (p: Partial<typeof v>) => patch({ viewport: { ...v, ...p } });
+  const sel = draft.selection;
+  const setSel = (p: Partial<typeof sel>) => patch({ selection: { ...sel, ...p } });
 
   return (
     <>
       <p className="prefs-desc">
-        Transform gizmo orientation and the increments Ctrl-drag snaps to.
+        How selected objects highlight in the 3D view, the transform gizmo orientation, and the
+        increments Ctrl-drag snaps to.
       </p>
+      <Row label="Selection highlight">
+        <select
+          className="input-field"
+          value={sel.style}
+          onChange={(e) => setSel({ style: e.target.value as SelectionHighlightStyle })}
+        >
+          <option value="outline">Outline</option>
+          <option value="tint">Tint (legacy)</option>
+          <option value="none">None</option>
+        </select>
+      </Row>
+      {sel.style !== "none" && (
+        <Row label="Highlight color">
+          <input
+            type="color"
+            className="input-field prefs-color"
+            value={sel.color}
+            onChange={(e) => setSel({ color: e.target.value })}
+          />
+        </Row>
+      )}
+      {sel.style === "outline" && (
+        <Row label="Outline width (px)">
+          <input
+            className="input-field"
+            type="number"
+            min={1}
+            max={16}
+            step={1}
+            value={sel.width}
+            onChange={(e) =>
+              setSel({ width: Math.min(16, Math.max(1, Number(e.target.value) || 3)) })
+            }
+          />
+        </Row>
+      )}
       <Row label="Handle orientation">
         <select
           className="input-field"

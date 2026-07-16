@@ -24,6 +24,8 @@ pub struct BindGroupLayouts {
     pub uv_overlap_read: wgpu::BindGroupLayout,
     pub validation_color: wgpu::BindGroupLayout,
     pub overdraw_show: wgpu::BindGroupLayout,
+    pub outline_texture: wgpu::BindGroupLayout,
+    pub outline_params: wgpu::BindGroupLayout,
     pub skybox: wgpu::BindGroupLayout,
 }
 
@@ -110,10 +112,7 @@ impl BindGroupLayouts {
             label: Some("grid_params_bind_group_layout"),
             // Vertex reads `plane` (to place the quad in its world plane) and
             // fragment reads cell_size/color/plane, so both stages need it.
-            entries: &[bgl_uniform_entry(
-                0,
-                wgpu::ShaderStages::VERTEX_FRAGMENT,
-            )],
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
         });
         let normals_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("normals_params_bind_group_layout"),
@@ -235,6 +234,17 @@ impl BindGroupLayouts {
             label: Some("skybox_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
+        // Selection-outline jump flood (phase 18): the source texture is
+        // read with textureLoad only (Rg32Float is non-filterable), and
+        // one uniform layout serves the per-step and blit params.
+        let outline_texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("outline_texture_bind_group_layout"),
+            entries: &[bgl_texture_entry_unfilterable(0)],
+        });
+        let outline_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("outline_params_bind_group_layout"),
+            entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
         BindGroupLayouts {
             texture,
             camera,
@@ -258,6 +268,8 @@ impl BindGroupLayouts {
             validation_color,
             overdraw_show,
             skybox,
+            outline_texture,
+            outline_params,
         }
     }
 }
@@ -283,6 +295,21 @@ fn bgl_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
             multisampled: false,
             view_dimension: wgpu::TextureViewDimension::D2,
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        },
+        count: None,
+    }
+}
+
+/// A non-filterable float texture entry (Rg32Float sources read with
+/// textureLoad; filterable textures also satisfy it).
+fn bgl_texture_entry_unfilterable(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
         },
         count: None,
     }

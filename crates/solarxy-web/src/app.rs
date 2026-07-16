@@ -1111,6 +1111,55 @@ impl SolarxyApp {
         }
     }
 
+    /// The displayed image of a texture network (phase 19), for the
+    /// texture viewer pane: `{ width, height, pixels }` (RGBA8) or
+    /// `undefined` when the network publishes nothing. The pixel copy is
+    /// display-only and pull-based, so cooked images still never ride the
+    /// event stream; the viewer fetches on cook changes.
+    pub fn texture_preview(&self, owner: f64) -> JsValue {
+        let Some(img) = self
+            .engine
+            .display_image(solarxy_graph::document::NodeId(owner as u64))
+        else {
+            return JsValue::UNDEFINED;
+        };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("width", &JsValue::from_f64(f64::from(img.width)));
+        set("height", &JsValue::from_f64(f64::from(img.height)));
+        set(
+            "pixels",
+            &JsValue::from(js_sys::Uint8ClampedArray::from(img.pixels.as_slice())),
+        );
+        obj.into()
+    }
+
+    /// Executes an export node's Action param (phase 21): the engine
+    /// encodes the committed output, and the returned
+    /// `{ filename, mime, bytes }` goes to the frontend's save path (the
+    /// File System Access flow `.slxy` already uses).
+    pub fn invoke_action(&self, ctx: JsValue, node: f64, key: String) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let result = self
+            .engine
+            .invoke_action(ctx, NodeId(node as u64), &key)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("filename", &JsValue::from_str(&result.filename));
+        set("mime", &JsValue::from_str(&result.mime));
+        set(
+            "bytes",
+            &JsValue::from(js_sys::Uint8Array::from(result.bytes.as_slice())),
+        );
+        Ok(obj.into())
+    }
+
     /// Renders the active pane offscreen at capture resolution and encodes
     /// the readback copy. The pane's display settings are copied with the
     /// requested overlay toggles applied; the composite always clears (a
@@ -1281,6 +1330,29 @@ impl SolarxyApp {
         self.selected_object = node.map(|n| SceneObjectId(n as u64));
     }
 
+    /// Applies the selection-highlight preference (phase 18): `style` is
+    /// `"outline"`, `"tint"`, or `"none"`; color is linear RGBA; `width`
+    /// is the rim width in pixels (clamped 1..16 renderer-side). The
+    /// legacy tint reuses the same color at its fixed 0.35 alpha.
+    pub fn set_selection_highlight(
+        &mut self,
+        style: String,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        width: f32,
+    ) {
+        use solarxy_renderer::frame::SelectionStyle;
+        let style = match style.as_str() {
+            "tint" => SelectionStyle::Tint,
+            "none" => SelectionStyle::None,
+            _ => SelectionStyle::Outline,
+        };
+        self.renderer
+            .set_selection_highlight(&self.queue, style, [r, g, b, a], width);
+    }
+
     // ---- view-state boundary (host-owned; React mirrors) ----
 
     /// The full view state for the mirror.
@@ -1333,11 +1405,7 @@ impl SolarxyApp {
 
     /// Toggles lock-camera-to-view for a look-through pane (Blender semantics:
     /// navigation reframes the bound camera). No effect on a free view.
-    pub fn set_pane_camera_lock(
-        &mut self,
-        pane: usize,
-        locked: bool,
-    ) -> Result<JsValue, JsError> {
+    pub fn set_pane_camera_lock(&mut self, pane: usize, locked: bool) -> Result<JsValue, JsError> {
         if pane < 4 && self.view.look_through[pane].is_some() {
             self.view.camera_locked[pane] = locked;
             self.view.camera_editing[pane] = false;
@@ -2771,8 +2839,7 @@ impl SolarxyApp {
             .cameras()
             .map(<[_]>::to_vec)
             .unwrap_or_default();
-        self.renderer
-            .write_camera_helpers(&self.queue, &cams, skip);
+        self.renderer.write_camera_helpers(&self.queue, &cams, skip);
     }
 
     /// Lazily creates a `CameraState` for every pane slot the layout uses
@@ -2943,6 +3010,10 @@ impl SolarxyApp {
         self.renderer
             .overdraw
             .resize(&self.device, &self.renderer.layouts, width, height);
+        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
+        self.renderer
+            .outline
+            .resize(&self.device, &layouts, width, height);
     }
 
     /// Renders one pane: 3D passes (or overdraw / empty) into the shared
@@ -3028,6 +3099,20 @@ impl SolarxyApp {
             viewport,
             i == 0,
         );
+        // The selection-outline rim lands after tone mapping (phase 18),
+        // so it never blooms and AO never darkens it.
+        if scene_present
+            && !is_uv_map
+            && self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
+            && self.selected_object.is_some()
+            && self
+                .selected_object
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some())
+            && self.view.pane_settings[i].inspection_mode != InspectionMode::Overdraw
+        {
+            self.renderer
+                .composite_selection_outline(&mut encoder, surface_view, viewport);
+        }
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
@@ -3094,6 +3179,16 @@ impl SolarxyApp {
             pds,
             self.resolve_background(pds),
         );
+
+        // Selection outline (phase 18): the offscreen mask + jump-flood
+        // stages run here; the rim blits onto the swapchain after the
+        // composite pass (composite_and_submit reads has_selection).
+        if self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
+            && objects.iter().any(|o| o.selected)
+        {
+            self.renderer
+                .render_selection_outline(encoder, &objects, cam_bg);
+        }
 
         if self.renderer.post.ssao_enabled {
             self.renderer.render_ssao_passes(encoder, cam_bg);
@@ -3215,12 +3310,12 @@ impl SolarxyApp {
             .to_string()
         });
         let cams = self.scene_objects.cameras();
-        let pane_look_through = std::array::from_fn(|i| {
-            self.view.look_through[i].map(|n| n.0 as f64)
-        });
+        let pane_look_through =
+            std::array::from_fn(|i| self.view.look_through[i].map(|n| n.0 as f64));
         let pane_gate_aspect = std::array::from_fn(|i| {
             let node = self.view.look_through[i]?;
-            cams?.iter()
+            cams?
+                .iter()
                 .find(|c| c.id == SceneObjectId(node.0))
                 .map(|c| c.aspect)
         });
@@ -3457,7 +3552,10 @@ impl SolarxyApp {
     /// render chain at preview size (the screenshot pattern; the next main
     /// frame's `sync_render_target_dims` restores the layout dimensions).
     fn render_preview(&mut self) {
-        let Some((w, h)) = self.preview.as_ref().map(|p| (p.config.width, p.config.height))
+        let Some((w, h)) = self
+            .preview
+            .as_ref()
+            .map(|p| (p.config.width, p.config.height))
         else {
             return;
         };

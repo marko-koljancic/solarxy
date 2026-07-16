@@ -114,6 +114,32 @@ export async function saveToFile(bytes: Uint8Array, filename: string): Promise<v
   downloadBytes(bytes, filename);
 }
 
+/** Explicit save for EXPORT bytes (phase 21): like `saveToFile` but with
+ * the export's own mime/extension instead of the `.slxy` type. */
+export async function saveExportToFile(
+  bytes: Uint8Array,
+  filename: string,
+  mime: string,
+): Promise<void> {
+  const ext = filename.includes(".") ? `.${filename.split(".").pop()}` : "";
+  const picker = (window as unknown as SaveFilePickerWindow).showSaveFilePicker;
+  if (picker && ext) {
+    try {
+      const handle = await picker({
+        suggestedName: filename,
+        types: [{ description: "Export", accept: { [mime]: [ext] } }],
+      });
+      const w = await handle.createWritable();
+      await w.write(bytes);
+      await w.close();
+      return;
+    } catch (e) {
+      if ((e as DOMException)?.name === "AbortError") return; // user cancelled
+    }
+  }
+  downloadBytes(bytes, filename);
+}
+
 /** Opens a `.slxy` via the File System Access API, or a hidden file input
  * fallback. Returns the file's bytes and name, or null if cancelled. */
 export async function openSceneFile(): Promise<{ bytes: Uint8Array; name: string } | null> {

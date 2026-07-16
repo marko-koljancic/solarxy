@@ -7,7 +7,7 @@ use super::common::{geometry_output, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -16,7 +16,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Null",
         category: Category::Utility,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()

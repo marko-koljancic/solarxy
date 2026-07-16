@@ -9,7 +9,7 @@ use super::common::{geometry_output, migrate_strip_rendering_group, params_with}
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::registry::coerce::DataType;
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -18,7 +18,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Merge",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)
                 .default_port()

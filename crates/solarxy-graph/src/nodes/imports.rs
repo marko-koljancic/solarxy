@@ -21,7 +21,7 @@ use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{
-    BypassBehavior, Category, ContextMask, MigrateError, MigrateFn, NodeRole, NodeTypeDescriptor,
+    BypassBehavior, Category, ContextSet, MigrateError, MigrateFn, NodeRole, NodeTypeDescriptor,
 };
 
 /// An [`AssetResolver`] over the in-memory [`AssetTable`], resolving a
@@ -112,7 +112,8 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
         version: f.version,
         display_name: f.display_name,
         category: Category::Import,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],
         params: params_with(f.display_name, specific),

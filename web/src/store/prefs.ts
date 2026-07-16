@@ -44,6 +44,19 @@ export interface ScreenshotPrefs {
   };
 }
 
+export type SelectionHighlightStyle = "outline" | "tint" | "none";
+
+/** How selection presents in the 3D viewport (phase 18, decision C-6):
+ * the jump-flood rim (default), the legacy translucent tint, or nothing.
+ * Pushed into the Rust host like the gizmo ergonomics. */
+export interface SelectionPrefs {
+  style: SelectionHighlightStyle;
+  /** Rim color, sRGB hex; converted to linear at the host boundary. */
+  color: string;
+  /** Rim width in pixels (clamped 1..16 renderer-side). */
+  width: number;
+}
+
 export interface Prefs {
   appearance: {
     theme: ThemeChoice;
@@ -63,6 +76,7 @@ export interface Prefs {
   };
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
+  selection: SelectionPrefs;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -75,6 +89,7 @@ export const DEFAULT_PREFS: Prefs = {
     customHeight: 1080,
     overlays: { grid: true, axes: true, validation: true },
   },
+  selection: { style: "outline", color: "#ff9e21", width: 3 },
   viewport: {
     orientation: "world",
     snapTranslate: 0.5,
@@ -178,6 +193,7 @@ export const usePrefs = create<PrefsStore>()(
           // Backfilled by the same deep merge, so no version bump is needed for
           // the group added in Phase 12.
           viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
+          selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
         };
         if (!p) {
           const migrated = legacyTheme();

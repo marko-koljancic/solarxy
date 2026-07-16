@@ -1,6 +1,11 @@
-//! The hybrid `material` node (Phase 14, ratified decision 4): assigns a
-//! PBR material to every mesh of the input geometry (override-all in v1;
-//! per-slot targeting is a backlog note).
+//! The hybrid `material` node (Phase 14, ratified decision 4; v2 in the
+//! context expansion's phase 20): assigns a PBR material to the input
+//! geometry, either built INLINE from its own factors and map ports
+//! (decision 4, unchanged) or REFERENCED from a material network by path
+//! (decision C-2). v2 also discharges the per-slot-targeting backlog
+//! note: an empty `target` overrides every mesh (the v1 behavior); a
+//! non-empty target assigns only meshes whose name contains it, leaving
+//! the rest on their existing materials.
 //!
 //! Factor params (base color, metallic, roughness, emissive) drive their
 //! channels alone until the matching Image map port is connected; a
@@ -20,12 +25,13 @@ use super::common::{geometry_output, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
-use crate::registry::param_spec::{ParamSpec, ParamType};
+use crate::registry::param_spec::{EnumVariant, NodePathAccept, ParamSpec, ParamType, Pred};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 /// The five optional map ports, one per `RawMaterialData` texture role.
-const MAP_PORTS: [(&str, &str); 5] = [
+/// Shared with the mat-context `principled` node (phase 20).
+pub(super) const MAP_PORTS: [(&str, &str); 5] = [
     ("base_color_map", "Base Color Map"),
     ("normal_map", "Normal Map"),
     ("metallic_roughness_map", "Metallic Roughness Map"),
@@ -43,62 +49,62 @@ pub fn descriptor() -> NodeTypeDescriptor {
 
     NodeTypeDescriptor {
         type_id: "material",
-        version: 1,
+        // v2 (phase 20): Reference mode + per-slot targeting. Added
+        // params fill from defaults on load (registry-default migration),
+        // so v1 documents keep their exact inline behavior.
+        version: 2,
         display_name: "Material",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs,
         outputs: vec![geometry_output()],
         params: params_with(
             "Material",
             vec![
                 ParamSpec::new(
-                    "base_color",
-                    "Base Color",
+                    "mode",
+                    "Mode",
                     "material",
-                    ParamType::Color,
-                    ParamValue::Color([0.8, 0.8, 0.8, 1.0]),
-                )
-                .driven_by_port("base_color_map"),
+                    ParamType::Enum {
+                        variants: vec![
+                            EnumVariant::new("inline", "Inline"),
+                            EnumVariant::new("reference", "Reference"),
+                        ],
+                    },
+                    ParamValue::Enum("inline".to_string()),
+                ),
                 ParamSpec::new(
-                    "metallic",
-                    "Metallic",
+                    "material_path",
+                    "Material Network",
                     "material",
-                    ParamType::Float,
-                    ParamValue::Float(0.0),
+                    ParamType::NodePath {
+                        accept: NodePathAccept::Opens(crate::document::ContextKind::Mat),
+                    },
+                    ParamValue::NodeRef(None),
                 )
-                .hard(0.0, 1.0)
-                .soft(0.0, 1.0)
-                .step(0.01)
-                .driven_by_port("metallic_roughness_map"),
+                .show_if("mode", Pred::Eq(ParamValue::Enum("reference".to_string()))),
                 ParamSpec::new(
-                    "roughness",
-                    "Roughness",
-                    "material",
-                    ParamType::Float,
-                    ParamValue::Float(0.5),
-                )
-                .hard(0.0, 1.0)
-                .soft(0.0, 1.0)
-                .step(0.01)
-                .driven_by_port("metallic_roughness_map"),
-                ParamSpec::new(
-                    "emissive",
-                    "Emissive",
-                    "material",
-                    ParamType::Color,
-                    ParamValue::Color([0.0, 0.0, 0.0, 1.0]),
-                )
-                .driven_by_port("emissive_map"),
-                ParamSpec::new(
-                    "material_name",
-                    "Material Name",
+                    "target",
+                    "Target Meshes",
                     "material",
                     ParamType::Text,
                     ParamValue::Text(String::new()),
-                ),
+                )
+                .doc("Substring filter on mesh names; empty assigns every mesh."),
             ],
-        ),
+        )
+        .into_iter()
+        .chain(factor_params().into_iter().map(|spec| {
+            // The factors drive only the INLINE mode; Reference mode
+            // hides them (the referenced network owns the surface).
+            if spec.key == "material_name" {
+                spec
+            } else {
+                spec.show_if("mode", Pred::Eq(ParamValue::Enum("inline".to_string())))
+            }
+        }))
+        .collect(),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
@@ -112,11 +118,63 @@ pub fn descriptor() -> NodeTypeDescriptor {
     }
 }
 
-#[allow(clippy::unnecessary_wraps)] // signature matches CookFn
+/// The inline hybrid surface's factor params (plus the name), shared
+/// with the mat-context `principled` node, which uses them WITHOUT the
+/// material node's mode gating.
+pub(super) fn factor_params() -> Vec<ParamSpec> {
+    vec![
+        ParamSpec::new(
+            "base_color",
+            "Base Color",
+            "material",
+            ParamType::Color,
+            ParamValue::Color([0.8, 0.8, 0.8, 1.0]),
+        )
+        .driven_by_port("base_color_map"),
+        ParamSpec::new(
+            "metallic",
+            "Metallic",
+            "material",
+            ParamType::Float,
+            ParamValue::Float(0.0),
+        )
+        .hard(0.0, 1.0)
+        .soft(0.0, 1.0)
+        .step(0.01)
+        .driven_by_port("metallic_roughness_map"),
+        ParamSpec::new(
+            "roughness",
+            "Roughness",
+            "material",
+            ParamType::Float,
+            ParamValue::Float(0.5),
+        )
+        .hard(0.0, 1.0)
+        .soft(0.0, 1.0)
+        .step(0.01)
+        .driven_by_port("metallic_roughness_map"),
+        ParamSpec::new(
+            "emissive",
+            "Emissive",
+            "material",
+            ParamType::Color,
+            ParamValue::Color([0.0, 0.0, 0.0, 1.0]),
+        )
+        .driven_by_port("emissive_map"),
+        ParamSpec::new(
+            "material_name",
+            "Material Name",
+            "material",
+            ParamType::Text,
+            ParamValue::Text(String::new()),
+        ),
+    ]
+}
+
 fn cook_material(
     p: &ResolvedParams,
     inputs: &Inputs,
-    _cx: &mut CookCtx,
+    cx: &mut CookCtx,
 ) -> Result<CookOutcome, CookError> {
     // The required-input guard already ran in the driver; a connected but
     // empty upstream flows here as None and yields empty (keep-last-good).
@@ -126,6 +184,38 @@ fn cook_material(
         )));
     };
 
+    let material = if p.enum_key("mode") == "reference" {
+        // Reference mode (phase 20): the material network's published
+        // value, pre-resolved by the driver. A set-but-unresolvable path
+        // is a hard error badge, never a silent fallback material.
+        let Some(target) = p.node_ref("material_path") else {
+            return Err(CookError::Failed {
+                message: "reference mode needs a material network".to_string(),
+            });
+        };
+        match cx.referenced(target).and_then(|v| v.as_material()) {
+            Some(m) => std::sync::Arc::clone(m),
+            None => {
+                return Err(CookError::Failed {
+                    message: format!("material reference to node {} does not resolve", target.0),
+                });
+            }
+        }
+    } else {
+        std::sync::Arc::new(build_inline_material(p, inputs))
+    };
+
+    Ok(CookOutcome::Done(Outputs::geometry(assign_material(
+        input,
+        &material,
+        p.text("target"),
+    ))))
+}
+
+/// Builds the inline hybrid material from the node's own factors and map
+/// ports (the ratified decision-4 semantics, verbatim from v1). Shared
+/// with the mat-context `principled` node.
+pub(super) fn build_inline_material(p: &ResolvedParams, inputs: &Inputs) -> RawMaterialData {
     let base_color_map = inputs.image("base_color_map");
     let normal_map = inputs.image("normal_map");
     let mr_map = inputs.image("metallic_roughness_map");
@@ -156,7 +246,7 @@ fn cook_material(
         [e[0], e[1], e[2]]
     };
 
-    let material = RawMaterialData {
+    RawMaterialData {
         name,
         diffuse_texture_data: base_color_map.cloned(),
         normal_texture_data: normal_map.cloned(),
@@ -169,16 +259,35 @@ fn cook_material(
         base_color_factor: base_color,
         alpha_cutoff: 0.5,
         ..RawMaterialData::default()
-    };
+    }
+}
 
-    // Override-all (v1): one material table entry, every mesh bound to it.
+/// Assigns the material to the input's meshes. An empty target is the v1
+/// override-all (one-entry material table); a non-empty target appends
+/// the material and points only name-matching meshes at it, leaving the
+/// rest on their existing materials (per-slot targeting, phase 20).
+fn assign_material(
+    input: &Arc<solarxy_kernel::GeometrySet>,
+    material: &Arc<RawMaterialData>,
+    target: &str,
+) -> solarxy_kernel::GeometrySet {
     // Mesh attribute buffers stay Arc-shared; bounds are untouched.
     let mut set = (**input).clone();
-    set.materials = vec![Arc::new(material)];
-    for mesh in &mut set.meshes {
-        mesh.material_index = Some(0);
+    if target.is_empty() {
+        set.materials = vec![Arc::clone(material)];
+        for mesh in &mut set.meshes {
+            mesh.material_index = Some(0);
+        }
+    } else {
+        set.materials.push(Arc::clone(material));
+        let idx = set.materials.len() - 1;
+        for mesh in &mut set.meshes {
+            if mesh.name.contains(target) {
+                mesh.material_index = Some(idx);
+            }
+        }
     }
-    Ok(CookOutcome::Done(Outputs::geometry(set)))
+    set
 }
 
 #[cfg(test)]

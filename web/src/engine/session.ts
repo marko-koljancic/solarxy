@@ -246,8 +246,10 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // The host caches the gizmo's snap steps and orientation; push the current
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
+    pushSelectionHighlight();
     usePrefs.subscribe((state, prev) => {
       if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
+      if (state.prefs.selection !== prev.prefs.selection) pushSelectionHighlight();
     });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
@@ -350,6 +352,13 @@ export function setTool(tool: ToolMode): void {
 export function pushGizmoSettings(): void {
   if (!client) return;
   getClient().setGizmoSettings(usePrefs.getState().prefs.viewport);
+}
+
+/** Pushes the selection-highlight preference into the host (phase 18).
+ * Called on boot and on any prefs change, like the gizmo ergonomics. */
+export function pushSelectionHighlight(): void {
+  if (!client) return;
+  getClient().setSelectionHighlight(usePrefs.getState().prefs.selection);
 }
 
 /** Escape during a gizmo drag: rolls it back. */

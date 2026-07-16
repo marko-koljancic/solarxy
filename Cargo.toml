@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/solarxy-core",
     "crates/solarxy-formats",
+    "crates/solarxy-imaging",
     "crates/solarxy-kernel",
     "crates/solarxy-graph",
     "crates/solarxy-scenefile",

@@ -19,7 +19,7 @@ use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{
-    BypassBehavior, Category, ContextMask, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
+    BypassBehavior, Category, ContextSet, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
 };
 
 #[must_use]
@@ -29,7 +29,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Subdivide",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
         ],

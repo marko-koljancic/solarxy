@@ -18,7 +18,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { isAssetsPanelOpen, setAssetsPanelOpen, setReviewPanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, isTexturePanelOpen, setAssetsPanelOpen, setReviewPanelOpen, setTexturePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -127,6 +127,8 @@ export function MenuBar() {
     // The Assets panel (item 2): presence in the dock is its open state,
     // the Review-panel pattern.
     { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
+    // The texture viewer (phase 19): same presence-is-state pattern.
+    { label: "Texture Viewer", onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
   ];
 
   const reviewMode = useReview((s) => s.reviewMode);

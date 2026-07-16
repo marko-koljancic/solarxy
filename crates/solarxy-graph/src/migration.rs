@@ -179,8 +179,8 @@ mod tests {
     use crate::registry::param_spec::{ParamSpec, ParamType};
     use crate::registry::resolve::ResolvedParams;
     use crate::registry::{
-        BypassBehavior, Category, ContextMask, MigrateError, NodeRole, NodeTypeDescriptor,
-        PortSpec, Registry,
+        BypassBehavior, Category, ContextSet, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
+        Registry,
     };
     use crate::registry::coerce::DataType;
 
@@ -212,7 +212,8 @@ mod tests {
             version: 2,
             display_name: "Widget",
             category: Category::Primitives,
-            contexts: ContextMask::SUBFLOW,
+            contexts: ContextSet::GEO,
+            opens: None,
             inputs: vec![],
             outputs: vec![
                 PortSpec::single("geometry", "Geometry", DataType::Geometry, false).default_port(),

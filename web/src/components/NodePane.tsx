@@ -5,13 +5,13 @@
 // depends on properties internals.
 
 import { ReactFlowProvider } from "@xyflow/react";
-import { ctxKey } from "../engine/types";
+import { ctxKey, type GraphContext } from "../engine/types";
 import { FlowListView } from "../flow/FlowListView";
 import { NodeCanvas } from "../flow/NodeCanvas";
 import { nodeLabel } from "../flow/nodeLabel";
 import { IconGraphView, IconListView } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
-import { selectGraph, useMirror } from "../store/mirror";
+import { useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 import { NodesMenu } from "./menu/NodesMenu";
 import { NodePaneViewMenu } from "./menu/NodePaneViewMenu";
@@ -20,19 +20,54 @@ import { NodePalette } from "./NodePalette";
 function Breadcrumb() {
   const current = useMirror((s) => s.current);
   const registry = useMirror((s) => s.registry);
-  const root = useMirror((s) => selectGraph(s, "root"));
+  const contexts = useMirror((s) => s.contexts);
   const setCurrent = useMirror((s) => s.setCurrent);
 
   if (current === "root") return <div className="breadcrumb">Scene</div>;
-  const owner = root.nodes.find((n) => n.id === current.subflow);
-  const name = owner ? nodeLabel(owner, descriptorFor(registry, owner.typeId)) : "subflow";
+
+  // Walk the owner chain up to the root (containers nest since phase 17):
+  // each child context's owner node lives in some enclosing graph; that
+  // graph is the next crumb out.
+  const chain: { ctx: GraphContext; label: string }[] = [];
+  let cursor: GraphContext = current;
+  let guard = 0;
+  while (cursor !== "root" && guard < 64) {
+    guard += 1;
+    const ownerId = cursor.subflow;
+    let holder: GraphContext = "root";
+    let ownerLabel = "subflow";
+    for (const [key, g] of Object.entries(contexts)) {
+      const owner = g.nodes.find((n) => n.id === ownerId);
+      if (owner) {
+        ownerLabel = nodeLabel(owner, descriptorFor(registry, owner.typeId));
+        holder = key === "root" ? "root" : { subflow: Number(key.slice(4)) };
+        break;
+      }
+    }
+    chain.unshift({ ctx: cursor, label: ownerLabel });
+    cursor = holder;
+  }
+
   return (
     <div className="breadcrumb">
       <button className="crumb-link" onClick={() => setCurrent("root")}>
         Scene
       </button>
-      <span className="crumb-sep">›</span>
-      <span>{name}</span>
+      {chain.map((crumb, i) => {
+        const last = i === chain.length - 1;
+        return (
+          <span key={ctxKey(crumb.ctx)}>
+            <span className="crumb-sep">›</span>
+            {last ? (
+              <span>{crumb.label}</span>
+            ) : (
+              <button className="crumb-link" onClick={() => setCurrent(crumb.ctx)}>
+                {crumb.label}
+              </button>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

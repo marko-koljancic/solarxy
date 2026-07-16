@@ -5,7 +5,7 @@
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -51,7 +51,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Note",
         category: Category::Utility,
-        contexts: ContextMask::BOTH,
+        contexts: ContextSet::ALL,
+        opens: None,
         inputs: vec![],
         outputs: vec![],
         params,

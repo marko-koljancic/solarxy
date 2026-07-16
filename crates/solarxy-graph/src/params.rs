@@ -38,6 +38,12 @@ pub enum ParamValue {
     /// The selected variant's key.
     Enum(String),
     Asset(AssetId),
+    /// A cross-context reference to another node, stored as the stable
+    /// node id so renames never break it (`None` = unset). The widget and
+    /// error messages render the display path; the id is the truth
+    /// (context-expansion decision C-2: references cross contexts by
+    /// path, never by wire).
+    NodeRef(Option<crate::document::NodeId>),
 }
 
 /// Where a parameter's value comes from (decision 26: values are tagged so

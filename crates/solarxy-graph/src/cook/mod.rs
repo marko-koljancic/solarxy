@@ -120,6 +120,15 @@ impl Inputs {
             _ => None,
         }
     }
+
+    /// The material on a single-arity port, if connected (phase 20).
+    #[must_use]
+    pub fn material(&self, key: &str) -> Option<&Arc<solarxy_core::RawMaterialData>> {
+        match self.slot(key) {
+            InputSlot::Single(v) => v.as_material(),
+            _ => None,
+        }
+    }
 }
 
 /// A compute body's outputs, keyed by output-port key.
@@ -158,13 +167,21 @@ impl Outputs {
     }
 
     /// Whether the default geometry output is renderable-empty (the
-    /// keep-last-good test). Non-geometry and absent outputs count as
-    /// empty.
+    /// keep-last-good test). Keep-last-good is a geometry-only semantic
+    /// (the transiently-empty-input case), so outputs that carry no
+    /// geometry value never qualify: an image-only commit must replace
+    /// the cache (a re-decode would otherwise be silently swallowed by
+    /// the stale first commit), and a fully empty commit (mute bypass,
+    /// pass-through with nothing connected) must replace so the node
+    /// actually stops contributing downstream. The `geometry` key is the
+    /// registry-invariant-pinned default-output name (see
+    /// `every_geometry_producing_node_has_a_default_geometry_output`),
+    /// so keying on it is keying on the descriptor's declaration.
     #[must_use]
     pub fn is_renderable_empty(&self) -> bool {
         match self.values.get("geometry") {
             Some(Value::Geometry(set)) => set.is_renderable_empty(),
-            _ => true,
+            _ => false,
         }
     }
 }
@@ -327,6 +344,12 @@ pub struct CookCtx<'a> {
     /// drains it on commit into its per-node validation cache, which
     /// feeds node badges and the per-object overlay lowering.
     validation: Option<ValidationResult>,
+    /// The published values of networks this node references through its
+    /// `NodePath` params, pre-resolved by the driver before the compute
+    /// runs (keyed by the referenced container's id). The engine cooks
+    /// referenced networks first (`ordered_contexts`), so these are fresh
+    /// within the pass. Empty for nodes without references.
+    referenced: BTreeMap<crate::document::NodeId, Value>,
 }
 
 impl<'a> CookCtx<'a> {
@@ -337,7 +360,22 @@ impl<'a> CookCtx<'a> {
             async_jobs,
             warnings: Vec::new(),
             validation: None,
+            referenced: BTreeMap::new(),
         }
+    }
+
+    /// Installs the pre-resolved referenced values (driver-side).
+    pub fn set_referenced(&mut self, referenced: BTreeMap<crate::document::NodeId, Value>) {
+        self.referenced = referenced;
+    }
+
+    /// The published value of a referenced network, if the reference
+    /// resolves (the target exists, its network designates a display node,
+    /// and that node has a committed value). A cook that requires the
+    /// reference treats `None` as a dangling-reference [`CookError`].
+    #[must_use]
+    pub fn referenced(&self, target: crate::document::NodeId) -> Option<&Value> {
+        self.referenced.get(&target)
     }
 
     /// Records a non-fatal warning (badges the node without failing the

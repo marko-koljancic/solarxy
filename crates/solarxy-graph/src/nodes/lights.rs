@@ -10,7 +10,7 @@
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
@@ -114,7 +114,8 @@ fn assemble(
         version: 1,
         display_name,
         category: Category::Lights,
-        contexts: ContextMask::ROOT,
+        contexts: ContextSet::OBJ,
+        opens: None,
         inputs: vec![],
         outputs: vec![],
         params,

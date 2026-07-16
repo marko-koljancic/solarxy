@@ -284,6 +284,10 @@ impl State {
         self.renderer
             .overdraw
             .resize(&self.device, &self.renderer.layouts, width, height);
+        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
+        self.renderer
+            .outline
+            .resize(&self.device, &layouts, width, height);
     }
 
     pub fn update(&mut self) {

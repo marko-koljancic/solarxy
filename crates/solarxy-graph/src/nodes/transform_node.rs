@@ -14,7 +14,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -23,7 +23,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Transform",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()

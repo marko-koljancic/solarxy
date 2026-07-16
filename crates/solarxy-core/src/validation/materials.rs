@@ -73,6 +73,8 @@ mod tests {
             base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
+            shading_model: crate::geometry::ShadingModel::default(),
+            toon_steps: 3.0,
             ambient: None,
             diffuse: None,
             specular: None,

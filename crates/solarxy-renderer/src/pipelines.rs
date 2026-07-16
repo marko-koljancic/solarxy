@@ -141,6 +141,14 @@ pub struct OverlayPipelines {
     pub manipulator_tris: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
+    /// Selection outline (phase 18): the silhouette mask (validation.wgsl's
+    /// transform-only stages into an R8 target, no depth), the jump-flood
+    /// init and step passes (Rg32Float ping-pong), and the rim blit onto
+    /// the composited swapchain view.
+    pub outline_mask: wgpu::RenderPipeline,
+    pub outline_jfa_init: wgpu::RenderPipeline,
+    pub outline_jfa_step: wgpu::RenderPipeline,
+    pub outline_blit: wgpu::RenderPipeline,
 }
 
 pub struct UvPipelines {
@@ -315,6 +323,58 @@ impl Pipelines {
         })
         .sample_count(sample_count)
         .build();
+
+        // Selection outline (phase 18). The mask reuses validation.wgsl's
+        // transform-only vertex stage with a white color uniform; it
+        // ignores depth entirely (the rim marks the full screen-space
+        // silhouette of the selection, occluded or not).
+        let outline_mask = PipelineBuilder::new(
+            device,
+            "Outline Mask",
+            &validation_layout,
+            &validation_shader,
+        )
+        .vertex_entry("vs_validation")
+        .fragment_entry("fs_validation")
+        .buffers(model_instance_buffers())
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .no_blend()
+        .no_depth()
+        .build();
+
+        let outline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Outline JFA Pipeline Layout"),
+            bind_group_layouts: &[&layouts.outline_texture, &layouts.outline_params],
+            push_constant_ranges: &[],
+        });
+        let outline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Outline Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/outline.wgsl").into()),
+        });
+        let outline_jfa_init =
+            PipelineBuilder::new(device, "Outline JFA Init", &outline_layout, &outline_shader)
+                .vertex_entry("vs_fullscreen")
+                .fragment_entry("fs_jfa_init")
+                .color_format(wgpu::TextureFormat::Rg32Float)
+                .no_blend()
+                .no_depth()
+                .build();
+        let outline_jfa_step =
+            PipelineBuilder::new(device, "Outline JFA Step", &outline_layout, &outline_shader)
+                .vertex_entry("vs_fullscreen")
+                .fragment_entry("fs_jfa_step")
+                .color_format(wgpu::TextureFormat::Rg32Float)
+                .no_blend()
+                .no_depth()
+                .build();
+        let outline_blit =
+            PipelineBuilder::new(device, "Outline Blit", &outline_layout, &outline_shader)
+                .vertex_entry("vs_fullscreen")
+                .fragment_entry("fs_outline")
+                .color_format(config.format)
+                .blend_alpha()
+                .no_depth()
+                .build();
 
         let validation_edge = PipelineBuilder::new(
             device,
@@ -915,6 +975,10 @@ impl Pipelines {
                 manipulator_lines,
                 manipulator_tris,
                 validation_overlay,
+                outline_mask,
+                outline_jfa_init,
+                outline_jfa_step,
+                outline_blit,
                 validation_edge,
             },
             uv: UvPipelines {

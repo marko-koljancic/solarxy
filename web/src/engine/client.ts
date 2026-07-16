@@ -4,7 +4,7 @@
 
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
-import type { GizmoPrefs } from "../store/prefs";
+import type { GizmoPrefs, SelectionPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
@@ -142,6 +142,42 @@ export class SolarxyClient {
       s.snapRotate,
       s.snapScale,
     );
+  }
+
+  /** The selection-highlight preference (phase 18). The hex color is
+   * sRGB; the rim draws into an sRGB swapchain view, so the shader wants
+   * linear components (the hardware re-encodes on write). */
+  setSelectionHighlight(s: SelectionPrefs): void {
+    const [r, g, b] = hexToLinearRgb(s.color);
+    this.app.set_selection_highlight(s.style, r, g, b, 1.0, s.width);
+  }
+
+  /** The displayed image of a texture network (phase 19), or null when
+   * it publishes nothing. Pull-based; the viewer fetches on cook changes,
+   * so cooked pixels never ride the event stream. */
+  texturePreview(
+    owner: number,
+  ): { width: number; height: number; pixels: Uint8ClampedArray } | null {
+    return (this.app.texture_preview(owner) ?? null) as {
+      width: number;
+      height: number;
+      pixels: Uint8ClampedArray;
+    } | null;
+  }
+
+  /** Executes an export node's Action param (phase 21); the returned
+   * bytes go to the save path. Throws with the engine's message when the
+   * action cannot run (nothing cooked, unsupported). */
+  invokeAction(
+    ctx: GraphContext,
+    node: number,
+    key: string,
+  ): { filename: string; mime: string; bytes: Uint8Array } {
+    return this.app.invoke_action(ctx, node, key) as {
+      filename: string;
+      mime: string;
+      bytes: Uint8Array;
+    };
   }
 
   /** The live drag's delta text ("X +1.250 m"), or null when nothing is
@@ -391,4 +427,15 @@ export class SolarxyClient {
   loadSlxy(bytes: Uint8Array): SlxyLoadResult {
     return this.app.load_slxy(bytes) as SlxyLoadResult;
   }
+}
+
+/** Parses "#rrggbb" and converts each sRGB channel to linear. */
+function hexToLinearRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  const n = m ? parseInt(m[1], 16) : 0xff9e21;
+  const toLinear = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return [toLinear((n >> 16) & 0xff), toLinear((n >> 8) & 0xff), toLinear(n & 0xff)];
 }

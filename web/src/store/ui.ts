@@ -83,6 +83,9 @@ interface UiState {
   prefsOpen: boolean;
   /** The screenshot modal (not persisted). */
   screenshotOpen: boolean;
+  /** Resolution preset for the next screenshot-modal open (the render
+   * node's Render button, phase 21); consumed once by the modal. */
+  screenshotPreset: { width: number; height: number } | null;
   /** The turntable-export modal (not persisted). */
   turntableOpen: boolean;
   /** The node palette (not persisted; Tab and the Add menu toggle it). */
@@ -114,6 +117,7 @@ interface UiState {
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
   setScreenshotOpen: (open: boolean) => void;
+  setScreenshotPreset: (preset: { width: number; height: number } | null) => void;
   setTurntableOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setBootError: (message: string) => void;
@@ -218,6 +222,7 @@ export const useUi = create<UiState>((set) => {
     shortcutsOpen: false,
     prefsOpen: false,
     screenshotOpen: false,
+    screenshotPreset: null,
     turntableOpen: false,
     paletteOpen: false,
     bootError: null,
@@ -233,6 +238,7 @@ export const useUi = create<UiState>((set) => {
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPrefsOpen: (open) => set({ prefsOpen: open }),
     setScreenshotOpen: (open) => set({ screenshotOpen: open }),
+    setScreenshotPreset: (preset) => set({ screenshotPreset: preset }),
     setTurntableOpen: (open) => set({ turntableOpen: open }),
     setPaletteOpen: (open) => set({ paletteOpen: open }),
     setBootError: (message) => set({ bootError: message }),

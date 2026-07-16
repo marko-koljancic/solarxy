@@ -9,6 +9,7 @@ import { getClient } from "../engine/session";
 import type { ScreenshotResult } from "../engine/types";
 import { usePrefs, type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
+import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 
 /** Capture dimensions (physical px) for a preset over the active pane's
@@ -52,8 +53,16 @@ function filename(): string {
 export function ScreenshotModal({ onClose }: { onClose: () => void }) {
   const defaults = usePrefs((s) => s.prefs.screenshot);
   const view = useViewState((s) => s.view);
-  const [resolution, setResolution] = useState<ScreenshotResolution>(defaults.resolution);
-  const [custom, setCustom] = useState({ w: defaults.customWidth, h: defaults.customHeight });
+  // A render node's Render button (phase 21) presets a custom resolution
+  // for exactly one open; consumed here.
+  const preset = useUi.getState().screenshotPreset;
+  if (preset) useUi.getState().setScreenshotPreset(null);
+  const [resolution, setResolution] = useState<ScreenshotResolution>(
+    preset ? "custom" : defaults.resolution,
+  );
+  const [custom, setCustom] = useState(
+    preset ? { w: preset.width, h: preset.height } : { w: defaults.customWidth, h: defaults.customHeight },
+  );
   const [overlays, setOverlays] = useState({ ...defaults.overlays });
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ url: string; blob: Blob; dims: string } | null>(null);

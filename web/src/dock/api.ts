@@ -137,6 +137,34 @@ export function openAssetPreviewPanel(title: string): void {
   });
 }
 
+// ---- the texture viewer panel (phase 19; added and removed on demand) ----
+
+export function isTexturePanelOpen(): boolean {
+  return api?.getPanel("texture") !== undefined;
+}
+
+/** Adds the Texture viewer panel (tabbed beside Properties, the Assets
+ * pattern) or removes it. */
+export function setTexturePanelOpen(open: boolean): void {
+  if (!api) return;
+  const existing = api.getPanel("texture");
+  if (open) {
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const properties = api.getPanel("properties");
+    api.addPanel({
+      id: "texture",
+      component: "texture",
+      title: "Texture",
+      position: properties ? { referenceGroup: properties.api.group } : undefined,
+    });
+  } else if (existing) {
+    api.removePanel(existing);
+  }
+}
+
 // ---- the review panel (added and removed on demand, N) ----
 
 export function isReviewPanelOpen(): boolean {

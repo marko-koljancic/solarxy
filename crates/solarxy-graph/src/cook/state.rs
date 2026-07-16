@@ -35,10 +35,14 @@ pub struct NodeCookStats {
     pub prims: u64,
     pub meshes: u32,
     pub bounds: Option<AABB>,
+    /// `(width, height)` of the default image output, for nodes whose
+    /// default output is an image rather than geometry (the geometry
+    /// fields stay zero for those).
+    pub image: Option<(u32, u32)>,
 }
 
 impl NodeCookStats {
-    /// Whether two stats describe the same geometry (ignoring
+    /// Whether two stats describe the same output shape (ignoring
     /// `duration_us`, which changes every cook and must not force a stats
     /// event on its own). Bounds compare bit-exact.
     #[must_use]
@@ -46,6 +50,7 @@ impl NodeCookStats {
         self.points == other.points
             && self.prims == other.prims
             && self.meshes == other.meshes
+            && self.image == other.image
             && bounds_eq(self.bounds, other.bounds)
     }
 }

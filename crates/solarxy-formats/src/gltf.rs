@@ -164,6 +164,8 @@ fn build_model(
             base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
+            shading_model: solarxy_core::geometry::ShadingModel::default(),
+            toon_steps: 3.0,
             ambient: None,
             diffuse: None,
             specular: None,
@@ -250,6 +252,14 @@ fn extract_materials(
                 base_color_factor: base_color,
                 alpha_mode,
                 alpha_cutoff,
+                // KHR_materials_unlit maps onto the per-material Unlit
+                // shading model (phase 18); everything else is PBR.
+                shading_model: if mat.unlit() {
+                    solarxy_core::geometry::ShadingModel::Unlit
+                } else {
+                    solarxy_core::geometry::ShadingModel::Pbr
+                },
+                toon_steps: 3.0,
                 ambient: None,
                 diffuse: Some([base_color[0], base_color[1], base_color[2]]),
                 specular: None,

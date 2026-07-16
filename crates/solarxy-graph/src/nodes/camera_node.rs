@@ -12,7 +12,7 @@
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeRole, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 fn kind_is(variant: &str) -> Pred {
     Pred::Eq(ParamValue::Enum(variant.to_string()))
@@ -150,7 +150,8 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
         // No dedicated Camera category; Utility is the root-object home (the
         // registry invariant gates context, not category).
         category: Category::Utility,
-        contexts: ContextMask::ROOT,
+        contexts: ContextSet::OBJ,
+        opens: None,
         inputs: vec![],
         outputs: vec![],
         params,
@@ -174,7 +175,7 @@ mod tests {
     fn descriptor_is_a_portless_root_node() {
         let d = camera_descriptor();
         assert_eq!(d.type_id, "camera");
-        assert!(d.contexts.root);
+        assert!(d.contexts.contains(crate::document::ContextKind::Obj));
         assert!(d.inputs.is_empty() && d.outputs.is_empty());
     }
 

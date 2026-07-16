@@ -284,11 +284,12 @@ export function NodeCanvas() {
     [ctx],
   );
 
-  // Double-click a geo container to enter its subflow.
+  // Double-click a container to enter its child network. Ownership is the
+  // descriptor's `opens` (any network kind), never a category or type id.
   const onNodeDoubleClick = useCallback(
     (_e: React.MouseEvent, node: Node<FlowNodeData>) => {
       const mirror = graph.nodes.find((n) => n.id === Number(node.id));
-      if (mirror && descriptorFor(registry, mirror.typeId)?.category === "container") {
+      if (mirror && descriptorFor(registry, mirror.typeId)?.opens != null) {
         useMirror.getState().setCurrent({ subflow: mirror.id });
       }
     },

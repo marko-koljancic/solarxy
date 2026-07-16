@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Popover, renderDoc } from "./Popover";
 import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
+import { contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
@@ -60,10 +61,11 @@ export function NodePalette() {
     }
   }, [open]);
 
-  const inRoot = current === "root";
+  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const kind = contextKind(registry, current, rootNodes);
   const contextNodes = useMemo(
-    () => (registry?.nodes ?? []).filter((n) => (inRoot ? n.rootContext : n.subflowContext)),
-    [registry, inRoot],
+    () => (registry?.nodes ?? []).filter((n) => n.contexts.includes(kind)),
+    [registry, kind],
   );
 
   // Id/label pairs: filtering stays keyed by the stable snake_case id, the
