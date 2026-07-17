@@ -143,7 +143,7 @@ pub struct OverlayPipelines {
     pub validation_edge: wgpu::RenderPipeline,
     /// Selection outline (phase 18): the silhouette mask (validation.wgsl's
     /// transform-only stages into an R8 target, no depth), the jump-flood
-    /// init and step passes (Rg32Float ping-pong), and the rim blit onto
+    /// init and step passes (`Rg32Float` ping-pong), and the rim blit onto
     /// the composited swapchain view.
     pub outline_mask: wgpu::RenderPipeline,
     pub outline_jfa_init: wgpu::RenderPipeline,
@@ -975,11 +975,11 @@ impl Pipelines {
                 manipulator_lines,
                 manipulator_tris,
                 validation_overlay,
+                validation_edge,
                 outline_mask,
                 outline_jfa_init,
                 outline_jfa_step,
                 outline_blit,
-                validation_edge,
             },
             uv: UvPipelines {
                 uv_gradient,

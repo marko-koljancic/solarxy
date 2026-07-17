@@ -6,9 +6,9 @@
 //! `Renderer::composite_selection_outline` in `frame.rs`):
 //!
 //! 1. Mask: selected objects render their silhouettes into `mask_view`
-//!    (R8Unorm), depth-ignoring, via the validation shader's
+//!    (`R8Unorm`), depth-ignoring, via the validation shader's
 //!    transform-only vertex stage with a white color uniform.
-//! 2. Init: `fs_jfa_init` seeds `ping` (Rg32Float nearest-seed pixel
+//! 2. Init: `fs_jfa_init` seeds `ping` (`Rg32Float` nearest-seed pixel
 //!    coordinates; `(-1,-1)` = none).
 //! 3. Five `fs_jfa_step` passes ping-pong with steps 16, 8, 4, 2, 1
 //!    (supporting rim widths up to 16 px in constant passes); the FIXED
@@ -190,7 +190,7 @@ impl OutlineState {
     /// `dst_view(i)` reading `src_bind_group(i)`.
     #[must_use]
     pub fn step_io(&self, i: usize) -> (&wgpu::BindGroup, &wgpu::TextureView) {
-        if i % 2 == 0 {
+        if i.is_multiple_of(2) {
             (&self.ping_bind_group, &self.pong_view)
         } else {
             (&self.pong_bind_group, &self.ping_view)

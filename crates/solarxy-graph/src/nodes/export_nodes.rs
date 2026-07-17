@@ -12,7 +12,6 @@
 
 use super::common::{geometry_output, params_with, passive_cook};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
-use crate::document::ContextKind;
 use crate::params::ParamValue;
 use crate::registry::coerce::{DataType, Value};
 use crate::registry::param_spec::{EnumVariant, NodePathAccept, ParamSpec, ParamType, Pred};

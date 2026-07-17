@@ -36,6 +36,7 @@ use solarxy_graph::assets::AssetTable;
 use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult, ParsedModel};
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::engine::{EngineEvent, GizmoTarget, SceneSidecar};
+use solarxy_graph::params::{ParamSource, ParamValue};
 use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
@@ -598,10 +599,10 @@ impl SolarxyApp {
         if rpm.abs() > 1e-6 {
             let yaw = rpm * std::f32::consts::TAU / 60.0 * dt;
             for i in 0..self.view.cameras.len() {
-                if self.view.pane_settings[i].turntable_active {
-                    if let Some(cam) = self.view.cameras[i].as_mut() {
-                        cam.inject_orbit_yaw(yaw);
-                    }
+                if self.view.pane_settings[i].turntable_active
+                    && let Some(cam) = self.view.cameras[i].as_mut()
+                {
+                    cam.inject_orbit_yaw(yaw);
                 }
             }
         }
@@ -1280,16 +1281,15 @@ impl SolarxyApp {
             .get(pane)
             .and_then(|c| c.as_ref())
             .map(|c| c.camera)?;
-        if let Some(node) = self.view.look_through.get(pane).copied().flatten() {
-            if let Some(def) = self
+        if let Some(node) = self.view.look_through.get(pane).copied().flatten()
+            && let Some(def) = self
                 .scene_objects
                 .cameras()
                 .and_then(|cams| cams.iter().find(|c| c.id == SceneObjectId(node.0)))
-            {
-                let mut cam = scratch;
-                apply_camera_def(&mut cam, def);
-                return Some(cam);
-            }
+        {
+            let mut cam = scratch;
+            apply_camera_def(&mut cam, def);
+            return Some(cam);
         }
         Some(scratch)
     }
@@ -1431,21 +1431,18 @@ impl SolarxyApp {
 
     /// The current pose (eye + target) of a pane's camera, so the frontend can
     /// author a new `camera` node framed on the current view (create-from-view
-    /// is a frontend-orchestrated AddNode + SetParam, keeping the
+    /// is a frontend-orchestrated `AddNode` + `SetParam`, keeping the
     /// mirror-and-command model intact).
     pub fn pane_camera_pose(&self, pane: usize) -> Result<JsValue, JsError> {
-        let (position, target) = self
-            .view
-            .cameras
-            .get(pane)
-            .and_then(|c| c.as_ref())
-            .map(|c| {
+        let (position, target) = self.view.cameras.get(pane).and_then(|c| c.as_ref()).map_or(
+            ([7.0, 5.0, 7.0], [0.0, 0.0, 0.0]),
+            |c| {
                 (
                     [c.camera.eye.x, c.camera.eye.y, c.camera.eye.z],
                     [c.camera.target.x, c.camera.target.y, c.camera.target.z],
                 )
-            })
-            .unwrap_or(([7.0, 5.0, 7.0], [0.0, 0.0, 0.0]));
+            },
+        );
         to_js(&CameraPoseDto { position, target })
     }
 
@@ -2791,7 +2788,6 @@ impl SolarxyApp {
             let cam = self.view.cameras[pane].as_ref()?;
             (cam.camera.eye, cam.camera.target)
         };
-        use solarxy_graph::params::{ParamSource, ParamValue};
         let cmds = [
             Command::BeginTransaction {
                 label: "Frame Camera".to_string(),

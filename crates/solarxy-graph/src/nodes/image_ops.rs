@@ -11,6 +11,9 @@ use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
+// Mirrors the fields of NodeTypeDescriptor that vary per tex node; grouping
+// them into a struct would just restate the descriptor itself.
+#[allow(clippy::too_many_arguments)]
 fn tex_node(
     type_id: &'static str,
     display_name: &'static str,
@@ -228,6 +231,7 @@ pub fn pack_orm_descriptor() -> NodeTypeDescriptor {
     )
 }
 
+#[allow(clippy::unnecessary_wraps)] // signature matches CookFn
 fn cook_pack_orm(
     p: &ResolvedParams,
     inputs: &Inputs,

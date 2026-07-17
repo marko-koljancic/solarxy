@@ -172,7 +172,7 @@ pub fn write_glb_bytes(meshes: &[ExportMesh<'_>]) -> Result<Vec<u8>, FormatsErro
 
     let mut push_view = |bin: &mut Vec<u8>, bytes: &[u8], target: u32| -> usize {
         // 4-byte alignment per the spec.
-        while bin.len() % 4 != 0 {
+        while !bin.len().is_multiple_of(4) {
             bin.push(0);
         }
         let offset = bin.len();
@@ -238,7 +238,7 @@ pub fn write_glb_bytes(meshes: &[ExportMesh<'_>]) -> Result<Vec<u8>, FormatsErro
         nodes.push(serde_json::json!({ "mesh": i }));
     }
 
-    while bin.len() % 4 != 0 {
+    while !bin.len().is_multiple_of(4) {
         bin.push(0);
     }
     let json = serde_json::json!({

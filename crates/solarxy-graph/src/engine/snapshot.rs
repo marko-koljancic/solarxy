@@ -179,9 +179,10 @@ pub struct NodeTypeSnapshot {
     pub category: crate::registry::Category,
     /// Title Case label for the category; `category` stays the stable id.
     pub category_label: String,
-    /// The network kinds this node may be placed in, in [`ContextKind::ALL`]
-    /// order. Replaces the pre-phase-17 `rootContext`/`subflowContext`
-    /// booleans; the palette filters against the current canvas's kind.
+    /// The network kinds this node may be placed in, in
+    /// [`ContextKind::ALL`](crate::document::ContextKind::ALL) order. Replaces
+    /// the pre-phase-17 `rootContext`/`subflowContext` booleans; the palette
+    /// filters against the current canvas's kind.
     pub contexts: Vec<crate::document::ContextKind>,
     /// The child-network kind this node opens, for containers (`geo`
     /// opens `geo`); `null` otherwise. The frontend derives a canvas's

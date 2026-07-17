@@ -267,9 +267,9 @@ impl BindGroupLayouts {
             uv_overlap_read,
             validation_color,
             overdraw_show,
-            skybox,
             outline_texture,
             outline_params,
+            skybox,
         }
     }
 }
@@ -300,7 +300,7 @@ fn bgl_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-/// A non-filterable float texture entry (Rg32Float sources read with
+/// A non-filterable float texture entry (`Rg32Float` sources read with
 /// textureLoad; filterable textures also satisfy it).
 fn bgl_texture_entry_unfilterable(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {

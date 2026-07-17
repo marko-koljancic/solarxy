@@ -14,11 +14,16 @@
 //! what a texture artist expects from Photoshop-style tools. Alpha is
 //! carried through untouched unless an operator documents otherwise.
 
+// Allow list kept consistent with `solarxy-kernel`, this crate's closest
+// sibling (pure-CPU, wasm-clean, no fs or GPU): operator errors are described
+// on the `ImagingError` variants rather than repeated in each `# Errors`
+// section.
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
+    clippy::missing_errors_doc,
     clippy::module_name_repetitions,
     clippy::many_single_char_names
 )]
@@ -108,9 +113,9 @@ pub fn hue_saturation(
     let mut px = src.pixels.clone();
     for chunk in px.chunks_exact_mut(4) {
         let (h, s, l) = rgb_to_hsl(
-            chunk[0] as f32 / 255.0,
-            chunk[1] as f32 / 255.0,
-            chunk[2] as f32 / 255.0,
+            f32::from(chunk[0]) / 255.0,
+            f32::from(chunk[1]) / 255.0,
+            f32::from(chunk[2]) / 255.0,
         );
         let h = (h + hue_deg / 360.0).rem_euclid(1.0);
         let s = (s * saturation.max(0.0)).clamp(0.0, 1.0);
@@ -166,21 +171,21 @@ pub fn mix(a: &RawImageData, b: &RawImageData, mode: BlendMode, factor: f32) -> 
         for x in 0..w {
             let i = ((y * w + x) * 4) as usize;
             // Nearest sample of b at the same normalized position.
-            let bx = (x as u64 * u64::from(b.width) / u64::from(w.max(1))) as u32;
+            let bx = (u64::from(x) * u64::from(b.width) / u64::from(w.max(1))) as u32;
             let by = (y * b.height / h.max(1)).min(b.height - 1);
             let j = ((by * b.width + bx.min(b.width - 1)) * 4) as usize;
 
             let (ar, ag, ab_, aa) = (
-                a.pixels[i] as f32 / 255.0,
-                a.pixels[i + 1] as f32 / 255.0,
-                a.pixels[i + 2] as f32 / 255.0,
-                a.pixels[i + 3] as f32 / 255.0,
+                f32::from(a.pixels[i]) / 255.0,
+                f32::from(a.pixels[i + 1]) / 255.0,
+                f32::from(a.pixels[i + 2]) / 255.0,
+                f32::from(a.pixels[i + 3]) / 255.0,
             );
             let (br, bg, bb, ba) = (
-                b.pixels[j] as f32 / 255.0,
-                b.pixels[j + 1] as f32 / 255.0,
-                b.pixels[j + 2] as f32 / 255.0,
-                b.pixels[j + 3] as f32 / 255.0,
+                f32::from(b.pixels[j]) / 255.0,
+                f32::from(b.pixels[j + 1]) / 255.0,
+                f32::from(b.pixels[j + 2]) / 255.0,
+                f32::from(b.pixels[j + 3]) / 255.0,
             );
             let blend = |x: f32, y: f32| -> f32 {
                 match mode {
@@ -247,7 +252,7 @@ pub fn pack_orm(
         match src {
             None => to_u8(fallback),
             Some(img) => {
-                let sx = (x as u64 * u64::from(img.width) / u64::from(w.max(1))) as u32;
+                let sx = (u64::from(x) * u64::from(img.width) / u64::from(w.max(1))) as u32;
                 let sy = (y * img.height / h.max(1)).min(img.height - 1);
                 img.pixels[(((sy * img.width) + sx.min(img.width - 1)) * 4) as usize]
             }
@@ -270,11 +275,11 @@ pub fn pack_orm(
 /// (0.5, 0.5, 1.0 = flat), edge pixels clamp.
 #[must_use]
 pub fn height_to_normal(src: &RawImageData, strength: f32) -> RawImageData {
-    let (w, h) = (src.width as i64, src.height as i64);
+    let (w, h) = (i64::from(src.width), i64::from(src.height));
     let height_at = |x: i64, y: i64| -> f32 {
         let cx = x.clamp(0, w - 1);
         let cy = y.clamp(0, h - 1);
-        src.pixels[((cy * w + cx) * 4) as usize] as f32 / 255.0
+        f32::from(src.pixels[((cy * w + cx) * 4) as usize]) / 255.0
     };
     let mut px = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
@@ -404,15 +409,16 @@ pub fn blur(src: &RawImageData, radius: f32) -> RawImageData {
         .map(|i| (-((i * i) as f32) / (2.0 * sigma * sigma)).exp())
         .collect();
     let norm: f32 = kernel.iter().sum();
-    let (w, h) = (src.width as i64, src.height as i64);
+    let (w, h) = (i64::from(src.width), i64::from(src.height));
 
     let pass = |input: &[u8], horizontal: bool| -> Vec<u8> {
         let mut out = vec![0u8; input.len()];
         for y in 0..h {
             for x in 0..w {
                 let mut acc = [0.0f32; 4];
-                for (k, weight) in kernel.iter().enumerate() {
-                    let o = k as i64 - taps;
+                // Zip the same range the kernel was built from, so the tap
+                // offset is an i64 by construction.
+                for (o, weight) in (-taps..=taps).zip(kernel.iter()) {
                     let (sx, sy) = if horizontal {
                         ((x + o).clamp(0, w - 1), y)
                     } else {
@@ -420,7 +426,7 @@ pub fn blur(src: &RawImageData, radius: f32) -> RawImageData {
                     };
                     let idx = ((sy * w + sx) * 4) as usize;
                     for c in 0..4 {
-                        acc[c] += input[idx + c] as f32 * weight;
+                        acc[c] += f32::from(input[idx + c]) * weight;
                     }
                 }
                 let idx = ((y * w + x) * 4) as usize;
@@ -444,12 +450,12 @@ pub fn sharpen(src: &RawImageData, amount: f32) -> RawImageData {
     }
     let soft = blur(src, 1.5);
     let mut px = src.pixels.clone();
-    for i in 0..px.len() {
+    for (i, (p, s)) in px.iter_mut().zip(soft.pixels.iter()).enumerate() {
         if i % 4 == 3 {
             continue; // alpha untouched
         }
-        let v = px[i] as f32 + (px[i] as f32 - soft.pixels[i] as f32) * a;
-        px[i] = to_u8(v / 255.0);
+        let v = f32::from(*p) + (f32::from(*p) - f32::from(*s)) * a;
+        *p = to_u8(v / 255.0);
     }
     RawImageData::new(px, src.width, src.height)
 }
@@ -491,7 +497,7 @@ fn normalize3(x: f32, y: f32, z: f32) -> (f32, f32, f32) {
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let l = (max + min) / 2.0;
+    let l = f32::midpoint(max, min);
     if (max - min).abs() < 1e-6 {
         return (0.0, 0.0, l);
     }

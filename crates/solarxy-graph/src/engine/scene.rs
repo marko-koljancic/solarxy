@@ -439,16 +439,13 @@ fn camera_from_node(
         Some(ParamValue::Enum(k)) if k == "physical" => CameraKind::Physical,
         _ => CameraKind::Perspective,
     };
-    let fov_y = match kind {
-        CameraKind::Physical => {
-            let focal = f32p("focal_length").max(1e-3);
-            let sensor = f32p("sensor_width").max(1e-3);
-            2.0 * (sensor / (2.0 * focal)).atan()
-        }
-        _ => {
-            let v = f32p("fov_y");
-            if v > 1e-4 { v } else { 45.0_f32.to_radians() }
-        }
+    let fov_y = if kind == CameraKind::Physical {
+        let focal = f32p("focal_length").max(1e-3);
+        let sensor = f32p("sensor_width").max(1e-3);
+        2.0 * (sensor / (2.0 * focal)).atan()
+    } else {
+        let v = f32p("fov_y");
+        if v > 1e-4 { v } else { 45.0_f32.to_radians() }
     };
     let aspect = f32p("aspect");
     Some(CameraDef {
