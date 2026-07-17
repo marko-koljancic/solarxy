@@ -109,13 +109,28 @@ jobs:
             sed -i -E "s/^(  sha256 ${key}:[[:space:]]+)\"[^\"]*\"/\1\"${sha}\"/;s/^([[:space:]]+${key}:[[:space:]]+)\"[^\"]*\"/\1\"${sha}\"/" tap/Casks/solarxy.rb
           done
 
-          # Fail loudly if the cask still carries a placeholder or :no_check —
-          # a silently unverified cask is the failure mode this job exists to
-          # prevent.
-          if grep -q "sha256 :no_check" tap/Casks/solarxy.rb; then
-            echo "::error::Cask still carries sha256 :no_check after bump."
+          # Fail loudly if the cask still carries :no_check — a silently
+          # unverified cask is the failure mode this job exists to prevent.
+          # Anchored to a real stanza (optional indent, then `sha256 :no_check`)
+          # and run over comment-stripped text: the cask *documents* why
+          # :no_check was retired, so a naive substring grep matches that prose
+          # and fails every release.
+          if grep -v '^[[:space:]]*#' tap/Casks/solarxy.rb \
+              | grep -qE '^[[:space:]]*sha256[[:space:]]+:no_check'; then
+            echo "::error::Cask still carries a sha256 :no_check stanza after bump."
             exit 1
           fi
+
+          # Both hashes must actually be present, or the sed silently no-opped
+          # (e.g. someone reformatted the stanza and the pattern stopped
+          # matching) and we would ship a cask pinned to the previous release's
+          # checksums.
+          for key in arm intel; do
+            if ! grep -qE "^[[:space:]]*(sha256 )?${key}:[[:space:]]+\"[a-f0-9]{64}\"" tap/Casks/solarxy.rb; then
+              echo "::error::Cask is missing a valid ${key} sha256 after bump."
+              exit 1
+            fi
+          done
 
           # Formula — bump the version, then fill each platform's sha256 from
           # the cargo-dist `.tar.xz.sha256` companion file. These are global
