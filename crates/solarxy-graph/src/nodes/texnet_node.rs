@@ -14,13 +14,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "texnet",
         version: 1,
-        display_name: "Texture Network",
+        display_name: "Tex",
         category: Category::Container,
         contexts: ContextSet::OBJ,
         opens: Some(ContextKind::Tex),
         inputs: vec![],
         outputs: vec![],
-        params: params_with("Texture Network", vec![]),
+        params: params_with("Tex", vec![]),
         bypass: BypassBehavior::NotBypassable,
         doc: "A container you dive into to build an image procedurally: \
               `constant`, `ramp`, `noise` and `import_image` as sources, \

@@ -4435,7 +4435,7 @@
     {
       "typeId": "matnet",
       "version": 1,
-      "displayName": "Material Network",
+      "displayName": "Mat",
       "category": "container",
       "categoryLabel": "Container",
       "contexts": [
@@ -4452,7 +4452,7 @@
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
-          "default": "Material Network",
+          "default": "Mat",
           "hard": null,
           "soft": null,
           "step": null,
@@ -7459,7 +7459,7 @@
     {
       "typeId": "texnet",
       "version": 1,
-      "displayName": "Texture Network",
+      "displayName": "Tex",
       "category": "container",
       "categoryLabel": "Container",
       "contexts": [
@@ -7476,7 +7476,7 @@
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
-          "default": "Texture Network",
+          "default": "Tex",
           "hard": null,
           "soft": null,
           "step": null,

@@ -74,13 +74,13 @@ pub fn matnet_descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "matnet",
         version: 1,
-        display_name: "Material Network",
+        display_name: "Mat",
         category: Category::Container,
         contexts: ContextSet::OBJ,
         opens: Some(ContextKind::Mat),
         inputs: vec![],
         outputs: vec![],
-        params: params_with("Material Network", vec![]),
+        params: params_with("Mat", vec![]),
         bypass: BypassBehavior::NotBypassable,
         doc: "A container for a material network. Surface nodes cook inside \
               it, and whichever node you designate as the display node \
