@@ -1,5 +1,5 @@
 // Middle-mouse precision drag for numeric fields, carried from Minimystix
-// per UX spec section 7: horizontal drag scrubs the value at the selected
+// Horizontal drag scrubs the value at the selected
 // precision decade, vertical drag selects the decade on a floating overlay
 // (6px deadzone, 12px hysteresis, rows of 28px), Escape cancels, window
 // blur cancels, rAF-throttled. Values flow through the caller's

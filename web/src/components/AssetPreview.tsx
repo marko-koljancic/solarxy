@@ -1,4 +1,4 @@
-// The asset preview panel (item 2): opened by double-clicking an asset tile.
+// The asset preview panel: opened by double-clicking an asset tile.
 // Textures get a 2D pan/zoom view (pure DOM). Models get a LIVE 3D orbit on a
 // second WebGPU surface: the Rust host parses the staged bytes through the
 // import path, uploads to a throwaway scene, and renders on demand (open,

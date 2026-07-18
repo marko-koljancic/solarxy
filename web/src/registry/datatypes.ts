@@ -1,5 +1,5 @@
 // Registry-snapshot-derived helpers: typed-handle presentation (color +
-// shape by DataType, UX spec section 6) and connection legality from the
+// shape by DataType) and connection legality from the
 // coercion matrix. All data-driven, so a new node reusing existing types
 // needs zero changes here.
 
@@ -27,7 +27,7 @@ export const DATA_TYPE_COLOR: Record<DataType, string> = {
   color: "#f5a623",
   text: "#9aa0a6",
   image: "#e879c8",
-  // Phase 20's sanctioned addition: a copper hue unused by the twelve
+  // A copper hue unused by the twelve
   // existing types; the hexagon groups it with Image as a resource
   // handle (dual encoding still holds: hue differs).
   material: "#c96f4a",
@@ -83,7 +83,7 @@ export function portDataType(
 
 /** The param types the parameter panel renders a widget for (a new node
  * using only these needs zero frontend changes; a new ParamType is a
- * deliberate frontend addition). `assetRef` lands with imports (Phase 5);
+ * deliberate frontend addition). `assetRef` lands with imports;
  * `nodePath` is the phase-17 cross-context reference picker. */
 export const SUPPORTED_PARAM_TYPES = [
   "float",

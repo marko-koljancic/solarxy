@@ -1,7 +1,7 @@
 // The Add menu: registry-driven node creation grouped by category (a
 // pure interpreter of the snapshot, so a node added in Rust appears with
 // zero changes here), led by a palette-opening search entry. Lives in the
-// node-pane menu bar (Phase 9); node management sits beside the canvas it
+// node-pane menu bar; node management sits beside the canvas it
 // acts on.
 
 import { dispatch } from "../../engine/session";

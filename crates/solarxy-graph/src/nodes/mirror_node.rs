@@ -1,4 +1,4 @@
-//! The `mirror` modifier (node catalog part II, Tier-2, Phase 15). Reflects
+//! The `mirror` modifier. Reflects
 //! the input across an axis-aligned plane, optionally keeping the original.
 //! The kernel op flips winding after the reflection (a negative determinant
 //! reverses triangle orientation) while leaving normals alone, because the
@@ -70,10 +70,23 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Reflects the input across an axis-aligned plane, flipping the \
-              winding so the reflected surface faces outward. Keep Original \
-              merges both halves, which is the usual way to build a symmetric \
-              model from one side.",
+        doc: "Reflects the input across the axis-aligned plane sitting at \
+              Offset along the chosen axis. The reflection carries the normals \
+              to their mirrored directions on its own, but it also reverses \
+              which way round each triangle reads, so the node swaps the \
+              winding back: the reflected half comes out facing outward with \
+              nothing left to repair. Keep Original merges both halves into \
+              one set, original first.\n\n\
+              This is the symmetry workflow. Model one half, mirror the other, \
+              and the two stay in sync as you keep editing upstream. It sits \
+              at the end of the half you built, before the `merge` or \
+              `validate` that sees the whole model.\n\n\
+              Offset is where the mirror is, not where the copy lands: a box \
+              spanning -0.5 to 0.5 mirrored across x = 3 comes out at 5.5 to \
+              6.5, because a reflection maps x to twice the offset minus x. \
+              Nothing is welded either, so mirroring a model that already \
+              crosses the plane leaves you two overlapping surfaces down the \
+              middle.",
         search_aliases: &["reflect", "symmetry", "flip"],
         glyph: "mirror",
         role: NodeRole::Standard,

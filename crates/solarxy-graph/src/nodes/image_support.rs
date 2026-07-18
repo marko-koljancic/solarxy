@@ -1,4 +1,4 @@
-//! Shared plumbing for the texture-context image nodes (phase 19): port
+//! Shared plumbing for the texture-context image nodes: port
 //! constructors, the working-resolution cap, and the input accessor every
 //! image cook funnels through.
 
@@ -12,18 +12,42 @@ use crate::registry::coerce::{DataType, Value};
 
 /// The working-resolution cap (long edge, pixels): every image op clamps
 /// its inputs here so a 4K source cannot hitch the single-threaded wasm
-/// cook (decision C-5). Full-resolution evaluation is the export node's
-/// re-cook concern (phase 21).
+/// cook.
+///
+/// This cap is TERMINAL today. `image_export`'s save action encodes the
+/// node's already-cooked output as-is (`engine/mod.rs`, the
+/// `("image_export", "save")` arm), so a 4K source exports at 2048. A
+/// full-resolution re-cook on export is planned, not built; this comment
+/// used to describe it as the export node's concern, which read as a
+/// statement of fact and is how it came to be documented as one.
 pub const WORKING_EDGE: u32 = 2048;
 
-/// The default single Image input.
+/// The default single Image input. Carries the generic port doc; a node
+/// whose input means something more specific than "the image to operate
+/// on" (a height field, a base layer) chains its own `.doc(...)` over it.
 pub fn image_in(required: bool) -> PortSpec {
-    PortSpec::single("image", "Image", DataType::Image, required).default_port()
+    PortSpec::single("image", "Image", DataType::Image, required)
+        .default_port()
+        .doc(format!(
+            "The image to operate on. Being the default input, a drag from \
+             an upstream node's body wires here, and dropping this node on \
+             an existing wire splices it in. Whatever arrives is clamped to \
+             the working resolution ({WORKING_EDGE} px on the long edge) \
+             before the operator runs, so a large source cannot stall the \
+             cook."
+        ))
 }
 
 /// The default Image output.
 pub fn image_out() -> PortSpec {
-    PortSpec::single("image", "Image", DataType::Image, false).default_port()
+    PortSpec::single("image", "Image", DataType::Image, false)
+        .default_port()
+        .doc(format!(
+            "The resulting image: RGBA8, and never more than {WORKING_EDGE} \
+             px on the long edge, because that is the resolution the \
+             texture context cooks at. Being the default output, a drag \
+             from the node's body wires from here."
+        ))
 }
 
 /// One image output under the catalog's default key.

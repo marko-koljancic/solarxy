@@ -1,7 +1,7 @@
-//! The `merge` modifier (node catalog part II, section 13). Concatenates
+//! The `merge` modifier. Concatenates
 //! its variadic Geometry inputs in port order, deduplicating materials by
 //! content. An empty merge outputs empty geometry with a warning (not an
-//! error). Replaces Minimystix's fixed-input Combine (decision 25).
+//! error). Replaces Minimystix's fixed-input Combine.
 
 use std::sync::Arc;
 
@@ -23,7 +23,15 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)
                 .default_port()
-                .doc("The geometry sets to concatenate, in order."),
+                .doc(
+                    "The geometry sets to concatenate. Wire as many as you like. Order \
+                     matters in three ways: it fixes the mesh order of the result, it \
+                     fixes the order of the deduplicated material table, and a bypassed \
+                     merge passes through the FIRST connected input. A wire whose \
+                     upstream has no geometry yet is skipped, and it contributes exactly \
+                     nothing -- the result is the same as if the wire were not there. \
+                     Connecting nothing at all is a warning, not an error.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with("Merge", vec![]),
@@ -31,8 +39,20 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "inputs".to_string(),
         },
-        doc: "Concatenates its inputs into one geometry set, in port order, \
-              deduplicating identical materials.",
+        doc: "Concatenates every connected geometry input into a single set, in \
+              port order. Materials are deduplicated by content as it goes, so \
+              four copies of the same red plastic arrive as one table entry \
+              rather than four identical ones.\n\n\
+              This is the recombine end of a fan-out: a `box` down one branch \
+              and a `sphere` down another, each with its own `transform`, \
+              merged back into the one set that a `validate` or an output node \
+              sees. It takes as many inputs as you wire into it.\n\n\
+              Nothing is welded, intersected, or fused geometrically. Two \
+              meshes that overlap stay two overlapping meshes and the point \
+              count is exactly the sum of the inputs. What order buys you is \
+              the mesh order downstream and which input a bypass passes \
+              through (the first). Merging nothing is legal: empty geometry \
+              and a warning.",
         search_aliases: &["combine", "join", "union", "append"],
         glyph: "merge",
         role: NodeRole::Gather,

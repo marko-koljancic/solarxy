@@ -36,6 +36,7 @@ import { nodeLabel } from "../flow/nodeLabel";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
+import { Select } from "./Select";
 import { FloatInput } from "./inputs/FloatInput";
 import { VectorInput } from "./inputs/VectorInput";
 
@@ -124,17 +125,13 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <select
-            className="input-field select-input"
+          <Select
+            width={140}
+            ariaLabel={spec.label}
             value={String(value)}
-            onChange={(e) => commit(e.target.value)}
-          >
-            {spec.enumVariants.map(([key, lbl]) => (
-              <option key={key} value={key}>
-                {lbl}
-              </option>
-            ))}
-          </select>
+            options={spec.enumVariants.map(([key, lbl]) => ({ value: key, label: lbl }))}
+            onChange={(v) => commit(v)}
+          />
         </div>
       );
     case "text":
@@ -194,7 +191,7 @@ function Field({ ctx, node, spec }: FieldProps) {
  * control. Selecting a file stages its bytes (content-addressed) and commits
  * the asset hash as the param, which dirties the import node so the next cook
  * yields a parse job to the worker. */
-/** An Action param (phase 21): a button whose press is routed by node
+/** An Action param: a button whose press is routed by node
  * type. Export nodes run the engine's encoder and save the bytes through
  * the File System Access flow; the render node is HOST-interpreted (jump
  * the active pane to its camera, then open the screenshot modal with its
@@ -248,7 +245,7 @@ function numberParam(
   return Number(spec?.default) || fallback;
 }
 
-/** The cross-context reference picker (phase 17): candidates come from
+/** The cross-context reference picker: candidates come from
  * the root graph filtered by the descriptor's accept constraint (`opens`
  * containers or one exact type), and the stored value is the target's
  * stable node id, so renames never break a reference. A value pointing at
@@ -276,19 +273,20 @@ function NodePathField({ ctx, node, spec, label }: FieldProps & { label: ReactNo
   return (
     <div className="param-row">
       {label}
-      <select
-        className="input-field select-input"
+      <Select
+        width={140}
+        ariaLabel={spec.label}
         value={value == null ? "" : String(value)}
-        onChange={(e) => commit(e.target.value === "" ? null : Number(e.target.value))}
-      >
-        <option value="">None</option>
-        {missing && <option value={String(value)}>{`Missing node ${value}`}</option>}
-        {candidates.map((n) => (
-          <option key={n.id} value={String(n.id)}>
-            {nodeLabel(n, descriptorFor(registry, n.typeId))}
-          </option>
-        ))}
-      </select>
+        options={[
+          { value: "", label: "None" },
+          ...(missing ? [{ value: String(value), label: `Missing node ${value}` }] : []),
+          ...candidates.map((n) => ({
+            value: String(n.id),
+            label: nodeLabel(n, descriptorFor(registry, n.typeId)),
+          })),
+        ]}
+        onChange={(v) => commit(v === "" ? null : Number(v))}
+      />
     </div>
   );
 }
@@ -429,7 +427,7 @@ export function ParameterPanel() {
     g.push(p);
     groups.set(p.group, g);
   }
-  // Tabs (Minimystix underline pattern, Phase 7b D1): general first, the
+ // Tabs (Minimystix underline pattern, D1): general first, the
   // rest in declaration order, plus a Validation tab when a report exists.
   const groupNames = [...groups.keys()];
   const orderedGroups = [

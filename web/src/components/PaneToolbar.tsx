@@ -1,5 +1,5 @@
 // Per-pane ghost-text viewport controls floated over the WebGPU canvas
-// (Phase 7b D2, Minimystix ViewportControls / desktop label-menu pattern):
+// (D2, Minimystix ViewportControls / desktop label-menu pattern):
 // frameless bracketed labels that open small local dropdowns, replacing
 // the filled toolbar strip. Pure interpreters of the view-state mirror;
 // every change goes through the session's view actions (Rust owns the
@@ -50,7 +50,7 @@ const INSPECTION_MODES = [
   ["AoPreview", "AO Preview"],
 ] as const;
 
-// Temporary per-pane shading overrides (item 7): the desktop set, wired to
+// Temporary per-pane shading overrides: the desktop set, wired to
 // the already-plumbed camera.material_override uniform. Session-only, so it
 // is never persisted to the scene (reset to None on load, host-side).
 const MATERIAL_OVERRIDES = [
@@ -90,6 +90,16 @@ const BOUNDS = [
   ["off", "Off"],
   ["wholeModel", "Whole model"],
   ["perMesh", "Per mesh"],
+] as const;
+
+/** Wireframe stroke weight. Per pane, like every other entry in this menu, so
+ * a split view can compare weights. The px figures are
+ * `solarxy_core::preferences::LineWeight::width_px`; they are in the labels
+ * because "Light" alone does not tell you what you are choosing between. */
+const LINE_WEIGHTS = [
+  ["Light", "Light (1 px)"],
+  ["Medium", "Medium (2 px)"],
+  ["Bold", "Bold (3 px)"],
 ] as const;
 
 /** One frameless bracketed label opening a local dropdown; closes on
@@ -414,6 +424,16 @@ function PaneControls({ pane, settings, projection, active }: {
             checked={settings.boundsMode === v}
             sticky
             onPick={() => patch({ boundsMode: v })}
+          />
+        ))}
+        <GhostHeading label="Wireframe" />
+        {LINE_WEIGHTS.map(([v, label]) => (
+          <GhostItem
+            key={v}
+            label={label}
+            checked={settings.lineWeight === v}
+            sticky
+            onPick={() => patch({ lineWeight: v })}
           />
         ))}
         <GhostHeading label="Background" />

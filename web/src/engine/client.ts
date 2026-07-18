@@ -144,7 +144,7 @@ export class SolarxyClient {
     );
   }
 
-  /** The selection-highlight preference (phase 18). The hex color is
+  /** The selection-highlight preference. The hex color is
    * sRGB; the rim draws into an sRGB swapchain view, so the shader wants
    * linear components (the hardware re-encodes on write). */
   setSelectionHighlight(s: SelectionPrefs): void {
@@ -152,7 +152,7 @@ export class SolarxyClient {
     this.app.set_selection_highlight(s.style, r, g, b, 1.0, s.width);
   }
 
-  /** The displayed image of a texture network (phase 19), or null when
+  /** The displayed image of a texture network, or null when
    * it publishes nothing. Pull-based; the viewer fetches on cook changes,
    * so cooked pixels never ride the event stream. */
   texturePreview(
@@ -165,7 +165,7 @@ export class SolarxyClient {
     } | null;
   }
 
-  /** Executes an export node's Action param (phase 21); the returned
+  /** Executes an export node's Action param; the returned
    * bytes go to the save path. Throws with the engine's message when the
    * action cannot run (nothing cooked, unsupported). */
   invokeAction(
@@ -304,7 +304,7 @@ export class SolarxyClient {
     return this.app.asset_manifest() as AssetRef[];
   }
 
-  /** Opens (or replaces) the live model preview on a canvas (item 2). */
+  /** Opens (or replaces) the live model preview on a canvas. */
   previewOpen(canvas: HTMLCanvasElement, hash: string, name: string): void {
     this.app.preview_open(canvas, hash, name);
   }

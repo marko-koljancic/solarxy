@@ -1,4 +1,4 @@
-// Desk snapshots (Phase 10 shape): the forward migration of pre-docking desks,
+// Desk snapshots (shape): the forward migration of pre-docking desks,
 // and sanitize's coercion of anything stale or hand-edited.
 
 import { describe, expect, it } from "vitest";

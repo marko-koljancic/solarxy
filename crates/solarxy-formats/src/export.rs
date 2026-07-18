@@ -1,4 +1,4 @@
-//! Geometry and image WRITERS (context-expansion phase 21, decision C-7):
+//! Geometry and image WRITERS:
 //! the first export surface in the workspace. Byte-first like the
 //! loaders; the caller owns file handling.
 //!

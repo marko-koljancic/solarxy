@@ -2,7 +2,7 @@
 // backfills new fields when an older persisted blob rehydrates.
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFS, motionReduced, resolveTheme } from "./prefs";
+import { DEFAULT_PREFS, motionReduced, resolveTheme, sanitizeTheme } from "./prefs";
 
 describe("resolveTheme", () => {
   it("passes explicit choices through", () => {
@@ -25,6 +25,30 @@ describe("motionReduced", () => {
   it("follows the system under 'system'", () => {
     expect(motionReduced("system", true)).toBe(true);
     expect(motionReduced("system", false)).toBe(false);
+  });
+});
+
+describe("sanitizeTheme", () => {
+  // 0.7.1 collapsed "mpw" into "light". Anyone who had selected the MPW
+  // variant must keep the palette they picked rather than being bounced to
+  // a theme option that no longer exists.
+  it("migrates the retired mpw choice to light", () => {
+    expect(sanitizeTheme("mpw")).toBe("light");
+  });
+
+  it("passes the surviving choices through", () => {
+    expect(sanitizeTheme("dark")).toBe("dark");
+    expect(sanitizeTheme("light")).toBe("light");
+    expect(sanitizeTheme("system")).toBe("system");
+  });
+
+  // A blob hand-edited or written by a future build would otherwise put an
+  // unrenderable value on `body`, which reads as an unthemed page rather
+  // than an error.
+  it("falls back to the default for anything unrecognised", () => {
+    for (const junk of ["solarized", "", null, undefined, 7, {}]) {
+      expect(sanitizeTheme(junk)).toBe(DEFAULT_PREFS.appearance.theme);
+    }
   });
 });
 

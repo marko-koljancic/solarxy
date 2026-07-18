@@ -116,7 +116,7 @@ impl From<AlphaMode> for u32 {
     }
 }
 
-/// The per-material shading model (context-expansion phase 18). `Pbr` is
+/// The per-material shading model. `Pbr` is
 /// the full Cook-Torrance metallic-roughness path and the default;
 /// everything else is a stylized branch in `fs_main`. The discriminants
 /// mirror the WGSL `switch material.shading_model` arms; conversion via
@@ -202,7 +202,7 @@ pub struct RawMaterialData {
     pub normal_texture_name: Option<String>,
     pub shininess_texture_name: Option<String>,
     pub dissolve_texture_name: Option<String>,
-    /// The per-material shading model (phase 18). Defaults to `Pbr`, so
+    /// The per-material shading model. Defaults to `Pbr`, so
     /// every pre-existing material (imports, `.slxy`, the transfer codec's
     /// serde header) renders exactly as before.
     #[cfg_attr(feature = "serde", serde(default))]

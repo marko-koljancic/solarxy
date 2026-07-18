@@ -93,7 +93,7 @@ export function IconDisplay(p: IconProps) {
 }
 
 export function IconVisibility(p: IconProps) {
-  // The root visibility lamp (D-23): a ring with a lit core, echoing the
+  // The root visibility lamp: a ring with a lit core, echoing the
   // node's vis-dot badge.
   return (
     <Svg {...p}>
@@ -141,7 +141,7 @@ export function IconTrash(p: IconProps) {
 }
 
 export function IconRename(p: IconProps) {
-  // A text cursor between serifs (the radial's rename wedge, D-7).
+ // A text cursor between serifs (the radial's rename wedge).
   return (
     <Svg {...p}>
       <path d="M6 3h4M6 13h4M8 3v10" />
@@ -156,6 +156,67 @@ export function IconDive(p: IconProps) {
       <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
       <path d="M8 5.5v5" />
       <path d="M5.8 8.3 8 10.5l2.2-2.2" />
+    </Svg>
+  );
+}
+
+// ---- Viewport transform tools -------------------------------------------
+//
+// The four live in this registry rather than beside ToolColumn because they
+// were the only icons in the codebase defined outside it.
+//
+// Each glyph is drawn CENTRED ON THE 16x16 GRID: its bounding box is
+// symmetric about (8, 8). That is the whole fix for the tools looking
+// off-centre in their buttons -- the button already flex-centres the <svg>,
+// but centring the box does nothing when the artwork inside it is not
+// centred. The old set drew the cursor over x 2..10 and the scale over
+// x 1..12.5 in a shared 0 0 14 14 box, so each sat a different distance from
+// its button's middle.
+
+export function IconToolSelect(p: IconProps) {
+  // An arrow pointer. Solid, so it reads at 19px where a stroked outline
+  // would fill in.
+  return (
+    <Svg {...p}>
+      <path
+        d="M4.55 2.8 L4.55 12.0 L6.75 9.9 L8.25 13.2 L9.95 12.4 L8.45 9.2 L11.45 8.9 Z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </Svg>
+  );
+}
+
+export function IconToolMove(p: IconProps) {
+  // Four-way arrows: symmetric by construction.
+  return (
+    <Svg {...p}>
+      <path d="M8 2.2V13.8M2.2 8h11.6" />
+      <path d="M8 2.2 6.1 4.3M8 2.2l1.9 2.1M8 13.8l-1.9-2.1M8 13.8l1.9-2.1" />
+      <path d="M2.2 8l2.1-1.9M2.2 8l2.1 1.9M13.8 8l-2.1-1.9M13.8 8l-2.1 1.9" />
+    </Svg>
+  );
+}
+
+export function IconToolRotate(p: IconProps) {
+  // An arc around (8, 8) with the arrowhead sitting ON the circle, so the
+  // head does not push the bounding box off centre.
+  return (
+    <Svg {...p}>
+      <path d="M11.54 4.46 A5 5 0 1 1 8 3" />
+      <path d="M8.1 2.9 L11.9 4.1 L10.6 6.9 Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function IconToolScale(p: IconProps) {
+  // Two equal handles on a diagonal: one filled, one open, mirrored about
+  // (8, 8).
+  return (
+    <Svg {...p}>
+      <rect x="2.3" y="10.3" width="3.4" height="3.4" fill="currentColor" stroke="none" />
+      <rect x="10.3" y="2.3" width="3.4" height="3.4" />
+      <path d="M6.4 9.6 9.6 6.4" />
     </Svg>
   );
 }

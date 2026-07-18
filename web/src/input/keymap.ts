@@ -1,4 +1,4 @@
-// The keyboard map: a single typed table (UX spec section 16) feeding the
+// The keyboard map: a single typed table feeding the
 // dispatcher AND the generated shortcuts modal, so the two can never drift.
 // Contexts follow the cursor-hover focus model: "global" fires anywhere
 // (outside text fields), "canvas" only while the pointer is over the node
@@ -41,10 +41,11 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "cook", keys: "mod+enter", context: "global", group: "Edit", description: "Cook now (manual mode)" },
   { id: "bypass", keys: "b", context: "global", group: "Node Canvas", description: "Toggle bypass on selection" },
   { id: "palette", keys: "tab", context: "global", group: "Node Canvas", description: "Open the node palette", note: "When the canvas has focus" },
-  // Narrowed from global to canvas in Phase 11: that is precisely what frees E
+  // Narrowed from global to canvas: that is precisely what frees E
   // over the viewport for the Rotate tool. It was always a Node Canvas action.
   { id: "display-flag", keys: "e", context: "canvas", group: "Node Canvas", description: "Set the display flag on the selection (subflow)" },
   { id: "rename", keys: "f2", context: "canvas", group: "Node Canvas", description: "Rename the first selected node (inline)" },
+  { id: "node-info", keys: "i", context: "canvas", group: "Node Canvas", description: "Show info for the selected node", note: "Ports, parameters and cook status; also on the hover radial" },
   { id: "flow-grid", keys: "g", context: "canvas", group: "Node Canvas", description: "Toggle the canvas grid" },
   { id: "flow-minimap", keys: "m", context: "canvas", group: "Node Canvas", description: "Toggle the minimap" },
   { id: "flow-controls", keys: "c", context: "canvas", group: "Node Canvas", description: "Toggle the zoom controls" },
@@ -71,14 +72,14 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "uv-overlap-toggle", keys: "o", context: "viewport", group: "Inspection", description: "Toggle the UV overlap display (UV pane)" },
   // Viewport tools (Maya-style Q/W/E/R; Blender's G/R/S collide with the grid,
   // connection-style and review bindings). E is free over the viewport because
-  // Phase 11 narrowed the display-flag binding to the canvas context, which was
+ // narrowed the display-flag binding to the canvas context, which was
   // always where it belonged.
   { id: "tool-select", keys: "q", context: "viewport", group: "Viewport & Layout", description: "Tool: Select" },
   { id: "tool-move", keys: "w", context: "viewport", group: "Viewport & Layout", description: "Tool: Move (translate gizmo)" },
   { id: "tool-rotate", keys: "e", context: "viewport", group: "Viewport & Layout", description: "Tool: Rotate (rotation rings)" },
   { id: "tool-scale", keys: "r", context: "viewport", group: "Viewport & Layout", description: "Tool: Scale (scale handles)" },
   { id: "gizmo-orientation", keys: "x", context: "viewport", group: "Viewport & Layout", description: "Toggle gizmo orientation (world / local)" },
-  // Review (Phase 7): mode toggle over the viewport, panel anywhere; Esc
+  // Review: mode toggle over the viewport, panel anywhere; Esc
   // walks the cancel ladder (gizmo drag > draft > re-anchor > review mode >
   // maximized panel).
   { id: "review-mode", keys: "shift+r", context: "viewport", group: "Review", description: "Toggle review mode (click geometry to pin a note)" },

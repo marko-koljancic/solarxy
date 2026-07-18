@@ -1,7 +1,7 @@
 // The one generic node component: every node type renders through it, its
 // ports, fill, glyph, and silhouette derived from the registry snapshot (so
 // a node added in Rust needs no new component). Evo anatomy (revamp R2,
-// decisions D-4, D-10..D-11, D-15, D-16, D-18; polish D-20/D-21/D-23): a
+// a
 // 3.5:1 instrument body with the category pastel fill, a per-type glyph
 // inked directly on the body in a darkened category tone, symmetric
 // rounded role silhouettes (rect, container square, gather dome, branch
@@ -45,7 +45,7 @@ function handleLeft(index: number, count: number): string {
   return `${((index + 1) / (count + 1)) * 100}%`;
 }
 
-/** Handles float clear of the body (D-4): 11px dot, ~3px air gap; gather
+/** Handles float clear of the body: 11px dot, ~3px air gap; gather
  * inputs sit above the dome. */
 function handleStyle(
   color: string,
@@ -106,11 +106,11 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   // Empty-geo indicator: a container whose subflow has no nodes or no
   // display flag produces nothing in the scene; render it hollow.
   const subflow = useMirror((s) => s.contexts[`sub:${node.id}`]);
-  // Zoom LOD (D-16): the label stack degrades with zoom. Bucketed to the
-  // two D-11 thresholds so panning never re-renders nodes, only threshold
+  // Zoom LOD: the label stack degrades with zoom. Bucketed to the
+  // two thresholds so panning never re-renders nodes, only threshold
   // crossings do.
   const zoomBucket = useStore((s) => (s.transform[2] >= 0.9 ? 2 : s.transform[2] >= 0.7 ? 1 : 0));
-  // Manual mode: the stale tag plus body wash (D-15: no ring; rings mean
+ // Manual mode: the stale tag plus body wash (no ring; rings mean
   // selection). Auto mode: a subtle pending tint while the cook catches up.
   const stale = cookMode === "manual" && inStale;
   const pending = cookMode === "auto" && inStale;
@@ -122,7 +122,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const glyph = glyphPath(desc);
   const shapedPath = ROLE_BODY_PATHS[role];
 
-  // Inline rename (Phase 8): opened by double-clicking the label (the node
+  // Inline rename: opened by double-clicking the label (the node
   // body keeps its container-dive double-click) or by F2 via the ui-store
   // rename request. Committing is one ordinary setParam on `name`.
   const [renaming, setRenaming] = useState(false);
@@ -153,7 +153,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   // cook arc as "cooking".
   const loading = status?.state === "cooking" || status?.state === "pending";
 
-  // Wings (D-4) live on rect bodies only (standard, gather); shaped
+  // Wings live on rect bodies only (standard, gather); shaped
   // silhouettes keep bypass and display reachable through the radial and
   // keyboard. The display wing is a subflow affordance (the root uses the
   // additive visibility eye instead).
@@ -167,7 +167,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const infoLine = nodeInfoLine(desc, node, assetDisplayName);
   const description = authoredDescription(node);
   // The grey type label disambiguates a renamed node (an un-renamed node's
-  // title IS the type name); LOD-gated at zoom 0.7 (D-11).
+  // title IS the type name); LOD-gated at zoom 0.7.
   const showTypeLabel = zoomBucket >= 1 && desc !== undefined && title !== desc.displayName;
   const showDescription = zoomBucket >= 2 && description !== null;
 
@@ -188,7 +188,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
     cancelRadialTimer();
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      // Identity only (Phase 10): the ring derives its screen anchor from the
+      // Identity only: the ring derives its screen anchor from the
       // live xyflow transform, and its mutable flags from the mirror, so it
       // tracks the node through pan, zoom, bypass and display changes.
       useRadial.getState().openRadial({
@@ -219,7 +219,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       {isDisplay && <span className="display-halo" aria-hidden />}
 
       {ctx === "root" && hasVisibleParam(desc) && (
-        // Root visibility lamp (Phase 8, restyled D-23): registry-gated
+ // Root visibility lamp: registry-gated
         // (note declares no `visible`, so it gets no lamp), distinct from
         // the subflow display flag. A filled display-blue dot when
         // visible, hollow and dimmed when hidden. An ordinary setParam,

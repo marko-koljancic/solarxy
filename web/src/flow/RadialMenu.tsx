@@ -1,4 +1,4 @@
-// The Houdini-style hover radial (Phase 7b; D-7 revised by D-22): six
+// The Houdini-style hover radial: six
 // wedges on a 60-degree pitch with 54-degree sweeps closing a full,
 // symmetric circle, centred at E rename / NE display or visibility /
 // NW dive / W info / SW bypass / SE delete. Conditional actions render
@@ -11,7 +11,7 @@
 // radius, on any outside pointerdown (drag/marquee/connect starts), or
 // on Esc.
 //
-// Phase 10: the ring TRACKS its node. It renders inside the ReactFlowProvider
+// The ring TRACKS its node. It renders inside the ReactFlowProvider
 // (so it can subscribe to the viewport transform) but still portals to the body
 // (so its stacking context is unchanged), and recomputes its anchor every render
 // from the live transform instead of a stale open-time DOM rect. The band width
@@ -30,9 +30,9 @@ import { useUi } from "../store/ui";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
-/** Band width (D-7's 38px band, kept by D-22). */
+/** Band width. */
 const RING_WIDTH = 38;
-/** The D-22 inner radius: clears a 112x32 body's half-width (56) with
+/** The inner radius: clears a 112x32 body's half-width (56) with
  * air, so the ring never sits on the side wings. Zoomed-in nodes grow,
  * so the live inner radius is the larger of this and the measured node
  * clearance. */
@@ -152,7 +152,7 @@ export function RadialMenu() {
   if (!target || !anchor) return null;
   const t = target;
 
-  // Live node state (Phase 10): bypass and display flags come from the mirror,
+  // Live node state: bypass and display flags come from the mirror,
   // so the ring reflects the node as it is now, not as it was when the ring
   // opened.
   const node = graph.nodes.find((n) => n.id === t.nodeId);
@@ -165,7 +165,7 @@ export function RadialMenu() {
   const size = (r1 + 8) * 2;
   const c = size / 2;
 
-  // The NE wedge is context-dependent (Phase 8): in a subflow it is the
+  // The NE wedge is context-dependent: in a subflow it is the
   // display flag (a radio selecting the container's output); at root it
   // toggles the node's `visible` param (additive per-node visibility),
   // gated on the descriptor declaring one (note gets a disabled wedge).
@@ -206,8 +206,8 @@ export function RadialMenu() {
           },
         };
 
-  // D-22 wedge layout: six 60-degree wedges close the full circle, the
-  // D-7 mnemonics kept (E rename, NE display/visibility, NW dive, W info,
+  // Wedge layout: six 60-degree wedges close the full circle, the
+  // Mnemonics (E rename, NE display/visibility, NW dive, W info,
   // SW bypass, SE delete). Conditional actions render disabled rather
   // than absent so the ring stays symmetric.
   const segments: Segment[] = [

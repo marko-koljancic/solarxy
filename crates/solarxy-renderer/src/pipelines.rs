@@ -141,7 +141,7 @@ pub struct OverlayPipelines {
     pub manipulator_tris: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
-    /// Selection outline (phase 18): the silhouette mask (validation.wgsl's
+    /// Selection outline: the silhouette mask (validation.wgsl's
     /// transform-only stages into an R8 target, no depth), the jump-flood
     /// init and step passes (`Rg32Float` ping-pong), and the rim blit onto
     /// the composited swapchain view.
@@ -324,7 +324,7 @@ impl Pipelines {
         .sample_count(sample_count)
         .build();
 
-        // Selection outline (phase 18). The mask reuses validation.wgsl's
+        // Selection outline. The mask reuses validation.wgsl's
         // transform-only vertex stage with a white color uniform; it
         // ignores depth entirely (the rim marks the full screen-space
         // silhouette of the selection, occluded or not).

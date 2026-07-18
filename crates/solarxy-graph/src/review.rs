@@ -1,6 +1,6 @@
-//! In-document review annotations (node catalog / UX review system).
+//! In-document review annotations.
 //!
-//! Phase 3 shipped the data model plus annotation CRUD; Phase 7 completed
+//! shipped the data model plus annotation CRUD; completed
 //! it: anchors carry an optional `(mesh, face, barycentric)` pin with a
 //! world-space fallback and a cheap structural [`geometry_hash`] of the
 //! anchored output, annotations carry author/timestamps and flat reply
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn phase3_shaped_annotation_deserializes_with_defaults() {
+    fn legacy_shaped_annotation_deserializes_with_defaults() {
         // The pre-Phase-7 wire shape: no mesh/world/hash/author/timestamps.
         let json = r#"{
             "id": 7,

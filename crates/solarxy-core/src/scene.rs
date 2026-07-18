@@ -1,6 +1,6 @@
 //! GPU-free runtime scene types: the contract between the node engine
 //! (`solarxy-graph`, next milestone phase) and the renderer's multi-object
-//! scene (`solarxy-renderer::scene_objects`).
+//! scene (`solarxy-renderer:scene_objects`).
 //!
 //! The engine and the renderer never depend on each other; they communicate
 //! exclusively through [`SceneDelta`] values built from these types. On the
@@ -47,7 +47,7 @@ pub struct CookedGeometry {
     pub bounds: AABB,
 }
 
-/// Light variety, mirroring the node catalog's six light nodes.
+/// Light variety, mirroring the six light node types.
 /// `Ambient` and `Hemisphere` modulate the ambient/IBL term and do not
 /// consume one of the renderer's per-light slots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub enum LightKind {
     Directional,
     Spot,
     /// V1 renders rect-area as a soft point-light approximation
-    /// (plan decision 17); `area_extent` is retained for the LTC upgrade.
+    /// ; `area_extent` is retained for the LTC upgrade.
     RectArea,
     Ambient,
     Hemisphere,
@@ -65,7 +65,7 @@ pub enum LightKind {
 /// One light's resolved runtime description. Field applicability by kind is
 /// documented per field; irrelevant fields hold their defaults. Angles are
 /// radians here — the engine's param resolver owns the degrees-to-radians
-/// conversion (units convention, node catalog part I).
+/// conversion (units convention).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightDef {
     pub kind: LightKind,
@@ -93,7 +93,7 @@ pub struct LightDef {
     pub area_extent: [f32; 2],
     /// Hemisphere ground color (linear RGB).
     pub ground_color: [f32; 3],
-    /// Exclusive shadow caster (plan decision 27): the engine enforces
+    /// Exclusive shadow caster: the engine enforces
     /// radio semantics, so at most one visible light carries `true`.
     pub cast_shadow: bool,
     /// Shadow map resolution for the caster (512-4096).

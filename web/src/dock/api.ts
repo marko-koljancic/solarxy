@@ -137,7 +137,7 @@ export function openAssetPreviewPanel(title: string): void {
   });
 }
 
-// ---- the texture viewer panel (phase 19; added and removed on demand) ----
+// ---- the texture viewer panel (added and removed on demand) ----
 
 export function isTexturePanelOpen(): boolean {
   return api?.getPanel("texture") !== undefined;

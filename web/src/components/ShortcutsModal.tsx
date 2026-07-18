@@ -1,5 +1,5 @@
 // The keyboard shortcuts modal, generated ENTIRELY from the typed keymap
-// table (UX spec section 16: the table feeds both the dispatcher and this
+// table (section 16: the table feeds both the dispatcher and this
 // modal, preventing the README-vs-code drift Minimystix accumulated).
 // No shortcut strings are hardcoded here or anywhere outside keymap.ts.
 

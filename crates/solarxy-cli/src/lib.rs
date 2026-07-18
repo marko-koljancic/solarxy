@@ -24,6 +24,8 @@ pub mod parser;
 pub(crate) mod tui;
 #[cfg(feature = "tui")]
 pub mod tui_analysis;
+#[cfg(feature = "tui")]
+pub mod tui_theme;
 mod validators;
 
 // Re-export the validation orchestration library so existing call sites

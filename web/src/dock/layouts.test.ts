@@ -1,4 +1,4 @@
-// The dock layout recipes (Phase 10). The recipe is what makes a preset and a
+// The dock layout recipes. The recipe is what makes a preset and a
 // migrated legacy desk survive a hand-edit and a dockview version bump, so its
 // coercion is the part worth pinning.
 

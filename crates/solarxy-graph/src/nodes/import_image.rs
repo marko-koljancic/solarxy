@@ -1,4 +1,4 @@
-//! `import_image` (Phase 13): turns a staged encoded image (PNG, JPEG,
+//! `import_image`: turns a staged encoded image (PNG, JPEG,
 //! WebP) into a first-class `Image` wire value for the `material` node's
 //! map ports.
 //!
@@ -30,28 +30,59 @@ pub fn descriptor() -> NodeTypeDescriptor {
         display_name: "Import Image",
         category: Category::Import,
         // Placeable in geometry networks (material map wiring) AND in
-        // texture networks (the image-op source), phase 19.
+        // texture networks (the image-op source).
         contexts: ContextSet::GEO.or(ContextSet::TEX),
         opens: None,
         inputs: vec![],
-        outputs: vec![PortSpec::single("image", "Image", DataType::Image, false).default_port()],
+        outputs: vec![
+            PortSpec::single("image", "Image", DataType::Image, false)
+                .default_port()
+                .doc(
+                    "The decoded RGBA image. Empty until a file is staged, \
+                     which a material map port reads as 'no map' rather than \
+                     as a blank texture.",
+                ),
+        ],
         params: params_with(
             "Import Image",
-            vec![ParamSpec::new(
-                "file",
-                "File",
-                "object",
-                ParamType::AssetRef {
-                    accept: [".png", ".jpg", ".jpeg", ".webp"]
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect(),
-                },
-                ParamValue::Asset(crate::params::AssetId(String::new())),
-            )],
+            vec![
+                ParamSpec::new(
+                    "file",
+                    "File",
+                    "object",
+                    ParamType::AssetRef {
+                        accept: [".png", ".jpg", ".jpeg", ".webp"]
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect(),
+                    },
+                    ParamValue::Asset(crate::params::AssetId(String::new())),
+                )
+                .doc(
+                    "The staged image file: PNG, JPEG, or WebP. Identity is \
+                     the bytes' SHA-256, not the path, so staging the same \
+                     file twice costs nothing and a saved `.slxy` embeds a \
+                     copy -- the scene still opens once the original is gone. \
+                     Only this reference is stored in the document; the \
+                     decoded pixels are a cook artifact, rebuilt on load.",
+                ),
+            ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "Loads an image file as a texture value for material map inputs.",
+        doc: "Decodes a PNG, JPEG, or WebP file into an Image value that can \
+              drive a material's map ports or feed a texture network.\n\n\
+              It is the source end of both image workflows: wire it into a \
+              `material` node's base colour, roughness, or normal port to \
+              texture a surface, or drop it in a texture network as the input \
+              an image operator chain works over. It is one of the few nodes \
+              placeable in both geometry and texture networks, for exactly \
+              that reason.\n\n\
+              With no file staged the node emits no value at all, not a \
+              placeholder pixel: a map port wired to it reads as unconnected, \
+              so an empty import never silently drives a channel to black. On \
+              the web the decode happens off the main thread in the import \
+              worker via `createImageBitmap`; a failed decode badges the node \
+              and the previous image stays live.",
         search_aliases: &["image", "texture", "png", "jpeg", "webp", "import"],
         glyph: "import_image",
         role: NodeRole::ImageSource,

@@ -1,9 +1,9 @@
-//! The `switch` utility node (node catalog part II, Tier-2, Phase 15).
+//! The `switch` utility node.
 //! Selects one of N variadic geometry inputs by index.
 //!
 //! **Selection is positional, and that is load-bearing.** The index addresses
 //! the *n*th connected wire in `port_order`, not the *n*th wire that happened
-//! to produce a value. Before Phase 15 the cook driver compacted absent values
+//! to produce a value. Before the cook driver compacted absent values
 //! out of a variadic gather, so a branch that errored, was bypassed to empty,
 //! or had not cooked yet would silently shift every later branch down one and
 //! this node would select the wrong geometry with no indication. The gather now
@@ -32,7 +32,14 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)
                 .default_port()
-                .doc("The candidate geometries, in wire order. The index selects among them."),
+                .doc(
+                    "The candidate geometries. Order is load-bearing: Index \
+                     addresses these by position, so reordering the wires \
+                     changes what a given index selects. Every connected \
+                     branch cooks whether or not it is the one selected. With \
+                     nothing connected the switch emits empty geometry and \
+                     warns.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with(
@@ -49,17 +56,35 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 .soft(0.0, 8.0)
                 .step(1.0)
                 .doc(
-                    "Which input wire to pass through, counting from 0 in wire \
-                     order. Clamped to the number of connected wires.",
+                    "Which input wire to pass through, counting from 0 in \
+                     wire order. Past the last connected wire it clamps to \
+                     that wire and warns rather than emitting nothing. \
+                     Landing on a wire whose upstream produced no geometry \
+                     yields empty, never the neighbouring branch.",
                 ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "inputs".to_string(),
         },
-        doc: "Passes exactly one of its inputs through, chosen by index. The \
-              index counts wires in the order they are connected, so an input \
-              that fails to cook does not shift the selection.",
+        doc: "Passes exactly one of its variadic inputs through, chosen by \
+              Index. Everything else connected to it is ignored, though still \
+              cooked -- a switch selects an output, it does not prune the \
+              graph behind the branches it did not pick.\n\n\
+              It is how a graph carries variants: wire three treatments of a \
+              model into one switch and flip between them from a single \
+              parameter, or drive it from an expression to make the choice \
+              follow something else in the scene. It sits anywhere a `null` \
+              would, and reads as one from downstream.\n\n\
+              Selection is positional, and this is the part that surprises \
+              people. The index addresses the nth connected wire, counting \
+              from 0 in wire order -- not the nth wire that produced \
+              geometry. A branch that errored, was bypassed to empty, or has \
+              not cooked yet still occupies its slot, so it cannot shift the \
+              others down and silently change what you selected. Land on such \
+              a wire and the switch emits empty geometry and warns; it will \
+              not quietly substitute a neighbour. An index past the last wire \
+              clamps to it, also with a warning.",
         search_aliases: &["select", "choose", "multiplex", "if"],
         glyph: "switch",
         role: NodeRole::Branch,

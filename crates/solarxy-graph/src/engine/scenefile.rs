@@ -56,7 +56,7 @@ fn parse_id(s: &str) -> Option<u64> {
 // ---- write direction: DocumentData -> SceneJson ----
 
 fn node_to_json(n: &NodeData) -> sf::NodeJson {
-    // The display `name` param is surfaced top-level (section 6.6) and not
+    // The display `name` param is surfaced top-level and not
     // duplicated in the params map; everything else flattens to a literal.
     let mut params = sf::JsonObject::new();
     let mut name = String::new();

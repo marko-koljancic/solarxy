@@ -1,4 +1,4 @@
-//! The `validate` modifier (node catalog part II, section 13): the only
+//! The `validate` modifier: the only
 //! node with two outputs. It passes its input geometry through unchanged on
 //! `geometry` and emits a `Report` on `report`, wrapping the existing
 //! `solarxy-core` validation pipeline over a `RawModelData` view of the
@@ -33,17 +33,54 @@ pub fn descriptor() -> NodeTypeDescriptor {
         ],
         outputs: vec![
             geometry_output(),
-            PortSpec::single("report", "Report", DataType::Report, false)
-                .doc("The validation report."),
+            PortSpec::single("report", "Report", DataType::Report, false).doc(
+                "The issues found: what went wrong, how bad it is, and which mesh it \
+                 belongs to, one row each. Empty when every enabled check passed.",
+            ),
         ],
         params: params_with(
             "Validate",
             vec![
-                check("normals", "Normals"),
-                check("uvs", "UVs"),
-                check("topology", "Topology"),
-                check("materials", "Materials"),
-                check("budget", "Triangle Budget"),
+                check(
+                    "normals",
+                    "Normals",
+                    "Flags a mesh whose normal count disagrees with its vertex count, \
+                     and triangles whose stored normals point away from the surface \
+                     their winding describes (more than about 120 degrees off). \
+                     Inside-out geometry is the usual cause and `compute_normals` with \
+                     Flip Orientation is the usual fix.",
+                ),
+                check(
+                    "uvs",
+                    "UVs",
+                    "Flags a UV buffer whose length disagrees with the vertex count. \
+                     Geometry carrying no UVs at all is NOT flagged here: that warning \
+                     depends on the source file format expecting them, and cooked \
+                     geometry has no source format. Use `uv_project` to add UVs.",
+                ),
+                check(
+                    "topology",
+                    "Topology",
+                    "Flags the structural defects: an empty or non-triangulated index \
+                     buffer, an index pointing past the end of the vertices, zero-area \
+                     triangles, edges shared by three or more triangles, and boundary \
+                     edges. Boundary edges mean an open mesh, which warns here with no \
+                     way to allow it, so expect them on a plane or a scan.",
+                ),
+                check(
+                    "materials",
+                    "Materials",
+                    "Flags a mesh pointing at a material index its set does not have. \
+                     `merge` already clears such a reference to none as it \
+                     concatenates, so in practice this catches imports.",
+                ),
+                check(
+                    "budget",
+                    "Triangle Budget",
+                    "Turns the Budget comparison on. It is on by default but silent \
+                     until Budget itself is above 0, so switching it off only matters \
+                     once you have set a number.",
+                ),
                 ParamSpec::new(
                     "triangle_budget",
                     "Budget",
@@ -52,14 +89,34 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamValue::Int(0),
                 )
                 .hard(0.0, 2_000_000_000.0)
-                .show_if("budget", Pred::Truthy),
+                .show_if("budget", Pred::Truthy)
+                .doc(
+                    "How many triangles this geometry is allowed. 0 means no limit, \
+                     which is why the check says nothing until you set one. Going over \
+                     is a warning up to 20 percent above the number and an error beyond \
+                     that. The count is the whole input set, not per mesh.",
+                ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Runs the Solarxy validation checks over the input geometry, \
-              passing the geometry through and emitting a report.",
+        doc: "Runs the Solarxy validation checks over the input and emits what \
+              it finds on the `report` output, while the geometry itself \
+              passes through on `geometry` completely unchanged. Each toggle \
+              turns on a group of related checks rather than a single \
+              one.\n\n\
+              It is the only node with two outputs, and that is what makes it \
+              droppable into the middle of a chain you have already built: \
+              wire it between a modeling branch and an output and the result \
+              is identical, you just gain the report. Put one after an import \
+              to see what the file arrived with; the fixes usually live in \
+              `compute_normals` and `uv_project`.\n\n\
+              Nothing here repairs anything, so a reported problem stays \
+              reported until you add the node that fixes it. Above 250,000 \
+              input triangles the checks move off the cook thread onto a \
+              background worker, so on heavy geometry the report lands a \
+              moment after the geometry does.",
         search_aliases: &["validate", "check", "lint", "inspect"],
         glyph: "validate",
         role: NodeRole::Analyzer,
@@ -68,7 +125,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
     }
 }
 
-fn check(key: &str, label: &str) -> ParamSpec {
+fn check(key: &str, label: &str, doc: &str) -> ParamSpec {
     ParamSpec::new(
         key,
         label,
@@ -76,6 +133,7 @@ fn check(key: &str, label: &str) -> ParamSpec {
         ParamType::Bool,
         ParamValue::Bool(true),
     )
+    .doc(doc)
 }
 
 /// Above this input triangle count the validate node offloads to an async

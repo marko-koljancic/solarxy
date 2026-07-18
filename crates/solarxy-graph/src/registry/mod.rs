@@ -1,8 +1,8 @@
 //! The node registry: descriptors, ports, contexts, bypass, and the
-//! registry invariants (node catalog part I, sections 1, 3, 6, 7).
+//! registry invariants (sections 1, 3, 6, 7).
 //!
 //! Adding a node is two touch points: one file in `nodes/` containing
-//! `descriptor()`, the cook function, the optional migrate hook, and unit
+//! `descriptor`, the cook function, the optional migrate hook, and unit
 //! tests; plus one registration line. The invariants below make the
 //! contract's implicit rules explicit and machine-checked.
 
@@ -28,7 +28,7 @@ pub enum Arity {
     Single {
         required: bool,
     },
-    /// Ordered, unlimited, reorderable (decision 25).
+    /// Ordered, unlimited, reorderable.
     Variadic {
         min: usize,
     },
@@ -194,7 +194,7 @@ impl ContextSet {
     }
 }
 
-/// Bypass semantics (node catalog part I, section 6).
+/// Bypass semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BypassBehavior {
     /// Output = that input's gathered value; the node is not cooked. On a
@@ -462,7 +462,7 @@ impl Registry {
             // are portless (lights and cameras cook at root portless;
             // containers and notes carry no ports). Cross-context data
             // flow is by path reference, never by wire, so the object
-            // canvas never needs handles (context-expansion decision C-2).
+            // canvas never needs handles.
             if desc.contexts.contains(ContextKind::Obj)
                 && (!desc.inputs.is_empty() || !desc.outputs.is_empty())
             {

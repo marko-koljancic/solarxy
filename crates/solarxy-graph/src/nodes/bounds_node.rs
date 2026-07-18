@@ -1,4 +1,4 @@
-//! The `bounds` utility node (node catalog part II, Tier-2, Phase 15). Emits
+//! The `bounds` utility node. Emits
 //! the input's axis-aligned bounding box as geometry, or a small marker cube at
 //! its center. The QA persona's measuring tape.
 //!
@@ -28,7 +28,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
-                .doc("The geometry to measure."),
+                .doc(
+                    "The geometry to measure. Its extents drive the output; \
+                     the geometry itself does not appear downstream. An empty \
+                     or unconnected input yields empty geometry, with a \
+                     warning in the empty case.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with(
@@ -46,7 +51,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     },
                     ParamValue::Enum("box".into()),
                 )
-                .doc("Box emits the bounding box itself; Center emits a marker at its center."),
+                .doc(
+                    "Box emits the bounding box itself, matching the input's \
+                     extents on every axis. Center discards the size and \
+                     emits a fixed-size marker cube at the box's centre, for \
+                     when the pivot is what you are chasing rather than the \
+                     volume.",
+                ),
                 ParamSpec::new(
                     "marker_size",
                     "Marker Size",
@@ -58,15 +69,34 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 .soft(0.01, 1.0)
                 .unit(Unit::Meters)
                 .show_if("mode", Pred::Eq(ParamValue::Enum("center".into())))
-                .doc("The size of the center marker cube."),
+                .doc(
+                    "Edge length of the centre marker cube, in metres. It is \
+                     absolute, not relative to the input, so a marker sized \
+                     for a doorknob vanishes inside a building. Only read in \
+                     Center mode.",
+                ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Emits the input's axis-aligned bounding box as geometry, or a \
-              small marker cube at its center. Useful for measuring a model and \
-              for sanity-checking where a piece of geometry actually sits.",
+        doc: "Emits the input's axis-aligned bounding box as geometry: a solid \
+              box spanning the input's extents, or a small marker cube sitting \
+              at its centre. It measures the input and replaces it; the box is \
+              the output, not an overlay on the original.\n\n\
+              This is the measuring tape. Tap it off a chain to see how big \
+              something actually is, where its centre really sits, or whether \
+              two parts occupy the space you think they do -- `merge` the \
+              bounds with the model it measured and you can eyeball the fit \
+              directly. Bypassing it passes the input through, which makes it \
+              cheap to leave wired in as an inspection tap.\n\n\
+              The box is axis-aligned in object space, so a diagonally \
+              oriented model gets a box much larger than the model itself; \
+              that is the AABB being honest, not a bug. Both modes emit solid \
+              triangulated boxes, including Center: there are no line or point \
+              primitives to draw a truer marker with, so a small cube stands \
+              in. An empty input warns and emits nothing rather than boxing \
+              the fallback bounds into a confident unit cube around nothing.",
         search_aliases: &["bbox", "aabb", "extents", "measure", "center"],
         glyph: "bounds",
         role: NodeRole::Standard,

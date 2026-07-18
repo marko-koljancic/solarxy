@@ -6,7 +6,7 @@
 //! their CPU mesh copies and pass them in.
 //!
 //! Lives in `solarxy-core` (moved from `solarxy-app` in the web milestone's
-//! phase 2) because web picking runs in Rust — cooked geometry never
+//! because web picking runs in Rust — cooked geometry never
 //! crosses into JavaScript, so `engine.pick()` needs this crate-neutral.
 //!
 //! Performance budget: < 5ms for ~100K-triangle scenes on Apple Silicon
@@ -462,7 +462,7 @@ mod tests {
         }
     }
 
-    // ---- gizmo primitives (phase 11) ----
+    // ---- gizmo primitives ----
 
     #[test]
     fn ray_segment_hits_an_axis_arrow_dead_on() {
@@ -826,7 +826,7 @@ mod tests {
         );
     }
 
-    // ---- gizmo primitives (phase 12: rotate rings, scale cubes) ----
+    // ---- gizmo primitives (rotate rings, scale cubes) ----
 
     #[test]
     fn a_ring_is_grabbable_on_its_band_and_not_inside_or_outside_it() {

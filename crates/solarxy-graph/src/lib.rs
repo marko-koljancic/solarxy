@@ -14,8 +14,8 @@
 //! catalog deltas: enforced typed ports, Int/Float split, per-node
 //! versioning and migration, absolute matrix-bake transforms, and undo.
 //!
-//! Design baseline: `SOLARXY-NODE-CATALOG.md` (the node-system contract)
-//! and `SOLARXY-WEB-INTEGRATION-PLAN.md` sections 6.2/6.3.
+//! The node-system contract (typed ports, coercion, declarative param
+//! schemas, per-node versioning) is documented on the types themselves.
 
 #![warn(clippy::pedantic)]
 #![allow(

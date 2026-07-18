@@ -803,7 +803,7 @@ mod tests {
         [m.x.into(), m.y.into(), m.z.into()]
     }
 
-    // ---- translate (phase 11 behaviour, preserved) ----
+    // ---- translate (behaviour, preserved) ----
 
     #[test]
     fn the_x_arrow_is_grabbable_and_the_empty_space_beside_it_is_not() {

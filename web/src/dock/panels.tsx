@@ -1,5 +1,5 @@
 // The four dock panels. Each is a thin wrapper around a pane component that
-// Phase 9 already made self-contained, which is exactly why this phase does not
+// already made self-contained, which is exactly why this phase does not
 // have to restructure any of them.
 
 import {
@@ -159,7 +159,7 @@ function PaneColorPicker({
 /** A dockview tab wrapped so its header carries the per-pane tint and a
  * right-click color picker. Preserves the default tab's drag / close behavior
  * (we only wrap it, never reimplement it). */
-/** The automatic per-context-kind tint (decision C-9): the Nodes tab
+/** The automatic per-context-kind tint: the Nodes tab
  * reflects which network kind its canvas shows, and the Texture viewer
  * carries the image family's pink. A manual right-click tint wins. */
 function autoPaneColor(id: string, kind: ReturnType<typeof contextKind>): string | undefined {

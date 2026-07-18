@@ -1,4 +1,4 @@
-// The application shell: a slim menu-bar header over a dockview dock (Phase 10).
+// The application shell: a slim menu-bar header over a dockview dock.
 // The four panels (viewport, nodes, properties, review) dock, float, tab and
 // maximize freely; the arrangement persists and Desks capture it. The 3D canvas
 // is a module-level DOM node the viewport panel adopts (engine/canvas.ts), so no
@@ -16,6 +16,7 @@ import { ShortcutsModal } from "./components/ShortcutsModal";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { NodeInfoModal } from "./components/NodeInfoModal";
+import { Tour } from "./components/tour/Tour";
 import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
 import { importDroppedFiles } from "./engine/session";
 import { collectDroppedFiles } from "./persistence/dropEntries";
@@ -102,6 +103,7 @@ export function App() {
       </div>
       <Toasts />
       <NodeInfoModal />
+      <Tour />
       <MissingSidecarsModal />
       <RecoveryPrompt />
       {(bootError !== null || !registry) && (

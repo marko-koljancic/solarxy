@@ -1,4 +1,4 @@
-//! The four import nodes (node catalog part II, section 13): OBJ, glTF,
+//! The four import nodes: OBJ, glTF,
 //! STL, PLY.
 //!
 //! Source nodes: no inputs, one Geometry output, `Mute` bypass. File
@@ -56,6 +56,15 @@ fn common_params(accept: &[&str]) -> Vec<ParamSpec> {
                 accept: accept.iter().map(ToString::to_string).collect(),
             },
             ParamValue::Asset(crate::params::AssetId(String::new())),
+        )
+        .doc(
+            "The staged model file. Identity is the bytes' SHA-256, not the \
+             path, so re-staging the same file costs nothing and a saved \
+             `.slxy` carries a copy of the bytes -- the scene keeps loading \
+             after the original moves or is deleted. The picker is \
+             multi-select: stage companion files (an MTL, a `.bin`, textures) \
+             in the same go and the parser resolves them by name. Left empty \
+             the node cooks to nothing, without an error.",
         ),
         ParamSpec::new(
             "scale",
@@ -65,13 +74,26 @@ fn common_params(accept: &[&str]) -> Vec<ParamSpec> {
             ParamValue::Float(1.0),
         )
         .hard(0.0, 10000.0)
-        .soft(0.001, 100.0),
+        .soft(0.001, 100.0)
+        .doc(
+            "A uniform multiplier baked into the points at import, about the \
+             origin. Use it to reconcile units at the source -- a millimetre \
+             CAD export needs 0.001 to land in metres. Unlike a downstream \
+             `transform`, this is baked, so everything after it measures the \
+             scaled model.",
+        ),
         ParamSpec::new(
             "center_to_origin",
             "Center to Origin",
             "object",
             ParamType::Bool,
             ParamValue::Bool(false),
+        )
+        .doc(
+            "Moves the model so its bounding-box centre sits at the origin. \
+             Applied after Scale. Worth turning on for a file authored far \
+             from the origin, which otherwise imports off-screen and orbits \
+             around nothing.",
         ),
     ]
 }
@@ -129,12 +151,26 @@ fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
 
 const OBJ: Format = Format {
     type_id: "import_obj",
-    // v3: gains `preserve_materials` (Phase 13); the strip migration's
+    // v3: gains `preserve_materials`; the strip migration's
     // v2 step is a no-op and the new param default-fills on load.
     version: 3,
     display_name: "Import OBJ",
     accept: &[".obj"],
-    doc: "Loads a Wavefront OBJ (MTL and textures via the asset resolver).",
+    doc: "Loads a Wavefront OBJ, triangulating as it parses. Materials come \
+          from the companion MTL and its textures, resolved by file name \
+          against the staged assets rather than the file system.\n\n\
+          This heads a chain: import, then `transform` to place the model, \
+          `merge` to combine it with others, `bounds` to check where it \
+          actually landed. It is also the validator's entry point -- an \
+          import validates the raw file as it parses, the same check the \
+          desktop viewer runs on load, so both products report the same \
+          issues on the same file.\n\n\
+          OBJ is a multi-file format and the MTL is not optional-by-accident: \
+          stage the `.mtl` and its textures together with the `.obj` (the \
+          picker is multi-select, and dropping the containing folder \
+          traverses it) or the model arrives with geometry and no materials, \
+          no error raised. On the web the parse runs in an import worker off \
+          the main thread, so a heavy file does not freeze the canvas.",
     aliases: &["obj", "wavefront", "import"],
     extra: preserve_materials_extra,
     migrate: migrate_strip_rendering_group,
@@ -144,7 +180,20 @@ const GLTF: Format = Format {
     version: 2,
     display_name: "Import glTF",
     accept: &[".gltf", ".glb"],
-    doc: "Loads a glTF or GLB model.",
+    doc: "Loads a glTF 2.0 model, either the self-contained binary `.glb` or \
+          the `.gltf` JSON with its companion `.bin` and textures resolved by \
+          file name against the staged assets. Materials come across natively \
+          -- glTF is the format that survives the round trip best.\n\n\
+          Reach for it when you have a choice of export from the DCC: it \
+          heads the same chain as any import (`transform`, `merge`, `bounds` \
+          downstream) and, like the others, validates the raw file as it \
+          parses, so the Validation tab reports on it exactly as the desktop \
+          viewer does.\n\n\
+          Draco-compressed glTF is rejected outright, with a message asking \
+          you to re-export without Draco -- there is no decoder in the app \
+          yet, and the check runs in the import worker before the parse so \
+          the previous geometry stays on screen. Prefer `.glb` when you can: \
+          `.gltf` splits into files that all have to be staged together.",
     aliases: &["gltf", "glb", "import"],
     extra: preserve_materials_extra,
     migrate: migrate_strip_rendering_group,
@@ -154,7 +203,19 @@ const STL: Format = Format {
     version: 2,
     display_name: "Import STL",
     accept: &[".stl"],
-    doc: "Loads a binary or ASCII STL mesh.",
+    doc: "Loads an STL mesh, binary or ASCII (the loader sniffs which). One \
+          file, no companions, no materials -- STL carries triangles and \
+          nothing else.\n\n\
+          This is the 3D-printing and CAD-handoff path. It pairs with the \
+          validator more than most: STL is where degenerate triangles, \
+          non-manifold edges, and flipped windings actually show up, and the \
+          import validates the raw file as it parses, so the badge is \
+          populated before you wire anything downstream.\n\n\
+          STL stores a normal per facet rather than per vertex, and the \
+          loader keeps none of them: a parsed STL arrives with positions and \
+          triangles and no normals at all. That is why Recompute Normals \
+          defaults to on -- turn it off and the mesh has no normals for \
+          anything downstream to shade with.",
     aliases: &["stl", "import", "print"],
     extra: stl_extra,
     migrate: migrate_strip_rendering_group,
@@ -164,7 +225,17 @@ const PLY: Format = Format {
     version: 2,
     display_name: "Import PLY",
     accept: &[".ply"],
-    doc: "Loads a binary or ASCII PLY mesh.",
+    doc: "Loads a PLY mesh, binary or ASCII. Self-contained like STL: one \
+          file, no companions, no materials.\n\n\
+          PLY is the scanning and photogrammetry format, so this usually \
+          heads a cleanup chain and pairs with the validator -- like every \
+          import it validates the raw file as it parses, which on a \
+          multi-million-point scan is where the issue counts actually matter. \
+          On the web the parse runs in an import worker off the main thread.\n\n\
+          Vertex colours do not survive the import. PLY commonly carries \
+          them, and this node had a Vertex Colors toggle once, but no \
+          vertex-colour channel exists end to end yet, so the param was \
+          removed rather than left lying about doing nothing.",
     aliases: &["ply", "import", "scan"],
     extra: Vec::new,
     migrate: migrate_ply,
@@ -175,22 +246,39 @@ const PLY: Format = Format {
 /// with the renderer's neutral default. STL and PLY have no materials and
 /// no checkbox.
 fn preserve_materials_extra() -> Vec<ParamSpec> {
-    vec![ParamSpec::new(
-        "preserve_materials",
-        "Preserve Materials",
-        "object",
-        ParamType::Bool,
-        ParamValue::Bool(true),
-    )]
+    vec![
+        ParamSpec::new(
+            "preserve_materials",
+            "Preserve Materials",
+            "object",
+            ParamType::Bool,
+            ParamValue::Bool(true),
+        )
+        .doc(
+            "On keeps the materials the file defines. Off drops every \
+             material binding and the material table with them, so the whole \
+             model draws in the renderer's neutral default -- the clay look \
+             you want when judging form, or when a file's own materials are \
+             fighting you.",
+        ),
+    ]
 }
 fn stl_extra() -> Vec<ParamSpec> {
-    vec![ParamSpec::new(
-        "recompute_normals",
-        "Recompute Normals",
-        "object",
-        ParamType::Bool,
-        ParamValue::Bool(true),
-    )]
+    vec![
+        ParamSpec::new(
+            "recompute_normals",
+            "Recompute Normals",
+            "object",
+            ParamType::Bool,
+            ParamValue::Bool(true),
+        )
+        .doc(
+            "Computes vertex normals from the triangles. The STL loader keeps \
+             none of the file's facet normals, so off leaves the mesh with no \
+             normals at all -- leave this on unless something downstream is \
+             about to supply its own.",
+        ),
+    ]
 }
 
 #[must_use]

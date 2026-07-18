@@ -1,5 +1,5 @@
 // The global menu bar (File / Edit / Desks / Review / Help), slimmed in
-// Phase 9: pane-scoped chrome lives on the pane bars (the node-pane Add
+// Pane-scoped chrome lives on the pane bars (the node-pane Add
 // and View menus, the viewport View menu) and Theme lives in Preferences.
 // Every item dispatches through the same session functions the keyboard
 // uses.
@@ -97,7 +97,7 @@ export function MenuBar() {
     { label: "Preferences...", shortcut: `${MOD},`, onClick: () => useUi.getState().setPrefsOpen(true) },
   ];
 
-  // Desks (Phase 7b D3, reshaped in Phase 10): presets + user-saved dock
+ // Desks: presets + user-saved dock
   // arrangements, save-as, delete. Applying never touches the document, only
   // chrome. The old "Viewport on Left / Properties at Bottom" radios are gone:
   // the user drags panels wherever they want now, and a desk captures it.
@@ -124,10 +124,10 @@ export function MenuBar() {
       })),
     },
     { divider: true },
-    // The Assets panel (item 2): presence in the dock is its open state,
+    // The Assets panel: presence in the dock is its open state,
     // the Review-panel pattern.
     { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
-    // The texture viewer (phase 19): same presence-is-state pattern.
+    // The texture viewer: same presence-is-state pattern.
     { label: "Texture Viewer", onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
   ];
 
@@ -160,6 +160,11 @@ export function MenuBar() {
       label: "Keyboard Shortcuts",
       shortcut: "?",
       onClick: () => useUi.getState().setShortcutsOpen(true),
+    },
+    {
+      // Replayable, so skipping the first-run tour is not a one-way door.
+      label: "Take the Tour",
+      onClick: () => window.dispatchEvent(new Event("solarxy:tour")),
     },
     {
       label: "Wiki",

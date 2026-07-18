@@ -1,6 +1,5 @@
-//! Selection-outline resources (context-expansion phase 18, decision
-//! C-6): the offscreen mask, the jump-flood ping-pong pair, and the
-//! uniforms for the step and blit passes.
+//! Selection-outline resources: the offscreen mask, the jump-flood
+//! ping-pong pair, and the uniforms for the step and blit passes.
 //!
 //! The pass chain (encoded by `Renderer::render_selection_outline` and
 //! `Renderer::composite_selection_outline` in `frame.rs`):

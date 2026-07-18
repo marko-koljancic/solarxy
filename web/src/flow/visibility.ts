@@ -1,4 +1,4 @@
-// Root visibility affordance helpers (Phase 8): the registry-driven
+// Root visibility affordance helpers: the registry-driven
 // predicate (the descriptor declares a `visible` param; the note node gets
 // no eye by construction, future root types get one for free) and the
 // current value with the default-true fallback (params are override-only,

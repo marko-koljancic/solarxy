@@ -121,7 +121,7 @@ impl Inputs {
         }
     }
 
-    /// The material on a single-arity port, if connected (phase 20).
+    /// The material on a single-arity port, if connected.
     #[must_use]
     pub fn material(&self, key: &str) -> Option<&Arc<solarxy_core::RawMaterialData>> {
         match self.slot(key) {
@@ -192,7 +192,7 @@ impl Outputs {
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum CookError {
     /// A required input has no edge. Keep-last-good deliberately does not
-    /// apply (catalog section 3).
+    /// apply.
     #[error("input '{port}' is required")]
     InputRequired { port: String },
 
@@ -232,7 +232,7 @@ pub struct ImportOptions {
     pub preserve_materials: Option<bool>,
 }
 
-/// One async work order (the import worker protocol; Phase 5 runs the
+/// One async work order (the import worker protocol; runs the
 /// execution in a real web worker). The `options` travel with the request
 /// so the worker's parsed result is finished (scaled, recentered, toggles
 /// applied) before it transfers back, keeping the native and web paths
@@ -258,7 +258,7 @@ pub enum JobRequest {
         /// The resolved triangle budget, when the budget check is on.
         budget: Option<u32>,
     },
-    /// Decode a staged encoded image (`import_image`, Phase 13). The web
+    /// Decode a staged encoded image (`import_image`). The web
     /// worker decodes via `createImageBitmap`; the native path decodes
     /// inline through the shared formats decoder.
     DecodeImage { asset: AssetId },
@@ -336,7 +336,7 @@ pub struct CookCtx<'a> {
     pub assets: &'a AssetTable,
     /// Whether async cooking is available. When true, import-style nodes
     /// should return [`CookOutcome::Pending`] with a [`JobRequest`];
-    /// when false (native Phase 3), they parse inline.
+    /// when false (native), they parse inline.
     pub async_jobs: bool,
     warnings: Vec<String>,
     /// Side-channel for a cook that ran validation (the validate node's

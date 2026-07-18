@@ -4,7 +4,7 @@
 //! the grid/floor/gizmo visualization buffers.
 //!
 //! Extracted from [`crate::scene::ModelScene`] in the web milestone's
-//! phase 6 so a shell without a file-loaded model (the web host, whose
+//! so a shell without a file-loaded model (the web host, whose
 //! geometry arrives through `SceneObjects` deltas) can drive the full
 //! pass set. `ModelScene` recomposes as `{ env, model, ... }` with the
 //! construction order copied verbatim; desktop output is bit-identical

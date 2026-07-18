@@ -354,7 +354,7 @@ export function pushGizmoSettings(): void {
   getClient().setGizmoSettings(usePrefs.getState().prefs.viewport);
 }
 
-/** Pushes the selection-highlight preference into the host (phase 18).
+/** Pushes the selection-highlight preference into the host.
  * Called on boot and on any prefs change, like the gizmo ergonomics. */
 export function pushSelectionHighlight(): void {
   if (!client) return;
@@ -368,7 +368,7 @@ export function cancelGizmoDrag(): void {
 }
 
 /** The exclusive-shadow-caster rule must be self-explanatory at the moment
- * it acts (UX spec J3): when granting cast_shadow cascades a release onto
+ * it acts: when granting cast_shadow cascades a release onto
  * another light, toast the name of the light that lost it. */
 function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
   if (cmd.type !== "setParam" || cmd.key !== "cast_shadow") return;
@@ -398,7 +398,7 @@ function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
 }
 
 /** Pushes the root-context selection into the host so the picked object
- * gets its viewport tint (decision 24, node-to-viewport direction). */
+ * gets its viewport tint. */
 export function syncSceneSelection(): void {
   if (!client) return;
   const root = useMirror.getState().contexts["root"];
@@ -693,7 +693,7 @@ export function copySelection(): void {
 }
 
 /** Pastes the clipboard fragment into the current context; context-illegal
- * nodes are skipped with a toast naming the count (UX spec section 13). */
+ * nodes are skipped with a toast naming the count. */
 export function paste(): void {
   if (!clipboard) return;
   const s = useMirror.getState();
@@ -848,7 +848,7 @@ export function completeModelImport(primaryHash: string, primaryName: string): v
  * frame so a just-cooked node drops its badge. */
 export function runFrame(dtMs: number): void {
   // The surface must match the canvas BEFORE the frame is cooked and rendered:
-  // dockview can re-parent or resize the canvas at any time (Phase 10).
+  // dockview can re-parent or resize the canvas at any time.
   syncCanvasSize((w, h, dpr) => getClient().resize(w, h, dpr));
   applyToMirror(getClient().frame(dtMs));
   pumpImportJobs();

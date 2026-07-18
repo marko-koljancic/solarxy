@@ -62,7 +62,7 @@ pub enum FormatsError {
     /// glTF/GLB parse or import failure.
     #[error("glTF error: {0}")]
     Gltf(#[from] ::gltf::Error),
-    /// A writer failure (phase 21: obj/stl/ply/glb/png/jpeg export).
+    /// A writer failure (obj/stl/ply/glb/png/jpeg export).
     #[error("{format} export error: {message}")]
     Export {
         format: &'static str,

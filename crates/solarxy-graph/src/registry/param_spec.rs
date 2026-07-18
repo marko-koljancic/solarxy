@@ -1,4 +1,4 @@
-//! Declarative parameter schemas (node catalog part I, section 4).
+//! Declarative parameter schemas.
 //!
 //! `ParamSpec` is what the parameter panel interprets and what the
 //! resolver enforces. Conventions frozen here: hard range = validity
@@ -48,13 +48,13 @@ pub enum ParamType {
     AssetRef {
         accept: Vec<String>,
     },
-    /// A properties-pane action button (phase 21): no stored value of
+    /// A properties-pane action button: no stored value of
     /// consequence (an inert Bool rides the slot so the schema stays
     /// uniform). The frontend renders the param's label as a button and
     /// routes the press through the host's `invoke_action`.
     Action,
-    /// A cross-context node reference (context-expansion decision C-2:
-    /// references cross contexts by path, never by wire). The picker is
+    /// A cross-context node reference: references cross contexts by path,
+    /// never by wire. The picker is
     /// constrained by `accept`; the stored value is the target's stable
     /// [`crate::document::NodeId`] (`ParamValue::NodeRef`).
     NodePath {

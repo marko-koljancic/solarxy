@@ -114,7 +114,7 @@ export async function saveToFile(bytes: Uint8Array, filename: string): Promise<v
   downloadBytes(bytes, filename);
 }
 
-/** Explicit save for EXPORT bytes (phase 21): like `saveToFile` but with
+/** Explicit save for EXPORT bytes: like `saveToFile` but with
  * the export's own mime/extension instead of the `.slxy` type. */
 export async function saveExportToFile(
   bytes: Uint8Array,

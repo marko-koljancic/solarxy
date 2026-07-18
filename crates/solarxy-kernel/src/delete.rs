@@ -1,5 +1,4 @@
-//! Primitive removal by region or by facing (the `delete` node's kernel,
-//! Phase 15).
+//! Primitive removal by region or by facing (the `delete` node's kernel).
 //!
 //! The kernel has no per-face attributes, no groups, and no primitive ids, so
 //! there was no selection model to build on and this one is defined from

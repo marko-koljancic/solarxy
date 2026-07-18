@@ -1,4 +1,4 @@
-// The flat node list view (Phase 7b C11, Minimystix FlowListView): a
+// The flat node list view (C11, Minimystix FlowListView): a
 // per-context table alternative to the graph canvas sharing the mirror
 // selection. Row click selects; double-clicking a container enters its
 // subflow; the Select button mirrors the Minimystix column.
@@ -20,7 +20,7 @@ export function FlowListView() {
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
 
-  // Inline rename (Phase 8): double-click on the node cell or F2 via the
+  // Inline rename: double-click on the node cell or F2 via the
   // ui-store rename request; commit is one setParam on `name`.
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const renameRequest = useUi((s) => s.renameRequest);

@@ -1,5 +1,5 @@
 //! Pure-CPU image operators for the Solarxy texture context
-//! (context-expansion phase 19, decision C-5).
+//! .
 //!
 //! Every operator maps `&RawImageData` (RGBA8) plus parameters to a new
 //! `RawImageData`, synchronously and single-threaded: the engine crate

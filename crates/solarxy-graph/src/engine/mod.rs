@@ -39,7 +39,7 @@ pub use scenefile::{LoadedScene, SceneSidecar};
 
 use undo::{Transaction, UndoOp, UndoStack};
 
-/// Cook scheduling mode (node catalog / boundary design).
+/// Cook scheduling mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CookMode {
@@ -409,12 +409,12 @@ fn push_validation_events(
 
 /// A whole-document save file: the graph data plus the editor's cook mode.
 /// The Phase-4 web host serializes this to JSON for OPFS autosave and the
-/// explicit save/load path; Phase 5's `.slxy` ZIP embeds the same
+/// explicit save/load path; the `.slxy` ZIP embeds the same
 /// `DocumentData` as its `document.json`, wrapping asset payloads around it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentFile {
-    /// The save-format version (1 in Phase 4), for forward migration.
+    /// The save-format version, for forward migration.
     #[serde(default = "one")]
     pub format_version: u32,
     pub document: DocumentData,
@@ -1330,7 +1330,7 @@ impl Engine {
             key: key.to_string(),
             prev,
         });
-        // The exclusive-shadow-caster rule (UX spec J3): at most one root
+        // The exclusive-shadow-caster rule: at most one root
         // light carries the shadow map. Granting it to one shadow-capable
         // light clears the flag on every other one INSIDE the same command,
         // so the whole handoff is a single undo step and the batch carries
@@ -1632,7 +1632,7 @@ impl Engine {
 
     /// The image a container's child network publishes: its display
     /// node's committed default output, when that value is an image. The
-    /// texture viewer pane reads this (phase 19), and it is exactly the
+    /// texture viewer pane reads this, and it is exactly the
     /// value a path reference to the container resolves to.
     #[must_use]
     pub fn display_image(
@@ -1682,7 +1682,7 @@ impl Engine {
         out
     }
 
-    /// Executes a node's `Action` param (phase 21). Like `copy_nodes`,
+    /// Executes a node's `Action` param. Like `copy_nodes`,
     /// this is a data-producing query, NOT a `Command`: it mutates
     /// nothing, so it needs no events and no undo entry. The engine
     /// encodes the node's committed output via the format writers and the
@@ -2550,7 +2550,7 @@ impl Engine {
 
     /// Picks the root `geo` container the ray hits nearest over the
     /// committed, world-transformed display geometry (single-pane picking;
-    /// pane-awareness is Phase 6). Runs in Rust over CPU-retained geometry,
+    /// Runs in Rust over CPU-retained geometry,
     /// so nothing crosses into JavaScript. The host builds the ray from the
     /// cursor via `solarxy_core::raycast::screen_to_world_ray`.
     #[must_use]
@@ -2696,7 +2696,7 @@ impl Engine {
     // Helpers.
 
     /// Marks a node dirty in its graph AND propagates across contexts
-    /// through node references (context-expansion phase 17): editing a
+    /// through node references: editing a
     /// node inside a referenced network re-dirties every referrer of that
     /// network's container, transitively, so a `/mat` edit repaints every
     /// geo pointing at it without a manual cook. Reference cycles are

@@ -14,6 +14,9 @@
 //!   `preferences::IblMode`) loaded from `~/.config/solarxy/config.toml` via
 //!   `preferences::load`.
 //! - **Reporting** (`report::AnalysisReport`, `json::report_to_json`).
+//! - **The interface palette** ([`theme::Palette`]) shared by the egui GUI,
+//!   the analyze TUI, and — through `examples/gen_tokens.rs` — the web
+//!   frontend's `tokens.generated.css`.
 //!
 //! No GPU types, no winit, no egui — depend on this crate from anywhere
 //! without pulling wgpu/egui/winit into the build graph.
@@ -72,6 +75,7 @@ pub mod report;
 #[cfg(feature = "serialization")]
 pub mod review;
 pub mod scene;
+pub mod theme;
 pub mod validation;
 #[cfg(feature = "serde")]
 pub mod view_config;

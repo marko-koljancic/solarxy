@@ -1,6 +1,6 @@
 // The core numeric field: typed entry (Enter commits, Escape reverts,
 // blur commits), int snapping, and middle-mouse precision drag with the
-// decade overlay (UX spec section 7). Interaction values flow through the
+// decade overlay. Interaction values flow through the
 // caller's preview/commit lanes; while idle the field mirrors `value`.
 
 import { useEffect, useState } from "react";

@@ -1,7 +1,7 @@
 //! Shared node-descriptor building blocks: the implicit `general` group,
 //! the geo container's `rendering` group, the default geometry output
-//! port, and the Phase 8 silent-strip migrations. These factor out the
-//! catalog conventions (part II, section 11) so each node file declares
+//! port, and the silent-strip migrations. These factor out the
+//! catalog conventions so each node file declares
 //! only what is specific to it.
 
 use solarxy_kernel::transform::RotateOrder;
@@ -53,7 +53,7 @@ pub fn general_params(display_name: &str) -> Vec<ParamSpec> {
 }
 
 /// The `rendering` group on the `geo` container only (root render flags,
-/// both wired end to end since Phase 8): additive visibility and per-object
+/// both wired end to end): additive visibility and per-object
 /// shadow participation. Subflow geometry nodes carry no copy: per-object
 /// flags are geo-level concepts, and the display flag is graph-level.
 /// `receive_shadow` was dropped in the same phase (no per-object channel
@@ -119,6 +119,9 @@ pub fn rotate_order_variants() -> Vec<EnumVariant> {
 }
 
 /// The `rotate_order` param, identical on every node that composes a rotation.
+///
+/// Documented here rather than at each call site, so `transform` and the
+/// `geo` container cannot drift into describing the same control two ways.
 #[must_use]
 pub fn rotate_order_param() -> ParamSpec {
     ParamSpec::new(
@@ -129,6 +132,15 @@ pub fn rotate_order_param() -> ParamSpec {
             variants: rotate_order_variants(),
         },
         ParamValue::Enum("xyz".to_string()),
+    )
+    .doc(
+        "The order the three Euler angles are applied in. Rotations do not \
+         commute, so the same three numbers land the object differently \
+         depending on this: XYZ rotates about X first, then Y, then Z.\n\n\
+         Change it only when matching another package's convention, or when \
+         an axis you are animating has ended up gimbal-locked against \
+         another. If a rotation is behaving unintuitively, this is usually \
+         the reason.",
     )
 }
 
@@ -213,11 +225,17 @@ pub fn migrate_strip_rect_area_transform(
 /// single default output).
 #[must_use]
 pub fn geometry_output() -> PortSpec {
-    PortSpec::single("geometry", "Geometry", DataType::Geometry, false).default_port()
+    PortSpec::single("geometry", "Geometry", DataType::Geometry, false)
+        .default_port()
+        .doc(
+            "The cooked geometry. Being the default output, a drag from the \
+             node's body wires from here, and a bypass passes the input \
+             through it.",
+        )
 }
 
 /// Assembles a node's full param list: `general`, then the node-specific
-/// groups. (The `rendering` group is geo-container-only since Phase 8;
+/// groups. (The `rendering` group is geo-container-only;
 /// `geo_node` appends it explicitly.)
 #[must_use]
 pub fn params_with(display_name: &str, specific: Vec<ParamSpec>) -> Vec<ParamSpec> {

@@ -1,12 +1,11 @@
-// The registry-driven node visual vocabulary (revamp R2, decisions D-4 and
-// D-10..D-11, D-18; polish D-20/D-21): per-type glyphs and role
+// The registry-driven node visual vocabulary: per-type glyphs and role
 // silhouettes, resolved from the snapshot's `glyph` and `role` hints with
 // a category fallback, so a node added in Rust renders with its declared
 // identity and a node the frontend has never seen still renders sensibly
 // (the zero-frontend-change contract). Glyph art is transplanted verbatim
 // from the design source (solarxy/design/web/solarxy-web.pen, the
 // Evo/Glyph set); every glyph is a 16x16 stroke path (round caps and
-// joins, 1.5 width). Shaped bodies are generated 112x32 outlines (D-21):
+// joins, 1.5 width). Shaped bodies are generated 112x32 outlines:
 // left-right symmetric vertex lists run through the corner-rounding
 // helper below.
 
@@ -53,6 +52,54 @@ export const GLYPH_PATHS: Record<string, string> = {
     "M9.4 8a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 1 1 2.8 0m-1.4-5.2v2m0 6.4v2m-5.2-5.2h2m6.4 0h2m-8.9-3.7l1.4 1.4m4.6 4.6l1.4 1.4m0-7.4l-1.4 1.4m-4.6 4.6l-1.4 1.4",
   rect_area: "M3 3h6v10h-6z m8 2h2.5m-2.5 3h2.5m-2.5 3h2.5",
   spot: "M6.5 3h3l1.2 3.5h-5.4z m-2.5 10l2.3-6.5m5.7 6.5l-2.3-6.5m-5.7 6.5h8",
+
+  // Texture-context generators: a swatch, a stop bar, a scatter.
+  constant: "M3 3.5h10v9h-10z m6.8 4.5a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 1 1 3.6 0",
+  ramp: "M2.5 5.5h11v3.5h-11z m1.5 5.5v2m4-2v2m4-2v2",
+  noise:
+    "M4.9 4.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M10.4 3.9a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M13.3 7.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M6.6 8.7a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M11 11.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M5.4 12.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+
+  // Texture-context adjustments: histogram, split disc, spoked wheel,
+  // opposed arrows, the gamma letterform.
+  levels: "M2.5 13.2h11m-9-0.2v-4m2.6 4v-7.5m2.6 7.5v-5.3m2.6 5.3v-8.7",
+  brightness_contrast:
+    "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M8 3v10 M10 6.2h1.6 M10 8h2.2 M10 9.8h1.6",
+  hue_saturation: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M8 8V3 M8 8l-4.33 2.5 M8 8l4.33 2.5",
+  invert: "M3 5.5h8.5m0 0l-2-2m2 2l-2 2 M13 10.5h-8.5m0 0l2-2m-2 2l2 2",
+  gamma: "M4.5 3.5c0.8 3.2 2 5.2 3.6 6.8m3.4-6.8c-0.2 4.6-1.6 7.6-4 9.7",
+
+  // Texture-context composites: venn, echoed dot, peak, layer stack,
+  // terrain-to-arrow.
+  mix: "M9.4 8a3.4 3.4 0 1 1-6.8 0 3.4 3.4 0 1 1 6.8 0 M13.4 8a3.4 3.4 0 1 1-6.8 0",
+  blur: "M10 8a2 2 0 1 1-4 0 2 2 0 1 1 4 0 M4.6 5.2a5 5 0 0 0 0 5.6 M11.4 5.2a5 5 0 0 1 0 5.6",
+  sharpen: "M3.5 12.5l4.5-9 4.5 9z M8 8.2v4.3",
+  pack_orm: "M8 2.5l5.5 3-5.5 3-5.5-3z m-5.5 5.7l5.5 3 5.5-3 m-11 2.6l5.5 3 5.5-3",
+  height_to_normal:
+    "M2.5 12.5c2-5 3.8-5 5.5-2s3.8 3 5.5-2 M11.5 8V3.5 m-1.7 1.7l1.7-1.7 1.7 1.7",
+
+  // Containers: the geo body with a context motif inside.
+  texnet:
+    "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M5 10.5l2.2-2.7 1.6 1.8 1.4-1.6 1.8 2.5",
+  matnet:
+    "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M8 4.8c1.5 1.9 2.4 3 2.4 4.2a2.4 2.4 0 1 1-4.8 0c0-1.2 0.9-2.3 2.4-4.2z",
+
+  // Material surfaces: the sphere family, one distinguishing mark each.
+  principled: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M7.3 6a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 1 1 2.6 0",
+  matcap: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M3.9 6.5a4.6 4.6 0 0 1 8.2 0",
+  toon: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M3.6 9.5h4.2l2-2.5h3 M5 11.8h3l1.8-2.2",
+  unlit: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M4.5 11.5l7-7",
+  mix_material:
+    "M6 4.5c1.2 1.5 2 2.6 2 3.7a2 2 0 1 1-4 0c0-1.1 0.8-2.2 2-3.7z M10.5 7c1.2 1.5 2 2.6 2 3.7a2 2 0 1 1-4 0c0-1.1 0.8-2.2 2-3.7z",
+  tex_ref: "M6.5 4h7v8h-7z M8 10l1.8-2.2 1.6 1.9 M1.5 8h3.6m-1.5-1.6L5.3 8l-1.7 1.6",
+
+  // Output: the import file motif reversed (arrow out), a frame with a
+  // corner-out arrow, an aperture, a camera body.
+  geo_export: "M4 2.5h5l3 3v8h-8z m5 0v3h3 M8 12v-4m-1.7 1.7L8 8l1.7 1.7",
+  image_export:
+    "M3 5.5h8v7.5h-8z M4.3 11.2l2-2.4 1.5 1.7 1.2-1.3 1.7 2 M10.5 2.5h3v3m0-3l-3.7 3.7",
+  render: "M13 8a5 5 0 1 1-10 0 5 5 0 1 1 10 0 M8 3.6l3.8 6.6h-7.6z",
+  camera:
+    "M2.5 5.5h2.8l1.2-1.8h3l1.2 1.8h2.8v7h-11z M10.2 9a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0",
 };
 
 /** Category -> the glyph shown when a node's declared key has no art (a
@@ -137,7 +184,7 @@ export function roundedPolygonPath(points: RoundedVertex[]): string {
   return parts.join(" ");
 }
 
-/** Shaped 112x32 body outlines (D-21): every silhouette left-right
+/** Shaped 112x32 body outlines: every silhouette left-right
  * symmetric with rounded corners. Roles absent here render as plain CSS
  * rectangles. */
 export const ROLE_BODY_PATHS: Partial<Record<NodeRole, string>> = {

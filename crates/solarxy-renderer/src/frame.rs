@@ -256,7 +256,7 @@ pub struct ValidationColorResources {
     #[allow(dead_code)]
     pub buffers: Vec<wgpu::Buffer>,
     /// The selection tint (accent blue, translucent) drawn over the picked
-    /// object's meshes (decision 24, web picking sync).
+    /// object's meshes.
     pub selection_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     pub selection_buffer: wgpu::Buffer,
@@ -276,7 +276,7 @@ pub struct ObjectValidationGpu {
 /// [`crate::model::Model`] plus its per-object instance buffer (one
 /// `InstanceRaw`) and optional validation overlay resources. The
 /// multi-object draw path iterates slices of these; `ModelScene`
-/// contributes itself as one entry and `scene_objects::SceneObjects`
+/// contributes itself as one entry and `scene_objects:SceneObjects`
 /// entries append beside it.
 #[derive(Clone, Copy)]
 pub struct DrawObject<'a> {
@@ -287,7 +287,7 @@ pub struct DrawObject<'a> {
     pub validation: Option<&'a ObjectValidationGpu>,
     /// Whether the object carries the selection highlight (a translucent
     /// accent tint drawn at the end of the main pass; the web picking-sync
-    /// direction of decision 24). Desktop passes `false`.
+    /// Desktop passes `false`.
     pub selected: bool,
     /// Whether the object is drawn into the shadow map (per-object
     /// participation; which light owns the map is the light-side
@@ -324,7 +324,7 @@ pub struct Renderer {
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
-    /// Selection-outline resources (phase 18); drawn only when
+    /// Selection-outline resources; drawn only when
     /// `selection_style` is `Outline` and something is selected.
     pub outline: crate::outline::OutlineState,
     /// How selection presents in the viewport: the jump-flood rim
@@ -343,7 +343,7 @@ pub struct Renderer {
 }
 
 /// How a selected object is highlighted in the viewport (a user
-/// preference; context-expansion decision C-6).
+/// preference).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectionStyle {
     /// Constant-width jump-flood rim around the screen-space silhouette.
@@ -1300,7 +1300,7 @@ impl Renderer {
         // On overflow, TRUNCATE to what fits rather than draw nothing. The old
         // code zeroed both counts, so the gizmo vanished entirely -- and it
         // guarded that with a `debug_assert`, which is a no-op in release, plus
-        // a `tracing::warn` that reaches NO subscriber on web. A release web
+        // a `tracing:warn` that reaches NO subscriber on web. A release web
         // build therefore lost the gizmo with zero diagnostics. A clipped gizmo
         // is still usable and still visibly wrong, which is what we want.
         truncate_to_budget(&mut lines, 2, "line");
@@ -1314,7 +1314,7 @@ impl Renderer {
         self.manipulator_tri_count = u32::try_from(tris.len()).unwrap_or(0);
     }
 
-    /// Renders the selection-outline offscreen stages (phase 18): the
+    /// Renders the selection-outline offscreen stages: the
     /// silhouette mask of every selected object, the jump-flood init, and
     /// the fixed five-step ladder. Call after [`Self::render_main_pass`]
     /// when `selection_style` is `Outline` and something is selected; the

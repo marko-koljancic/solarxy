@@ -1,4 +1,4 @@
-//! The `null` utility node (node catalog part II, Tier-2, Phase 15). A
+//! The `null` utility node. A
 //! pass-through anchor: it exists to give a subflow a stable, tidy display-flag
 //! target (the idiomatic "OUT" node) that does not move when the graph behind
 //! it is rewired. The cook is an `Arc` clone, so it costs nothing.
@@ -21,16 +21,33 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
-                .doc("The geometry to pass through unchanged."),
+                .doc(
+                    "The geometry to pass through unchanged. Left \
+                     unconnected the null cooks to empty geometry rather \
+                     than failing, so an anchor placed before its upstream \
+                     exists is not an error.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with("Null", vec![]),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Passes geometry through unchanged. Use it as a stable output \
-              anchor for a subflow: point the display flag at the null and it \
-              stays put while you rework the graph feeding it.",
+        doc: "Passes its input geometry through untouched. The cook is a \
+              refcount bump on the incoming geometry, not a copy, so a null \
+              costs effectively nothing however large the model.\n\n\
+              A graph wants a no-op for two reasons. The first is a stable \
+              reference point: put a null at the end of a subflow, name it \
+              OUT, and point the display flag at it. You can then rewire, \
+              insert, and delete everything upstream and the flag never moves \
+              -- whereas a flag pointed at whichever node happened to be last \
+              has to be re-set every time you extend the chain. The second is \
+              routing: a null is a reroute, a place to give a long wire a \
+              corner and a name.\n\n\
+              Nothing about it is inert to the graph, only to the geometry. It \
+              is a real node that cooks, appears in the dependency chain, and \
+              can be bypassed (bypassing passes the input straight through, \
+              which for a null is what it already did).",
         search_aliases: &["out", "output", "anchor", "passthrough"],
         glyph: "null",
         role: NodeRole::Terminal,

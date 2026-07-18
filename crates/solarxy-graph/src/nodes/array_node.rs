@@ -1,4 +1,4 @@
-//! The `array` modifier (node catalog part II, Tier-2, Phase 15). Duplicates
+//! The `array` modifier. Duplicates
 //! the input `count` times (the original included), either stepping linearly by
 //! an offset or revolving radially about an axis. The kernel op composes the
 //! existing transform bake and merge, so materials survive duplication and
@@ -43,6 +43,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("linear".into()),
+                )
+                .doc(
+                    "How the copies are placed. Linear steps each one along a fixed \
+                     offset, for fence posts and stair treads. Radial revolves them \
+                     about an axis, for spokes and bolt circles, and turns each copy to \
+                     follow the revolution. The mode decides which of the parameters \
+                     below apply; the rest hide.",
                 ),
                 ParamSpec::new(
                     "count",
@@ -112,8 +119,23 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Duplicates the input geometry, either in a line or around a \
-              circle. Materials are preserved and shared across the copies.",
+        doc: "Duplicates the input Count times, counting the original, either \
+              stepping each copy linearly along an offset or revolving it \
+              about an axis. Every copy is a real baked transform of the input \
+              concatenated as though you had merged them yourself, and \
+              identical materials collapse to one table entry rather than one \
+              per copy.\n\n\
+              It replaces the branch you would otherwise wire by hand: a \
+              `transform` and a `merge` for every copy. Put it after whatever \
+              makes the single unit, a primitive or a small assembly you have \
+              already merged, and then change one number instead of \
+              rewiring.\n\n\
+              Count includes the original, so 1 is a no-op rather than one \
+              extra copy. The radial step is Sweep divided by Count rather \
+              than by Count minus 1, which is what lets a full 360 tile evenly \
+              instead of stacking a copy on the original at the seam. And \
+              Radius defaults to 0, which leaves every radial copy sitting on \
+              the axis spinning in place: give it a radius to get a ring.",
         search_aliases: &["duplicate", "repeat", "clone", "radial", "grid"],
         glyph: "array",
         role: NodeRole::Standard,

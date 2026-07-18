@@ -8,7 +8,7 @@
 //! Naming is `snake_case` on disk (the Rust field names serialize
 //! verbatim), distinct from the `camelCase` engine-to-JS boundary.
 //! Forward-looking
-//! sections whose features land in later phases (`view` panes beyond one,
+//! sections whose features landed later (`view` panes beyond one,
 //! `environment`, `review` UI) are present in the schema with defaults so
 //! the format is shape-stable from day one.
 
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 pub type JsonObject = BTreeMap<String, serde_json::Value>;
 
 /// serde `skip_serializing_if` predicate: a `false` bool is omitted (the
-/// `bypass` field is present only when set, per section 6.6).
+/// `bypass` field is present only when set).
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_false(b: &bool) -> bool {
     !*b
@@ -148,8 +148,8 @@ pub struct EdgeJson {
     pub to: (String, String),
 }
 
-/// The viewport layout and per-pane state. Phase 5 is a single shaded pane
-/// with an orbit camera; the multi-pane fields exist for Phase 6.
+/// The viewport layout and per-pane state: one entry per pane, each with
+/// its own camera and display settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct ViewJson {
@@ -157,7 +157,7 @@ pub struct ViewJson {
     pub layout: String,
     #[serde(default)]
     pub active_pane: u32,
-    /// Divider position for the two-pane layouts (phase 6); 0.5 when unset.
+    /// Divider position for the two-pane layouts; 0.5 when unset.
     #[serde(default = "default_split_ratio")]
     pub split_ratio: f32,
     #[serde(default)]
@@ -180,8 +180,8 @@ impl Default for ViewJson {
 }
 
 /// One viewport pane: its camera, display flags, inspection mode, and
-/// background. `display` and `background` are still opaque JSON (Phase 6
-/// gives them structure).
+/// background. `display` and `background` are opaque JSON: the reader
+/// round-trips them without interpreting their contents.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct PaneJson {
@@ -224,8 +224,9 @@ pub struct CameraJson {
     pub pitch: f32,
     pub distance: f32,
     pub fov_y: f32,
-    /// `"perspective"` (default) or `"orthographic"` (phase 6, per-pane
-    /// projection). Serde-default so pre-phase-6 files load unchanged.
+    /// `"perspective"` (default) or `"orthographic"`, per pane.
+    /// Serde-default, so a file written before per-pane projection existed
+    /// loads unchanged.
     #[serde(default = "default_projection")]
     pub projection: String,
     /// Half-height of the orthographic view volume; unused in perspective.
@@ -251,7 +252,7 @@ impl Default for CameraJson {
     }
 }
 
-/// The lighting environment. Reserved for the Phase-6 HDRI/IBL flow;
+/// The lighting environment. Reserved for the HDRI/IBL flow;
 /// defaults are inert.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
@@ -266,8 +267,8 @@ pub struct EnvironmentJson {
 
 /// Review annotations. The annotation shape is owned by
 /// `solarxy_core::review` (which has its own schema); the format carries
-/// each annotation opaquely so it survives save/load ahead of the Phase-7
-/// review UI.
+/// each annotation opaquely, so it survives a save/load round trip without
+/// the format layer needing to understand it.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
 pub struct ReviewJson {

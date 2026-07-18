@@ -4,7 +4,7 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UnsupportedBrowser } from "./components/UnsupportedBrowser";
 import { initTelemetry, installSmokeHooks } from "./telemetry";
-// Bundled typefaces (revamp D-14): Inter for UI, IBM Plex Mono for numeric
+// Bundled typefaces: Inter for UI, IBM Plex Mono for numeric
 // surfaces. Self-hosted latin woff2 subsets; unicode-range keeps the wire
 // cost to the subsets a page actually uses.
 import "@fontsource-variable/inter";

@@ -1,4 +1,4 @@
-//! The `geo` container (node catalog part II, section 12): the subflow
+//! The `geo` container: the subflow
 //! host. No ports, no wire output. The renderer resolves its display object
 //! from the subflow's active display node and applies this node's transform
 //! as the `SceneObject` transform (not baked into vertices, so transform
@@ -41,7 +41,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ParamType::Vec3,
                         ParamValue::Vec3([0.0; 3]),
                     )
-                    .unit(Unit::Meters),
+                    .unit(Unit::Meters)
+                    .doc(
+                        "Where the object sits in the world, in metres from \
+                         the origin. Applied after rotation and scale, so it \
+                         moves the object as a finished whole. The move gizmo \
+                         writes here.",
+                    ),
                     ParamSpec::new(
                         "rotate",
                         "Rotate",
@@ -49,8 +55,21 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ParamType::Vec3,
                         ParamValue::Vec3([0.0; 3]),
                     )
-                    .unit(Unit::Degrees),
-                    rotate_order_param(),
+                    .unit(Unit::Degrees)
+                    .doc(
+                        "Euler angles in degrees, one per axis, applied in \
+                         Rotate Order. With two or more axes nonzero the \
+                         order changes the result, so the two params are read \
+                         together.",
+                    ),
+                    rotate_order_param().doc(
+                        "The order the three Euler angles compose in. It only \
+                         matters once two or more axes are nonzero -- a \
+                         single-axis rotation is identical under all six \
+                         orders. Match the order your DCC used if you are \
+                         transcribing angles from one, or the object arrives \
+                         pointing somewhere else.",
+                    ),
                     ParamSpec::new(
                         "scale",
                         "Scale",
@@ -59,7 +78,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ParamValue::Vec3([1.0; 3]),
                     )
                     .hard(0.001, 10000.0)
-                    .soft(0.01, 100.0),
+                    .soft(0.01, 100.0)
+                    .doc(
+                        "Per-axis scale multipliers. 1 on every axis leaves \
+                         the object alone; unequal values stretch it. \
+                         Multiplied by Uniform Scale, so the effective scale \
+                         on each axis is this times that.",
+                    ),
                     ParamSpec::new(
                         "uniform_scale",
                         "Uniform Scale",
@@ -68,7 +93,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ParamValue::Float(1.0),
                     )
                     .hard(0.001, 10000.0)
-                    .soft(0.01, 100.0),
+                    .soft(0.01, 100.0)
+                    .doc(
+                        "One multiplier over all three axes, on top of Scale. \
+                         Reach for it to resize the whole object without \
+                         disturbing a per-axis ratio you have already dialled \
+                         in.",
+                    ),
                 ],
             );
             // The root render flags (visible / cast_shadow) live on the
@@ -78,8 +109,25 @@ pub fn descriptor() -> NodeTypeDescriptor {
         },
         // Bypassing a geo excludes its whole subflow from the scene.
         bypass: BypassBehavior::Mute,
-        doc: "A container node hosting a subflow; renders its subflow's \
-              active display object with this node's transform applied.",
+        doc: "A container: one object in the scene, holding a whole geometry \
+              network inside it. It has no ports and produces no wire value. \
+              What it renders is whichever node inside carries the display \
+              flag, placed in the world by this node's transform.\n\n\
+              Containers are how a scene stays a scene instead of one \
+              enormous graph. The object level holds geos, cameras, and \
+              lights -- the things a scene is made of -- and each geo's \
+              network holds the modelling that builds that one object. \
+              Double-click a geo to dive into its network; the breadcrumb \
+              walks you back out. Bypassing a geo takes its entire subflow \
+              out of the scene in one click.\n\n\
+              The rendering flags live here and only here. Visible and Cast \
+              Shadow are per-object properties, so they belong to the object, \
+              not to the box or the merge inside it -- which is why a plain \
+              geometry node has no such params, and why hunting for a Visible \
+              checkbox on your `box` will not find one. The transform is the \
+              same story: it is applied to the object at draw time rather \
+              than baked into the points, so dragging a geo around never \
+              recooks the network inside it, however heavy that network is.",
         search_aliases: &["object", "container", "group", "subflow"],
         glyph: "geo",
         role: NodeRole::Container,

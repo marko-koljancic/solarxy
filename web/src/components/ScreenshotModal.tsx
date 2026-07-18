@@ -1,4 +1,4 @@
-// The screenshot modal (UX spec J3 / section 11, Minimystix reference):
+// The screenshot modal (/ section 11, Minimystix reference):
 // resolution presets over the active pane, GPU overlay toggles, capture,
 // preview, and PNG download. The capture renders offscreen Rust-side at
 // the requested resolution; the RGBA readback encodes to PNG here via
@@ -11,6 +11,7 @@ import { usePrefs, type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
+import { Select } from "./Select";
 
 /** Capture dimensions (physical px) for a preset over the active pane's
  * CSS rect. Pure for tests. */
@@ -53,7 +54,7 @@ function filename(): string {
 export function ScreenshotModal({ onClose }: { onClose: () => void }) {
   const defaults = usePrefs((s) => s.prefs.screenshot);
   const view = useViewState((s) => s.view);
-  // A render node's Render button (phase 21) presets a custom resolution
+  // A render node's Render button presets a custom resolution
   // for exactly one open; consumed here.
   const preset = useUi.getState().screenshotPreset;
   if (preset) useUi.getState().setScreenshotPreset(null);
@@ -154,17 +155,18 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
       <div className="modal modal-wide screenshot-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Screenshot</h3>
         <div className="screenshot-controls">
-          <select
-            className="input-field"
+          <Select
+            ariaLabel="Resolution"
             value={resolution}
-            onChange={(e) => setResolution(e.target.value as ScreenshotResolution)}
-          >
-            <option value="viewport">Viewport</option>
-            <option value="1.5x">1.5x</option>
-            <option value="2x">2x</option>
-            <option value="4x">4x</option>
-            <option value="custom">Custom</option>
-          </select>
+            options={[
+              { value: "viewport", label: "Viewport" },
+              { value: "1.5x", label: "1.5x" },
+              { value: "2x", label: "2x" },
+              { value: "4x", label: "4x" },
+              { value: "custom", label: "Custom" },
+            ]}
+            onChange={(v) => setResolution(v as ScreenshotResolution)}
+          />
           {resolution === "custom" && (
             <>
               <input

@@ -1,4 +1,4 @@
-// Landing-page behavior (item 10): the node-assembly hero animation, scroll
+// Landing-page behavior: the node-assembly hero animation, scroll
 // reveals, the accent progress rail, and small chrome. No React; this entry
 // stays a few KB so the marketing page paints instantly.
 //

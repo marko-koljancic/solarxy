@@ -1,4 +1,4 @@
-// The node info modal (Phase 7b C8, opened from the radial menu): a
+// The node info modal (C8, opened from the radial menu): a
 // modeless, draggable card aggregating everything the mirror knows about
 // one node: identity + doc, cook status/time/error, geometry stats,
 // validation counts with a jump to the full report, and the bypass/stale/
@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { dispatch } from "../engine/session";
-import { ctxKey } from "../engine/types";
+import { ctxKey, type PortSnapshot } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
@@ -66,6 +66,14 @@ export function NodeInfoModal() {
   const title = desc?.displayName ?? node.typeId;
   const status = cook?.status;
 
+  const ports = [
+    ...(desc?.inputs ?? []).map((port) => ({ dir: "in", port })),
+    ...(desc?.outputs ?? []).map((port) => ({ dir: "out", port })),
+  ];
+  // `general` is the implicit name/description group every node carries; it
+  // is not what someone opens this modal to read about.
+  const params = (desc?.params ?? []).filter((p) => p.group !== "general");
+
   const startDrag = (e: React.PointerEvent) => {
     dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -116,6 +124,16 @@ export function NodeInfoModal() {
         </button>
       </div>
       <div className="node-info-body">
+        {desc && (
+          <div className="node-info-row">
+            <span className="node-info-key">Kind</span>
+            <span>
+              {desc.categoryLabel}
+              {desc.contexts.length > 0 && ` · in ${desc.contexts.join(", ")}`}
+              {desc.opens && ` · opens a ${desc.opens} network`}
+            </span>
+          </div>
+        )}
         {desc?.doc && <div className="node-info-doc">{renderDoc(desc.doc)}</div>}
         <div className="node-info-row">
           <span className="node-info-key">Status</span>
@@ -149,7 +167,60 @@ export function NodeInfoModal() {
             </span>
           </div>
         )}
+
+        {/* Ports and params come straight off the registry snapshot, so a
+         * node added in Rust documents itself here with no frontend change.
+         * The modal used to show only the node's own doc, which meant the
+         * per-port and per-param docs the registry carries had exactly one
+         * surface: a hover popover you had to already know about. */}
+        {desc && ports.length > 0 && (
+          <PortSection ports={ports} />
+        )}
+        {desc && params.length > 0 && (
+          <details className="node-info-section">
+            <summary>Parameters ({params.length})</summary>
+            <dl className="node-info-defs">
+              {params.map((p) => (
+                <div key={p.key} className="node-info-def">
+                  <dt>
+                    {p.label}
+                    <span className="node-info-meta">
+                      {p.paramType}
+                      {p.unit !== "none" && ` · ${p.unit}`}
+                      {p.hard && ` · ${p.hard[0]} to ${p.hard[1]}`}
+                    </span>
+                  </dt>
+                  <dd>{p.doc ? renderDoc(p.doc) : <em>No description.</em>}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Inputs then outputs, each with its wire type and what it expects. */
+function PortSection({ ports }: { ports: { dir: string; port: PortSnapshot }[] }) {
+  return (
+    <details className="node-info-section" open>
+      <summary>Ports ({ports.length})</summary>
+      <dl className="node-info-defs">
+        {ports.map(({ dir, port }) => (
+          <div key={`${dir}:${port.key}`} className="node-info-def">
+            <dt>
+              {port.label}
+              <span className="node-info-meta">
+                {dir} · {port.dataType}
+                {port.variadic && " · variadic"}
+                {port.required && " · required"}
+              </span>
+            </dt>
+            <dd>{port.doc ? renderDoc(port.doc) : <em>No description.</em>}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }

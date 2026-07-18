@@ -11,8 +11,8 @@
 //! - `overlap.rs` — UV-overlap GPU readback polling.
 //! - `capture.rs` — screenshot capture.
 //! - `raycast` — CPU picking (Möller-Trumbore + AABB early-reject), now
-//!   `solarxy_core::raycast` (moved in web-milestone phase 2 so web picking
-//!   can run in Rust); re-exported here so call sites keep their paths.
+//!   `solarxy_core::raycast` (moved so web picking can run in Rust);
+//!   re-exported here so call sites keep their paths.
 //! - `review.rs` — `ReviewState`: in-memory mirror of one review-file
 //!   plus transient UI state (draft, selection, panel visibility).
 //! - `input/` — keyboard/mouse, dialogs, menu actions.
@@ -56,7 +56,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 use winit::{keyboard::ModifiersState, window::Window};
 
-// Pane geometry moved to `solarxy_renderer::panes` (web-milestone phase 6)
+// Pane geometry moved to `solarxy_renderer::panes`
 // so both shells share the layout math; re-exported to keep call sites.
 pub(super) use solarxy_renderer::panes::{PaneRect as Pane, compute_target_dimensions, hit_test_pane};
 
@@ -106,10 +106,10 @@ pub struct State {
     pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
-    /// Multi-object dynamic scene drawn beside `scene` (web-milestone
-    /// phase 2). Fed by [`SceneDelta`] batches queued in
-    /// `pending_scene_deltas` and applied at the top of each frame; the
-    /// node engine becomes the producer in the next milestone.
+    /// Multi-object dynamic scene drawn beside `scene`. Fed by
+    /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
+    /// the top of each frame; the node engine becomes the producer in a
+    /// later milestone.
     pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
     pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
     pub(super) view: ViewState,

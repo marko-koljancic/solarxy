@@ -1,4 +1,4 @@
-// The dock (Phase 10): dockview owns the shell's geometry. Panels dock, float,
+// The dock: dockview owns the shell's geometry. Panels dock, float,
 // tab and maximize; the arrangement persists and Desks capture it.
 //
 // Two invariants are enforced here and nowhere else:

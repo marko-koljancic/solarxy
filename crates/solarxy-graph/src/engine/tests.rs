@@ -1262,7 +1262,7 @@ fn annotation_crud_and_undo() {
     );
 }
 
-// Phase 7 review: anchoring, threading, staleness, markers, detailed picks.
+// review: anchoring, threading, staleness, markers, detailed picks.
 
 /// A displayable scene: a root geo whose subflow holds one default box
 /// (display flag claimed), cooked. Returns (engine, geo id, subflow ctx,
@@ -1721,7 +1721,7 @@ fn review_command_boundary_shape_is_camelcase() {
 
 #[test]
 fn granting_cast_shadow_releases_every_other_root_light_in_one_step() {
-    // The exclusive-shadow-caster rule (UX spec J3): the handoff cascades
+    // The exclusive-shadow-caster rule: the handoff cascades
     // inside the same command, so it is one undo step and the batch names
     // the released lights via their ParamChanged events.
     let mut e = engine();
@@ -1905,7 +1905,7 @@ fn scene_delta_maps_a_geo_container_and_lights() {
     assert!((lights[0].position[0] - 10.0).abs() < 1e-5);
 }
 
-// Phase 8 root visibility: hidden-but-cooked, picking and marker gates.
+// root visibility: hidden-but-cooked, picking and marker gates.
 
 /// Sets a root-level bool param (the visibility / shadow toggles).
 fn set_root_bool(e: &mut Engine, node: NodeId, key: &str, value: bool) {
@@ -2243,7 +2243,7 @@ fn cook_durations_use_the_installed_clock() {
 
 #[test]
 fn cook_status_ms_stays_zero_without_a_clock() {
-    // The native/test default (no clock) preserves the Phase-3 behavior.
+    // The native/test default (no clock) preserves the behavior.
     let (mut e, ctx) = subflow_engine();
     let box_id = add(&mut e, ctx, "box");
     let events = e.cook(&mut || true);
@@ -2404,7 +2404,7 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     assert!((g.node(a).unwrap().position[0] - 42.0).abs() < 1e-6);
     assert!((g.node(a).unwrap().position[1] - (-7.0)).abs() < 1e-6);
     assert!(g.node(b).unwrap().bypassed);
-    // Phase 8 bumped the subflow geometry nodes to v2 (rendering-group
+    // bumped the subflow geometry nodes to v2 (rendering-group
     // strip); the version stored and reloaded is the current one.
     assert_eq!(g.node(m).unwrap().type_version, 2);
 
@@ -2428,7 +2428,7 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     assert!((cam.target[1] - 2.0).abs() < 1e-6);
 }
 
-// Validation systems (phase 6 W3): implicit import validation, the
+// Validation systems (W3): implicit import validation, the
 // validate node's cache + boundary events, the effective-validation
 // lowering, and the async validate-job protocol.
 
@@ -2661,7 +2661,7 @@ fn validation_result_round_trips_through_json() {
 #[test]
 fn preview_param_reaches_the_cook() {
     use solarxy_core::scene::{SceneObjectId, SceneOp};
-    // The realtime contract (UX spec section 17 item 1): a param drag must reach
+    // The realtime contract (section 17 item 1): a param drag must reach
     // the viewport, and the mechanism is the preview lane. If previews never
     // reach the cook, a drag shows nothing until the pointer is released.
     let (mut e, geo, sub, box_id) = displayed_box();
@@ -2709,7 +2709,7 @@ fn preview_param_reaches_the_cook() {
     );
 }
 
-// ---- Phase 11: the gizmo policy ----
+// ---- the gizmo policy ----
 
 /// The engine's own selection is what `gizmo_target` reads, so set it the way
 /// the host does.
@@ -2994,7 +2994,7 @@ fn clear_preview_releases_a_cancelled_drag() {
 #[test]
 fn gizmo_command_boundary_json_shape_is_camelcase() {
     // Pins the hand-authored TS mirror (web/src/engine/types.ts) to the Rust
-    // serde shapes for the Phase 11 additions, the same way the other boundary
+    // serde shapes for the additions, the same way the other boundary
     // guards do for theirs.
     let ensure = serde_json::to_value(Command::EnsureTransformTarget { geo: NodeId(7) }).unwrap();
     assert_eq!(ensure["type"], "ensureTransformTarget");
@@ -3265,7 +3265,7 @@ fn a_subflow_basis_composes_the_container_and_the_node() {
     );
 }
 
-// ---- Phase 13: import_image persistence + async decode round trips ----
+// ---- import_image persistence + async decode round trips ----
 
 /// A valid 1x1 red PNG (identical to the `import_image` unit fixture).
 fn red_png() -> Vec<u8> {
@@ -3375,7 +3375,7 @@ fn import_image_slxy_round_trip_recooks_identically() {
     assert_eq!(second.pixels, vec![255, 0, 0, 255]);
 }
 
-/// The Phase 14 exit-criterion chain, engine-level: a primitive through
+/// The exit-criterion chain, engine-level: a primitive through
 /// `uv_project` into `material` with an `import_image` wired into the base
 /// color map port. The cooked output must carry projected UVs and one
 /// override material whose diffuse texture is the imported image with a
@@ -3453,11 +3453,11 @@ fn image_material_uv_project_chain_cooks_end_to_end() {
     );
 }
 
-/// All six Phase 15 nodes: they cook, they survive a `.slxy` round trip with
+/// All six nodes: they cook, they survive a `.slxy` round trip with
 /// their params and the switch's variadic wire order intact, and an undo of the
 /// last edit restores the document exactly.
 #[test]
-fn phase15_nodes_cook_round_trip_and_undo() {
+fn modeling_nodes_cook_round_trip_and_undo() {
     let (mut e, ctx) = subflow_engine();
 
     let prim = add(&mut e, ctx, "box");
@@ -3604,7 +3604,7 @@ fn phase15_nodes_cook_round_trip_and_undo() {
     assert_eq!(fingerprint(&e, ctx), before_edit, "undo restored it");
 }
 
-/// The Phase 15 exit chain, and the reason `material` had to land before the
+/// The exit chain, and the reason `material` had to land before the
 /// modeling wave: a textured material must survive duplication. box -> material
 /// -> array -> mirror, with the material assigned BEFORE the copies are made, so
 /// every copy has to carry it and merge's content-hash dedup has to collapse
@@ -3718,7 +3718,7 @@ fn materials_survive_array_and_mirror() {
     );
 }
 
-/// The typed-context model generalizes (phase 17): a fabricated container
+/// The typed-context model generalizes: a fabricated container
 /// opens a Mat network, a Mat-placed container opens a Tex network three
 /// levels deep, placement is judged by the target graph's KIND (never its
 /// address or a special-cased type id), and a removed container's whole
@@ -3818,7 +3818,7 @@ fn typed_contexts_generalize_beyond_geo() {
     );
 }
 
-/// The cross-context reference machinery (phase 17c): a geo-side node
+/// The cross-context reference machinery: a geo-side node
 /// references a material network by path; editing INSIDE the referenced
 /// network re-dirties and recooks the referrer with the fresh value in the
 /// SAME pass (the reference-ordered context walk); cycles are refused at
@@ -4099,7 +4099,7 @@ fn context_kinds_and_node_refs_survive_a_slxy_round_trip() {
     assert_eq!(back_null, ParamSource::Literal(ParamValue::NodeRef(None)));
 }
 
-/// The texture context cooks end to end (phase 19): a texnet opens a Tex
+/// The texture context cooks end to end: a texnet opens a Tex
 /// canvas through the command path, generators and filters chain inside
 /// it, the display node publishes through `Engine::display_image`, and
 /// editing an upstream param recooks the chain (the keep-last-good fix
@@ -4167,7 +4167,7 @@ fn texture_network_cooks_and_publishes_its_display_image() {
     assert!(e.display_image(geo).is_none());
 }
 
-/// The full material pipeline (phase 20): a texture network feeds a
+/// The full material pipeline: a texture network feeds a
 /// material network through `tex_ref`, whose `principled` output a
 /// geo-side `material` node consumes in Reference mode; editing the
 /// TEXTURE recooks the whole chain across three contexts in one pass, and
@@ -4302,7 +4302,7 @@ fn material_network_references_flow_across_three_contexts() {
     );
 }
 
-/// The export nodes (phase 21): a geo_export taps the chain, its Save
+/// The export nodes: a geo_export taps the chain, its Save
 /// action encodes the committed geometry, and the bytes reimport through
 /// this workspace's own loaders (the round-trip acceptance criterion).
 #[test]

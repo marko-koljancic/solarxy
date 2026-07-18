@@ -1,0 +1,216 @@
+// The app's dropdown.
+//
+// Every picker in the chrome used to be a native `<select>`. There was no
+// `select` styling in styles.css at all -- no `appearance: none`, no chevron --
+// so they rendered as OS controls: system-grey on the warm cream light theme,
+// system-blue focus rings against an amber accent, and a popup list drawn by
+// the platform that no token could reach.
+//
+// The interaction model is lifted from PaneToolbar's ghost menus, which
+// already got this right: click to open, close on outside pointerdown or
+// Escape, a tick against the current value. This adds what a value-bound
+// control needs beyond a menu -- typeahead, Home/End, and arrow keys that move
+// a highlight without committing until Enter.
+//
+// Deliberately NOT a portal (unlike Popover): these sit inside modals and the
+// parameter panel, both of which scroll and clip predictably, and an absolute
+// child avoids the reposition-on-scroll problem a portal would introduce.
+
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { IconCheck, IconChevronDown } from "../icons";
+
+export interface SelectOption<T extends string> {
+  value: T;
+  label: string;
+  /** Optional right-aligned hint (units, a px figure, a category). */
+  hint?: string;
+  disabled?: boolean;
+}
+
+interface SelectProps<T extends string> {
+  value: T;
+  options: readonly SelectOption<T>[];
+  onChange: (value: T) => void;
+  /** Accessible name. Required: these replace `<select>` elements that were
+   * labelled by a `<Row label=...>` the control could not see. */
+  ariaLabel: string;
+  /** Fixed width, where a call site relied on one. */
+  width?: number | string;
+  disabled?: boolean;
+  id?: string;
+}
+
+export function Select<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  width,
+  disabled,
+  id,
+}: SelectProps<T>) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const typeahead = useRef({ buffer: "", at: 0 });
+  const listId = useId();
+
+  const selectedIndex = useMemo(
+    () => Math.max(0, options.findIndex((o) => o.value === value)),
+    [options, value],
+  );
+  const current = options[selectedIndex];
+
+  useEffect(() => {
+    if (open) setActive(selectedIndex);
+  }, [open, selectedIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !rootRef.current?.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+
+  // Keep the highlighted row in view when arrowing through a long list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [open, active]);
+
+  const commit = (i: number) => {
+    const opt = options[i];
+    if (!opt || opt.disabled) return;
+    onChange(opt.value);
+    setOpen(false);
+  };
+
+  /** Jump to the next option starting with the typed run, as a native select
+   * does. Repeating one letter cycles matches; typing a run seeks the run. */
+  const seek = (key: string) => {
+    const now = Date.now();
+    const t = typeahead.current;
+    t.buffer = now - t.at > 700 ? key : t.buffer + key;
+    t.at = now;
+    const q = t.buffer.toLowerCase();
+    const from = t.buffer.length === 1 ? (open ? active : selectedIndex) + 1 : 0;
+    for (let n = 0; n < options.length; n++) {
+      const i = (from + n) % options.length;
+      const o = options[i];
+      if (!o.disabled && o.label.toLowerCase().startsWith(q)) {
+        if (open) setActive(i);
+        else commit(i);
+        return;
+      }
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    const step = (delta: number) => {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
+      setActive((a) => {
+        // Skip disabled rows rather than parking the highlight on one.
+        for (let n = 1; n <= options.length; n++) {
+          const i = (a + delta * n + options.length * n) % options.length;
+          if (!options[i].disabled) return i;
+        }
+        return a;
+      });
+    };
+
+    switch (e.key) {
+      case "ArrowDown":
+      case "Down":
+        step(1);
+        break;
+      case "ArrowUp":
+      case "Up":
+        step(-1);
+        break;
+      case "Home":
+        e.preventDefault();
+        setActive(0);
+        break;
+      case "End":
+        e.preventDefault();
+        setActive(options.length - 1);
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (open) commit(active);
+        else setOpen(true);
+        break;
+      case "Escape":
+        if (open) {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+        }
+        break;
+      case "Tab":
+        // Never swallow Tab: it is the node palette's binding, and stealing
+        // focus-nav from a closed control would be worse still.
+        setOpen(false);
+        break;
+      default:
+        if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) seek(e.key);
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="select" style={width ? { width } : undefined}>
+      <button
+        id={id}
+        type="button"
+        className={`select-trigger${open ? " open" : ""}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        aria-controls={open ? listId : undefined}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onKeyDown}
+      >
+        <span className="select-value">{current?.label ?? value}</span>
+        <IconChevronDown size={12} />
+      </button>
+      {open && (
+        <div ref={listRef} id={listId} className="select-list" role="listbox" tabIndex={-1}>
+          {options.map((o, i) => (
+            <button
+              key={o.value}
+              type="button"
+              data-i={i}
+              role="option"
+              aria-selected={o.value === value}
+              disabled={o.disabled}
+              className={`select-option${i === active ? " active" : ""}`}
+              // pointerdown, not click: the outside-pointerdown listener runs
+              // in the capture phase and would close the list first.
+              onPointerDown={(e) => {
+                e.preventDefault();
+                commit(i);
+              }}
+              onPointerEnter={() => setActive(i)}
+            >
+              <span className="select-check">
+                {o.value === value && <IconCheck size={11} />}
+              </span>
+              <span className="select-option-label">{o.label}</span>
+              {o.hint && <span className="select-option-hint">{o.hint}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

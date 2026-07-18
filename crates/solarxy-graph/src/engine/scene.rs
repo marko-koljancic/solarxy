@@ -1,7 +1,7 @@
 //! Lowering cooked geometry to a `solarxy_core::scene::SceneDelta` for the
 //! renderer, the sole engine-to-renderer contract.
 //!
-//! The mapping (node catalog part II):
+//! The mapping:
 //!
 //! - Each root `geo` container becomes one `SceneObject`: its subflow's
 //!   active display node's cooked geometry is the object geometry
@@ -273,7 +273,7 @@ pub(crate) fn geo_world_matrix(
 
 /// Picks the root `geo` container whose displayed, world-transformed
 /// geometry the ray hits nearest (single-pane picking; pane-awareness is
-/// Phase 6). Runs entirely in Rust over CPU-retained cooked geometry, so
+/// Runs entirely in Rust over CPU-retained cooked geometry, so
 /// nothing crosses into JavaScript. Returns the producing geo node's id.
 #[must_use]
 pub fn pick_node(
@@ -504,7 +504,7 @@ fn light_from_node(
         shadow_map_size: 1024,
         shadow_bias: f32p("bias"),
         visible: !matches!(p.get("visible"), Some(ParamValue::Bool(false))),
-        // Declared on every light since Phase 8 and read by nothing until now.
+        // Declared on every light since and read by nothing until now.
         show_helper: boolp("show_helper"),
         helper_size: f32p("helper_size"),
     };

@@ -1,5 +1,5 @@
-//! The seven parametric primitive generators (node catalog part II,
-//! section 13): box, sphere, cylinder, cone, plane, torus, torus knot.
+//! The seven parametric primitive generators: box, sphere, cylinder, cone,
+//! plane, torus, torus knot.
 //!
 //! Shared conventions, frozen for the whole engine:
 //!

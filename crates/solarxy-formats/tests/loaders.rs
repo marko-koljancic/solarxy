@@ -241,7 +241,7 @@ fn gltf_bytes_external_buffer_via_resolver() {
     }
 }
 
-// ---- Phase 13 texture matrix: decoded pixels through every delivery path ----
+// ---- texture matrix: decoded pixels through every delivery path ----
 
 /// The known texels of `texel.png` (2x2 RGBA: red, green / blue, white),
 /// exactly as every loader must decode them.

@@ -46,7 +46,7 @@ export default defineConfig({
     // fetched separately, so the default 500 kB warning only adds noise.
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
-      // Two-page build (item 10): the MPW landing owns index.html at the
+      // Two-page build: the MPW landing owns index.html at the
       // domain root; the app moved to app.html (served at /app by nginx).
       input: {
         landing: resolve(import.meta.dirname, "index.html"),

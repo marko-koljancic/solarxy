@@ -134,7 +134,7 @@ function Section({ title, items, all }: { title: string; items: Annotation[]; al
   );
 }
 
-/** The Review panel. Phase 10 promoted it from a canvas overlay drawer to a real
+/** The Review panel. promoted it from a canvas overlay drawer to a real
  * dock panel, so its presence in the dock IS its open state: dockview's tab owns
  * the title and the close button, and N adds or removes the panel. */
 export function ReviewPanel() {

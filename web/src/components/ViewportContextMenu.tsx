@@ -1,4 +1,4 @@
-// The viewport right-click context menu (item 3). Right-click always opens it
+// The viewport right-click context menu. Right-click always opens it
 // (the camera never used the right button; orbit is LMB, pan is MMB, zoom is
 // scroll). Tool switches mirror the tool column; object actions apply to the
 // selected root geo and are disabled when the selection can't take them.

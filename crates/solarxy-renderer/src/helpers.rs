@@ -339,7 +339,7 @@ mod tests {
         }
     }
 
-    /// The param has been declared on every light since Phase 8 and read by
+    /// The param has been declared on every light since and read by
     /// nothing. It reads now.
     #[test]
     fn show_helper_is_what_decides_whether_a_helper_is_drawn() {

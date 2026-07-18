@@ -1,4 +1,4 @@
-// The ui store's pure pieces: the dock-layout loader (Phase 10), the legacy
+// The ui store's pure pieces: the dock-layout loader, the legacy
 // arrangement reader that migrates a pre-docking user forward, and the
 // connection-style state. (Theme resolution moved to the preferences store; see
 // prefs.test.ts. The layout clamps went with the hand-rolled SplitPane: dockview

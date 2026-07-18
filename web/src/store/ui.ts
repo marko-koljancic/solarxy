@@ -1,8 +1,8 @@
 // UI chrome state: the dock layout, canvas chrome toggles, and transient modal
 // flags. Persisted to localStorage; pure presentation, never document truth.
-// Theme moved to the preferences store (store/prefs.ts) in Phase 7 W4.
+// Theme moved to the preferences store (store/prefs.ts) in W4.
 //
-// Phase 10 retired the hand-rolled layout state (splitPct, viewportSide,
+// retired the hand-rolled layout state (splitPct, viewportSide,
 // propertiesDock, drawerHeight, drawerWidth, drawerCollapsed, viewportMaximized):
 // dockview owns all of it now, and `dockLayout` is the one persisted arrangement.
 // The legacy keys are still READ once, to migrate an existing user's arrangement
@@ -21,7 +21,7 @@ const DOCK_LAYOUT_KEY = "solarxy.ui.dockLayout";
 const FLOW_VIEW_KEY = "solarxy.ui.flowView";
 const PANE_COLORS_KEY = "solarxy.ui.paneColors";
 
-// Retired in Phase 10; read once by loadLegacyArrangement, never written.
+// Retired; read once by loadLegacyArrangement, never written.
 const LEGACY_SPLIT_KEY = "solarxy.ui.splitPct";
 const LEGACY_ARRANGEMENT_KEY = "solarxy.ui.arrangement";
 
@@ -74,7 +74,7 @@ export interface SidecarPrompt {
 }
 
 interface UiState {
-  /** The serialized dockview arrangement (Phase 10). The single source of truth
+  /** The serialized dockview arrangement. The single source of truth
    * for the shell's geometry; `null` before the first layout settles. */
   dockLayout: SerializedDockview | null;
   /** The generated keyboard-shortcuts modal (not persisted). */
@@ -84,7 +84,7 @@ interface UiState {
   /** The screenshot modal (not persisted). */
   screenshotOpen: boolean;
   /** Resolution preset for the next screenshot-modal open (the render
-   * node's Render button, phase 21); consumed once by the modal. */
+   * node's Render button); consumed once by the modal. */
   screenshotPreset: { width: number; height: number } | null;
   /** The turntable-export modal (not persisted). */
   turntableOpen: boolean;
@@ -109,7 +109,7 @@ interface UiState {
   renameRequest: number | null;
   /** The missing-sidecars import prompt (not persisted). */
   sidecarPrompt: SidecarPrompt | null;
-  /** Per-pane header tint, keyed by dockview panel id (item 4). Persisted. */
+  /** Per-pane header tint, keyed by dockview panel id. Persisted. */
   paneColors: Record<string, string>;
   /** The asset the preview panel shows (item 2; not persisted). */
   assetPreview: { hash: string; name: string } | null;
@@ -195,7 +195,7 @@ export function loadEdgeStyle(): EdgeStyle {
   return (EDGE_STYLES as readonly string[]).includes(raw ?? "") ? (raw as EdgeStyle) : "bezier";
 }
 
-/** The persisted per-pane header tint, keyed by dockview panel id (item 4).
+/** The persisted per-pane header tint, keyed by dockview panel id.
  * Pure chrome; malformed entries are dropped. */
 export function loadPaneColors(): Record<string, string> {
   if (typeof localStorage === "undefined") return {};

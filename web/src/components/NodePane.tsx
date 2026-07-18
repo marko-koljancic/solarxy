@@ -1,4 +1,4 @@
-// The self-contained node pane (Phase 9, a Phase 10 docking prerequisite):
+// The self-contained node pane:
 // a Blender-style menu-bar row (Add + View), the breadcrumb on its own row,
 // the graph/list canvas host, and the always-mounted palette. The bottom
 // properties drawer arrives through the children slot so this pane never
@@ -25,7 +25,7 @@ function Breadcrumb() {
 
   if (current === "root") return <div className="breadcrumb">Scene</div>;
 
-  // Walk the owner chain up to the root (containers nest since phase 17):
+  // Walk the owner chain up to the root (containers nest):
   // each child context's owner node lives in some enclosing graph; that
   // graph is the next crumb out.
   const chain: { ctx: GraphContext; label: string }[] = [];

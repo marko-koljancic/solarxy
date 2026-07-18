@@ -24,7 +24,7 @@ pub struct GridUniform {
     pub color: [f32; 3],
     /// Which world plane the grid lies in: 0 = XZ ground (default), 1 = XY,
     /// 2 = YZ. Lets an orthographic elevation view show a view-plane grid
-    /// instead of an edge-on hairline (item 6). Written per pane by the host.
+    /// instead of an edge-on hairline. Written per pane by the host.
     pub plane: u32,
     pub _pad: [u32; 3],
 }

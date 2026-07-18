@@ -343,10 +343,14 @@ pub(super) fn draw_keyboard_shortcuts_modal(
                 }
                 ui.add_space(6.0);
                 ui.label(
+                    // Was `from_white_alpha(140)`: white ink, which only
+                    // resolves on a dark ground and vanished once the light
+                    // theme became cream paper. `weak_text_color` derives
+                    // from the themed visuals, so it recontrasts on both.
                     egui::RichText::new("User-remappable shortcuts land in a future release.")
                         .small()
                         .italics()
-                        .color(egui::Color32::from_white_alpha(140)),
+                        .color(ui.visuals().weak_text_color()),
                 );
             });
         });

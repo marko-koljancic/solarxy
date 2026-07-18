@@ -253,7 +253,7 @@ fn extract_materials(
                 alpha_mode,
                 alpha_cutoff,
                 // KHR_materials_unlit maps onto the per-material Unlit
-                // shading model (phase 18); everything else is PBR.
+                // shading model; everything else is PBR.
                 shading_model: if mat.unlit() {
                     solarxy_core::geometry::ShadingModel::Unlit
                 } else {

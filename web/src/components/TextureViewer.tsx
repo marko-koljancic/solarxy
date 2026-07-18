@@ -1,4 +1,4 @@
-// The texture viewer pane (context-expansion phase 19): a live 2D view of
+// The texture viewer pane: a live 2D view of
 // the texture network's published image. Pull-based: the pane fetches the
 // pixels from the host when the cook state changes (cooked images never
 // ride the event stream), draws them into a plain 2D canvas, and letterboxes

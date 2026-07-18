@@ -34,7 +34,7 @@ interface ReviewStore {
   reviewMode: boolean;
   /** Hide all marker pins (panel stays usable). */
   markersHidden: boolean;
-  /** Whether the Review dock panel is present. Phase 10 made this a read-only
+ /** Whether the Review dock panel is present. made this a read-only
    * MIRROR of the dock: the panel's presence is the truth, and the Dock writes
    * this on add/remove. To open or close it, call `setReviewPanelOpen` in
    * `dock/api`, never this. */

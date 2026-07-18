@@ -1,4 +1,4 @@
-// The D-21 silhouette generator: rounded-corner polygon paths and the
+// The silhouette generator: rounded-corner polygon paths and the
 // left-right symmetry commitment for every shaped role body.
 
 import { describe, expect, it } from "vitest";

@@ -46,7 +46,7 @@ const PROBE: NodeTypeSnapshot = {
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
   searchAliases: ["probe", "novel"],
-  // Revamp D-18 identity hints: a glyph key the frontend has NO art for,
+  // Identity hints: a glyph key the frontend has NO art for,
   // so the category fallback is what the tests below exercise.
   glyph: "probe",
   role: "standard",
@@ -69,7 +69,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     expect(descriptorFor(SNAP, "probe")?.displayName).toBe("Probe");
     // A geo-network palette (pure kind filter) includes it; the root
     // (obj) palette does not. The kinds come from the typed-context
-    // vocabulary (phase 17); a node declaring a NEW kind is still just a
+    // vocabulary; a node declaring a NEW kind is still just a
     // filter match away.
     expect(SNAP.nodes.filter((n) => n.contexts.includes("geo")).map((n) => n.typeId)).toContain(
       "probe",
@@ -110,7 +110,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     expect(coercionKind(SNAP, "int", "float")).toBe("lossless");
   });
 
-  it("speaks the Image vocabulary (Phase 13's sanctioned addition)", () => {
+  it("speaks the Image vocabulary", () => {
     const map = portDataType(SNAP, "probe", "detail_map", "input");
     expect(map).toBe("image");
     // Distinct hue and the resource (hexagon) shape.

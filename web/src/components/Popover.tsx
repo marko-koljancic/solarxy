@@ -1,4 +1,4 @@
-// The shared help popover (UX spec sections 7/9/18): hover or focus opens
+// The shared help popover (sections 7/9/18): hover or focus opens
 // after a short delay, Escape dismisses (spec 19), position flips at the
 // viewport edges. Rendered in a portal so overflow containers (palette,
 // parameter panel) never clip it. The doc renderer handles the descriptor

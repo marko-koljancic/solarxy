@@ -1,4 +1,4 @@
-//! The output nodes (context-expansion phase 21, decisions C-7 and C-8):
+//! The output nodes:
 //! `geo_export` (Geo), `image_export` (Tex), and the root `render`
 //! configuration node.
 //!
@@ -6,9 +6,13 @@
 //! without changing it, and their Save button (a `ParamType::Action`)
 //! routes through `Engine::invoke_action`, which encodes the node's
 //! committed output via `solarxy-formats`' writers and hands bytes to the
-//! host for saving. The `render` node is a config carrier (camera by
-//! path, resolution); its Render button is HOST-interpreted (the engine
-//! cannot render), driving the existing screenshot path.
+//! host for saving. Neither writer carries materials: `ExportMesh` has no
+//! material field, so every geometry format exports bare geometry (a
+//! recorded follow-up, not a format limitation).
+//!
+//! The `render` node is a config carrier (camera by path, resolution); its
+//! Render button is HOST-interpreted (the engine cannot render) and never
+//! reaches `invoke_action`, driving the existing screenshot path instead.
 
 use super::common::{geometry_output, params_with, passive_cook};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
@@ -26,7 +30,10 @@ fn filename_param(default: &str) -> ParamSpec {
         ParamType::Text,
         ParamValue::Text(default.to_string()),
     )
-    .doc("Without extension; the format decides it.")
+    .doc(
+        "The base name for the saved file, without an extension -- the chosen \
+         format supplies that. Left empty it falls back to 'export'.",
+    )
 }
 
 fn save_action() -> ParamSpec {
@@ -36,6 +43,14 @@ fn save_action() -> ParamSpec {
         "output",
         ParamType::Action,
         ParamValue::Bool(false),
+    )
+    .doc(
+        "Encodes what this node last cooked and hands it to the browser's \
+         save dialog. It is a button, not a setting: nothing is stored, and \
+         nothing is written until you press it and pick a destination. It \
+         exports the current cooked result, so a node that has not cooked yet \
+         reports that there is nothing to export rather than writing an empty \
+         file.",
     )
 }
 
@@ -49,7 +64,13 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
-            PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
+            PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
+                .default_port()
+                .doc(
+                    "The geometry to write out. It also leaves by the output \
+                     port untouched, so this node taps a chain rather than \
+                     ending it. Unconnected, there is nothing to export.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with(
@@ -68,6 +89,17 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("glb".to_string()),
+                )
+                .doc(
+                    "Which writer encodes the file. glTF Binary is the \
+                     default and keeps the most: one file, positions, \
+                     normals, and UVs, one node per mesh. OBJ keeps the same \
+                     attributes as text, one `o` block per mesh. PLY merges \
+                     every mesh into one vertex/face list, and only writes \
+                     normals and UVs if every mesh has them. STL is the \
+                     lossiest: triangles and nothing else, no meshes, no UVs, \
+                     with facet normals recomputed on the way out. None of \
+                     the four write materials.",
                 ),
                 filename_param("export"),
                 save_action(),
@@ -76,7 +108,23 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Saves the input geometry to disk (obj, stl, ply, glb); passes it through unchanged. Materials do not export yet.",
+        doc: "Writes the geometry reaching it out to a file -- OBJ, STL, PLY, \
+              or GLB -- and passes that same geometry on unchanged. The \
+              output is the input by refcount, not a copy.\n\n\
+              Because it passes through, it taps a chain rather than \
+              terminating one: drop it partway down and the nodes after it \
+              never notice. That makes it cheap to leave several in a network \
+              at the points worth exporting, each with its own format and \
+              name, and press whichever you need. Saving is a button, not a \
+              side effect of cooking -- the node never writes a file on its \
+              own.\n\n\
+              Materials do not export. Every writer here takes positions, \
+              normals, UVs, and triangles and nothing else, so a textured \
+              model exports as bare geometry, silently, in all four formats \
+              -- including GLB, which is perfectly capable of carrying them. \
+              Material export is a known gap, not a property of the formats. \
+              The button exports what the node last cooked, so it reports \
+              having nothing to export rather than writing an empty file.",
         search_aliases: &[
             "export", "save", "file", "obj", "stl", "ply", "gltf", "glb", "rop",
         ],
@@ -114,8 +162,20 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
         category: Category::Utility,
         contexts: ContextSet::TEX,
         opens: None,
-        inputs: vec![PortSpec::single("image", "Image", DataType::Image, true).default_port()],
-        outputs: vec![PortSpec::single("image", "Image", DataType::Image, false).default_port()],
+        inputs: vec![
+            PortSpec::single("image", "Image", DataType::Image, true)
+                .default_port()
+                .doc(
+                    "The image to write out. It also leaves by the output \
+                     port untouched, so this node taps a texture chain rather \
+                     than ending it. Unconnected, there is nothing to export.",
+                ),
+        ],
+        outputs: vec![
+            PortSpec::single("image", "Image", DataType::Image, false)
+                .default_port()
+                .doc("The input image, passed straight through."),
+        ],
         params: params_with(
             "Export Image",
             vec![
@@ -130,6 +190,13 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("png".to_string()),
+                )
+                .doc(
+                    "PNG is lossless and keeps the alpha channel: the right \
+                     default for a map that will drive a material. JPEG is \
+                     lossy and has no alpha -- transparency is flattened away \
+                     on write -- so keep it for reference images and previews \
+                     rather than working textures.",
                 ),
                 ParamSpec::new(
                     "quality",
@@ -140,7 +207,13 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(1.0, 100.0)
                 .step(1.0)
-                .show_if("format", Pred::Eq(ParamValue::Enum("jpg".to_string()))),
+                .show_if("format", Pred::Eq(ParamValue::Enum("jpg".to_string())))
+                .doc(
+                    "The JPEG quality factor, 1 to 100: higher is a bigger \
+                     file with fewer compression artifacts. Only read when \
+                     Format is JPEG, and hidden otherwise, since PNG has no \
+                     equivalent knob.",
+                ),
                 filename_param("texture"),
                 save_action(),
             ],
@@ -148,7 +221,19 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "image".to_string(),
         },
-        doc: "Saves the input image to disk (png, jpg); passes it through unchanged. Exports at the cooked working resolution.",
+        doc: "Writes the image reaching it out to a PNG or JPEG file, and \
+              passes that same image on unchanged. The counterpart to \
+              `geo_export`, for texture networks.\n\n\
+              It taps a chain rather than terminating one, so it drops in \
+              partway down a texture network without disturbing what follows: \
+              leave one at each stage worth baking out. Saving is a button, \
+              never a side effect of cooking, so a texture network does not \
+              litter your disk while you tweak it.\n\n\
+              It exports at whatever resolution the chain cooked at, which is \
+              the working resolution and not necessarily the one you want on \
+              disk -- if you need a specific size, set it upstream. Choosing \
+              JPEG discards the alpha channel outright, flattening \
+              transparency, which matters when the map you are baking uses it.",
         search_aliases: &["export", "save", "file", "png", "jpeg", "image"],
         glyph: "image_export",
         role: NodeRole::Terminal,
@@ -195,7 +280,14 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
                     },
                     ParamValue::NodeRef(None),
                 )
-                .doc("Unset renders from the current view."),
+                .doc(
+                    "Which camera to render through, picked by path from the \
+                     cameras in the scene -- a reference, not a wire. Left \
+                     unset the render comes from the current viewport view, \
+                     wherever you last orbited it to, which is convenient but \
+                     not repeatable. Point it at a camera to pin the shot \
+                     down.",
+                ),
                 ParamSpec::new(
                     "width",
                     "Width",
@@ -204,7 +296,12 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
                     ParamValue::Int(1920),
                 )
                 .hard(16.0, 4096.0)
-                .step(1.0),
+                .step(1.0)
+                .doc(
+                    "Output width in pixels. Together with Height it also \
+                     fixes the aspect ratio the camera frames at, so changing \
+                     it changes the composition, not just the file size.",
+                ),
                 ParamSpec::new(
                     "height",
                     "Height",
@@ -213,18 +310,45 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
                     ParamValue::Int(1080),
                 )
                 .hard(16.0, 4096.0)
-                .step(1.0),
+                .step(1.0)
+                .doc(
+                    "Output height in pixels. Note that width times height is \
+                     capped at 4 megapixels on the way to the GPU: ask for \
+                     more and the capture is scaled down to fit, keeping the \
+                     aspect ratio, and reports the size it actually produced.",
+                ),
                 ParamSpec::new(
                     "render",
                     "Render",
                     "render",
                     ParamType::Action,
                     ParamValue::Bool(false),
+                )
+                .doc(
+                    "Jumps the active viewport to the chosen camera and opens \
+                     the screenshot dialog at this resolution. Nothing is \
+                     written until you save from there.",
                 ),
             ],
         ),
         bypass: BypassBehavior::NotBypassable,
-        doc: "Render configuration: a camera (by path; unset uses the current view) and a resolution. The Render button captures through the existing screenshot path; the same settings feed the turntable export.",
+        doc: "Holds a render setup: which camera to shoot through and at what \
+              resolution. It carries settings and nothing else -- no ports, \
+              no cook, no output. Pressing Render jumps the active viewport to \
+              the chosen camera and opens the screenshot dialog at this \
+              resolution, where you review the frame and choose whether to \
+              save it.\n\n\
+              It lives at the object level beside the cameras and lights it \
+              refers to, and it is how a shot stops being something you \
+              re-find by orbiting. Point it at a `camera` node and the same \
+              framing comes back every session; keep several around, one per \
+              shot, each named for what it captures.\n\n\
+              A capture is capped at 4 megapixels. The width and height go up \
+              to 4096 each, but anything past the cap is scaled down to fit, \
+              preserving aspect -- so asking for 3840x2160 does not get you a \
+              4K frame, and the result tells you the size it really made. The \
+              limit is deliberate: larger captures can lose the WebGPU device \
+              outright, and there is no recovery from that on the web yet.",
         search_aliases: &["render", "rop", "output", "capture", "screenshot"],
         glyph: "render",
         role: NodeRole::Terminal,

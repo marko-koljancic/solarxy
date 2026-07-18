@@ -1,8 +1,8 @@
-// Hover-radial + node-info-modal state (Phase 7b): one radial at a time,
+// Hover-radial + node-info-modal state: one radial at a time,
 // anchored to a canvas node; the info modal is modeless and draggable,
 // keyed by node id. Both are pure UI state over the mirror.
 //
-// Phase 10: the target carries IDENTITY ONLY. Its screen position used to be
+// The target carries IDENTITY ONLY. Its screen position used to be
 // captured once at open time from a DOM rect, which meant the ring drifted off
 // its node on pan and zoom; the ring now derives its anchor from the live xyflow
 // transform each render (flow/radialAnchor.ts). The mutable per-node flags

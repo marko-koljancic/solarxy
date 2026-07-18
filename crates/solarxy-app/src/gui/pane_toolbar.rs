@@ -209,7 +209,7 @@ pub(super) fn draw_pane_toolbars(
 /// Style the toolbar `Ui` so its `menu_button`s render as bare floating
 /// text — no fill or outline in any state. The hover / open cue is the
 /// text colour shifting to the amber accent. Scoped to the toolbar; the
-/// dropdown popups open with the global Ayu style untouched.
+/// dropdown popups open with the global theme style untouched.
 fn style_frameless_labels(ui: &mut egui::Ui, theme: Theme) {
     ui.spacing_mut().item_spacing.x = 10.0;
     ui.spacing_mut().button_padding = egui::vec2(6.0, 1.0);

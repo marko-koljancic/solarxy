@@ -1,4 +1,4 @@
-//! The `cylinder` primitive (node catalog part II, section 13). The
+//! The `cylinder` primitive. The
 //! catalog allows `radius_top = 0` (a capped cone), unlike Minimystix.
 
 use solarxy_kernel::primitives::generate_cylinder;
@@ -34,7 +34,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(0.0, 10000.0)
                 .soft(0.0, 50.0)
-                .unit(Unit::Meters),
+                .unit(Unit::Meters)
+                .doc(
+                    "Radius of the top ring, at +height/2, in metres. Set it to 0 and \
+                     the ring collapses to a point and its cap disappears, turning the \
+                     cylinder into a cone; set it anywhere between 0 and \
+                     `radius_bottom` for a truncated cone.",
+                ),
                 ParamSpec::new(
                     "radius_bottom",
                     "Radius Bottom",
@@ -44,7 +50,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(0.0, 10000.0)
                 .soft(0.0, 50.0)
-                .unit(Unit::Meters),
+                .unit(Unit::Meters)
+                .doc(
+                    "Radius of the bottom ring, at -height/2, in metres. 0 collapses it \
+                     to a point and drops the bottom cap, the same as `radius_top` does \
+                     at the other end. Both radii at 0 collapses the whole surface onto \
+                     the Y axis and leaves nothing to see.",
+                ),
                 ParamSpec::new(
                     "height",
                     "Height",
@@ -54,7 +66,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(0.001, 10000.0)
                 .soft(0.01, 100.0)
-                .unit(Unit::Meters),
+                .unit(Unit::Meters)
+                .doc(
+                    "Length along Y, in metres. The cylinder is centred on the origin, \
+                     so this extends half either side and the caps sit at +/-height/2, \
+                     rather than growing up from the base.",
+                ),
                 ParamSpec::new(
                     "radial_segments",
                     "Radial Segments",
@@ -62,7 +79,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamType::Int,
                     ParamValue::Int(32),
                 )
-                .hard(3.0, 512.0),
+                .hard(3.0, 512.0)
+                .doc(
+                    "Facets around the circumference. This is what makes the tube read \
+                     as round: 32 is smooth at ordinary sizes, and the minimum of 3 \
+                     gives a triangular tube. It prices both caps as well as the torso.",
+                ),
                 ParamSpec::new(
                     "height_segments",
                     "Height Segments",
@@ -70,11 +92,30 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamType::Int,
                     ParamValue::Int(1),
                 )
-                .hard(1.0, 512.0),
+                .hard(1.0, 512.0)
+                .doc(
+                    "How many rows the torso is cut into between the caps. It never \
+                     changes the silhouette, because the torso is straight-sided \
+                     either way. Raise it only when something downstream needs the \
+                     extra points -- a bend, a noise displacement -- which is why it \
+                     defaults to 1.",
+                ),
             ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "A cylinder (or capped cone when a radius is zero).",
+        doc: "A cylinder running along Y and centred on the origin, with a flat cap at \
+              each end and a smooth-shaded torso. The two radii are independent, so \
+              the same node covers tapered tubes and truncated cones.\n\n\
+              Reach for it for pipes, pillars, and pegs in a blockout, then \
+              `transform` to place it and `merge` to combine it with others. For a \
+              plain cone prefer `cone`, which is this same generator with the top \
+              radius pinned to 0 and one less param to set.\n\n\
+              Either radius may be 0, which collapses that ring to a point and omits \
+              its cap. Torso normals lean by the slope between the two radii, so a \
+              collapsed tip still shades correctly with no special case. The caps \
+              never share vertices with the torso, because their normals differ, so \
+              the rim is a hard edge and the default comes to 134 points for 128 \
+              triangles.",
         search_aliases: &["tube", "pipe"],
         glyph: "cylinder",
         role: NodeRole::Standard,

@@ -1,5 +1,4 @@
-//! Reflection across an axis-aligned plane (the `mirror` node's kernel,
-//! Phase 15).
+//! Reflection across an axis-aligned plane (the `mirror` node's kernel).
 //!
 //! The reflection itself is a [`bake_transform`](crate::transform::bake_transform)
 //! with a negative-determinant matrix (still invertible, so it does not trip

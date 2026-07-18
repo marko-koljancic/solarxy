@@ -1,4 +1,4 @@
-//! The Phase 3 native smoke tool: builds a box -> transform -> merge graph
+//! The native smoke tool: builds a box -> transform -> merge graph
 //! through the direct document/cook API, cooks it, and writes the merged
 //! result as OBJ to stdout (or to a path argument).
 //!

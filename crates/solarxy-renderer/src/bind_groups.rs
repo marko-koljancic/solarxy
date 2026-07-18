@@ -234,7 +234,7 @@ impl BindGroupLayouts {
             label: Some("skybox_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
-        // Selection-outline jump flood (phase 18): the source texture is
+        // Selection-outline jump flood: the source texture is
         // read with textureLoad only (Rg32Float is non-filterable), and
         // one uniform layout serves the per-step and blit params.
         let outline_texture = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

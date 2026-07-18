@@ -1,8 +1,7 @@
-//! The hybrid `material` node (Phase 14, ratified decision 4; v2 in the
-//! context expansion's phase 20): assigns a PBR material to the input
+//! The hybrid `material` node: assigns a PBR material to the input
 //! geometry, either built INLINE from its own factors and map ports
-//! (decision 4, unchanged) or REFERENCED from a material network by path
-//! (decision C-2). v2 also discharges the per-slot-targeting backlog
+//! or REFERENCED from a material network by path
+//!. v2 also discharges the per-slot-targeting backlog
 //! note: an empty `target` overrides every mesh (the v1 behavior); a
 //! non-empty target assigns only meshes whose name contains it, leaving
 //! the rest on their existing materials.
@@ -29,27 +28,69 @@ use crate::registry::param_spec::{EnumVariant, NodePathAccept, ParamSpec, ParamT
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
-/// The five optional map ports, one per `RawMaterialData` texture role.
-/// Shared with the mat-context `principled` node (phase 20).
-pub(super) const MAP_PORTS: [(&str, &str); 5] = [
-    ("base_color_map", "Base Color Map"),
-    ("normal_map", "Normal Map"),
-    ("metallic_roughness_map", "Metallic Roughness Map"),
-    ("occlusion_map", "Occlusion Map"),
-    ("emissive_map", "Emissive Map"),
+/// The five optional map ports, one per `RawMaterialData` texture role:
+/// `(key, label, doc)`. Shared with the mat-context `principled` node, so
+/// the two cannot describe the same port differently.
+pub(super) const MAP_PORTS: [(&str, &str, &str); 5] = [
+    (
+        "base_color_map",
+        "Base Color Map",
+        "The albedo texture, read as sRGB and multiplied by the Base Color \
+         factor. Connecting it neutralizes that factor to white, so the map \
+         alone drives the colour. Left empty, the factor is the colour.",
+    ),
+    (
+        "normal_map",
+        "Normal Map",
+        "A tangent-space normal map, read as linear data. It has no factor \
+         to neutralize, so nothing dims when you connect it. Left empty, \
+         the surface samples a flat normal and shades from the mesh normals \
+         alone.",
+    ),
+    (
+        "metallic_roughness_map",
+        "Metallic Roughness Map",
+        "glTF-packed: roughness in G, metallic in B. Connecting it \
+         neutralizes BOTH the Metallic and Roughness factors to 1.0, so one \
+         port takes over two channels at once -- there is no way to map one \
+         of them and keep the scalar on the other.",
+    ),
+    (
+        "occlusion_map",
+        "Occlusion Map",
+        "Baked ambient occlusion, read from R and composited into the packed \
+         ORM texture. It only reaches the renderer when a Metallic Roughness \
+         Map is connected too AND the two images have identical dimensions; \
+         connected alone, or at a mismatched size, it is silently dropped.",
+    ),
+    (
+        "emissive_map",
+        "Emissive Map",
+        "Light the surface emits by itself, read as sRGB and multiplied by \
+         the Emissive factor. Connecting it neutralizes that factor to \
+         white. Left empty, the factor alone decides the emission.",
+    ),
 ];
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
-    let mut inputs =
-        vec![PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port()];
-    for (key, label) in MAP_PORTS {
-        inputs.push(PortSpec::single(key, label, DataType::Image, false));
+    let mut inputs = vec![
+        PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
+            .default_port()
+            .doc(
+                "The geometry to dress. Required: this node only rewrites \
+                 the material table and each mesh's material index, so it \
+                 has nothing to assign to without an input. Points, normals \
+                 and UVs pass through untouched.",
+            ),
+    ];
+    for (key, label, doc) in MAP_PORTS {
+        inputs.push(PortSpec::single(key, label, DataType::Image, false).doc(doc));
     }
 
     NodeTypeDescriptor {
         type_id: "material",
-        // v2 (phase 20): Reference mode + per-slot targeting. Added
+        // v2: Reference mode + per-slot targeting. Added
         // params fill from defaults on load (registry-default migration),
         // so v1 documents keep their exact inline behavior.
         version: 2,
@@ -73,6 +114,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("inline".to_string()),
+                )
+                .doc(
+                    "Inline builds the surface from this node's own factors \
+                     and map ports. Reference ignores both and assigns the \
+                     material a `matnet` publishes instead. Switching to \
+                     Reference hides the factors but keeps their values, so \
+                     switching back restores exactly what you had.",
                 ),
                 ParamSpec::new(
                     "material_path",
@@ -83,7 +131,16 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     },
                     ParamValue::NodeRef(None),
                 )
-                .show_if("mode", Pred::Eq(ParamValue::Enum("reference".to_string()))),
+                .show_if("mode", Pred::Eq(ParamValue::Enum("reference".to_string())))
+                .doc(
+                    "The `matnet` to take the material from. What arrives is \
+                     whatever that network's display node publishes, so \
+                     re-designating the display node inside it re-points \
+                     every referrer at once. In Reference mode this is \
+                     required: unset, dangling, or aimed at a network that \
+                     publishes nothing all fail the cook rather than \
+                     quietly assigning a default surface.",
+                ),
                 ParamSpec::new(
                     "target",
                     "Target Meshes",
@@ -91,7 +148,17 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamType::Text,
                     ParamValue::Text(String::new()),
                 )
-                .doc("Substring filter on mesh names; empty assigns every mesh."),
+                .doc(
+                    "A case-sensitive substring matched against mesh names. \
+                     Empty is the override-all default: the material table \
+                     collapses to this one material and every mesh takes it. \
+                     Non-empty appends the material and re-points only the \
+                     matching meshes, leaving the rest on whatever they \
+                     already had, so several `material` nodes in a row can \
+                     dress different parts of one merged object. Primitives \
+                     are named after their type (`box`, `sphere`); imported \
+                     meshes keep the names from the file.",
+                ),
             ],
         )
         .into_iter()
@@ -108,8 +175,25 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Assigns a PBR material to every mesh of the input; connected \
-              maps drive their channels, factors drive the rest.",
+        doc: "Assigns one material to the meshes of the input geometry. The \
+              material is either built INLINE from this node's own factors \
+              and map ports, or taken by REFERENCE from a `matnet` \
+              elsewhere in the scene.\n\n\
+              Drop it at the tail of a geo network, after the modelling and \
+              the UV work: it only rewrites the material table and each \
+              mesh's material index, so points, normals and UVs pass \
+              through untouched. Reach for Inline for a one-off surface \
+              nothing else needs. Reach for Reference once a material is \
+              shared: point `material_path` at a `matnet` and one edit \
+              inside that network updates every object referring to it.\n\n\
+              `target` decides how much this node claims. Empty, it \
+              overrides everything -- the material table collapses to this \
+              one material and every mesh points at it. Non-empty, it \
+              appends instead and re-points only the meshes whose name \
+              contains that substring. Note that Reference mode hides the \
+              factor params but NOT the five map ports: they stay on the \
+              node and are ignored, because the referenced network owns the \
+              whole surface.",
         search_aliases: &["material", "pbr", "texture", "shader", "color"],
         glyph: "material",
         role: NodeRole::Standard,
@@ -130,7 +214,15 @@ pub(super) fn factor_params() -> Vec<ParamSpec> {
             ParamType::Color,
             ParamValue::Color([0.8, 0.8, 0.8, 1.0]),
         )
-        .driven_by_port("base_color_map"),
+        .driven_by_port("base_color_map")
+        .doc(
+            "The surface colour of a dielectric, or the reflectance tint of \
+             a metal, multiplied into the base-color sample. Connecting a \
+             Base Color Map neutralizes this to white so the map alone \
+             drives the channel; the value you set is kept for when the map \
+             comes off again. Alpha is carried, but these nodes only build \
+             Opaque materials today.",
+        ),
         ParamSpec::new(
             "metallic",
             "Metallic",
@@ -141,7 +233,15 @@ pub(super) fn factor_params() -> Vec<ParamSpec> {
         .hard(0.0, 1.0)
         .soft(0.0, 1.0)
         .step(0.01)
-        .driven_by_port("metallic_roughness_map"),
+        .driven_by_port("metallic_roughness_map")
+        .doc(
+            "How metallic the surface is. 0 is a dielectric: coloured \
+             diffuse plus an uncoloured specular highlight. 1 is bare \
+             metal: no diffuse at all, and the reflection takes the base \
+             colour. Values in between are not physical -- reach for them \
+             for a worn or corroded edge, not as a dial for shininess \
+             (that is Roughness).",
+        ),
         ParamSpec::new(
             "roughness",
             "Roughness",
@@ -152,7 +252,13 @@ pub(super) fn factor_params() -> Vec<ParamSpec> {
         .hard(0.0, 1.0)
         .soft(0.0, 1.0)
         .step(0.01)
-        .driven_by_port("metallic_roughness_map"),
+        .driven_by_port("metallic_roughness_map")
+        .doc(
+            "Microsurface scatter, which sets how wide the specular lobe \
+             is: 0 is a mirror, 1 is fully diffuse. The shader clamps the \
+             low end to 0.04, so a perfect mirror is not reachable and \
+             highlights never collapse into a single aliased pixel.",
+        ),
         ParamSpec::new(
             "emissive",
             "Emissive",
@@ -160,13 +266,27 @@ pub(super) fn factor_params() -> Vec<ParamSpec> {
             ParamType::Color,
             ParamValue::Color([0.0, 0.0, 0.0, 1.0]),
         )
-        .driven_by_port("emissive_map"),
+        .driven_by_port("emissive_map")
+        .doc(
+            "Light the surface emits on its own, added on top of the lit \
+             result, so an emissive surface stays visible in shadow. Black \
+             (the default) is no emission. It lights nothing else: there is \
+             no emissive bounce, so a glowing panel does not brighten the \
+             wall behind it.",
+        ),
         ParamSpec::new(
             "material_name",
             "Material Name",
             "material",
             ParamType::Text,
             ParamValue::Text(String::new()),
+        )
+        .doc(
+            "What the material is called wherever it is listed. It has no \
+             effect on the shading. Empty falls back to `material`. The \
+             geo-side `material` node keeps this visible in Reference mode \
+             but ignores it there: a referenced network's material carries \
+             its own name.",
         ),
     ]
 }
@@ -185,7 +305,7 @@ fn cook_material(
     };
 
     let material = if p.enum_key("mode") == "reference" {
-        // Reference mode (phase 20): the material network's published
+        // Reference mode: the material network's published
         // value, pre-resolved by the driver. A set-but-unresolvable path
         // is a hard error badge, never a silent fallback material.
         let Some(target) = p.node_ref("material_path") else {
@@ -265,7 +385,7 @@ pub(super) fn build_inline_material(p: &ResolvedParams, inputs: &Inputs) -> RawM
 /// Assigns the material to the input's meshes. An empty target is the v1
 /// override-all (one-entry material table); a non-empty target appends
 /// the material and points only name-matching meshes at it, leaving the
-/// rest on their existing materials (per-slot targeting, phase 20).
+/// rest on their existing materials (per-slot targeting).
 fn assign_material(
     input: &Arc<solarxy_kernel::GeometrySet>,
     material: &Arc<RawMaterialData>,

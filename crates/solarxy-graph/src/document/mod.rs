@@ -108,7 +108,7 @@ pub enum GraphContext {
 pub struct PortRef {
     pub node: NodeId,
     /// The port key (simultaneously the canvas handle id and the compute
-    /// body's input key, per catalog section 3).
+    /// body's input key).
     pub port: String,
 }
 
@@ -136,7 +136,7 @@ pub struct NodeData {
     /// Canvas position (presentation state, undoable, never cook-relevant).
     pub position: [f32; 2],
     pub bypassed: bool,
-    /// Explicit edge order per **variadic** input port (decision 25):
+    /// Explicit edge order per **variadic** input port:
     /// reordering is a single list rewrite, no renumbering churn. Managed
     /// exclusively by [`Graph::connect`]/[`Graph::disconnect`]/
     /// [`Graph::reorder_variadic`].

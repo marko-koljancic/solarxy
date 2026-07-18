@@ -1,5 +1,4 @@
-//! The `DataType` system and the wire-level coercion matrix (node catalog
-//! part I, section 2).
+//! The `DataType` system and the wire-level coercion matrix.
 //!
 //! A connection is legal iff the endpoint types are the same or a listed
 //! coercion exists; the engine applies coercions at value-gather time
@@ -7,7 +6,7 @@
 //! and from nothing (a Color-to-Image constant fill would require a
 //! synthesis cook; backlog note). Lossy cells (`Float -> Int` rounds half
 //! away from zero,
-//! `Color -> Vec3` drops alpha) are allowed per decision 28 and get
+//! `Color -> Vec3` drops alpha) are allowed, and get
 //! distinct handle UX in the frontend.
 //!
 //! The matrix is a table-driven function locked by an exhaustive N-by-N
@@ -46,10 +45,10 @@ pub enum DataType {
     Text,
     /// `Arc<RawImageData>`: decoded RGBA8 pixels plus content hash. The
     /// wire value between `import_image` and the `material` node's map
-    /// ports (Phase 13).
+    /// ports.
     Image,
     /// `Arc<RawMaterialData>`: a built material description. The wire
-    /// value INSIDE material networks only (phase 20, decision C-2);
+    /// value INSIDE material networks only;
     /// across contexts materials travel by path reference, never by
     /// wire. Coerces to and from nothing.
     Material,
@@ -251,7 +250,7 @@ mod tests {
 
     use super::*;
 
-    /// The exhaustive N-by-N snapshot (catalog section 2). Any matrix
+    /// The exhaustive N-by-N snapshot. Any matrix
     /// change is a visible diff in this expected text, never an accident.
     #[test]
     fn coercion_matrix_snapshot() {

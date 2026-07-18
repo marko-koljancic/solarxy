@@ -1,7 +1,7 @@
 //! Serializable mirrors: the per-node [`NodeMirror`] and whole-document
 //! [`DocumentSnapshot`] the frontend rebuilds its store from, and the
 //! [`RegistrySnapshot`] that drives the palette and parameter panel (the
-//! zero-frontend-change contract, node catalog part I section 8).
+//! zero-frontend-change contract).
 //!
 //! Geometry never appears here: the mirror holds only node, edge, and
 //! param metadata, so a full resnapshot after a desync or structural undo

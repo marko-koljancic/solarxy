@@ -131,9 +131,9 @@ struct MaterialUniform {
     emissive: vec3<f32>,
     alpha_mode: u32,
     material_index: u32,
-    // Phase 18: per-material shading model (0 Pbr, 1 Matcap, 2 Toon,
-    // 3 Unlit, 4 Clay, 5 ClayDark, 6 Chrome, 7 Silhouette) and the toon
-    // band count, at offsets 32/36 (the former pad slots).
+    // Per-material shading model (0 Pbr, 1 Matcap, 2 Toon, 3 Unlit,
+    // 4 Clay, 5 ClayDark, 6 Chrome, 7 Silhouette) and the toon band count,
+    // at offsets 32/36 (the former pad slots).
     shading_model: u32,
     toon_steps: f32,
     // Offset 48 (vec4 alignment); factor x map, glTF style.
@@ -289,7 +289,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4(0.0, 0.0, 0.0, 1.0);
     }
 
-    // Per-material shading model (phase 18). A global viewport override
+    // Per-material shading model. A global viewport override
     // (camera.material_override != 0u) wins over the per-material model,
     // so inspection and override workflows see every object uniformly.
     let model_id = select(0u, material.shading_model, camera.material_override == 0u);

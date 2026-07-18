@@ -1,5 +1,5 @@
 //! The `SolarxyApp` wasm-bindgen class: the browser host over the engine
-//! and the full `solarxy-renderer` pipeline (phase 6; the phase-4 stopgap
+//! and the full `solarxy-renderer` pipeline (the phase-4 stopgap
 //! forward renderer is retired).
 //!
 //! The React frontend holds one instance: it dispatches `Command`s (in) and
@@ -228,7 +228,7 @@ pub struct SolarxyApp {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    /// The asset-preview pane's isolated render state (item 2), when open.
+    /// The asset-preview pane's isolated render state, when open.
     preview: Option<PreviewState>,
     /// The (sRGB) format render pipelines target; the surface view is
     /// created with this format each frame (Chrome offers only non-sRGB
@@ -253,7 +253,7 @@ pub struct SolarxyApp {
     /// The live drag's delta text, rebuilt each pointer move and polled once per
     /// frame by the shell. `None` whenever nothing is being dragged.
     gizmo_readout: Option<String>,
-    /// The scene object tinted as selected in the viewports (decision 24),
+    /// The scene object tinted as selected in the viewports,
     /// or `None`.
     selected_object: Option<SceneObjectId>,
     /// Validate jobs drained from the engine but not yet handed to the
@@ -289,7 +289,7 @@ pub struct SolarxyApp {
     /// A turntable-export frame request: (pane, absolute azimuth in degrees,
     /// opts). Rendered offscreen at frame end from a rotated clone of the
     /// pane's render-through camera, through the same capture slot as the
-    /// screenshot (item 9). The frontend drives one frame at a time.
+    /// screenshot. The frontend drives one frame at a time.
     turntable_request: Option<(usize, f32, ScreenshotOptsDto)>,
     /// The in-flight screenshot readback (one at a time).
     pending_screenshot: Option<solarxy_renderer::capture::PendingCapture>,
@@ -417,7 +417,14 @@ impl SolarxyApp {
             sky_top,
             sky_bottom,
             wireframe_color: background.wireframe_color(),
-            wireframe_line_width: solarxy_core::preferences::LineWeight::Medium.width_px(),
+            // Only the seed for the renderer's first frame: every pane's real
+            // weight arrives through `PaneDisplaySettings::line_weight` (see
+            // the per-pane `width_px()` reads below). Taken from the shared
+            // default rather than naming a variant, because this hardcoded
+            // `Medium` silently disagreed with the desktop's persisted
+            // `Light` default, so the same scene drew different wireframes in
+            // the two shells out of the box.
+            wireframe_line_width: solarxy_core::preferences::LineWeight::default().width_px(),
             bloom_enabled: false,
             ssao_enabled: false,
             tone_mode: ToneMode::AcesFilmic,
@@ -592,7 +599,7 @@ impl SolarxyApp {
         // supposed to pass a real frame delta; treat anything else as one frame.
         let dt_ms = if dt_ms.is_finite() { dt_ms } else { 16.0 };
         let dt = (dt_ms / 1000.0).clamp(0.0, 0.1) as f32;
-        // Live turntable spin (item 9): a constant angular velocity on each pane
+        // Live turntable spin: a constant angular velocity on each pane
         // whose toggle is on. rpm is the global display setting; the spin is
         // session-temporary (reset on load) and drives the pane's scratch camera.
         let rpm = self.view.display.turntable_rpm;
@@ -1112,7 +1119,7 @@ impl SolarxyApp {
         }
     }
 
-    /// The displayed image of a texture network (phase 19), for the
+    /// The displayed image of a texture network, for the
     /// texture viewer pane: `{ width, height, pixels }` (RGBA8) or
     /// `undefined` when the network publishes nothing. The pixel copy is
     /// display-only and pull-based, so cooked images still never ride the
@@ -1137,7 +1144,7 @@ impl SolarxyApp {
         obj.into()
     }
 
-    /// Executes an export node's Action param (phase 21): the engine
+    /// Executes an export node's Action param: the engine
     /// encodes the committed output, and the returned
     /// `{ filename, mime, bytes }` goes to the frontend's save path (the
     /// File System Access flow `.slxy` already uses).
@@ -1325,12 +1332,12 @@ impl SolarxyApp {
     }
 
     /// Marks the scene object produced by `node` as selected (viewport
-    /// outline tint, decision 24); `undefined`/null clears it.
+    /// outline tint); `undefined`/null clears it.
     pub fn set_scene_selection(&mut self, node: Option<f64>) {
         self.selected_object = node.map(|n| SceneObjectId(n as u64));
     }
 
-    /// Applies the selection-highlight preference (phase 18): `style` is
+    /// Applies the selection-highlight preference: `style` is
     /// `"outline"`, `"tint"`, or `"none"`; color is linear RGBA; `width`
     /// is the rim width in pixels (clamped 1..16 renderer-side). The
     /// legacy tint reuses the same color at its fixed 0.35 alpha.
@@ -2756,7 +2763,7 @@ impl SolarxyApp {
                 .filter_map(|i| {
                     let node = self.view.look_through[i]?;
                     // Suppressed while navigating, or while a turntable spins
-                    // this pane's scratch camera (item 9).
+                    // this pane's scratch camera.
                     if self.view.camera_editing[i] || self.view.pane_settings[i].turntable_active {
                         return None;
                     }
@@ -3095,7 +3102,7 @@ impl SolarxyApp {
             viewport,
             i == 0,
         );
-        // The selection-outline rim lands after tone mapping (phase 18),
+        // The selection-outline rim lands after tone mapping,
         // so it never blooms and AO never darkens it.
         if scene_present
             && !is_uv_map
@@ -3140,7 +3147,7 @@ impl SolarxyApp {
         pds: &PaneDisplaySettings,
     ) {
         let mut objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        // The picking-sync selection highlight (decision 24): flag the
+        // The picking-sync selection highlight: flag the
         // selected node's object so the main pass draws its accent tint.
         if let Some(id) = self.selected_object
             && let Some(selected) = self.scene_objects.draw_object(id)
@@ -3176,7 +3183,7 @@ impl SolarxyApp {
             self.resolve_background(pds),
         );
 
-        // Selection outline (phase 18): the offscreen mask + jump-flood
+        // Selection outline: the offscreen mask + jump-flood
         // stages run here; the rim blits onto the swapchain after the
         // composite pass (composite_and_submit reads has_selection).
         if self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
@@ -3264,7 +3271,7 @@ impl SolarxyApp {
         );
         // The grid plane follows the pane camera: perspective keeps the XZ
         // ground; an orthographic elevation view (front/side) gets a view-plane
-        // grid so it is not seen edge-on (item 6). Shared buffer, written per
+        // grid so it is not seen edge-on. Shared buffer, written per
         // pane before that pane's grid pass, exactly like the color above.
         let plane: u32 = self.view.cameras[i]
             .as_ref()
@@ -3402,7 +3409,7 @@ impl SolarxyApp {
                 });
                 apply_camera_json(&mut cam_state.camera, &pane.camera);
             }
-            // Restore the look-through binding + lock (item 1). The follow will
+            // Restore the look-through binding + lock. The follow will
             // drive the pane from the node once it cooks.
             self.view.look_through[i] = pane.look_through.map(NodeId);
             self.view.camera_locked[i] = pane.camera_locked;
@@ -3412,7 +3419,7 @@ impl SolarxyApp {
     }
 }
 
-/// The asset-preview pane's isolated render state (item 2): its own surface
+/// The asset-preview pane's isolated render state: its own surface
 /// (a second canvas from the SAME instance/device), a throwaway `SceneObjects`
 /// holding one parsed model, and an orbit camera. Never touches the document.
 struct PreviewState {
@@ -3422,7 +3429,7 @@ struct PreviewState {
     camera: CameraState,
 }
 
-/// The asset-preview pane (item 2): a live 3D orbit view of one staged model,
+/// The asset-preview pane: a live 3D orbit view of one staged model,
 /// rendered ON DEMAND (open / orbit / zoom / resize), never in the frame loop,
 /// so an idle preview costs nothing. Each render borrows the shared HDR chain
 /// at preview size (the screenshot pattern); the next main frame's target sync
@@ -3655,7 +3662,7 @@ fn projection_name(mode: ProjectionMode) -> &'static str {
 /// 0 = XZ ground, 1 = XY, 2 = YZ). Perspective and top/bottom orthographic
 /// keep the ground grid; a front/back orthographic view uses XY and a
 /// left/right view uses YZ, so the grid is face-on instead of an edge-on
-/// hairline (item 6). Chosen from the camera's dominant forward axis.
+/// hairline. Chosen from the camera's dominant forward axis.
 fn grid_plane_for(cam: &Camera) -> u32 {
     if cam.projection != ProjectionMode::Orthographic {
         return 0;

@@ -1,4 +1,4 @@
-//! The `uv_project` node (Phase 14): planar, box, cylindrical, or
+//! The `uv_project` node: planar, box, cylindrical, or
 //! spherical UV projection over the whole input set, normalized against
 //! its AABB. High QA value: texel density needs UVs, and imports often
 //! lack them. The kernel lives in `solarxy_kernel::uv_project`; box mode
@@ -25,7 +25,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
-            PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
+            PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
+                .default_port()
+                .doc(
+                    "The geometry to unwrap. Every mesh in the set is projected, and any \
+                     UVs a mesh already carried are overwritten rather than kept.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with(
@@ -44,6 +49,17 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("planar".into()),
+                )
+                .doc(
+                    "Which shape maps position onto UV. Planar flattens the geometry \
+                     along one axis and is the honest choice for anything roughly flat. \
+                     Box gives each triangle the planar mapping of whichever axis its \
+                     face normal is closest to, so a hard-surface model gets a sensible \
+                     mapping on all six sides at once. Cylindrical turns the angle \
+                     around the axis into u and the height along it into v. Spherical \
+                     uses longitude and latitude about the axis. Cylindrical and \
+                     Spherical wrap, and a triangle that straddles the wrap seam smears \
+                     the whole texture across itself.",
                 ),
                 ParamSpec::new(
                     "axis",
@@ -57,6 +73,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
                         ],
                     },
                     ParamValue::Enum("y".into()),
+                )
+                .doc(
+                    "The axis the projection is built around: Planar projects along it, \
+                     Cylindrical wraps about it, Spherical takes it as the pole. Box \
+                     uses all three axes by construction, so this does nothing at all in \
+                     that mode.",
                 ),
                 ParamSpec::new(
                     "scale",
@@ -65,7 +87,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamType::Vec2,
                     ParamValue::Vec2([1.0, 1.0]),
                 )
-                .step(0.1),
+                .step(0.1)
+                .doc(
+                    "Multiplies the normalized UVs. 1 fits the geometry's bounds into \
+                     0..1 exactly; 2 tiles the texture twice across it; 0.5 uses half of \
+                     it. Applied before Offset.",
+                ),
                 ParamSpec::new(
                     "offset",
                     "Offset",
@@ -73,14 +100,32 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     ParamType::Vec2,
                     ParamValue::Vec2([0.0, 0.0]),
                 )
-                .step(0.05),
+                .step(0.05)
+                .doc(
+                    "Slides the UVs after Scale, in UV units, so 1 shifts by a full \
+                     tile. Use it to line a texture up on the surface, not to resize it.",
+                ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Projects UVs onto the input (planar, box, cylindrical, or \
-              spherical), normalized over its bounds.",
+        doc: "Writes a fresh UV set onto every mesh in the input using one of \
+              four projections, normalized over the whole set's bounding box \
+              so that a scale of 1 lands the geometry inside 0..1.\n\n\
+              Imports very often arrive with no UVs at all, and texel density, \
+              the checker pattern, and any textured material all need them. \
+              This is the node that gives them something to read: it goes \
+              after the import or the primitive and before the material. It is \
+              a projection rather than an unwrap, so treat it as the fast way \
+              to usable UVs, not as a substitute for a real layout.\n\n\
+              Three things to expect. Existing UVs are replaced, not merged. \
+              The normalization is against the bounds of the whole input set, \
+              so several meshes share one consistent mapping and a `transform` \
+              upstream drags the UVs along with the bounds. And Box mode \
+              rebuilds each mesh non-indexed, three points per triangle, so \
+              the point count jumps and validate's topology counts will \
+              reflect it.",
         search_aliases: &["uv", "unwrap", "project", "texture", "mapping"],
         glyph: "uv_project",
         role: NodeRole::Standard,

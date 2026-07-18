@@ -1,4 +1,4 @@
-//! Node-version migration (node catalog part I, section 1).
+//! Node-version migration.
 //!
 //! On document load, each stored node carries a `type_version`. This module
 //! reconciles it with the registry's current descriptor version:
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn phase8_v1_nodes_strip_their_dead_params_silently() {
+    fn v1_nodes_strip_their_dead_params_silently() {
         // The real registry: v1 documents carrying values in the dropped
         // params (users may have toggled them expecting an effect) load
         // with zero warnings through the silent-strip migrations.

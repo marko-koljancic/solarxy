@@ -1,10 +1,26 @@
-/* The Solarxy landing page (item 10), in the MPW "Balanced Editorial" design
- * language (the koljam.com system; see the mpw repo's globals.css and
- * STITCH_DESIGN_BRIEF.md). Self-contained: the app's tokens.css is NOT loaded
- * here. Light (warm cream) is the primary look; dark follows the MPW dark
- * palette via prefers-color-scheme. Motion follows the MPW spec: clip-mask
- * headline rise, floating pastel tiles, calm scroll reveals, a thin accent
- * progress rail. prefers-reduced-motion collapses everything. */
+/* The Solarxy landing page, in the MPW "Balanced Editorial" design language
+ * (the koljam.com system; see the mpw repo's globals.css and
+ * STITCH_DESIGN_BRIEF.md). Motion follows the MPW spec: clip-mask headline
+ * rise, floating pastel tiles, calm scroll reveals, a thin accent progress
+ * rail. prefers-reduced-motion collapses everything.
+ *
+ * SELF-CONTAINED ON PURPOSE, and it stays that way after 0.7.1 centralised
+ * the app's palette in `crates/solarxy-core/src/theme.rs`. This page is a
+ * front door mirroring the WEBSITE, not app chrome, and the two genuinely
+ * differ:
+ *
+ *   - The vocabulary is MPW's (--paper, --ink, --accent-ink, --lavender),
+ *     not the app's semantic roles (--surface-app, --ink-primary). Importing
+ *     the generated tokens would define names nothing here reads.
+ *   - Its dark mode is koljam.com's WARM dark (--paper #16140f). The app's
+ *     dark is a neutral grey (#2a2a2a). That is a deliberate divergence, not
+ *     drift: the landing matches the site it sits next to.
+ *
+ * The LIGHT values below are the exception: they are the same MPW palette the
+ * app's light theme now uses, so they must not drift apart. That overlap is
+ * pinned by `landing_light_values_match_the_palette` in
+ * `crates/solarxy-core/tests/tokens_drift.rs` — change one and the test names
+ * the other. */
 
 :root {
   --paper: #f4f1ea;

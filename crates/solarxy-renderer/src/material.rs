@@ -26,7 +26,7 @@ pub struct MaterialUniform {
     pub emissive: [f32; 3],
     pub alpha_mode: u32,
     pub material_index: u32,
-    /// `solarxy_core::geometry::ShadingModel` as u32 (phase 18): 0 Pbr,
+    /// `solarxy_core::geometry::ShadingModel` as u32: 0 Pbr,
     /// 1 Matcap, 2 Toon, 3 Unlit, 4 Clay, 5 `ClayDark`, 6 Chrome,
     /// 7 Silhouette. Occupies a former pad slot, so the struct stays 64
     /// bytes and shaders declaring the 48-byte prefix keep binding.

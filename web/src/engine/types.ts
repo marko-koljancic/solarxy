@@ -27,7 +27,7 @@ export type ParamValue =
   | { type: "enum"; value: string }
   | { type: "asset"; value: string }
   /** A cross-context node reference: the target's stable node id, or
-   * null when unset (phase 17, references cross contexts by path). */
+ * null when unset. */
   | { type: "nodeRef"; value: NodeId | null };
 
 export type ParamSource =
@@ -277,7 +277,7 @@ export type BypassSnapshot =
   | { mode: "mute" }
   | { mode: "notBypassable" };
 
-/** The visual silhouette family a node renders with (revamp D-18);
+/** The visual silhouette family a node renders with;
  * orthogonal to `category` (which picks the fill). A pure UI hint. */
 export type NodeRole =
   | "standard"
@@ -290,7 +290,7 @@ export type NodeRole =
   | "light"
   | "note";
 
-/** The network kinds of the typed-context model (phase 17). The root
+/** The network kinds of the typed-context model. The root
  * canvas is `obj`; a container's child canvas is whatever its descriptor
  * `opens`. */
 export type ContextKind = "obj" | "geo" | "mat" | "tex";
@@ -316,10 +316,10 @@ export interface NodeTypeSnapshot {
   bypass: BypassSnapshot;
   doc: string;
   searchAliases: string[];
-  /** Stable icon key (revamp D-18); an unknown key falls back to the
+  /** Stable icon key; an unknown key falls back to the
    * category glyph in `flow/nodeVisual.ts`. */
   glyph: string;
-  /** Silhouette hint (revamp D-18); a variant this frontend does not know
+  /** Silhouette hint; a variant this frontend does not know
    * yet falls back by category in `flow/nodeVisual.ts`. */
   role: NodeRole;
 }
@@ -458,7 +458,7 @@ export function ctxKey(ctx: GraphContext): string {
   return ctx === "root" ? "root" : `sub:${ctx.subflow}`;
 }
 
-// --- Phase 6: host-owned view state (panes, cameras, display settings).
+// --- Host-owned view state (panes, cameras, display settings).
 // PaneDisplaySettings mirrors solarxy_core::view_config with camelCase
 // fields; enum VALUES keep their Rust casing ("Shaded", "GRADIENT"-style
 // BackgroundMode strings) because those serde shapes predate the boundary.
@@ -478,7 +478,9 @@ export interface PaneDisplaySettings {
   backgroundMode: unknown;
   uvMode: "Off" | "Gradient" | "Checker";
   boundsMode: "off" | "wholeModel" | "perMesh";
-  lineWeight: string;
+  /** Wireframe stroke weight in screen px: Light 1, Medium 2, Bold 3.
+   * Pinned to `solarxy_core::preferences::LineWeight`. */
+  lineWeight: "Light" | "Medium" | "Bold";
   showGrid: boolean;
   showAxisGizmo: boolean;
   showLocalAxes: boolean;
@@ -491,7 +493,7 @@ export interface PaneDisplaySettings {
   uvZoom: number;
   showUvOverlap: boolean;
   showValidation: boolean;
-  /** Live per-pane turntable spin (item 9); session-temporary, not persisted. */
+  /** Live per-pane turntable spin; session-temporary, not persisted. */
   turntableActive: boolean;
 }
 
@@ -543,7 +545,7 @@ export type HostEvent =
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
   | { type: "viewChanged" };
 
-/** The viewport tool. Rotate and Scale are Phase 12: they select, but draw and
+/** The viewport tool. Rotate and Scale select, draw and
  * grab nothing, which is why their buttons ship disabled rather than dead. */
 export type ToolMode = "select" | "move" | "rotate" | "scale";
 

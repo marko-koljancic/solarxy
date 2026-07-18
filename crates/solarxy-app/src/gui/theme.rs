@@ -1,27 +1,39 @@
-//! Ayu Mirage theme system — Dark + Light presets + matching `egui_dock`
-//! style.
+//! The egui adapter over the shared interface palette, plus the matching
+//! `egui_dock` style.
 //!
 //! [`Theme`] is a flat bundle of `Color32` tokens. Because every field is
 //! `Copy`, `Theme` itself is `Copy` and threads through draw code without
 //! lifetime noise. `EguiRenderer` owns the active `Theme`; [`apply_theme`]
 //! pushes it into the egui `Context` and is re-run on a live theme swap.
 //!
-//! Two presets ship: [`Theme::ayu_mirage_dark`] (the original warm
-//! dark-blue-grey palette) and [`Theme::ayu_mirage_light`] (Ayu Light's
-//! near-white surface with the orange accent). Both are selected via
-//! [`solarxy_core::preferences::ThemeChoice`].
+//! **This file authors no colors.** Every value comes from
+//! [`solarxy_core::theme::Palette`], which the web frontend (through
+//! generated CSS) and the analyze TUI read too, so one edit reaches all
+//! three shells. Before 0.7.1 each surface hand-authored its own values and
+//! they drifted: the review "change" category was green here and error-red
+//! on web. What lives here is only the *mapping* from semantic role to
+//! egui's widget vocabulary.
+//!
+//! Two presets ship, selected via
+//! [`solarxy_core::preferences::ThemeChoice`]: neutral grey with an amber
+//! accent, and warm cream paper with a terracotta accent.
 //!
 //! All corner radii are zero — flat, professional, 3D-DCC-app feel.
 
 use solarxy_core::preferences::ThemeChoice;
+use solarxy_core::theme::{Palette, Rgb};
 
-const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
-    egui::Color32::from_rgb(r, g, b)
+const fn rgb(c: Rgb) -> egui::Color32 {
+    egui::Color32::from_rgb(c.r, c.g, c.b)
 }
 
 /// The four Review-System category colors plus the shared selection
-/// accent. Kept theme-scoped so the light preset can re-contrast the
-/// category hues against a near-white background.
+/// accent. Theme-scoped because the light palette re-contrasts the
+/// category hues against its cream ground.
+///
+/// These four are the strongest visual-correlation cue in the product: the
+/// same hue must color a viewport pin and its panel chip. `review_panel`
+/// and `review_overlay` both read them from here.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ReviewColors {
     pub info: egui::Color32,
@@ -44,12 +56,11 @@ pub(super) struct Theme {
     pub widget_bg: egui::Color32,
     pub widget_hover: egui::Color32,
     pub border: egui::Color32,
-    #[allow(dead_code)]
     pub severity_error: egui::Color32,
     pub severity_warn: egui::Color32,
+    /// Mapped for completeness; not yet read by any widget.
     #[allow(dead_code)]
     pub severity_info: egui::Color32,
-    #[allow(dead_code)]
     pub severity_success: egui::Color32,
     pub review: ReviewColors,
 }
@@ -57,63 +68,44 @@ pub(super) struct Theme {
 impl Theme {
     /// Resolve a persisted [`ThemeChoice`] into a concrete palette.
     pub(super) fn from_choice(choice: ThemeChoice) -> Self {
-        match choice {
-            ThemeChoice::AyuMirageDark => Self::ayu_mirage_dark(),
-            ThemeChoice::AyuMirageLight => Self::ayu_mirage_light(),
-        }
+        Self::from_palette(&choice.palette())
     }
 
-    /// Warm dark blue-grey with an amber accent — the original palette.
-    pub(super) fn ayu_mirage_dark() -> Self {
+    /// Map the shared semantic roles onto egui's widget vocabulary.
+    ///
+    /// This mapping is the only thing this file decides; the colors
+    /// themselves belong to `solarxy_core::theme`.
+    pub(super) fn from_palette(palette: &Palette) -> Self {
+        let r = &palette.roles;
+        let accent = rgb(r.accent.rgb);
         Self {
-            dark: true,
-            bg: rgb(0x1F, 0x24, 0x30),
-            bg_elevated: rgb(0x23, 0x28, 0x34),
-            fg: rgb(0xCC, 0xCA, 0xC2),
-            muted: rgb(0x5C, 0x67, 0x73),
-            accent: rgb(0xFF, 0xC4, 0x4C),
-            selection: rgb(0x33, 0x41, 0x5E),
-            widget_bg: rgb(0x3D, 0x42, 0x4D),
-            widget_hover: rgb(0x2D, 0x32, 0x3D),
-            border: rgb(0x3D, 0x42, 0x4D),
-            severity_error: rgb(0xFF, 0x33, 0x33),
-            severity_warn: rgb(0xFF, 0xC4, 0x4C),
-            severity_info: rgb(0x78, 0xA0, 0xEE),
-            severity_success: rgb(0x7F, 0xD9, 0x62),
+            dark: palette.dark,
+            bg: rgb(r.surface_app.rgb),
+            bg_elevated: rgb(r.surface_raised.rgb),
+            fg: rgb(r.ink_primary.rgb),
+            muted: rgb(r.ink_muted.rgb),
+            accent,
+            selection: rgb(r.selection.rgb),
+            // egui's "widget" is a raised interactive surface: the RAISED
+            // role, not the overlay one. Mapping it to overlay put it on the
+            // same value as `hover_bg` on the dark palette (both n-700), so
+            // hovering any widget changed nothing at all. The two must stay
+            // distinct — hover brightens on dark, darkens on cream, and both
+            // read against the panel behind them.
+            widget_bg: rgb(r.surface_raised.rgb),
+            widget_hover: rgb(r.hover_bg.rgb),
+            border: rgb(r.border_subtle.rgb),
+            severity_error: rgb(r.status_error.rgb),
+            // Warn rides the attention hue, always paired with a shape.
+            severity_warn: rgb(r.state_attention.rgb),
+            severity_info: rgb(r.display.rgb),
+            severity_success: rgb(r.status_success.rgb),
             review: ReviewColors {
-                info: rgb(0x5C, 0x9E, 0xFF),
-                warning: rgb(0xFF, 0xB2, 0x3D),
-                question: rgb(0xA0, 0x6D, 0xFF),
-                change: rgb(0x3D, 0xC9, 0x7A),
-                selection_accent: rgb(0xFF, 0xC4, 0x4C),
-            },
-        }
-    }
-
-    /// Ayu Light's near-white surface with the orange accent. Review
-    /// category hues are darkened for AA contrast on the light ground.
-    pub(super) fn ayu_mirage_light() -> Self {
-        Self {
-            dark: false,
-            bg: rgb(0xFA, 0xFA, 0xFA),
-            bg_elevated: rgb(0xF0, 0xF0, 0xF0),
-            fg: rgb(0x5C, 0x67, 0x73),
-            muted: rgb(0x82, 0x8C, 0x99),
-            accent: rgb(0xFF, 0x6A, 0x00),
-            selection: rgb(0xF0, 0xEE, 0xE4),
-            widget_bg: rgb(0xE5, 0xE5, 0xE6),
-            widget_hover: rgb(0xE8, 0xE8, 0xE8),
-            border: rgb(0xD0, 0xD0, 0xD0),
-            severity_error: rgb(0xC7, 0x37, 0x3B),
-            severity_warn: rgb(0xF2, 0xAE, 0x49),
-            severity_info: rgb(0x31, 0x99, 0xE1),
-            severity_success: rgb(0x86, 0xB3, 0x00),
-            review: ReviewColors {
-                info: rgb(0x25, 0x63, 0xC9),
-                warning: rgb(0xB7, 0x79, 0x1F),
-                question: rgb(0x7C, 0x3A, 0xED),
-                change: rgb(0x2F, 0x85, 0x5A),
-                selection_accent: rgb(0xFF, 0x6A, 0x00),
+                info: rgb(palette.review.info),
+                warning: rgb(palette.review.warning),
+                question: rgb(palette.review.question),
+                change: rgb(palette.review.change),
+                selection_accent: accent,
             },
         }
     }
@@ -279,4 +271,89 @@ pub(super) fn configure_fonts(ctx: &egui::Context) {
         .or_default()
         .insert(0, "lilex".to_owned());
     ctx.set_fonts(fonts);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ink that names a colour instead of reading the theme is the bug class
+    /// that made the console log invisible: `Color32::from_white_alpha` is
+    /// white, which only resolves on a dark ground, and the light theme is
+    /// warm cream paper.
+    ///
+    /// Scoped to the two known-safe exceptions:
+    ///
+    /// - `overlays.rs` paints white on its OWN `from_black_alpha` chip
+    ///   (`overlay_frame`), so it is self-grounded and floats over the 3D
+    ///   scene rather than over themed chrome.
+    /// - `review_overlay.rs`/`review_panel.rs` put ink on a saturated
+    ///   category hue, which is the `ink_on_attention` pattern.
+    #[test]
+    fn gui_chrome_does_not_hardcode_ink() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/gui");
+        let exempt = [
+            "overlays.rs",
+            "review_overlay.rs",
+            "review_panel.rs",
+            "theme.rs",
+        ];
+
+        let mut offenders = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("src/gui must exist") {
+            let path = entry.expect("dir entry").path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") || exempt.contains(&name) {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("read");
+            for (i, line) in src.lines().enumerate() {
+                // Skip comments: this file's own prose names the pattern.
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                if code.contains("from_white_alpha") || code.contains("Color32::WHITE") {
+                    offenders.push(format!("{name}:{}", i + 1));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these paint white ink onto themed chrome, which disappears on the light theme. \
+             Read the colour from `Theme` instead (or `ui.visuals().weak_text_color()` where no \
+             theme is threaded): {offenders:?}"
+        );
+    }
+
+    /// The egui mapping must not collapse two roles onto one colour: a
+    /// widget that fills the same as its hover has no hover state.
+    #[test]
+    fn interactive_states_are_distinguishable() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let t = Theme::from_palette(&palette);
+            assert_ne!(t.widget_bg, t.widget_hover, "hover is invisible");
+            assert_ne!(t.bg, t.fg, "text matches its background");
+            assert_ne!(t.selection, t.bg, "selection is invisible");
+        }
+    }
+
+    /// The review categories are the strongest correlation cue in the
+    /// product, so they must stay four distinct hues on both themes.
+    #[test]
+    fn review_categories_stay_distinct() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let r = Theme::from_palette(&palette).review;
+            let all = [r.info, r.warning, r.question, r.change];
+            for (i, a) in all.iter().enumerate() {
+                for b in &all[i + 1..] {
+                    assert_ne!(a, b, "two review categories share a colour");
+                }
+            }
+        }
+    }
 }

@@ -17,6 +17,7 @@ import { type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { screenshotDims } from "./ScreenshotModal";
+import { Select } from "./Select";
 
 /** Requests one turntable frame and resolves when the readback is ready. */
 function captureFrame(
@@ -142,29 +143,27 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
         <h3>Export Turntable</h3>
         <div className="screenshot-controls">
           <label className="prefs-unit">Format</label>
-          <select
-            className="input-field"
+          <Select
+            ariaLabel="Format"
             value={format}
-            onChange={(e) => setFormat(e.target.value as TurntableFormat)}
-          >
-            <option value="webm" disabled={!canVideo}>
-              WebM{canVideo ? "" : " (needs WebCodecs)"}
-            </option>
-            <option value="mp4" disabled={!canVideo}>
-              MP4{canVideo ? "" : " (needs WebCodecs)"}
-            </option>
-            <option value="pngZip">PNG sequence (ZIP)</option>
-          </select>
+            options={[
+              { value: "webm", label: "WebM", hint: canVideo ? undefined : "needs WebCodecs", disabled: !canVideo },
+              { value: "mp4", label: "MP4", hint: canVideo ? undefined : "needs WebCodecs", disabled: !canVideo },
+              { value: "pngZip", label: "PNG sequence (ZIP)" },
+            ]}
+            onChange={(v) => setFormat(v as TurntableFormat)}
+          />
           <label className="prefs-unit">Resolution</label>
-          <select
-            className="input-field"
+          <Select
+            ariaLabel="Resolution"
             value={resolution}
-            onChange={(e) => setResolution(e.target.value as ScreenshotResolution)}
-          >
-            <option value="viewport">Viewport</option>
-            <option value="1.5x">1.5x</option>
-            <option value="2x">2x</option>
-          </select>
+            options={[
+              { value: "viewport", label: "Viewport" },
+              { value: "1.5x", label: "1.5x" },
+              { value: "2x", label: "2x" },
+            ]}
+            onChange={(v) => setResolution(v as ScreenshotResolution)}
+          />
           <label className="prefs-unit">FPS</label>
           <input
             className="input-field prefs-dim"

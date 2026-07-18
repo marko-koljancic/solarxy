@@ -1,8 +1,8 @@
-//! The material context (context-expansion phase 20): the `matnet` root
+//! The material context: the `matnet` root
 //! container plus the mat-network node set. Inside a material network,
 //! `DataType::Material` wires nodes together and the display node
 //! publishes the network's material; across contexts materials travel by
-//! path reference only (decision C-2), consumed by the geo-side
+//! path reference only, consumed by the geo-side
 //! `material` node's Reference mode.
 //!
 //! Surface nodes: `principled` (the full metallic-roughness surface,
@@ -31,7 +31,15 @@ use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 fn material_out() -> PortSpec {
-    PortSpec::single("material", "Material", DataType::Material, false).default_port()
+    PortSpec::single("material", "Material", DataType::Material, false)
+        .default_port()
+        .doc(
+            "The material this node builds. Wire it into `mix_material`, or \
+             designate this node as the network's display node so the \
+             enclosing `matnet` publishes it to `material` nodes in \
+             Reference mode. Being the default output, a drag from the \
+             node's body wires from here.",
+        )
 }
 
 fn material_outputs(m: RawMaterialData) -> Outputs {
@@ -45,6 +53,10 @@ fn name_param() -> ParamSpec {
         "material",
         ParamType::Text,
         ParamValue::Text(String::new()),
+    )
+    .doc(
+        "What the material is called wherever it is listed. It has no effect \
+         on the shading. Empty falls back to the node type's own name.",
     )
 }
 
@@ -70,7 +82,19 @@ pub fn matnet_descriptor() -> NodeTypeDescriptor {
         outputs: vec![],
         params: params_with("Material Network", vec![]),
         bypass: BypassBehavior::NotBypassable,
-        doc: "A material network: surface nodes cook inside it, and its display node publishes the network's material for `material` nodes in Reference mode.",
+        doc: "A container for a material network. Surface nodes cook inside \
+              it, and whichever node you designate as the display node \
+              publishes its material as the network's one result.\n\n\
+              Add one per material you want to reuse. Dive in, build a \
+              surface with `principled`, `matcap`, `toon` or `unlit`, and \
+              combine surfaces with `mix_material`. Nothing leaves on a \
+              wire: materials cross contexts by path only, so a geo-side \
+              `material` node in Reference mode is what pulls the result \
+              out, and any number of them can point at the same network.\n\n\
+              It cooks nothing itself and cannot be bypassed. A network \
+              with no display node designated publishes nothing at all, and \
+              every `material` node referring to it fails its cook rather \
+              than falling back to a default surface.",
         search_aliases: &["matnet", "material", "shop", "shader network"],
         glyph: "matnet",
         role: NodeRole::Container,
@@ -87,8 +111,8 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
     // inline half; only the output differs (a Material wire, not an
     // assignment).
     let mut inputs = Vec::new();
-    for (key, label) in super::material_node::MAP_PORTS {
-        inputs.push(PortSpec::single(key, label, DataType::Image, false));
+    for (key, label, doc) in super::material_node::MAP_PORTS {
+        inputs.push(PortSpec::single(key, label, DataType::Image, false).doc(doc));
     }
     NodeTypeDescriptor {
         type_id: "principled",
@@ -101,7 +125,22 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
         outputs: vec![material_out()],
         params: params_with("Principled", super::material_node::factor_params()),
         bypass: BypassBehavior::Mute,
-        doc: "The full metallic-roughness surface: factors plus five texture-role map ports (a connected map drives its channel and neutralizes the factor).",
+        doc: "The physically-based metallic-roughness surface: base colour, \
+              metallic, roughness and emissive as factors, each with an \
+              optional texture map port that takes its channel over.\n\n\
+              This is the surface to reach for first inside a `matnet`, and \
+              the one the renderer's Cook-Torrance path with image-based \
+              lighting exists for. Feed its map ports from `tex_ref` or an \
+              `import_image`, then either designate it the network's \
+              display node or run it into `mix_material` first.\n\n\
+              The factor-and-map pairing is a hand-off, not a blend: \
+              connecting a map sets its factor to the multiplicative \
+              identity (white, or 1.0) so the map alone drives the channel, \
+              and the parameter panel dims the factor to say so. Metallic \
+              Roughness is one port for two channels and neutralizes both \
+              at once. It is the same surface builder the geo-side \
+              `material` node uses inline; the difference is only that this \
+              one outputs a Material wire instead of assigning to geometry.",
         search_aliases: &["principled", "pbr", "surface", "standard"],
         glyph: "principled",
         role: NodeRole::Standard,
@@ -133,7 +172,15 @@ pub fn matcap_descriptor() -> NodeTypeDescriptor {
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![
-            PortSpec::single("matcap", "Matcap Image", DataType::Image, false).default_port(),
+            PortSpec::single("matcap", "Matcap Image", DataType::Image, false)
+                .default_port()
+                .doc(
+                    "The matcap image: a sphere lit the way you want the \
+                     surface to look. It is sampled at the view-space \
+                     normal, not at the mesh's UVs, so the mesh needs no \
+                     UVs at all. Left empty, the base-color slot falls back \
+                     to white and the surface renders as the flat Tint.",
+                ),
         ],
         outputs: vec![material_out()],
         params: params_with(
@@ -145,12 +192,32 @@ pub fn matcap_descriptor() -> NodeTypeDescriptor {
                     "material",
                     ParamType::Color,
                     ParamValue::Color([1.0, 1.0, 1.0, 1.0]),
+                )
+                .doc(
+                    "Multiplied into every matcap sample. White (the \
+                     default) leaves the image exactly as authored; a \
+                     colour recolours it without needing a second image. \
+                     Its alpha is ignored -- matcap always renders opaque.",
                 ),
                 name_param(),
             ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "A matcap surface: the image is sampled by the view-space normal, unlit. The image rides the base-color texture role; the tint multiplies it.",
+        doc: "A material-capture surface: the connected image is sampled by \
+              the view-space normal and returned as-is, with no lighting \
+              whatsoever.\n\n\
+              Reach for it for a sculpt preview, or for a stylized look \
+              that must not depend on the scene's lights or HDRI -- the way \
+              ZBrush and Blender's solid mode shade. Feed the image from \
+              `tex_ref` or an `import_image` and designate this the \
+              network's display node.\n\n\
+              The matcap image IS the base-color texture role; no separate \
+              matcap slot exists anywhere in the pipeline. The lighting is \
+              baked into the image, so shading follows the CAMERA: orbit \
+              around a fixed object and the highlights swing with you \
+              rather than staying put. Alpha is forced opaque, and a \
+              viewport material override (Clay, Chrome, Silhouette) wins \
+              over this model entirely.",
         search_aliases: &["matcap", "material capture", "sculpt", "zbrush"],
         glyph: "matcap",
         role: NodeRole::Standard,
@@ -188,7 +255,13 @@ pub fn toon_descriptor() -> NodeTypeDescriptor {
         opens: None,
         inputs: vec![
             PortSpec::single("base_color_map", "Base Color Map", DataType::Image, false)
-                .default_port(),
+                .default_port()
+                .doc(
+                    "Optional albedo texture. Connecting it drives the \
+                     colour entirely and neutralizes Base Color to white; \
+                     the banding then applies to the sampled colour. Left \
+                     empty, Base Color is the surface colour.",
+                ),
         ],
         outputs: vec![material_out()],
         params: params_with(
@@ -201,7 +274,13 @@ pub fn toon_descriptor() -> NodeTypeDescriptor {
                     ParamType::Color,
                     ParamValue::Color([0.8, 0.8, 0.8, 1.0]),
                 )
-                .driven_by_port("base_color_map"),
+                .driven_by_port("base_color_map")
+                .doc(
+                    "The colour the bands are cut from: each band is this \
+                     colour scaled by its step, so a saturated colour gives \
+                     saturated bands. A connected Base Color Map \
+                     neutralizes this to white and bands the map instead.",
+                ),
                 ParamSpec::new(
                     "steps",
                     "Bands",
@@ -210,12 +289,35 @@ pub fn toon_descriptor() -> NodeTypeDescriptor {
                     ParamValue::Float(3.0),
                 )
                 .hard(2.0, 8.0)
-                .step(1.0),
+                .step(1.0)
+                .doc(
+                    "How many flat bands each light's diffuse term is \
+                     quantized into, 2 to 8. 2 is the hardest, most graphic \
+                     split into lit and unlit; by 8 the steps are close \
+                     enough together that the cel look mostly disappears. \
+                     Only the direct lights read it, never the ambient \
+                     term.",
+                ),
                 name_param(),
             ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "Cel shading: the diffuse term quantizes into bands.",
+        doc: "Cel shading: the surface takes an ordinary base colour, but \
+              each light's diffuse contribution is quantized into a fixed \
+              number of flat bands instead of falling off smoothly.\n\n\
+              Reach for it inside a `matnet` for a cartoon or \
+              graphic-novel look. Give it a colour or a map, set the band \
+              count, and designate it the network's display node. Fewer \
+              bands read as more graphic; the hard edge between them is the \
+              whole point.\n\n\
+              Only the DIRECT lights are banded. Ambient image-based \
+              lighting is still added smoothly on top, and because this \
+              node exposes no roughness the ambient term sits at the \
+              shader's 0.04 roughness floor, which reads as a sharp \
+              environment reflection. A bright HDRI can therefore wash the \
+              bands out; turn the environment down if the banding must \
+              read. There is no outline either: this node shades, it does \
+              not draw contours.",
         search_aliases: &["toon", "cel", "cartoon", "banded"],
         glyph: "toon",
         role: NodeRole::Standard,
@@ -259,7 +361,13 @@ pub fn unlit_descriptor() -> NodeTypeDescriptor {
         opens: None,
         inputs: vec![
             PortSpec::single("base_color_map", "Base Color Map", DataType::Image, false)
-                .default_port(),
+                .default_port()
+                .doc(
+                    "Optional texture, multiplied by Base Color and sent \
+                     straight to the screen. Connecting it neutralizes Base \
+                     Color to white. Left empty, Base Color alone is what \
+                     you see.",
+                ),
         ],
         outputs: vec![material_out()],
         params: params_with(
@@ -272,12 +380,31 @@ pub fn unlit_descriptor() -> NodeTypeDescriptor {
                     ParamType::Color,
                     ParamValue::Color([0.8, 0.8, 0.8, 1.0]),
                 )
-                .driven_by_port("base_color_map"),
+                .driven_by_port("base_color_map")
+                .doc(
+                    "The colour the surface renders at, with no lighting \
+                     applied to it, so it lands on screen as close to what \
+                     you typed as the tone mapping allows. A connected Base \
+                     Color Map neutralizes this to white and is shown \
+                     instead.",
+                ),
                 name_param(),
             ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "Flat base color, no lighting (exports as glTF KHR_materials_unlit).",
+        doc: "Flat colour with no lighting at all: the base colour times the \
+              base color map, straight to the screen.\n\n\
+              Reach for it inside a `matnet` for surfaces that must read at \
+              exactly the colour you typed: reference planes, backdrop \
+              cards, UI-like panels, or a texture whose lighting is already \
+              baked in. Wire the colour or a map in and designate it the \
+              network's display node.\n\n\
+              Its semantics come from glTF's `KHR_materials_unlit`. Nothing \
+              else in the shading pipeline reaches it: no normal map, no \
+              ambient occlusion, no image-based lighting, and it is not \
+              darkened by shadows falling on it. It does still CAST \
+              shadows, though -- the shadow pass never reads the shading \
+              model, so an unlit object occludes light like any other.",
         search_aliases: &["unlit", "flat", "constant", "emission"],
         glyph: "unlit",
         role: NodeRole::Standard,
@@ -319,8 +446,20 @@ pub fn mix_material_descriptor() -> NodeTypeDescriptor {
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![
-            PortSpec::single("a", "A", DataType::Material, true).default_port(),
-            PortSpec::single("b", "B", DataType::Material, true),
+            PortSpec::single("a", "A", DataType::Material, true)
+                .default_port()
+                .doc(
+                    "The first material, and what Factor 0 resolves to. It \
+                     is also the dominant side BELOW Factor 0.5, so its \
+                     maps and shading model are the ones used there. \
+                     Bypassing the node passes this input straight through.",
+                ),
+            PortSpec::single("b", "B", DataType::Material, true).doc(
+                "The second material, and what Factor 1 resolves to. It is \
+                 the dominant side at Factor 0.5 AND ABOVE, so its maps and \
+                 shading model take over from the midpoint on -- exactly \
+                 0.5 already counts as B, not as a tie.",
+            ),
         ],
         outputs: vec![material_out()],
         params: params_with(
@@ -334,14 +473,42 @@ pub fn mix_material_descriptor() -> NodeTypeDescriptor {
                     ParamValue::Float(0.5),
                 )
                 .hard(0.0, 1.0)
-                .step(0.01),
+                .step(0.01)
+                .doc(
+                    "Where between A (0) and B (1) the scalar factors land. \
+                     It also picks the dominant side for the half of the \
+                     material that does not blend: below 0.5 A's maps and \
+                     shading model are used, at 0.5 and above B's. That \
+                     switch is a hard cut, so sweeping this param pops at \
+                     the midpoint whenever the two sides differ in their \
+                     maps or their model.",
+                ),
                 name_param(),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "a".to_string(),
         },
-        doc: "Lerps the factor channels of two materials; textures and the shading model come from the dominant side (over 0.5 = B).",
+        doc: "Blends two materials, but only partially. The scalar factors \
+              -- base colour, metallic, roughness, emissive, toon bands -- \
+              interpolate between A and B by Factor. Everything else does \
+              NOT blend: the five texture maps, the shading model and the \
+              alpha settings are taken wholesale from whichever side is \
+              dominant, which is B at Factor 0.5 and above, A below it.\n\n\
+              So it does what you expect for two untextured surfaces of the \
+              same shading model: dialing between a rough dielectric and a \
+              polished metal, or animating a preset-to-preset roughness \
+              change. It misleads as soon as either side carries maps or a \
+              different model, because those pop over at the midpoint \
+              instead of crossfading. True map and shading-model blending \
+              needs shader work and is on the milestone backlog; this node \
+              is a documented approximation until then.\n\n\
+              Put plainly: a sweep from 0 to 1 is smooth in the factors and \
+              discontinuous at 0.5 in everything else. If what you actually \
+              want is two materials on one object, assign them to different \
+              meshes with two `material` nodes and their `target` filters \
+              instead of mixing here. Both inputs are required: this node \
+              fails its cook until each side has a material.",
         search_aliases: &["mix", "blend", "layer", "material"],
         glyph: "mix_material",
         role: NodeRole::Gather,
@@ -411,21 +578,55 @@ pub fn tex_ref_descriptor() -> NodeTypeDescriptor {
         contexts: ContextSet::MAT.or(ContextSet::GEO),
         opens: None,
         inputs: vec![],
-        outputs: vec![PortSpec::single("image", "Image", DataType::Image, false).default_port()],
+        outputs: vec![
+            PortSpec::single("image", "Image", DataType::Image, false)
+                .default_port()
+                .doc(
+                    "The fetched image. It emits nothing at all while \
+                     Texture Network is unset, which a downstream map port \
+                     reads as `no map connected` rather than as an error.",
+                ),
+        ],
         params: params_with(
             "Texture Reference",
-            vec![ParamSpec::new(
-                "texture_path",
-                "Texture Network",
-                "object",
-                ParamType::NodePath {
-                    accept: NodePathAccept::Opens(ContextKind::Tex),
-                },
-                ParamValue::NodeRef(None),
-            )],
+            vec![
+                ParamSpec::new(
+                    "texture_path",
+                    "Texture Network",
+                    "object",
+                    ParamType::NodePath {
+                        accept: NodePathAccept::Opens(ContextKind::Tex),
+                    },
+                    ParamValue::NodeRef(None),
+                )
+                .doc(
+                    "The `texnet` to fetch from; only containers that open a \
+                     texture context can be picked. What arrives is that \
+                     network's display node output, so re-designating the \
+                     display node inside it changes every referrer at once. \
+                     Left unset this node simply emits nothing, but a path \
+                     aimed at a deleted node or at a network that publishes \
+                     nothing fails the cook rather than yielding a blank \
+                     image.",
+                ),
+            ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "Brings a texture network's published image in as an Image wire (the fetch pattern); editing the network recooks every referrer.",
+        doc: "Pulls the image a texture network publishes into this network \
+              as an Image wire. It reads across contexts by path, so no wire \
+              ever crosses a network boundary.\n\n\
+              Point it at a `texnet` and feed the result into a map port on \
+              `principled`, or into the geo-side `material` node -- it is \
+              placeable in both Mat and Geo networks for exactly that \
+              reason. One texture network can back any number of these, \
+              which is how a texture gets authored once and used \
+              everywhere; editing the network recooks every referrer.\n\n\
+              This is the fetch pattern rather than a wire, so the \
+              dependency is invisible on the canvas: nothing draws a line \
+              from the `texnet` to here, and the only record of the link is \
+              this node's Texture Network param. An unset path is harmless \
+              (no output, read downstream as no map), but a path pointing \
+              at a network with no display node is a cook error.",
         search_aliases: &["tex_ref", "fetch", "object merge", "texture", "reference"],
         glyph: "tex_ref",
         role: NodeRole::ImageSource,

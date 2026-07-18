@@ -3,10 +3,10 @@
 //! merged here before upload; ambient and hemisphere [`LightDef`]s fold into
 //! the hemisphere ambient rows instead of consuming light slots.
 //!
-//! Generalized in web-milestone phase 2 from the fixed 3-entry viewer rig to
+//! Generalized from the fixed 3-entry viewer rig to
 //! a capacity-[`MAX_LIGHTS`] array with per-kind fields. A scene with zero
 //! light nodes still synthesizes the camera-relative key/fill/rim rig
-//! (`scene::lights_from_camera`), whose entries use `range = 0`,
+//! (`scene:lights_from_camera`), whose entries use `range = 0`,
 //! `decay = 0` so every generalized code path multiplies by exactly 1.0 —
 //! desktop output is unchanged by construction.
 
@@ -17,7 +17,7 @@ use solarxy_core::scene::{LightDef, LightKind};
 pub const MAX_LIGHTS: usize = 8;
 
 /// `kind` discriminants shared with `shader.wgsl`. Rect-area lights are
-/// approximated as point lights in v1 (plan decision 17).
+/// approximated as point lights in v1.
 pub const LIGHT_KIND_POINT: u32 = 0;
 pub const LIGHT_KIND_DIRECTIONAL: u32 = 1;
 pub const LIGHT_KIND_SPOT: u32 = 2;

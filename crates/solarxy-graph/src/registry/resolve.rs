@@ -1,5 +1,5 @@
 //! The param resolver: the single chokepoint between stored params and
-//! compute bodies (node catalog part I, sections 4 and 5).
+//! compute bodies (sections 4 and 5).
 //!
 //! `resolve_params` runs before every compute. It reads literals (v1
 //! refuses expressions), conforms values to the spec type, clamps to the

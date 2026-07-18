@@ -94,7 +94,7 @@ pub struct CookEngine {
     /// closure) so the driver stays wasm-safe and the struct stays
     /// `Debug`/`Default`: the web host installs `performance.now`, native
     /// callers a monotonic source, and tests a deterministic tick. When
-    /// unset, per-node cook durations stay `0` (the Phase-3 behavior).
+    /// unset, per-node cook durations stay `0` (the behavior).
     clock: Option<fn() -> f64>,
 }
 
@@ -385,7 +385,7 @@ impl CookEngine {
     }
 
     /// Pre-resolves the published value of every network this node's
-    /// `NodeRef` params reference (context-expansion C-2): the target
+    /// `NodeRef` params reference: the target
     /// container's child network designates a display node
     /// (`active_output`), and that node's committed default output is the
     /// published value. Unresolvable references (dangling target, no

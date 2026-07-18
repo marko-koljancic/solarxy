@@ -60,7 +60,7 @@ impl SubflowFragment {
 }
 
 /// A self-contained graph slice. Serializable: the clipboard places it on
-/// the system clipboard as JSON, and Phase 5's `.slxy` format reuses these
+/// the system clipboard as JSON, and the `.slxy` format reuses these
 /// same schema types.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphFragment {

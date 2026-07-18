@@ -1,5 +1,5 @@
 //! Per-node cook state and statistics (the resumable budget loop that
-//! consumes them lands in the engine cook driver, task G4).
+//! consumes them lands in the engine cook driver).
 
 use solarxy_core::AABB;
 
@@ -22,7 +22,7 @@ pub enum CookState {
     Pending(u64),
 }
 
-/// Per-successful-cook statistics (node catalog part I, section 9).
+/// Per-successful-cook statistics.
 /// Delivered as coalesced `NodeStats` events, emitted only for nodes whose
 /// stats changed. `AABB` is not `PartialEq`, so change detection compares
 /// via [`NodeCookStats::same_shape`] (bit-exact bounds), not `derive`.
@@ -70,8 +70,8 @@ fn bounds_eq(a: Option<AABB>, b: Option<AABB>) -> bool {
     }
 }
 
-/// The lean, high-frequency badge state machine (node catalog part I,
-/// section 9). `Ok` carries milliseconds for the badge tooltip.
+/// The lean, high-frequency badge state machine. `Ok` carries milliseconds
+/// for the badge tooltip.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum CookStatus {

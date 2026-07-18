@@ -1,74 +1,31 @@
-/* Design tokens: the two-tier architecture from the UI/UX revamp (D-13,
- * SOLARXY-WEB-REVAMP.md, 2026-07-15), superseding the flat Minimystix
- * carryover. Tier 1 is a raw primitive palette with no UI meaning; tier 2
- * is the semantic layer components read. Legacy variable names (the
- * pre-revamp vocabulary that styles.css and the dockview remap consume)
- * are kept as aliases onto the semantics, so the reskin lands without a
- * call-site rename; new code should prefer the semantic names.
+/* Design tokens: a two-tier architecture. Tier 1 is a raw primitive
+ * palette with no UI meaning; tier 2 is the semantic layer components
+ * read. Legacy variable names (the pre-revamp vocabulary that styles.css
+ * and the dockview remap consume) are kept as aliases onto the semantics,
+ * so the reskin landed without a call-site rename; new code should prefer
+ * the semantic names.
  *
- * The shipping look is the ratified evolution palette (design decisions
- * D-1..D-3 in solarxy/design/web/solarxy-web.pen): Ayu amber accent,
- * burnt-orange attention state (always shape-paired), Houdini-blue
- * display flag. Dark is the default theme; the light set overrides on
- * body.light-theme; "system" resolves to one of the two in the prefs
- * store. The typed-handle palette in registry/datatypes.ts and the node
- * category pastels are UX-spec-owned (D-8) and unchanged. */
+ * BOTH COLOR TIERS ARE GENERATED. They live in `crates/solarxy-core/src/
+ * theme.rs`, which also feeds the egui desktop GUI and the analyze TUI, so
+ * one palette drives all three shells. Do not add a color here: add it to
+ * the Rust palette and regenerate. `tokens_drift.rs` fails CI on a stale
+ * file, and refuses a hand-written role that would win on cascade order.
+ *
+ * What stays hand-authored in this file: typography, motion, spacing, and
+ * the legacy aliases. The typed-handle palette in registry/datatypes.ts
+ * and the node category pastels are UX-spec-owned and unchanged.
+ *
+ * The shipping look: neutral grey with an Ayu amber accent on dark, warm
+ * cream paper with a terracotta accent on light (the MPW "Balanced
+ * Editorial" palette from koljam.com). Burnt-orange attention state
+ * (always shape-paired), Houdini-blue display flag. Dark is the default;
+ * the light set overrides on body.light-theme; "system" resolves to one of
+ * the two in the prefs store. */
+
+@import "./tokens.generated.css";
 
 :root {
-  /* ---- Tier 1: primitives (theme-agnostic, no UI meaning) ---------- */
-
-  /* Neutral ramp, dark UI. */
-  --n-900: #1e1e1e;
-  --n-850: #242424;
-  --n-800: #2a2a2a;
-  --n-750: #333333;
-  --n-700: #3a3a3a;
-  --n-600: #404040;
-  --n-550: #4a4a4a;
-  --n-500: #555555;
-  --n-400: #999999;
-  --n-300: #888888;
-  --n-200: #aaaaaa;
-  --n-100: #e0e0e0;
-  --n-000: #ffffff;
-
-  /* Neutral ramp, light UI. */
-  --l-000: #ffffff;
-  --l-050: #f5f5f5;
-  --l-075: #fafafa;
-  --l-100: #e8e8e8;
-  --l-150: #e0e0e0;
-  --l-300: #bbbbbb;
-  --l-350: #cccccc;
-  --l-400: #999999;
-  --l-450: #aaaaaa;
-  --l-500: #777777;
-  --l-700: #555555;
-  --l-900: #333333;
-  --l-950: #000000;
-
-  /* Amber: the accent family (D-1, Ayu). */
-  --amber-300: #ffb454;
-  --amber-400: #e6b450;
-  --amber-600: #d9a13f;
-  --amber-650: #c88f2f;
-  --amber-700: #a8781c;
-
-  /* Burnt orange: the attention family (D-2; never without a shape). */
-  --burnt-400: #e07a3f;
-  --burnt-600: #b85c1e;
-
-  /* Houdini blue: the display family (D-3). */
-  --disp-400: #58a6ff;
-  --disp-600: #1f6feb;
-
-  /* Signal hues. */
-  --err-400: #e5484d;
-  --err-600: #d1373c;
-  --ok-400: #55dd99;
-  --ok-600: #3aa76d;
-
-  /* Typography (D-14): bundled, self-hosted families (fontsource,
+  /* Typography: bundled, self-hosted families (fontsource,
    * latin-subset woff2 via unicode-range); the system stacks remain as
    * fallbacks. IBM Plex Mono carries all numeric-precision surfaces. */
   --font-ui:
@@ -76,7 +33,7 @@
     Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Motion (D-17). Zeroed under reduce-motion below; transform/opacity
+  /* Motion. Zeroed under reduce-motion below; transform/opacity
    * only, never on the cook path. */
   --motion-fast: 90ms;
   --motion-base: 160ms;
@@ -100,63 +57,19 @@ body.reduce-motion {
   --motion-slow: 0ms;
 }
 
+/* Tier 2's colors are generated (see the header). What remains here is the
+ * derived-from-a-role values and the legacy alias vocabulary: both are
+ * indirections ONTO the semantics, never redefinitions of them. */
 :root,
 body,
 body.dark-theme {
-  color-scheme: dark;
-
-  /* ---- Tier 2: semantic roles (dark) ------------------------------- */
-
-  --surface-canvas: var(--n-850);
-  --surface-dot: #3c3c3c;
-  --surface-app: var(--n-800);
-  --surface-raised: var(--n-750);
-  --surface-overlay: var(--n-700);
-  --surface-sunken: var(--n-900);
-
-  --ink-primary: var(--n-100);
-  --ink-secondary: var(--n-200);
-  --ink-tertiary: var(--n-300);
-  --ink-muted: var(--n-400);
-  --ink-strong: var(--n-000);
-  --ink-on-accent: #111111;
-  --ink-on-pastel: #1f2937;
-
-  --border-subtle: var(--n-600);
-  --border-default: var(--n-550);
-  --border-strong: var(--n-500);
-  --divider: var(--n-500);
-
-  --accent: var(--amber-400);
-  --accent-hover: var(--amber-300);
-  --accent-pressed: var(--amber-600);
-  --accent-subtle: color-mix(in srgb, var(--amber-400) 14%, transparent);
-  /* Safe for 1px hairlines (focus borders). On dark the accent itself
-   * clears 3:1; the light theme substitutes a darker amber. */
-  --accent-hairline: var(--amber-400);
-
-  --state-attention: var(--burnt-400);
-  /* Ink on the attention hue: dark on the bright dark-theme orange (5.6:1),
-   * white on the deeper light-theme orange (contrast matrix). */
-  --ink-on-attention: #1a1a1a;
-
-  --display: var(--disp-400);
-  --display-halo: var(--disp-400);
-
-  --status-error: var(--err-400);
+  --display-halo: var(--display);
   --status-error-bg: rgba(255, 68, 68, 0.1);
-  --status-success: var(--ok-400);
 
-  /* Node anatomy (D-4/D-11, D-20): the glyph ink and the label stack.
-   * The glyph draws directly on the body fill (the chip plate is retired,
-   * D-20); the ink below is the dark base the category tint mixes toward. */
-  --node-glyph-ink: #1f2937;
+  /* Node anatomy: the glyph draws directly on the body fill; the wing
+   * hovers tint the state hue they act on. */
   --wing-bypass-hover: color-mix(in srgb, var(--state-attention) 45%, transparent);
   --wing-display-hover: color-mix(in srgb, var(--display) 45%, transparent);
-  --node-type-label: #8a8f98;
-  --node-desc: #5fb3a1;
-  --node-param: #7fa8cc;
-  --node-slot: #1f2937;
 
   /* ---- Legacy aliases (pre-revamp vocabulary) ----------------------- */
 
@@ -173,7 +86,7 @@ body.dark-theme {
 
   --light-node-background: #f8e7b0;
 
-  /* Houdini-inspired pastel category fills (Phase 7b, ratified D-8/D-9).
+  /* Houdini-inspired pastel category fills.
    * Dark text stays readable on all of them; the dark theme uses slightly
    * muted values. */
   --node-cat-primitives: #c9dcf2;
@@ -248,7 +161,7 @@ body.dark-theme {
 
   /* Solarxy: status + node-canvas tokens (UX-spec-owned). Warn, stale and
    * cook share the attention hue; each keeps its own shape channel (badge,
-   * corner tag, spinner arc). The display flag is Houdini-blue (D-3). */
+   * corner tag, spinner arc). The display flag is Houdini-blue. */
   --error-badge: var(--status-error);
   --warn-badge: var(--state-attention);
   --stale-color: var(--state-attention);
@@ -261,56 +174,10 @@ body.dark-theme {
   --node-text: var(--ink-on-pastel);
 }
 
+/* The light theme's roles are generated alongside the dark set. Only the
+ * derived values and the legacy aliases differ per theme here. */
 body.light-theme {
-  color-scheme: light;
-
-  /* ---- Tier 2: semantic roles (light) ------------------------------ */
-
-  --surface-canvas: var(--l-075);
-  --surface-dot: #d8d8d8;
-  --surface-app: var(--l-000);
-  --surface-raised: var(--l-050);
-  --surface-overlay: var(--l-100);
-  --surface-sunken: var(--l-150);
-
-  --ink-primary: var(--l-900);
-  --ink-secondary: var(--l-700);
-  --ink-tertiary: var(--l-500);
-  --ink-muted: var(--l-400);
-  --ink-strong: var(--l-950);
-  --ink-on-accent: #111111;
-  --ink-on-pastel: #1f2937;
-
-  --border-subtle: var(--l-150);
-  --border-default: var(--l-350);
-  --border-strong: var(--l-300);
-  --divider: var(--l-450);
-
-  --accent: var(--amber-600);
-  --accent-hover: var(--amber-400);
-  --accent-pressed: var(--amber-650);
-  --accent-subtle: color-mix(in srgb, var(--amber-600) 12%, transparent);
-  /* The light accent fails 3:1 on white for hairlines; the darker amber
-   * clears it (contrast matrix, SOLARXY-WEB-REVAMP.md). */
-  --accent-hairline: var(--amber-700);
-
-  --state-attention: var(--burnt-600);
-  --ink-on-attention: #ffffff;
-
-  --display: var(--disp-600);
-  --display-halo: var(--disp-600);
-
-  --status-error: var(--err-600);
   --status-error-bg: rgba(204, 0, 0, 0.05);
-  --status-success: var(--ok-600);
-
-  --node-glyph-ink: #1f2937;
-  --wing-bypass-hover: color-mix(in srgb, var(--state-attention) 45%, transparent);
-  --wing-display-hover: color-mix(in srgb, var(--display) 45%, transparent);
-  --node-type-label: #6b7078;
-  --node-desc: #2e7d6b;
-  --node-param: #2f6390;
-  --node-slot: #1f2937;
 
   /* ---- Legacy aliases (light) --------------------------------------- */
 
@@ -343,41 +210,5 @@ body.light-theme {
   --error-border: #cc0000;
   --error-text: #cc0000;
 
-  --handle-border: var(--l-050);
-}
-
-/* ---- MPW "Balanced Editorial" light variant (item 10) ----------------
- * Applied ALONGSIDE body.light-theme (prefs sets both classes), so anything
- * not overridden here inherits the light theme: node pastels, status colors,
- * the display blue. Values are the koljam.com design tokens (warm cream paper,
- * near-black ink, terracotta accent; see the mpw repo's globals.css).
- * Deliberately minimal; readability in the dense tool UI is validated in
- * Chrome before this variant is ever made a default.
- * Watch item: the terracotta accent sits near the burnt-orange attention
- * hue; if bypass wings stop reading, re-tint --state-attention here. */
-body.mpw-theme {
-  --surface-canvas: #efebe0;
-  --surface-dot: #d8d2c6;
-  --surface-app: #f4f1ea;
-  --surface-raised: #fbf9f4;
-  --surface-overlay: #fbf9f4;
-  --surface-sunken: #ece7dc;
-
-  --ink-primary: #11110e;
-  --ink-secondary: #4a463e;
-  --ink-tertiary: #7a756a;
-  --ink-muted: #a09a8c;
-  --ink-strong: #0a0a08;
-  --ink-on-accent: #f4f1ea;
-
-  --border-subtle: #ece7dc;
-  --border-default: #d8d2c6;
-  --border-strong: #c9c2b4;
-  --divider: #c4bdae;
-
-  --accent: #9a4a2e;
-  --accent-hover: #b05a3a;
-  --accent-pressed: #83402a;
-  --accent-subtle: color-mix(in srgb, #9a4a2e 12%, transparent);
-  --accent-hairline: #9a4a2e;
+  --handle-border: var(--surface-raised);
 }

@@ -64,6 +64,26 @@
   </provides>
 
   <releases>
+    <release version="0.7.1" date="2026-07-17">
+      <description>
+        <p>
+          Typed node contexts take the web app's catalogue from 33 to 58 node
+          types: dedicated material and texture networks, camera nodes any pane
+          can look through, turntable export, and file export to OBJ, STL, PLY
+          and GLB. Every node, port and parameter is now documented in the app
+          and in the generated node reference, and a first-run tour introduces
+          the interface.
+        </p>
+        <p>
+          The desktop app adopts the unified design language: one palette now
+          drives the desktop GUI, the web app and the analyze TUI from a single
+          definition. The themes are now named Dark and Light (existing
+          preference files migrate automatically), the light theme is the warm
+          koljam.com palette, and the console, hover states and error screens
+          were fixed for the light ground.
+        </p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-07-14">
       <description>
         <p>

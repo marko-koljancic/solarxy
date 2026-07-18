@@ -1,5 +1,4 @@
-// Selection outline (context-expansion phase 18, decision C-6): the
-// jump-flood stages. The pipeline is three stages:
+// Selection outline: the jump-flood stages. The pipeline is three stages:
 //
 // 1. Mask: the selected objects' silhouettes render into an R8 target
 //    (that pass reuses validation.wgsl's transform-only vertex shader

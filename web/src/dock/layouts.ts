@@ -1,4 +1,4 @@
-// Dock layouts (Phase 10).
+// Dock layouts.
 //
 // A desk's arrangement is one of two things:
 //

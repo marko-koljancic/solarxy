@@ -2,9 +2,9 @@
 //! whole [`Document`] (every context's nodes, edges, display flag, and
 //! selection, plus the review annotations and the id mint).
 //!
-//! This is the Phase-4 autosave substrate. The web host serializes a
+//! This is the autosave substrate. The web host serializes a
 //! [`DocumentData`] (wrapped by the engine's `DocumentFile` with the cook
-//! mode) to OPFS as JSON; Phase 5's `.slxy` ZIP reuses these same schema
+//! mode) to OPFS as JSON; the `.slxy` ZIP reuses these same schema
 //! types as its `document.json` entry, adding the asset payloads around it.
 //! Topology is not stored: it is re-derived from the edges on load, exactly
 //! as [`super::fragment::SubflowFragment`] does.

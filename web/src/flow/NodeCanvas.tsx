@@ -30,16 +30,17 @@ import { usePrefs } from "../store/prefs";
 import { useUi, type EdgeStyle } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
+import { setFlowProjection } from "./flowProjection";
 import { NoteNode } from "./NoteNode";
 import { RadialMenu } from "./RadialMenu";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
 
-/** The background dot-grid pitch; snap-to-grid (D-24) locks drags to the
+/** The background dot-grid pitch; snap-to-grid locks drags to the
  * same lattice so the two stay one concept. */
 const GRID_GAP = 18;
 
-/** Minimap tint (D-24): each node carries its category pastel so the
+/** Minimap tint: each node carries its category pastel so the
  * overview map reads as a scaled-down graph, not uniform blocks. */
 function minimapNodeColor(registry: RegistrySnapshot | null) {
   return (n: Node): string => {
@@ -116,7 +117,7 @@ export function NodeCanvas() {
   const showFlowControls = useUi((s) => s.showFlowControls);
   const snapToGrid = useUi((s) => s.snapToGrid);
   const edgeStyle = useUi((s) => s.edgeStyle);
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
 
   // Auto-layout completion fits the view (the layout module emits this
   // after its moveNodes command lands).
@@ -125,6 +126,15 @@ export function NodeCanvas() {
     window.addEventListener("solarxy:fitView", onFit);
     return () => window.removeEventListener("solarxy:fitView", onFit);
   }, [fitView]);
+
+  // Publish the projection for NodePalette, which renders outside this
+  // provider (it must survive list view) and so cannot call useReactFlow.
+  // Nulled on unmount, so a palette opened in list view falls back instead of
+  // projecting through a stale transform.
+  useEffect(() => {
+    setFlowProjection((p) => screenToFlowPosition(p));
+    return () => setFlowProjection(null);
+  }, [screenToFlowPosition]);
 
   const seed = useMemo(() => toRf(graph, registry, edgeStyle), [graph, registry, edgeStyle]);
   const [nodes, setNodes, onNodesChange] = useNodesState(seed.nodes);
@@ -233,7 +243,7 @@ export function NodeCanvas() {
   );
 
   // A drop on an incompatible handle rejects with a toast NAMING BOTH
-  // TYPES (UX spec section 6: "Cannot connect Geometry to Float"); the
+  // TYPES (section 6: "Cannot connect Geometry to Float"); the
   // wire also snaps back, React Flow's built-in visual feedback.
   const onConnectEnd = useCallback(
     (
@@ -331,7 +341,7 @@ export function NodeCanvas() {
         <Background gap={GRID_GAP} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
       )}
       {graph.nodes.length === 0 && (
-        // The first-session teaching hint (UX spec J4; revamp 08-02).
+        // The first-session teaching hint (; revamp 08-02).
         <div className="canvas-empty-hint">
           <kbd className="key-chip">Tab</kbd>
           <span className="empty-title">Press Tab to add a node</span>
@@ -343,7 +353,7 @@ export function NodeCanvas() {
         </div>
       )}
       {graph.nodes.length > 0 && graph.activeOutput === null && current !== "root" && (
-        // The cleared-display ghost chip (UX spec sec. 10; revamp 08-02):
+        // The cleared-display ghost chip (sec. 10; revamp 08-02):
         // this subflow currently renders nothing.
         <div className="ghost-chip-row">
           <span className="ghost-chip">

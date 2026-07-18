@@ -1,4 +1,4 @@
-// The Assets pane (item 2): a thumbnail grid of every staged asset in the
+// The Assets pane: a thumbnail grid of every staged asset in the
 // scene, from the engine's authoritative manifest (view and preview only; no
 // management). Textures show real decoded thumbnails; models show typed
 // glyphs. Double-click opens the preview panel (2D pan/zoom for textures,
