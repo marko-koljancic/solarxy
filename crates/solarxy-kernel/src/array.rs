@@ -1,4 +1,4 @@
-//! Linear and radial duplication (the `array` node's kernel, Phase 15).
+//! Linear and radial duplication (the `array` node's kernel).
 //!
 //! Both modes are compositions of machinery that already exists: each copy's
 //! placement is a [`compose_trs`] matrix, each copy is a

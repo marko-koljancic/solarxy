@@ -1,5 +1,4 @@
-//! Parameter values and the expression reserve (node catalog part I,
-//! section 5).
+//! Parameter values and the expression reserve.
 //!
 //! These are the **typed in-memory** forms. They deliberately do not derive
 //! serde: the schema-v1 on-disk shape is *schema-typed, not
@@ -21,7 +20,7 @@ pub struct AssetId(pub String);
 /// The serde form here is the **self-describing** (tagged) representation
 /// used on the Command/Event boundary and in the registry snapshot. The
 /// separate schema-typed plain form used in `.slxy` files is produced by
-/// `crate::registry::resolve::param_value_to_json` (Phase 5), which the
+/// `crate::registry::resolve::param_value_to_json`, which the
 /// registry's `ParamSpec.ty` disambiguates on read.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
@@ -38,9 +37,15 @@ pub enum ParamValue {
     /// The selected variant's key.
     Enum(String),
     Asset(AssetId),
+    /// A cross-context reference to another node, stored as the stable
+    /// node id so renames never break it (`None` = unset). The widget and
+    /// error messages render the display path; the id is the truth
+    /// (references cross contexts by
+    /// path, never by wire).
+    NodeRef(Option<crate::document::NodeId>),
 }
 
-/// Where a parameter's value comes from (decision 26: values are tagged so
+/// Where a parameter's value comes from (values are tagged so
 /// expressions arrive additively post-beta).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

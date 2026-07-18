@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     symbols::border,
     text::{Line, Span, Text},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap},
@@ -15,6 +15,7 @@ use solarxy_core::json::report_to_json;
 use solarxy_core::report::{AnalysisReport, Severity};
 
 use super::tui::{kv_line, section_header};
+use super::tui_theme::TuiTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -51,6 +52,9 @@ pub struct TerminalApp {
     export_input: Option<String>,
     export_json_input: Option<String>,
     status_message: Option<(String, bool)>,
+    /// The shared palette, resolved once at construction. This shell draws
+    /// no color that does not come from here.
+    theme: TuiTheme,
 }
 
 impl TerminalApp {
@@ -65,7 +69,15 @@ impl TerminalApp {
             export_input: None,
             export_json_input: None,
             status_message: None,
+            theme: TuiTheme::resolve(),
         }
+    }
+
+    /// Build with an explicit theme, bypassing the persisted preference.
+    #[must_use]
+    pub fn with_theme(mut self, theme: TuiTheme) -> Self {
+        self.theme = theme;
+        self
     }
 
     pub fn run(mut self) -> io::Result<()> {
@@ -93,16 +105,16 @@ impl TerminalApp {
 
         let title = Line::from(vec![
             Span::raw(" "),
-            Span::styled("\u{2600}", Style::default().fg(Color::Yellow)),
+            Span::styled("\u{2600}", Style::default().fg(self.theme.accent)),
             Span::raw(" "),
             Span::styled(
                 "Solarxy",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(self.theme.heading)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled("Model Analysis", Style::default().fg(Color::White)),
+            Span::styled("Model Analysis", Style::default().fg(self.theme.text)),
             Span::raw(" "),
         ]);
 
@@ -113,15 +125,15 @@ impl TerminalApp {
                 Block::bordered()
                     .title(title.centered())
                     .border_set(border::ROUNDED)
-                    .border_style(Style::default().fg(Color::Cyan)),
+                    .border_style(Style::default().fg(self.theme.border)),
             )
             .select(self.active_tab.index())
             .highlight_style(
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             )
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(self.theme.muted))
             .divider(" \u{2502} ");
         frame.render_widget(tabs_widget, chunks[0]);
 
@@ -147,23 +159,23 @@ impl TerminalApp {
                 Span::styled(
                     "Export JSON to: ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.label)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(path.clone(), Style::default().fg(Color::White)),
-                Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
+                Span::styled(path.clone(), Style::default().fg(self.theme.text)),
+                Span::styled("\u{2588}", Style::default().fg(self.theme.accent)),
                 Span::raw("  "),
                 Span::styled(
                     "Enter",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Save  "),
                 Span::styled(
                     "Esc",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Cancel "),
@@ -174,29 +186,33 @@ impl TerminalApp {
                 Span::styled(
                     "Export to: ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(self.theme.label)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(path.clone(), Style::default().fg(Color::White)),
-                Span::styled("\u{2588}", Style::default().fg(Color::Yellow)),
+                Span::styled(path.clone(), Style::default().fg(self.theme.text)),
+                Span::styled("\u{2588}", Style::default().fg(self.theme.accent)),
                 Span::raw("  "),
                 Span::styled(
                     "Enter",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Save  "),
                 Span::styled(
                     "Esc",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Cancel "),
             ])
         } else if let Some((ref msg, success)) = self.status_message {
-            let color = if success { Color::Green } else { Color::Red };
+            let color = if success {
+                self.theme.success
+            } else {
+                self.theme.error
+            };
             Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
@@ -211,42 +227,42 @@ impl TerminalApp {
                 Span::styled(
                     "Tab/1-4",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Switch  "),
                 Span::styled(
                     "j/k",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Scroll  "),
                 Span::styled(
                     "g/G",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Top/Bottom  "),
                 Span::styled(
                     "e",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Export  "),
                 Span::styled(
                     "J",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" JSON  "),
                 Span::styled(
                     "q",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" Quit "),
@@ -256,9 +272,9 @@ impl TerminalApp {
         let content_block = Block::bordered()
             .title_bottom(instructions.left_aligned())
             .title_bottom(Line::from(position).centered())
-            .title_bottom(validation_status_line(&self.report).right_aligned())
+            .title_bottom(validation_status_line(&self.report, &self.theme).right_aligned())
             .border_set(border::ROUNDED)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(self.theme.border));
 
         let paragraph = Paragraph::new(content_text)
             .block(content_block)
@@ -417,22 +433,39 @@ impl TerminalApp {
 
     fn format_overview(&self) -> Text<'static> {
         let mut lines = vec![
-            section_header("MODEL OVERVIEW"),
+            section_header("MODEL OVERVIEW", &self.theme),
             Line::from(""),
-            kv_line("Model Name", &self.report.model_name),
-            kv_line("Mesh Count", &self.report.mesh_count.to_string()),
-            kv_line("Material Count", &self.report.material_count.to_string()),
-            kv_line("Total Vertices", &format_number(self.report.total_vertices)),
-            kv_line("Total Indices", &format_number(self.report.total_indices)),
+            kv_line("Model Name", &self.report.model_name, &self.theme),
+            kv_line(
+                "Mesh Count",
+                &self.report.mesh_count.to_string(),
+                &self.theme,
+            ),
+            kv_line(
+                "Material Count",
+                &self.report.material_count.to_string(),
+                &self.theme,
+            ),
+            kv_line(
+                "Total Vertices",
+                &format_number(self.report.total_vertices),
+                &self.theme,
+            ),
+            kv_line(
+                "Total Indices",
+                &format_number(self.report.total_indices),
+                &self.theme,
+            ),
             kv_line(
                 "Total Triangles",
                 &format_number(self.report.total_triangles),
+                &self.theme,
             ),
         ];
 
         if let Some(ref bounds) = self.report.bounds {
             lines.push(Line::from(""));
-            lines.push(section_header("BOUNDING BOX"));
+            lines.push(section_header("BOUNDING BOX", &self.theme));
             lines.push(Line::from(""));
             lines.push(kv_line(
                 "Min",
@@ -440,6 +473,7 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     bounds.min[0], bounds.min[1], bounds.min[2]
                 ),
+                &self.theme,
             ));
             lines.push(kv_line(
                 "Max",
@@ -447,6 +481,7 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     bounds.max[0], bounds.max[1], bounds.max[2]
                 ),
+                &self.theme,
             ));
             lines.push(kv_line(
                 "Size",
@@ -454,6 +489,7 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     bounds.size[0], bounds.size[1], bounds.size[2]
                 ),
+                &self.theme,
             ));
             lines.push(kv_line(
                 "Center",
@@ -461,8 +497,13 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     bounds.center[0], bounds.center[1], bounds.center[2]
                 ),
+                &self.theme,
             ));
-            lines.push(kv_line("Diagonal", &format!("{:.3}", bounds.diagonal)));
+            lines.push(kv_line(
+                "Diagonal",
+                &format!("{:.3}", bounds.diagonal),
+                &self.theme,
+            ));
         }
 
         Text::from(lines)
@@ -474,24 +515,36 @@ impl TerminalApp {
         if self.report.meshes.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No meshes found",
-                Style::default().fg(Color::Gray),
+                Style::default().fg(self.theme.label),
             )));
             return Text::from(lines);
         }
 
-        lines.push(section_header("MESH DETAILS"));
+        lines.push(section_header("MESH DETAILS", &self.theme));
         lines.push(Line::from(""));
 
         for (i, mesh) in self.report.meshes.iter().enumerate() {
             lines.push(Line::from(Span::styled(
                 format!("Mesh [{}]:", mesh.index),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
             )));
-            lines.push(kv_line("  Vertices", &format_number(mesh.vertex_count)));
-            lines.push(kv_line("  Indices", &format_number(mesh.index_count)));
-            lines.push(kv_line("  Triangles", &format_number(mesh.triangle_count)));
+            lines.push(kv_line(
+                "  Vertices",
+                &format_number(mesh.vertex_count),
+                &self.theme,
+            ));
+            lines.push(kv_line(
+                "  Indices",
+                &format_number(mesh.index_count),
+                &self.theme,
+            ));
+            lines.push(kv_line(
+                "  Triangles",
+                &format_number(mesh.triangle_count),
+                &self.theme,
+            ));
 
             let normal_indicator = if mesh.normal_count == mesh.vertex_count {
                 "\u{2713}"
@@ -501,6 +554,7 @@ impl TerminalApp {
             lines.push(kv_line(
                 "  Normals",
                 &format!("{} {}", format_number(mesh.normal_count), normal_indicator),
+                &self.theme,
             ));
 
             let texcoord_indicator = if mesh.texcoord_count == mesh.vertex_count {
@@ -517,6 +571,7 @@ impl TerminalApp {
                     format_number(mesh.texcoord_count),
                     texcoord_indicator
                 ),
+                &self.theme,
             ));
 
             let mat_str = match (&mesh.material_name, mesh.material_id) {
@@ -524,7 +579,7 @@ impl TerminalApp {
                 (None, Some(id)) => format!("Invalid ID: {}", id),
                 _ => "None".to_string(),
             };
-            lines.push(kv_line("  Material", &mat_str));
+            lines.push(kv_line("  Material", &mat_str, &self.theme));
 
             if i < self.report.meshes.len() - 1 {
                 lines.push(Line::from(""));
@@ -538,23 +593,23 @@ impl TerminalApp {
         let mut lines = Vec::new();
 
         if self.report.materials.is_empty() {
-            lines.push(section_header("MATERIALS"));
+            lines.push(section_header("MATERIALS", &self.theme));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "No materials found (.mtl file not provided or empty)",
-                Style::default().fg(Color::Gray),
+                Style::default().fg(self.theme.label),
             )));
             return Text::from(lines);
         }
 
-        lines.push(section_header("MATERIAL DETAILS"));
+        lines.push(section_header("MATERIAL DETAILS", &self.theme));
         lines.push(Line::from(""));
 
         for (i, mat) in self.report.materials.iter().enumerate() {
             lines.push(Line::from(Span::styled(
                 format!("Material [{}]: '{}'", mat.index, mat.name),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
             )));
             lines.push(kv_line(
@@ -563,6 +618,7 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     mat.ambient[0], mat.ambient[1], mat.ambient[2]
                 ),
+                &self.theme,
             ));
             lines.push(kv_line(
                 "  Diffuse",
@@ -570,6 +626,7 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]
                 ),
+                &self.theme,
             ));
             lines.push(kv_line(
                 "  Specular",
@@ -577,33 +634,43 @@ impl TerminalApp {
                     "[{:.3}, {:.3}, {:.3}]",
                     mat.specular[0], mat.specular[1], mat.specular[2]
                 ),
+                &self.theme,
             ));
 
             if let Some(shininess) = mat.shininess {
-                lines.push(kv_line("  Shininess", &format!("{:.3}", shininess)));
+                lines.push(kv_line(
+                    "  Shininess",
+                    &format!("{:.3}", shininess),
+                    &self.theme,
+                ));
             }
             if let Some(dissolve) = mat.dissolve {
-                lines.push(kv_line("  Dissolve (opacity)", &format!("{:.3}", dissolve)));
+                lines.push(kv_line(
+                    "  Dissolve (opacity)",
+                    &format!("{:.3}", dissolve),
+                    &self.theme,
+                ));
             }
             if let Some(optical_density) = mat.optical_density {
                 lines.push(kv_line(
                     "  Optical Density",
                     &format!("{:.3}", optical_density),
+                    &self.theme,
                 ));
             }
 
-            lines.push(kv_line_label_only("  Textures"));
+            lines.push(kv_line_label_only("  Textures", &self.theme));
             if mat.textures.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "    None",
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(self.theme.label),
                 )));
             } else {
                 for tex in &mat.textures {
                     let style = if tex.exists {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(self.theme.text)
                     } else {
-                        Style::default().fg(Color::Red)
+                        Style::default().fg(self.theme.error)
                     };
                     let missing = if tex.exists { "" } else { " [MISSING]" };
                     lines.push(Line::from(vec![
@@ -611,12 +678,12 @@ impl TerminalApp {
                         Span::styled(
                             format!("{}:", tex.slot),
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(self.theme.success)
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw(" "),
                         Span::styled(format!("'{}'", tex.path), style),
-                        Span::styled(missing.to_string(), Style::default().fg(Color::Red)),
+                        Span::styled(missing.to_string(), Style::default().fg(self.theme.error)),
                     ]));
                 }
             }
@@ -632,14 +699,14 @@ impl TerminalApp {
     fn format_validation(&self) -> Text<'static> {
         let mut lines = Vec::new();
 
-        lines.push(section_header("VALIDATION"));
+        lines.push(section_header("VALIDATION", &self.theme));
         lines.push(Line::from(""));
 
         if self.report.validation.is_clean() {
             lines.push(Line::from(Span::styled(
                 "\u{2713} No issues found",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(self.theme.success)
                     .add_modifier(Modifier::BOLD),
             )));
             return Text::from(lines);
@@ -650,15 +717,19 @@ impl TerminalApp {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} error(s)", errors),
-                Style::default().fg(if errors > 0 { Color::Red } else { Color::Green }),
+                Style::default().fg(if errors > 0 {
+                    self.theme.error
+                } else {
+                    self.theme.success
+                }),
             ),
             Span::raw(", "),
             Span::styled(
                 format!("{} warning(s)", warnings),
                 Style::default().fg(if warnings > 0 {
-                    Color::Yellow
+                    self.theme.warning
                 } else {
-                    Color::Green
+                    self.theme.success
                 }),
             ),
         ]));
@@ -666,8 +737,8 @@ impl TerminalApp {
 
         for issue in &self.report.validation.issues {
             let (tag, color) = match issue.severity {
-                Severity::Error => ("[ERROR]", Color::Red),
-                Severity::Warning => ("[WARN]", Color::Yellow),
+                Severity::Error => ("[ERROR]", self.theme.error),
+                Severity::Warning => ("[WARN]", self.theme.warning),
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -676,7 +747,7 @@ impl TerminalApp {
                 ),
                 Span::styled(
                     format!("{}", issue.scope),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(self.theme.text),
                 ),
                 Span::raw(": "),
                 Span::styled(issue.message.clone(), Style::default().fg(color)),
@@ -687,22 +758,22 @@ impl TerminalApp {
     }
 }
 
-fn kv_line_label_only(label: &str) -> Line<'static> {
+fn kv_line_label_only(label: &str, theme: &TuiTheme) -> Line<'static> {
     Line::from(Span::styled(
         format!("{}:", label),
         Style::default()
-            .fg(Color::Green)
+            .fg(theme.success)
             .add_modifier(Modifier::BOLD),
     ))
 }
 
-fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
+fn validation_status_line(report: &AnalysisReport, theme: &TuiTheme) -> Line<'static> {
     let v = &report.validation;
     if v.is_clean() {
         Line::from(Span::styled(
             " \u{2713} Clean ".to_string(),
             Style::default()
-                .fg(Color::Green)
+                .fg(theme.success)
                 .add_modifier(Modifier::BOLD),
         ))
     } else {
@@ -716,7 +787,9 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
                     errors,
                     if errors == 1 { "" } else { "s" }
                 ),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         if warnings > 0 {
@@ -727,10 +800,121 @@ fn validation_status_line(report: &AnalysisReport) -> Line<'static> {
                     if warnings == 1 { "" } else { "s" }
                 ),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme.warning)
                     .add_modifier(Modifier::BOLD),
             ));
         }
         Line::from(spans)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use solarxy_core::report::AnalysisReport;
+    use solarxy_core::theme::Palette;
+    use solarxy_core::validation::ValidationReport;
+
+    use super::*;
+
+    fn report() -> AnalysisReport {
+        AnalysisReport {
+            model_name: "frog".to_string(),
+            mesh_count: 3,
+            material_count: 1,
+            total_vertices: 12,
+            total_indices: 36,
+            total_triangles: 12,
+            bounds: None,
+            meshes: Vec::new(),
+            materials: Vec::new(),
+            validation: ValidationReport::default(),
+        }
+    }
+
+    /// Render the real widget tree and read the cells back.
+    ///
+    /// The TUI needs a tty, so this is the only way to assert what it
+    /// actually paints rather than what we believe it paints.
+    fn render(theme: TuiTheme) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("test terminal");
+        let mut app = TerminalApp::new(report(), "frog.obj".to_string()).with_theme(theme);
+        terminal.draw(|f| app.draw(f)).expect("draw");
+        terminal.backend().buffer().clone()
+    }
+
+    /// Nothing the TUI paints may be a colour we invented for ink. Every
+    /// foreground is either the terminal's own (Reset / a named ANSI slot)
+    /// or a semantic hue from the shared palette.
+    #[test]
+    fn paints_only_terminal_ink_or_palette_hues() {
+        let buffer = render(TuiTheme::resolve());
+        let allowed = [
+            ratatui::style::Color::Reset,
+            ratatui::style::Color::DarkGray,
+        ];
+        let t = TuiTheme::resolve();
+        let hues = [t.accent, t.success, t.warning, t.error];
+        for cell in buffer.content() {
+            assert!(
+                allowed.contains(&cell.fg) || hues.contains(&cell.fg),
+                "painted {:?}, which is neither terminal ink nor a palette hue",
+                cell.fg
+            );
+        }
+    }
+
+    /// The regression the maintainer caught in a real terminal: selecting
+    /// the GUI's light theme painted near-black ink into a dark terminal, so
+    /// the report was invisible. No RGB ink may reach the screen at all.
+    #[test]
+    fn no_rgb_ink_reaches_the_screen() {
+        let buffer = render(TuiTheme::from_palette(&Palette::light()));
+        let light = Palette::light();
+        for cell in buffer.content() {
+            for role in [
+                light.roles.ink_primary,
+                light.roles.ink_strong,
+                light.roles.ink_tertiary,
+            ] {
+                let ink = ratatui::style::Color::Rgb(role.rgb.r, role.rgb.g, role.rgb.b);
+                assert_ne!(
+                    cell.fg, ink,
+                    "a light palette's ink was painted into a terminal"
+                );
+            }
+        }
+    }
+
+    /// Body text must be the terminal's own foreground, which is the only
+    /// value legible in every colour scheme.
+    #[test]
+    fn body_text_is_terminal_ink() {
+        let buffer = render(TuiTheme::resolve());
+        let resets = buffer
+            .content()
+            .iter()
+            .filter(|c| c.fg == ratatui::style::Color::Reset && !c.symbol().trim().is_empty())
+            .count();
+        assert!(
+            resets > 20,
+            "expected the bulk of the report to be terminal ink, saw {resets}"
+        );
+    }
+
+    /// The TUI must never paint a background: the terminal's own ground
+    /// shows through, which is what keeps RGB foregrounds legible whatever
+    /// the user's terminal theme is.
+    #[test]
+    fn never_paints_a_background() {
+        let buffer = render(TuiTheme::resolve());
+        for cell in buffer.content() {
+            assert_eq!(
+                cell.bg,
+                ratatui::style::Color::Reset,
+                "the TUI painted a background, which fights the user's terminal"
+            );
+        }
     }
 }

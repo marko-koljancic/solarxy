@@ -110,8 +110,17 @@ impl std::fmt::Display for ViewMode {
 }
 
 cycle_enum! {
-    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+    /// Wireframe stroke weight, in screen pixels (the edge wireframe is a
+    /// screen-space quad expansion, so these are true widths, not a GPU
+    /// line-width limit).
+    ///
+    /// `Light` is the default on every shell. It used to be stated twice —
+    /// here via `RenderingPrefs` and again as a hardcoded `Medium` in the web
+    /// host — and the two disagreed, so the same scene drew a 1 px wireframe
+    /// on desktop and a 2 px one on web.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
     pub enum LineWeight {
+        #[default]
         Light => "Light",
         Medium => "Medium",
         Bold => "Bold",
@@ -486,15 +495,34 @@ cycle_enum! {
 }
 
 cycle_enum! {
-    /// User-selectable interface theme. Both presets are Ayu Mirage
-    /// derivatives; the GUI hot-swaps between them without a restart.
+    /// User-selectable interface theme. Resolves to a
+    /// [`crate::theme::Palette`], which is shared with the web frontend and
+    /// the analyze TUI. The GUI hot-swaps between the two without a restart.
+    ///
+    /// The variants were `AyuMirageDark`/`AyuMirageLight` before 0.7.1, when
+    /// the desktop carried its own Ayu-derived palette. The aliases are load
+    /// bearing: this enum is serialized into `~/.config/solarxy/config.toml`,
+    /// so without them every existing user's theme choice fails to
+    /// deserialize and silently resets to the default.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub enum ThemeChoice {
         #[default]
-        AyuMirageDark => "Ayu Mirage Dark",
-        AyuMirageLight => "Ayu Mirage Light",
+        #[serde(alias = "AyuMirageDark")]
+        Dark => "Dark",
+        #[serde(alias = "AyuMirageLight")]
+        Light => "Light",
     }
     ; cycle
+}
+
+impl ThemeChoice {
+    /// The palette this choice selects.
+    pub const fn palette(self) -> crate::theme::Palette {
+        match self {
+            Self::Dark => crate::theme::Palette::dark(),
+            Self::Light => crate::theme::Palette::light(),
+        }
+    }
 }
 
 /// Root TOML structure persisted at `~/.config/solarxy/config.toml`
@@ -763,7 +791,7 @@ impl Default for DisplayPrefs {
 impl Default for RenderingPrefs {
     fn default() -> Self {
         Self {
-            wireframe_line_weight: LineWeight::Light,
+            wireframe_line_weight: LineWeight::default(),
             msaa_sample_count: 4,
             shadow_map_size: 2048,
         }
@@ -900,7 +928,7 @@ mod tests {
             ui: UiPrefs {
                 max_recent_files: 10,
                 status_bar_visible: false,
-                theme: ThemeChoice::AyuMirageLight,
+                theme: ThemeChoice::Light,
             },
             updater: UpdaterPrefs {
                 check_on_launch: true,
@@ -1093,16 +1121,74 @@ mod tests {
 
     #[test]
     fn theme_choice_defaults_to_dark_and_cycles() {
-        assert_eq!(ThemeChoice::default(), ThemeChoice::AyuMirageDark);
-        assert_eq!(UiPrefs::default().theme, ThemeChoice::AyuMirageDark);
+        assert_eq!(ThemeChoice::default(), ThemeChoice::Dark);
+        assert_eq!(UiPrefs::default().theme, ThemeChoice::Dark);
+        assert_eq!(ThemeChoice::Dark.next(), ThemeChoice::Light);
+        assert_eq!(ThemeChoice::Light.next(), ThemeChoice::Dark);
+    }
+
+    /// 0.7.1 renamed the variants from `AyuMirageDark`/`AyuMirageLight`.
+    /// A config.toml written by any earlier release must still load, or the
+    /// upgrade silently throws away the user's theme choice.
+    #[test]
+    fn pre_0_7_1_theme_names_still_deserialize() {
+        let old: UiPrefs = toml::from_str(r#"theme = "AyuMirageLight""#).expect("legacy light");
+        assert_eq!(old.theme, ThemeChoice::Light);
+
+        let old: UiPrefs = toml::from_str(r#"theme = "AyuMirageDark""#).expect("legacy dark");
+        assert_eq!(old.theme, ThemeChoice::Dark);
+
+        // And the current names round-trip.
+        for choice in [ThemeChoice::Dark, ThemeChoice::Light] {
+            let ui = UiPrefs {
+                theme: choice,
+                ..UiPrefs::default()
+            };
+            let text = toml::to_string(&ui).expect("serialize");
+            let back: UiPrefs = toml::from_str(&text).expect("round trip");
+            assert_eq!(back.theme, choice);
+        }
+    }
+
+    /// A whole legacy `config.toml` section, not just the enum: this is the
+    /// shape that actually sits on users' disks today.
+    #[test]
+    fn a_v0_7_0_config_file_loads_with_its_theme_intact() {
+        let toml_text = r#"
+            config_version = 1
+
+            [ui]
+            theme = "AyuMirageLight"
+        "#;
+        let prefs: Preferences = toml::from_str(toml_text).expect("v0.7.0 config must load");
+        assert_eq!(prefs.ui.theme, ThemeChoice::Light);
+    }
+
+    #[test]
+    fn theme_choice_selects_the_matching_palette() {
+        assert!(ThemeChoice::Dark.palette().dark);
+        assert!(!ThemeChoice::Light.palette().dark);
+    }
+
+    /// The wireframe default is stated in two places that must agree: this
+    /// enum (which the web host seeds its renderer from) and `RenderingPrefs`
+    /// (which the desktop persists). They did not agree before 0.7.1 — the
+    /// web host hardcoded `Medium` against the desktop's `Light`, so the same
+    /// scene drew a 2 px wireframe in one shell and 1 px in the other.
+    #[test]
+    fn the_wireframe_default_is_the_same_on_every_shell() {
+        assert_eq!(LineWeight::default(), LineWeight::Light);
         assert_eq!(
-            ThemeChoice::AyuMirageDark.next(),
-            ThemeChoice::AyuMirageLight
+            RenderingPrefs::default().wireframe_line_weight,
+            LineWeight::default(),
         );
-        assert_eq!(
-            ThemeChoice::AyuMirageLight.next(),
-            ThemeChoice::AyuMirageDark
-        );
+        assert!((LineWeight::default().width_px() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn line_weights_are_ordered_and_distinct() {
+        let widths: Vec<f32> = LineWeight::ALL.iter().map(|w| w.width_px()).collect();
+        assert_eq!(widths, vec![1.0, 2.0, 3.0]);
     }
 
     #[test]

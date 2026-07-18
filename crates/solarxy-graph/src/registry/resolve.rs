@@ -1,5 +1,5 @@
 //! The param resolver: the single chokepoint between stored params and
-//! compute bodies (node catalog part I, sections 4 and 5).
+//! compute bodies (sections 4 and 5).
 //!
 //! `resolve_params` runs before every compute. It reads literals (v1
 //! refuses expressions), conforms values to the spec type, clamps to the
@@ -183,6 +183,15 @@ impl ResolvedParams {
             _ => None,
         }
     }
+
+    /// The cross-context node reference, if one is set.
+    #[must_use]
+    pub fn node_ref(&self, key: &str) -> Option<crate::document::NodeId> {
+        match self.values.get(key) {
+            Some(ParamValue::NodeRef(id)) => *id,
+            _ => None,
+        }
+    }
 }
 
 /// The chokepoint. Reads each spec'd param from `stored` (default when
@@ -243,6 +252,9 @@ pub fn conform_value(value: &ParamValue, ty: &ParamType) -> Result<ParamValue, S
             }
         }
         (ParamValue::Asset(id), ParamType::AssetRef { .. }) => Ok(ParamValue::Asset(id.clone())),
+        (ParamValue::NodeRef(id), ParamType::NodePath { .. }) => Ok(ParamValue::NodeRef(*id)),
+        // Action params are inert; any stored bool conforms.
+        (ParamValue::Bool(_), ParamType::Action) => Ok(ParamValue::Bool(false)),
         (other, ty) => Err(format!("{other:?} does not conform to {ty:?}")),
     }
 }
@@ -304,6 +316,12 @@ pub fn param_value_to_json(value: &ParamValue) -> Json {
         ParamValue::Color(v) => serde_json::json!(v),
         ParamValue::Enum(key) => serde_json::json!(key),
         ParamValue::Asset(id) => serde_json::json!(id.0),
+        // The plain form is the raw id number (or null when unset), so a
+        // reference reads naturally in `document.json`.
+        ParamValue::NodeRef(id) => match id {
+            Some(n) => serde_json::json!(n.0),
+            None => Json::Null,
+        },
     }
 }
 
@@ -377,6 +395,17 @@ pub fn param_source_from_json(json: &Json, ty: &ParamType) -> Result<ParamSource
                 .ok_or_else(|| format!("expected an asset digest string, got {json}"))?
                 .to_string(),
         )),
+        ParamType::Action => ParamValue::Bool(false),
+        ParamType::NodePath { .. } => {
+            if json.is_null() {
+                ParamValue::NodeRef(None)
+            } else {
+                let id = json
+                    .as_u64()
+                    .ok_or_else(|| format!("expected a node id number or null, got {json}"))?;
+                ParamValue::NodeRef(Some(crate::document::NodeId(id)))
+            }
+        }
     };
     Ok(ParamSource::Literal(value))
 }

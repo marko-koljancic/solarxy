@@ -1,4 +1,4 @@
-// A single-line inline text editor (Phase 8 rename), extracted from the
+// A single-line inline text editor (rename), extracted from the
 // NoteNode editing pattern: draft state, focus-and-select on open, commit
 // on blur or Enter, revert on Esc, keydown propagation stopped so the
 // canvas and global keymaps never see the typing. The `nodrag` class keeps

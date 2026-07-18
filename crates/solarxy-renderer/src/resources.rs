@@ -202,7 +202,9 @@ pub fn upload_model(
             emissive: mat.emissive_factor,
             alpha_mode: mat.alpha_mode.into(),
             material_index: mat_idx as u32,
-            _pad: [0.0; 3],
+            shading_model: mat.shading_model.into(),
+            toon_steps: mat.toon_steps,
+            _pad: 0.0,
             base_color: mat.base_color_factor,
         };
 
@@ -490,7 +492,9 @@ pub(crate) fn upload_cooked_materials(
             emissive: mat.emissive_factor,
             alpha_mode: mat.alpha_mode.into(),
             material_index: mat_idx as u32,
-            _pad: [0.0; 3],
+            shading_model: mat.shading_model.into(),
+            toon_steps: mat.toon_steps,
+            _pad: 0.0,
             base_color: mat.base_color_factor,
         };
 

@@ -4037,7 +4037,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4049,7 +4049,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-app"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axoupdater",
@@ -4094,7 +4094,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "cgmath",
@@ -4113,13 +4113,14 @@ dependencies = [
 
 [[package]]
 name = "solarxy-formats"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "base64 0.22.1",
  "cgmath",
  "gltf",
  "image",
  "ply-rs-bw",
+ "serde_json",
  "solarxy-core",
  "stl_io",
  "thiserror 2.0.17",
@@ -4130,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-graph"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cgmath",
  "serde",
@@ -4138,14 +4139,23 @@ dependencies = [
  "sha2",
  "solarxy-core",
  "solarxy-formats",
+ "solarxy-imaging",
  "solarxy-kernel",
  "solarxy-scenefile",
  "thiserror 2.0.17",
 ]
 
 [[package]]
+name = "solarxy-imaging"
+version = "0.7.1"
+dependencies = [
+ "solarxy-core",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "solarxy-kernel"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytemuck",
  "cgmath",
@@ -4156,7 +4166,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-renderer"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4174,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-scenefile"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "schemars",
  "serde",
@@ -4186,7 +4196,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-validate"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "glob",
@@ -4205,7 +4215,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-web"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytemuck",
  "cgmath",

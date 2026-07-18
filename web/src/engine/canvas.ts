@@ -1,6 +1,6 @@
 // The one WebGPU canvas, owned by the module and NOT by React.
 //
-// Phase 10 (docking) made this necessary and the dock-spike proved it safe.
+// (docking) made this necessary and the dock-spike proved it safe.
 // dockview's `fromJSON` rebuilds the panel tree, which is exactly what every
 // desk apply runs, and that unmounts panel content. A canvas rendered as JSX
 // would be recreated there and the WebGPU surface lost (the Rust host holds a

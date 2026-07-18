@@ -1,4 +1,4 @@
-//! AABB geometry (the `bounds` node's kernel, Phase 15).
+//! AABB geometry (the `bounds` node's kernel).
 //!
 //! Two shapes, both solid triangulated boxes, because `GeometrySet` has
 //! neither line nor point primitives: `box` emits a box matching the input's

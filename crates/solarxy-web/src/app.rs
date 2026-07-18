@@ -1,5 +1,5 @@
 //! The `SolarxyApp` wasm-bindgen class: the browser host over the engine
-//! and the full `solarxy-renderer` pipeline (phase 6; the phase-4 stopgap
+//! and the full `solarxy-renderer` pipeline (the phase-4 stopgap
 //! forward renderer is retired).
 //!
 //! The React frontend holds one instance: it dispatches `Command`s (in) and
@@ -34,8 +34,9 @@ use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
 use solarxy_graph::cook::{ImportOptions, JobId, JobRequest, JobResult, ParsedModel};
-use solarxy_graph::document::GraphContext;
+use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::engine::{EngineEvent, GizmoTarget, SceneSidecar};
+use solarxy_graph::params::{ParamSource, ParamValue};
 use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
@@ -110,6 +111,7 @@ fn default_pane_settings() -> PaneDisplaySettings {
         uv_zoom: 1.0,
         show_uv_overlap: false,
         show_validation: false,
+        turntable_active: false,
     }
 }
 
@@ -133,6 +135,16 @@ struct WebViewState {
     cameras_linked: bool,
     cameras: [Option<CameraState>; 4],
     pane_settings: [PaneDisplaySettings; 4],
+    /// Which `camera` node each pane looks through (`None` = free view).
+    look_through: [Option<NodeId>; 4],
+    /// Whether a look-through pane is locked so navigation reframes the camera
+    /// node (Blender's Lock-Camera-to-View). Only meaningful when the same
+    /// slot's `look_through` is `Some`.
+    camera_locked: [bool; 4],
+    /// Transient: a locked look-through pane is mid-navigation, so the
+    /// node-to-pane follow is suppressed until the gesture commits (avoids the
+    /// follow fighting live navigation). Not persisted.
+    camera_editing: [bool; 4],
 }
 
 /// Async happenings the frontend drains once per frame.
@@ -209,10 +221,15 @@ struct ScreenshotOverlaysDto {
 /// the headless engine.
 #[wasm_bindgen]
 pub struct SolarxyApp {
+    /// Kept for the asset-preview pane: a second surface (its own canvas)
+    /// must come from the same instance as the device.
+    instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    /// The asset-preview pane's isolated render state, when open.
+    preview: Option<PreviewState>,
     /// The (sRGB) format render pipelines target; the surface view is
     /// created with this format each frame (Chrome offers only non-sRGB
     /// surface formats, so it rides `view_formats`).
@@ -236,7 +253,7 @@ pub struct SolarxyApp {
     /// The live drag's delta text, rebuilt each pointer move and polled once per
     /// frame by the shell. `None` whenever nothing is being dragged.
     gizmo_readout: Option<String>,
-    /// The scene object tinted as selected in the viewports (decision 24),
+    /// The scene object tinted as selected in the viewports,
     /// or `None`.
     selected_object: Option<SceneObjectId>,
     /// Validate jobs drained from the engine but not yet handed to the
@@ -269,6 +286,11 @@ pub struct SolarxyApp {
     hdri: Option<HdriMeta>,
     /// A screenshot request captured this frame (rendered at frame end).
     screenshot_request: Option<ScreenshotOptsDto>,
+    /// A turntable-export frame request: (pane, absolute azimuth in degrees,
+    /// opts). Rendered offscreen at frame end from a rotated clone of the
+    /// pane's render-through camera, through the same capture slot as the
+    /// screenshot. The frontend drives one frame at a time.
+    turntable_request: Option<(usize, f32, ScreenshotOptsDto)>,
     /// The in-flight screenshot readback (one at a time).
     pending_screenshot: Option<solarxy_renderer::capture::PendingCapture>,
     /// Whether the normals/bounds visualization aggregate is stale
@@ -395,7 +417,14 @@ impl SolarxyApp {
             sky_top,
             sky_bottom,
             wireframe_color: background.wireframe_color(),
-            wireframe_line_width: solarxy_core::preferences::LineWeight::Medium.width_px(),
+            // Only the seed for the renderer's first frame: every pane's real
+            // weight arrives through `PaneDisplaySettings::line_weight` (see
+            // the per-pane `width_px()` reads below). Taken from the shared
+            // default rather than naming a variant, because this hardcoded
+            // `Medium` silently disagreed with the desktop's persisted
+            // `Light` default, so the same scene drew different wireframes in
+            // the two shells out of the box.
+            wireframe_line_width: solarxy_core::preferences::LineWeight::default().width_px(),
             bloom_enabled: false,
             ssao_enabled: false,
             tone_mode: ToneMode::AcesFilmic,
@@ -446,12 +475,14 @@ impl SolarxyApp {
         ));
 
         Ok(SolarxyApp {
+            instance,
             surface,
             device,
             queue,
             config,
             render_format,
             renderer,
+            preview: None,
             scene_objects: SceneObjects::new(),
             env,
             env_bounds: bounds,
@@ -461,6 +492,9 @@ impl SolarxyApp {
                 cameras_linked: false,
                 cameras: [None, None, None, None],
                 pane_settings: [default_pane_settings(); 4],
+                look_through: [None; 4],
+                camera_locked: [false; 4],
+                camera_editing: [false; 4],
             },
             engine,
             host_events: Vec::new(),
@@ -478,6 +512,7 @@ impl SolarxyApp {
             last_pointer: (0.0, 0.0),
             hdri: None,
             screenshot_request: None,
+            turntable_request: None,
             pending_screenshot: None,
             viz_dirty: true,
             gizmo: GizmoState::default(),
@@ -556,6 +591,7 @@ impl SolarxyApp {
         self.sync_visualization();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
+        self.follow_look_through_cameras();
         // `f64::clamp` RETURNS NaN for a NaN input (every comparison with NaN is
         // false), so the clamp alone is not a guard. A non-finite delta reaching
         // a camera transition integrates straight into eye/target, and the next
@@ -563,6 +599,20 @@ impl SolarxyApp {
         // supposed to pass a real frame delta; treat anything else as one frame.
         let dt_ms = if dt_ms.is_finite() { dt_ms } else { 16.0 };
         let dt = (dt_ms / 1000.0).clamp(0.0, 0.1) as f32;
+        // Live turntable spin: a constant angular velocity on each pane
+        // whose toggle is on. rpm is the global display setting; the spin is
+        // session-temporary (reset on load) and drives the pane's scratch camera.
+        let rpm = self.view.display.turntable_rpm;
+        if rpm.abs() > 1e-6 {
+            let yaw = rpm * std::f32::consts::TAU / 60.0 * dt;
+            for i in 0..self.view.cameras.len() {
+                if self.view.pane_settings[i].turntable_active
+                    && let Some(cam) = self.view.cameras[i].as_mut()
+                {
+                    cam.inject_orbit_yaw(yaw);
+                }
+            }
+        }
         for cam in self.view.cameras.iter_mut().flatten() {
             cam.update(&self.queue, dt);
         }
@@ -614,6 +664,9 @@ impl SolarxyApp {
         // the layout dimensions).
         if let Some(opts) = self.screenshot_request.take() {
             self.render_screenshot(&opts);
+        }
+        if let Some((pane, azimuth, opts)) = self.turntable_request.take() {
+            self.render_turntable_frame(pane, azimuth, &opts);
         }
 
         to_js(&EventBatch {
@@ -726,6 +779,11 @@ impl SolarxyApp {
                 cam.handle_mouse_button(btn, true);
             }
         }
+        // On a locked look-through pane, this drag reframes the bound camera, so
+        // suppress the node-to-pane follow for the duration of the gesture.
+        if self.is_locked_look_through(active) {
+            self.view.camera_editing[active] = true;
+        }
         Ok(JsValue::NULL)
     }
 
@@ -797,6 +855,15 @@ impl SolarxyApp {
         {
             cam.handle_mouse_button(btn, false);
         }
+        // A locked look-through reframe ends when the last button lifts: commit
+        // the new camera pose to the node (one undo step) and let the follow
+        // resume. The batch flows back so the parameter panel reflects the pose.
+        if self.pointer_buttons_down == 0 && self.view.camera_editing[active] {
+            self.view.camera_editing[active] = false;
+            if let Some(batch) = self.commit_pane_camera_to_node(active) {
+                return to_js(&batch);
+            }
+        }
         Ok(JsValue::NULL)
     }
 
@@ -821,6 +888,13 @@ impl SolarxyApp {
         }
         if let Some(cam) = self.view.cameras[active].as_mut() {
             cam.handle_scroll(delta);
+        }
+        // A dolly on a locked look-through pane reframes the bound camera. Wheel
+        // has no return channel; committing bumps the revision, and the frame
+        // loop's next batch carries it so the mirror self-heals (resnapshot on
+        // the gap), keeping the node params in step with the pose.
+        if self.is_locked_look_through(active) {
+            let _ = self.commit_pane_camera_to_node(active);
         }
     }
 
@@ -976,6 +1050,43 @@ impl SolarxyApp {
         Ok(())
     }
 
+    /// Requests one turntable-export frame: pane `pane` rendered offscreen from
+    /// its render-through camera rotated by `azimuth_deg`, at the given opts.
+    /// Uses the same single capture slot as the screenshot; the frontend drives
+    /// one azimuth at a time (poll with `poll_screenshot`). Deterministic: it
+    /// renders a rotated clone, never disturbing the live view.
+    pub fn request_turntable_frame(
+        &mut self,
+        pane: usize,
+        azimuth_deg: f32,
+        opts: JsValue,
+    ) -> Result<(), JsError> {
+        const MAX_CAPTURE_PIXELS: u64 = 4_000_000;
+        if self.screenshot_request.is_some()
+            || self.turntable_request.is_some()
+            || self.pending_screenshot.is_some()
+        {
+            return Err(JsError::new("a capture is already in flight"));
+        }
+        let mut opts: ScreenshotOptsDto = serde_wasm_bindgen::from_value(opts)
+            .map_err(|e| JsError::new(&format!("bad opts: {e}")))?;
+        let max = self.device.limits().max_texture_dimension_2d;
+        opts.width = opts.width.clamp(16, max);
+        opts.height = opts.height.clamp(16, max);
+        let pixels = u64::from(opts.width) * u64::from(opts.height);
+        if pixels > MAX_CAPTURE_PIXELS {
+            #[allow(clippy::cast_precision_loss)]
+            let scale = ((MAX_CAPTURE_PIXELS as f64) / (pixels as f64)).sqrt();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            {
+                opts.width = ((f64::from(opts.width) * scale) as u32).max(16);
+                opts.height = ((f64::from(opts.height) * scale) as u32).max(16);
+            }
+        }
+        self.turntable_request = Some((pane.min(3), azimuth_deg, opts));
+        Ok(())
+    }
+
     /// Polls the in-flight capture. `undefined` while pending (or when no
     /// capture is in flight); on completion returns
     /// `{ width, height, pixels: Uint8Array }` (tightly-packed RGBA8).
@@ -1006,6 +1117,55 @@ impl SolarxyApp {
                 Ok(obj.into())
             }
         }
+    }
+
+    /// The displayed image of a texture network, for the
+    /// texture viewer pane: `{ width, height, pixels }` (RGBA8) or
+    /// `undefined` when the network publishes nothing. The pixel copy is
+    /// display-only and pull-based, so cooked images still never ride the
+    /// event stream; the viewer fetches on cook changes.
+    pub fn texture_preview(&self, owner: f64) -> JsValue {
+        let Some(img) = self
+            .engine
+            .display_image(solarxy_graph::document::NodeId(owner as u64))
+        else {
+            return JsValue::UNDEFINED;
+        };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("width", &JsValue::from_f64(f64::from(img.width)));
+        set("height", &JsValue::from_f64(f64::from(img.height)));
+        set(
+            "pixels",
+            &JsValue::from(js_sys::Uint8ClampedArray::from(img.pixels.as_slice())),
+        );
+        obj.into()
+    }
+
+    /// Executes an export node's Action param: the engine
+    /// encodes the committed output, and the returned
+    /// `{ filename, mime, bytes }` goes to the frontend's save path (the
+    /// File System Access flow `.slxy` already uses).
+    pub fn invoke_action(&self, ctx: JsValue, node: f64, key: String) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let result = self
+            .engine
+            .invoke_action(ctx, NodeId(node as u64), &key)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("filename", &JsValue::from_str(&result.filename));
+        set("mime", &JsValue::from_str(&result.mime));
+        set(
+            "bytes",
+            &JsValue::from(js_sys::Uint8Array::from(result.bytes.as_slice())),
+        );
+        Ok(obj.into())
     }
 
     /// Renders the active pane offscreen at capture resolution and encodes
@@ -1119,6 +1279,50 @@ impl SolarxyApp {
         ));
     }
 
+    /// The camera a pane renders through: its bound camera's saved `CameraDef`
+    /// if any, else its scratch camera. The base pose for a turntable sweep.
+    fn render_through_camera(&self, pane: usize) -> Option<Camera> {
+        let scratch = self
+            .view
+            .cameras
+            .get(pane)
+            .and_then(|c| c.as_ref())
+            .map(|c| c.camera)?;
+        if let Some(node) = self.view.look_through.get(pane).copied().flatten()
+            && let Some(def) = self
+                .scene_objects
+                .cameras()
+                .and_then(|cams| cams.iter().find(|c| c.id == SceneObjectId(node.0)))
+        {
+            let mut cam = scratch;
+            apply_camera_def(&mut cam, def);
+            return Some(cam);
+        }
+        Some(scratch)
+    }
+
+    /// Renders one turntable frame: the render-through camera rotated by
+    /// `azimuth_deg`, offscreen at capture resolution, into the capture slot.
+    /// The pane's live camera is swapped in and restored within this call, so a
+    /// deterministic sweep never depends on or disturbs the live view / follow.
+    fn render_turntable_frame(&mut self, pane: usize, azimuth_deg: f32, opts: &ScreenshotOptsDto) {
+        let Some(mut cam) = self.render_through_camera(pane) else {
+            return;
+        };
+        orbit_camera_yaw(&mut cam, azimuth_deg.to_radians());
+        let saved = self.view.cameras[pane].as_ref().map(|c| c.camera);
+        if let Some(cs) = self.view.cameras[pane].as_mut() {
+            cs.camera = cam;
+        }
+        let prev_active = self.view.active_pane;
+        self.view.active_pane = pane;
+        self.render_screenshot(opts);
+        self.view.active_pane = prev_active;
+        if let (Some(saved), Some(cs)) = (saved, self.view.cameras[pane].as_mut()) {
+            cs.camera = saved;
+        }
+    }
+
     /// Mirrors the graph context the node canvas currently shows (the UV
     /// pane's selected-node source resolves against it).
     pub fn set_current_context(&mut self, ctx: JsValue) -> Result<(), JsError> {
@@ -1128,9 +1332,32 @@ impl SolarxyApp {
     }
 
     /// Marks the scene object produced by `node` as selected (viewport
-    /// outline tint, decision 24); `undefined`/null clears it.
+    /// outline tint); `undefined`/null clears it.
     pub fn set_scene_selection(&mut self, node: Option<f64>) {
         self.selected_object = node.map(|n| SceneObjectId(n as u64));
+    }
+
+    /// Applies the selection-highlight preference: `style` is
+    /// `"outline"`, `"tint"`, or `"none"`; color is linear RGBA; `width`
+    /// is the rim width in pixels (clamped 1..16 renderer-side). The
+    /// legacy tint reuses the same color at its fixed 0.35 alpha.
+    pub fn set_selection_highlight(
+        &mut self,
+        style: String,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        width: f32,
+    ) {
+        use solarxy_renderer::frame::SelectionStyle;
+        let style = match style.as_str() {
+            "tint" => SelectionStyle::Tint,
+            "none" => SelectionStyle::None,
+            _ => SelectionStyle::Outline,
+        };
+        self.renderer
+            .set_selection_highlight(&self.queue, style, [r, g, b, a], width);
     }
 
     // ---- view-state boundary (host-owned; React mirrors) ----
@@ -1164,6 +1391,66 @@ impl SolarxyApp {
             self.view.active_pane = pane;
         }
         self.view_state()
+    }
+
+    /// Binds pane `pane` to look through the `camera` node id, or clears to a
+    /// free view when `camera` is negative / non-finite. Returns the view state.
+    pub fn set_pane_camera(&mut self, pane: usize, camera: f64) -> Result<JsValue, JsError> {
+        if pane < 4 {
+            self.view.look_through[pane] = if camera.is_finite() && camera >= 0.0 {
+                Some(NodeId(camera as u64))
+            } else {
+                None
+            };
+            if self.view.look_through[pane].is_none() {
+                self.view.camera_locked[pane] = false;
+            }
+            self.view.camera_editing[pane] = false;
+        }
+        self.view_state()
+    }
+
+    /// Toggles lock-camera-to-view for a look-through pane (Blender semantics:
+    /// navigation reframes the bound camera). No effect on a free view.
+    pub fn set_pane_camera_lock(&mut self, pane: usize, locked: bool) -> Result<JsValue, JsError> {
+        if pane < 4 && self.view.look_through[pane].is_some() {
+            self.view.camera_locked[pane] = locked;
+            self.view.camera_editing[pane] = false;
+        }
+        self.view_state()
+    }
+
+    /// Jumps a pane's (free) view to a camera node's saved pose without binding
+    /// or locking it (the bookmark action). Returns the view state.
+    pub fn jump_to_camera(&mut self, pane: usize, camera: f64) -> Result<JsValue, JsError> {
+        if pane < 4 && camera.is_finite() && camera >= 0.0 {
+            let id = SceneObjectId(camera as u64);
+            let def = self
+                .scene_objects
+                .cameras()
+                .and_then(|cams| cams.iter().find(|c| c.id == id).cloned());
+            if let (Some(def), Some(cam)) = (def, self.view.cameras[pane].as_mut()) {
+                apply_camera_def(&mut cam.camera, &def);
+            }
+        }
+        self.view_state()
+    }
+
+    /// The current pose (eye + target) of a pane's camera, so the frontend can
+    /// author a new `camera` node framed on the current view (create-from-view
+    /// is a frontend-orchestrated `AddNode` + `SetParam`, keeping the
+    /// mirror-and-command model intact).
+    pub fn pane_camera_pose(&self, pane: usize) -> Result<JsValue, JsError> {
+        let (position, target) = self.view.cameras.get(pane).and_then(|c| c.as_ref()).map_or(
+            ([7.0, 5.0, 7.0], [0.0, 0.0, 0.0]),
+            |c| {
+                (
+                    [c.camera.eye.x, c.camera.eye.y, c.camera.eye.z],
+                    [c.camera.target.x, c.camera.target.y, c.camera.target.z],
+                )
+            },
+        );
+        to_js(&CameraPoseDto { position, target })
     }
 
     /// Flies the active pane's camera to frame the mesh a validation issue
@@ -2405,6 +2692,16 @@ impl SolarxyApp {
     }
 
     fn sync_env_bounds(&mut self) {
+        // Keep the ground environment (grid, floor, shadow frustum) world-fixed
+        // during interactive edits. A subflow gizmo drag writes a `transform`
+        // node that BAKES into the cooked points, so the visible bounds churn
+        // every frame; refitting here would rescale/slide the grid and floor
+        // under the gizmo. Any interaction streams through the preview lane, so
+        // we skip the refit while a preview is in flight and let it settle once
+        // when the edit commits (the preview clears on the authoritative write).
+        if self.engine.has_active_previews() {
+            return;
+        }
         let Some(bounds) = self.scene_objects.visible_bounds() else {
             return;
         };
@@ -2449,6 +2746,103 @@ impl SolarxyApp {
         // The rebuilt environment starts with empty per-mesh viz data; the
         // aggregate refills it when a pane wants overlays.
         self.viz_dirty = true;
+    }
+
+    /// Drives each look-through pane's camera from its bound `camera` node, so
+    /// param-panel edits (and non-navigating panes) always show the node's
+    /// saved pose. Suppressed for a pane mid-navigation (`camera_editing`) so
+    /// the follow never fights live orbit/pan on a locked pane.
+    fn follow_look_through_cameras(&mut self) {
+        // Snapshot the cloned defs first, ending the scene_objects borrow before
+        // the pane cameras are mutated.
+        let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
+            let Some(cams) = self.scene_objects.cameras() else {
+                return;
+            };
+            (0..4)
+                .filter_map(|i| {
+                    let node = self.view.look_through[i]?;
+                    // Suppressed while navigating, or while a turntable spins
+                    // this pane's scratch camera.
+                    if self.view.camera_editing[i] || self.view.pane_settings[i].turntable_active {
+                        return None;
+                    }
+                    cams.iter()
+                        .find(|c| c.id == SceneObjectId(node.0))
+                        .map(|def| (i, def.clone()))
+                })
+                .collect()
+        };
+        for (i, def) in updates {
+            if let Some(cam) = self.view.cameras[i].as_mut() {
+                apply_camera_def(&mut cam.camera, &def);
+            }
+        }
+    }
+
+    /// Whether pane `pane` is a locked look-through pane (navigation reframes
+    /// its bound camera node).
+    fn is_locked_look_through(&self, pane: usize) -> bool {
+        pane < 4 && self.view.look_through[pane].is_some() && self.view.camera_locked[pane]
+    }
+
+    /// Writes a locked look-through pane's current camera pose back to its bound
+    /// `camera` node as one undo step, returning the merged event batch so the
+    /// frontend mirror reflects the new params (position + target).
+    fn commit_pane_camera_to_node(&mut self, pane: usize) -> Option<EventBatch> {
+        let node = self.view.look_through.get(pane).copied().flatten()?;
+        let (eye, target) = {
+            let cam = self.view.cameras[pane].as_ref()?;
+            (cam.camera.eye, cam.camera.target)
+        };
+        let cmds = [
+            Command::BeginTransaction {
+                label: "Frame Camera".to_string(),
+            },
+            Command::SetParam {
+                ctx: GraphContext::Root,
+                node,
+                key: "position".to_string(),
+                value: ParamSource::Literal(ParamValue::Vec3([
+                    f64::from(eye.x),
+                    f64::from(eye.y),
+                    f64::from(eye.z),
+                ])),
+            },
+            Command::SetParam {
+                ctx: GraphContext::Root,
+                node,
+                key: "target".to_string(),
+                value: ParamSource::Literal(ParamValue::Vec3([
+                    f64::from(target.x),
+                    f64::from(target.y),
+                    f64::from(target.z),
+                ])),
+            },
+            Command::EndTransaction,
+        ];
+        let mut events = Vec::new();
+        let mut revision = self.engine.revision();
+        for cmd in cmds {
+            if let Ok(batch) = self.engine.apply(cmd) {
+                revision = batch.revision;
+                events.extend(batch.events);
+            }
+        }
+        Some(EventBatch { revision, events })
+    }
+
+    /// Uploads the camera gizmos for pane `i`, hiding the camera the pane is
+    /// looking through. Cloned first so the `scene_objects` borrow ends before
+    /// the mutable renderer write.
+    fn write_pane_camera_helpers(&mut self, i: usize) {
+        let skip = self.view.look_through[i].map(|n| SceneObjectId(n.0));
+        let cams: Vec<solarxy_core::scene::CameraDef> = self
+            .scene_objects
+            .cameras()
+            .map(<[_]>::to_vec)
+            .unwrap_or_default();
+        self.renderer.write_camera_helpers(&self.queue, &cams, skip);
     }
 
     /// Lazily creates a `CameraState` for every pane slot the layout uses
@@ -2619,6 +3013,10 @@ impl SolarxyApp {
         self.renderer
             .overdraw
             .resize(&self.device, &self.renderer.layouts, width, height);
+        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
+        self.renderer
+            .outline
+            .resize(&self.device, &layouts, width, height);
     }
 
     /// Renders one pane: 3D passes (or overdraw / empty) into the shared
@@ -2660,6 +3058,7 @@ impl SolarxyApp {
         // pane's pass rather than once per frame.
         self.renderer
             .write_manipulator(&self.queue, &cam_data, pane.height / self.dpr);
+        self.write_pane_camera_helpers(i);
         if is_split && i >= 1 {
             self.setup_pane_lighting(&cam_data);
         }
@@ -2703,6 +3102,20 @@ impl SolarxyApp {
             viewport,
             i == 0,
         );
+        // The selection-outline rim lands after tone mapping,
+        // so it never blooms and AO never darkens it.
+        if scene_present
+            && !is_uv_map
+            && self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
+            && self.selected_object.is_some()
+            && self
+                .selected_object
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some())
+            && self.view.pane_settings[i].inspection_mode != InspectionMode::Overdraw
+        {
+            self.renderer
+                .composite_selection_outline(&mut encoder, surface_view, viewport);
+        }
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
@@ -2734,7 +3147,7 @@ impl SolarxyApp {
         pds: &PaneDisplaySettings,
     ) {
         let mut objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        // The picking-sync selection highlight (decision 24): flag the
+        // The picking-sync selection highlight: flag the
         // selected node's object so the main pass draws its accent tint.
         if let Some(id) = self.selected_object
             && let Some(selected) = self.scene_objects.draw_object(id)
@@ -2769,6 +3182,16 @@ impl SolarxyApp {
             pds,
             self.resolve_background(pds),
         );
+
+        // Selection outline: the offscreen mask + jump-flood
+        // stages run here; the rim blits onto the swapchain after the
+        // composite pass (composite_and_submit reads has_selection).
+        if self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
+            && objects.iter().any(|o| o.selected)
+        {
+            self.renderer
+                .render_selection_outline(encoder, &objects, cam_bg);
+        }
 
         if self.renderer.post.ssao_enabled {
             self.renderer.render_ssao_passes(encoder, cam_bg);
@@ -2846,6 +3269,18 @@ impl SolarxyApp {
             solarxy_renderer::visualization::GridUniform::COLOR_OFFSET,
             bytemuck::cast_slice(&grid),
         );
+        // The grid plane follows the pane camera: perspective keeps the XZ
+        // ground; an orthographic elevation view (front/side) gets a view-plane
+        // grid so it is not seen edge-on. Shared buffer, written per
+        // pane before that pane's grid pass, exactly like the color above.
+        let plane: u32 = self.view.cameras[i]
+            .as_ref()
+            .map_or(0, |c| grid_plane_for(&c.camera));
+        self.queue.write_buffer(
+            &self.env.vis.grid_uniform_buf,
+            solarxy_renderer::visualization::GridUniform::PLANE_OFFSET,
+            bytemuck::bytes_of(&plane),
+        );
 
         if let Some(cam) = self.view.cameras[i].as_ref() {
             let (near, far) = compute_depth_bounds(&cam.camera, &self.scene_bounds());
@@ -2877,6 +3312,16 @@ impl SolarxyApp {
             )
             .to_string()
         });
+        let cams = self.scene_objects.cameras();
+        let pane_look_through =
+            std::array::from_fn(|i| self.view.look_through[i].map(|n| n.0 as f64));
+        let pane_gate_aspect = std::array::from_fn(|i| {
+            let node = self.view.look_through[i]?;
+            cams?
+                .iter()
+                .find(|c| c.id == SceneObjectId(node.0))
+                .map(|c| c.aspect)
+        });
         ViewStateDto {
             layout: self.view.display.layout,
             split_ratio: self.view.display.split_ratio,
@@ -2886,6 +3331,9 @@ impl SolarxyApp {
             display: self.view.display,
             pane_projections: projections,
             pane_rects: self.pane_rects_css(),
+            pane_look_through,
+            pane_camera_locked: self.view.camera_locked,
+            pane_gate_aspect,
         }
     }
 
@@ -2916,6 +3364,8 @@ impl SolarxyApp {
                 solarxy_scenefile::PaneJson {
                     camera,
                     display,
+                    look_through: self.view.look_through[i].map(|n| n.0),
+                    camera_locked: self.view.camera_locked[i],
                     ..solarxy_scenefile::PaneJson::default()
                 }
             })
@@ -2941,7 +3391,12 @@ impl SolarxyApp {
         for (i, pane) in view.panes.iter().take(4).enumerate() {
             if !pane.display.is_empty() {
                 let value = serde_json::Value::Object(pane.display.clone().into_iter().collect());
-                if let Ok(settings) = serde_json::from_value::<PaneDisplaySettings>(value) {
+                if let Ok(mut settings) = serde_json::from_value::<PaneDisplaySettings>(value) {
+                    // Viewport shading overrides and the turntable spin are
+                    // session-temporary (items 7, 9): never restored from a
+                    // saved scene, so a reopened scene starts Textured and still.
+                    settings.material_override = solarxy_core::preferences::MaterialOverride::None;
+                    settings.turntable_active = false;
                     self.view.pane_settings[i] = settings;
                 }
             }
@@ -2954,8 +3409,226 @@ impl SolarxyApp {
                 });
                 apply_camera_json(&mut cam_state.camera, &pane.camera);
             }
+            // Restore the look-through binding + lock. The follow will
+            // drive the pane from the node once it cooks.
+            self.view.look_through[i] = pane.look_through.map(NodeId);
+            self.view.camera_locked[i] = pane.camera_locked;
+            self.view.camera_editing[i] = false;
         }
         self.ensure_pane_cameras();
+    }
+}
+
+/// The asset-preview pane's isolated render state: its own surface
+/// (a second canvas from the SAME instance/device), a throwaway `SceneObjects`
+/// holding one parsed model, and an orbit camera. Never touches the document.
+struct PreviewState {
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    objects: SceneObjects,
+    camera: CameraState,
+}
+
+/// The asset-preview pane: a live 3D orbit view of one staged model,
+/// rendered ON DEMAND (open / orbit / zoom / resize), never in the frame loop,
+/// so an idle preview costs nothing. Each render borrows the shared HDR chain
+/// at preview size (the screenshot pattern); the next main frame's target sync
+/// restores it.
+#[wasm_bindgen]
+impl SolarxyApp {
+    /// Opens (or replaces) the model preview on the given canvas: parses the
+    /// staged asset through the same `parse_model` path the import cooks use,
+    /// frames a camera on its bounds, and renders the first frame.
+    pub fn preview_open(
+        &mut self,
+        canvas: web_sys::HtmlCanvasElement,
+        hash: String,
+        name: String,
+    ) -> Result<(), JsError> {
+        let format = name
+            .rsplit('.')
+            .next()
+            .map(str::to_lowercase)
+            .unwrap_or_default();
+        let id = solarxy_graph::params::AssetId(hash);
+        let Some(bytes) = self.engine.asset_bytes(&id).map(<[_]>::to_vec) else {
+            return Err(JsError::new("asset is not staged"));
+        };
+        let options = ImportOptions {
+            scale: 1.0,
+            center_to_origin: false,
+            recompute_normals: None,
+            preserve_materials: None,
+        };
+        let set = solarxy_graph::nodes::parse_model(
+            &format,
+            &bytes,
+            &name,
+            self.engine.asset_table(),
+            &options,
+        )
+        .map_err(|e| JsError::new(&format!("preview parse failed: {e}")))?;
+        let cooked = std::sync::Arc::new(set.to_cooked());
+
+        let width = canvas.width().max(16);
+        let height = canvas.height().max(16);
+        let surface = self
+            .instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|e| JsError::new(&format!("preview surface: {e}")))?;
+        let mut config = self.config.clone();
+        config.width = width;
+        config.height = height;
+        surface.configure(&self.device, &config);
+
+        let mut objects = SceneObjects::new();
+        let delta = SceneDelta {
+            ops: vec![SceneOp::UpsertGeometry {
+                id: SceneObjectId(0),
+                geometry: cooked,
+            }],
+        };
+        objects
+            .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
+            .map_err(|e| JsError::new(&format!("preview upload: {e}")))?;
+        let bounds = objects.visible_bounds().unwrap_or_else(default_bounds);
+        let aspect = width as f32 / height.max(1) as f32;
+        let camera = CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect);
+
+        self.preview = Some(PreviewState {
+            surface,
+            config,
+            objects,
+            camera,
+        });
+        self.render_preview();
+        Ok(())
+    }
+
+    /// Orbits the preview camera (canvas-px deltas) and re-renders.
+    pub fn preview_orbit(&mut self, dx: f32, dy: f32) {
+        if let Some(p) = self.preview.as_mut() {
+            let cam = &mut p.camera.camera;
+            orbit_camera_yaw(cam, dx * -0.008);
+            // Pitch: rotate eye about the target's horizontal axis, clamped so
+            // the orbit never flips over the pole.
+            let offset = cam.eye - cam.target;
+            let dist = offset.magnitude().max(1e-4);
+            let pitch = (offset.y / dist).clamp(-1.0, 1.0).asin();
+            let new_pitch = (pitch + dy * 0.008).clamp(-1.45, 1.45);
+            let horiz = (offset.x * offset.x + offset.z * offset.z).sqrt().max(1e-4);
+            let scale = (dist * new_pitch.cos()) / horiz;
+            cam.eye = cam.target
+                + Vector3::new(offset.x * scale, dist * new_pitch.sin(), offset.z * scale);
+        }
+        self.render_preview();
+    }
+
+    /// Dollies the preview camera and re-renders; positive zooms in.
+    pub fn preview_zoom(&mut self, delta: f32) {
+        if let Some(p) = self.preview.as_mut() {
+            let cam = &mut p.camera.camera;
+            let offset = cam.eye - cam.target;
+            cam.eye = cam.target + offset * (-delta * 0.1).exp();
+        }
+        self.render_preview();
+    }
+
+    /// Resizes the preview surface to the canvas's current physical size.
+    pub fn preview_resize(&mut self, width: u32, height: u32) {
+        if let Some(p) = self.preview.as_mut() {
+            p.config.width = width.max(16);
+            p.config.height = height.max(16);
+            p.surface.configure(&self.device, &p.config);
+        }
+        self.render_preview();
+    }
+
+    /// Drops the preview (its surface, geometry, and camera).
+    pub fn preview_close(&mut self) {
+        self.preview = None;
+    }
+}
+
+impl SolarxyApp {
+    /// Renders one preview frame into the preview surface, reusing the shared
+    /// render chain at preview size (the screenshot pattern; the next main
+    /// frame's `sync_render_target_dims` restores the layout dimensions).
+    fn render_preview(&mut self) {
+        let Some((w, h)) = self
+            .preview
+            .as_ref()
+            .map(|p| (p.config.width, p.config.height))
+        else {
+            return;
+        };
+        // Everything that needs whole-&self access happens BEFORE the preview
+        // borrow; inside it only disjoint field borrows are used.
+        self.set_target_dims(w, h);
+        let mut pds = default_pane_settings();
+        pds.show_grid = false;
+        pds.show_axis_gizmo = false;
+        let background = self.resolve_background(&pds);
+
+        let Some(p) = self.preview.as_mut() else {
+            return;
+        };
+        let aspect = w as f32 / h.max(1) as f32;
+        p.camera.write_with_aspect(&self.queue, aspect);
+
+        let output = match p.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                p.surface.configure(&self.device, &p.config);
+                return;
+            }
+            Err(_) => return,
+        };
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.render_format),
+            ..Default::default()
+        });
+
+        let objects: Vec<solarxy_renderer::frame::DrawObject<'_>> =
+            p.objects.draw_objects().collect();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Preview Encoder"),
+            });
+        // Shadow the preview content itself, so the map matches what is drawn.
+        self.renderer
+            .render_shadow_pass(&mut encoder, &self.env, &objects);
+        self.renderer.render_main_pass(
+            &mut encoder,
+            &self.env,
+            &objects,
+            &p.camera.bind_group,
+            &p.camera.camera,
+            &pds,
+            background,
+        );
+        // Composite without bloom/SSAO: a preview is a shaded look, not a
+        // post-processed beauty frame.
+        self.renderer.post.composite.write_params(
+            &self.queue,
+            false,
+            false,
+            self.renderer.post.tone_mode,
+            self.renderer.post.exposure,
+            pds.inspection_mode,
+        );
+        self.renderer.post.composite.render(
+            &mut encoder,
+            &self.renderer.pipelines,
+            &view,
+            false,
+            &self.renderer.post.ssao,
+            Some([0.0, 0.0, w as f32, h as f32]),
+            true,
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
     }
 }
 
@@ -2968,10 +3641,40 @@ fn map_button(button: u32) -> Option<PointerButton> {
     }
 }
 
+/// Orbits a camera's eye around its target about the world-up (Y) axis by
+/// `yaw` radians: the turntable rotation for a deterministic export sweep.
+fn orbit_camera_yaw(cam: &mut Camera, yaw: f32) {
+    let offset = cam.eye - cam.target;
+    let (s, c) = yaw.sin_cos();
+    let x = offset.x * c + offset.z * s;
+    let z = -offset.x * s + offset.z * c;
+    cam.eye = cam.target + Vector3::new(x, offset.y, z);
+}
+
 fn projection_name(mode: ProjectionMode) -> &'static str {
     match mode {
         ProjectionMode::Perspective => "perspective",
         ProjectionMode::Orthographic => "orthographic",
+    }
+}
+
+/// The world plane a pane's grid should lie in (the `GridUniform.plane` code:
+/// 0 = XZ ground, 1 = XY, 2 = YZ). Perspective and top/bottom orthographic
+/// keep the ground grid; a front/back orthographic view uses XY and a
+/// left/right view uses YZ, so the grid is face-on instead of an edge-on
+/// hairline. Chosen from the camera's dominant forward axis.
+fn grid_plane_for(cam: &Camera) -> u32 {
+    if cam.projection != ProjectionMode::Orthographic {
+        return 0;
+    }
+    let f = cam.target - cam.eye;
+    let (ax, ay, az) = (f.x.abs(), f.y.abs(), f.z.abs());
+    if ay >= ax && ay >= az {
+        0 // top / bottom -> XZ ground
+    } else if az >= ax {
+        1 // front / back -> XY
+    } else {
+        2 // left / right -> YZ
     }
 }
 
@@ -3008,6 +3711,27 @@ fn camera_to_json(cam: &Camera) -> solarxy_scenefile::CameraJson {
         fov_y: cam.fovy.to_radians(),
         projection: projection_name(cam.projection).to_string(),
         ortho_scale: cam.ortho_scale,
+    }
+}
+
+/// Copies a resolved `CameraDef` (from a `camera` node) into a viewport
+/// camera, so a pane looking through the node shows exactly what it frames.
+/// The pane's aspect is not touched here (it tracks the pane rect); the
+/// framing gate uses the def's own aspect.
+fn apply_camera_def(cam: &mut Camera, def: &solarxy_core::scene::CameraDef) {
+    use solarxy_core::scene::CameraKind;
+    cam.eye = Point3::new(def.position[0], def.position[1], def.position[2]);
+    cam.target = Point3::new(def.target[0], def.target[1], def.target[2]);
+    cam.up = Vector3::new(def.up[0], def.up[1], def.up[2]);
+    if def.fov_y > 0.0 {
+        cam.fovy = def.fov_y.to_degrees();
+    }
+    cam.projection = match def.kind {
+        CameraKind::Orthographic => ProjectionMode::Orthographic,
+        _ => ProjectionMode::Perspective,
+    };
+    if def.ortho_scale > 0.0 {
+        cam.ortho_scale = def.ortho_scale;
     }
 }
 
@@ -3157,6 +3881,14 @@ struct ViewStateDto {
     display: DisplaySettings,
     pane_projections: [String; 4],
     pane_rects: Vec<RectDto>,
+    /// The `camera` node each pane looks through (id as a number), or `null`
+    /// for a free view.
+    pane_look_through: [Option<f64>; 4],
+    /// Whether each look-through pane is locked (reframes the camera).
+    pane_camera_locked: [bool; 4],
+    /// The framing aspect of each pane's look-through camera (for the gate
+    /// overlay); `null` when the pane is a free view.
+    pane_gate_aspect: [Option<f32>; 4],
 }
 
 #[derive(Deserialize, Default)]
@@ -3165,6 +3897,13 @@ struct CameraCommandDto {
     kind: String,
     axis: String,
     mode: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraPoseDto {
+    position: [f32; 3],
+    target: [f32; 3],
 }
 
 #[derive(Serialize)]

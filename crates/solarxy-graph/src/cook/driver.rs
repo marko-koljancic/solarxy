@@ -94,7 +94,7 @@ pub struct CookEngine {
     /// closure) so the driver stays wasm-safe and the struct stays
     /// `Debug`/`Default`: the web host installs `performance.now`, native
     /// callers a monotonic source, and tests a deterministic tick. When
-    /// unset, per-node cook durations stay `0` (the Phase-3 behavior).
+    /// unset, per-node cook durations stay `0` (the behavior).
     clock: Option<fn() -> f64>,
 }
 
@@ -232,7 +232,7 @@ impl CookEngine {
             if !report.cooked.is_empty() && !should_continue() {
                 break;
             }
-            self.cook_one(graph, registry, assets, previews, node, &mut report);
+            self.cook_one(doc, graph, registry, assets, previews, node, &mut report);
         }
 
         report.remaining_dirty = self
@@ -262,9 +262,13 @@ impl CookEngine {
         }
     }
 
-    /// Cooks (or bypass-resolves) one node and commits the result.
+    /// Cooks (or bypass-resolves) one node and commits the result. `doc`
+    /// is only consulted to resolve cross-context references (the node's
+    /// `NodeRef` params); everything else reads `graph`.
+    #[allow(clippy::too_many_arguments)]
     fn cook_one(
         &mut self,
+        doc: &Document,
         graph: &Graph,
         registry: &Registry,
         assets: &AssetTable,
@@ -334,8 +338,14 @@ impl CookEngine {
             }
         };
 
-        // Compute (timed against the host clock, if installed).
+        // Compute (timed against the host clock, if installed). Referenced
+        // networks' published values are pre-resolved here (the engine
+        // cooked those networks first), so the body reads them through
+        // `CookCtx::referenced` without ever seeing another graph. The
+        // scan goes through the preview-effective params like every other
+        // consumer (previews.rs's standing warning).
         let mut cx = CookCtx::new(assets, self.async_jobs);
+        cx.set_referenced(self.resolve_references(doc, registry, &params));
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;
@@ -372,6 +382,47 @@ impl CookEngine {
                 self.state.insert(node, CookState::Clean);
             }
         }
+    }
+
+    /// Pre-resolves the published value of every network this node's
+    /// `NodeRef` params reference: the target
+    /// container's child network designates a display node
+    /// (`active_output`), and that node's committed default output is the
+    /// published value. Unresolvable references (dangling target, no
+    /// display node, nothing committed) are simply absent from the map;
+    /// the cook body decides whether that is an error.
+    fn resolve_references(
+        &self,
+        doc: &Document,
+        registry: &Registry,
+        params: &BTreeMap<String, crate::params::ParamSource>,
+    ) -> BTreeMap<NodeId, Value> {
+        use crate::params::{ParamSource, ParamValue};
+        let mut out = BTreeMap::new();
+        for src in params.values() {
+            let ParamSource::Literal(ParamValue::NodeRef(Some(target))) = src else {
+                continue;
+            };
+            let Ok(g) = doc.graph(GraphContext::Subflow(*target)) else {
+                continue;
+            };
+            let Some(display) = g.active_output else {
+                continue;
+            };
+            let Some(outputs) = self.outputs.get(&display) else {
+                continue;
+            };
+            let value = g
+                .node(display)
+                .and_then(|n| registry.get(&n.type_id))
+                .and_then(crate::registry::NodeTypeDescriptor::default_output)
+                .and_then(|p| outputs.get(&p.key))
+                .cloned();
+            if let Some(v) = value {
+                out.insert(*target, v);
+            }
+        }
+        out
     }
 
     /// Resolves a bypassed node's output: pass-through copies the target
@@ -609,6 +660,7 @@ impl CookEngine {
                 prims: 0,
                 meshes: 0,
                 bounds: None,
+                image: None,
             },
             |o| stats_from_outputs(o),
         );
@@ -632,7 +684,10 @@ impl CookEngine {
     }
 }
 
-/// Derives cook statistics from a node's committed outputs.
+/// Derives cook statistics from a node's committed outputs: geometry
+/// shape for the default `geometry` output, image dimensions for the
+/// default `image` output (both key names are the catalog's default-output
+/// conventions).
 fn stats_from_outputs(outputs: &Outputs) -> NodeCookStats {
     if let Some(Value::Geometry(set)) = outputs.get("geometry") {
         NodeCookStats {
@@ -641,6 +696,16 @@ fn stats_from_outputs(outputs: &Outputs) -> NodeCookStats {
             prims: set.triangle_count(),
             meshes: set.mesh_count(),
             bounds: Some(set.bounds),
+            image: None,
+        }
+    } else if let Some(Value::Image(img)) = outputs.get("image") {
+        NodeCookStats {
+            duration_us: 0,
+            points: 0,
+            prims: 0,
+            meshes: 0,
+            bounds: None,
+            image: Some((img.width, img.height)),
         }
     } else {
         NodeCookStats {
@@ -649,6 +714,7 @@ fn stats_from_outputs(outputs: &Outputs) -> NodeCookStats {
             prims: 0,
             meshes: 0,
             bounds: None,
+            image: None,
         }
     }
 }
@@ -657,13 +723,14 @@ fn stats_from_outputs(outputs: &Outputs) -> NodeCookStats {
 mod tests {
     use super::*;
     use crate::cook::state::CookState;
+    use crate::document::ContextKind;
     use crate::document::{Edge, NodeData};
     use crate::params::{ParamSource, ParamValue};
     use crate::registry::coerce::DataType;
     use crate::registry::param_spec::{ParamSpec, ParamType};
     use crate::registry::resolve::ResolvedParams;
     use crate::registry::{
-        BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec, Registry,
+        BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec, Registry,
     };
     use solarxy_kernel::primitives::generate_box;
     use solarxy_kernel::{GeometrySet, KernelMesh};
@@ -683,6 +750,20 @@ mod tests {
             GeometrySet::from_mesh(generate_box(size, size, size, 1, 1, 1))
         };
         Ok(CookOutcome::Done(Outputs::geometry(set)))
+    }
+
+    // An image node that always parks on an async decode, so tests can
+    // drive `submit_job_result` directly (the import_image path).
+    // Signature matches CookFn.
+    #[allow(clippy::unnecessary_wraps)]
+    fn img_async_cook(
+        _p: &ResolvedParams,
+        _in: &Inputs,
+        _cx: &mut CookCtx,
+    ) -> Result<CookOutcome, CookError> {
+        Ok(CookOutcome::Pending(JobRequest::DecodeImage {
+            asset: crate::params::AssetId("test-img".into()),
+        }))
     }
 
     // A required-input passthrough; empty input -> empty output.
@@ -705,7 +786,8 @@ mod tests {
             version: 1,
             display_name: "Gen",
             category: Category::Primitives,
-            contexts: ContextMask::SUBFLOW,
+            contexts: ContextSet::GEO,
+            opens: None,
             inputs: vec![],
             outputs: vec![
                 PortSpec::single("geometry", "Geometry", DataType::Geometry, false).default_port(),
@@ -730,6 +812,8 @@ mod tests {
             bypass: BypassBehavior::Mute,
             doc: "",
             search_aliases: &[],
+            glyph: "gen",
+            role: NodeRole::Standard,
             cook: gen_cook,
             migrate: None,
         };
@@ -738,7 +822,8 @@ mod tests {
             version: 1,
             display_name: "Pass",
             category: Category::Modifiers,
-            contexts: ContextMask::SUBFLOW,
+            contexts: ContextSet::GEO,
+            opens: None,
             inputs: vec![
                 PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
             ],
@@ -751,10 +836,32 @@ mod tests {
             },
             doc: "",
             search_aliases: &[],
+            glyph: "pass",
+            role: NodeRole::Standard,
             cook: pass_cook,
             migrate: None,
         };
-        Registry::with_descriptors(vec![gen_desc, pass]).unwrap()
+        let img_async = NodeTypeDescriptor {
+            type_id: "img_async",
+            version: 1,
+            display_name: "Img Async",
+            category: Category::Import,
+            contexts: ContextSet::GEO,
+            opens: None,
+            inputs: vec![],
+            outputs: vec![
+                PortSpec::single("image", "Image", DataType::Image, false).default_port(),
+            ],
+            params: vec![],
+            bypass: BypassBehavior::Mute,
+            doc: "",
+            search_aliases: &[],
+            glyph: "img",
+            role: NodeRole::ImageSource,
+            cook: img_async_cook,
+            migrate: None,
+        };
+        Registry::with_descriptors(vec![gen_desc, pass, img_async]).unwrap()
     }
 
     struct Fixture {
@@ -769,7 +876,7 @@ mod tests {
         fn new() -> Self {
             let mut doc = Document::new();
             let geo = doc.mint_node_id();
-            doc.create_subflow(geo);
+            doc.create_subflow(geo, ContextKind::Geo);
             Self {
                 doc,
                 engine: CookEngine::new(),
@@ -1013,5 +1120,104 @@ mod tests {
         ));
         let cooked = set.to_cooked();
         assert_eq!(cooked.meshes.len(), 1);
+    }
+
+    /// The committed image's first pixel byte, if the node has an image
+    /// output cached.
+    fn image_pixel(f: &Fixture, node: NodeId) -> Option<u8> {
+        f.engine
+            .outputs(node)
+            .and_then(|o| o.get("image"))
+            .and_then(Value::as_image)
+            .and_then(|img| img.pixels.first().copied())
+    }
+
+    fn one_pixel_image(byte: u8) -> Arc<solarxy_core::RawImageData> {
+        Arc::new(solarxy_core::RawImageData::new(
+            vec![byte, byte, byte, 255],
+            1,
+            1,
+        ))
+    }
+
+    #[test]
+    fn resubmitted_image_replaces_previous_commit() {
+        // The Phase-17 keep-last-good regression: an image-only node's
+        // SECOND commit must replace the first. Before the fix,
+        // `is_renderable_empty` treated any non-geometry output as empty,
+        // so keep-last-good silently discarded every re-decode (the live
+        // import_image re-point bug).
+        let mut f = Fixture::new();
+        let img = f.add("img_async");
+        f.set_display(img);
+
+        // First cook parks the node on an async decode.
+        let report = f.cook_all();
+        let job_a = report.jobs.first().map(|(id, _)| *id).expect("job spawned");
+        let graph = f.doc.graph(f.ctx).unwrap().clone();
+        let report = f.engine.submit_job_result(
+            &graph,
+            job_a,
+            crate::cook::JobResult::Image(Ok(one_pixel_image(10))),
+        );
+        assert!(report.cooked.contains(&img));
+        assert_eq!(image_pixel(&f, img), Some(10));
+        assert_eq!(
+            f.engine.stats(img).and_then(|s| s.image),
+            Some((1, 1)),
+            "image stats carry the dimensions"
+        );
+
+        // Re-point (re-dirty) and decode a different image: the second
+        // commit must win.
+        f.engine.mark_dirty(f.doc.graph(f.ctx).unwrap(), img);
+        let report = f.cook_all();
+        let job_b = report
+            .jobs
+            .first()
+            .map(|(id, _)| *id)
+            .expect("second job spawned");
+        f.engine.submit_job_result(
+            &graph,
+            job_b,
+            crate::cook::JobResult::Image(Ok(one_pixel_image(200))),
+        );
+        assert_eq!(
+            image_pixel(&f, img),
+            Some(200),
+            "the second decode must replace the first, not be swallowed by keep-last-good"
+        );
+    }
+
+    #[test]
+    fn mute_bypass_stops_contributing() {
+        // A muted node commits empty outputs, and empty must REPLACE the
+        // cache: retaining the old geometry would make Mute bypass a
+        // no-op downstream.
+        let mut f = Fixture::new();
+        let g = f.add("gen");
+        f.set_display(g);
+        f.cook_all();
+        assert_eq!(f.points(g), 24);
+
+        f.doc
+            .graph_mut(f.ctx)
+            .unwrap()
+            .node_mut(g)
+            .unwrap()
+            .bypassed = true;
+        f.engine.mark_dirty(f.doc.graph(f.ctx).unwrap(), g);
+        f.cook_all();
+        assert_eq!(
+            f.points(g),
+            0,
+            "a muted node's stale geometry must not survive the bypass"
+        );
+        assert!(
+            f.engine
+                .outputs(g)
+                .is_none_or(|o| o.get("geometry").is_none()),
+            "the muted commit replaces the cache with empty outputs"
+        );
     }
 }

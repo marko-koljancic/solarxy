@@ -1108,5 +1108,5 @@ impl State {
 }
 
 // `resolve_issue_aabb` / `material_meshes_aabb` moved to
-// `solarxy_renderer::validation` (phase 6 W3) so the web report panel's
+// `solarxy_renderer::validation` (W3) so the web report panel's
 // fly-to shares the exact desktop resolution logic.

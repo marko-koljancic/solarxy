@@ -39,7 +39,7 @@ pub use scenefile::{LoadedScene, SceneSidecar};
 
 use undo::{Transaction, UndoOp, UndoStack};
 
-/// Cook scheduling mode (node catalog / boundary design).
+/// Cook scheduling mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CookMode {
@@ -277,6 +277,9 @@ pub enum EngineEvent {
         points: u64,
         prims: u64,
         meshes: u32,
+        /// `[width, height]` when the node's default output is an image
+        /// (the geometry fields stay zero for those); `None` otherwise.
+        image: Option<(u32, u32)>,
     },
     /// A node's validation counts changed (validate node cook, import load
     /// validation). Zero counts on a clean result AND on a cleared one
@@ -406,12 +409,12 @@ fn push_validation_events(
 
 /// A whole-document save file: the graph data plus the editor's cook mode.
 /// The Phase-4 web host serializes this to JSON for OPFS autosave and the
-/// explicit save/load path; Phase 5's `.slxy` ZIP embeds the same
+/// explicit save/load path; the `.slxy` ZIP embeds the same
 /// `DocumentData` as its `document.json`, wrapping asset payloads around it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentFile {
-    /// The save-format version (1 in Phase 4), for forward migration.
+    /// The save-format version, for forward migration.
     #[serde(default = "one")]
     pub format_version: u32,
     pub document: DocumentData,
@@ -439,6 +442,20 @@ pub enum EngineError {
     InvalidParam { key: String, reason: String },
     #[error("geo {geo:?} has no display node, so there is nothing to transform")]
     NoDisplayNode { geo: NodeId },
+    /// A `SetParam` would create a reference cycle (a network depending,
+    /// through any chain of node references, on its own result). Refused
+    /// at set time so the cook never has to detect one.
+    #[error("setting '{key}' would create a reference cycle through node {target:?}")]
+    ReferenceCycle { key: String, target: NodeId },
+}
+
+/// What [`Engine::invoke_action`] produced: encoded bytes for the host to
+/// save (the File System Access path already used for `.slxy`).
+#[derive(Debug, Clone)]
+pub struct ActionResult {
+    pub filename: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
 }
 
 /// What a viewport gizmo drives, resolved by [`Engine::gizmo_target`].
@@ -668,6 +685,14 @@ impl Engine {
     #[must_use]
     pub fn asset_bytes(&self, id: &AssetId) -> Option<&[u8]> {
         self.assets.get(id).map(|e| e.bytes.as_slice())
+    }
+
+    /// The staged asset table itself, for host features that parse assets
+    /// outside a cook (the asset-preview pane parses a staged model on demand
+    /// through the same `parse_model` path the import cooks use).
+    #[must_use]
+    pub fn asset_table(&self) -> &crate::assets::AssetTable {
+        &self.assets
     }
 
     /// The number of staged assets (introspection / tests).
@@ -938,7 +963,10 @@ impl Engine {
             .registry
             .get(node_type)
             .ok_or_else(|| EngineError::UnknownNodeType(node_type.to_string()))?;
-        if !desc.contexts.allows(ctx) {
+        // Placement legality is judged against the target graph's KIND,
+        // never its address (the typed-context model).
+        let kind = self.doc.graph(ctx)?.kind;
+        if !desc.contexts.contains(kind) {
             return Err(EngineError::ContextIllegal {
                 type_id: node_type.to_string(),
             });
@@ -946,9 +974,10 @@ impl Engine {
         let id = self.doc.mint_node_id();
         let mut node = NodeData::new(id, node_type, desc.version);
         node.position = position;
-        // Subflow-owning container nodes open their own canvas.
-        if node_type == "geo" {
-            self.doc.create_subflow(id);
+        // Container nodes open their own canvas, kinded by the descriptor
+        // (no type id is special-cased).
+        if let Some(child_kind) = desc.opens {
+            self.doc.create_subflow(id, child_kind);
         }
         let mirror = snapshot::NodeMirror::from_public(&node);
         let graph = self.doc.graph_mut(ctx)?;
@@ -1085,13 +1114,29 @@ impl Engine {
             (boundary, graph.active_output)
         };
 
+        // Every id whose disappearance can dangle a reference: the removed
+        // nodes themselves plus every container in their removed
+        // child-network trees.
+        let mut removed_targets: Vec<NodeId> = Vec::new();
         for &id in ids {
             let graph = self.doc.graph_mut(ctx)?;
             // Mark the removed node's downstream dirty before it vanishes.
             let downstream = graph.downstream(id);
             let (_node, removed_edges) = graph.remove_node(id)?;
-            // A removed geo container drops its whole subflow.
-            self.doc.remove_subflow(id);
+            removed_targets.push(id);
+            // A removed container drops its whole child-network TREE:
+            // nested containers own networks of their own, and leaving one
+            // behind would orphan it in the document. The undo fragment
+            // captured them all transitively before this loop.
+            if let Some(sub) = self.doc.remove_subflow(id) {
+                let mut stack: Vec<NodeId> = sub.nodes().map(|n| n.id).collect();
+                while let Some(inner) = stack.pop() {
+                    if let Some(nested) = self.doc.remove_subflow(inner) {
+                        removed_targets.push(inner);
+                        stack.extend(nested.nodes().map(|n| n.id));
+                    }
+                }
+            }
             for edge in &removed_edges {
                 events.push(EngineEvent::EdgeRemoved { ctx, id: edge.id });
             }
@@ -1101,6 +1146,14 @@ impl Engine {
             }
             self.previews.retain(|(n, _), _| *n != id);
             events.push(EngineEvent::NodeRemoved { ctx, id });
+        }
+        // Deleting a referenced node is allowed (never blocked); surviving
+        // referrers recook into a dangling-reference error badge, so they
+        // must be dirtied now that their target is gone.
+        for target in removed_targets {
+            for (r_ctx, referrer) in self.referrers_of(target) {
+                self.mark_dirty(r_ctx, referrer);
+            }
         }
         Ok(UndoOp::RestoreFragment {
             ctx,
@@ -1248,6 +1301,17 @@ impl Engine {
             }
             ParamSource::Expression { .. } => value.clone(),
         };
+        // A reference is refused at SET time if it would close a cycle
+        // (a network depending on its own result through any chain of
+        // references and containment); the cook never has to detect one.
+        if let ParamSource::Literal(ParamValue::NodeRef(Some(target))) = &conformed
+            && self.would_create_reference_cycle(ctx, node, *target)
+        {
+            return Err(EngineError::ReferenceCycle {
+                key: key.to_string(),
+                target: *target,
+            });
+        }
         // The authoritative value clears any transient preview overlay.
         self.previews.remove(&(node, key.to_string()));
         let graph = self.doc.graph_mut(ctx)?;
@@ -1266,7 +1330,7 @@ impl Engine {
             key: key.to_string(),
             prev,
         });
-        // The exclusive-shadow-caster rule (UX spec J3): at most one root
+        // The exclusive-shadow-caster rule: at most one root
         // light carries the shadow map. Granting it to one shadow-capable
         // light clears the flag on every other one INSIDE the same command,
         // so the whole handoff is a single undo step and the batch carries
@@ -1566,6 +1630,29 @@ impl Engine {
         Some([world.x, world.y, world.z])
     }
 
+    /// The image a container's child network publishes: its display
+    /// node's committed default output, when that value is an image. The
+    /// texture viewer pane reads this, and it is exactly the
+    /// value a path reference to the container resolves to.
+    #[must_use]
+    pub fn display_image(
+        &self,
+        owner: NodeId,
+    ) -> Option<std::sync::Arc<solarxy_core::RawImageData>> {
+        let graph = self.doc.graph(GraphContext::Subflow(owner)).ok()?;
+        let display = graph.active_output?;
+        let outputs = self.cook.outputs(display)?;
+        let key = graph
+            .node(display)
+            .and_then(|n| self.registry.get(&n.type_id))
+            .and_then(crate::registry::NodeTypeDescriptor::default_output)
+            .map(|p| p.key.clone())?;
+        match outputs.get(&key) {
+            Some(crate::registry::coerce::Value::Image(img)) => Some(std::sync::Arc::clone(img)),
+            _ => None,
+        }
+    }
+
     /// Every root geo container's displayed geometry with its world matrix,
     /// ascending geo id (the renderer's `SceneObjects` draw order). Feeds
     /// the host-side normals/bounds visualization aggregation, so hidden
@@ -1595,6 +1682,136 @@ impl Engine {
         out
     }
 
+    /// Executes a node's `Action` param. Like `copy_nodes`,
+    /// this is a data-producing query, NOT a `Command`: it mutates
+    /// nothing, so it needs no events and no undo entry. The engine
+    /// encodes the node's committed output via the format writers and the
+    /// host saves the bytes (the mirror-and-command boundary holds:
+    /// document state never moves). Host-interpreted actions (the render
+    /// node's capture) never reach here.
+    pub fn invoke_action(
+        &self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+    ) -> Result<ActionResult, EngineError> {
+        let type_id = self.node_type_in(ctx, node)?;
+        let graph = self.doc.graph(ctx)?;
+        let data = graph.node(node).ok_or(GraphError::UnknownNode(node))?;
+        let desc = self
+            .registry
+            .get(&type_id)
+            .ok_or_else(|| EngineError::UnknownNodeType(type_id.clone()))?;
+        let params = crate::previews::effective_params(&self.previews, node, &data.params);
+        let resolved =
+            crate::registry::resolve::resolve_params(&params, &desc.params).map_err(|e| {
+                EngineError::InvalidParam {
+                    key: key.to_string(),
+                    reason: e.to_string(),
+                }
+            })?;
+        let unsupported = || EngineError::InvalidParam {
+            key: key.to_string(),
+            reason: format!("no engine action '{key}' on '{type_id}'"),
+        };
+        // Read lazily: only the export nodes carry a filename param.
+        let filename_base =
+            |resolved: &crate::registry::resolve::ResolvedParams| match resolved.text("filename") {
+                "" => "export".to_string(),
+                n => n.to_string(),
+            };
+        match (type_id.as_str(), key) {
+            ("geo_export", "save") => {
+                let set = self
+                    .cook
+                    .outputs(node)
+                    .and_then(|o| o.get("geometry").and_then(|v| v.as_geometry().cloned()))
+                    .ok_or_else(|| EngineError::InvalidParam {
+                        key: key.to_string(),
+                        reason: "nothing cooked to export yet".to_string(),
+                    })?;
+                let meshes: Vec<solarxy_formats::export::ExportMesh<'_>> = set
+                    .meshes
+                    .iter()
+                    .map(|m| solarxy_formats::export::ExportMesh {
+                        name: &m.name,
+                        positions: &m.positions,
+                        normals: m.normals.as_deref().map(Vec::as_slice),
+                        tex_coords: m.tex_coords.as_deref().map(Vec::as_slice),
+                        indices: &m.indices,
+                    })
+                    .collect();
+                let fail = |e: solarxy_formats::FormatsError| EngineError::InvalidParam {
+                    key: key.to_string(),
+                    reason: e.to_string(),
+                };
+                let (bytes, ext, mime) = match resolved.enum_key("format") {
+                    "obj" => (
+                        solarxy_formats::export::write_obj_bytes(&meshes),
+                        "obj",
+                        "model/obj",
+                    ),
+                    "stl" => (
+                        solarxy_formats::export::write_stl_bytes(&meshes).map_err(fail)?,
+                        "stl",
+                        "model/stl",
+                    ),
+                    "ply" => (
+                        solarxy_formats::export::write_ply_bytes(&meshes),
+                        "ply",
+                        "application/octet-stream",
+                    ),
+                    _ => (
+                        solarxy_formats::export::write_glb_bytes(&meshes).map_err(fail)?,
+                        "glb",
+                        "model/gltf-binary",
+                    ),
+                };
+                Ok(ActionResult {
+                    filename: format!("{}.{ext}", filename_base(&resolved)),
+                    mime: mime.to_string(),
+                    bytes,
+                })
+            }
+            ("image_export", "save") => {
+                let img = self
+                    .cook
+                    .outputs(node)
+                    .and_then(|o| o.get("image").and_then(|v| v.as_image().cloned()))
+                    .ok_or_else(|| EngineError::InvalidParam {
+                        key: key.to_string(),
+                        reason: "nothing cooked to export yet".to_string(),
+                    })?;
+                let fail = |e: solarxy_formats::FormatsError| EngineError::InvalidParam {
+                    key: key.to_string(),
+                    reason: e.to_string(),
+                };
+                let (bytes, ext, mime) = match resolved.enum_key("format") {
+                    "jpg" => (
+                        solarxy_formats::export::encode_jpeg_bytes(
+                            &img,
+                            resolved.u32("quality").clamp(1, 100) as u8,
+                        )
+                        .map_err(fail)?,
+                        "jpg",
+                        "image/jpeg",
+                    ),
+                    _ => (
+                        solarxy_formats::export::encode_png_bytes(&img).map_err(fail)?,
+                        "png",
+                        "image/png",
+                    ),
+                };
+                Ok(ActionResult {
+                    filename: format!("{}.{ext}", filename_base(&resolved)),
+                    mime: mime.to_string(),
+                    bytes,
+                })
+            }
+            _ => Err(unsupported()),
+        }
+    }
+
     // Clipboard.
 
     /// Captures a fragment of the given nodes for the clipboard (the
@@ -1616,18 +1833,23 @@ impl Engine {
         events: &mut Vec<EngineEvent>,
         inv: &mut Vec<UndoOp>,
     ) -> Result<(), EngineError> {
-        // Context legality is checked per node against the registry.
+        // Context legality is checked per node against the registry, by
+        // the target graph's kind; the registry also supplies the
+        // container knowledge (which types open a child network).
+        let kind = self.doc.graph(ctx)?.kind;
         let registry = &self.registry;
         let ctx_ok = |type_id: &str| {
             registry
                 .get(type_id)
-                .is_some_and(|d| d.contexts.allows(ctx))
+                .is_some_and(|d| d.contexts.contains(kind))
         };
+        let opens = |type_id: &str| registry.get(type_id).and_then(|d| d.opens);
         let result = fragment.insert_into(
             &mut self.doc,
             ctx,
             crate::document::InsertMode::Remap,
             &ctx_ok,
+            &opens,
         );
         // Offset the pasted nodes so they do not sit exactly on the source,
         // and register + dirty them.
@@ -1913,7 +2135,9 @@ impl Engine {
             } => {
                 let ids: Vec<NodeId> = fragment.nodes.iter().map(|n| n.id).collect();
                 // Restore nodes + internal edges + owned subflows verbatim.
-                fragment.insert_into(&mut self.doc, ctx, undo::UNDO_INSERT, &|_| true);
+                // Undo never fabricates a fresh child network: any owned
+                // network was captured (with its kind) in the fragment.
+                fragment.insert_into(&mut self.doc, ctx, undo::UNDO_INSERT, &|_| true, &|_| None);
                 // Re-add boundary edges (to surviving outside nodes).
                 for (edge, variadic) in &boundary_edges {
                     let _ = self.doc.graph_mut(ctx)?.connect(edge.clone(), *variadic);
@@ -1964,6 +2188,19 @@ impl Engine {
         if self.previews.remove(&(node, key.to_string())).is_some() {
             self.mark_dirty(ctx, node);
         }
+    }
+
+    /// True while any transient param preview is in flight: a gizmo drag, a
+    /// parameter-panel slider drag, or (later) a locked-camera reframe. Every
+    /// interactive edit streams through [`Engine::preview_param`] and clears on
+    /// the committing `SetParam`, so a non-empty preview map is the precise
+    /// "an interaction is in flight" signal. The host uses it to suppress
+    /// interactive-only churn such as the environment/grid/floor/shadow refit,
+    /// so the ground grid stays world-fixed during a drag and refits once when
+    /// the edit commits.
+    #[must_use]
+    pub fn has_active_previews(&self) -> bool {
+        !self.previews.is_empty()
     }
 
     /// The geo container's world matrix, as the renderer and picking see it
@@ -2110,9 +2347,7 @@ impl Engine {
         }
         let mut events = Vec::new();
         let mut remaining = 0usize;
-        // Root first, then each subflow in id order (deterministic).
-        let mut contexts = vec![GraphContext::Root];
-        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        let contexts = self.ordered_contexts();
         for ctx in contexts {
             let report = self.cook.cook_until(
                 &self.doc,
@@ -2132,6 +2367,7 @@ impl Engine {
                     points: stats.points,
                     prims: stats.prims,
                     meshes: stats.meshes,
+                    image: stats.image,
                 });
             }
             for (node, validation) in report.validation_changed {
@@ -2293,6 +2529,7 @@ impl Engine {
                 points: stats.points,
                 prims: stats.prims,
                 meshes: stats.meshes,
+                image: stats.image,
             });
         }
         for (node, validation) in report.validation_changed {
@@ -2313,7 +2550,7 @@ impl Engine {
 
     /// Picks the root `geo` container the ray hits nearest over the
     /// committed, world-transformed display geometry (single-pane picking;
-    /// pane-awareness is Phase 6). Runs in Rust over CPU-retained geometry,
+    /// Runs in Rust over CPU-retained geometry,
     /// so nothing crosses into JavaScript. The host builds the ray from the
     /// cursor via `solarxy_core::raycast::screen_to_world_ray`.
     #[must_use]
@@ -2458,10 +2695,224 @@ impl Engine {
 
     // Helpers.
 
+    /// Marks a node dirty in its graph AND propagates across contexts
+    /// through node references: editing a
+    /// node inside a referenced network re-dirties every referrer of that
+    /// network's container, transitively, so a `/mat` edit repaints every
+    /// geo pointing at it without a manual cook. Reference cycles are
+    /// refused at set time, but the visited set also guards diamonds.
     fn mark_dirty(&mut self, ctx: GraphContext, node: NodeId) {
+        let mut visited = std::collections::BTreeSet::new();
+        self.mark_dirty_inner(ctx, node, &mut visited);
+    }
+
+    fn mark_dirty_inner(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        visited: &mut std::collections::BTreeSet<(GraphContext, NodeId)>,
+    ) {
+        if !visited.insert((ctx, node)) {
+            return;
+        }
         if let Ok(graph) = self.doc.graph(ctx) {
             self.cook.mark_dirty(graph, node);
         }
+        // Direct referrers of THIS node (a render node pointing at a
+        // camera) recook wherever they live.
+        for (r_ctx, referrer) in self.referrers_of(node) {
+            self.mark_dirty_inner(r_ctx, referrer, visited);
+        }
+        // A dirty node inside a child network changes that network's
+        // published result, so the network's CONTAINER counts as changed
+        // for everyone referencing it.
+        if let GraphContext::Subflow(owner) = ctx {
+            for (r_ctx, referrer) in self.referrers_of(owner) {
+                self.mark_dirty_inner(r_ctx, referrer, visited);
+            }
+        }
+    }
+
+    /// Every node holding a `NodeRef` param pointing at `target`, with its
+    /// context. A scan, not a maintained index: `NodeRef` literals are
+    /// self-describing, documents are interactive-sized, and a scan has no
+    /// maintenance-bug surface across undo/paste/load. Memoize only if
+    /// profiling ever says so.
+    fn referrers_of(&self, target: NodeId) -> Vec<(GraphContext, NodeId)> {
+        let mut out = Vec::new();
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            let Ok(graph) = self.doc.graph(ctx) else {
+                continue;
+            };
+            for n in graph.nodes() {
+                let refs_target = n.params.values().any(|src| {
+                    matches!(
+                        src,
+                        ParamSource::Literal(ParamValue::NodeRef(Some(t))) if *t == target
+                    )
+                });
+                if refs_target {
+                    out.push((ctx, n.id));
+                }
+            }
+        }
+        out
+    }
+
+    /// The reference targets held by one node's params.
+    fn node_ref_targets(node: &NodeData) -> Vec<NodeId> {
+        node.params
+            .values()
+            .filter_map(|src| match src {
+                ParamSource::Literal(ParamValue::NodeRef(Some(t))) => Some(*t),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether pointing `referrer` (living in `ctx`) at `target` would
+    /// create a reference cycle: a network depending, through any chain of
+    /// node references and containment, on its own result. Walks the
+    /// dependency closure of `target` (its own refs, and for containers
+    /// the refs of every node in the child-network tree) and refuses if it
+    /// reaches the referrer or any container on the referrer's ancestor
+    /// chain.
+    fn would_create_reference_cycle(
+        &self,
+        ctx: GraphContext,
+        referrer: NodeId,
+        target: NodeId,
+    ) -> bool {
+        // The referrer's forbidden set: itself plus every enclosing
+        // container up to the root.
+        let mut forbidden = std::collections::BTreeSet::from([referrer]);
+        let mut cursor = ctx;
+        while let GraphContext::Subflow(owner) = cursor {
+            forbidden.insert(owner);
+            cursor = self.context_of(owner);
+        }
+
+        // Walk target's dependency closure.
+        let mut stack = vec![target];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(t) = stack.pop() {
+            if !seen.insert(t) {
+                continue;
+            }
+            if forbidden.contains(&t) {
+                return true;
+            }
+            // The target's own reference params.
+            if let Some(n) = self.find_node(t) {
+                stack.extend(Self::node_ref_targets(n));
+            }
+            // A container target depends on everything its child-network
+            // tree references.
+            let mut tree = vec![t];
+            while let Some(owner) = tree.pop() {
+                if let Ok(g) = self.doc.graph(GraphContext::Subflow(owner)) {
+                    for n in g.nodes() {
+                        stack.extend(Self::node_ref_targets(n));
+                        tree.push(n.id);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// The cook order over contexts: root first (its nodes are portless
+    /// and consume no referenced results), then the child networks in
+    /// reference-dependency order, so a network cooks BEFORE any network
+    /// referencing its result and a referrer always reads the fresh value
+    /// in the same pass. Kahn's algorithm with id-order tie-breaking
+    /// (deterministic); the cycle fallback (impossible while `SetParam`
+    /// refuses cycles, reachable only through a hand-crafted paste) simply
+    /// appends the remainder in id order and converges over passes on
+    /// last-committed values.
+    fn ordered_contexts(&self) -> Vec<GraphContext> {
+        use std::collections::{BTreeMap, BTreeSet};
+        let owners: Vec<NodeId> = self.doc.subflow_owners().collect();
+        let owner_set: BTreeSet<NodeId> = owners.iter().copied().collect();
+        // dependents[t] = owners whose networks reference container t.
+        let mut dependents: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+        let mut in_degree: BTreeMap<NodeId, usize> = owners.iter().map(|o| (*o, 0)).collect();
+        for &owner in &owners {
+            let Ok(graph) = self.doc.graph(GraphContext::Subflow(owner)) else {
+                continue;
+            };
+            let mut deps: BTreeSet<NodeId> = BTreeSet::new();
+            for n in graph.nodes() {
+                for t in Self::node_ref_targets(n) {
+                    if owner_set.contains(&t) && t != owner {
+                        deps.insert(t);
+                    }
+                }
+            }
+            for t in deps {
+                if dependents.entry(t).or_default().insert(owner) {
+                    *in_degree.entry(owner).or_default() += 1;
+                }
+            }
+        }
+        let mut ready: BTreeSet<NodeId> = in_degree
+            .iter()
+            .filter(|(_, d)| **d == 0)
+            .map(|(o, _)| *o)
+            .collect();
+        let mut ordered = Vec::with_capacity(owners.len());
+        while let Some(&next) = ready.iter().next() {
+            ready.remove(&next);
+            ordered.push(next);
+            for &dep in dependents.get(&next).into_iter().flatten() {
+                let d = in_degree.entry(dep).or_default();
+                *d = d.saturating_sub(1);
+                if *d == 0 {
+                    ready.insert(dep);
+                }
+            }
+        }
+        // Cycle backstop: append whatever never reached in-degree zero.
+        for &owner in &owners {
+            if !ordered.contains(&owner) {
+                ordered.push(owner);
+            }
+        }
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(ordered.into_iter().map(GraphContext::Subflow));
+        contexts
+    }
+
+    /// The context holding a node (root when not found in any child
+    /// network; callers only pass ids that exist).
+    fn context_of(&self, node: NodeId) -> GraphContext {
+        for owner in self.doc.subflow_owners() {
+            if let Ok(g) = self.doc.graph(GraphContext::Subflow(owner))
+                && g.node(node).is_some()
+            {
+                return GraphContext::Subflow(owner);
+            }
+        }
+        GraphContext::Root
+    }
+
+    /// A node's data, found in any context.
+    fn find_node(&self, node: NodeId) -> Option<&NodeData> {
+        if let Ok(root) = self.doc.graph(GraphContext::Root)
+            && let Some(n) = root.node(node)
+        {
+            return Some(n);
+        }
+        for owner in self.doc.subflow_owners() {
+            if let Ok(g) = self.doc.graph(GraphContext::Subflow(owner))
+                && let Some(n) = g.node(node)
+            {
+                return Some(n);
+            }
+        }
+        None
     }
 
     /// The type id of a node found in any context (used by connect, whose

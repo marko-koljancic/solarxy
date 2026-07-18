@@ -4,6 +4,13 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UnsupportedBrowser } from "./components/UnsupportedBrowser";
 import { initTelemetry, installSmokeHooks } from "./telemetry";
+// Bundled typefaces: Inter for UI, IBM Plex Mono for numeric
+// surfaces. Self-hosted latin woff2 subsets; unicode-range keeps the wire
+// cost to the subsets a page actually uses.
+import "@fontsource-variable/inter";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
 // dockview's base CSS first; styles.css then maps every --dv-* colour onto the
 // token theme, so the dock re-themes with the app and no dockview preset ships.
 import "dockview-react/dist/styles/dockview.css";

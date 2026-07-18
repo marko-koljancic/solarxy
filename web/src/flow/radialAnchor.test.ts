@@ -1,4 +1,4 @@
-// The radial ring's anchor math (Phase 10). Before this, the ring captured the
+// The radial ring's anchor math. Before this, the ring captured the
 // node's rect once at open time and drifted off it on pan and zoom; the ring now
 // re-measures every render, and this is the geometry it derives.
 

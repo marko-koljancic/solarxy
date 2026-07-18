@@ -1,11 +1,11 @@
-//! The `subdivide` node (Phase 14): linear 1-to-4 triangle subdivision
+//! The `subdivide` node: linear 1-to-4 triangle subdivision
 //! with crack-free shared-edge midpoints and attribute interpolation. The
 //! iteration count is hard-capped and the kernel's output-triangle ceiling
 //! turns runaway growth into a cook error instead of a stall.
 //!
-//! v2 dropped `scheme` (Phase 15H param audit). It was an enum with a single
+//! v2 dropped `scheme` (param audit). It was an enum with a single
 //! variant, read by nothing, so the UI showed a dropdown with one option that
-//! did nothing -- exactly the dead-param class the Phase 8 audit removed. It was
+//! did nothing -- exactly the dead-param class the audit removed. It was
 //! originally kept to reserve the key for Catmull-Clark, but a param that never
 //! had an effect must not freeze into schema v1; when a second scheme lands it
 //! comes back as an ordinary default-filling addition.
@@ -19,7 +19,7 @@ use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{
-    BypassBehavior, Category, ContextMask, MigrateError, NodeTypeDescriptor, PortSpec,
+    BypassBehavior, Category, ContextSet, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
 };
 
 #[must_use]
@@ -29,9 +29,16 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Subdivide",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
-            PortSpec::single("geometry", "Geometry", DataType::Geometry, true).default_port(),
+            PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
+                .default_port()
+                .doc(
+                    "The geometry to refine. Every mesh in the set is subdivided, and it \
+                     is the triangle count of the whole set that the output ceiling is \
+                     measured against.",
+                ),
         ],
         outputs: vec![geometry_output()],
         params: params_with(
@@ -46,15 +53,40 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(1.0, 5.0)
                 .soft(1.0, 3.0)
-                .step(1.0),
+                .step(1.0)
+                .doc(
+                    "How many subdivision passes to run. Each pass splits every triangle \
+                     into four, so the multiplier is 4 to this power: 2 is 16 times the \
+                     input, 3 is 64, 5 is over a thousand. The cook fails rather than \
+                     stalls once the result would pass 8 million triangles, which is \
+                     what the ceiling of 5 exists to keep you away from.",
+                ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Splits every triangle into four at its edge midpoints, \
-              interpolating normals, UVs, and attributes.",
+        doc: "Splits every triangle into four at its edge midpoints, one pass \
+              per iteration, interpolating normals, UVs, and any named \
+              attributes onto the new points. Neighbouring triangles look \
+              their shared edge's midpoint up in an edge map instead of each \
+              making its own, so both sides land on the same point and the \
+              surface stays crack-free.\n\n\
+              Reach for it to buy resolution for something downstream that \
+              needs points to work with: a displacement, a noise, a deform. It \
+              sits between the source geometry and that node, and it is the \
+              answer when the source is an import rather than a primitive \
+              whose segment counts you could have raised instead.\n\n\
+              The subdivision is linear: it adds points onto the existing \
+              surface without moving any of them, so a subdivided box is still \
+              a box with the same silhouette and four times the triangles. \
+              Nothing here smooths. And the growth compounds hard -- at 5 \
+              iterations a 10,000-triangle mesh projects to over 10 million, \
+              past the kernel's 8 million ceiling, which is a cook error \
+              rather than a stall.",
         search_aliases: &["subdivide", "smooth", "tessellate", "refine"],
+        glyph: "subdivide",
+        role: NodeRole::Standard,
         cook: cook_subdivide,
         migrate: Some(migrate_drop_scheme),
     }

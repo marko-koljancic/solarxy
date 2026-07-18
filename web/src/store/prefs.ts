@@ -1,4 +1,4 @@
-// User preferences (Phase 7 W4): a single persisted zustand store on the
+// User preferences: a single persisted zustand store on the
 // Minimystix pattern (one localStorage key, versioned, migration hook).
 // Four groups per the ratified scope: Appearance (theme + reduced motion),
 // Review (opt-in author), Autosave (enable + cadence), Screenshot defaults.
@@ -8,6 +8,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+/** 0.7.1 collapsed three themes into two. The MPW "Balanced Editorial"
+ * palette (warm cream + terracotta, the koljam.com design language) used to
+ * be a separate "mpw" variant layered over a neutral light theme; it IS the
+ * light theme now, on web and on the desktop GUI alike. Stored "mpw" values
+ * migrate to "light" (see `migrate` below). */
 export type ThemeChoice = "dark" | "light" | "system";
 export type ResolvedTheme = "dark" | "light";
 export type MotionChoice = "system" | "reduce" | "none";
@@ -40,6 +45,19 @@ export interface ScreenshotPrefs {
   };
 }
 
+export type SelectionHighlightStyle = "outline" | "tint" | "none";
+
+/** How selection presents in the 3D viewport:
+ * the jump-flood rim (default), the legacy translucent tint, or nothing.
+ * Pushed into the Rust host like the gizmo ergonomics. */
+export interface SelectionPrefs {
+  style: SelectionHighlightStyle;
+  /** Rim color, sRGB hex; converted to linear at the host boundary. */
+  color: string;
+  /** Rim width in pixels (clamped 1..16 renderer-side). */
+  width: number;
+}
+
 export interface Prefs {
   appearance: {
     theme: ThemeChoice;
@@ -59,6 +77,13 @@ export interface Prefs {
   };
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
+  selection: SelectionPrefs;
+  /** First-run tour state. `version` lets a materially changed tour show
+   * again to someone who has already seen an older one. */
+  onboarding: {
+    completed: boolean;
+    version: number;
+  };
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -71,6 +96,8 @@ export const DEFAULT_PREFS: Prefs = {
     customHeight: 1080,
     overlays: { grid: true, axes: true, validation: true },
   },
+  selection: { style: "outline", color: "#ff9e21", width: 3 },
+  onboarding: { completed: false, version: 0 },
   viewport: {
     orientation: "world",
     snapTranslate: 0.5,
@@ -128,6 +155,19 @@ function legacyTheme(): ThemeChoice | null {
   return raw === "light" || raw === "system" || raw === "dark" ? raw : null;
 }
 
+const THEME_CHOICES: readonly string[] = ["dark", "light", "system"];
+
+/** Coerce a stored theme to one that still exists.
+ *
+ * Defensive rather than clever: `migrate` below handles the known "mpw"
+ * case, but a blob hand-edited or written by a future build would otherwise
+ * put an unrenderable value on `body`, which shows up as an unthemed page
+ * rather than an error. */
+export function sanitizeTheme(raw: unknown): ThemeChoice {
+  if (raw === "mpw") return "light";
+  return THEME_CHOICES.includes(raw as string) ? (raw as ThemeChoice) : DEFAULT_PREFS.appearance.theme;
+}
+
 export const usePrefs = create<PrefsStore>()(
   persist(
     (set, get) => ({
@@ -150,9 +190,20 @@ export const usePrefs = create<PrefsStore>()(
     }),
     {
       name: "solarxy.prefs",
-      version: 1,
+      // 1 -> 2 (0.7.1): the "mpw" theme became the light theme.
+      version: 2,
       // Persist only the prefs blob (resolvedTheme derives).
       partialize: (s) => ({ prefs: s.prefs }),
+      migrate: (persisted, version) => {
+        const state = persisted as { prefs?: Partial<Prefs> } | undefined;
+        if (version < 2 && state?.prefs?.appearance) {
+          // Anyone who had selected the MPW variant keeps the palette they
+          // chose: it is what "light" now means. Without this they would
+          // land on a theme option that no longer exists.
+          state.prefs.appearance.theme = sanitizeTheme(state.prefs.appearance.theme);
+        }
+        return state;
+      },
       merge: (persisted, current) => {
         // Deep-merge over the defaults so new fields backfill on upgrade
         // (the Minimystix onRehydrateStorage pattern).
@@ -170,13 +221,21 @@ export const usePrefs = create<PrefsStore>()(
             },
           },
           // Backfilled by the same deep merge, so no version bump is needed for
-          // the group added in Phase 12.
+          // a newly added group.
           viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
+          selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
+          // Backfilled by this same deep merge, so adding the group needs no
+          // persist version bump: an existing user rehydrates with
+          // `completed: false` and is offered the tour once.
+          onboarding: { ...DEFAULT_PREFS.onboarding, ...p?.onboarding },
         };
         if (!p) {
           const migrated = legacyTheme();
           if (migrated) prefs.appearance.theme = migrated;
         }
+        // Belt and braces over `migrate`: a blob already stamped at the
+        // current version still gets a renderable theme.
+        prefs.appearance.theme = sanitizeTheme(prefs.appearance.theme);
         return { ...current, prefs };
       },
       onRehydrateStorage: () => (state) => {

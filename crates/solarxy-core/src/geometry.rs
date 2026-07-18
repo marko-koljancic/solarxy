@@ -116,6 +116,44 @@ impl From<AlphaMode> for u32 {
     }
 }
 
+/// The per-material shading model. `Pbr` is
+/// the full Cook-Torrance metallic-roughness path and the default;
+/// everything else is a stylized branch in `fs_main`. The discriminants
+/// mirror the WGSL `switch material.shading_model` arms; conversion via
+/// `From<ShadingModel> for u32` at the CPU-GPU boundary, exactly like
+/// [`AlphaMode`]. `Matcap` samples the material's BASE COLOR texture slot
+/// by view-space normal (a matcap material's base texture IS the matcap),
+/// so no new texture role exists anywhere in the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ShadingModel {
+    /// Cook-Torrance metallic-roughness with IBL (the existing path).
+    #[default]
+    Pbr = 0,
+    /// View-space-normal lookup into the base-color texture; unlit.
+    Matcap = 1,
+    /// Ramp-quantized diffuse with stepped specular
+    /// ([`RawMaterialData::toon_steps`] bands).
+    Toon = 2,
+    /// Flat base color, no lighting (glTF `KHR_materials_unlit`).
+    Unlit = 3,
+    /// The promoted Clay viewport look (matte light gray).
+    Clay = 4,
+    /// The promoted Clay Dark look.
+    ClayDark = 5,
+    /// The promoted Chrome look (mirror metal, env-only).
+    Chrome = 6,
+    /// Solid black silhouette.
+    Silhouette = 7,
+}
+
+impl From<ShadingModel> for u32 {
+    fn from(m: ShadingModel) -> u32 {
+        m as u32
+    }
+}
+
 /// One PBR material inside a [`RawModelData`].
 /// Holds factor scalars, optional textures (path or in-memory bytes), and the
 /// PBR alpha mode. `solarxy-renderer/src/resources.rs` consumes this and
@@ -164,6 +202,18 @@ pub struct RawMaterialData {
     pub normal_texture_name: Option<String>,
     pub shininess_texture_name: Option<String>,
     pub dissolve_texture_name: Option<String>,
+    /// The per-material shading model. Defaults to `Pbr`, so
+    /// every pre-existing material (imports, `.slxy`, the transfer codec's
+    /// serde header) renders exactly as before.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub shading_model: ShadingModel,
+    /// Toon band count (only read when `shading_model` is `Toon`).
+    #[cfg_attr(feature = "serde", serde(default = "default_toon_steps"))]
+    pub toon_steps: f32,
+}
+
+fn default_toon_steps() -> f32 {
+    3.0
 }
 
 fn white_rgba() -> [f32; 4] {
@@ -200,6 +250,8 @@ impl Default for RawMaterialData {
             shininess: None,
             dissolve: None,
             optical_density: None,
+            shading_model: ShadingModel::default(),
+            toon_steps: default_toon_steps(),
             ambient_texture_name: None,
             diffuse_texture_name: None,
             specular_texture_name: None,

@@ -4,11 +4,12 @@
 
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
-import type { GizmoPrefs } from "../store/prefs";
+import type { GizmoPrefs, SelectionPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
   CameraCommand,
+  CameraPose,
   Command,
   DisplaySettingsDto,
   DocumentSnapshot,
@@ -88,6 +89,13 @@ export class SolarxyClient {
     this.app.request_screenshot(opts);
   }
 
+  /** Requests one turntable-export frame: `pane` rendered through its
+   * render-through camera rotated by `azimuthDeg`. Uses the same capture slot
+   * as the screenshot; poll with `pollScreenshot`. */
+  requestTurntableFrame(pane: number, azimuthDeg: number, opts: ScreenshotOpts): void {
+    this.app.request_turntable_frame(pane, azimuthDeg, opts);
+  }
+
   /** Polls the in-flight capture; undefined while pending. */
   pollScreenshot(): ScreenshotResult | undefined {
     return (this.app.poll_screenshot() ?? undefined) as ScreenshotResult | undefined;
@@ -134,6 +142,42 @@ export class SolarxyClient {
       s.snapRotate,
       s.snapScale,
     );
+  }
+
+  /** The selection-highlight preference. The hex color is
+   * sRGB; the rim draws into an sRGB swapchain view, so the shader wants
+   * linear components (the hardware re-encodes on write). */
+  setSelectionHighlight(s: SelectionPrefs): void {
+    const [r, g, b] = hexToLinearRgb(s.color);
+    this.app.set_selection_highlight(s.style, r, g, b, 1.0, s.width);
+  }
+
+  /** The displayed image of a texture network, or null when
+   * it publishes nothing. Pull-based; the viewer fetches on cook changes,
+   * so cooked pixels never ride the event stream. */
+  texturePreview(
+    owner: number,
+  ): { width: number; height: number; pixels: Uint8ClampedArray } | null {
+    return (this.app.texture_preview(owner) ?? null) as {
+      width: number;
+      height: number;
+      pixels: Uint8ClampedArray;
+    } | null;
+  }
+
+  /** Executes an export node's Action param; the returned
+   * bytes go to the save path. Throws with the engine's message when the
+   * action cannot run (nothing cooked, unsupported). */
+  invokeAction(
+    ctx: GraphContext,
+    node: number,
+    key: string,
+  ): { filename: string; mime: string; bytes: Uint8Array } {
+    return this.app.invoke_action(ctx, node, key) as {
+      filename: string;
+      mime: string;
+      bytes: Uint8Array;
+    };
   }
 
   /** The live drag's delta text ("X +1.250 m"), or null when nothing is
@@ -203,6 +247,23 @@ export class SolarxyClient {
     this.app.camera_command(pane, cmd);
   }
 
+  /** Binds a pane to look through a camera node, or -1 to clear to free view. */
+  setPaneCamera(pane: number, camera: number): ViewStateDto {
+    return this.app.set_pane_camera(pane, camera) as ViewStateDto;
+  }
+
+  setPaneCameraLock(pane: number, locked: boolean): ViewStateDto {
+    return this.app.set_pane_camera_lock(pane, locked) as ViewStateDto;
+  }
+
+  jumpToCamera(pane: number, camera: number): ViewStateDto {
+    return this.app.jump_to_camera(pane, camera) as ViewStateDto;
+  }
+
+  paneCameraPose(pane: number): CameraPose {
+    return this.app.pane_camera_pose(pane) as CameraPose;
+  }
+
   paneRects(): PaneRectDto[] {
     return this.app.pane_rects() as PaneRectDto[];
   }
@@ -241,6 +302,27 @@ export class SolarxyClient {
    * authoritative staged-name source). */
   assetManifest(): AssetRef[] {
     return this.app.asset_manifest() as AssetRef[];
+  }
+
+  /** Opens (or replaces) the live model preview on a canvas. */
+  previewOpen(canvas: HTMLCanvasElement, hash: string, name: string): void {
+    this.app.preview_open(canvas, hash, name);
+  }
+
+  previewOrbit(dx: number, dy: number): void {
+    this.app.preview_orbit(dx, dy);
+  }
+
+  previewZoom(delta: number): void {
+    this.app.preview_zoom(delta);
+  }
+
+  previewResize(width: number, height: number): void {
+    this.app.preview_resize(width, height);
+  }
+
+  previewClose(): void {
+    this.app.preview_close();
   }
 
   /** Drains the import jobs the last cook spawned (to run in the worker).
@@ -345,4 +427,15 @@ export class SolarxyClient {
   loadSlxy(bytes: Uint8Array): SlxyLoadResult {
     return this.app.load_slxy(bytes) as SlxyLoadResult;
   }
+}
+
+/** Parses "#rrggbb" and converts each sRGB channel to linear. */
+function hexToLinearRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  const n = m ? parseInt(m[1], 16) : 0xff9e21;
+  const toLinear = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return [toLinear((n >> 16) & 0xff), toLinear((n >> 8) & 0xff), toLinear(n & 0xff)];
 }

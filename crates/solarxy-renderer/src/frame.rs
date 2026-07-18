@@ -44,6 +44,7 @@ fn truncate_to_budget<V>(verts: &mut Vec<V>, verts_per_prim: usize, what: &str) 
 /// a wire sphere or a cone) rather than one selection-attached gizmo, so sharing
 /// the manipulator's buffer would make one starve the other.
 const LIGHT_HELPER_BUF_BYTES: u64 = 256 * 1024;
+const CAMERA_HELPER_BUF_BYTES: u64 = 256 * 1024;
 use crate::model::{DrawMeshSimple, DrawModel};
 use crate::pipelines::Pipelines;
 use crate::texture::SharedSamplers;
@@ -255,7 +256,7 @@ pub struct ValidationColorResources {
     #[allow(dead_code)]
     pub buffers: Vec<wgpu::Buffer>,
     /// The selection tint (accent blue, translucent) drawn over the picked
-    /// object's meshes (decision 24, web picking sync).
+    /// object's meshes.
     pub selection_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     pub selection_buffer: wgpu::Buffer,
@@ -275,7 +276,7 @@ pub struct ObjectValidationGpu {
 /// [`crate::model::Model`] plus its per-object instance buffer (one
 /// `InstanceRaw`) and optional validation overlay resources. The
 /// multi-object draw path iterates slices of these; `ModelScene`
-/// contributes itself as one entry and `scene_objects::SceneObjects`
+/// contributes itself as one entry and `scene_objects:SceneObjects`
 /// entries append beside it.
 #[derive(Clone, Copy)]
 pub struct DrawObject<'a> {
@@ -286,7 +287,7 @@ pub struct DrawObject<'a> {
     pub validation: Option<&'a ObjectValidationGpu>,
     /// Whether the object carries the selection highlight (a translucent
     /// accent tint drawn at the end of the main pass; the web picking-sync
-    /// direction of decision 24). Desktop passes `false`.
+    /// Desktop passes `false`.
     pub selected: bool,
     /// Whether the object is drawn into the shadow map (per-object
     /// participation; which light owns the map is the light-side
@@ -314,11 +315,22 @@ pub struct Renderer {
     manipulator_line_count: u32,
     light_helper_buf: wgpu::Buffer,
     light_helper_count: u32,
+    /// Camera gizmos. Written PER PANE (not once per frame like the light
+    /// helpers), because each pane hides the camera it is looking through.
+    camera_helper_buf: wgpu::Buffer,
+    camera_helper_count: u32,
     manipulator_tri_buf: wgpu::Buffer,
     manipulator_tri_count: u32,
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
+    /// Selection-outline resources; drawn only when
+    /// `selection_style` is `Outline` and something is selected.
+    pub outline: crate::outline::OutlineState,
+    /// How selection presents in the viewport: the jump-flood rim
+    /// (default), the legacy translucent tint, or nothing. A user
+    /// preference plumbed by the host via `set_selection_highlight`.
+    pub selection_style: SelectionStyle,
     /// Bind group for the HDRI skybox pass — `Some` only while an HDRI is
     /// loaded. Rebuilt through the app's `rebuild_light_bind_group`
     /// IBL chokepoint.
@@ -328,6 +340,19 @@ pub struct Renderer {
     pub msaa_sample_count: u32,
     pub target_width: u32,
     pub target_height: u32,
+}
+
+/// How a selected object is highlighted in the viewport (a user
+/// preference).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelectionStyle {
+    /// Constant-width jump-flood rim around the screen-space silhouette.
+    #[default]
+    Outline,
+    /// The pre-phase-18 translucent accent fill over the meshes.
+    Tint,
+    /// No viewport highlight.
+    None,
 }
 
 /// Startup inputs for [`Renderer::new`] the shell owns: preference-derived
@@ -593,6 +618,7 @@ impl Renderer {
         };
 
         let overdraw = crate::overdraw::OverdrawResources::new(device, &layouts, width, height);
+        let outline = crate::outline::OutlineState::new(device, &layouts, width, height);
 
         Ok(Self {
             targets: RenderTargets {
@@ -654,6 +680,13 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             light_helper_count: 0,
+            camera_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Camera Helpers"),
+                size: CAMERA_HELPER_BUF_BYTES,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            camera_helper_count: 0,
             uv_overlap: UvOverlapResources {
                 count_texture: count_tex,
                 count_view,
@@ -669,6 +702,8 @@ impl Renderer {
             },
             validation_colors,
             overdraw,
+            outline,
+            selection_style: SelectionStyle::default(),
             skybox_bind_group: None,
             shared_samplers,
             msaa_sample_count,
@@ -1108,11 +1143,12 @@ impl Renderer {
         if pds.show_validation {
             self.draw_validation_overlay(&mut pass, objects, cam_bg);
         }
-        if objects.iter().any(|o| o.selected) {
+        if self.selection_style == SelectionStyle::Tint && objects.iter().any(|o| o.selected) {
             self.draw_selection_tint(&mut pass, objects, cam_bg);
         }
         // Last, so it sits over everything; its pipelines ignore depth anyway.
         self.draw_light_helpers(&mut pass, cam_bg);
+        self.draw_camera_helpers(&mut pass, cam_bg);
         self.draw_manipulator(&mut pass, cam_bg);
     }
 
@@ -1153,6 +1189,50 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
         pass.set_vertex_buffer(0, self.light_helper_buf.slice(..));
         pass.draw(0..self.light_helper_count, 0..1);
+    }
+
+    /// Draws the camera gizmos. Its own draw/buffer, like the light helpers,
+    /// but written per pane (each pane hides its own look-through camera).
+    fn draw_camera_helpers<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if self.camera_helper_count == 0 {
+            return;
+        }
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_pipeline(&self.pipelines.overlay.manipulator_lines);
+        pass.set_vertex_buffer(0, self.camera_helper_buf.slice(..));
+        pass.draw(0..self.camera_helper_count, 0..1);
+    }
+
+    /// Uploads this pane's camera gizmos. Written PER PANE with the pane's
+    /// look-through camera as `skip`, so you never see the camera you are
+    /// inside. Call before rendering each 3D pane.
+    pub fn write_camera_helpers(
+        &mut self,
+        queue: &wgpu::Queue,
+        cameras: &[solarxy_core::scene::CameraDef],
+        skip: Option<solarxy_core::scene::SceneObjectId>,
+    ) {
+        let lines = crate::helpers::build_camera_helpers(cameras, skip);
+        if lines.is_empty() {
+            self.camera_helper_count = 0;
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&lines);
+        if bytes.len() as u64 > CAMERA_HELPER_BUF_BYTES {
+            tracing::warn!(
+                bytes = bytes.len(),
+                budget = CAMERA_HELPER_BUF_BYTES,
+                "camera helpers exceeded their vertex buffer; not drawing"
+            );
+            self.camera_helper_count = 0;
+            return;
+        }
+        queue.write_buffer(&self.camera_helper_buf, 0, bytes);
+        self.camera_helper_count = u32::try_from(lines.len()).unwrap_or(0);
     }
 
     /// Uploads this frame's light helpers. Unlike the manipulator, these are
@@ -1220,7 +1300,7 @@ impl Renderer {
         // On overflow, TRUNCATE to what fits rather than draw nothing. The old
         // code zeroed both counts, so the gizmo vanished entirely -- and it
         // guarded that with a `debug_assert`, which is a no-op in release, plus
-        // a `tracing::warn` that reaches NO subscriber on web. A release web
+        // a `tracing:warn` that reaches NO subscriber on web. A release web
         // build therefore lost the gizmo with zero diagnostics. A clipped gizmo
         // is still usable and still visibly wrong, which is what we want.
         truncate_to_budget(&mut lines, 2, "line");
@@ -1232,6 +1312,152 @@ impl Renderer {
         queue.write_buffer(&self.manipulator_tri_buf, 0, tri_bytes);
         self.manipulator_line_count = u32::try_from(lines.len()).unwrap_or(0);
         self.manipulator_tri_count = u32::try_from(tris.len()).unwrap_or(0);
+    }
+
+    /// Renders the selection-outline offscreen stages: the
+    /// silhouette mask of every selected object, the jump-flood init, and
+    /// the fixed five-step ladder. Call after [`Self::render_main_pass`]
+    /// when `selection_style` is `Outline` and something is selected; the
+    /// rim itself lands on the swapchain via
+    /// [`Self::composite_selection_outline`] after the composite pass.
+    pub fn render_selection_outline(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        objects: &[DrawObject<'_>],
+        cam_bg: &wgpu::BindGroup,
+    ) {
+        // Mask: selected silhouettes, depth-ignoring, white on black.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Outline Mask Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.outline.mask_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.overlay.outline_mask);
+            pass.set_bind_group(0, cam_bg, &[]);
+            pass.set_bind_group(1, &self.outline.white_bind_group, &[]);
+            for obj in objects.iter().filter(|o| o.selected) {
+                pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                for mesh in &obj.model.meshes {
+                    if !mesh.visible {
+                        continue;
+                    }
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                }
+            }
+        }
+        // Jump-flood init: seed the ping half from the mask.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Outline JFA Init"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: self.outline.ping(),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.overlay.outline_jfa_init);
+            pass.set_bind_group(0, &self.outline.init_bind_group, &[]);
+            pass.set_bind_group(1, &self.outline.params_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        // The fixed ladder (always five passes, so the final field always
+        // lands in the pong half regardless of the preferred width).
+        for i in 0..crate::outline::JFA_STEPS.len() {
+            let (src, dst) = self.outline.step_io(i);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Outline JFA Step"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: dst,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.overlay.outline_jfa_step);
+            pass.set_bind_group(0, src, &[]);
+            pass.set_bind_group(1, &self.outline.step_bind_groups[i], &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    /// Blits the outline rim onto the composited swapchain view (after
+    /// tone mapping, so it never blooms and AO never darkens it). Pass
+    /// the pane viewport exactly as the composite pass received it.
+    pub fn composite_selection_outline(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        viewport: Option<[f32; 4]>,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Outline Blit Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        if let Some([x, y, w, h]) = viewport {
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+            pass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
+        }
+        pass.set_pipeline(&self.pipelines.overlay.outline_blit);
+        pass.set_bind_group(0, self.outline.final_bind_group(), &[]);
+        pass.set_bind_group(1, &self.outline.params_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Applies the selection-highlight preference: the style, and the rim
+    /// color/width (the legacy tint reuses the same color at a fixed
+    /// 0.35 alpha, matching its pre-phase-18 look).
+    pub fn set_selection_highlight(
+        &mut self,
+        queue: &wgpu::Queue,
+        style: SelectionStyle,
+        color: [f32; 4],
+        width: f32,
+    ) {
+        self.selection_style = style;
+        self.outline.write_params(queue, color, width);
+        let tint = [color[0], color[1], color[2], 0.35f32];
+        queue.write_buffer(
+            &self.validation_colors.selection_buffer,
+            0,
+            bytemuck::cast_slice(&tint),
+        );
     }
 
     /// Draws the translucent accent tint over selected objects' meshes,

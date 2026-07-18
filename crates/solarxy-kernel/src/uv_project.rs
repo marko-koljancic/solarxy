@@ -1,4 +1,4 @@
-//! UV projection (the `uv_project` node's kernel, Phase 14): writes a
+//! UV projection (the `uv_project` node's kernel): writes a
 //! fresh `tex_coords` buffer from one of four projections, normalized
 //! against the whole set's AABB so multiple meshes share one consistent
 //! mapping. `uv = normalized * scale + offset`.

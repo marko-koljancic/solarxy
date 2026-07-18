@@ -57,7 +57,7 @@ interface ValidateRequest {
   budget?: number;
 }
 
-/** The image-decode request (`import_image`, Phase 13). Decoded entirely
+/** The image-decode request (`import_image`). Decoded entirely
  * by the browser (`createImageBitmap` + OffscreenCanvas readback): zero
  * wasm involvement, native codec speed, free format support. */
 interface DecodeImageRequest {

@@ -28,6 +28,8 @@ export interface NodeCook {
   points?: number;
   prims?: number;
   meshes?: number;
+  /** `[width, height]` of the default image output, for image nodes. */
+  image?: [number, number] | null;
   /** Validation badge counts (validate node, import load validation).
    * Zero counts mean clean or cleared; the badge renders only when > 0. */
   validation?: { errors: number; warnings: number };
@@ -149,6 +151,7 @@ function applyEvent(
       c.points = ev.points;
       c.prims = ev.prims;
       c.meshes = ev.meshes;
+      c.image = ev.image;
       break;
     }
     case "validationSummary": {

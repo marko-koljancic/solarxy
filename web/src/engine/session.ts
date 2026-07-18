@@ -246,8 +246,10 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // The host caches the gizmo's snap steps and orientation; push the current
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
+    pushSelectionHighlight();
     usePrefs.subscribe((state, prev) => {
       if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
+      if (state.prefs.selection !== prev.prefs.selection) pushSelectionHighlight();
     });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
@@ -352,6 +354,13 @@ export function pushGizmoSettings(): void {
   getClient().setGizmoSettings(usePrefs.getState().prefs.viewport);
 }
 
+/** Pushes the selection-highlight preference into the host.
+ * Called on boot and on any prefs change, like the gizmo ergonomics. */
+export function pushSelectionHighlight(): void {
+  if (!client) return;
+  getClient().setSelectionHighlight(usePrefs.getState().prefs.selection);
+}
+
 /** Escape during a gizmo drag: rolls it back. */
 export function cancelGizmoDrag(): void {
   if (!client) return;
@@ -359,7 +368,7 @@ export function cancelGizmoDrag(): void {
 }
 
 /** The exclusive-shadow-caster rule must be self-explanatory at the moment
- * it acts (UX spec J3): when granting cast_shadow cascades a release onto
+ * it acts: when granting cast_shadow cascades a release onto
  * another light, toast the name of the light that lost it. */
 function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
   if (cmd.type !== "setParam" || cmd.key !== "cast_shadow") return;
@@ -389,7 +398,7 @@ function toastShadowHandoff(cmd: Command, batch: EventBatch): void {
 }
 
 /** Pushes the root-context selection into the host so the picked object
- * gets its viewport tint (decision 24, node-to-viewport direction). */
+ * gets its viewport tint. */
 export function syncSceneSelection(): void {
   if (!client) return;
   const root = useMirror.getState().contexts["root"];
@@ -420,6 +429,52 @@ export function setDisplaySettings(settings: DisplaySettingsDto): void {
 
 export function cameraCommand(pane: number, cmd: CameraCommand): void {
   getClient().cameraCommand(pane, cmd);
+}
+
+/** Binds a pane to look through a camera node (or -1 to clear to free view). */
+export function setPaneCamera(pane: number, camera: number): void {
+  useViewState.getState().setView(getClient().setPaneCamera(pane, camera));
+}
+
+/** Toggles lock-camera-to-view for a look-through pane. */
+export function setPaneCameraLock(pane: number, locked: boolean): void {
+  useViewState.getState().setView(getClient().setPaneCameraLock(pane, locked));
+}
+
+/** Jumps a pane's free view to a camera's saved pose (bookmark). */
+export function jumpToCamera(pane: number, camera: number): void {
+  useViewState.getState().setView(getClient().jumpToCamera(pane, camera));
+}
+
+/** Authors a new camera node framed on the pane's current view, then looks
+ * through it (unlocked). The host exposes the pose; the node itself is created
+ * and framed with ordinary commands so the mirror stays the source of truth. */
+export function createCameraFromView(pane: number): void {
+  const pose = getClient().paneCameraPose(pane);
+  dispatch({ type: "beginTransaction", label: "Add Camera" });
+  const batch = dispatch({ type: "addNode", ctx: "root", nodeType: "camera", position: [0, 0] });
+  const added = batch.events.find((e) => e.type === "nodeAdded");
+  if (added && added.type === "nodeAdded") {
+    const id = added.node.id;
+    dispatch({
+      type: "setParam",
+      ctx: "root",
+      node: id,
+      key: "position",
+      value: { kind: "literal", type: "vec3", value: pose.position },
+    });
+    dispatch({
+      type: "setParam",
+      ctx: "root",
+      node: id,
+      key: "target",
+      value: { kind: "literal", type: "vec3", value: pose.target },
+    });
+    dispatch({ type: "endTransaction" });
+    useViewState.getState().setView(getClient().setPaneCamera(pane, id));
+  } else {
+    dispatch({ type: "endTransaction" });
+  }
 }
 
 /** Refreshes the whole view-state mirror from the host. */
@@ -638,7 +693,7 @@ export function copySelection(): void {
 }
 
 /** Pastes the clipboard fragment into the current context; context-illegal
- * nodes are skipped with a toast naming the count (UX spec section 13). */
+ * nodes are skipped with a toast naming the count. */
 export function paste(): void {
   if (!clipboard) return;
   const s = useMirror.getState();
@@ -793,7 +848,7 @@ export function completeModelImport(primaryHash: string, primaryName: string): v
  * frame so a just-cooked node drops its badge. */
 export function runFrame(dtMs: number): void {
   // The surface must match the canvas BEFORE the frame is cooked and rendered:
-  // dockview can re-parent or resize the canvas at any time (Phase 10).
+  // dockview can re-parent or resize the canvas at any time.
   syncCanvasSize((w, h, dpr) => getClient().resize(w, h, dpr));
   applyToMirror(getClient().frame(dtMs));
   pumpImportJobs();

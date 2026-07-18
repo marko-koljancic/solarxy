@@ -1,8 +1,8 @@
 //! The node registry: descriptors, ports, contexts, bypass, and the
-//! registry invariants (node catalog part I, sections 1, 3, 6, 7).
+//! registry invariants (sections 1, 3, 6, 7).
 //!
 //! Adding a node is two touch points: one file in `nodes/` containing
-//! `descriptor()`, the cook function, the optional migrate hook, and unit
+//! `descriptor`, the cook function, the optional migrate hook, and unit
 //! tests; plus one registration line. The invariants below make the
 //! contract's implicit rules explicit and machine-checked.
 
@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::GraphError;
 use crate::cook::CookFn;
-use crate::document::GraphContext;
+use crate::document::ContextKind;
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
@@ -28,7 +28,7 @@ pub enum Arity {
     Single {
         required: bool,
     },
-    /// Ordered, unlimited, reorderable (decision 25).
+    /// Ordered, unlimited, reorderable.
     Variadic {
         min: usize,
     },
@@ -134,37 +134,67 @@ impl Category {
     }
 }
 
-/// Which canvases a node type may appear on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ContextMask {
-    pub root: bool,
-    pub subflow: bool,
+/// The visual silhouette family a node renders with in the web canvas.
+/// Orthogonal to [`Category`] (which picks the fill): a pure UI hint that
+/// never affects cooking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeRole {
+    Standard,
+    Container,
+    Gather,
+    Branch,
+    Terminal,
+    Analyzer,
+    ImageSource,
+    Light,
+    Note,
 }
 
-impl ContextMask {
-    pub const ROOT: Self = Self {
-        root: true,
-        subflow: false,
-    };
-    pub const SUBFLOW: Self = Self {
-        root: false,
-        subflow: true,
-    };
-    pub const BOTH: Self = Self {
-        root: true,
-        subflow: true,
-    };
+/// Which network kinds a node type may be placed in: a small bitset over
+/// [`ContextKind`]. The phase-17 generalization of the old two-bool
+/// root/subflow mask; legality is judged against the target graph's
+/// `kind`, never against its address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextSet(u8);
+
+impl ContextSet {
+    pub const OBJ: Self = Self::of(ContextKind::Obj);
+    pub const GEO: Self = Self::of(ContextKind::Geo);
+    pub const MAT: Self = Self::of(ContextKind::Mat);
+    pub const TEX: Self = Self::of(ContextKind::Tex);
+    /// Every kind (the note node's placement).
+    pub const ALL: Self = Self::OBJ.or(Self::GEO).or(Self::MAT).or(Self::TEX);
 
     #[must_use]
-    pub fn allows(&self, ctx: GraphContext) -> bool {
-        match ctx {
-            GraphContext::Root => self.root,
-            GraphContext::Subflow(_) => self.subflow,
-        }
+    pub const fn of(kind: ContextKind) -> Self {
+        Self(1 << kind as u8)
+    }
+
+    /// Set union, `const` so descriptor literals can compose
+    /// (`ContextSet::GEO.or(ContextSet::TEX)`).
+    #[must_use]
+    pub const fn or(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn contains(self, kind: ContextKind) -> bool {
+        self.0 & (1 << kind as u8) != 0
+    }
+
+    /// The member kinds in [`ContextKind::ALL`] order (the snapshot's
+    /// serialization).
+    #[must_use]
+    pub fn kinds(self) -> Vec<ContextKind> {
+        ContextKind::ALL
+            .into_iter()
+            .filter(|k| self.contains(*k))
+            .collect()
     }
 }
 
-/// Bypass semantics (node catalog part I, section 6).
+/// Bypass semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BypassBehavior {
     /// Output = that input's gathered value; the node is not cooked. On a
@@ -204,7 +234,13 @@ pub struct NodeTypeDescriptor {
     pub version: u32,
     pub display_name: &'static str,
     pub category: Category,
-    pub contexts: ContextMask,
+    pub contexts: ContextSet,
+    /// The network kind this node's child canvas is, for container nodes
+    /// (`geo` opens `Geo`, `matnet` opens `Mat`, `texnet` opens `Tex`).
+    /// `None` for everything else. The engine creates and kinds the child
+    /// network from this, so no container type is ever special-cased by
+    /// its `type_id`.
+    pub opens: Option<ContextKind>,
     pub inputs: Vec<PortSpec>,
     pub outputs: Vec<PortSpec>,
     pub params: Vec<ParamSpec>,
@@ -212,6 +248,12 @@ pub struct NodeTypeDescriptor {
     /// Markdown node help; also feeds the generated wiki reference.
     pub doc: &'static str,
     pub search_aliases: &'static [&'static str],
+    /// Stable icon key the web frontend maps to vector art; by convention
+    /// the type id (lights drop their `_light` suffix). An unknown key
+    /// falls back to the category glyph client-side.
+    pub glyph: &'static str,
+    /// The silhouette family the node renders with.
+    pub role: NodeRole,
     pub cook: CookFn,
     pub migrate: Option<MigrateFn>,
 }
@@ -416,21 +458,34 @@ impl Registry {
                     ));
                 }
             }
-            // MVP context consistency: root-context nodes are portless
-            // (lights cook at root portless; geo and note carry no ports).
-            if desc.contexts.root && (!desc.inputs.is_empty() || !desc.outputs.is_empty()) {
+            // Context consistency: nodes placeable in the object network
+            // are portless (lights and cameras cook at root portless;
+            // containers and notes carry no ports). Cross-context data
+            // flow is by path reference, never by wire, so the object
+            // canvas never needs handles.
+            if desc.contexts.contains(ContextKind::Obj)
+                && (!desc.inputs.is_empty() || !desc.outputs.is_empty())
+            {
                 violations.push(format!(
-                    "'{id}': root-context nodes are portless in the MVP catalog"
+                    "'{id}': nodes placeable in the object network are portless"
                 ));
             }
             // Every param default that is an Asset must be the unset
-            // (empty) reference; concrete assets cannot be defaults.
+            // (empty) reference; concrete assets cannot be defaults. The
+            // same rule binds NodePath defaults: a node id baked into a
+            // descriptor could never resolve in a fresh document.
             for p in &desc.params {
                 if let ParamValue::Asset(asset) = &p.default
                     && !asset.0.is_empty()
                 {
                     violations.push(format!(
                         "'{id}': param '{}' defaults to a concrete asset",
+                        p.key
+                    ));
+                }
+                if let ParamValue::NodeRef(Some(_)) = &p.default {
+                    violations.push(format!(
+                        "'{id}': param '{}' defaults to a concrete node reference",
                         p.key
                     ));
                 }

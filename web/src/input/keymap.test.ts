@@ -69,8 +69,8 @@ describe("viewport tools (phase 11)", () => {
     expect(lookupBinding("w", "viewport")?.id).toBe("tool-move");
   });
 
-  it("binds E and R now that Phase 12 has wired rotate and scale", () => {
-    // Phase 11 left these deliberately unbound, because a key that silently does
+  it("binds E and R for rotate and scale", () => {
+ // left these deliberately unbound, because a key that silently does
     // nothing is worse than no key. Their gizmos exist now, so the keys do too.
     expect(lookupBinding("e", "viewport")?.id).toBe("tool-rotate");
     expect(lookupBinding("r", "viewport")?.id).toBe("tool-scale");

@@ -1,4 +1,4 @@
-//! The `compute_normals` modifier (node catalog part II, section 13).
+//! The `compute_normals` modifier.
 //! Recomputes vertex normals via the core face-normal-accumulation kernel;
 //! `flip_orientation` reverses winding and negates normals.
 
@@ -10,7 +10,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -19,7 +19,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Compute Normals",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
@@ -45,8 +46,25 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Recomputes per-vertex normals from the triangle topology.",
+        doc: "Rebuilds every mesh's vertex normals from its triangles. Each \
+              triangle's geometric normal is accumulated onto the three points \
+              it touches and the sum is normalized, so a point shared by \
+              several triangles ends up carrying their area-weighted \
+              average.\n\n\
+              Reach for it when an import arrives with no normals, or with \
+              normals that disagree with the surface, or after something \
+              upstream left them stale. The `validate` node's Normals check \
+              reports exactly what this clears, so the two pair naturally: \
+              validate to see the problem, compute_normals to fix it.\n\n\
+              It can only smooth where points are actually shared. Primitives \
+              split their corners so that each face carries its own copy -- a \
+              box has 24 points for 8 corners -- and recomputing normals on \
+              one leaves it just as flat-shaded as before. Smooth shading out \
+              of split geometry needs the points welded first, which this node \
+              does not do.",
         search_aliases: &["normals", "recompute", "smooth"],
+        glyph: "compute_normals",
+        role: NodeRole::Standard,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

@@ -1,9 +1,17 @@
 // Registry-snapshot-derived helpers: typed-handle presentation (color +
-// shape by DataType, UX spec section 6) and connection legality from the
+// shape by DataType) and connection legality from the
 // coercion matrix. All data-driven, so a new node reusing existing types
 // needs zero changes here.
 
-import type { CoercionKind, DataType, NodeTypeSnapshot, RegistrySnapshot } from "../engine/types";
+import type {
+  CoercionKind,
+  ContextKind,
+  DataType,
+  GraphContext,
+  NodeMirror,
+  NodeTypeSnapshot,
+  RegistrySnapshot,
+} from "../engine/types";
 
 /** Handle color by DataType family (theme-owned tokens). */
 export const DATA_TYPE_COLOR: Record<DataType, string> = {
@@ -19,6 +27,10 @@ export const DATA_TYPE_COLOR: Record<DataType, string> = {
   color: "#f5a623",
   text: "#9aa0a6",
   image: "#e879c8",
+  // A copper hue unused by the twelve
+  // existing types; the hexagon groups it with Image as a resource
+  // handle (dual encoding still holds: hue differs).
+  material: "#c96f4a",
 };
 
 /** Handle shape channel for color-blind safety. */
@@ -27,7 +39,7 @@ export type HandleShape = "round" | "diamond" | "square" | "hexagon";
 export function dataTypeShape(dt: DataType): HandleShape {
   if (dt === "int") return "diamond";
   if (dt === "color") return "square";
-  if (dt === "image") return "hexagon";
+  if (dt === "image" || dt === "material") return "hexagon";
   return "round";
 }
 
@@ -37,6 +49,23 @@ export function descriptorFor(
   typeId: string,
 ): NodeTypeSnapshot | undefined {
   return reg?.nodes.find((n) => n.typeId === typeId);
+}
+
+/** The network kind of a canvas: the root is "obj"; a child canvas is
+ * whatever its owning container's descriptor `opens` ("geo" when the
+ * owner or its descriptor is unknown, the only pre-context child kind).
+ * `ownerNodes` is the graph holding the owning container (the root graph
+ * while containers are root-only; the N-level breadcrumb generalizes the
+ * lookup). */
+export function contextKind(
+  reg: RegistrySnapshot | null,
+  current: GraphContext,
+  ownerNodes: NodeMirror[],
+): ContextKind {
+  if (current === "root") return "obj";
+  const owner = ownerNodes.find((n) => n.id === current.subflow);
+  if (!owner) return "geo";
+  return descriptorFor(reg, owner.typeId)?.opens ?? "geo";
 }
 
 /** A port's DataType, resolved from the descriptor (null if unknown). */
@@ -54,7 +83,8 @@ export function portDataType(
 
 /** The param types the parameter panel renders a widget for (a new node
  * using only these needs zero frontend changes; a new ParamType is a
- * deliberate frontend addition). `assetRef` lands with imports (Phase 5). */
+ * deliberate frontend addition). `assetRef` lands with imports;
+ * `nodePath` is the phase-17 cross-context reference picker. */
 export const SUPPORTED_PARAM_TYPES = [
   "float",
   "int",
@@ -65,6 +95,7 @@ export const SUPPORTED_PARAM_TYPES = [
   "vec4",
   "color",
   "enum",
+  "nodePath",
 ] as const;
 
 export function isSupportedParamType(t: string): boolean {

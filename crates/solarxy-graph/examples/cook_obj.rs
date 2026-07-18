@@ -1,4 +1,4 @@
-//! The Phase 3 native smoke tool: builds a box -> transform -> merge graph
+//! The native smoke tool: builds a box -> transform -> merge graph
 //! through the direct document/cook API, cooks it, and writes the merged
 //! result as OBJ to stdout (or to a path argument).
 //!
@@ -13,7 +13,7 @@ use solarxy_graph::assets::AssetTable;
 use solarxy_graph::builtin_registry;
 use solarxy_graph::cook::CookEngine;
 use solarxy_graph::cook::state::CookStatus;
-use solarxy_graph::document::{Document, Edge, GraphContext, NodeData, NodeId};
+use solarxy_graph::document::{ContextKind, Document, Edge, GraphContext, NodeData, NodeId};
 use solarxy_graph::params::{ParamSource, ParamValue};
 use solarxy_graph::registry::coerce::Value;
 use solarxy_kernel::GeometrySet;
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // One subflow to work in (owned by a synthetic geo container id).
     let geo = doc.mint_node_id();
-    doc.create_subflow(geo);
+    doc.create_subflow(geo, ContextKind::Geo);
     let ctx = GraphContext::Subflow(geo);
 
     // Helpers over the direct API.

@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
 solarxy-formats = { path = "../solarxy-formats", default-features = false }
+solarxy-imaging = { path = "../solarxy-imaging" }
 solarxy-kernel = { path = "../solarxy-kernel" }
 solarxy-scenefile = { path = "../solarxy-scenefile" }
 cgmath = { workspace = true }

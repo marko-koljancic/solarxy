@@ -55,7 +55,7 @@
         },
         "projection": {
           "default": "perspective",
-          "description": "`\"perspective\"` (default) or `\"orthographic\"` (phase 6, per-pane projection). Serde-default so pre-phase-6 files load unchanged.",
+          "description": "`\"perspective\"` (default) or `\"orthographic\"`, per pane. Serde-default, so a file written before per-pane projection existed loads unchanged.",
           "type": "string"
         },
         "target": {
@@ -157,7 +157,7 @@
       "type": "object"
     },
     "EnvironmentJson": {
-      "description": "The lighting environment. Reserved for the Phase-6 HDRI/IBL flow; defaults are inert.",
+      "description": "The lighting environment. Reserved for the HDRI/IBL flow; defaults are inert.",
       "properties": {
         "background": {
           "additionalProperties": true,
@@ -277,7 +277,7 @@
       "type": "object"
     },
     "PaneJson": {
-      "description": "One viewport pane: its camera, display flags, inspection mode, and background. `display` and `background` are still opaque JSON (Phase 6 gives them structure).",
+      "description": "One viewport pane: its camera, display flags, inspection mode, and background. `display` and `background` are opaque JSON: the reader round-trips them without interpreting their contents.",
       "properties": {
         "background": {
           "additionalProperties": true,
@@ -303,6 +303,10 @@
             "yaw": 0.0
           }
         },
+        "camera_locked": {
+          "description": "Whether the look-through pane is locked (reframes the camera).",
+          "type": "boolean"
+        },
         "display": {
           "additionalProperties": true,
           "type": "object"
@@ -310,12 +314,20 @@
         "inspection": {
           "default": "shaded",
           "type": "string"
+        },
+        "look_through": {
+          "description": "The `camera` node this pane looks through (its id), or `None` for a free view. Serde-default so older scenes load unchanged.",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
     },
     "ReviewJson": {
-      "description": "Review annotations. The annotation shape is owned by `solarxy_core::review` (which has its own schema); the format carries each annotation opaquely so it survives save/load ahead of the Phase-7 review UI.",
+      "description": "Review annotations. The annotation shape is owned by `solarxy_core::review` (which has its own schema); the format carries each annotation opaquely, so it survives a save/load round trip without the format layer needing to understand it.",
       "properties": {
         "annotations": {
           "items": true,
@@ -341,6 +353,13 @@
           },
           "type": "array"
         },
+        "kind": {
+          "description": "The network kind (`\"geo\"`, `\"mat\"`, `\"tex\"`); absent in pre-context files, whose subflows were all geometry networks. The engine resolves an absent kind from the owning node's registry descriptor on load, so this field is advisory redundancy that keeps the file self-describing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nodes": {
           "default": [],
           "items": {
@@ -352,7 +371,7 @@
       "type": "object"
     },
     "ViewJson": {
-      "description": "The viewport layout and per-pane state. Phase 5 is a single shaded pane with an orbit camera; the multi-pane fields exist for Phase 6.",
+      "description": "The viewport layout and per-pane state: one entry per pane, each with its own camera and display settings.",
       "properties": {
         "active_pane": {
           "default": 0,
@@ -372,7 +391,7 @@
         },
         "split_ratio": {
           "default": 0.5,
-          "description": "Divider position for the two-pane layouts (phase 6); 0.5 when unset.",
+          "description": "Divider position for the two-pane layouts; 0.5 when unset.",
           "type": "number"
         }
       },

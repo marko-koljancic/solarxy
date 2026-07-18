@@ -1,6 +1,6 @@
-// The radial ring's screen anchor (Phase 10).
+// The radial ring's screen anchor.
 //
-// Before Phase 10 the ring captured the node's rect ONCE, when it opened, and
+// Before the ring captured the node's rect ONCE, when it opened, and
 // never moved again: pan or zoom and the ring drifted off its node. The fix is
 // to recompute the anchor on every viewport change, which RadialMenu does by
 // subscribing to the xyflow transform and re-measuring the node.

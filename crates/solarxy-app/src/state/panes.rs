@@ -1,5 +1,5 @@
 //! Split-viewport layout adapters: the pure pane math lives in
-//! `solarxy_renderer::panes` (moved there in web-milestone phase 6 so both
+//! `solarxy_renderer::panes` (moved there so both
 //! shells share it); this module anchors it to the egui-dock Viewport tab
 //! rect and the window scale factor, and converts the divider rects to
 //! egui's logical coordinate space.

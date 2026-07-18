@@ -1,21 +1,24 @@
-//! The six light nodes (node catalog part II, section 12): point,
+//! The six light nodes: point,
 //! directional, spot, ambient, hemisphere, rect-area.
 //!
 //! Lights are portless, root-context, `Mute`-bypassable, and cook
 //! passively: their `LightDef` is resolved directly from their params by
 //! the engine's scene builder (`engine::scene`), not carried on a wire.
 //! Shadow-capable lights (point / directional / spot) carry `cast_shadow`
-//! with exclusive-caster radio semantics enforced downstream (decision 27).
+//! with exclusive-caster radio semantics enforced downstream.
 
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
 /// The `visible` / `show_helper` / `helper_size` group every light carries.
-fn helper_group() -> Vec<ParamSpec> {
+/// The helper docs are passed per light: the shape differs by kind, and for
+/// ambient (which draws nothing) and rect-area (which sizes itself from its
+/// width and height) these controls are inert, which the doc has to say.
+fn helper_group(show_helper_doc: &str, helper_size_doc: &str) -> Vec<ParamSpec> {
     vec![
         ParamSpec::new(
             "visible",
@@ -23,6 +26,11 @@ fn helper_group() -> Vec<ParamSpec> {
             "rendering",
             ParamType::Bool,
             ParamValue::Bool(true),
+        )
+        .doc(
+            "Whether this light is in the scene at all. Off removes its \
+             contribution and hides its helper, and releases its slot in the \
+             8-light budget for the next light that wants one.",
         ),
         ParamSpec::new(
             "show_helper",
@@ -30,7 +38,8 @@ fn helper_group() -> Vec<ParamSpec> {
             "rendering",
             ParamType::Bool,
             ParamValue::Bool(false),
-        ),
+        )
+        .doc(show_helper_doc),
         ParamSpec::new(
             "helper_size",
             "Helper Size",
@@ -38,11 +47,12 @@ fn helper_group() -> Vec<ParamSpec> {
             ParamType::Float,
             ParamValue::Float(1.0),
         )
-        .hard(0.1, 10.0),
+        .hard(0.1, 10.0)
+        .doc(helper_size_doc),
     ]
 }
 
-fn color_param(key: &str, label: &str, default: [f32; 4]) -> ParamSpec {
+fn color_param(key: &str, label: &str, default: [f32; 4], doc: &str) -> ParamSpec {
     ParamSpec::new(
         key,
         label,
@@ -50,6 +60,7 @@ fn color_param(key: &str, label: &str, default: [f32; 4]) -> ParamSpec {
         ParamType::Color,
         ParamValue::Color(default),
     )
+    .doc(doc)
 }
 
 fn intensity(default: f64) -> ParamSpec {
@@ -62,6 +73,73 @@ fn intensity(default: f64) -> ParamSpec {
     )
     .hard(0.0, 1000.0)
     .soft(0.0, 10.0)
+    .doc(
+        "Linear multiplier on this light's contribution. 0 turns it off \
+         without removing it from the scene, which is the quick way to A/B a \
+         light you want to keep. The scale is arbitrary rather than \
+         photometric -- there are no lumens or watts behind it -- so match \
+         lights against each other by eye, not against real-world figures.",
+    )
+}
+
+/// Shared by the three shadow-capable lights (identical group, type, and
+/// default on each), so the exclusive-caster rule is stated once.
+fn cast_shadow_param() -> ParamSpec {
+    ParamSpec::new(
+        "cast_shadow",
+        "Cast Shadow",
+        "light",
+        ParamType::Bool,
+        ParamValue::Bool(true),
+    )
+    .doc(
+        "Whether this light renders the shadow map. Exactly one light in the \
+         scene may cast at a time: switching this on here switches it off on \
+         every other light, as a single undo step. Switching it off here \
+         leaves the scene with no shadows until you grant it to another light.",
+    )
+}
+
+/// Shared by point and spot (identical spec on both).
+fn range_param() -> ParamSpec {
+    ParamSpec::new(
+        "range",
+        "Range",
+        "light",
+        ParamType::Float,
+        ParamValue::Float(0.0),
+    )
+    .hard(0.0, 100_000.0)
+    .soft(0.0, 1000.0)
+    .unit(Unit::Meters)
+    .doc(
+        "Distance at which the light's contribution reaches zero, in metres. \
+         0, the default, means no cutoff at all: the light carries \
+         infinitely far and only Decay dims it. Above 0 the falloff is \
+         windowed so brightness arrives at exactly zero on the Range sphere, \
+         which is how you stop a lamp from lighting the far side of a set. \
+         Range and Decay are independent; both apply when both are set.",
+    )
+}
+
+/// Shared by point and spot (identical spec on both).
+fn decay_param() -> ParamSpec {
+    ParamSpec::new(
+        "decay",
+        "Decay",
+        "light",
+        ParamType::Float,
+        ParamValue::Float(2.0),
+    )
+    .hard(0.0, 10.0)
+    .doc(
+        "Falloff exponent: brightness is divided by the distance raised to \
+         this power. The default 2 is physical inverse-square. 0 disables \
+         decay outright, so the light is equally bright at any distance -- \
+         handy for a flat fill, wrong for anything meant to read as a real \
+         source. Values between 0 and 2 give the gentler falloff that is \
+         often easier to light with than the physical answer.",
+    )
 }
 
 fn map_size_param(default: &str) -> ParamSpec {
@@ -79,6 +157,14 @@ fn map_size_param(default: &str) -> ParamSpec {
         ParamValue::Enum(default.to_string()),
     )
     .show_if("cast_shadow", Pred::Truthy)
+    .doc(
+        "The resolution the shadow map would render at, trading crisper \
+         shadow edges against memory and fill cost. This control does \
+         nothing today: the shadow map size is fixed by the host (2048 in \
+         the web app) and nothing reads this value. It is resolved and saved \
+         with the document, waiting on the per-light shadow work, so setting \
+         it now changes neither the image nor performance.",
+    )
 }
 
 fn bias_param(default: f64) -> ParamSpec {
@@ -92,31 +178,48 @@ fn bias_param(default: f64) -> ParamSpec {
     .hard(-0.01, 0.01)
     .step(0.0001)
     .show_if("cast_shadow", Pred::Truthy)
+    .doc(
+        "Depth offset applied when testing against the shadow map, the usual \
+         dial for trading shadow acne against peter-panning. This control \
+         does nothing today: the shader hardcodes one bias for every caster \
+         and nothing reads this value. Dragging it will not change the \
+         image; if you are fighting acne, the bias is not currently yours to \
+         tune.",
+    )
 }
 
+/// `glyph` is the icon key: the type id with its `_light` suffix dropped
+/// (`point`, `directional`, ...), passed per light like the other identity
+/// fields.
 fn assemble(
     type_id: &'static str,
     display_name: &'static str,
     doc: &'static str,
     aliases: &'static [&'static str],
-    display: &str,
+    glyph: &'static str,
     specific: Vec<ParamSpec>,
+    helper_docs: (&str, &str),
 ) -> NodeTypeDescriptor {
-    let mut params = general_params(display);
+    // Every light's `name` default is its display name, so the two were
+    // always passed the same string; `general_params` takes it from here.
+    let mut params = general_params(display_name);
     params.extend(specific);
-    params.extend(helper_group());
+    params.extend(helper_group(helper_docs.0, helper_docs.1));
     NodeTypeDescriptor {
         type_id,
         version: 1,
         display_name,
         category: Category::Lights,
-        contexts: ContextMask::ROOT,
+        contexts: ContextSet::OBJ,
+        opens: None,
         inputs: vec![],
         outputs: vec![],
         params,
         bypass: BypassBehavior::Mute,
         doc,
         search_aliases: aliases,
+        glyph,
+        role: NodeRole::Light,
         cook: passive_cook,
         migrate: None,
     }
@@ -127,9 +230,23 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
     assemble(
         "point_light",
         "Point Light",
-        "An omnidirectional light with distance falloff.",
+        "An omnidirectional light: it emits from Position equally in every \
+         direction, dimming with distance according to Range and Decay.\n\n\
+         The workhorse for a local source -- a bulb, a candle, a muzzle \
+         flash. Drop it in the root graph beside your `geo` containers; it \
+         takes no wires, because the scene builder reads its params straight \
+         off the node rather than passing a light down a chain. Reach for \
+         `directional_light` when you want a sun instead, or `spot_light` \
+         when you want the same falloff inside a cone.\n\n\
+         Two limits bite. Only 8 point, spot, directional, and rect-area \
+         lights reach the shader: the first 8 in document order win and the \
+         rest are dropped with no warning anywhere, so a scene that quietly \
+         stops responding to new lights is probably at the cap (ambient and \
+         hemisphere lights are free, and an invisible light gives its slot \
+         back). And shadow casting is exclusive -- switching Cast Shadow on \
+         here switches it off on every other light, in one undo step.",
         &["light", "omni", "bulb"],
-        "Point Light",
+        "point",
         vec![
             ParamSpec::new(
                 "position",
@@ -138,37 +255,36 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([10.0, 10.0, 5.0]),
             )
-            .unit(Unit::Meters),
-            color_param("color", "Color", WHITE),
-            intensity(1.5),
-            ParamSpec::new(
-                "range",
-                "Range",
-                "light",
-                ParamType::Float,
-                ParamValue::Float(0.0),
-            )
-            .hard(0.0, 100_000.0)
-            .soft(0.0, 1000.0)
-            .unit(Unit::Meters),
-            ParamSpec::new(
-                "decay",
-                "Decay",
-                "light",
-                ParamType::Float,
-                ParamValue::Float(2.0),
-            )
-            .hard(0.0, 10.0),
-            ParamSpec::new(
-                "cast_shadow",
-                "Cast Shadow",
-                "light",
-                ParamType::Bool,
-                ParamValue::Bool(true),
+            .unit(Unit::Meters)
+            .doc(
+                "Where the light sits, in metres. Everything radiates from \
+                 here: Range and Decay measure their distance from this \
+                 point, and the helper sphere is drawn around it.",
             ),
+            color_param(
+                "color",
+                "Color",
+                WHITE,
+                "The light's color, linear RGB. It multiplies the surface \
+                 color, so a saturated light cannot put back a hue the \
+                 surface does not reflect. Alpha is ignored. Tint this \
+                 rather than Intensity when you want warmth, not brightness.",
+            ),
+            intensity(1.5),
+            range_param(),
+            decay_param(),
+            cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
         ],
+        (
+            "Draw a wireframe sphere at Position, so you can see where the \
+             light is without hunting for it. The helper is drawn in the \
+             light's own color, and is hidden whenever Visible is off.",
+            "How big the helper sphere is drawn, in world metres. Purely \
+             cosmetic -- it has no effect on the light itself. Raise it when \
+             the helper is lost in a large scene.",
+        ),
     )
 }
 
@@ -177,10 +293,22 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
     assemble(
         "directional_light",
         "Directional Light",
-        "A parallel light (like the sun); its shadow frustum auto-fits the \
-         scene bounds.",
+        "A parallel light, like the sun: every ray travels the same \
+         direction, so nothing is nearer to it and nothing falls off with \
+         distance. Only the direction from Position to Target matters.\n\n\
+         The key light for most scenes -- sun, moon, a large window. Aim it \
+         by moving Target rather than Position, and pair it with a \
+         `hemisphere_light` or `ambient_light` to lift the shadow side, \
+         because a directional light on its own leaves every face turned \
+         away from it black.\n\n\
+         Its Position lights nothing. The shading uses only the \
+         Position-to-Target direction, and the shadow frustum auto-fits the \
+         scene bounds instead of sitting at Position, so moving the node in \
+         space moves nothing but its helper arrow. It spends one of the 8 \
+         direct-light slots, and Cast Shadow is exclusive: granting it here \
+         revokes it from every other light in a single undo step.",
         &["light", "sun", "sky"],
-        "Directional Light",
+        "directional",
         vec![
             ParamSpec::new(
                 "position",
@@ -189,7 +317,15 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([10.0, 10.0, 5.0]),
             )
-            .unit(Unit::Meters),
+            .unit(Unit::Meters)
+            .doc(
+                "Where the helper arrow is drawn, in metres, and the tail of \
+                 the aiming vector. The shading ignores it: rays are \
+                 parallel, so only the direction toward Target counts, and \
+                 the shadow frustum fits itself to the scene rather than to \
+                 this point. Move it to park the helper somewhere readable; \
+                 the lighting will not change.",
+            ),
             ParamSpec::new(
                 "target",
                 "Target",
@@ -197,19 +333,37 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([0.0; 3]),
             )
-            .unit(Unit::Meters),
-            color_param("color", "Color", WHITE),
-            intensity(1.5),
-            ParamSpec::new(
-                "cast_shadow",
-                "Cast Shadow",
-                "light",
-                ParamType::Bool,
-                ParamValue::Bool(true),
+            .unit(Unit::Meters)
+            .doc(
+                "The point the light aims at, in metres. Only the direction \
+                 from Position to Target is used, so the distance between \
+                 them is irrelevant -- this is a rotation control wearing \
+                 XYZ clothes. If Target and Position coincide the light \
+                 falls back to pointing straight down.",
             ),
+            color_param(
+                "color",
+                "Color",
+                WHITE,
+                "The light's color, linear RGB. It multiplies the surface \
+                 color, so a saturated light cannot put back a hue the \
+                 surface does not reflect. Alpha is ignored. A slightly warm \
+                 sun against a cool `hemisphere_light` fill is the cheapest \
+                 believable daylight there is.",
+            ),
+            intensity(1.5),
+            cast_shadow_param(),
             map_size_param("2048"),
             bias_param(0.0001),
         ],
+        (
+            "Draw a wireframe arrow at Position pointing toward Target. \
+             Worth turning on while aiming: the direction is the only thing \
+             this light actually uses, and the arrow is the only way to see \
+             it. Hidden whenever Visible is off.",
+            "How long the helper arrow is drawn, in world metres. Purely \
+             cosmetic -- it has no effect on the light.",
+        ),
     )
 }
 
@@ -218,9 +372,21 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
     assemble(
         "spot_light",
         "Spot Light",
-        "A cone light with an angle and soft-edge penumbra.",
+        "A cone of light from Position toward Target: full intensity in the \
+         middle, nothing past the outer Angle, and a Penumbra that controls \
+         how abruptly it gets there.\n\n\
+         The pick for a deliberate pool of light -- a lamp, a torch, a stage \
+         special. It falls off with distance exactly like a `point_light` \
+         and shares its Range and Decay, so think of it as a point light \
+         wearing a cone; use the point light when you do not need the cone.\n\n\
+         Penumbra defaults to 0, which gives a razor-hard cone edge -- the \
+         classic tell of a CG spotlight, and rarely what you want; a little \
+         goes a long way. Angle is the HALF-angle, so the default 45 spreads \
+         90 degrees in total. The light spends one of the 8 direct-light \
+         slots, and Cast Shadow is exclusive: granting it here revokes it \
+         from every other light in a single undo step.",
         &["light", "cone", "flashlight"],
-        "Spot Light",
+        "spot",
         vec![
             ParamSpec::new(
                 "position",
@@ -229,7 +395,12 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([10.0, 10.0, 5.0]),
             )
-            .unit(Unit::Meters),
+            .unit(Unit::Meters)
+            .doc(
+                "The apex of the cone, in metres: where the light sits and \
+                 emits from. Range and Decay measure distance from this \
+                 point, and the helper cone is drawn from it toward Target.",
+            ),
             ParamSpec::new(
                 "target",
                 "Target",
@@ -237,27 +408,25 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([0.0; 3]),
             )
-            .unit(Unit::Meters),
-            color_param("color", "Color", WHITE),
+            .unit(Unit::Meters)
+            .doc(
+                "The point the cone aims at, in metres. Only the direction \
+                 from Position is used, so moving Target further away aims \
+                 the light without lengthening its reach -- that is Range. \
+                 If Target and Position coincide the light points straight \
+                 down.",
+            ),
+            color_param(
+                "color",
+                "Color",
+                WHITE,
+                "The light's color, linear RGB. It multiplies the surface \
+                 color, so a saturated light cannot put back a hue the \
+                 surface does not reflect. Alpha is ignored.",
+            ),
             intensity(1.5),
-            ParamSpec::new(
-                "range",
-                "Range",
-                "light",
-                ParamType::Float,
-                ParamValue::Float(0.0),
-            )
-            .hard(0.0, 100_000.0)
-            .soft(0.0, 1000.0)
-            .unit(Unit::Meters),
-            ParamSpec::new(
-                "decay",
-                "Decay",
-                "light",
-                ParamType::Float,
-                ParamValue::Float(2.0),
-            )
-            .hard(0.0, 10.0),
+            range_param(),
+            decay_param(),
             ParamSpec::new(
                 "angle",
                 "Angle",
@@ -266,7 +435,13 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                 ParamValue::Float(45.0),
             )
             .hard(1.0, 89.0)
-            .unit(Unit::Degrees),
+            .unit(Unit::Degrees)
+            .doc(
+                "Half-angle of the cone's outer edge, in degrees: the full \
+                 spread is twice this, so the default 45 is a 90-degree \
+                 cone. Nothing outside the angle receives any light. It also \
+                 sets the width of the helper cone.",
+            ),
             ParamSpec::new(
                 "penumbra",
                 "Penumbra",
@@ -275,17 +450,29 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                 ParamValue::Float(0.0),
             )
             .hard(0.0, 1.0)
-            .unit(Unit::Normalized),
-            ParamSpec::new(
-                "cast_shadow",
-                "Cast Shadow",
-                "light",
-                ParamType::Bool,
-                ParamValue::Bool(true),
+            .unit(Unit::Normalized)
+            .doc(
+                "How soft the cone edge is, 0 to 1. 0, the default, is a \
+                 hard edge: full intensity right up to Angle, then nothing. \
+                 Raising it shrinks the full-intensity inner cone toward the \
+                 centre -- the inner half-angle is Angle * (1 - Penumbra) -- \
+                 and fades across the gap, so 1 spreads the falloff over the \
+                 whole cone and leaves no flat core at all.",
             ),
+            cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
         ],
+        (
+            "Draw a wireframe cone from Position along the aim, at the outer \
+             Angle, plus a dimmer inner circle when Penumbra has opened a \
+             gap worth seeing. The cone is drawn out to Range when it has \
+             one, so the helper shows where the light actually stops.",
+            "How long the helper cone is drawn, in world metres, when Range \
+             is 0 (an unbounded light has no natural length to draw). Once \
+             Range is set the cone is drawn out to Range instead and this \
+             does nothing. Cosmetic either way.",
+        ),
     )
 }
 
@@ -294,11 +481,44 @@ pub fn ambient_descriptor() -> NodeTypeDescriptor {
     assemble(
         "ambient_light",
         "Ambient Light",
-        "A uniform fill light with no position or shadow; modulates the \
-         scene ambient/IBL term.",
+        "A uniform fill: it adds the same light to every surface, whatever \
+         its position and whichever way it faces. No position, no direction, \
+         no shadow, no falloff.\n\n\
+         The blunt instrument for lifting shadows that a key light left too \
+         dark. `hemisphere_light` is usually the better answer -- it costs \
+         the same and at least varies from sky to ground -- so reach for \
+         ambient when you specifically want flatness, or want a quick global \
+         lift while blocking out a scene.\n\n\
+         It costs no light slot: ambient and hemisphere lights fold into the \
+         ambient term instead of competing for the 8 direct-light slots, so \
+         stack as many as you like. Two honest limits: it ADDS to the IBL \
+         environment rather than scaling it, so it cannot dim an HDRI, and \
+         ambient occlusion still darkens it, so it will not fully flatten \
+         creases. Show Helper and Helper Size do nothing here -- with no \
+         position and no direction there is no honest shape to draw.",
         &["light", "fill", "environment"],
-        "Ambient Light",
-        vec![color_param("color", "Color", WHITE), intensity(0.5)],
+        "ambient",
+        vec![
+            color_param(
+                "color",
+                "Color",
+                WHITE,
+                "The fill color, linear RGB, multiplied by Intensity and \
+                 added to every surface equally. It multiplies the surface \
+                 color like any other light. Keep it dim and slightly tinted \
+                 -- a bright neutral ambient is what makes a render look \
+                 washed out and unlit. Alpha is ignored.",
+            ),
+            intensity(0.5),
+        ],
+        (
+            "This control does nothing on an ambient light. An ambient light \
+             has no position and no direction, so there is no shape to draw \
+             and no place to draw it; the viewport shows nothing however \
+             this is set.",
+            "This control does nothing on an ambient light: there is no \
+             helper to size.",
+        ),
     )
 }
 
@@ -307,14 +527,53 @@ pub fn hemisphere_descriptor() -> NodeTypeDescriptor {
     assemble(
         "hemisphere_light",
         "Hemisphere Light",
-        "A two-color sky/ground ambient light.",
+        "A two-tone ambient: Sky Color from above, Ground Color from below, \
+         blended across each surface by how far its normal tilts up or \
+         down. No position, no direction, no shadow.\n\n\
+         The default choice for fill, and a cheap stand-in for a real \
+         environment: a cool sky over a warm ground reads as outdoors \
+         without loading an HDRI. It sits under a `directional_light` key in \
+         most rigs. Prefer it to `ambient_light`, which costs exactly the \
+         same and gives none of the variation.\n\n\
+         It costs no light slot -- ambient and hemisphere lights fold into \
+         the ambient term rather than taking one of the 8 direct-light \
+         slots. The blend is decided purely by the surface normal, so it is \
+         a gradient in ORIENTATION, not in space: a floor at the top of your \
+         scene still gets Sky Color, and nothing occludes the light except \
+         ambient occlusion. Having no position, its helper dome always draws \
+         at the world origin no matter where the scene sits.",
         &["light", "sky", "gradient"],
-        "Hemisphere Light",
+        "hemisphere",
         vec![
-            color_param("sky_color", "Sky Color", WHITE),
-            color_param("ground_color", "Ground Color", [0.267, 0.267, 0.267, 1.0]),
+            color_param(
+                "sky_color",
+                "Sky Color",
+                WHITE,
+                "Linear RGB reaching surfaces that face up; multiplied by \
+                 Intensity. This is the dominant half in practice, because \
+                 most of what you light -- floors, shoulders, the tops of \
+                 things -- faces up. Alpha is ignored.",
+            ),
+            color_param(
+                "ground_color",
+                "Ground Color",
+                [0.267, 0.267, 0.267, 1.0],
+                "Linear RGB reaching surfaces that face down; multiplied by \
+                 Intensity. Read it as bounce off the floor, and tint it \
+                 toward whatever the floor is made of. Setting it equal to \
+                 Sky Color makes this light exactly an `ambient_light`. \
+                 Alpha is ignored.",
+            ),
             intensity(1.0),
         ],
+        (
+            "Draw a wireframe dome, in Sky Color, at the WORLD ORIGIN -- a \
+             hemisphere light has no position, so the dome cannot follow \
+             your scene. It is an indicator that the light exists, not a \
+             picture of where it is.",
+            "How big the helper dome is drawn, in world metres. Purely \
+             cosmetic -- it has no effect on the light.",
+        ),
     )
 }
 
@@ -327,10 +586,23 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
     let mut desc = assemble(
         "rect_area_light",
         "Rect Area Light",
-        "A rectangular area light (rendered as a soft point-light \
-         approximation in v1).",
+        "A rectangular emitter -- the softbox of the light kit -- with a \
+         Width and Height, sitting at Translate and facing straight down.\n\n\
+         What you would reach for it for: soft key and fill on a product or \
+         character shot, the broad specular roll-off that a panel gives and \
+         a pinpoint source cannot.\n\n\
+         It does not do that yet, and this is the node's central caveat. The \
+         renderer approximates it as a plain point light at Translate: Width \
+         and Height size the helper rectangle and are carried through to the \
+         renderer, but they do not reach the shading at all, so a 10 x 10 \
+         panel lights identically to a 0.1 x 0.1 one -- no softer shadows, \
+         no broader highlight. Helper Size is ignored too (the rectangle \
+         sizes itself from Width and Height), and this light cannot cast \
+         shadows at all, having no Cast Shadow param. It still spends one of \
+         the 8 direct-light slots. Until a real area-light model lands, a \
+         `point_light` is this node with fewer promises.",
         &["light", "area", "softbox", "panel"],
-        "Rect Area Light",
+        "rect_area",
         vec![
             ParamSpec::new(
                 "translate",
@@ -339,8 +611,22 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
                 ParamType::Vec3,
                 ParamValue::Vec3([0.0; 3]),
             )
-            .unit(Unit::Meters),
-            color_param("color", "Color", WHITE),
+            .unit(Unit::Meters)
+            .doc(
+                "The centre of the rectangle, in metres, and the point the \
+                 approximating point light actually emits from. The \
+                 rectangle always lies flat and faces straight down: v2 \
+                 dropped the rotation params because nothing read them, so \
+                 this is the only way to place the light.",
+            ),
+            color_param(
+                "color",
+                "Color",
+                WHITE,
+                "The panel's color, linear RGB, multiplied by Intensity. It \
+                 multiplies the surface color like any other light. Alpha is \
+                 ignored.",
+            ),
             intensity(1.5),
             ParamSpec::new(
                 "width",
@@ -350,7 +636,15 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
                 ParamValue::Float(10.0),
             )
             .hard(0.1, 1000.0)
-            .unit(Unit::Meters),
+            .unit(Unit::Meters)
+            .doc(
+                "One edge length of the emitting rectangle, in metres. Today \
+                 it only sizes the helper rectangle: the shading treats this \
+                 light as a point at Translate and ignores the extent \
+                 entirely, so changing this will not soften a shadow or \
+                 widen a highlight. It is resolved and saved with the \
+                 document, ready for a real area-light model.",
+            ),
             ParamSpec::new(
                 "height",
                 "Height",
@@ -359,8 +653,21 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
                 ParamValue::Float(10.0),
             )
             .hard(0.1, 1000.0)
-            .unit(Unit::Meters),
+            .unit(Unit::Meters)
+            .doc(
+                "The other edge length of the emitting rectangle, in metres. \
+                 Like Width, it currently only sizes the helper rectangle \
+                 and has no effect on the shading.",
+            ),
         ],
+        (
+            "Draw the emitting rectangle at Translate, sized by Width and \
+             Height, with a short stub along its normal so the emitting side \
+             is unambiguous. Worth turning on: it is the only place Width \
+             and Height have any visible effect at all.",
+            "This control does nothing on a rect-area light. The helper \
+             rectangle takes its size from Width and Height instead.",
+        ),
     );
     desc.version = 2;
     desc.migrate = Some(super::common::migrate_strip_rect_area_transform);

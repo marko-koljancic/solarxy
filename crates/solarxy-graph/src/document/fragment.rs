@@ -14,15 +14,20 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::{Document, Edge, EdgeId, Graph, GraphContext, NodeData, NodeId};
+use crate::document::{ContextKind, Document, Edge, EdgeId, Graph, GraphContext, NodeData, NodeId};
 
-/// A serializable snapshot of one subflow's structure (rebuilt into a live
-/// `Graph` on insert). Keyed by owner id in [`GraphFragment::subflows`].
+/// A serializable snapshot of one child network's structure (rebuilt into
+/// a live `Graph` on insert). Keyed by owner id in
+/// [`GraphFragment::subflows`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubflowFragment {
     pub nodes: Vec<NodeData>,
     pub edges: Vec<Edge>,
     pub active_output: Option<NodeId>,
+    /// The captured network's kind. `None` on pre-context clipboard
+    /// payloads, which could only ever hold geo subflows.
+    #[serde(default)]
+    pub kind: Option<ContextKind>,
 }
 
 impl SubflowFragment {
@@ -31,12 +36,13 @@ impl SubflowFragment {
             nodes: graph.nodes().cloned().collect(),
             edges: graph.edges().cloned().collect(),
             active_output: graph.active_output,
+            kind: Some(graph.kind),
         }
     }
 
     /// Rebuilds a live `Graph` (topology re-derived from the edges).
     fn to_graph(&self) -> Graph {
-        let mut graph = Graph::new();
+        let mut graph = Graph::new(self.kind.unwrap_or(ContextKind::Geo));
         for node in &self.nodes {
             graph.add_node(node.clone());
         }
@@ -54,7 +60,7 @@ impl SubflowFragment {
 }
 
 /// A self-contained graph slice. Serializable: the clipboard places it on
-/// the system clipboard as JSON, and Phase 5's `.slxy` format reuses these
+/// the system clipboard as JSON, and the `.slxy` format reuses these
 /// same schema types.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphFragment {
@@ -95,15 +101,21 @@ impl GraphFragment {
             .filter(|e| set.contains(&e.from) && set.contains(&e.to))
             .cloned()
             .collect();
-        let subflows = nodes
-            .iter()
-            .filter(|n| n.type_id == "geo")
-            .filter_map(|n| {
-                doc.graph(GraphContext::Subflow(n.id))
-                    .ok()
-                    .map(|g| (n.id, SubflowFragment::from_graph(g)))
-            })
-            .collect();
+        // Capture the child network of ANY captured node that owns one,
+        // TRANSITIVELY: a nested container's network rides along too.
+        // Owner ids are document-unique, so the map stays flat
+        // (registry-independent: ownership itself is the container test).
+        let mut subflows = BTreeMap::new();
+        let mut stack: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        while let Some(owner) = stack.pop() {
+            if subflows.contains_key(&owner) {
+                continue;
+            }
+            if let Ok(g) = doc.graph(GraphContext::Subflow(owner)) {
+                stack.extend(g.nodes().map(|n| n.id));
+                subflows.insert(owner, SubflowFragment::from_graph(g));
+            }
+        }
         Self {
             nodes,
             edges,
@@ -119,12 +131,18 @@ impl GraphFragment {
     /// Skips nodes whose type is illegal in the target context, reporting
     /// them; boundary edges (to nodes not in the fragment) are only
     /// restorable in `PreserveIds` mode and are the caller's concern.
+    ///
+    /// `opens` supplies the registry's container knowledge (which node
+    /// types own a child network, and of what kind) without this module
+    /// depending on the registry: a container pasted WITHOUT a captured
+    /// child network still gets a fresh empty one of the right kind.
     pub fn insert_into(
         &self,
         doc: &mut Document,
         ctx: GraphContext,
         mode: InsertMode,
         context_ok: &dyn Fn(&str) -> bool,
+        opens: &dyn Fn(&str) -> Option<ContextKind>,
     ) -> InsertResult {
         let mut node_map: BTreeMap<NodeId, NodeId> = BTreeMap::new();
         let mut inserted = Vec::new();
@@ -156,16 +174,26 @@ impl GraphFragment {
             if mode == InsertMode::Remap {
                 clone.port_order.clear();
             }
-            // Restore an owned subflow (geo nodes). Remap of a subflow's
-            // inner ids is a Phase-4+ concern; on remap the paste currently
-            // reuses inner ids, which is correct for undo (PreserveIds) and
-            // acceptable for a single paste (the ids stay document-unique
-            // because they were minted before). A future refinement remaps
-            // inner ids too.
+            // Restore an owned child network (container nodes). Remap of a
+            // subflow's inner ids is a Phase-4+ concern; on remap the paste
+            // currently reuses inner ids, which is correct for undo
+            // (PreserveIds) and acceptable for a single paste (the ids stay
+            // document-unique because they were minted before). A future
+            // refinement remaps inner ids too.
             if let Some(subflow) = self.subflows.get(&node.id) {
                 doc.restore_subflow(new_id, subflow.to_graph());
-            } else if node.type_id == "geo" {
-                doc.create_subflow(new_id);
+                // Restore nested networks transitively. Inner node ids are
+                // preserved in both modes (remap keeps inner ids, see the
+                // note above), so the flat owner-keyed map still matches.
+                let mut stack: Vec<NodeId> = subflow.nodes.iter().map(|n| n.id).collect();
+                while let Some(inner) = stack.pop() {
+                    if let Some(nested) = self.subflows.get(&inner) {
+                        stack.extend(nested.nodes.iter().map(|n| n.id));
+                        doc.restore_subflow(inner, nested.to_graph());
+                    }
+                }
+            } else if let Some(kind) = opens(&node.type_id) {
+                doc.create_subflow(new_id, kind);
             }
             if let Ok(graph) = doc.graph_mut(ctx) {
                 graph.add_node(clone);

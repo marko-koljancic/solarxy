@@ -39,14 +39,16 @@ function desc(
     displayName: "T",
     category,
     categoryLabel: category[0].toUpperCase() + category.slice(1),
-    rootContext: true,
-    subflowContext: true,
+    contexts: ["obj", "geo"],
+    opens: null,
     inputs: [],
     outputs: [],
     params,
     bypass: { mode: "mute" },
     doc: "",
     searchAliases: [],
+    glyph: "t",
+    role: "standard",
   };
 }
 

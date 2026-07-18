@@ -131,7 +131,12 @@ struct MaterialUniform {
     emissive: vec3<f32>,
     alpha_mode: u32,
     material_index: u32,
-    // Offset 48 (after the CPU struct's _pad); factor x map, glTF style.
+    // Per-material shading model (0 Pbr, 1 Matcap, 2 Toon, 3 Unlit,
+    // 4 Clay, 5 ClayDark, 6 Chrome, 7 Silhouette) and the toon band count,
+    // at offsets 32/36 (the former pad slots).
+    shading_model: u32,
+    toon_steps: f32,
+    // Offset 48 (vec4 alignment); factor x map, glTF style.
     base_color: vec4<f32>,
 }
 @group(0) @binding(8) var<uniform> material: MaterialUniform;
@@ -284,6 +289,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4(0.0, 0.0, 0.0, 1.0);
     }
 
+    // Per-material shading model. A global viewport override
+    // (camera.material_override != 0u) wins over the per-material model,
+    // so inspection and override workflows see every object uniformly.
+    let model_id = select(0u, material.shading_model, camera.material_override == 0u);
+
+    if model_id == 7u {
+        // Silhouette: solid black, no lighting.
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    if model_id == 3u {
+        // Unlit: flat factor x map (glTF KHR_materials_unlit).
+        return vec4(material.base_color.rgb * albedo_sample.rgb, base_alpha);
+    }
+    if model_id == 1u {
+        // Matcap: the base-color texture IS the matcap, sampled by the
+        // view-space normal (explicit level: sampling stays valid under
+        // WebGPU's uniformity analysis, and matcaps need no mips).
+        let n_view =
+            normalize((camera.view * vec4(normalize(in.world_normal), 0.0)).xyz);
+        let uv_m = n_view.xy * vec2(0.5, -0.5) + 0.5;
+        let matcap = textureSampleLevel(t_diffuse, s_diffuse, uv_m, 0.0).rgb;
+        return vec4(material.base_color.rgb * matcap, 1.0);
+    }
+
     var albedo: vec3<f32>;
     var roughness: f32;
     var metallic: f32;
@@ -293,7 +322,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
 
-    if camera.material_override == 0u {
+    if camera.material_override == 0u && model_id >= 4u && model_id <= 6u {
+        // The promoted per-material Clay / ClayDark / Chrome looks: the
+        // same constants as the matching global overrides.
+        switch model_id {
+            case 4u: { albedo = vec3(0.8); roughness = 0.7; metallic = 0.0; }
+            case 5u: { albedo = vec3(0.025); roughness = 1.0; metallic = 0.0; }
+            default: { albedo = vec3(0.05); roughness = 0.03; metallic = 1.0; }
+        }
+        ao = 1.0;
+        emissive_color = vec3(0.0);
+        N = vec3(0.0, 0.0, 1.0);
+    } else if camera.material_override == 0u {
         let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
         let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
         let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
@@ -347,7 +387,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let brdf = textureSampleLevel(t_brdf_lut, s_brdf_lut, brdf_uv, 0.0).rg;
     let specular_ibl_pbr = prefiltered_color * (F0 * brdf.x + brdf.y);
 
-    let is_clay = camera.material_override == 1u || camera.material_override == 2u;
+    let is_clay = camera.material_override == 1u || camera.material_override == 2u
+        || model_id == 4u || model_id == 5u;
     let ibl_ambient = vec3<f32>(lights.ibl_avg_r, lights.ibl_avg_g, lights.ibl_avg_b);
     let diffuse_ibl = select(diffuse_ibl_pbr, ibl_ambient * albedo, is_clay);
     let specular_ibl = select(specular_ibl_pbr, vec3<f32>(0.0), is_clay);
@@ -369,8 +410,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow = select(1.0, textureSampleCompare(shadow_map, shadow_sampler, uv, proj.z + SHADOW_BIAS), in_map);
 
     var radiance_acc = vec3(0.0);
+    let is_toon = model_id == 2u;
 
-    if camera.material_override != 3u {
+    // Chrome (global 3u or per-material 6u) is env-reflection-only: it
+    // skips the direct-light loop entirely.
+    if camera.material_override != 3u && model_id != 6u {
         // All lighting runs in tangent space; the TBN is orthonormal, so
         // distances and angles match their world-space values.
         for (var i = 0u; i < lights.count; i++) {
@@ -420,11 +464,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
             let shadow_factor = select(1.0, shadow, light.shadowed > 0.5);
             let scale = light.intensity * 3.0 * atten * shadow_factor;
-            let brdf = select(
+            var brdf = select(
                 cook_torrance(N, V, L, albedo, roughness, metallic),
                 lambert_direct(N, L, albedo),
                 is_clay,
             );
+            if is_toon {
+                // Cel shading: quantize the diffuse term into
+                // material.toon_steps bands (a stepped lambert).
+                let ndotl = max(dot(N, L), 0.0);
+                let banded = floor(ndotl * material.toon_steps)
+                    / max(material.toon_steps - 1.0, 1.0);
+                brdf = albedo / PI * clamp(banded, 0.0, 1.0);
+            }
             radiance_acc += light.color * brdf * scale;
         }
     }

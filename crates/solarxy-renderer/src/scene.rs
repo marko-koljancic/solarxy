@@ -116,7 +116,7 @@ impl ModelScene {
     /// Load a model file from disk and build its full GPU scene state.
     /// Path-based by nature; a byte-fed scene assembles the same public
     /// fields from `resources::upload_model` output (multi-object scenes
-    /// replace this in the web milestone's phase 2).
+    /// replace this).
     #[cfg(feature = "std-fs")]
     #[allow(clippy::too_many_arguments)]
     pub fn new(

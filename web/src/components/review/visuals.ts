@@ -11,12 +11,16 @@ export const CATEGORY_LABELS: Record<ReviewCategory, string> = {
   change: "Change",
 };
 
-/** The pin glyph (desktop parity: i / ! / ? / a pen). */
+/** The pin glyph. Must stay identical to the desktop set in
+ * `gui/review_visuals.rs`: a marker and its panel chip are correlated by
+ * BOTH color and glyph, so a shell-specific glyph breaks the cue for anyone
+ * who uses both. "change" drew a `*` here against the desktop's pen until
+ * 0.7.1, under a comment that claimed it was already a pen. */
 export const CATEGORY_GLYPHS: Record<ReviewCategory, string> = {
   info: "i",
   warning: "!",
   question: "?",
-  change: "*",
+  change: "✎",
 };
 
 /** Relative time for annotation rows ("3h ago"); falls back to the raw

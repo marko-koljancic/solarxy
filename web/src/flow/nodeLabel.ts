@@ -1,4 +1,4 @@
-// The one node-label rule (Phase 8 rename chain): the per-node `name`
+// The one node-label rule (rename chain): the per-node `name`
 // param when set and non-empty, else the type display name, else the type
 // id. Every label surface (FlowNode title, FlowListView cell, parameter
 // panel header, breadcrumb) goes through this helper so a rename is

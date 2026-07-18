@@ -1,4 +1,4 @@
-// Dock layouts (Phase 10).
+// Dock layouts.
 //
 // A desk's arrangement is one of two things:
 //
@@ -16,7 +16,7 @@
 
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 
-export const PANEL_IDS = ["viewport", "nodes", "properties", "review"] as const;
+export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export type ViewportSide = "left" | "right";

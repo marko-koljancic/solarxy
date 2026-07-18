@@ -30,10 +30,26 @@ import { usePrefs } from "../store/prefs";
 import { useUi, type EdgeStyle } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { FlowNode, type FlowNodeData } from "./FlowNode";
+import { setFlowProjection } from "./flowProjection";
 import { NoteNode } from "./NoteNode";
 import { RadialMenu } from "./RadialMenu";
 
 const NODE_TYPES = { solarxy: FlowNode, note: NoteNode };
+
+/** The background dot-grid pitch; snap-to-grid locks drags to the
+ * same lattice so the two stay one concept. */
+const GRID_GAP = 18;
+
+/** Minimap tint: each node carries its category pastel so the
+ * overview map reads as a scaled-down graph, not uniform blocks. */
+function minimapNodeColor(registry: RegistrySnapshot | null) {
+  return (n: Node): string => {
+    if (n.type === "note") return "var(--background-tertiary)";
+    const data = n.data as FlowNodeData | undefined;
+    const desc = data ? descriptorFor(registry, data.node.typeId) : undefined;
+    return desc ? `var(--node-cat-${desc.category})` : "var(--geometry-node-background)";
+  };
+}
 
 /** Connection styles map onto xyflow's built-in edge types, so the typed
  * color classes (edge-type-*, edge-lossy) apply to every style unchanged.
@@ -99,8 +115,9 @@ export function NodeCanvas() {
   const showFlowGrid = useUi((s) => s.showFlowGrid);
   const showMinimap = useUi((s) => s.showMinimap);
   const showFlowControls = useUi((s) => s.showFlowControls);
+  const snapToGrid = useUi((s) => s.snapToGrid);
   const edgeStyle = useUi((s) => s.edgeStyle);
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
 
   // Auto-layout completion fits the view (the layout module emits this
   // after its moveNodes command lands).
@@ -109,6 +126,15 @@ export function NodeCanvas() {
     window.addEventListener("solarxy:fitView", onFit);
     return () => window.removeEventListener("solarxy:fitView", onFit);
   }, [fitView]);
+
+  // Publish the projection for NodePalette, which renders outside this
+  // provider (it must survive list view) and so cannot call useReactFlow.
+  // Nulled on unmount, so a palette opened in list view falls back instead of
+  // projecting through a stale transform.
+  useEffect(() => {
+    setFlowProjection((p) => screenToFlowPosition(p));
+    return () => setFlowProjection(null);
+  }, [screenToFlowPosition]);
 
   const seed = useMemo(() => toRf(graph, registry, edgeStyle), [graph, registry, edgeStyle]);
   const [nodes, setNodes, onNodesChange] = useNodesState(seed.nodes);
@@ -217,7 +243,7 @@ export function NodeCanvas() {
   );
 
   // A drop on an incompatible handle rejects with a toast NAMING BOTH
-  // TYPES (UX spec section 6: "Cannot connect Geometry to Float"); the
+  // TYPES (section 6: "Cannot connect Geometry to Float"); the
   // wire also snaps back, React Flow's built-in visual feedback.
   const onConnectEnd = useCallback(
     (
@@ -268,11 +294,12 @@ export function NodeCanvas() {
     [ctx],
   );
 
-  // Double-click a geo container to enter its subflow.
+  // Double-click a container to enter its child network. Ownership is the
+  // descriptor's `opens` (any network kind), never a category or type id.
   const onNodeDoubleClick = useCallback(
     (_e: React.MouseEvent, node: Node<FlowNodeData>) => {
       const mirror = graph.nodes.find((n) => n.id === Number(node.id));
-      if (mirror && descriptorFor(registry, mirror.typeId)?.category === "container") {
+      if (mirror && descriptorFor(registry, mirror.typeId)?.opens != null) {
         useMirror.getState().setCurrent({ subflow: mirror.id });
       }
     },
@@ -303,20 +330,47 @@ export function NodeCanvas() {
       deleteKeyCode={["Backspace", "Delete"]}
       multiSelectionKeyCode={["Meta", "Control"]}
       connectionLineType={RF_EDGE_TYPE[edgeStyle]}
+      snapToGrid={snapToGrid}
+      snapGrid={[GRID_GAP, GRID_GAP]}
       zoomOnDoubleClick={false}
       fitView
       proOptions={{ hideAttribution: true }}
       colorMode={resolvedTheme}
     >
       {showFlowGrid && (
-        <Background gap={18} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
+        <Background gap={GRID_GAP} color={resolvedTheme === "dark" ? "#3c3c3c" : "#d8d8d8"} />
       )}
       {graph.nodes.length === 0 && (
+        // The first-session teaching hint (; revamp 08-02).
         <div className="canvas-empty-hint">
-          Press <kbd className="key-chip">Tab</kbd> to add a node - or drag one in from the palette.
+          <kbd className="key-chip">Tab</kbd>
+          <span className="empty-title">Press Tab to add a node</span>
+          <span className="empty-sub">
+            {current === "root"
+              ? "or drop a model file to import"
+              : "or drag one in from the palette"}
+          </span>
         </div>
       )}
-      {showMinimap && <MiniMap pannable zoomable className="flow-minimap" />}
+      {graph.nodes.length > 0 && graph.activeOutput === null && current !== "root" && (
+        // The cleared-display ghost chip (sec. 10; revamp 08-02):
+        // this subflow currently renders nothing.
+        <div className="ghost-chip-row">
+          <span className="ghost-chip">
+            <span className="ghost-dot" />
+            no display node
+          </span>
+          <span className="empty-sub">Set a node's display flag to render it</span>
+        </div>
+      )}
+      {showMinimap && (
+        <MiniMap
+          pannable
+          zoomable
+          className="flow-minimap"
+          nodeColor={minimapNodeColor(registry)}
+        />
+      )}
       {showFlowControls && <Controls showInteractive={false} />}
     </ReactFlow>
     {/* The hover radial lives INSIDE the flow (Phase 10) so it can subscribe to

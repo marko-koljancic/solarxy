@@ -12,10 +12,14 @@ import {
   assetDisplayName,
   dispatch,
   flyToIssue,
+  getClient,
   previewParam,
   stagedManifestNames,
   stageFile,
 } from "../engine/session";
+import { saveExportToFile } from "../persistence/opfs";
+import { pushToast } from "../store/toasts";
+import { useViewState } from "../store/viewState";
 import { hasMissing, missingSidecars, referencedSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
 import { DIRECTORY_PICKER } from "./directoryPicker";
@@ -24,6 +28,7 @@ import type {
   NodeMirror,
   ParamSnapshot,
   ParamSource,
+  RegistrySnapshot,
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
@@ -31,6 +36,7 @@ import { nodeLabel } from "../flow/nodeLabel";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
+import { Select } from "./Select";
 import { FloatInput } from "./inputs/FloatInput";
 import { VectorInput } from "./inputs/VectorInput";
 
@@ -43,7 +49,7 @@ function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
 
 /** Builds a literal ParamSource of the given descriptor param type. */
 function literal(paramType: string, value: unknown): ParamSource {
-  const tag = paramType === "assetRef" ? "asset" : paramType;
+  const tag = paramType === "assetRef" ? "asset" : paramType === "nodePath" ? "nodeRef" : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
 
@@ -119,17 +125,13 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <select
-            className="input-field select-input"
+          <Select
+            width={140}
+            ariaLabel={spec.label}
             value={String(value)}
-            onChange={(e) => commit(e.target.value)}
-          >
-            {spec.enumVariants.map(([key, lbl]) => (
-              <option key={key} value={key}>
-                {lbl}
-              </option>
-            ))}
-          </select>
+            options={spec.enumVariants.map(([key, lbl]) => ({ value: key, label: lbl }))}
+            onChange={(v) => commit(v)}
+          />
         </div>
       );
     case "text":
@@ -153,6 +155,10 @@ function Field({ ctx, node, spec }: FieldProps) {
       );
     case "assetRef":
       return <AssetField ctx={ctx} node={node} spec={spec} label={label} />;
+    case "nodePath":
+      return <NodePathField ctx={ctx} node={node} spec={spec} label={label} />;
+    case "action":
+      return <ActionField ctx={ctx} node={node} spec={spec} label={label} />;
     case "vec2":
     case "vec3":
     case "vec4": {
@@ -185,6 +191,106 @@ function Field({ ctx, node, spec }: FieldProps) {
  * control. Selecting a file stages its bytes (content-addressed) and commits
  * the asset hash as the param, which dirties the import node so the next cook
  * yields a parse job to the worker. */
+/** An Action param: a button whose press is routed by node
+ * type. Export nodes run the engine's encoder and save the bytes through
+ * the File System Access flow; the render node is HOST-interpreted (jump
+ * the active pane to its camera, then open the screenshot modal with its
+ * resolution preset). */
+function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
+  const registry = useMirror((s) => s.registry);
+  const run = async () => {
+    if (node.typeId === "render") {
+      const camSrc = node.params.camera_path;
+      const cam =
+        camSrc && camSrc.kind === "literal" ? ((camSrc as { value: number | null }).value) : null;
+      const width = numberParam(node, registry, "width", 1920);
+      const height = numberParam(node, registry, "height", 1080);
+      if (cam != null) {
+        const pane = useViewState.getState().view?.activePane ?? 0;
+        const view = getClient().jumpToCamera(pane, cam);
+        useViewState.getState().setView(view);
+      }
+      useUi.getState().setScreenshotPreset({ width, height });
+      useUi.getState().setScreenshotOpen(true);
+      return;
+    }
+    try {
+      const result = getClient().invokeAction(ctx, node.id, spec.key);
+      await saveExportToFile(result.bytes, result.filename, result.mime);
+      pushToast(`Exported ${result.filename}`);
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : String(e), "error");
+    }
+  };
+  return (
+    <div className="param-row">
+      {label}
+      <button className="tbtn param-action" onClick={() => void run()}>
+        {spec.label}
+      </button>
+    </div>
+  );
+}
+
+/** A numeric param's effective value (literal else registry default). */
+function numberParam(
+  node: NodeMirror,
+  registry: RegistrySnapshot | null,
+  key: string,
+  fallback: number,
+): number {
+  const src = node.params[key];
+  if (src && src.kind === "literal") return Number((src as { value: unknown }).value) || fallback;
+  const spec = descriptorFor(registry, node.typeId)?.params.find((p) => p.key === key);
+  return Number(spec?.default) || fallback;
+}
+
+/** The cross-context reference picker: candidates come from
+ * the root graph filtered by the descriptor's accept constraint (`opens`
+ * containers or one exact type), and the stored value is the target's
+ * stable node id, so renames never break a reference. A value pointing at
+ * a vanished node stays selectable as a labelled Missing entry rather
+ * than being silently rewritten. */
+function NodePathField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
+  const registry = useMirror((s) => s.registry);
+  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const value = paramValue(node, spec) as number | null;
+  const accept = spec.nodePath;
+  const candidates = rootNodes.filter((n) => {
+    if (!accept) return false;
+    if (accept.kind === "opens") return descriptorFor(registry, n.typeId)?.opens === accept.opens;
+    return n.typeId === accept.typeIs;
+  });
+  const missing = value != null && !candidates.some((n) => n.id === value);
+  const commit = (v: number | null) =>
+    dispatch({
+      type: "setParam",
+      ctx,
+      node: node.id,
+      key: spec.key,
+      value: { kind: "literal", type: "nodeRef", value: v },
+    });
+  return (
+    <div className="param-row">
+      {label}
+      <Select
+        width={140}
+        ariaLabel={spec.label}
+        value={value == null ? "" : String(value)}
+        options={[
+          { value: "", label: "None" },
+          ...(missing ? [{ value: String(value), label: `Missing node ${value}` }] : []),
+          ...candidates.map((n) => ({
+            value: String(n.id),
+            label: nodeLabel(n, descriptorFor(registry, n.typeId)),
+          })),
+        ]}
+        onChange={(v) => commit(v === "" ? null : Number(v))}
+      />
+    </div>
+  );
+}
+
 function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
   const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -321,7 +427,7 @@ export function ParameterPanel() {
     g.push(p);
     groups.set(p.group, g);
   }
-  // Tabs (Minimystix underline pattern, Phase 7b D1): general first, the
+ // Tabs (Minimystix underline pattern, D1): general first, the
   // rest in declaration order, plus a Validation tab when a report exists.
   const groupNames = [...groups.keys()];
   const orderedGroups = [

@@ -12,7 +12,7 @@
 //! material (factors, paths, alpha mode) plus raw RGBA blobs for the five
 //! texture roles (the `*_texture_data` fields are `serde(skip)` and travel
 //! binary), so the full PBR renderer consumes worker-parsed models
-//! (phase 6; the geometry-only form was the documented Phase-5 boundary).
+//! (the geometry-only form was the documented Phase-5 boundary).
 //! Bounds are recomputed by [`GeometrySet::from_parts`] on unpack. The
 //! format is versionless and same-origin (both sides are the same wasm
 //! build), so endianness is fixed little-endian.

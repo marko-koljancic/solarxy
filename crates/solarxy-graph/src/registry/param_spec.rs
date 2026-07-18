@@ -1,4 +1,4 @@
-//! Declarative parameter schemas (node catalog part I, section 4).
+//! Declarative parameter schemas.
 //!
 //! `ParamSpec` is what the parameter panel interprets and what the
 //! resolver enforces. Conventions frozen here: hard range = validity
@@ -48,6 +48,31 @@ pub enum ParamType {
     AssetRef {
         accept: Vec<String>,
     },
+    /// A properties-pane action button: no stored value of
+    /// consequence (an inert Bool rides the slot so the schema stays
+    /// uniform). The frontend renders the param's label as a button and
+    /// routes the press through the host's `invoke_action`.
+    Action,
+    /// A cross-context node reference: references cross contexts by path,
+    /// never by wire. The picker is
+    /// constrained by `accept`; the stored value is the target's stable
+    /// [`crate::document::NodeId`] (`ParamValue::NodeRef`).
+    NodePath {
+        accept: NodePathAccept,
+    },
+}
+
+/// What a [`ParamType::NodePath`] param may point at. Covers the ratified
+/// consumers concretely (material networks, texture networks, cameras)
+/// without speculative generality; a new target shape is a new variant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodePathAccept {
+    /// Container nodes whose descriptor opens a network of this kind
+    /// (a material reference accepts `Opens(Mat)` containers).
+    Opens(crate::document::ContextKind),
+    /// Nodes of one exact type (the render node's camera picker is
+    /// `TypeIs("camera")`).
+    TypeIs(String),
 }
 
 /// Unit annotation: drives the UI suffix and the resolver conversion

@@ -24,7 +24,9 @@ use solarxy_core::geometry::{
     compute_bounds, compute_normals, compute_tangent_basis, compute_tangent_from_normal,
     extract_edges,
 };
-use solarxy_core::scene::{CookedGeometry, CookedMesh, LightDef, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{
+    CameraDef, CookedGeometry, CookedMesh, LightDef, SceneDelta, SceneObjectId, SceneOp,
+};
 use solarxy_core::validation::ValidationResult;
 
 use crate::bind_groups::BindGroupLayouts;
@@ -85,6 +87,10 @@ pub struct SceneObjects {
     objects: BTreeMap<SceneObjectId, SceneObject>,
     lights: Option<Vec<LightDef>>,
     lights_dirty: bool,
+    /// Engine-provided cameras (from `camera` nodes). Non-drawn scene objects
+    /// the host reads back to drive a pane's look-through view and to draw the
+    /// wireframe camera gizmos.
+    cameras: Option<Vec<CameraDef>>,
     /// Content-addressed GPU textures shared across materials and cooks;
     /// swept when objects leave the scene.
     texture_cache: resources::TextureCache,
@@ -175,6 +181,14 @@ impl SceneObjects {
         std::mem::take(&mut self.lights_dirty)
     }
 
+    /// The engine-provided cameras (from `camera` nodes); `None` means no
+    /// `SetCameras` has arrived. The host reads these to drive a pane's
+    /// look-through view and to draw the wireframe camera gizmos.
+    #[must_use]
+    pub fn cameras(&self) -> Option<&[CameraDef]> {
+        self.cameras.as_deref()
+    }
+
     /// Union world-space-ish bounds over visible objects (object bounds
     /// only; transforms are not applied in v1 — good enough for the
     /// camera-framing and shadow-fit callers, refined with the engine).
@@ -246,11 +260,15 @@ impl SceneObjects {
                     self.lights = Some(lights.clone());
                     self.lights_dirty = true;
                 }
+                SceneOp::SetCameras { cameras } => {
+                    self.cameras = Some(cameras.clone());
+                }
                 SceneOp::Clear => {
                     self.objects.clear();
                     self.texture_cache.sweep();
                     self.lights = None;
                     self.lights_dirty = true;
+                    self.cameras = None;
                 }
             }
         }

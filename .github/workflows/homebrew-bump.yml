@@ -1,10 +1,19 @@
 # Bump the Solarxy Homebrew tap after each stable GitHub Release.
 #
 # Updates both:
-#   - Casks/solarxy.rb       — the GUI .dmg (cask). Version-only bump: the
-#     cask carries `sha256 :no_check` (the .app is ad-hoc signed), so no DMG
-#     download is needed — which also avoids racing the native-bundle job
-#     that uploads the DMG in the same release run.
+#   - Casks/solarxy.rb       — the GUI .dmg (cask). Bumps the version and fills
+#     the two per-arch sha256 values from the `*.dmg.sha256` companion files
+#     that native-bundle publishes beside each DMG.
+#
+#     This job used to bump the version only, because the cask carried
+#     `sha256 :no_check` and reading a DMG hash would have raced the
+#     native-bundle job that uploads it. Both halves of that are now fixed:
+#     `custom-homebrew-bump` gains `needs: custom-native-bundle` in
+#     release.yml, so the DMG and its companion exist before this runs.
+#     `:no_check` was not a free simplification — with no integrity gate, a
+#     failed staging step is only caught after the installed app has already
+#     been removed, which is exactly how a 0.6.0 -> 0.7.0 upgrade left a
+#     machine with no Solarxy at all.
 #   - Formula/solarxy-cli.rb — the CLI. Bumps the version and fills the four
 #     per-platform sha256 values from the `*.tar.xz.sha256` companion files
 #     cargo-dist publishes next to each binary tarball.
@@ -79,9 +88,49 @@ jobs:
           set -euo pipefail
           VERSION="${TAG#v}"
 
-          # Cask — version-only bump. `sha256 :no_check` stays and the URL
-          # interpolates #{version}, so nothing needs to be downloaded.
+          # Cask — bump the version, then fill each arch's sha256 from the
+          # `.dmg.sha256` companion native-bundle publishes. Ordered after
+          # native-bundle via `needs:` in release.yml, so the companions are
+          # already on the release when this runs.
           sed -i -E "s/^(  version )\"[^\"]*\"/\1\"${VERSION}\"/" tap/Casks/solarxy.rb
+          for arch in aarch64 x86_64; do
+            url="https://github.com/marko-koljancic/solarxy/releases/download/${TAG}/Solarxy-${VERSION}-${arch}.dmg.sha256"
+            sha=$(curl -fsSL "$url" | awk '{print $1}')
+            # A cask that cannot verify its download must not ship: bail rather
+            # than fall back to :no_check.
+            if [ -z "$sha" ]; then
+              echo "::error::Could not read sha256 for Solarxy-${VERSION}-${arch}.dmg"
+              exit 1
+            fi
+            case "$arch" in
+              aarch64) key="arm" ;;
+              x86_64)  key="intel" ;;
+            esac
+            sed -i -E "s/^(  sha256 ${key}:[[:space:]]+)\"[^\"]*\"/\1\"${sha}\"/;s/^([[:space:]]+${key}:[[:space:]]+)\"[^\"]*\"/\1\"${sha}\"/" tap/Casks/solarxy.rb
+          done
+
+          # Fail loudly if the cask still carries :no_check — a silently
+          # unverified cask is the failure mode this job exists to prevent.
+          # Anchored to a real stanza (optional indent, then `sha256 :no_check`)
+          # and run over comment-stripped text: the cask *documents* why
+          # :no_check was retired, so a naive substring grep matches that prose
+          # and fails every release.
+          if grep -v '^[[:space:]]*#' tap/Casks/solarxy.rb \
+              | grep -qE '^[[:space:]]*sha256[[:space:]]+:no_check'; then
+            echo "::error::Cask still carries a sha256 :no_check stanza after bump."
+            exit 1
+          fi
+
+          # Both hashes must actually be present, or the sed silently no-opped
+          # (e.g. someone reformatted the stanza and the pattern stopped
+          # matching) and we would ship a cask pinned to the previous release's
+          # checksums.
+          for key in arm intel; do
+            if ! grep -qE "^[[:space:]]*(sha256 )?${key}:[[:space:]]+\"[a-f0-9]{64}\"" tap/Casks/solarxy.rb; then
+              echo "::error::Cask is missing a valid ${key} sha256 after bump."
+              exit 1
+            fi
+          done
 
           # Formula — bump the version, then fill each platform's sha256 from
           # the cargo-dist `.tar.xz.sha256` companion file. These are global

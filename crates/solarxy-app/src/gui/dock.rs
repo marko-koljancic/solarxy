@@ -1,7 +1,7 @@
 //! `egui_dock` integration — the unified panel + viewport docking layer.
 //!
-//! All five user-facing panels (Sidebar, Review Panel, Console, Material
-//! Inspector, Properties) plus the 3D Viewport live as tabs inside a
+//! All six user-facing panels (Sidebar, Review Panel, Console, Material
+//! Inspector, Properties, Outliner) plus the 3D Viewport live as tabs inside a
 //! single [`egui_dock::DockState`]. Users drag tab titles between leaves
 //! to dock left/right/bottom/top; drag outside the dock area to tear out
 //! into a floating window. The Viewport tab is **closeable but
@@ -152,7 +152,7 @@ impl TabViewer for SolarxyTabViewer<'_> {
                 );
             }
             SolarxyTab::Console => {
-                super::console_view::draw_console_content(ui, self.console);
+                super::console_view::draw_console_content(ui, self.console, &self.theme);
             }
             SolarxyTab::MaterialInspector => {
                 if let Some(model) = self.model {

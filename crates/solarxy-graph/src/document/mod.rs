@@ -44,15 +44,62 @@ pub struct NodeId(pub u64);
 )]
 pub struct EdgeId(pub u64);
 
+/// The network kind a graph is: the vocabulary of typed contexts. The
+/// root graph is always [`ContextKind::Obj`]; a child network's kind is
+/// whatever its owning container's descriptor `opens` (`geo` opens `Geo`,
+/// `matnet` opens `Mat`, `texnet` opens `Tex`). Node placement legality is
+/// judged against this kind via the descriptor's `ContextSet`, and adding
+/// a kind here plus a container descriptor is the whole cost of a new
+/// context (the phase-17 generalization of the old root/subflow pair).
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextKind {
+    /// The scene/object network (the root canvas): containers, lights,
+    /// cameras, render configuration. Nodes placeable here are portless
+    /// (the generalized MVP invariant).
+    #[default]
+    Obj,
+    /// A geometry network (a `geo` container's canvas).
+    Geo,
+    /// A material network (a `matnet` container's canvas).
+    Mat,
+    /// A texture/image network (a `texnet` container's canvas).
+    Tex,
+}
+
+impl ContextKind {
+    /// Every kind, in declaration order (snapshot and UI vocabularies).
+    pub const ALL: [ContextKind; 4] = [
+        ContextKind::Obj,
+        ContextKind::Geo,
+        ContextKind::Mat,
+        ContextKind::Tex,
+    ];
+}
+
 /// Which graph a command or event targets. The serde form is the
-/// wasm-boundary shape: `"root"` or `{ "subflow": <nodeId> }`.
+/// wasm-boundary shape: `"root"` or `{ "subflow": <nodeId> }`. A
+/// "subflow" is any child network regardless of its [`ContextKind`]; the
+/// kind lives on the [`Graph`] itself, not in the address.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 #[serde(rename_all = "camelCase")]
 pub enum GraphContext {
     Root,
-    /// The subflow owned by this `geo` container node.
+    /// The child network owned by this container node.
     Subflow(NodeId),
 }
 
@@ -61,7 +108,7 @@ pub enum GraphContext {
 pub struct PortRef {
     pub node: NodeId,
     /// The port key (simultaneously the canvas handle id and the compute
-    /// body's input key, per catalog section 3).
+    /// body's input key).
     pub port: String,
 }
 
@@ -89,7 +136,7 @@ pub struct NodeData {
     /// Canvas position (presentation state, undoable, never cook-relevant).
     pub position: [f32; 2],
     pub bypassed: bool,
-    /// Explicit edge order per **variadic** input port (decision 25):
+    /// Explicit edge order per **variadic** input port:
     /// reordering is a single list rewrite, no renumbering churn. Managed
     /// exclusively by [`Graph::connect`]/[`Graph::disconnect`]/
     /// [`Graph::reorder_variadic`].
@@ -120,22 +167,30 @@ impl NodeData {
     }
 }
 
-/// One graph context: the root canvas or one subflow.
+/// One graph context: the root canvas or one child network.
 #[derive(Debug, Default, Clone)]
 pub struct Graph {
     nodes: BTreeMap<NodeId, NodeData>,
     edges: BTreeMap<EdgeId, Edge>,
     topology: Topology,
-    /// The display node (subflows: exactly one node holds the display
-    /// flag; root: unused, root visibility is additive per geo node).
+    /// The display node (child networks: exactly one node holds the
+    /// display flag; root: unused, root visibility is additive per geo
+    /// node).
     pub active_output: Option<NodeId>,
     pub selection: Vec<NodeId>,
+    /// The network kind (root: `Obj`; a child network: whatever its
+    /// owning container's descriptor opens). Placement legality and the
+    /// palette filter judge against this.
+    pub kind: ContextKind,
 }
 
 impl Graph {
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(kind: ContextKind) -> Self {
+        Self {
+            kind,
+            ..Self::default()
+        }
     }
 
     #[must_use]
@@ -386,8 +441,9 @@ impl Graph {
     }
 }
 
-/// The whole document: the root graph plus one subflow per `geo` node,
-/// the review annotations, and the id mint.
+/// The whole document: the root graph (kind `Obj`) plus one child network
+/// per container node (each stamped with the kind its owner opens), the
+/// review annotations, and the id mint.
 #[derive(Debug, Default, Clone)]
 pub struct Document {
     root: Graph,
@@ -465,22 +521,26 @@ impl Document {
         }
     }
 
-    /// Creates the (empty) subflow for a newly added `geo` node.
-    pub fn create_subflow(&mut self, geo: NodeId) {
-        self.subflows.entry(geo).or_default();
+    /// Creates the (empty) child network for a newly added container node,
+    /// stamped with the kind the container's descriptor opens.
+    pub fn create_subflow(&mut self, owner: NodeId, kind: ContextKind) {
+        self.subflows
+            .entry(owner)
+            .or_insert_with(|| Graph::new(kind));
     }
 
-    /// Detaches a `geo` node's subflow (returned whole for undo).
-    pub fn remove_subflow(&mut self, geo: NodeId) -> Option<Graph> {
-        self.subflows.remove(&geo)
+    /// Detaches a container node's child network (returned whole for undo).
+    pub fn remove_subflow(&mut self, owner: NodeId) -> Option<Graph> {
+        self.subflows.remove(&owner)
     }
 
-    /// Reattaches a subflow (the undo path of [`Self::remove_subflow`]).
-    pub fn restore_subflow(&mut self, geo: NodeId, graph: Graph) {
-        self.subflows.insert(geo, graph);
+    /// Reattaches a child network (the undo path of
+    /// [`Self::remove_subflow`]).
+    pub fn restore_subflow(&mut self, owner: NodeId, graph: Graph) {
+        self.subflows.insert(owner, graph);
     }
 
-    /// The `geo` node ids that own subflows, in id order.
+    /// The container node ids that own child networks, in id order.
     pub fn subflow_owners(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.subflows.keys().copied()
     }
@@ -508,7 +568,7 @@ mod tests {
 
     #[test]
     fn single_arity_occupancy_is_enforced() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let c = node(&mut g, 3);
@@ -522,7 +582,7 @@ mod tests {
 
     #[test]
     fn variadic_connect_appends_port_order() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -538,7 +598,7 @@ mod tests {
 
     #[test]
     fn cycle_refused_and_graph_intact() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         g.connect(edge(10, a, b, "geometry"), false).unwrap();
@@ -553,7 +613,7 @@ mod tests {
 
     #[test]
     fn disconnect_cleans_port_order() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -569,7 +629,7 @@ mod tests {
 
     #[test]
     fn reorder_requires_a_permutation_and_returns_previous() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -599,7 +659,7 @@ mod tests {
 
     #[test]
     fn remove_node_returns_state_and_cleans_neighbors() {
-        let mut g = Graph::new();
+        let mut g = Graph::new(ContextKind::Geo);
         let a = node(&mut g, 1);
         let b = node(&mut g, 2);
         let m = node(&mut g, 3);
@@ -640,7 +700,7 @@ mod tests {
             doc.graph(GraphContext::Subflow(geo)),
             Err(GraphError::UnknownContext)
         ));
-        doc.create_subflow(geo);
+        doc.create_subflow(geo, ContextKind::Geo);
         assert!(doc.graph(GraphContext::Subflow(geo)).is_ok());
 
         let sub = doc.remove_subflow(geo).unwrap();

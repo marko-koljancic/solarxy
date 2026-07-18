@@ -95,3 +95,168 @@ fn type_ids_are_unique_and_anchor_safe() {
         );
     }
 }
+
+/// The README's headline claims must match the code.
+///
+/// This is the same failure the `nodes/mod.rs` comment had, but public: the
+/// README advertised "33 node types" and an "11 member" workspace long after
+/// the registry reached 58 and `solarxy-imaging` landed as the 12th member.
+/// Prose that recites a number the code owns goes stale silently, so the
+/// number is checked rather than trusted.
+///
+/// Checks EVERY occurrence, not merely that a correct one exists somewhere:
+/// the README states the node count in three places, so a `contains` check
+/// passes happily while one of them lies.
+#[test]
+fn the_readme_states_the_real_counts() {
+    let root = workspace_root();
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("README.md");
+    let nodes = snapshot().nodes.len();
+
+    let claims = count_claims(&readme, " node types");
+    assert!(
+        !claims.is_empty(),
+        "the README no longer states the node count; it is a headline fact"
+    );
+    for claim in &claims {
+        assert_eq!(
+            *claim, nodes,
+            "the README claims {claim} node types; the registry has {nodes}"
+        );
+    }
+
+    // `.` (the root bin) plus one entry per crate.
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml");
+    let members = manifest
+        .lines()
+        .skip_while(|l| !l.starts_with("members"))
+        .take_while(|l| !l.starts_with(']'))
+        .filter(|l| l.trim().starts_with('"'))
+        .count();
+    for claim in count_claims(&readme, " members") {
+        assert_eq!(
+            claim, members,
+            "the README claims {claim} workspace members; Cargo.toml lists {members}"
+        );
+    }
+
+    // Every crate must appear in the README's architecture table. The one
+    // that was missing (`solarxy-imaging`) is exactly the one whose absence
+    // made the member count wrong.
+    for line in manifest
+        .lines()
+        .skip_while(|l| !l.starts_with("members"))
+        .take_while(|l| !l.starts_with(']'))
+    {
+        let Some(name) = line
+            .trim()
+            .trim_matches(|c| c == '"' || c == ',')
+            .strip_prefix("crates/")
+        else {
+            continue;
+        };
+        assert!(
+            readme.contains(&format!("[`{name}`]")),
+            "the README's crate table omits `{name}`"
+        );
+    }
+}
+
+/// Every integer immediately preceding `suffix` in `text`.
+fn count_claims(text: &str, suffix: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (i, _) in text.match_indices(suffix) {
+        let digits: String = text[..i]
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if let Ok(n) = digits.chars().rev().collect::<String>().parse() {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// Every param must document itself.
+///
+/// `ParamSpec::doc` is a `String` that defaults to empty, so an undocumented
+/// param is not an error anywhere: it renders a blank hover popover in the
+/// parameter panel and a blank cell in the published node reference. Nobody
+/// notices until a user hovers it and learns nothing.
+#[test]
+fn every_param_is_documented() {
+    let snap = snapshot();
+    let mut undocumented: Vec<String> = Vec::new();
+    for node in &snap.nodes {
+        for param in &node.params {
+            if param.doc.trim().is_empty() {
+                undocumented.push(format!("{}.{}", node.type_id, param.key));
+            }
+        }
+    }
+    assert!(
+        undocumented.is_empty(),
+        "{} param(s) have no `doc`, so their hover help and their row in the public node \
+         reference are blank. Add `.doc(...)` to the ParamSpec:\n  {}",
+        undocumented.len(),
+        undocumented.join("\n  ")
+    );
+}
+
+/// Every port must document itself.
+///
+/// A port's type and label carry a lot, but not what it EXPECTS: which of
+/// several legal inputs it wants, what it does with an empty one, whether
+/// order matters on a variadic. That belongs in `PortSpec::doc`.
+#[test]
+fn every_port_is_documented() {
+    let snap = snapshot();
+    let mut undocumented: Vec<String> = Vec::new();
+    for node in &snap.nodes {
+        for (dir, port) in node
+            .inputs
+            .iter()
+            .map(|p| ("in", p))
+            .chain(node.outputs.iter().map(|p| ("out", p)))
+        {
+            if port.doc.trim().is_empty() {
+                undocumented.push(format!("{}.{dir}:{}", node.type_id, port.key));
+            }
+        }
+    }
+    assert!(
+        undocumented.is_empty(),
+        "{} port(s) have no `doc`:\n  {}",
+        undocumented.len(),
+        undocumented.join("\n  ")
+    );
+}
+
+/// A node's `doc` must be a real explanation, not a restated title.
+///
+/// The registry-drift test has always required a non-empty `doc`, which 58
+/// one-line stubs satisfied while telling a reader nothing: `import_gltf`
+/// read "Load a glTF/GLB file." The floor is prose that says what the node
+/// does and when to reach for it.
+#[test]
+fn node_docs_are_more_than_a_restated_title() {
+    /// Two sentences of real explanation do not fit in less than this.
+    const MIN_CHARS: usize = 120;
+
+    let snap = snapshot();
+    let thin: Vec<String> = snap
+        .nodes
+        .iter()
+        .filter(|n| n.doc.trim().len() < MIN_CHARS)
+        .map(|n| format!("{} ({} chars)", n.type_id, n.doc.trim().len()))
+        .collect();
+
+    assert!(
+        thin.is_empty(),
+        "{} node doc(s) are under {MIN_CHARS} chars, which is a restated title rather than \
+         documentation. They are the public node reference AND the in-app info modal:\n  {}",
+        thin.len(),
+        thin.join("\n  ")
+    );
+}

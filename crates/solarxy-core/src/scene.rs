@@ -1,6 +1,6 @@
 //! GPU-free runtime scene types: the contract between the node engine
 //! (`solarxy-graph`, next milestone phase) and the renderer's multi-object
-//! scene (`solarxy-renderer::scene_objects`).
+//! scene (`solarxy-renderer:scene_objects`).
 //!
 //! The engine and the renderer never depend on each other; they communicate
 //! exclusively through [`SceneDelta`] values built from these types. On the
@@ -47,7 +47,7 @@ pub struct CookedGeometry {
     pub bounds: AABB,
 }
 
-/// Light variety, mirroring the node catalog's six light nodes.
+/// Light variety, mirroring the six light node types.
 /// `Ambient` and `Hemisphere` modulate the ambient/IBL term and do not
 /// consume one of the renderer's per-light slots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub enum LightKind {
     Directional,
     Spot,
     /// V1 renders rect-area as a soft point-light approximation
-    /// (plan decision 17); `area_extent` is retained for the LTC upgrade.
+    /// ; `area_extent` is retained for the LTC upgrade.
     RectArea,
     Ambient,
     Hemisphere,
@@ -65,7 +65,7 @@ pub enum LightKind {
 /// One light's resolved runtime description. Field applicability by kind is
 /// documented per field; irrelevant fields hold their defaults. Angles are
 /// radians here — the engine's param resolver owns the degrees-to-radians
-/// conversion (units convention, node catalog part I).
+/// conversion (units convention).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightDef {
     pub kind: LightKind,
@@ -93,7 +93,7 @@ pub struct LightDef {
     pub area_extent: [f32; 2],
     /// Hemisphere ground color (linear RGB).
     pub ground_color: [f32; 3],
-    /// Exclusive shadow caster (plan decision 27): the engine enforces
+    /// Exclusive shadow caster: the engine enforces
     /// radio semantics, so at most one visible light carries `true`.
     pub cast_shadow: bool,
     /// Shadow map resolution for the caster (512-4096).
@@ -113,6 +113,44 @@ impl LightDef {
     pub fn consumes_slot(&self) -> bool {
         !matches!(self.kind, LightKind::Ambient | LightKind::Hemisphere)
     }
+}
+
+/// The projection model of a camera node. `Physical` is a perspective camera
+/// whose `fov_y` was derived from a focal length and sensor size, so the
+/// renderer treats it exactly like `Perspective`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraKind {
+    Perspective,
+    Orthographic,
+    Physical,
+}
+
+/// One camera node's resolved runtime description. Lowered from a `camera`
+/// root node the same way [`LightDef`] is lowered from a light node, and read
+/// back by the host to drive a pane's look-through camera and its wireframe
+/// gizmo. `fov_y` is in radians (the engine's param resolver owns the
+/// degrees-to-radians conversion and the physical focal-length derivation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CameraDef {
+    /// The producing `camera` node id (the object key).
+    pub id: SceneObjectId,
+    pub kind: CameraKind,
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    /// Vertical field of view in radians (perspective / physical).
+    pub fov_y: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Orthographic half-height.
+    pub ortho_scale: f32,
+    /// The framing aspect (width / height) for the viewport gate and the
+    /// default export aspect.
+    pub aspect: f32,
+    /// Draw the wireframe camera gizmo in the viewport.
+    pub show_gizmo: bool,
+    /// The gizmo's world-space size, in meters.
+    pub gizmo_size: f32,
 }
 
 /// One scene mutation. Transforms are column-major world matrices; a
@@ -156,6 +194,12 @@ pub enum SceneOp {
     /// Replace the full light list (lights are few; diffing buys nothing).
     SetLights {
         lights: Vec<LightDef>,
+    },
+    /// Replace the full camera list (cameras are few; diffing buys nothing).
+    /// Cameras are non-drawn scene objects the host reads back to drive a
+    /// pane's look-through view and its wireframe gizmo.
+    SetCameras {
+        cameras: Vec<CameraDef>,
     },
     /// Remove every object and light (document replaced).
     Clear,

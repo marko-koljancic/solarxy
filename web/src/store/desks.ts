@@ -1,5 +1,5 @@
-// Desks (Phase 7b D3, reshaped in Phase 10): a desk is a named snapshot of the
-// app ARRANGEMENT, never document state. Since Phase 10 the arrangement IS the
+// Desks: a desk is a named snapshot of the
+// app ARRANGEMENT, never document state. Since the arrangement IS the
 // dock layout, plus the canvas chrome toggles and the viewport pane layout.
 // Applying one drives the dock and the host view layout; scene files stay
 // portable.
@@ -55,7 +55,7 @@ export const DESK_PRESETS: DeskSnapshot[] = [
   {
     name: "Review",
     layout: {
-      // The Review preset now ships with the Review panel docked (Phase 10).
+      // The Review preset now ships with the Review panel docked.
       kind: "recipe",
       recipe: { viewportSide: "left", propertiesDock: "bottom", splitPct: 70, review: true },
     },

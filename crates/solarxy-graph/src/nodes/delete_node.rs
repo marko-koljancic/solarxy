@@ -1,4 +1,4 @@
-//! The `delete` modifier (node catalog part II, Tier-2, Phase 15). Removes
+//! The `delete` modifier. Removes
 //! triangles by region (centroid inside a box) or by facing (face normal within
 //! an angle of a direction), with an invert. The debugging knife.
 //!
@@ -13,7 +13,7 @@ use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor, PortSpec};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
 #[must_use]
 pub fn descriptor() -> NodeTypeDescriptor {
@@ -22,7 +22,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 1,
         display_name: "Delete",
         category: Category::Modifiers,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
@@ -98,10 +99,26 @@ pub fn descriptor() -> NodeTypeDescriptor {
         bypass: BypassBehavior::PassThrough {
             input: "geometry".to_string(),
         },
-        doc: "Removes triangles by region or by facing. Vertices left orphaned \
-              by the removal are compacted away. Deleting everything is allowed \
-              and produces empty geometry, not an error.",
+        doc: "Removes the triangles the selection picks: in Bounding Box mode \
+              the ones whose centroid falls inside the region box, in Normal \
+              Direction mode the ones whose face normal points within Angle of \
+              Direction. Invert deletes everything the selection did not pick \
+              instead.\n\n\
+              The debugging knife. Cut a wall away to see inside a model, \
+              strip the ground plane off a scan, drop the half of an import \
+              you do not need before it reaches a `merge` or an output. It \
+              goes anywhere in a modifier chain and it is usually quicker than \
+              going back to fix the source file.\n\n\
+              Those two predicates are the whole selection model. There are no \
+              groups, no primitive ids, and no per-face attributes to select \
+              on, so whatever you want gone has to be describable as a region \
+              or as a facing. Points left orphaned by the removal are \
+              compacted away, a mesh that loses every triangle drops out of \
+              the set, and deleting everything is legal: you get empty \
+              geometry and a warning, not an error.",
         search_aliases: &["remove", "cull", "erase", "filter"],
+        glyph: "delete",
+        role: NodeRole::Standard,
         cook,
         migrate: None,
     }

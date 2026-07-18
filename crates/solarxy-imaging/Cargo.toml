@@ -1,0 +1,13 @@
+[package]
+name = "solarxy-imaging"
+description = "Pure-CPU image operators for the Solarxy texture context: adjust, composite, generate, filter, and PBR-utility ops over RawImageData."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+solarxy-core = { path = "../solarxy-core", default-features = false }
+thiserror = { workspace = true }

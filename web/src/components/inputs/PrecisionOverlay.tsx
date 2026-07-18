@@ -1,5 +1,5 @@
 // The floating precision-decade column shown during a middle-mouse drag
-// (UX spec section 7). Pure presentation; the hook owns the numbers.
+//. Pure presentation; the hook owns the numbers.
 
 import { PRECISION_DECADES, ROW_HEIGHT } from "../../hooks/usePrecisionDrag";
 

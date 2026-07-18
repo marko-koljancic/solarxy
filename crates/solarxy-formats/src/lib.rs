@@ -32,6 +32,7 @@
     clippy::wildcard_imports
 )]
 
+pub mod export;
 pub mod gltf;
 pub mod obj;
 pub mod ply;
@@ -61,6 +62,12 @@ pub enum FormatsError {
     /// glTF/GLB parse or import failure.
     #[error("glTF error: {0}")]
     Gltf(#[from] ::gltf::Error),
+    /// A writer failure (obj/stl/ply/glb/png/jpeg export).
+    #[error("{format} export error: {message}")]
+    Export {
+        format: &'static str,
+        message: String,
+    },
     /// A required external asset (buffer, MTL) was not provided by the
     /// [`AssetResolver`]. The message is user-facing (import error badges
     /// and toasts), so it says what to do about it.

@@ -1,5 +1,5 @@
 //! Per-node cook state and statistics (the resumable budget loop that
-//! consumes them lands in the engine cook driver, task G4).
+//! consumes them lands in the engine cook driver).
 
 use solarxy_core::AABB;
 
@@ -22,7 +22,7 @@ pub enum CookState {
     Pending(u64),
 }
 
-/// Per-successful-cook statistics (node catalog part I, section 9).
+/// Per-successful-cook statistics.
 /// Delivered as coalesced `NodeStats` events, emitted only for nodes whose
 /// stats changed. `AABB` is not `PartialEq`, so change detection compares
 /// via [`NodeCookStats::same_shape`] (bit-exact bounds), not `derive`.
@@ -35,10 +35,14 @@ pub struct NodeCookStats {
     pub prims: u64,
     pub meshes: u32,
     pub bounds: Option<AABB>,
+    /// `(width, height)` of the default image output, for nodes whose
+    /// default output is an image rather than geometry (the geometry
+    /// fields stay zero for those).
+    pub image: Option<(u32, u32)>,
 }
 
 impl NodeCookStats {
-    /// Whether two stats describe the same geometry (ignoring
+    /// Whether two stats describe the same output shape (ignoring
     /// `duration_us`, which changes every cook and must not force a stats
     /// event on its own). Bounds compare bit-exact.
     #[must_use]
@@ -46,6 +50,7 @@ impl NodeCookStats {
         self.points == other.points
             && self.prims == other.prims
             && self.meshes == other.meshes
+            && self.image == other.image
             && bounds_eq(self.bounds, other.bounds)
     }
 }
@@ -65,8 +70,8 @@ fn bounds_eq(a: Option<AABB>, b: Option<AABB>) -> bool {
     }
 }
 
-/// The lean, high-frequency badge state machine (node catalog part I,
-/// section 9). `Ok` carries milliseconds for the badge tooltip.
+/// The lean, high-frequency badge state machine. `Ok` carries milliseconds
+/// for the badge tooltip.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum CookStatus {

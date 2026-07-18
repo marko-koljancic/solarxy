@@ -1,7 +1,7 @@
 //! The `.slxy` self-contained scene file.
 //!
 //! A `.slxy` is a ZIP holding `manifest.json` (the byte-level asset index),
-//! `scene.json` (the Rust-owned document schema, section 6.6), and
+//! `scene.json` (the Rust-owned document schema), and
 //! `assets/<sha256>` content-addressed blobs. The schema lives here, not in
 //! the engine: `solarxy-graph` maps a live document to and from
 //! [`SceneJson`], and this crate owns the container, the SHA-256 integrity

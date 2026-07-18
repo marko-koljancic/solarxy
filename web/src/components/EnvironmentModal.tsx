@@ -13,6 +13,7 @@ import {
 } from "../engine/session";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
+import { Select } from "./Select";
 
 const IBL_MODES: [string, string][] = [
   ["off", "Off"],
@@ -61,17 +62,12 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="env-row">
           <span className="env-label">IBL mode</span>
-          <select
-            className="input-field"
+          <Select
+            ariaLabel="IBL mode"
             value={env?.iblMode ?? "full"}
-            onChange={(e) => setIblMode(e.target.value)}
-          >
-            {IBL_MODES.map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
-          </select>
+            options={IBL_MODES.map(([v, label]) => ({ value: v, label }))}
+            onChange={(v) => setIblMode(v)}
+          />
         </div>
         <div className="env-row">
           <span className="env-label">Rotation</span>

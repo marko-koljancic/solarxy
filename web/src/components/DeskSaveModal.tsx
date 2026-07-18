@@ -1,4 +1,4 @@
-// Naming dialog for "Save Current Desk As..." (Phase 7b D3). A native
+// Naming dialog for "Save Current Desk As..." (D3). A native
 // prompt() would block the event loop; this is the styled equivalent.
 
 import { useState } from "react";

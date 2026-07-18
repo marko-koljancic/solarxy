@@ -1,5 +1,5 @@
 // The four dock panels. Each is a thin wrapper around a pane component that
-// Phase 9 already made self-contained, which is exactly why this phase does not
+// already made self-contained, which is exactly why this phase does not
 // have to restructure any of them.
 
 import {
@@ -7,13 +7,18 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
+import { useEffect, useRef, useState } from "react";
+import { AssetPreview } from "../components/AssetPreview";
+import { AssetsPane } from "../components/AssetsPane";
 import { NodePane } from "../components/NodePane";
 import { ParameterPanel } from "../components/ParameterPanel";
 import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
+import { TextureViewer } from "../components/TextureViewer";
 import { nodeLabel } from "../flow/nodeLabel";
-import { descriptorFor } from "../registry/datatypes";
+import { contextKind, descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
+import { useUi } from "../store/ui";
 
 /** The selected node's display label (its `name` param when renamed, else the
  * type display name), shown in the Properties header. */
@@ -52,20 +57,164 @@ function ReviewDockPanel(_props: IDockviewPanelProps) {
   return <ReviewPanel />;
 }
 
+function AssetsPanel(_props: IDockviewPanelProps) {
+  return <AssetsPane />;
+}
+
+function AssetPreviewPanel(_props: IDockviewPanelProps) {
+  return <AssetPreview />;
+}
+
+function TexturePanel(_props: IDockviewPanelProps) {
+  return <TextureViewer />;
+}
+
 export const DOCK_COMPONENTS = {
   viewport: ViewportPanel,
   nodes: NodesPanel,
   properties: PropertiesPanel,
   review: ReviewDockPanel,
+  assets: AssetsPanel,
+  assetPreview: AssetPreviewPanel,
+  texture: TexturePanel,
 };
 
-/** The pinned tab: no close button. The other half of the pin (cancelling the
- * tab drag) lives in Dock.tsx; together they mirror the desktop, where the
- * Viewport dock tab is neither floatable nor closeable. */
+// Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four
+// node-category pastels plus extras, so many open panes stay distinguishable.
+// Header/tab only; the pastels are light in both themes and pair with dark ink.
+const PANE_PALETTE = [
+  "#c9dcf2", // blue (primitives)
+  "#c8e8d6", // green (modifiers)
+  "#ddd0ee", // purple (import)
+  "#eed9c9", // tan (utility)
+  "#c9c2f0", // lavender
+  "#f2c9a0", // peach
+  "#f2c9d6", // pink
+  "#b8e3e0", // teal
+  "#eee3b0", // yellow
+  "#f0c8b8", // coral
+] as const;
+
+/** The tint swatch popover, opened by right-clicking a pane tab. Fixed at the
+ * click point; closes on outside pointerdown, Esc, or a pick. */
+function PaneColorPicker({
+  id,
+  x,
+  y,
+  onClose,
+}: {
+  id: string;
+  x: number;
+  y: number;
+  onClose: () => void;
+}) {
+  const current = useUi((s) => s.paneColors[id]);
+  const setPaneColor = useUi((s) => s.setPaneColor);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !ref.current?.contains(e.target)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [onClose]);
+
+  return (
+    <div ref={ref} className="pane-color-picker" style={{ position: "fixed", left: x, top: y }}>
+      <button
+        type="button"
+        className={`pane-swatch pane-swatch-none${current ? "" : " active"}`}
+        title="No color"
+        aria-label="No color"
+        onClick={() => {
+          setPaneColor(id, null);
+          onClose();
+        }}
+      />
+      {PANE_PALETTE.map((c) => (
+        <button
+          key={c}
+          type="button"
+          className={`pane-swatch${current === c ? " active" : ""}`}
+          style={{ background: c }}
+          title={c}
+          aria-label={c}
+          onClick={() => {
+            setPaneColor(id, c);
+            onClose();
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** A dockview tab wrapped so its header carries the per-pane tint and a
+ * right-click color picker. Preserves the default tab's drag / close behavior
+ * (we only wrap it, never reimplement it). */
+/** The automatic per-context-kind tint: the Nodes tab
+ * reflects which network kind its canvas shows, and the Texture viewer
+ * carries the image family's pink. A manual right-click tint wins. */
+function autoPaneColor(id: string, kind: ReturnType<typeof contextKind>): string | undefined {
+  if (id === "texture") return "#f2c9d6";
+  if (id !== "nodes") return undefined;
+  if (kind === "tex") return "#f2c9d6";
+  if (kind === "mat") return "#c9c2f0";
+  return undefined;
+}
+
+function ColoredTabInner({
+  props,
+  hideClose,
+}: {
+  props: IDockviewPanelHeaderProps;
+  hideClose: boolean;
+}) {
+  const id = props.api.id;
+  const manual = useUi((s) => s.paneColors[id]);
+  const current = useMirror((s) => s.current);
+  const registry = useMirror((s) => s.registry);
+  const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
+  const color = manual ?? autoPaneColor(id, contextKind(registry, current, rootNodes));
+  const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <div
+      className={`pane-tab-wrap${color ? " tinted" : ""}`}
+      style={color ? ({ "--pane-tint": color } as React.CSSProperties) : undefined}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPicker({ x: e.clientX, y: e.clientY });
+      }}
+    >
+      <DockviewDefaultTab {...props} hideClose={hideClose} />
+      {picker && (
+        <PaneColorPicker id={id} x={picker.x} y={picker.y} onClose={() => setPicker(null)} />
+      )}
+    </div>
+  );
+}
+
+/** The default (closeable) tab: colorable. */
+function ColoredTab(props: IDockviewPanelHeaderProps) {
+  return <ColoredTabInner props={props} hideClose={false} />;
+}
+
+/** The pinned tab: no close button, still colorable. The other half of the pin
+ * (cancelling the tab drag) lives in Dock.tsx; together they mirror the desktop,
+ * where the Viewport dock tab is neither floatable nor closeable. */
 function PinnedTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose />;
+  return <ColoredTabInner props={props} hideClose />;
 }
 
 export const DOCK_TAB_COMPONENTS = {
   pinned: PinnedTab,
+  colored: ColoredTab,
 };

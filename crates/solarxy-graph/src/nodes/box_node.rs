@@ -1,4 +1,4 @@
-//! The `box` primitive (node catalog part II, section 13).
+//! The `box` primitive.
 
 use solarxy_kernel::primitives::generate_box;
 
@@ -7,9 +7,9 @@ use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{ParamSpec, ParamType, Unit};
 use crate::registry::resolve::ResolvedParams;
-use crate::registry::{BypassBehavior, Category, ContextMask, NodeTypeDescriptor};
+use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
-fn dimension(key: &str, label: &str) -> ParamSpec {
+fn dimension(key: &str, label: &str, axis: &str) -> ParamSpec {
     ParamSpec::new(
         key,
         label,
@@ -20,10 +20,22 @@ fn dimension(key: &str, label: &str) -> ParamSpec {
     .hard(0.001, 10000.0)
     .soft(0.01, 100.0)
     .unit(Unit::Meters)
+    .doc(format!(
+        "Size along {axis}, in metres. The box is centred on the origin, so \
+         this extends {}0.5x either side rather than growing in one direction.",
+        "\u{00b1}"
+    ))
 }
 
-fn segments(key: &str, label: &str) -> ParamSpec {
-    ParamSpec::new(key, label, "geometry", ParamType::Int, ParamValue::Int(1)).hard(1.0, 512.0)
+fn segments(key: &str, label: &str, axis: &str) -> ParamSpec {
+    ParamSpec::new(key, label, "geometry", ParamType::Int, ParamValue::Int(1))
+        .hard(1.0, 512.0)
+        .doc(format!(
+            "How many divisions the {axis} faces are cut into. 1 leaves a flat \
+             quad. Raise it only when something downstream needs the extra \
+             points to work with -- a deform, a noise displacement, a \
+             subdivide -- because every segment multiplies the point count."
+        ))
 }
 
 #[must_use]
@@ -33,23 +45,36 @@ pub fn descriptor() -> NodeTypeDescriptor {
         version: 2,
         display_name: "Box",
         category: Category::Primitives,
-        contexts: ContextMask::SUBFLOW,
+        contexts: ContextSet::GEO,
+        opens: None,
         inputs: vec![],
         outputs: vec![geometry_output()],
         params: params_with(
             "Box",
             vec![
-                dimension("width", "Width"),
-                dimension("height", "Height"),
-                dimension("depth", "Depth"),
-                segments("width_segments", "Width Segments"),
-                segments("height_segments", "Height Segments"),
-                segments("depth_segments", "Depth Segments"),
+                dimension("width", "Width", "X"),
+                dimension("height", "Height", "Y"),
+                dimension("depth", "Depth", "Z"),
+                segments("width_segments", "Width Segments", "X"),
+                segments("height_segments", "Height Segments", "Y"),
+                segments("depth_segments", "Depth Segments", "Z"),
             ],
         ),
         bypass: BypassBehavior::Mute,
-        doc: "A rectangular box, subdivided per axis.",
+        doc: "A rectangular box centred on the origin, sized per axis and \
+              optionally divided into a grid of quads on each face.\n\n\
+              This is the usual starting point for a blockout: box out the \
+              massing first, then reach for `transform` to place it and \
+              `merge` to combine it with others. It generates flat-shaded \
+              geometry with hard edges, because each face carries its own \
+              corner points -- 24 points for the default 12 triangles, not 8 \
+              shared ones.\n\n\
+              The segment counts only matter to something downstream that \
+              needs the extra points. A plain box needs none, so they default \
+              to 1.",
         search_aliases: &["cube", "rectangle", "cuboid"],
+        glyph: "box",
+        role: NodeRole::Standard,
         cook,
         migrate: Some(migrate_strip_rendering_group),
     }

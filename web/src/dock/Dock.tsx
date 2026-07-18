@@ -1,4 +1,4 @@
-// The dock (Phase 10): dockview owns the shell's geometry. Panels dock, float,
+// The dock: dockview owns the shell's geometry. Panels dock, float,
 // tab and maximize; the arrangement persists and Desks capture it.
 //
 // Two invariants are enforced here and nowhere else:
@@ -76,6 +76,7 @@ export function Dock() {
       className="solarxy-dock"
       components={DOCK_COMPONENTS}
       tabComponents={DOCK_TAB_COMPONENTS}
+      defaultTabComponent={DOCK_TAB_COMPONENTS.colored}
       onReady={onReady}
       singleTabMode="fullwidth"
     />

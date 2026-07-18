@@ -1,4 +1,4 @@
-// The per-node one-line info text (Phase 7b C9): a muted line under the
+// The per-node one-line info text (C9): a muted line under the
 // node label summarizing its key parameter(s). A pure interpreter of the
 // registry snapshot + node params; new node types get a sensible line (or
 // none) with zero frontend changes.

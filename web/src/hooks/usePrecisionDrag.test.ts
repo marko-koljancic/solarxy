@@ -1,5 +1,5 @@
 // The precision-drag math: deadzone, hysteresis, decade clamping, and
-// value scrubbing (UX spec section 7 numbers).
+// value scrubbing (section 7 numbers).
 
 import { describe, expect, it } from "vitest";
 import { DEADZONE, HYSTERESIS, ROW_HEIGHT, scrubValue, selectDecade } from "./usePrecisionDrag";

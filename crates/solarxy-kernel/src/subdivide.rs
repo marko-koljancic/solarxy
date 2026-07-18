@@ -1,5 +1,4 @@
-//! Linear 1-to-4 triangle subdivision (the `subdivide` node's kernel,
-//! Phase 14). Each triangle splits at its edge midpoints; midpoints are
+//! Linear 1-to-4 triangle subdivision (the `subdivide` node's kernel). Each triangle splits at its edge midpoints; midpoints are
 //! deduplicated per shared edge through an edge map, so the surface stays
 //! crack-free. Positions, UVs, and extra attribute lanes interpolate
 //! linearly; normals interpolate linearly and renormalize. Catmull-Clark

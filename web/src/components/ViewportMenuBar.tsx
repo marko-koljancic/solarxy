@@ -1,4 +1,4 @@
-// The viewport menu bar (Phase 9): a slim DOM bar above the canvas holding
+// The viewport menu bar: a slim DOM bar above the canvas holding
 // viewport-global actions in a View menu. Per-pane state stays on the ghost
 // toolbars floating over the scene; this bar owns only what applies to the
 // viewport as a whole.
@@ -70,10 +70,14 @@ export function ViewportMenuBar() {
       shortcut: "C",
       onClick: () => useUi.getState().setScreenshotOpen(true),
     },
+    {
+      label: "Export Turntable...",
+      onClick: () => useUi.getState().setTurntableOpen(true),
+    },
     { divider: true },
     {
-      // Phase 10: real dock maximize, on the viewport's own group. Esc restores
-      // (the keymap's cancel ladder). The Phase 9 interim toggle is gone.
+      // Real dock maximize, on the viewport's own group. Esc restores
+ // (the keymap's cancel ladder). The interim toggle is gone.
       label: "Maximize Panel",
       shortcut: "Esc to restore",
       onClick: () => toggleMaximize("viewport"),

@@ -1,4 +1,4 @@
-// The preferences modal (Phase 7 W4), on the Minimystix pattern: a draft
+// The preferences modal, on the Minimystix pattern: a draft
 // copy edited locally, dirty star in the title, footer with Reset to
 // Defaults (nested confirm) on the left and Cancel / Apply / Save on the
 // right. Four tabs per the ratified scope: Appearance, Review, Autosave,
@@ -11,10 +11,12 @@ import {
   type MotionChoice,
   type Prefs,
   type GizmoOrientation,
+  type SelectionHighlightStyle,
   type ScreenshotResolution,
   type ThemeChoice,
 } from "../../store/prefs";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { Select } from "../Select";
 
 const TABS = ["Appearance", "Review", "Autosave", "Screenshot", "Viewport"] as const;
 type Tab = (typeof TABS)[number];
@@ -33,35 +35,30 @@ function AppearanceTab({ draft, patch }: TabProps) {
     <>
       <p className="prefs-desc">Theme and motion. System choices follow the OS.</p>
       <Row label="Theme">
-        <select
-          className="input-field"
+        <Select
+          ariaLabel="Theme"
           value={draft.appearance.theme}
-          onChange={(e) =>
-            patch({ appearance: { ...draft.appearance, theme: e.target.value as ThemeChoice } })
-          }
-        >
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">System</option>
-        </select>
+          options={[
+            { value: "dark", label: "Dark" },
+            { value: "light", label: "Light" },
+            { value: "system", label: "System" },
+          ]}
+          onChange={(v) => patch({ appearance: { ...draft.appearance, theme: v as ThemeChoice } })}
+        />
       </Row>
       <Row label="Reduced motion">
-        <select
-          className="input-field"
+        <Select
+          ariaLabel="Reduced motion"
           value={draft.appearance.reducedMotion}
-          onChange={(e) =>
-            patch({
-              appearance: {
-                ...draft.appearance,
-                reducedMotion: e.target.value as MotionChoice,
-              },
-            })
+          options={[
+            { value: "system", label: "Follow system" },
+            { value: "reduce", label: "Reduce" },
+            { value: "none", label: "Full motion" },
+          ]}
+          onChange={(v) =>
+            patch({ appearance: { ...draft.appearance, reducedMotion: v as MotionChoice } })
           }
-        >
-          <option value="system">Follow system</option>
-          <option value="reduce">Reduce</option>
-          <option value="none">Full motion</option>
-        </select>
+        />
       </Row>
       <div className="prefs-info">
         Reduced motion disables the connection-rejection shake and spinner animations in favor of
@@ -136,17 +133,18 @@ function ScreenshotTab({ draft, patch }: TabProps) {
     <>
       <p className="prefs-desc">Defaults for the screenshot dialog.</p>
       <Row label="Resolution">
-        <select
-          className="input-field"
+        <Select
+          ariaLabel="Resolution"
           value={sc.resolution}
-          onChange={(e) => patchSc({ resolution: e.target.value as ScreenshotResolution })}
-        >
-          <option value="viewport">Viewport</option>
-          <option value="1.5x">1.5x</option>
-          <option value="2x">2x</option>
-          <option value="4x">4x</option>
-          <option value="custom">Custom</option>
-        </select>
+          options={[
+            { value: "viewport", label: "Viewport" },
+            { value: "1.5x", label: "1.5x" },
+            { value: "2x", label: "2x" },
+            { value: "4x", label: "4x" },
+            { value: "custom", label: "Custom" },
+          ]}
+          onChange={(v) => patchSc({ resolution: v as ScreenshotResolution })}
+        />
       </Row>
       {sc.resolution === "custom" && (
         <Row label="Size">
@@ -192,21 +190,62 @@ function ScreenshotTab({ draft, patch }: TabProps) {
 function ViewportTab({ draft, patch }: TabProps) {
   const v = draft.viewport;
   const setV = (p: Partial<typeof v>) => patch({ viewport: { ...v, ...p } });
+  const sel = draft.selection;
+  const setSel = (p: Partial<typeof sel>) => patch({ selection: { ...sel, ...p } });
 
   return (
     <>
       <p className="prefs-desc">
-        Transform gizmo orientation and the increments Ctrl-drag snaps to.
+        How selected objects highlight in the 3D view, the transform gizmo orientation, and the
+        increments Ctrl-drag snaps to.
       </p>
+      <Row label="Selection highlight">
+        <Select
+          ariaLabel="Selection highlight"
+          value={sel.style}
+          options={[
+            { value: "outline", label: "Outline" },
+            { value: "tint", label: "Tint (legacy)" },
+            { value: "none", label: "None" },
+          ]}
+          onChange={(v) => setSel({ style: v as SelectionHighlightStyle })}
+        />
+      </Row>
+      {sel.style !== "none" && (
+        <Row label="Highlight color">
+          <input
+            type="color"
+            className="input-field prefs-color"
+            value={sel.color}
+            onChange={(e) => setSel({ color: e.target.value })}
+          />
+        </Row>
+      )}
+      {sel.style === "outline" && (
+        <Row label="Outline width (px)">
+          <input
+            className="input-field"
+            type="number"
+            min={1}
+            max={16}
+            step={1}
+            value={sel.width}
+            onChange={(e) =>
+              setSel({ width: Math.min(16, Math.max(1, Number(e.target.value) || 3)) })
+            }
+          />
+        </Row>
+      )}
       <Row label="Handle orientation">
-        <select
-          className="input-field"
+        <Select
+          ariaLabel="Handle orientation"
           value={v.orientation}
-          onChange={(e) => setV({ orientation: e.target.value as GizmoOrientation })}
-        >
-          <option value="world">World axes</option>
-          <option value="local">Object axes</option>
-        </select>
+          options={[
+            { value: "world", label: "World axes" },
+            { value: "local", label: "Object axes" },
+          ]}
+          onChange={(o) => setV({ orientation: o as GizmoOrientation })}
+        />
       </Row>
       <Row label="Snap: move (m)">
         <input

@@ -1,5 +1,5 @@
 // Global editor keyboard shortcuts, driven by the typed keymap table
-// (web/src/input/keymap.ts, UX spec section 16). Contexts follow the
+// (web/src/input/keymap.ts). Contexts follow the
 // cursor-hover focus model: viewport bindings (1-7 inspection, F1-F5
 // layouts, F fit) fire only while the pointer is over the 3D region.
 // Ignored while typing in a field. The palette handles its own Tab
@@ -23,6 +23,7 @@ import {
 import { cycleAutoLayout } from "../flow/layout";
 import { eventKeys, lookupBinding } from "../input/keymap";
 import { useMirror } from "../store/mirror";
+import { useRadial } from "../store/radial";
 import { useReview } from "../store/review";
 import { usePrefs } from "../store/prefs";
 import { EDGE_STYLE_LABELS, useUi } from "../store/ui";
@@ -118,6 +119,25 @@ export function useKeyboard(): void {
           if (!selection.length) break;
           e.preventDefault();
           useUi.getState().setRenameRequest(selection[0]);
+          break;
+        }
+        case "node-info": {
+          // The info modal used to open ONLY from a 400 ms hover dwell on the
+          // radial menu's west wedge, which is undiscoverable: you had to
+          // already know it was there to find out what a node does.
+          //
+          // Anchored on the node's own on-screen box when it is visible, so
+          // the card appears beside what it describes; falls back to the
+          // canvas centre when the node is scrolled out of view.
+          if (!selection.length) break;
+          e.preventDefault();
+          const el = document.querySelector(`.react-flow__node[data-id="${selection[0]}"]`);
+          const host = document.querySelector(".node-canvas-host")?.getBoundingClientRect();
+          const r = el?.getBoundingClientRect();
+          const at = r
+            ? { x: r.right + 16, y: r.top }
+            : { x: (host?.left ?? 0) + 40, y: (host?.top ?? 0) + 80 };
+          useRadial.getState().openInfo(selection[0], ctx, at.x, at.y);
           break;
         }
         case "bypass": {

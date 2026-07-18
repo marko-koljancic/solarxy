@@ -1,5 +1,5 @@
 /* Solarxy Web stylesheet, rebuilt on the Minimystix token system
- * (styles/tokens.css) in the phase-6 design adoption. Plain CSS on
+ * (styles/tokens.css). Plain CSS on
  * purpose: one file, flat class names, tokens carry the theming.
  * The html font-size trick makes 1rem = 10px (Minimystix convention). */
 
@@ -21,7 +21,7 @@ body,
 body {
   background: var(--background-primary);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-ui);
   font-size: 1.3rem;
   line-height: 1.5;
   overflow: hidden;
@@ -191,7 +191,7 @@ body.precision-drag-active {
   min-height: 0;
 }
 
-/* ---- Phase 10: the dock ---- */
+/* ---- the dock ---- */
 
 /* dockview fills the body; the shell's geometry is entirely its business now
    (the hand-rolled .split-* classes went with SplitPane.tsx). */
@@ -221,7 +221,7 @@ body.precision-drag-active {
 
 /* Every canvas overlay (pane toolbars, review pins, popup, panel) anchors
  * here, so its origin coincides with the canvas top-left even with the
- * menu bar above (Phase 9). */
+ * menu bar above. */
 .viewport-canvas-host {
   position: relative;
   flex: 1;
@@ -243,7 +243,7 @@ body.precision-drag-active {
   flex: 1;
   /* Inside a dockview panel the parent is display:block, where flex:1 is
    * inert: the pane must claim the panel's full size itself, exactly as
-   * .properties-panel does (Phase 10's pattern; this pane missed it). */
+   * .properties-panel does (this pane had missed it). */
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -263,8 +263,13 @@ body.precision-drag-active {
   background: var(--background-secondary);
 }
 
+/* The graph/list switch: the toolbar's one right-side command. */
+.node-toolbar .flow-view-toggle {
+  margin-left: auto;
+}
+
 /* The breadcrumb sits on its own row directly below the node-pane menu bar
- * (Phase 9), keeping the bar itself Blender-slim. */
+ *, keeping the bar itself Blender-slim. */
 .breadcrumb-row {
   display: flex;
   align-items: center;
@@ -324,70 +329,264 @@ body.precision-drag-active {
   stroke: var(--connection-line-valid);
 }
 
-/* The generic node: Minimystix pill / container square, label outside
- * to the right, flowing top-to-bottom. */
+/* ---- The Evo node system ----
+ * A 3.5:1 instrument body, category pastel fill (as --cat-fill, consumed
+ * by the CSS rect bodies AND the shaped SVG bodies), a glyph inked
+ * directly on the body (the chip plate and the segmentation seams are
+ * retired), wings on rect bodies, the display halo, and the label
+ * stack to the right. The .flow-node wrapper is transparent; all paint
+ * happens on .node-body and its layers. */
 .flow-node {
   position: relative;
-  background: var(--geometry-node-background);
-  border: 1px solid var(--geometry-node-border);
+  width: 112px;
+  height: 32px;
   color: var(--node-text);
+}
+
+.flow-node.role-container {
+  width: 48px;
+  height: 48px;
+}
+
+.flow-node.role-terminal {
+  width: 28px;
+  height: 28px;
+}
+
+.node-body {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+
+/* Rect bodies (standard, gather, container): fill + border + the top-down
+ * sheen in CSS (the segmentation seams are retired). Shaped
+ * roles draw an SVG body instead and keep this layer bare. */
+.flow-node.role-standard .node-body,
+.flow-node.role-gather .node-body,
+.flow-node.role-container .node-body {
+  background-color: var(--cat-fill, var(--geometry-node-background));
+  border: 1px solid var(--geometry-node-border);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
   box-shadow:
     0 0.1rem 0.3rem rgba(0, 0, 0, 0.2),
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
 }
 
-.flow-node:hover {
+.flow-node.role-container .node-body {
+  border-radius: 8px;
+}
+
+.flow-node:hover .role-hover,
+.flow-node.role-standard:hover .node-body,
+.flow-node.role-gather:hover .node-body,
+.flow-node.role-container:hover .node-body {
   border-color: var(--geometry-node-border-hover);
 }
 
-.flow-node.pill {
-  width: 9rem;
-  height: 3rem;
-  border-radius: 0.6rem;
+/* A light-category node on a rect body keeps the gold border cue. */
+.flow-node.cat-lights .node-body {
+  border-color: rgba(212, 175, 55, 0.55);
 }
 
-.flow-node.square {
-  width: 4.8rem;
-  height: 4.8rem;
-  border-radius: 0.8rem;
-  background: var(--node-background);
+/* Shaped silhouettes (branch, analyzer, imageSource, light): the SVG body. */
+.node-body-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
 }
 
-.flow-node.light-node {
-  background: var(--light-node-background);
-  border-color: var(--light-node-border);
+.node-body-svg .body-fill {
+  fill: var(--cat-fill, var(--geometry-node-background));
 }
 
-.flow-node.light-node:hover {
-  border-color: var(--light-node-border-hover);
+.node-body-svg .body-stroke {
+  fill: none;
+  stroke: var(--geometry-node-border);
 }
 
-.flow-node.selected {
+.flow-node:hover .node-body-svg .body-stroke {
+  stroke: var(--geometry-node-border-hover);
+}
+
+.flow-node.role-light .node-body-svg .body-stroke {
+  stroke: rgba(212, 175, 87, 0.55);
+}
+
+/* Terminal (null): the donut. The pastel ring with the ink core; the
+ * body ring doubles as the selection target. */
+.flow-node.role-terminal .node-body {
+  border-radius: 50%;
+  border: 7px solid var(--cat-fill, var(--geometry-node-background));
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--geometry-node-border);
+}
+
+.terminal-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--node-slot);
+  pointer-events: none;
+}
+
+/* The gather dome (variadic collector): inputs sit above it. */
+.gather-dome {
+  position: absolute;
+  left: 16px;
+  top: -8px;
+  width: 80px;
+  height: 8px;
+  border-radius: 12px 12px 0 0;
+  background: #b9bec6; /* design constant, both themes */
+  pointer-events: none;
+}
+
+/* The glyph slot: type identity at any zoom. The plate is gone;
+ * the glyph inks directly on the body in a darkened category tone. */
+.node-chip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.node-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.node-glyph path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cat-fill, var(--geometry-node-background)) 35%, var(--node-glyph-ink));
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Wings: bypass left, display right; visual
+ * 10px, hit area overshot via the ::after pad so they stay clickable at
+ * low zoom. Hover previews the wing's own state color and reveals its
+ * glyph; the on state is the full color. Rect bodies only. */
+.node-wing {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.node-wing::after {
+  content: "";
+  position: absolute;
+  inset: -13px -4px;
+}
+
+.node-wing svg {
+  opacity: 0;
+  color: var(--node-slot);
+  transition: opacity var(--motion-fast, 90ms) ease-out;
+}
+
+.node-wing:hover svg {
+  opacity: 1;
+}
+
+.wing-bypass {
+  left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.wing-display {
+  right: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.wing-bypass:hover {
+  background: var(--wing-bypass-hover);
+}
+
+.wing-display:hover {
+  background: var(--wing-display-hover);
+}
+
+.wing-bypass.on {
+  background: var(--state-attention);
+}
+
+.wing-display.on {
+  background: var(--display);
+}
+
+/* The display halo: the across-the-graph cue behind the display
+ * node. Painted in the node's negative z so wires stay visible through
+ * its translucency. */
+.display-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 148px;
+  height: 148px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--display-halo) 30%, transparent) 0 36.5%,
+    color-mix(in srgb, var(--display-halo) 17%, transparent) 36.5% 100%
+  );
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--display-halo) 55%, transparent);
+}
+
+/* Rings mean selection, exclusively. */
+.flow-node.selected .node-body {
   box-shadow: 0 0 0 0.2rem var(--accent-primary);
 }
 
-.flow-node.stale:not(.selected) {
-  box-shadow: 0 0 0 0.2rem var(--stale-color);
+/* Stale (manual mode): tag in the status row plus body desaturation. */
+.flow-node.stale .node-body {
+  filter: saturate(0.35);
 }
 
 .flow-node.bypassed {
   opacity: 0.65;
-  background-image: repeating-linear-gradient(
+}
+
+.flow-node.bypassed .node-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
     45deg,
     transparent,
     transparent 5px,
-    rgba(0, 0, 0, 0.08) 5px,
-    rgba(0, 0, 0, 0.08) 10px
+    rgba(0, 0, 0, 0.1) 5px,
+    rgba(0, 0, 0, 0.1) 10px
   );
-}
-
-.flow-node-body {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
+  pointer-events: none;
 }
 
 .flow-node-label {
@@ -409,7 +608,7 @@ body.precision-drag-active {
   font-weight: 400;
 }
 
-/* The Phase 8 inline rename editor (node label / list cell). */
+/* The inline rename editor (node label / list cell). */
 .inline-edit {
   font: inherit;
   color: var(--input-text);
@@ -426,19 +625,19 @@ body.precision-drag-active {
   font-size: 1.2rem;
 }
 
-/* The root visibility eye (Phase 8): bottom-left corner of the node face
-   (top-left is the stale tag's, top-right the cook error's, bottom-right
-   the validation badge's). Dimmed when the object is hidden. */
+/* The root visibility lamp: bottom-left corner
+   of the node face (top-left is the stale tag's, top-right the cook
+   error's, bottom-right the validation badge's). A filled display-blue
+   dot when visible; hollow and dimmed when hidden. */
 .visibility-eye {
   position: absolute;
-  bottom: -0.6rem;
-  left: -0.6rem;
-  width: 1.7rem;
-  height: 1.7rem;
+  bottom: -0.5rem;
+  left: -0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
   border-radius: 50%;
   border: 1px solid var(--border-primary);
   background: var(--background-tertiary);
-  color: var(--node-label);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -447,8 +646,21 @@ body.precision-drag-active {
   z-index: 2;
 }
 
+.vis-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--display);
+  pointer-events: none;
+}
+
 .visibility-eye.off {
-  opacity: 0.4;
+  opacity: 0.5;
+}
+
+.visibility-eye.off .vis-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--node-label);
 }
 
 .visibility-eye.list {
@@ -473,13 +685,63 @@ body.precision-drag-active {
   height: 1rem;
   border-radius: 50%;
   background: var(--display-flag);
-  box-shadow: 0 0 0 0.3rem rgba(251, 191, 36, 0.25);
+  box-shadow: 0 0 0 0.3rem color-mix(in srgb, var(--display-flag) 30%, transparent);
 }
 
-.cook-badge {
-  width: 0.9rem;
-  height: 0.9rem;
+/* The status row: error, validation count, bypass, stale live
+ * under the node name, not on the node face. */
+.node-status-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  line-height: 1;
+}
+
+.st-err {
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 50%;
+  background: var(--error-badge);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-val {
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  border-radius: 0.6rem;
+  background: var(--warn-badge);
+  color: var(--ink-on-attention);
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-val.val-err {
+  background: var(--error-badge);
+  color: #fff;
+}
+
+.st-bypass {
+  color: var(--state-attention);
+  display: inline-flex;
+  align-items: center;
+}
+
+.st-stale {
+  font-size: 0.8rem;
+  color: var(--stale-color);
+  border: 1px solid var(--stale-color);
+  border-radius: 2px;
+  padding: 0 0.3rem;
+  line-height: 1.3;
 }
 
 .enter-subflow {
@@ -500,56 +762,6 @@ body.precision-drag-active {
   color: var(--accent-primary);
 }
 
-.stale-tag {
-  position: absolute;
-  top: -0.4rem;
-  left: -0.4rem;
-  width: 0.8rem;
-  height: 0.8rem;
-  border-radius: 0.2rem;
-  background: var(--stale-color);
-}
-
-.err-tag {
-  position: absolute;
-  top: -0.6rem;
-  right: -0.6rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 50%;
-  background: var(--error-badge);
-  color: #fff;
-  font-size: 1.1rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Validation badge: issue count, bottom-right (top-right is the cook
-   error's). Amber for warnings-only, red when errors exist. */
-.val-tag {
-  position: absolute;
-  bottom: -0.6rem;
-  right: -0.6rem;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding: 0 0.3rem;
-  border-radius: 0.75rem;
-  background: var(--warn-badge);
-  color: #1a1a1a;
-  font-size: 1rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.val-tag.val-err {
-  background: var(--error-badge);
-  color: #fff;
-}
-
 /* Node palette: fixed two-column command palette with backdrop blur.
  * Opened by Tab or the Add menu (the "+ Add" trigger button is gone). */
 .palette-backdrop {
@@ -558,10 +770,14 @@ body.precision-drag-active {
   z-index: 50;
 }
 
+/* `left`/`top` are set inline by NodePalette from the pointer, clamped to the
+ * node pane (flow/palettePlacement.ts). They are NOT set here: the backdrop is
+ * `position: fixed; inset: 0`, which makes it the containing block, so a
+ * static `top: 7rem; right: 4rem` here resolved against the viewport and
+ * pinned the palette to the window's top-right corner no matter where the pane
+ * was — which is exactly the bug. */
 .palette {
   position: absolute;
-  top: 7rem;
-  right: 4rem;
   width: 440px;
   max-height: 60vh;
   display: flex;
@@ -784,16 +1000,16 @@ body.precision-drag-active {
 .number-field {
   width: 72px;
   text-align: right;
+  /* Numeric precision surfaces speak IBM Plex Mono with tabular
+   * figures. */
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
   font-variant-numeric: tabular-nums;
 }
 
 .text-input {
   width: 100%;
   max-width: 220px;
-}
-
-.select-input {
-  width: 140px;
 }
 
 .checkbox-input {
@@ -884,7 +1100,7 @@ body.precision-drag-active {
 
 .color-hex {
   width: 84px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .color-native {
@@ -895,7 +1111,7 @@ body.precision-drag-active {
   pointer-events: none;
 }
 
-/* Precision-drag overlay (UX spec section 7). */
+/* Precision-drag overlay. */
 .precision-overlay {
   position: fixed;
   background: rgba(26, 26, 26, 0.95);
@@ -903,7 +1119,7 @@ body.precision-drag-active {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
   z-index: 10000;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   user-select: none;
   pointer-events: none;
@@ -927,9 +1143,10 @@ body.precision-drag-active {
 }
 
 .precision-row.selected {
-  background-color: #ffeb3b;
-  color: #000;
-  font-weight: 700;
+  /* On-palette since the revamp: the accent, not a hard yellow. */
+  background-color: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-weight: 600;
 }
 
 /* Asset-ref widget. */
@@ -1096,7 +1313,7 @@ body.precision-drag-active {
   margin-left: 0.2rem;
 }
 
-/* Review-mode pill (Phase 9): amber like the desktop's menu-bar marker;
+/* Review-mode pill: amber like the desktop's menu-bar marker;
  * clicking it exits review mode. */
 .review-pill {
   margin-left: 0.6rem;
@@ -1140,6 +1357,9 @@ body.precision-drag-active {
 .modal h3 {
   margin: 0 0 0.8rem;
   font-size: 1.5rem;
+  /* Weight discipline: 600 for headings; 700 stays identity-only. */
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .modal p {
@@ -1367,17 +1587,14 @@ body.row-resizing .viewport-divider {
   font-size: 1.1rem;
 }
 
-/* ---- Review (Phase 7): marker overlay, popup editor, side panel ---- */
+/* ---- Review: marker overlay, popup editor, side panel ---- */
 
-/* Category colors, shared by pins and panel chips (one correlation cue). */
-:root,
-body.dark-theme,
-body.light-theme {
-  --cat-info: #4a90e2;
-  --cat-warning: #f5a623;
-  --cat-question: #9b6ef3;
-  --cat-change: #e5484d;
-}
+/* Category colors (--cat-info/-warning/-question/-change) are generated
+ * into tokens.generated.css from the Rust palette, because the desktop GUI
+ * paints the same four hues and the two had already drifted: "change" was
+ * green there and error-red here. They are deliberately NOT redefined in
+ * this file -- tokens.css imports before styles.css, so a copy here would
+ * win on source order and silently reinstate the drift. */
 
 .btn.danger {
   border-color: var(--error-badge);
@@ -1651,7 +1868,7 @@ body.light-theme {
   cursor: pointer;
 }
 
-/* ---- Help popovers + the generated shortcuts modal (Phase 7 W3) ---- */
+/* ---- Help popovers + the generated shortcuts modal ---- */
 
 .popover-anchor {
   display: contents;
@@ -1767,7 +1984,7 @@ body.light-theme {
   margin: 0 0 0.3rem;
 }
 
-/* ---- Preferences modal (Phase 7 W4, Minimystix tabbed pattern) ---- */
+/* ---- Preferences modal (the tabbed pattern) ---- */
 
 .modal.modal-prefs {
   width: 46rem;
@@ -1856,7 +2073,7 @@ body.reduce-motion * {
   transition-duration: 0.001s !important;
 }
 
-/* ---- Screenshot modal (Phase 7 W5) ---- */
+/* ---- Screenshot modal ---- */
 
 .screenshot-modal {
   height: 56rem;
@@ -1891,7 +2108,7 @@ body.reduce-motion * {
   margin-right: auto;
 }
 
-/* ---- Boot / loading / empty states (Phase 7 W7) ---- */
+/* ---- Boot / loading / empty states ---- */
 
 .boot-overlay {
   position: fixed;
@@ -1935,26 +2152,34 @@ body.reduce-motion * {
   color: var(--error-text);
 }
 
-/* Cooking spinner ring on the node body (spec sec. 8); reduce-motion
- * collapses the animation to a static accent ring. */
-.flow-node.cooking::after {
-  content: "";
+/* The cook arc (a spinner arc only): a 270-degree
+ * ring around the glyph chip; reduce-motion collapses it to a static
+ * ring. */
+.cook-arc {
   position: absolute;
-  inset: -4px;
-  border-radius: inherit;
-  border: 2px solid transparent;
-  border-top-color: var(--cooking-color, var(--accent-primary));
-  animation: cook-spin 0.8s linear infinite;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--cooking-color, var(--accent-primary));
+  border-left-color: transparent;
+  animation: cook-arc-spin 0.8s linear infinite;
   pointer-events: none;
+  z-index: 2;
 }
-@keyframes cook-spin {
+@keyframes cook-arc-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
   to {
-    transform: rotate(360deg);
+    transform: translate(-50%, -50%) rotate(360deg);
   }
 }
-body.reduce-motion .flow-node.cooking::after {
+body.reduce-motion .cook-arc {
   border-color: var(--cooking-color, var(--accent-primary));
   animation: none;
+  transform: translate(-50%, -50%);
 }
 
 /* Queued-dirty pending tint (auto mode). */
@@ -1963,18 +2188,60 @@ body.reduce-motion .flow-node.cooking::after {
   opacity: 0.82;
 }
 
-/* The empty-canvas teaching hint (UX spec J4). */
+/* The cleared-display ghost chip (sec. 10; revamp 08-02). */
+.ghost-chip-row {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.ghost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 1.2rem;
+  border: 1px solid var(--border-tertiary);
+  border-radius: 0.6rem;
+  color: var(--text-tertiary);
+  font-size: 1.2rem;
+}
+
+.ghost-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: var(--border-tertiary);
+}
+
+/* The empty-canvas teaching hint (; revamp 08-02: a centered
+ * teaching stack, not a one-liner). */
 .canvas-empty-hint {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  color: var(--text-tertiary);
-  font-size: 1.4rem;
+  gap: 1rem;
   pointer-events: none;
   z-index: 5;
+}
+
+.canvas-empty-hint .empty-title {
+  color: var(--text-secondary);
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+
+.empty-sub {
+  color: var(--text-tertiary);
+  font-size: 1.1rem;
 }
 
 /* Disabled buttons read as disabled (polish; prefs Apply/Save, Save PNG). */
@@ -1984,7 +2251,7 @@ body.reduce-motion .flow-node.cooking::after {
   pointer-events: none;
 }
 
-/* ---- Phase 7b W-B chrome corrections ---- */
+/* ---- W-B chrome corrections ---- */
 
 /* Menus flush left: the menu bar loses its brand-offset margin. */
 .app-header .menu-bar {
@@ -2004,16 +2271,18 @@ body.reduce-motion .flow-node.cooking::after {
   color: var(--accent-primary);
 }
 
-/* ---- Phase 7b W-C1: pastel category fills ---- */
+/* ---- W-C1: pastel category fills ---- */
 
-.flow-node.cat-primitives { background: var(--node-cat-primitives); }
-.flow-node.cat-modifiers { background: var(--node-cat-modifiers); }
-.flow-node.cat-import { background: var(--node-cat-import); }
-.flow-node.cat-utility { background: var(--node-cat-utility); }
-.flow-node.cat-lights { background: var(--node-cat-lights); border-color: rgba(212, 175, 55, 0.55); }
-.flow-node.cat-container { background: var(--node-cat-container); }
+/* Category -> the fill custom property both body kinds consume (the CSS
+ * rect bodies via background-color, the shaped SVG bodies via .body-fill). */
+.flow-node.cat-primitives { --cat-fill: var(--node-cat-primitives); }
+.flow-node.cat-modifiers { --cat-fill: var(--node-cat-modifiers); }
+.flow-node.cat-import { --cat-fill: var(--node-cat-import); }
+.flow-node.cat-utility { --cat-fill: var(--node-cat-utility); }
+.flow-node.cat-lights { --cat-fill: var(--node-cat-lights); }
+.flow-node.cat-container { --cat-fill: var(--node-cat-container); }
 
-/* ---- Phase 7b W-C2: typed wires (source data-type colors, matching the
+/* ---- Typed wires (source data-type colors, matching the
  * handle palette in registry/datatypes.ts) ---- */
 
 .react-flow__edge.edge-type-geometry .react-flow__edge-path { stroke: #5aa0ff; }
@@ -2028,8 +2297,9 @@ body.reduce-motion .flow-node.cooking::after {
 .react-flow__edge.edge-type-color .react-flow__edge-path { stroke: #f5a623; }
 .react-flow__edge.edge-type-text .react-flow__edge-path { stroke: #9aa0a6; }
 .react-flow__edge.edge-type-image .react-flow__edge-path { stroke: #e879c8; }
+.react-flow__edge.edge-type-material .react-flow__edge-path { stroke: #c96f4a; }
 
-/* ---- Phase 14: map-overrides-factor indicator (registry-driven via
+/* ---- Map-overrides-factor indicator (registry-driven via
  * ParamSnapshot.drivenByPort) ---- */
 
 .param-driven {
@@ -2040,13 +2310,15 @@ body.reduce-motion .flow-node.cooking::after {
   pointer-events: none;
 }
 .param-driven-hint {
+  /* Revamp 09-03: the teal descriptive voice (the same channel as the
+   * node's authored description). */
   font-size: 10px;
-  color: var(--fg-muted, #9aa0a6);
+  color: var(--node-desc);
   font-style: italic;
   margin: -2px 0 6px;
 }
 
-/* ---- Phase 7b W-C4: the note sticky ---- */
+/* ---- W-C4: the note sticky ---- */
 
 .note-node {
   position: relative;
@@ -2098,26 +2370,33 @@ body.reduce-motion .flow-node.cooking::after {
   height: 100%;
 }
 
-/* ---- Phase 7b C7-C11: radial menu, node info modal, info line, list view ---- */
+/* ---- radial menu, node info modal, info line, list view ---- */
 
 .radial-anchor {
   position: fixed;
   z-index: 60;
   pointer-events: none;
 }
+/* The wedges used to read `var(--radial-seg-bg, rgba(30, 34, 42, 0.92))` and
+ * friends. No `--radial-seg-*` token was ever defined, so every wedge always
+ * took the fallback: a hardcoded slice of the OLD Ayu blue-grey palette that
+ * ignored the theme entirely. Harmless while the app was only ever dark
+ * blue-grey; on the cream light theme it would have been a navy blob with a
+ * white hairline. They read the semantic roles now. */
 .radial-seg {
   pointer-events: auto;
   cursor: pointer;
-  fill: var(--radial-seg-bg, rgba(30, 34, 42, 0.92));
-  stroke: var(--radial-seg-border, rgba(255, 255, 255, 0.14));
+  fill: color-mix(in srgb, var(--surface-overlay) 92%, transparent);
+  stroke: var(--border-default);
   stroke-width: 1;
-  transition: fill 80ms ease;
+  transition: fill var(--motion-fast) var(--ease-out-quad);
 }
 .radial-seg:hover {
-  fill: var(--radial-seg-hover, rgba(52, 58, 70, 0.96));
+  fill: var(--hover-bg);
 }
 .radial-seg.active {
-  fill: var(--radial-seg-active, rgba(43, 89, 138, 0.95));
+  /* The active wedge fills the accent; its icon flips to dark ink. */
+  fill: var(--accent-primary);
 }
 .radial-seg.disabled {
   cursor: default;
@@ -2137,6 +2416,9 @@ body.reduce-motion .flow-node.cooking::after {
 .radial-icon.disabled {
   cursor: default;
   opacity: 0.5;
+}
+.radial-icon.active {
+  color: #111111;
 }
 .radial-glyph {
   font-style: italic;
@@ -2202,14 +2484,33 @@ body.reduce-motion .flow-node.cooking::after {
   color: var(--error-badge);
 }
 
+/* The param preview line: the existing infoLine in the label
+ * stack's blue monospace voice. */
 .flow-node-info {
   display: block;
-  font-size: 10px;
-  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--node-param);
   white-space: nowrap;
 }
 
-.flow-node.empty-geo {
+/* The grey type label above the name: only when a rename made the
+ * name diverge from the type; LOD-gated at zoom 0.7 in FlowNode. */
+.node-type-label {
+  font-size: 0.9rem;
+  color: var(--node-type-label);
+}
+
+/* The authored description: teal, wrapping, LOD-gated at 0.9. */
+.node-desc {
+  font-size: 1rem;
+  color: var(--node-desc);
+  white-space: normal;
+  max-width: 20rem;
+  line-height: 1.25;
+}
+
+.flow-node.empty-geo .node-body {
   border-style: dashed;
   background: transparent;
 }
@@ -2237,10 +2538,10 @@ body.reduce-motion .flow-node.cooking::after {
   cursor: default;
 }
 .flow-list tr.selected td {
-  background: var(--selection-bg, rgba(80, 130, 200, 0.18));
+  background: var(--selection);
 }
 .flow-list tr:hover td {
-  background: var(--hover-bg, rgba(128, 128, 128, 0.08));
+  background: var(--hover-bg);
 }
 .flow-list-type,
 .flow-list-info {
@@ -2260,7 +2561,7 @@ body.reduce-motion .flow-node.cooking::after {
   margin-right: 6px;
 }
 
-/* ---- Phase 7b D1: properties underline tabs ---- */
+/* ---- D1: properties underline tabs ---- */
 
 .param-tabs {
   display: flex;
@@ -2302,47 +2603,67 @@ body.reduce-motion .flow-node.cooking::after {
   padding-top: 8px;
 }
 
-/* ---- Phase 7b D2: ghost-text viewport controls ---- */
+/* ---- Ghost-text viewport controls ---- */
 
+/* These labels float directly on the 3D scene: there is no strip fill, by
+ * design. That makes their effective background whatever the model, the HDRI
+ * and the pane's background mode happen to be -- NOT a token. They used to
+ * lean entirely on `opacity: 0.7` plus a text-shadow tuned for a dark ground,
+ * which meant they faded out against a light model, a bright sky, or the
+ * White background option, and were worst exactly where they matter: a dark
+ * theme over a light scene.
+ *
+ * The fix stops guessing at the ground: a flat, semi-transparent plate in the
+ * app's own background colour gives the text a known surface while the scene
+ * still reads through it, and it inverts with the theme, so ink-on-plate
+ * contrasts in both. Opacity is no longer used to de-emphasise -- that dimmed
+ * the text against an unknown ground, which is the one thing it could not
+ * afford. Hierarchy comes from colour.
+ *
+ * FLAT, not a gradient. A top-down fade was tried and looked like a smudge
+ * rather than a surface; it also breaks the house rule (the MPW "Balanced
+ * Editorial" brief: no gradients). */
 .pane-controls {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 4px 6px;
   pointer-events: auto;
+  background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+  border-radius: 6px;
 }
 .ghost-menu {
   position: relative;
 }
+/* No text-shadow: the plate above is the contrast, and a halo on top of a
+ * known ground only softens the glyphs. */
 .ghost-label {
   appearance: none;
   background: none;
   border: none;
   font: inherit;
   font-size: 11.5px;
+  letter-spacing: 0.01em;
   color: var(--text-primary);
-  opacity: 0.7;
   padding: 2px 4px;
   cursor: pointer;
   white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 .ghost-label:hover,
 .ghost-label.open {
-  opacity: 1;
   color: var(--accent-primary);
 }
 .ghost-label.static {
   cursor: default;
-  opacity: 0.7;
+  color: var(--text-secondary);
 }
 .ghost-info {
   font-size: 11px;
-  color: var(--text-primary);
-  opacity: 0.7;
+  color: var(--text-secondary);
   padding: 2px 4px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
+/* Translucent over the live scene: the blur supplies legibility the 80%
+ * ground alone cannot, whatever the scene behind is doing. */
 .ghost-dropdown {
   position: absolute;
   top: 100%;
@@ -2351,9 +2672,11 @@ body.reduce-motion .flow-node.cooking::after {
   min-width: 160px;
   max-height: 60vh;
   overflow-y: auto;
-  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--background-secondary) 80%, transparent);
   border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border-radius: 6px;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 4px 0;
 }
@@ -2373,7 +2696,7 @@ body.reduce-motion .flow-node.cooking::after {
   text-align: left;
 }
 .ghost-item:hover {
-  background: var(--hover-bg, rgba(128, 128, 128, 0.12));
+  background: var(--hover-bg);
 }
 .ghost-check {
   display: inline-flex;
@@ -2389,10 +2712,345 @@ body.reduce-motion .flow-node.cooking::after {
   padding: 6px 10px 2px;
 }
 
-/* ---- Phase 7b D3: right-docked properties (desks) ---- */
+/* ---- Item 3: viewport right-click context menu ---- */
+.viewport-context-menu {
+  z-index: 40;
+  min-width: 184px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  user-select: none;
+}
+.ctx-heading {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding: 6px 12px 2px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 5px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ctx-item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.ctx-item.active {
+  color: var(--accent-primary);
+}
+.ctx-item:disabled {
+  color: var(--text-quaternary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.ctx-key {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-primary);
+}
+
+/* ---- Item 4: per-pane header tint + color picker ---- */
+.pane-tab-wrap {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+}
+.pane-tab-wrap > .dv-default-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+}
+/* The tint sits behind the whole tab; pastels are light in both themes, so the
+   tab text/close switch to dark ink for contrast. Header/tab only. */
+.pane-tab-wrap.tinted {
+  background: var(--pane-tint);
+}
+.pane-tab-wrap.tinted .dv-default-tab-content,
+.pane-tab-wrap.tinted .dv-default-tab-action {
+  color: var(--ink-on-pastel, #1f2937);
+}
+.pane-color-picker {
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  padding: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.pane-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  padding: 0;
+  appearance: none;
+}
+.pane-swatch.active {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+/* `--severity-error` was never defined either, so the "no tint" slash was
+ * always the hardcoded fallback rather than the theme's error hue. */
+.pane-swatch-none {
+  background:
+    linear-gradient(
+      45deg,
+      transparent 44%,
+      var(--status-error) 44%,
+      var(--status-error) 56%,
+      transparent 56%
+    ),
+    var(--background-tertiary);
+}
+
+/* ---- Item 2: assets pane + preview ---- */
+.assets-pane {
+  height: 100%;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--surface-app);
+}
+.assets-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+.assets-empty-hint {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 10px;
+}
+.asset-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ink-primary);
+  font: inherit;
+  text-align: left;
+  user-select: none;
+}
+.asset-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-overlay);
+}
+.asset-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--ink-tertiary);
+  overflow: hidden;
+}
+.asset-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.asset-name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.asset-kind {
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.asset-preview {
+  height: 100%;
+  background: var(--surface-sunken);
+}
+.asset-preview-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+.asset-preview-2d {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  /* Checker backdrop so alpha reads. */
+  background:
+    repeating-conic-gradient(
+      color-mix(in srgb, var(--ink-primary) 7%, transparent) 0% 25%,
+      transparent 0% 50%
+    )
+    0 0 / 24px 24px;
+}
+.asset-preview-2d:active {
+  cursor: grabbing;
+}
+.asset-preview-2d img {
+  max-width: 90%;
+  max-height: 90%;
+  image-rendering: auto;
+}
+.asset-preview-hud {
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  font-size: 10px;
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+.asset-preview-3d {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.asset-preview-3d:active {
+  cursor: grabbing;
+}
+
+/* ---- Item 10: device gate (MPW-styled, matches the landing look) ---- */
+.device-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f4f1ea;
+  color: #11110e;
+}
+.device-gate-soft {
+  background: rgba(17, 17, 14, 0.45);
+}
+.device-gate-card {
+  max-width: 420px;
+  background: #fbf9f4;
+  border: 1px solid #d8d2c6;
+  border-radius: 6px;
+  padding: 32px 28px;
+  text-align: left;
+}
+.device-gate-card h1 {
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 12px;
+  color: #11110e;
+}
+.device-gate-card p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #4a463e;
+  margin: 0 0 12px;
+}
+.device-gate-mark {
+  font-weight: 700;
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #11110e;
+}
+.device-gate-dot {
+  color: #d4623c;
+}
+.device-gate-hint {
+  font-size: 12px !important;
+  opacity: 0.8;
+}
+.device-gate-link {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 9999px;
+  background: #11110e;
+  color: #f4f1ea;
+  font-size: 14px;
+  text-decoration: none;
+}
+.device-gate-soft .device-gate-card .btn {
+  margin-top: 4px;
+}
+
+/* ---- Item 9b: turntable export progress ---- */
+.turntable-progress {
+  height: 6px;
+  margin: 10px 0;
+  background: var(--background-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.turntable-progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.1s linear;
+}
+
+/* ---- Item 1: camera framing gate (letterbox) ---- */
+.framing-gate-clip {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 8;
+}
+.framing-gate {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+}
+
+/* ---- D3: right-docked properties (desks) ---- */
 
 
-/* ---- Phase 10: dockview theme, mapped onto the token theme ---- */
+/* ---- dockview theme, mapped onto the token theme ---- */
 
 /* Every dockview colour resolves to a Solarxy token, so the dock re-themes with
    the app (light and dark) and no dockview preset is imported. Zero corner radii
@@ -2437,7 +3095,7 @@ body.reduce-motion .flow-node.cooking::after {
   --dv-floating-border: 1px solid var(--border-primary);
 
   --dv-icon-hover-background-color: var(--background-tertiary);
-  --dv-context-menu-background-color: var(--background-elevated, var(--background-secondary));
+  --dv-context-menu-background-color: var(--surface-raised);
   --dv-context-menu-color: var(--text-primary);
   --dv-scrollbar-background-color: var(--background-tertiary);
   --dv-tabs-container-scrollbar-color: var(--border-secondary);
@@ -2448,6 +3106,12 @@ body.reduce-motion .flow-node.cooking::after {
   box-shadow: inset 0 -2px 0 var(--accent-primary);
 }
 
+/* Dockview ships no inner tab padding, so labels sit flush against the
+   tab's left edge; give them breathing room. */
+.solarxy-dock .dv-default-tab {
+  padding-left: var(--spacing-sm);
+}
+
 /* The viewport tab is pinned (its drag is cancelled in Dock.tsx). Say so with
    the cursor instead of letting it advertise a drag that will not happen. */
 .solarxy-dock .dv-tab[data-testid="viewport"],
@@ -2455,7 +3119,7 @@ body.reduce-motion .flow-node.cooking::after {
   cursor: default;
 }
 
-/* ---- Phase 10: the Properties panel (replaces the drawer and side column) ---- */
+/* ---- the Properties panel (replaces the drawer and side column) ---- */
 
 .properties-panel {
   width: 100%;
@@ -2482,7 +3146,7 @@ body.reduce-motion .flow-node.cooking::after {
   overflow: auto;
 }
 
-/* ---- Phase 11: the viewport tool column ---- */
+/* ---- The viewport tool column ---- */
 
 /* An overlay INSIDE the canvas host, not a column beside it: it must not shrink
    the canvas, or the Rust pane rects (which the ghost toolbars and picking are
@@ -2495,42 +3159,55 @@ body.reduce-motion .flow-node.cooking::after {
   z-index: 9;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   user-select: none;
 }
 
+/* Flat: the group is a plain backdrop that separates the buttons from the 3D
+   scene behind them, with no frame of its own. The gap between groups is what
+   separates selection from the transform trio; a border would only add a
+   second, redundant boundary around it. */
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-secondary) 90%, transparent);
+  overflow: hidden;
+}
+
+/* The hover target IS the button: no inset padding around it, so there is no
+   dead ring where the pointer is over the control but nothing lights up. */
 .tool-btn {
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 3.2rem;
+  height: 3.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
-  border: 1px solid var(--border-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
-  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quad),
+    color var(--motion-fast) var(--ease-out-quad);
 }
 
-.tool-btn:hover:not(:disabled) {
+.tool-btn:hover {
   color: var(--text-primary);
-  background: var(--background-tertiary);
-  border-color: var(--border-secondary);
+  background: var(--hover-bg);
 }
 
 .tool-btn.active {
-  color: var(--text-on-accent, #1a1f29);
+  color: var(--text-on-accent);
   background: var(--accent-primary);
-  border-color: var(--accent-primary);
 }
 
-/* Rotate and Scale until Phase 12. Visibly inert, with a tooltip that says why:
-   the column's final shape is honest, and nothing pretends to work. */
-.tool-btn:disabled {
-  color: var(--text-quaternary);
-  cursor: not-allowed;
-  opacity: 0.55;
+/* Keyboard users get the ring the flat look drops for the mouse. */
+.tool-btn:focus-visible {
+  outline: 2px solid var(--accent-hairline);
+  outline-offset: -2px;
 }
 
 /* The live gizmo drag readout: a chip pinned bottom-centre of the canvas host.
@@ -2550,7 +3227,7 @@ body.reduce-motion .flow-node.cooking::after {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--text-primary);
-  background: var(--bg-elevated);
+  background: var(--surface-raised);
   border: 1px solid var(--accent);
   box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
 }
@@ -2566,14 +3243,14 @@ body.reduce-motion .flow-node.cooking::after {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg-primary);
+  background: var(--surface-app);
   color: var(--text-primary);
   overflow-y: auto;
 }
 .fatal-card {
   max-width: 560px;
   padding: 32px;
-  background: var(--bg-secondary);
+  background: var(--surface-raised);
   border: 1px solid var(--border-primary);
   box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
 }
@@ -2610,7 +3287,7 @@ body.reduce-motion .flow-node.cooking::after {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--bg-primary);
+  background: var(--surface-app);
   border: 1px solid var(--border-secondary);
   color: var(--error-text);
 }
@@ -2627,4 +3304,361 @@ body.reduce-motion .flow-node.cooking::after {
 }
 .fatal-card a {
   color: var(--accent-primary);
+}
+
+/* ---- The motion system + keyboard focus ----
+ * Compositor-only (transform/opacity), driven by the --motion-* tokens,
+ * which prefers-reduced-motion and body.reduce-motion zero out - every
+ * rule below collapses to an instant state change under reduce-motion. */
+
+/* Keyboard focus: a visible accent ring everywhere, hairline-safe on the
+ * light theme. Pointer interactions stay unringed (:focus-visible). */
+:focus-visible {
+  outline: 2px solid var(--accent-hairline);
+  outline-offset: 1px;
+}
+
+/* Menus arrive fast and quiet. */
+.menu-dropdown {
+  animation: menu-in var(--motion-fast) var(--ease-out-quad);
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* Toasts slide in from the bottom edge. */
+.toast {
+  animation: toast-in var(--motion-base) var(--ease-out-quad);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* The radial blooms from the node; the band scales, the node under
+ * it never moves. */
+.radial-anchor svg {
+  animation: radial-in var(--motion-slow) var(--ease-out-back);
+  transform-origin: center;
+}
+@keyframes radial-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+
+/* Modals rise gently over the scrim. */
+.modal {
+  animation: modal-in var(--motion-base) var(--ease-out-quad);
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* The display halo announces the flag landing. */
+.display-halo {
+  animation: halo-in var(--motion-base) var(--ease-out-quad);
+}
+@keyframes halo-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+
+/* ---- Texture viewer pane ---- */
+
+.texture-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface-sunken);
+}
+
+.texture-viewer-status {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: 0 0 auto;
+}
+
+.texture-viewer-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* A subtle checker so alpha reads as alpha. */
+  background-image:
+    linear-gradient(45deg, rgb(128 128 128 / 12%) 25%, transparent 25%, transparent 75%, rgb(128 128 128 / 12%) 75%),
+    linear-gradient(45deg, rgb(128 128 128 / 12%) 25%, transparent 25%, transparent 75%, rgb(128 128 128 / 12%) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.texture-viewer-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+/* ---- Select ----
+ *
+ * Replaces the native `<select>`s. There was no select styling in this file
+ * at all, so they rendered as OS controls: system chrome on the cream light
+ * theme, a platform-drawn popup no token could reach, and a system focus ring
+ * beside an amber accent. Every colour here is a role, so the control follows
+ * the theme like the rest of the chrome. */
+.select {
+  position: relative;
+  display: inline-block;
+}
+
+.select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 1.2rem;
+  text-align: left;
+  color: var(--input-text);
+  background: var(--input-background);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quad),
+    background-color var(--motion-fast) var(--ease-out-quad);
+}
+.select-trigger:hover:not(:disabled) {
+  border-color: var(--input-border-hover);
+}
+.select-trigger.open,
+.select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--input-border-focus);
+}
+.select-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 100%;
+  z-index: 40;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 2px 0;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.45);
+}
+
+.select-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 1.2rem;
+  text-align: left;
+  color: var(--text-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* Hover and keyboard highlight are the SAME state: the pointer moves the
+ * active index, so there is never a second, competing highlight. */
+.select-option.active:not(:disabled) {
+  background: var(--hover-bg);
+}
+.select-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.select-check {
+  display: inline-flex;
+  width: 11px;
+  flex: 0 0 11px;
+  color: var(--accent-primary);
+}
+.select-option-label {
+  flex: 1;
+}
+.select-option-hint {
+  color: var(--text-tertiary);
+  font-size: 1.1rem;
+}
+
+/* ---- Node info: ports and parameters ----
+ *
+ * These render straight from the registry snapshot, so a node added in Rust
+ * documents itself here with zero frontend change. Collapsed by default for
+ * params (a principled surface has a lot of them) and open for ports, which
+ * are what you usually came to check. */
+.node-info-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+.node-info-section > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 11px;
+  list-style: none;
+  user-select: none;
+}
+.node-info-section > summary::-webkit-details-marker {
+  display: none;
+}
+.node-info-section > summary::before {
+  content: "\25b8";
+  display: inline-block;
+  width: 1em;
+  transition: transform var(--motion-fast) var(--ease-out-quad);
+}
+.node-info-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+.node-info-section > summary:hover {
+  color: var(--text-primary);
+}
+
+.node-info-defs {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.node-info-def + .node-info-def {
+  margin-top: 8px;
+}
+.node-info-def dt {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+.node-info-def dd {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+}
+.node-info-def dd p {
+  margin: 0 0 4px;
+}
+.node-info-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+/* ---- The first-run tour ----
+ *
+ * The scrim is four rects around the target rather than one box-shadow ring:
+ * the hole must not intercept pointer events, so the app underneath stays
+ * live and the spotlight reads as a hole rather than a highlight. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+}
+.tour-scrim {
+  position: fixed;
+  /* The scrim ink is a theme role; the alpha is this layer's own
+   * concern, so the token stays reusable. */
+  background: color-mix(in srgb, var(--scrim) 62%, transparent);
+  pointer-events: auto;
+}
+.tour-spot {
+  position: fixed;
+  pointer-events: none;
+  border: 1px solid var(--accent-primary);
+  border-radius: 3px;
+}
+
+.tour-card {
+  position: fixed;
+  width: 320px;
+  pointer-events: auto;
+  padding: 12px 14px 10px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  box-shadow: 0 10px 34px -12px rgba(0, 0, 0, 0.55);
+}
+.tour-card-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.tour-card-body {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.tour-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tour-progress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* A single 6px triangle pointing back at the spotlight. */
+.tour-card::after {
+  content: "";
+  position: absolute;
+  border: 6px solid transparent;
+}
+.tour-card-bottom::after {
+  bottom: 100%;
+  left: 50%;
+  margin-left: -6px;
+  border-bottom-color: var(--border-default);
+}
+.tour-card-top::after {
+  top: 100%;
+  left: 50%;
+  margin-left: -6px;
+  border-top-color: var(--border-default);
+}
+.tour-card-right::after {
+  right: 100%;
+  top: 50%;
+  margin-top: -6px;
+  border-right-color: var(--border-default);
+}
+.tour-card-left::after {
+  left: 100%;
+  top: 50%;
+  margin-top: -6px;
+  border-left-color: var(--border-default);
 }

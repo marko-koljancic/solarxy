@@ -1,7 +1,7 @@
 //! Serializable mirrors: the per-node [`NodeMirror`] and whole-document
 //! [`DocumentSnapshot`] the frontend rebuilds its store from, and the
 //! [`RegistrySnapshot`] that drives the palette and parameter panel (the
-//! zero-frontend-change contract, node catalog part I section 8).
+//! zero-frontend-change contract).
 //!
 //! Geometry never appears here: the mirror holds only node, edge, and
 //! param metadata, so a full resnapshot after a desync or structural undo
@@ -179,14 +179,26 @@ pub struct NodeTypeSnapshot {
     pub category: crate::registry::Category,
     /// Title Case label for the category; `category` stays the stable id.
     pub category_label: String,
-    pub root_context: bool,
-    pub subflow_context: bool,
+    /// The network kinds this node may be placed in, in
+    /// [`ContextKind::ALL`](crate::document::ContextKind::ALL) order. Replaces
+    /// the pre-phase-17 `rootContext`/`subflowContext` booleans; the palette
+    /// filters against the current canvas's kind.
+    pub contexts: Vec<crate::document::ContextKind>,
+    /// The child-network kind this node opens, for containers (`geo`
+    /// opens `geo`); `null` otherwise. The frontend derives a canvas's
+    /// kind from its owner's descriptor through this.
+    pub opens: Option<crate::document::ContextKind>,
     pub inputs: Vec<PortSnapshot>,
     pub outputs: Vec<PortSnapshot>,
     pub params: Vec<ParamSnapshot>,
     pub bypass: BypassSnapshot,
     pub doc: String,
     pub search_aliases: Vec<String>,
+    /// Stable icon key for the node's vector glyph; an unknown key falls
+    /// back to the category glyph client-side.
+    pub glyph: String,
+    /// The silhouette family the node renders with; orthogonal to `category`.
+    pub role: crate::registry::NodeRole,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +242,11 @@ pub struct ParamSnapshot {
     pub param_type: String,
     pub enum_variants: Vec<(String, String)>,
     pub accept: Vec<String>,
+    /// The picker constraint for `nodePath` params; absent otherwise
+    /// (skipped from the JSON so pre-phase-17 consumers see no new key on
+    /// old param shapes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_path: Option<NodePathAcceptSnapshot>,
     /// The default value in schema-v1 plain JSON form.
     pub default: serde_json::Value,
     pub hard: Option<(f64, f64)>,
@@ -240,6 +257,21 @@ pub struct ParamSnapshot {
     /// panel dims the row while that port is connected).
     pub driven_by_port: Option<String>,
     pub doc: String,
+}
+
+/// What a `nodePath` param may point at, as the frontend picker consumes
+/// it: `{ "kind": "opens", "opens": "mat" }` (containers opening a
+/// network of that kind) or `{ "kind": "typeIs", "typeIs": "camera" }`
+/// (nodes of one exact type).
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    rename_all_fields = "camelCase"
+)]
+pub enum NodePathAcceptSnapshot {
+    Opens { opens: crate::document::ContextKind },
+    TypeIs { type_is: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -264,6 +296,7 @@ impl From<Unit> for UnitSnapshot {
 
 impl From<&ParamSpec> for ParamSnapshot {
     fn from(p: &ParamSpec) -> Self {
+        let mut node_path = None;
         let (param_type, enum_variants, accept) = match &p.ty {
             ParamType::Float => ("float", vec![], vec![]),
             ParamType::Int => ("int", vec![], vec![]),
@@ -282,6 +315,20 @@ impl From<&ParamSpec> for ParamSnapshot {
                 vec![],
             ),
             ParamType::AssetRef { accept } => ("assetRef", vec![], accept.clone()),
+            ParamType::Action => ("action", vec![], vec![]),
+            ParamType::NodePath { accept } => {
+                node_path = Some(match accept {
+                    crate::registry::param_spec::NodePathAccept::Opens(kind) => {
+                        NodePathAcceptSnapshot::Opens { opens: *kind }
+                    }
+                    crate::registry::param_spec::NodePathAccept::TypeIs(type_id) => {
+                        NodePathAcceptSnapshot::TypeIs {
+                            type_is: type_id.clone(),
+                        }
+                    }
+                });
+                ("nodePath", vec![], vec![])
+            }
         };
         Self {
             key: p.key.clone(),
@@ -290,6 +337,7 @@ impl From<&ParamSpec> for ParamSnapshot {
             param_type: param_type.to_string(),
             enum_variants,
             accept,
+            node_path,
             default: crate::registry::resolve::param_value_to_json(&p.default),
             hard: p.range.map(|r| r.hard),
             soft: p.range.and_then(|r| r.soft),
@@ -329,8 +377,8 @@ impl NodeTypeSnapshot {
             display_name: desc.display_name.to_string(),
             category: desc.category,
             category_label: desc.category.display_name().to_string(),
-            root_context: desc.contexts.root,
-            subflow_context: desc.contexts.subflow,
+            contexts: desc.contexts.kinds(),
+            opens: desc.opens,
             inputs: desc.inputs.iter().map(PortSnapshot::from).collect(),
             outputs: desc.outputs.iter().map(PortSnapshot::from).collect(),
             params: desc.params.iter().map(ParamSnapshot::from).collect(),
@@ -341,6 +389,8 @@ impl NodeTypeSnapshot {
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
+            glyph: desc.glyph.to_string(),
+            role: desc.role,
         }
     }
 }

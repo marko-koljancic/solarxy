@@ -25,7 +25,10 @@ export type ParamValue =
   | { type: "vec4"; value: [number, number, number, number] }
   | { type: "color"; value: [number, number, number, number] }
   | { type: "enum"; value: string }
-  | { type: "asset"; value: string };
+  | { type: "asset"; value: string }
+  /** A cross-context node reference: the target's stable node id, or
+ * null when unset. */
+  | { type: "nodeRef"; value: NodeId | null };
 
 export type ParamSource =
   | ({ kind: "literal" } & ParamValue)
@@ -154,7 +157,16 @@ export type EngineEvent =
   | { type: "bypassChanged"; ctx: GraphContext; node: NodeId; bypassed: boolean }
   | { type: "variadicReordered"; ctx: GraphContext; node: NodeId; port: string; order: EdgeId[] }
   | { type: "cookStatus"; node: NodeId; status: CookStatus }
-  | { type: "nodeStats"; node: NodeId; points: number; prims: number; meshes: number }
+  | {
+      type: "nodeStats";
+      node: NodeId;
+      points: number;
+      prims: number;
+      meshes: number;
+      /** `[width, height]` when the node's default output is an image
+       * (geometry counts stay zero for those); null otherwise. */
+      image: [number, number] | null;
+    }
   | { type: "validationSummary"; node: NodeId; errors: number; warnings: number }
   | {
       type: "validationReport";
@@ -227,7 +239,7 @@ export interface PortRef {
 
 export type DataType =
   | "geometry" | "light" | "report" | "float" | "int" | "bool"
-  | "vec2" | "vec3" | "vec4" | "color" | "text" | "image";
+  | "vec2" | "vec3" | "vec4" | "color" | "text" | "image" | "material";
 
 export interface PortSnapshot {
   key: string;
@@ -247,6 +259,8 @@ export interface ParamSnapshot {
   paramType: string;
   enumVariants: [string, string][];
   accept: string[];
+  /** The picker constraint for `nodePath` params; absent otherwise. */
+  nodePath?: { kind: "opens"; opens: ContextKind } | { kind: "typeIs"; typeIs: string };
   default: unknown;
   hard: [number, number] | null;
   soft: [number, number] | null;
@@ -263,6 +277,24 @@ export type BypassSnapshot =
   | { mode: "mute" }
   | { mode: "notBypassable" };
 
+/** The visual silhouette family a node renders with;
+ * orthogonal to `category` (which picks the fill). A pure UI hint. */
+export type NodeRole =
+  | "standard"
+  | "container"
+  | "gather"
+  | "branch"
+  | "terminal"
+  | "analyzer"
+  | "imageSource"
+  | "light"
+  | "note";
+
+/** The network kinds of the typed-context model. The root
+ * canvas is `obj`; a container's child canvas is whatever its descriptor
+ * `opens`. */
+export type ContextKind = "obj" | "geo" | "mat" | "tex";
+
 export interface NodeTypeSnapshot {
   typeId: string;
   version: number;
@@ -270,14 +302,26 @@ export interface NodeTypeSnapshot {
   category: "container" | "primitives" | "modifiers" | "import" | "lights" | "utility";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
-  rootContext: boolean;
-  subflowContext: boolean;
+  /** The network kinds this node may be placed in. Replaces the
+   * pre-phase-17 rootContext/subflowContext booleans; the palette filters
+   * against the current canvas's kind. */
+  contexts: ContextKind[];
+  /** The child-network kind this node opens, for containers (`geo` opens
+   * `"geo"`); null otherwise. A canvas's kind derives from its owner's
+   * descriptor through this. */
+  opens: ContextKind | null;
   inputs: PortSnapshot[];
   outputs: PortSnapshot[];
   params: ParamSnapshot[];
   bypass: BypassSnapshot;
   doc: string;
   searchAliases: string[];
+  /** Stable icon key; an unknown key falls back to the
+   * category glyph in `flow/nodeVisual.ts`. */
+  glyph: string;
+  /** Silhouette hint; a variant this frontend does not know
+   * yet falls back by category in `flow/nodeVisual.ts`. */
+  role: NodeRole;
 }
 
 export type CoercionKind = "same" | "lossless" | "lossy";
@@ -414,7 +458,7 @@ export function ctxKey(ctx: GraphContext): string {
   return ctx === "root" ? "root" : `sub:${ctx.subflow}`;
 }
 
-// --- Phase 6: host-owned view state (panes, cameras, display settings).
+// --- Host-owned view state (panes, cameras, display settings).
 // PaneDisplaySettings mirrors solarxy_core::view_config with camelCase
 // fields; enum VALUES keep their Rust casing ("Shaded", "GRADIENT"-style
 // BackgroundMode strings) because those serde shapes predate the boundary.
@@ -434,7 +478,9 @@ export interface PaneDisplaySettings {
   backgroundMode: unknown;
   uvMode: "Off" | "Gradient" | "Checker";
   boundsMode: "off" | "wholeModel" | "perMesh";
-  lineWeight: string;
+  /** Wireframe stroke weight in screen px: Light 1, Medium 2, Bold 3.
+   * Pinned to `solarxy_core::preferences::LineWeight`. */
+  lineWeight: "Light" | "Medium" | "Bold";
   showGrid: boolean;
   showAxisGizmo: boolean;
   showLocalAxes: boolean;
@@ -447,6 +493,8 @@ export interface PaneDisplaySettings {
   uvZoom: number;
   showUvOverlap: boolean;
   showValidation: boolean;
+  /** Live per-pane turntable spin; session-temporary, not persisted. */
+  turntableActive: boolean;
 }
 
 export interface DisplaySettingsDto {
@@ -476,6 +524,18 @@ export interface ViewStateDto {
   display: DisplaySettingsDto;
   paneProjections: ("perspective" | "orthographic")[];
   paneRects: PaneRectDto[];
+  /** The camera node each pane looks through (id), or null for a free view. */
+  paneLookThrough: (number | null)[];
+  /** Whether each look-through pane is locked (reframes the camera). */
+  paneCameraLock: boolean[];
+  /** The look-through camera's framing aspect per pane (for the gate), or null. */
+  paneGateAspect: (number | null)[];
+}
+
+/** The current pose of a pane's camera (create-camera-from-view). */
+export interface CameraPose {
+  position: [number, number, number];
+  target: [number, number, number];
 }
 
 /** Async host happenings drained once per frame. */
@@ -485,7 +545,7 @@ export type HostEvent =
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
   | { type: "viewChanged" };
 
-/** The viewport tool. Rotate and Scale are Phase 12: they select, but draw and
+/** The viewport tool. Rotate and Scale select, draw and
  * grab nothing, which is why their buttons ship disabled rather than dead. */
 export type ToolMode = "select" | "move" | "rotate" | "scale";
 

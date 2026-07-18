@@ -12,6 +12,7 @@ import type { ReviewCategory } from "../../engine/types";
 import { useReview } from "../../store/review";
 import { pushToast } from "../../store/toasts";
 import { CATEGORY_LABELS } from "./visuals";
+import { Select } from "../Select";
 
 const POPUP_W = 260;
 const POPUP_H = 170;
@@ -62,17 +63,15 @@ export function ReviewPopup() {
     >
       <div className="review-popup-head">
         <span>{title}</span>
-        <select
-          className="input-field"
+        <Select
+          ariaLabel="Annotation category"
           value={draft.category}
-          onChange={(e) => setDraft({ ...draft, category: e.target.value as ReviewCategory })}
-        >
-          {(Object.keys(CATEGORY_LABELS) as ReviewCategory[]).map((c) => (
-            <option key={c} value={c}>
-              {CATEGORY_LABELS[c]}
-            </option>
-          ))}
-        </select>
+          options={(Object.keys(CATEGORY_LABELS) as ReviewCategory[]).map((c) => ({
+            value: c,
+            label: CATEGORY_LABELS[c],
+          }))}
+          onChange={(c) => setDraft({ ...draft, category: c })}
+        />
       </div>
       <textarea
         ref={textRef}

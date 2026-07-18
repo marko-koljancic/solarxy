@@ -167,6 +167,37 @@ runs:
         ./appimagetool --appimage-extract-and-run \
           "$APPDIR" "bundle-out/Solarxy-${V}-x86_64.AppImage"
 
+    # ---- SHA256 companions -------------------------------------------------
+    # Emit `<bundle>.sha256` next to every artifact, mirroring the companion
+    # files cargo-dist publishes beside its tarballs. They ride the same
+    # `gh release upload bundle-out/*` in native-bundle.yml, so the release
+    # carries a checksum for the DMG and the AppImage — not just the
+    # cargo-dist tarballs.
+    #
+    # The DMG hashes are what let the Homebrew cask retire `sha256 :no_check`.
+    # Without a published checksum the cask has no integrity gate, so a bad
+    # or partial download is only discovered after the app artifact is moved
+    # -- i.e. after the previously installed app is already gone.
+    #
+    # `shasum -a 256` (not `sha256sum`) is deliberate: it exists on both the
+    # macOS and Ubuntu runners. `cd` via working-directory keeps the filename
+    # in the companion bare, matching the cargo-dist format that
+    # homebrew-bump.yml parses with `awk '{print $1}'`.
+    - name: Emit SHA256 companions
+      if: hashFiles('bundle-out/*') != ''
+      shell: bash
+      working-directory: bundle-out
+      run: |
+        set -euo pipefail
+        for f in *; do
+          case "$f" in
+            *.sha256) continue ;;
+          esac
+          [ -f "$f" ] || continue
+          shasum -a 256 "$f" > "$f.sha256"
+          cat "$f.sha256"
+        done
+
     # ---- Collect output paths + upload ------------------------------------
     - name: Collect output paths
       id: collect

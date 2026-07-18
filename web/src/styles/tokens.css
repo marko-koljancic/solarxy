@@ -1,20 +1,82 @@
-/* Design tokens, carried from the Minimystix reference
- * (_reference/minimystx/src/styles/variables.css) per the phase-6 design
- * adoption decision (2026-07-08). Dark is the default theme; the light set
- * overrides on body.light-theme; "system" resolves to one of the two in
- * the ui store. Solarxy-specific tokens (badges, stale, handles, canvas)
- * extend the set at the bottom of each block: the typed-handle palette and
- * status colors are UX-spec-owned and survive the restyle. */
+/* Design tokens: a two-tier architecture. Tier 1 is a raw primitive
+ * palette with no UI meaning; tier 2 is the semantic layer components
+ * read. Legacy variable names (the pre-revamp vocabulary that styles.css
+ * and the dockview remap consume) are kept as aliases onto the semantics,
+ * so the reskin landed without a call-site rename; new code should prefer
+ * the semantic names.
+ *
+ * BOTH COLOR TIERS ARE GENERATED. They live in `crates/solarxy-core/src/
+ * theme.rs`, which also feeds the egui desktop GUI and the analyze TUI, so
+ * one palette drives all three shells. Do not add a color here: add it to
+ * the Rust palette and regenerate. `tokens_drift.rs` fails CI on a stale
+ * file, and refuses a hand-written role that would win on cascade order.
+ *
+ * What stays hand-authored in this file: typography, motion, spacing, and
+ * the legacy aliases. The typed-handle palette in registry/datatypes.ts
+ * and the node category pastels are UX-spec-owned and unchanged.
+ *
+ * The shipping look: neutral grey with an Ayu amber accent on dark, warm
+ * cream paper with a terracotta accent on light (the MPW "Balanced
+ * Editorial" palette from koljam.com). Burnt-orange attention state
+ * (always shape-paired), Houdini-blue display flag. Dark is the default;
+ * the light set overrides on body.light-theme; "system" resolves to one of
+ * the two in the prefs store. */
 
+@import "./tokens.generated.css";
+
+:root {
+  /* Typography: bundled, self-hosted families (fontsource,
+   * latin-subset woff2 via unicode-range); the system stacks remain as
+   * fallbacks. IBM Plex Mono carries all numeric-precision surfaces. */
+  --font-ui:
+    "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Motion. Zeroed under reduce-motion below; transform/opacity
+   * only, never on the cook path. */
+  --motion-fast: 90ms;
+  --motion-base: 160ms;
+  --motion-slow: 240ms;
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+body.reduce-motion {
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+}
+
+/* Tier 2's colors are generated (see the header). What remains here is the
+ * derived-from-a-role values and the legacy alias vocabulary: both are
+ * indirections ONTO the semantics, never redefinitions of them. */
 :root,
 body,
 body.dark-theme {
-  color-scheme: dark;
+  --display-halo: var(--display);
+  --status-error-bg: rgba(255, 68, 68, 0.1);
 
-  --background-primary: #2a2a2a;
-  --background-secondary: #333333;
-  --background-tertiary: #3a3a3a;
-  --background-quaternary: #1e1e1e;
+  /* Node anatomy: the glyph draws directly on the body fill; the wing
+   * hovers tint the state hue they act on. */
+  --wing-bypass-hover: color-mix(in srgb, var(--state-attention) 45%, transparent);
+  --wing-display-hover: color-mix(in srgb, var(--display) 45%, transparent);
+
+  /* ---- Legacy aliases (pre-revamp vocabulary) ----------------------- */
+
+  --background-primary: var(--surface-app);
+  --background-secondary: var(--surface-raised);
+  --background-tertiary: var(--surface-overlay);
+  --background-quaternary: var(--surface-sunken);
 
   --node-background: #e5e7eb;
 
@@ -24,8 +86,9 @@ body.dark-theme {
 
   --light-node-background: #f8e7b0;
 
-  /* Houdini-inspired pastel category fills (Phase 7b). Dark text stays
-   * readable on all of them; the dark theme uses slightly muted values. */
+  /* Houdini-inspired pastel category fills.
+   * Dark text stays readable on all of them; the dark theme uses slightly
+   * muted values. */
   --node-cat-primitives: #c9dcf2;
   --node-cat-modifiers: #c8e8d6;
   --node-cat-import: #ddd0ee;
@@ -35,22 +98,26 @@ body.dark-theme {
   --light-node-border: rgba(255, 255, 255, 0.15);
   --light-node-border-hover: rgba(255, 255, 255, 0.25);
 
-  --border-primary: #404040;
-  --border-secondary: #4a4a4a;
-  --border-tertiary: #555555;
+  --border-primary: var(--border-subtle);
+  --border-secondary: var(--border-default);
+  --border-tertiary: var(--border-strong);
 
-  --divider-primary: #555555;
+  --divider-primary: var(--divider);
 
-  --text-primary: #e0e0e0;
-  --text-secondary: #888888;
-  --text-tertiary: #aaaaaa;
-  --text-quaternary: #999999;
-  --text-highlight: #ffffff;
-  --text-on-accent: rgba(255, 255, 255, 0.92);
+  /* Note: the legacy text scale had secondary darker than tertiary on
+   * dark; the aliases preserve those exact values. */
+  --text-primary: var(--ink-primary);
+  --text-secondary: var(--ink-tertiary);
+  --text-tertiary: var(--ink-secondary);
+  --text-quaternary: var(--ink-muted);
+  --text-highlight: var(--ink-strong);
+  --text-on-accent: var(--ink-on-accent);
 
-  --accent-primary: #4a90e2;
-  --accent-secondary: #0098ff;
-  --accent-tertiary: #003e66;
+  --accent-primary: var(--accent);
+  --accent-secondary: var(--accent-hover);
+  --accent-tertiary: var(--accent-subtle);
+  /* Legacy hues, unused in chrome (excluded from the evo application
+   * map); kept for compatibility only. */
   --accent-blue: #4a90e2;
   --accent-green: #5ec269;
   --accent-yellow: #f7df1e;
@@ -58,7 +125,7 @@ body.dark-theme {
   --edge-color: #4a90e2;
   --edge-outline-color: #000000;
   --connection-line-default: #e5e7eb;
-  --connection-line-valid: #55dd99;
+  --connection-line-valid: var(--ok-400);
   --connection-line-invalid: #ff6060;
 
   --spacing-xxs: 0.2rem;
@@ -82,36 +149,37 @@ body.dark-theme {
     border-color 0.3s ease;
 
   --error-border: #ff4444;
-  --error-background: rgba(255, 68, 68, 0.1);
+  --error-background: var(--status-error-bg);
   --error-text: #ff6666;
 
-  --input-background: var(--background-quaternary);
-  --input-border: var(--border-primary);
-  --input-border-focus: var(--accent-primary);
-  --input-border-hover: var(--border-secondary);
-  --input-text: var(--text-primary);
+  --input-background: var(--surface-sunken);
+  --input-border: var(--border-subtle);
+  --input-border-focus: var(--accent-hairline);
+  --input-border-hover: var(--border-default);
+  --input-text: var(--ink-primary);
   --input-placeholder: var(--text-tertiary);
 
-  /* Solarxy: status + node-canvas tokens (UX-spec-owned). */
-  --error-badge: #e5484d;
-  --warn-badge: #f5a623;
-  --stale-color: #f5a623;
-  --cooking-color: #f5a623;
-  --display-flag: #fbbf24;
-  --handle-border: var(--background-quaternary);
-  --canvas-background: #242424;
-  --canvas-dot: #3c3c3c;
-  --node-label: var(--text-primary);
-  --node-text: #1f2937;
+  /* Solarxy: status + node-canvas tokens (UX-spec-owned). Warn, stale and
+   * cook share the attention hue; each keeps its own shape channel (badge,
+   * corner tag, spinner arc). The display flag is Houdini-blue. */
+  --error-badge: var(--status-error);
+  --warn-badge: var(--state-attention);
+  --stale-color: var(--state-attention);
+  --cooking-color: var(--state-attention);
+  --display-flag: var(--display);
+  --handle-border: var(--surface-sunken);
+  --canvas-background: var(--surface-canvas);
+  --canvas-dot: var(--surface-dot);
+  --node-label: var(--ink-primary);
+  --node-text: var(--ink-on-pastel);
 }
 
+/* The light theme's roles are generated alongside the dark set. Only the
+ * derived values and the legacy aliases differ per theme here. */
 body.light-theme {
-  color-scheme: light;
+  --status-error-bg: rgba(204, 0, 0, 0.05);
 
-  --background-primary: #ffffff;
-  --background-secondary: #f5f5f5;
-  --background-tertiary: #e8e8e8;
-  --background-quaternary: #e0e0e0;
+  /* ---- Legacy aliases (light) --------------------------------------- */
 
   --node-background: #f8f8f8;
 
@@ -130,45 +198,17 @@ body.light-theme {
   --light-node-border: rgba(0, 0, 0, 0.15);
   --light-node-border-hover: rgba(0, 0, 0, 0.25);
 
-  --border-primary: #e0e0e0;
-  --border-secondary: #cccccc;
-  --border-tertiary: #bbbbbb;
+  --text-secondary: var(--ink-secondary);
+  --text-tertiary: var(--ink-tertiary);
 
-  --divider-primary: #aaaaaa;
-
-  --text-primary: #333333;
-  --text-secondary: #555555;
-  --text-tertiary: #777777;
-  --text-quaternary: #999999;
-  --text-highlight: #000000;
-  --text-on-accent: #111111;
-
-  --accent-primary: #0078d4;
-  --accent-secondary: #0098ff;
-  --accent-tertiary: #e1f0ff;
   --accent-blue: #4ba3e3;
-  --accent-green: #5ec269;
-  --accent-yellow: #f7df1e;
 
   --edge-color: #0078d4;
   --edge-outline-color: #000000;
   --connection-line-default: #434343;
-  --connection-line-valid: #55dd99;
-  --connection-line-invalid: #ff6060;
 
   --error-border: #cc0000;
-  --error-background: rgba(204, 0, 0, 0.05);
   --error-text: #cc0000;
 
-  /* Solarxy status/canvas tokens, light variants. */
-  --error-badge: #d1373c;
-  --warn-badge: #c77d00;
-  --stale-color: #c77d00;
-  --cooking-color: #c77d00;
-  --display-flag: #d97706;
-  --handle-border: #f5f5f5;
-  --canvas-background: #fafafa;
-  --canvas-dot: #d8d8d8;
-  --node-label: var(--text-primary);
-  --node-text: #1f2937;
+  --handle-border: var(--surface-raised);
 }

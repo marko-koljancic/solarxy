@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/solarxy-core",
     "crates/solarxy-formats",
+    "crates/solarxy-imaging",
     "crates/solarxy-kernel",
     "crates/solarxy-graph",
     "crates/solarxy-scenefile",
@@ -15,7 +16,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"

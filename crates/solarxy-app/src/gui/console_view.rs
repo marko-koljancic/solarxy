@@ -1,9 +1,10 @@
+use super::theme::Theme;
 use crate::console::ConsoleState;
 
 /// Console content for hosting inside an `egui_dock` tab. The dock owns
 /// docked/floating placement; this function paints the level filter,
 /// search bar, and the scrolling log entries.
-pub(super) fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState) {
+pub(super) fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState, theme: &Theme) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("console_filter")
             .selected_text(console.min_level.as_str())
@@ -56,30 +57,27 @@ pub(super) fn draw_console_content(ui: &mut egui::Ui, console: &mut ConsoleState
                     {
                         continue;
                     }
+                    // Every colour here comes from the theme.
+                    //
+                    // These used to be hardcoded: the severities were literal
+                    // RGB, and INFO/DEBUG were `from_white_alpha`, i.e. WHITE
+                    // at partial opacity. White ink only resolves on a dark
+                    // ground, so the moment the light theme became warm cream
+                    // paper the entire log went invisible — a faint smudge on
+                    // an off-white panel.
                     let (level_color, msg_color) = match entry.level {
-                        tracing::Level::ERROR => (
-                            egui::Color32::from_rgb(255, 100, 100),
-                            egui::Color32::from_rgb(255, 150, 150),
-                        ),
-                        tracing::Level::WARN => (
-                            egui::Color32::from_rgb(255, 200, 80),
-                            egui::Color32::from_rgb(235, 210, 160),
-                        ),
-                        tracing::Level::INFO => (
-                            egui::Color32::from_white_alpha(180),
-                            egui::Color32::from_white_alpha(200),
-                        ),
-                        _ => (
-                            egui::Color32::from_white_alpha(110),
-                            egui::Color32::from_white_alpha(130),
-                        ),
+                        tracing::Level::ERROR => (theme.severity_error, theme.severity_error),
+                        tracing::Level::WARN => (theme.severity_warn, theme.fg),
+                        tracing::Level::INFO => (theme.muted, theme.fg),
+                        // DEBUG / TRACE: present but recessive.
+                        _ => (theme.muted, theme.muted),
                     };
                     let row = ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(&entry.timestamp)
                                 .monospace()
                                 .small()
-                                .color(egui::Color32::from_white_alpha(110)),
+                                .color(theme.muted),
                         );
                         ui.label(
                             egui::RichText::new(format!("{:>5}", entry.level.as_str()))

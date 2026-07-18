@@ -1,26 +1,33 @@
+//! Shared line builders for the analyze TUI.
+//!
+//! Every color arrives as a [`TuiTheme`] rather than being named here, so
+//! this shell stays a pure consumer of the palette in `solarxy_core::theme`.
+
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
-pub(crate) fn section_header(text: &str) -> Line<'static> {
+use super::tui_theme::TuiTheme;
+
+pub(crate) fn section_header(text: &str, theme: &TuiTheme) -> Line<'static> {
     Line::from(Span::styled(
         text.to_string(),
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme.heading)
             .add_modifier(Modifier::BOLD),
     ))
 }
 
-pub(crate) fn kv_line(label: &str, value: &str) -> Line<'static> {
+pub(crate) fn kv_line(label: &str, value: &str, theme: &TuiTheme) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             format!("{}:", label),
             Style::default()
-                .fg(Color::Green)
+                .fg(theme.success)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
-        Span::styled(value.to_string(), Style::default().fg(Color::White)),
+        Span::styled(value.to_string(), Style::default().fg(theme.text)),
     ])
 }

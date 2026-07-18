@@ -81,7 +81,11 @@ impl EguiRenderer {
             egui_wgpu::Renderer::new(device, egui_format, egui_wgpu::RendererOptions::default());
 
         configure_fonts(&ctx);
-        let theme = Theme::ayu_mirage_dark();
+        // The startup default; `state/init.rs` re-applies the user's
+        // persisted choice once preferences have loaded. Routed through
+        // `ThemeChoice::default()` rather than naming a preset, so the
+        // default lives in exactly one place.
+        let theme = Theme::from_choice(ThemeChoice::default());
         apply_theme(&ctx, &theme);
 
         Self {

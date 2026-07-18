@@ -1,16 +1,16 @@
 // The 3D viewport: a single WebGPU canvas driven by the Rust renderer.
 // React never draws into it; it forwards pointer gestures to the host's
 // pane-aware camera routing, runs the rAF cook+render loop, and floats
-// one DOM toolbar per pane over the canvas (UX spec: panels are DOM, the
+// one DOM toolbar per pane over the canvas (panels are DOM, the
 // canvas is one WebGPU surface with Rust-side pane hit-testing).
 //
-// Phase 10: the canvas element is no longer JSX. It is a module singleton
+// The canvas element is not JSX. It is a module singleton
 // (engine/canvas.ts) that this panel ADOPTS, because dockview's `fromJSON`
 // (every desk apply) rebuilds panel content and would otherwise recreate the
 // canvas and lose the WebGPU surface. Consequence: pointer handlers are
 // attached imperatively rather than as React props.
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   applyViewportBatch,
   bootSession,
@@ -28,6 +28,7 @@ import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
 import { GizmoReadout } from "./GizmoReadout";
 import { ToolColumn } from "./ToolColumn";
+import { ViewportContextMenu } from "./ViewportContextMenu";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPopup } from "./review/ReviewPopup";
 import { ViewportMenuBar } from "./ViewportMenuBar";
@@ -51,6 +52,8 @@ function pointerMods(e: PointerEvent): number {
 
 export function Viewport() {
   const hostRef = useRef<HTMLDivElement>(null);
+  // The right-click context menu: screen-space anchor, or null when closed.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // Crosshair while review mode is active. A class on a canvas React does not
   // render, so it is applied imperatively.
   const reviewMode = useReview((s) => s.reviewMode);
@@ -74,7 +77,7 @@ export function Viewport() {
     bootSession(canvas)
       .catch((err: unknown) => {
         // WebGPU unavailable or wasm init failed: the boot overlay shows
-        // the message (the full unsupported-browser page is Phase 16).
+        // the message (the full unsupported-browser page is separate).
         useUi
           .getState()
           .setBootError(err instanceof Error ? err.message : String(err));
@@ -83,7 +86,7 @@ export function Viewport() {
       .then(() => {
         if (!mounted) return;
 
-        // The scene starts EMPTY (maintainer decision, Phase 7b): the
+        // The scene starts EMPTY (maintainer decision): the
         // canvas teaching hint carries the first-run experience.
         let last = performance.now();
         let frameFailures = 0;
@@ -214,7 +217,7 @@ export function Viewport() {
     };
 
     const onDoubleClick = (e: MouseEvent) => {
-      // Enter the picked geo's subflow (decision 24).
+      // Enter the picked geo's subflow.
       try {
         const p = canvasPos(e);
         const hit = getClient().pick(p.x, p.y);
@@ -224,7 +227,13 @@ export function Viewport() {
       }
     };
 
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    // Right-click opens the viewport context menu (the camera never used the
+    // right button). setCtxMenu from useState is stable, so referencing it in
+    // this mount-only effect is safe.
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY });
+    };
 
     const onWheel = (e: WheelEvent) => {
       try {
@@ -257,7 +266,7 @@ export function Viewport() {
   // The menu bar sits above the canvas; every canvas overlay (pane toolbars,
   // review pins, popup) lives inside the canvas host so their absolute
   // canvas-CSS-px coordinates keep their origin at the canvas top-left. The
-  // ReviewPanel became its own dock panel in Phase 10 and is no longer here.
+ // ReviewPanel became its own dock panel in and is no longer here.
   return (
     <div className="viewport-pane">
       <ViewportMenuBar />
@@ -268,6 +277,9 @@ export function Viewport() {
         <ReviewOverlay />
         <ReviewPopup />
       </div>
+      {ctxMenu && (
+        <ViewportContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
+      )}
     </div>
   );
 }

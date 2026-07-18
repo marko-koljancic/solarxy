@@ -1,7 +1,7 @@
 //! Lowering cooked geometry to a `solarxy_core::scene::SceneDelta` for the
 //! renderer, the sole engine-to-renderer contract.
 //!
-//! The mapping (node catalog part II):
+//! The mapping:
 //!
 //! - Each root `geo` container becomes one `SceneObject`: its subflow's
 //!   active display node's cooked geometry is the object geometry
@@ -18,7 +18,7 @@
 use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
-use solarxy_core::scene::{LightDef, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{CameraDef, LightDef, SceneDelta, SceneObjectId, SceneOp};
 
 use crate::cook::CookEngine;
 use crate::document::{Document, GraphContext, NodeId};
@@ -47,10 +47,16 @@ pub fn build_scene_delta(
     };
 
     let mut lights: Vec<LightDef> = Vec::new();
+    let mut cameras: Vec<CameraDef> = Vec::new();
 
     for node in root.nodes() {
         match node.type_id.as_str() {
             "geo" => emit_geo(doc, registry, cook, previews, node.id, &mut delta),
+            "camera" => {
+                if let Some(cam) = camera_from_node(registry, previews, node) {
+                    cameras.push(cam);
+                }
+            }
             id if is_light(id) => {
                 if let Some(light) = light_from_node(registry, previews, node) {
                     lights.push(light);
@@ -61,6 +67,7 @@ pub fn build_scene_delta(
     }
 
     delta.push(SceneOp::SetLights { lights });
+    delta.push(SceneOp::SetCameras { cameras });
     delta
 }
 
@@ -266,7 +273,7 @@ pub(crate) fn geo_world_matrix(
 
 /// Picks the root `geo` container whose displayed, world-transformed
 /// geometry the ray hits nearest (single-pane picking; pane-awareness is
-/// Phase 6). Runs entirely in Rust over CPU-retained cooked geometry, so
+/// Runs entirely in Rust over CPU-retained cooked geometry, so
 /// nothing crosses into JavaScript. Returns the producing geo node's id.
 #[must_use]
 pub fn pick_node(
@@ -405,6 +412,58 @@ pub(crate) fn pick_node_detailed(
 /// Resolves a light node's params into a `LightDef` (the resolver already
 /// converts angles to radians; `LightDef` stores radians). Returns `None`
 /// for a non-light node or one missing its descriptor.
+/// Resolves a `camera` root node to a `CameraDef` (the camera analog of
+/// `light_from_node`). `fov_y` comes out in radians: a perspective camera
+/// reads it directly (the resolver converts its degrees param), a physical
+/// camera derives it from focal length + sensor width, and an orthographic
+/// camera does not use it. Previews are honored so a locked-camera reframe
+/// (which streams param previews) tracks live.
+fn camera_from_node(
+    registry: &Registry,
+    previews: &Previews,
+    node: &crate::document::NodeData,
+) -> Option<CameraDef> {
+    use solarxy_core::scene::CameraKind;
+
+    let desc = registry.get(&node.type_id)?;
+    let params = effective_params(previews, node.id, &node.params);
+    let p = resolve_params(&params, &desc.params).ok()?;
+    let f32p = |key: &str| -> f32 {
+        match p.get(key) {
+            Some(ParamValue::Float(v)) => *v as f32,
+            _ => 0.0,
+        }
+    };
+    let kind = match p.get("kind") {
+        Some(ParamValue::Enum(k)) if k == "orthographic" => CameraKind::Orthographic,
+        Some(ParamValue::Enum(k)) if k == "physical" => CameraKind::Physical,
+        _ => CameraKind::Perspective,
+    };
+    let fov_y = if kind == CameraKind::Physical {
+        let focal = f32p("focal_length").max(1e-3);
+        let sensor = f32p("sensor_width").max(1e-3);
+        2.0 * (sensor / (2.0 * focal)).atan()
+    } else {
+        let v = f32p("fov_y");
+        if v > 1e-4 { v } else { 45.0_f32.to_radians() }
+    };
+    let aspect = f32p("aspect");
+    Some(CameraDef {
+        id: SceneObjectId(node.id.0),
+        kind,
+        position: p.vec3_f32("position"),
+        target: p.vec3_f32("target"),
+        up: [0.0, 1.0, 0.0],
+        fov_y,
+        near: f32p("near"),
+        far: f32p("far"),
+        ortho_scale: f32p("ortho_scale"),
+        aspect: if aspect > 1e-3 { aspect } else { 16.0 / 9.0 },
+        show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
+        gizmo_size: f32p("gizmo_size"),
+    })
+}
+
 fn light_from_node(
     registry: &Registry,
     previews: &Previews,
@@ -445,7 +504,7 @@ fn light_from_node(
         shadow_map_size: 1024,
         shadow_bias: f32p("bias"),
         visible: !matches!(p.get("visible"), Some(ParamValue::Bool(false))),
-        // Declared on every light since Phase 8 and read by nothing until now.
+        // Declared on every light since and read by nothing until now.
         show_helper: boolp("show_helper"),
         helper_size: f32p("helper_size"),
     };

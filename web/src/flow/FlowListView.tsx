@@ -1,4 +1,4 @@
-// The flat node list view (Phase 7b C11, Minimystix FlowListView): a
+// The flat node list view (C11, Minimystix FlowListView): a
 // per-context table alternative to the graph canvas sharing the mirror
 // selection. Row click selects; double-clicking a container enters its
 // subflow; the Select button mirrors the Minimystix column.
@@ -10,7 +10,6 @@ import { assetDisplayName } from "../engine/session";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
-import { IconEye } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
 import { hasVisibleParam, nodeVisible } from "./visibility";
@@ -21,7 +20,7 @@ export function FlowListView() {
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
 
-  // Inline rename (Phase 8): double-click on the node cell or F2 via the
+  // Inline rename: double-click on the node cell or F2 via the
   // ui-store rename request; commit is one setParam on `name`.
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const renameRequest = useUi((s) => s.renameRequest);
@@ -121,7 +120,7 @@ export function FlowListView() {
                         });
                       }}
                     >
-                      <IconEye size={11} />
+                      <span className="vis-dot" aria-hidden />
                     </button>
                   )}
                   <button

@@ -3,7 +3,7 @@
 //! pane hit test, and the split-divider rects.
 //!
 //! Moved verbatim from `solarxy-app/src/state/panes.rs` in the web
-//! milestone's phase 6 so `solarxy-web` renders, routes pointer input, and
+//! milestone's so `solarxy-web` renders, routes pointer input, and
 //! positions DOM pane toolbars from the same geometry the desktop uses.
 //! All functions are pure: the shells supply the viewport origin/size in
 //! whatever pixel space they own (desktop: physical px anchored to the

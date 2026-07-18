@@ -1,4 +1,4 @@
-//! Node-version migration (node catalog part I, section 1).
+//! Node-version migration.
 //!
 //! On document load, each stored node carries a `type_version`. This module
 //! reconciles it with the registry's current descriptor version:
@@ -179,7 +179,8 @@ mod tests {
     use crate::registry::param_spec::{ParamSpec, ParamType};
     use crate::registry::resolve::ResolvedParams;
     use crate::registry::{
-        BypassBehavior, Category, ContextMask, MigrateError, NodeTypeDescriptor, PortSpec, Registry,
+        BypassBehavior, Category, ContextSet, MigrateError, NodeRole, NodeTypeDescriptor, PortSpec,
+        Registry,
     };
     use crate::registry::coerce::DataType;
 
@@ -211,7 +212,8 @@ mod tests {
             version: 2,
             display_name: "Widget",
             category: Category::Primitives,
-            contexts: ContextMask::SUBFLOW,
+            contexts: ContextSet::GEO,
+            opens: None,
             inputs: vec![],
             outputs: vec![
                 PortSpec::single("geometry", "Geometry", DataType::Geometry, false).default_port(),
@@ -229,6 +231,8 @@ mod tests {
             bypass: BypassBehavior::Mute,
             doc: "",
             search_aliases: &[],
+            glyph: "widget",
+            role: NodeRole::Standard,
             cook: stub_cook,
             migrate: Some(migrate_v1_to_v2),
         };
@@ -299,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn phase8_v1_nodes_strip_their_dead_params_silently() {
+    fn v1_nodes_strip_their_dead_params_silently() {
         // The real registry: v1 documents carrying values in the dropped
         // params (users may have toggled them expecting an effect) load
         // with zero warnings through the silent-strip migrations.

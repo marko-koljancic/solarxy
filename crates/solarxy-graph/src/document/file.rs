@@ -2,9 +2,9 @@
 //! whole [`Document`] (every context's nodes, edges, display flag, and
 //! selection, plus the review annotations and the id mint).
 //!
-//! This is the Phase-4 autosave substrate. The web host serializes a
+//! This is the autosave substrate. The web host serializes a
 //! [`DocumentData`] (wrapped by the engine's `DocumentFile` with the cook
-//! mode) to OPFS as JSON; Phase 5's `.slxy` ZIP reuses these same schema
+//! mode) to OPFS as JSON; the `.slxy` ZIP reuses these same schema
 //! types as its `document.json` entry, adding the asset payloads around it.
 //! Topology is not stored: it is re-derived from the edges on load, exactly
 //! as [`super::fragment::SubflowFragment`] does.
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Document, Edge, Graph, NodeData, NodeId};
+use super::{ContextKind, Document, Edge, Graph, NodeData, NodeId};
 
 /// One graph context's serializable contents.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -24,6 +24,11 @@ pub struct GraphData {
     pub active_output: Option<NodeId>,
     #[serde(default)]
     pub selection: Vec<NodeId>,
+    /// The network kind. `None` in pre-context documents, which had
+    /// exactly two shapes: the root (always `Obj`) and geo subflows
+    /// (always `Geo`), so the loader resolves `None` per position.
+    #[serde(default)]
+    pub kind: Option<ContextKind>,
 }
 
 /// The whole document as data: the root graph, one entry per subflow (keyed
@@ -45,14 +50,16 @@ fn graph_to_data(graph: &Graph) -> GraphData {
         edges: graph.edges().cloned().collect(),
         active_output: graph.active_output,
         selection: graph.selection.clone(),
+        kind: Some(graph.kind),
     }
 }
 
 /// Rebuilds a live `Graph` from data (topology re-derived from the edges;
 /// a target port is variadic exactly when the restored node carries it in
-/// `port_order`, registry-independently).
-fn graph_from_data(data: &GraphData) -> Graph {
-    let mut graph = Graph::new();
+/// `port_order`, registry-independently). `fallback_kind` resolves a
+/// pre-context document's missing kind (root: `Obj`; subflows: `Geo`).
+fn graph_from_data(data: &GraphData, fallback_kind: ContextKind) -> Graph {
+    let mut graph = Graph::new(data.kind.unwrap_or(fallback_kind));
     for node in &data.nodes {
         graph.add_node(node.clone());
     }
@@ -96,10 +103,10 @@ impl Document {
         let subflows: BTreeMap<NodeId, Graph> = data
             .subflows
             .iter()
-            .map(|(owner, gd)| (*owner, graph_from_data(gd)))
+            .map(|(owner, gd)| (*owner, graph_from_data(gd, ContextKind::Geo)))
             .collect();
         Self {
-            root: graph_from_data(&data.root),
+            root: graph_from_data(&data.root, ContextKind::Obj),
             subflows,
             review,
             next_id: data.next_id,
@@ -119,7 +126,7 @@ mod tests {
         // flag, params, and a variadic edge order.
         let mut doc = Document::new();
         let geo = doc.mint_node_id();
-        doc.create_subflow(geo);
+        doc.create_subflow(geo, ContextKind::Geo);
         doc.graph_mut(GraphContext::Root)
             .unwrap()
             .add_node(NodeData::new(geo, "geo", 1));

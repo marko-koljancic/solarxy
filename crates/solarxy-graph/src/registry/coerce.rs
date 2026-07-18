@@ -1,5 +1,4 @@
-//! The `DataType` system and the wire-level coercion matrix (node catalog
-//! part I, section 2).
+//! The `DataType` system and the wire-level coercion matrix.
 //!
 //! A connection is legal iff the endpoint types are the same or a listed
 //! coercion exists; the engine applies coercions at value-gather time
@@ -7,7 +6,7 @@
 //! and from nothing (a Color-to-Image constant fill would require a
 //! synthesis cook; backlog note). Lossy cells (`Float -> Int` rounds half
 //! away from zero,
-//! `Color -> Vec3` drops alpha) are allowed per decision 28 and get
+//! `Color -> Vec3` drops alpha) are allowed, and get
 //! distinct handle UX in the frontend.
 //!
 //! The matrix is a table-driven function locked by an exhaustive N-by-N
@@ -46,13 +45,18 @@ pub enum DataType {
     Text,
     /// `Arc<RawImageData>`: decoded RGBA8 pixels plus content hash. The
     /// wire value between `import_image` and the `material` node's map
-    /// ports (Phase 13).
+    /// ports.
     Image,
+    /// `Arc<RawMaterialData>`: a built material description. The wire
+    /// value INSIDE material networks only;
+    /// across contexts materials travel by path reference, never by
+    /// wire. Coerces to and from nothing.
+    Material,
 }
 
 impl DataType {
     /// Every variant, in matrix row/column order.
-    pub const ALL: [DataType; 12] = [
+    pub const ALL: [DataType; 13] = [
         DataType::Geometry,
         DataType::Light,
         DataType::Report,
@@ -65,6 +69,7 @@ impl DataType {
         DataType::Color,
         DataType::Text,
         DataType::Image,
+        DataType::Material,
     ];
 }
 
@@ -140,6 +145,7 @@ pub enum Value {
     Color([f32; 4]),
     Text(String),
     Image(Arc<RawImageData>),
+    Material(Arc<solarxy_core::RawMaterialData>),
 }
 
 impl Value {
@@ -158,6 +164,7 @@ impl Value {
             Value::Color(_) => DataType::Color,
             Value::Text(_) => DataType::Text,
             Value::Image(_) => DataType::Image,
+            Value::Material(_) => DataType::Material,
         }
     }
 
@@ -184,6 +191,15 @@ impl Value {
     pub fn as_image(&self) -> Option<&Arc<RawImageData>> {
         match self {
             Value::Image(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// The material payload, if this is a Material value.
+    #[must_use]
+    pub fn as_material(&self) -> Option<&Arc<solarxy_core::RawMaterialData>> {
+        match self {
+            Value::Material(m) => Some(m),
             _ => None,
         }
     }
@@ -234,7 +250,7 @@ mod tests {
 
     use super::*;
 
-    /// The exhaustive N-by-N snapshot (catalog section 2). Any matrix
+    /// The exhaustive N-by-N snapshot. Any matrix
     /// change is a visible diff in this expected text, never an accident.
     #[test]
     fn coercion_matrix_snapshot() {
@@ -253,20 +269,21 @@ mod tests {
         }
         // Columns and rows in DataType::ALL order:
         // Geometry Light Report Float Int Bool Vec2 Vec3 Vec4 Color Text
-        // Image
+        // Image Material
         let expected = "\
-=...........\n\
-.=..........\n\
-..=.........\n\
-...=~.+++...\n\
-...+=.+++...\n\
-...++=......\n\
-......=.....\n\
-.......=.+..\n\
-........=+..\n\
-.......~+=..\n\
-..........=.\n\
-...........=\n";
+=............\n\
+.=...........\n\
+..=..........\n\
+...=~.+++....\n\
+...+=.+++....\n\
+...++=.......\n\
+......=......\n\
+.......=.+...\n\
+........=+...\n\
+.......~+=...\n\
+..........=..\n\
+...........=.\n\
+............=\n";
         assert_eq!(
             grid, expected,
             "coercion matrix changed; update the catalog first"
@@ -274,12 +291,13 @@ mod tests {
     }
 
     #[test]
-    fn geometry_light_report_image_coerce_to_and_from_nothing() {
+    fn geometry_light_report_image_material_coerce_to_and_from_nothing() {
         for hard in [
             DataType::Geometry,
             DataType::Light,
             DataType::Report,
             DataType::Image,
+            DataType::Material,
         ] {
             for other in DataType::ALL {
                 if other == hard {

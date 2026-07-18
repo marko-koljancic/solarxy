@@ -1,13 +1,17 @@
-// The Houdini-style hover radial (Phase 7b, maintainer reference
-// screenshot): dark arc segments with gaps surrounding the node. Segments:
-// info (i) left, display-flag eye top-right, enter-subflow top-left
-// (containers only), bypass bottom-left, delete bottom-right. Rendered in
-// a body portal at the node's viewport position; the container is
-// pointer-transparent so the node underneath stays fully interactive, and
-// the ring closes when the pointer strays past a grace radius, on any
-// outside pointerdown (drag/marquee/connect starts), or on Esc.
+// The Houdini-style hover radial: six
+// wedges on a 60-degree pitch with 54-degree sweeps closing a full,
+// symmetric circle, centred at E rename / NE display or visibility /
+// NW dive / W info / SW bypass / SE delete. Conditional actions render
+// disabled rather than absent so the circle stays complete; the enlarged
+// inner radius keeps the ring clear of the node's side wings and lets the
+// wires stay readable through the wedge gaps. Active segments fill accent
+// amber. Rendered in a body portal at the node's viewport position; the
+// container is pointer-transparent so the node underneath stays fully
+// interactive, and the ring closes when the pointer strays past a grace
+// radius, on any outside pointerdown (drag/marquee/connect starts), or
+// on Esc.
 //
-// Phase 10: the ring TRACKS its node. It renders inside the ReactFlowProvider
+// The ring TRACKS its node. It renders inside the ReactFlowProvider
 // (so it can subscribe to the viewport transform) but still portals to the body
 // (so its stacking context is unchanged), and recomputes its anchor every render
 // from the live transform instead of a stale open-time DOM rect. The band width
@@ -18,16 +22,32 @@ import { useStore } from "@xyflow/react";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { dispatch } from "../engine/session";
-import { IconBypass, IconDive, IconEye, IconTrash } from "../icons";
+import { IconBypass, IconDisplay, IconDive, IconRename, IconTrash, IconVisibility } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
+import { useUi } from "../store/ui";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
-const RING_WIDTH = 34;
-const GAP_DEG = 9;
+/** Band width. */
+const RING_WIDTH = 38;
+/** The inner radius: clears a 112x32 body's half-width (56) with
+ * air, so the ring never sits on the side wings. Zoomed-in nodes grow,
+ * so the live inner radius is the larger of this and the measured node
+ * clearance. */
+const MIN_INNER_R = 72;
+/** Clearance added to the measured node radius before the ring starts. */
+const INNER_CLEARANCE = 10;
+/** 60deg pitch minus 54deg sweep leaves the 6deg wedge gaps. */
+const GAP_DEG = 6;
 const GRACE_PX = 44;
+
+/** The live inner radius for a measured node radius (shared by the ring
+ * geometry and the stray-close distance so they cannot drift apart). */
+function innerRadius(nodeRadius: number): number {
+  return Math.max(MIN_INNER_R, nodeRadius + INNER_CLEARANCE);
+}
 
 interface Segment {
   key: string;
@@ -108,7 +128,7 @@ export function RadialMenu() {
       if (!a) return;
       const dx = e.clientX - a.cx;
       const dy = e.clientY - a.cy;
-      if (Math.hypot(dx, dy) > a.radius + 6 + RING_WIDTH + GRACE_PX) closeRadial();
+      if (Math.hypot(dx, dy) > innerRadius(a.radius) + RING_WIDTH + GRACE_PX) closeRadial();
     };
     const onDown = (e: PointerEvent) => {
       // Any press outside the ring (a node drag, marquee, connect) closes.
@@ -132,7 +152,7 @@ export function RadialMenu() {
   if (!target || !anchor) return null;
   const t = target;
 
-  // Live node state (Phase 10): bypass and display flags come from the mirror,
+  // Live node state: bypass and display flags come from the mirror,
   // so the ring reflects the node as it is now, not as it was when the ring
   // opened.
   const node = graph.nodes.find((n) => n.id === t.nodeId);
@@ -140,66 +160,93 @@ export function RadialMenu() {
   const desc = descriptorFor(registry, node.typeId);
   const isDisplay = graph.activeOutput === node.id;
 
-  // The eye segment is context-dependent (Phase 8): in a subflow it is the
+  const r0 = innerRadius(anchor.radius);
+  const r1 = r0 + RING_WIDTH;
+  const size = (r1 + 8) * 2;
+  const c = size / 2;
+
+  // The NE wedge is context-dependent: in a subflow it is the
   // display flag (a radio selecting the container's output); at root it
   // toggles the node's `visible` param (additive per-node visibility),
-  // gated on the descriptor declaring one (note gets no eye).
+  // gated on the descriptor declaring one (note gets a disabled wedge).
   const rootEye = t.ctx === "root" && hasVisibleParam(desc);
+  const neSegment: Segment =
+    t.ctx !== "root"
+      ? {
+          key: "display",
+          angle: 60,
+          span: 60,
+          icon: <IconDisplay size={13} />,
+          title: "Set the display flag",
+          active: isDisplay,
+          onPick: (tt) => {
+            dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
+            closeRadial();
+          },
+        }
+      : {
+          key: "visibility",
+          angle: 60,
+          span: 60,
+          icon: <IconVisibility size={13} />,
+          title: rootEye ? (nodeVisible(node) ? "Hide (stays cooked)" : "Show") : "No visibility toggle",
+          active: rootEye && nodeVisible(node),
+          disabled: !rootEye,
+          onPick: (tt) => {
+            if (rootEye) {
+              dispatch({
+                type: "setParam",
+                ctx: tt.ctx,
+                node: tt.nodeId,
+                key: "visible",
+                value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
+              });
+            }
+            closeRadial();
+          },
+        };
 
+  // Wedge layout: six 60-degree wedges close the full circle, the
+  // Mnemonics (E rename, NE display/visibility, NW dive, W info,
+  // SW bypass, SE delete). Conditional actions render disabled rather
+  // than absent so the ring stays symmetric.
   const segments: Segment[] = [
+    {
+      key: "rename",
+      angle: 0,
+      span: 60,
+      icon: <IconRename size={13} />,
+      title: "Rename (F2)",
+      onPick: (tt) => {
+        useUi.getState().setRenameRequest(tt.nodeId);
+        closeRadial();
+      },
+    },
+    neSegment,
+    {
+      key: "dive",
+      angle: 120,
+      span: 60,
+      icon: <IconDive size={13} />,
+      title: t.isContainer ? "Enter subflow" : "Not a container",
+      disabled: !t.isContainer,
+      onPick: (tt) => {
+        if (tt.isContainer) useMirror.getState().setCurrent({ subflow: tt.nodeId });
+        closeRadial();
+      },
+    },
     {
       key: "info",
       angle: 180,
-      span: 62,
+      span: 60,
       icon: <span className="radial-glyph">i</span>,
       title: "Node info",
-      onPick: (tt) =>
-        openInfo(
-          tt.nodeId,
-          tt.ctx,
-          anchor.cx + anchor.radius + RING_WIDTH + 24,
-          anchor.cy - 40,
-        ),
+      onPick: (tt) => openInfo(tt.nodeId, tt.ctx, anchor.cx + r1 + 24, anchor.cy - 40),
     },
-  ];
-  if (t.ctx !== "root") {
-    segments.push({
-      key: "display",
-      angle: 38,
-      span: 62,
-      icon: <IconEye size={13} />,
-      title: "Set the display flag",
-      active: isDisplay,
-      onPick: (tt) => {
-        dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
-        closeRadial();
-      },
-    });
-  } else if (rootEye) {
-    segments.push({
-      key: "visibility",
-      angle: 38,
-      span: 62,
-      icon: <IconEye size={13} />,
-      title: nodeVisible(node) ? "Hide (stays cooked)" : "Show",
-      active: nodeVisible(node),
-      onPick: (tt) => {
-        dispatch({
-          type: "setParam",
-          ctx: tt.ctx,
-          node: tt.nodeId,
-          key: "visible",
-          value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
-        });
-        closeRadial();
-      },
-    });
-  }
-  segments.push(
     {
       key: "bypass",
-      angle: 232,
-      span: 62,
+      angle: 240,
+      span: 60,
       icon: <IconBypass size={13} />,
       title: t.bypassable ? "Toggle bypass" : "Not bypassable",
       active: node.bypassed,
@@ -218,8 +265,8 @@ export function RadialMenu() {
     },
     {
       key: "delete",
-      angle: 308,
-      span: 62,
+      angle: 300,
+      span: 60,
       icon: <IconTrash size={13} />,
       title: "Delete node",
       onPick: (tt) => {
@@ -227,25 +274,7 @@ export function RadialMenu() {
         closeRadial();
       },
     },
-  );
-  if (t.isContainer) {
-    segments.push({
-      key: "dive",
-      angle: 142,
-      span: 42,
-      icon: <IconDive size={13} />,
-      title: "Enter subflow",
-      onPick: (tt) => {
-        useMirror.getState().setCurrent({ subflow: tt.nodeId });
-        closeRadial();
-      },
-    });
-  }
-
-  const r0 = anchor.radius + 6;
-  const r1 = r0 + RING_WIDTH;
-  const size = (r1 + 8) * 2;
-  const c = size / 2;
+  ];
 
   return createPortal(
     <div
@@ -273,7 +302,7 @@ export function RadialMenu() {
         return (
           <span
             key={seg.key}
-            className={`radial-icon${seg.disabled ? " disabled" : ""}`}
+            className={`radial-icon${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}`}
             style={{ left: x, top: y }}
             onClick={() => seg.onPick(t)}
             title={seg.title}

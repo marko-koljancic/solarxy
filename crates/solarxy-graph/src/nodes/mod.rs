@@ -2,7 +2,7 @@
 //! (and its cook function, optional migrate hook, and unit tests). The
 //! builtin registry collects them.
 //!
-//! Adding a node is two touch points (node catalog part I, section 10):
+//! Adding a node is two touch points:
 //! create `nodes/<type_id>.rs` with its `descriptor()`, then add one line
 //! to [`builtin_descriptors`]. The registry invariants validate it; the
 //! palette, handles, and parameter panel pick it up from the snapshot with
@@ -38,7 +38,21 @@ mod bounds_node;
 mod null_node;
 mod switch_node;
 
+// Material context: the container plus the surface nodes.
+mod mat_nodes;
+
+// Output: export taps and the render config node.
+mod export_nodes;
+
+// Texture context: the container plus the image ops.
+mod image_adjust;
+mod image_generate;
+mod image_ops;
+pub(crate) mod image_support;
+mod texnet_node;
+
 // Container + utility + lights (root) and imports (subflow).
+mod camera_node;
 mod geo_node;
 mod import_image;
 mod imports;
@@ -50,10 +64,9 @@ pub use imports::{parse_bytes, parse_model, parse_model_validated};
 use crate::GraphError;
 use crate::registry::{NodeTypeDescriptor, Registry};
 
-/// Every builtin descriptor, in registration order. The 3a set is the ten
-/// subflow nodes that exercise the cook core; the remaining thirteen
-/// (container, lights, note, imports, validate) register here too as they
-/// land.
+/// Every builtin descriptor, in registration order, grouped by the context
+/// it belongs to. Registration order is the palette's order within a
+/// category, so it is presentation as well as bookkeeping.
 #[must_use]
 pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
     vec![
@@ -89,6 +102,7 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         // Container + utility (root/both).
         geo_node::descriptor(),
         note_node::descriptor(),
+        camera_node::camera_descriptor(),
         // Lights (root).
         lights::point_descriptor(),
         lights::directional_descriptor(),
@@ -96,6 +110,33 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         lights::ambient_descriptor(),
         lights::hemisphere_descriptor(),
         lights::rect_area_descriptor(),
+        // Texture context.
+        texnet_node::descriptor(),
+        image_generate::constant_descriptor(),
+        image_generate::ramp_descriptor(),
+        image_generate::noise_descriptor(),
+        image_adjust::levels_descriptor(),
+        image_adjust::brightness_contrast_descriptor(),
+        image_adjust::hue_saturation_descriptor(),
+        image_adjust::invert_descriptor(),
+        image_adjust::gamma_descriptor(),
+        image_ops::mix_descriptor(),
+        image_ops::blur_descriptor(),
+        image_ops::sharpen_descriptor(),
+        image_ops::pack_orm_descriptor(),
+        image_ops::height_to_normal_descriptor(),
+        // Material context.
+        mat_nodes::matnet_descriptor(),
+        mat_nodes::principled_descriptor(),
+        mat_nodes::matcap_descriptor(),
+        mat_nodes::toon_descriptor(),
+        mat_nodes::unlit_descriptor(),
+        mat_nodes::mix_material_descriptor(),
+        mat_nodes::tex_ref_descriptor(),
+        // Output.
+        export_nodes::geo_export_descriptor(),
+        export_nodes::image_export_descriptor(),
+        export_nodes::render_descriptor(),
     ]
 }
 
@@ -108,6 +149,7 @@ pub fn builtin_registry() -> Result<Registry, GraphError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::ContextKind;
 
     #[test]
     fn builtin_registry_is_valid() {
@@ -140,12 +182,25 @@ mod tests {
         }
     }
 
+    /// The registry's size is asserted rather than described, because a
+    /// description goes stale silently: this comment used to enumerate the
+    /// waves that built the set and its arithmetic came to 33 while the
+    /// assert below read 58. The counts per context are the useful fact, and
+    /// they are derived here rather than recited.
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        // The 23 MVP node types plus import_image (Phase 13), the Phase 14
-        // wave (material, uv_project, subdivide), and the Phase 15 modeling
-        // wave (array, mirror, delete, null, switch, bounds).
-        assert_eq!(registry.len(), 33);
+        assert_eq!(registry.len(), 58);
+
+        let in_context = |kind: ContextKind| {
+            builtin_descriptors()
+                .iter()
+                .filter(|d| d.contexts.contains(kind))
+                .count()
+        };
+        assert!(in_context(ContextKind::Obj) > 0, "the Obj context is empty");
+        assert!(in_context(ContextKind::Geo) > 0, "the Geo context is empty");
+        assert!(in_context(ContextKind::Mat) > 0, "the Mat context is empty");
+        assert!(in_context(ContextKind::Tex) > 0, "the Tex context is empty");
     }
 }
