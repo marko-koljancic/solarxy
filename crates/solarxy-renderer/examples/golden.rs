@@ -363,11 +363,186 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         println!("GOLDEN wrote {path} (exit-criterion proof, not compared)");
     }
 
+    // 0.8.0 goldens growth: the non-triangle topologies and vertex colors
+    // (point quads, a line list, a vertex-colored quad through the PBR
+    // colored path) via the SceneObjects delta path. Compared once both
+    // sides of a diff carry it (see `grown_captures`).
+    {
+        use std::sync::Arc;
+
+        use solarxy_core::MeshTopology;
+        use solarxy_core::geometry::compute_bounds;
+        use solarxy_core::scene::{CookedGeometry, CookedMesh, SceneDelta, SceneObjectId, SceneOp};
+        use solarxy_renderer::scene_objects::SceneObjects;
+
+        let d = scene.model.bounds.diagonal();
+        let c = scene.model.bounds.center();
+
+        // A rainbow 8x8 point grid (the scatter-output stand-in).
+        let mut grid_pos = Vec::new();
+        let mut grid_col = Vec::new();
+        for i in 0..8u32 {
+            for j in 0..8u32 {
+                let (fi, fj) = (i as f32 / 7.0, j as f32 / 7.0);
+                grid_pos.push([(fi - 0.5) * d * 0.5, fj * d * 0.35, 0.0]);
+                grid_col.push([fi, fj, 1.0 - fi, 1.0]);
+            }
+        }
+        let cloud = CookedMesh {
+            name: "golden_cloud".to_string(),
+            positions: Arc::new(grid_pos),
+            normals: None,
+            tex_coords: None,
+            indices: Arc::new(Vec::new()),
+            material_index: None,
+            topology: MeshTopology::Points,
+            colors: Some(Arc::new(grid_col)),
+        };
+
+        // A colored zigzag polyline.
+        let mut wire_pos = Vec::new();
+        let mut wire_col = Vec::new();
+        let mut wire_idx = Vec::new();
+        for i in 0..16u32 {
+            let t = i as f32 / 15.0;
+            let y = if i % 2 == 0 { 0.0 } else { d * 0.06 };
+            wire_pos.push([(t - 0.5) * d * 0.6, y - d * 0.12, d * 0.05]);
+            wire_col.push([1.0 - t, t, 0.5, 1.0]);
+            if i > 0 {
+                wire_idx.push(i - 1);
+                wire_idx.push(i);
+            }
+        }
+        let wire = CookedMesh {
+            name: "golden_wire".to_string(),
+            positions: Arc::new(wire_pos),
+            normals: None,
+            tex_coords: None,
+            indices: Arc::new(wire_idx),
+            material_index: None,
+            topology: MeshTopology::Lines,
+            colors: Some(Arc::new(wire_col)),
+        };
+
+        // A vertex-colored quad through the colored PBR pipeline.
+        let q = d * 0.12;
+        let quad = CookedMesh {
+            name: "golden_quad".to_string(),
+            positions: Arc::new(vec![
+                [-q, -q - d * 0.3, 0.0],
+                [q, -q - d * 0.3, 0.0],
+                [q, q - d * 0.3, 0.0],
+                [-q, q - d * 0.3, 0.0],
+            ]),
+            normals: Some(Arc::new(vec![[0.0, 0.0, 1.0]; 4])),
+            tex_coords: None,
+            indices: Arc::new(vec![0, 1, 2, 0, 2, 3]),
+            material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: Some(Arc::new(vec![
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            ])),
+        };
+
+        let all_positions: Vec<[f32; 3]> = cloud
+            .positions
+            .iter()
+            .chain(wire.positions.iter())
+            .chain(quad.positions.iter())
+            .copied()
+            .collect();
+        let geometry = CookedGeometry {
+            bounds: compute_bounds(&all_positions),
+            meshes: vec![cloud, wire, quad],
+            materials: Vec::new(),
+        };
+
+        let mut extra = SceneObjects::new();
+        extra
+            .apply(
+                &device,
+                &queue,
+                &renderer.layouts,
+                &SceneDelta {
+                    ops: vec![
+                        SceneOp::UpsertGeometry {
+                            id: SceneObjectId(1),
+                            geometry: Arc::new(geometry),
+                        },
+                        SceneOp::SetTransform {
+                            id: SceneObjectId(1),
+                            transform: [
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [c.x, c.y + d * 0.05, c.z + d * 0.3, 1.0],
+                            ],
+                        },
+                    ],
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("SceneObjects::apply: {e}"))?;
+
+        let (_, pds) = &modes()[0];
+        write_inspection_block(&queue, &cam, pds, &scene.model.bounds);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Topology Encoder"),
+        });
+        let mut objects = vec![scene.draw_object()];
+        objects.extend(extra.draw_objects());
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene.env,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            ToneMode::AcesFilmic,
+            1.0,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/topology.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path} (points/lines/vertex colors)");
+    }
+
     println!(
         "GOLDEN capture complete: {} modes in {out_dir}",
         modes().len()
     );
     Ok(())
+}
+
+/// Captures added after the original mode set (the goldens-growth seam).
+/// Compared only when BOTH sides of a diff carry them: the base side of
+/// the commit that introduces one cannot have captured it, and a one-sided
+/// absence is a notice rather than a failure.
+fn grown_captures() -> &'static [&'static str] {
+    &["topology"]
 }
 
 /// Replicates the app's per-pane partial camera-uniform write (inspection
@@ -496,8 +671,19 @@ fn compare(args: &[String]) -> anyhow::Result<()> {
         .transpose()?
         .unwrap_or(0);
 
+    let mut names: Vec<String> = modes().iter().map(|(n, _)| (*n).to_string()).collect();
+    for extra in grown_captures() {
+        let pa = format!("{dir_a}/{extra}.png");
+        let pb = format!("{dir_b}/{extra}.png");
+        if std::path::Path::new(&pa).exists() && std::path::Path::new(&pb).exists() {
+            names.push((*extra).to_string());
+        } else {
+            println!("GOLDEN {extra}: skipped (grown capture absent on one side)");
+        }
+    }
+
     let mut failures = 0usize;
-    for (name, _) in modes() {
+    for name in names {
         let pa = format!("{dir_a}/{name}.png");
         let pb = format!("{dir_b}/{name}.png");
         let a = image::open(&pa).with_context(|| pa.clone())?.to_rgba8();
