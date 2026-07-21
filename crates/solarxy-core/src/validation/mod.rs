@@ -77,13 +77,23 @@ pub fn validate_raw_model_with_config(
     let degen_epsilon = diagonal * diagonal * 1e-10;
 
     for (i, mesh) in raw.meshes.iter().enumerate() {
-        if config.normal_mismatch
+        // The triangle-only checks (index shape, degenerate area, manifold
+        // edges, normals) are meaningless on line and point topologies and
+        // would fire false errors (a point cloud has an "empty" index
+        // buffer by definition). UV and material-reference checks stay
+        // universal: they inspect per-vertex buffers and table indices,
+        // not triangles.
+        let is_triangles = mesh.topology == crate::geometry::MeshTopology::Triangles;
+
+        if is_triangles
+            && config.normal_mismatch
             && let Some(issue) = normals::check_normal_mismatch(i, mesh)
         {
             issues.push(issue);
         }
 
-        if config.flipped_normals
+        if is_triangles
+            && config.flipped_normals
             && let Some(issue) =
                 normals::check_flipped_normals(i, mesh, thresholds.flipped_normal_dot)
         {
@@ -94,7 +104,7 @@ pub fn validate_raw_model_with_config(
             issues.extend(uvs::check_uvs(i, mesh, file_ext, config.uv_presence_forced));
         }
 
-        if config.index_buffer {
+        if is_triangles && config.index_buffer {
             issues.extend(geometry::check_indices(i, mesh));
         }
 
@@ -104,7 +114,7 @@ pub fn validate_raw_model_with_config(
             issues.push(issue);
         }
 
-        if config.non_manifold_edges {
+        if is_triangles && config.non_manifold_edges {
             issues.extend(manifold::check_non_manifold_edges(
                 i,
                 mesh,
@@ -112,7 +122,7 @@ pub fn validate_raw_model_with_config(
             ));
         }
 
-        if config.degenerate_triangles {
+        if is_triangles && config.degenerate_triangles {
             let (degen_issue, degen) = geometry::check_degenerate(i, mesh, degen_epsilon);
             if let Some(issue) = degen_issue {
                 issues.push(issue);
@@ -159,6 +169,49 @@ mod tests {
         assert!(result.report.is_clean());
         assert_eq!(result.report.error_count(), 0);
         assert_eq!(result.report.warning_count(), 0);
+    }
+
+    /// The W1d acceptance line: a point cloud has an empty index buffer by
+    /// definition and a polyline's pair count is not divisible by three,
+    /// so without the topology gate both would fire false Errors
+    /// (EmptyIndices / NonTriangulated) plus manifold and normals noise.
+    #[test]
+    fn point_and_line_topologies_produce_no_false_triangle_issues() {
+        let raw = RawModelData {
+            meshes: vec![
+                RawMeshData {
+                    name: "cloud".to_string(),
+                    positions: vec![[0.0; 3], [1.0; 3], [2.0; 3], [3.0; 3]],
+                    indices: vec![],
+                    normals: None,
+                    tex_coords: None,
+                    material_index: None,
+                    topology: MeshTopology::Points,
+                },
+                RawMeshData {
+                    name: "wire".to_string(),
+                    positions: vec![[0.0; 3], [1.0; 3], [2.0; 3]],
+                    indices: vec![0, 1, 1, 2],
+                    normals: None,
+                    tex_coords: None,
+                    material_index: None,
+                    topology: MeshTopology::Lines,
+                },
+            ],
+            materials: vec![],
+            polygon_count: 0,
+        };
+        let result = validate_default(&raw, "ply");
+        assert!(
+            result.report.is_clean(),
+            "expected clean, got: {:?}",
+            result.report.issues
+        );
+        assert_eq!(
+            result.degenerate_faces.len(),
+            2,
+            "the per-mesh overlay vector stays aligned"
+        );
     }
 
     #[test]

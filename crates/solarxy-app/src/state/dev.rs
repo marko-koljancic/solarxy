@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use solarxy_core::geometry::MeshTopology;
 use solarxy_core::scene::{CookedGeometry, CookedMesh, SceneDelta, SceneObjectId, SceneOp};
 
 use super::State;
@@ -161,6 +162,8 @@ fn dev_cube(name: &str) -> CookedGeometry {
             tex_coords: None,
             indices: Arc::new(indices),
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }],
         materials: Vec::new(),
         bounds,

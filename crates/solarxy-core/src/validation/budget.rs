@@ -27,7 +27,12 @@ pub(super) fn check_triangle_budget(
     if budget == 0 {
         return None;
     }
-    let count: usize = raw.meshes.iter().map(|m| m.indices.len() / 3).sum();
+    let count: usize = raw
+        .meshes
+        .iter()
+        .filter(|m| m.topology == crate::geometry::MeshTopology::Triangles)
+        .map(|m| m.indices.len() / 3)
+        .sum();
     let count_u32 = u32::try_from(count).unwrap_or(u32::MAX);
     let budget_f = budget as f32;
     let warning_threshold = budget_f * (1.0 + tolerance_percent / 100.0);

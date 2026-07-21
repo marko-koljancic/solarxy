@@ -309,21 +309,33 @@ impl GeometrySet {
     }
 
     /// Near-zero-copy conversion into the renderer contract: every buffer
-    /// crosses by refcount bump. Extra [`AttributeMap`] channels do not
-    /// cross (the contract has no attribute channel yet).
+    /// crosses by refcount bump, including the topology tag and the
+    /// reserved `color` lane (lifted into [`CookedMesh::colors`] when it is
+    /// a position-count Vec4; anything else stays kernel-side). Other
+    /// [`AttributeMap`] channels do not cross.
     #[must_use]
     pub fn to_cooked(&self) -> CookedGeometry {
         CookedGeometry {
             meshes: self
                 .meshes
                 .iter()
-                .map(|m| CookedMesh {
-                    name: m.name.clone(),
-                    positions: Arc::clone(&m.positions),
-                    normals: m.normals.clone(),
-                    tex_coords: m.tex_coords.clone(),
-                    indices: Arc::clone(&m.indices),
-                    material_index: m.material_index,
+                .map(|m| {
+                    let colors = match m.attributes.get(reserved::COLOR) {
+                        Some(AttributeData::Vec4(v)) if v.len() == m.positions.len() => {
+                            Some(Arc::clone(v))
+                        }
+                        _ => None,
+                    };
+                    CookedMesh {
+                        name: m.name.clone(),
+                        positions: Arc::clone(&m.positions),
+                        normals: m.normals.clone(),
+                        tex_coords: m.tex_coords.clone(),
+                        indices: Arc::clone(&m.indices),
+                        material_index: m.material_index,
+                        topology: m.topology,
+                        colors,
+                    }
                 })
                 .collect(),
             materials: self.materials.clone(),
@@ -531,6 +543,37 @@ mod tests {
         assert_eq!(cooked.meshes[0].material_index, Some(0));
         assert_eq!(cooked.bounds.min.x, set.bounds.min.x);
         assert_eq!(cooked.bounds.max.x, set.bounds.max.x);
+    }
+
+    /// The W2a contract: topology crosses into the renderer contract, and
+    /// the reserved `color` lane lifts into `CookedMesh::colors` by
+    /// refcount when (and only when) it is a position-count Vec4.
+    #[test]
+    fn to_cooked_maps_topology_and_lifts_the_color_lane() {
+        let mut cloud = KernelMesh::points("cloud", vec![[0.0; 3], [1.0; 3]]);
+        let lane = Arc::new(vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]]);
+        cloud.attributes.insert(
+            reserved::COLOR.to_string(),
+            AttributeData::Vec4(Arc::clone(&lane)),
+        );
+        let mut wire = KernelMesh::polyline("wire", vec![[0.0; 3], [1.0; 3]], vec![0, 1]);
+        wire.attributes.insert(
+            reserved::COLOR.to_string(),
+            AttributeData::Vec4(Arc::new(vec![[1.0; 4]])),
+        );
+        let set = GeometrySet::from_parts(vec![cloud, wire], vec![]);
+
+        let cooked = set.to_cooked();
+        assert_eq!(cooked.meshes[0].topology, MeshTopology::Points);
+        assert!(
+            Arc::ptr_eq(cooked.meshes[0].colors.as_ref().unwrap(), &lane),
+            "the color lane crosses by refcount bump"
+        );
+        assert_eq!(cooked.meshes[1].topology, MeshTopology::Lines);
+        assert!(
+            cooked.meshes[1].colors.is_none(),
+            "a length-mismatched lane stays kernel-side"
+        );
     }
 
     #[test]

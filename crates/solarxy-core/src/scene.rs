@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::aabb::AABB;
-use crate::geometry::RawMaterialData;
+use crate::geometry::{MeshTopology, RawMaterialData};
 use crate::validation::ValidationResult;
 
 /// Stable identity of one renderable object in the scene, minted by the
@@ -22,7 +22,8 @@ use crate::validation::ValidationResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SceneObjectId(pub u64);
 
-/// One cooked mesh: triangulated, attribute-complete CPU geometry.
+/// One cooked mesh: attribute-complete CPU geometry, connected per its
+/// `topology` (triangle triples, segment pairs, or a point cloud).
 /// Attribute buffers are `Arc`-shared so the engine's cook cache and the
 /// renderer's upload path reference the same allocation.
 #[derive(Debug, Clone)]
@@ -35,6 +36,11 @@ pub struct CookedMesh {
     pub indices: Arc<Vec<u32>>,
     /// Index into the owning [`CookedGeometry::materials`].
     pub material_index: Option<usize>,
+    /// How `indices` connect `positions` into primitives.
+    pub topology: MeshTopology,
+    /// Per-vertex linear RGBA colors (the kernel's reserved `color` lane);
+    /// `None` renders as white. Always position-count length when present.
+    pub colors: Option<Arc<Vec<[f32; 4]>>>,
 }
 
 /// The cooked output of one displayed node: an ordered list of meshes plus

@@ -21,8 +21,8 @@ use wgpu::util::DeviceExt;
 
 use solarxy_core::AABB;
 use solarxy_core::geometry::{
-    compute_bounds, compute_normals, compute_tangent_basis, compute_tangent_from_normal,
-    extract_edges,
+    MeshTopology, compute_bounds, compute_normals, compute_tangent_basis,
+    compute_tangent_from_normal, extract_edges,
 };
 use solarxy_core::scene::{
     CameraDef, CookedGeometry, CookedMesh, LightDef, SceneDelta, SceneObjectId, SceneOp,
@@ -867,6 +867,8 @@ pub fn cooked_from_parts(
             tex_coords: None,
             indices: Arc::new(indices),
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }],
         materials: Vec::new(),
         bounds,
@@ -885,6 +887,8 @@ mod tests {
             tex_coords: None,
             indices: Arc::new(indices),
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -929,6 +933,8 @@ mod tests {
                 tex_coords: None,
                 indices: Arc::clone(&a.meshes[0].indices),
                 material_index: None,
+                topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: Vec::new(),
             bounds: a.bounds,
