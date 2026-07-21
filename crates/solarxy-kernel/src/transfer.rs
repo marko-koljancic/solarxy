@@ -172,7 +172,9 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             tex_coords,
             indices,
             material_index,
+            topology: solarxy_core::geometry::MeshTopology::Triangles,
             attributes: AttributeMap::new(),
+            primitive_attributes: AttributeMap::new(),
         });
     }
 
@@ -276,7 +278,9 @@ mod tests {
             tex_coords: Some(Arc::new(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])),
             indices: Arc::new(vec![0, 1, 2]),
             material_index: Some(2),
+            topology: solarxy_core::geometry::MeshTopology::Triangles,
             attributes: AttributeMap::new(),
+            primitive_attributes: AttributeMap::new(),
         };
         let set = GeometrySet::from_parts(vec![mesh], Vec::new());
 

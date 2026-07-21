@@ -54,7 +54,9 @@ pub(crate) fn assemble(
         tex_coords: Some(Arc::new(uvs)),
         indices: Arc::new(indices),
         material_index: None,
+        topology: solarxy_core::geometry::MeshTopology::Triangles,
         attributes: AttributeMap::new(),
+        primitive_attributes: AttributeMap::new(),
     }
 }
 

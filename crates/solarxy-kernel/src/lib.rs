@@ -64,4 +64,4 @@ pub mod transform;
 pub mod uv_project;
 
 pub use error::KernelError;
-pub use set::{AttributeData, AttributeMap, GeometrySet, KernelMesh};
+pub use set::{AttributeData, AttributeDomain, AttributeMap, GeometrySet, KernelMesh, reserved};

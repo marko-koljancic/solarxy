@@ -3,7 +3,7 @@
 
 #![cfg(test)]
 
-use crate::geometry::{RawMeshData, RawModelData};
+use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
 /// Single clean unit triangle with normals + UVs, no material. Used as
 /// the canonical "valid" starting point that each test mutates to
@@ -17,6 +17,7 @@ pub(super) fn single_triangle_raw() -> RawModelData {
             normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
             tex_coords: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
             material_index: None,
+            topology: MeshTopology::Triangles,
         }],
         materials: vec![],
         polygon_count: 1,

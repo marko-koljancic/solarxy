@@ -9,7 +9,7 @@ use tobj::LoadError;
 
 use crate::{AssetResolver, FormatsError};
 use solarxy_core::geometry::RawImageData;
-use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, MeshTopology, RawMaterialData, RawMeshData, RawModelData};
 
 /// Parse OBJ bytes; `.mtl` libraries resolve through `resolver`. Texture
 /// references are recorded as the (cleaned) relative names from the MTL —
@@ -209,6 +209,7 @@ fn parse_obj(
             normals,
             tex_coords,
             material_index: m.mesh.material_id,
+            topology: MeshTopology::Triangles,
         });
     }
 

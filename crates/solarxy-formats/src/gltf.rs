@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
 use crate::{AssetResolver, FormatsError};
-use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, MeshTopology, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
 /// Load a glTF or GLB from disk via the gltf crate's importer (buffers and
 /// images resolved from the file's directory).
@@ -468,6 +468,7 @@ fn collect_meshes_recursive(
                 normals,
                 tex_coords,
                 material_index,
+                topology: MeshTopology::Triangles,
             });
         }
     }

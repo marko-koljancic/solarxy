@@ -52,7 +52,7 @@ pub(super) fn check_triangle_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{RawMeshData, RawModelData};
+    use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
     fn raw_with_triangles(n: usize) -> RawModelData {
         let mut positions = Vec::with_capacity(n * 3);
@@ -74,6 +74,7 @@ mod tests {
                 normals: None,
                 tex_coords: None,
                 material_index: None,
+                topology: MeshTopology::Triangles,
             }],
             materials: Vec::new(),
             polygon_count: n,

@@ -15,9 +15,24 @@ use cgmath::InnerSpace;
 
 use crate::aabb::AABB;
 
+/// How a mesh's vertices connect into primitives. `indices` are read as
+/// triples for `Triangles` and pairs for `Lines`; `Points` ignores indices
+/// entirely (every position is its own primitive). The tag rides the mesh
+/// from loader output through the kernel to the renderer contract, so every
+/// consumer interprets the same buffers the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MeshTopology {
+    #[default]
+    Triangles,
+    Lines,
+    Points,
+}
+
 /// One mesh inside a [`RawModelData`].
-/// Triangulated indices, optional per-vertex `normals` / `tex_coords`, and
-/// an optional `material_index` into the parent [`RawModelData::materials`].
+/// Indices interpreted per `topology` (triangle triples by default),
+/// optional per-vertex `normals` / `tex_coords`, and an optional
+/// `material_index` into the parent [`RawModelData::materials`].
 #[derive(Debug)]
 pub struct RawMeshData {
     pub name: String,
@@ -26,6 +41,7 @@ pub struct RawMeshData {
     pub normals: Option<Vec<[f32; 3]>>,
     pub tex_coords: Option<Vec<[f32; 2]>>,
     pub material_index: Option<usize>,
+    pub topology: MeshTopology,
 }
 
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.

@@ -81,7 +81,7 @@ pub mod validation;
 pub mod view_config;
 
 pub use aabb::AABB;
-pub use geometry::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
+pub use geometry::{AlphaMode, MeshTopology, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
 pub const WIKI_URL: &str = "https://github.com/marko-koljancic/solarxy/wiki";
 pub use validation::{

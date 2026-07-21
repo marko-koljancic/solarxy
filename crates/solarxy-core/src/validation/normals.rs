@@ -130,7 +130,7 @@ fn normalize3(v: &[f32; 3]) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{RawMeshData, RawModelData};
+    use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
     fn single_triangle(normals: Option<Vec<[f32; 3]>>) -> RawMeshData {
         RawMeshData {
@@ -140,6 +140,7 @@ mod tests {
             normals,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
         }
     }
 
@@ -203,6 +204,7 @@ mod tests {
             normals: Some(normals),
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
         };
         let issue = check_flipped_normals(0, &mesh, -0.5).expect("must flag");
         assert!(issue.message.contains("1 of 2"));
@@ -217,6 +219,7 @@ mod tests {
             normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
         };
         assert!(check_flipped_normals(0, &mesh, -0.5).is_none());
     }

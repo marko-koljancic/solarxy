@@ -54,7 +54,9 @@ pub fn merge(inputs: &[Arc<GeometrySet>]) -> GeometrySet {
                 tex_coords: mesh.tex_coords.clone(),
                 indices: Arc::clone(&mesh.indices),
                 material_index,
+                topology: mesh.topology,
                 attributes: mesh.attributes.clone(),
+                primitive_attributes: mesh.primitive_attributes.clone(),
             });
         }
     }

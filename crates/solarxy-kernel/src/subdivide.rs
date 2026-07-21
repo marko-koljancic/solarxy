@@ -105,7 +105,9 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
         tex_coords: uvs.map(Arc::new),
         indices: Arc::new(indices),
         material_index: mesh.material_index,
+        topology: mesh.topology,
         attributes,
+        primitive_attributes: mesh.primitive_attributes.clone(),
     }
 }
 

@@ -133,7 +133,7 @@ pub fn validate_raw_model_with_config(
 mod tests {
     use super::test_helpers::single_triangle_raw;
     use super::*;
-    use crate::geometry::{RawMeshData, RawModelData};
+    use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
     fn permissive_config() -> ValidationConfig {
         ValidationConfig {
@@ -207,6 +207,7 @@ mod tests {
                     normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
                     tex_coords: Some(vec![[0.0, 0.0]; 3]),
                     material_index: None,
+                    topology: MeshTopology::Triangles,
                 },
                 RawMeshData {
                     name: "broken".to_string(),
@@ -215,6 +216,7 @@ mod tests {
                     normals: Some(vec![[0.0, 0.0, 1.0]; 2]),
                     tex_coords: None,
                     material_index: None,
+                    topology: MeshTopology::Triangles,
                 },
             ],
             materials: vec![],

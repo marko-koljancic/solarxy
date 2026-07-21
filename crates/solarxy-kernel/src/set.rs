@@ -21,13 +21,41 @@ use std::sync::Arc;
 
 use solarxy_core::AABB;
 use solarxy_core::geometry::{
-    RawMaterialData, RawMeshData, RawModelData, compute_bounds, compute_normals,
+    MeshTopology, RawMaterialData, RawMeshData, RawModelData, compute_bounds, compute_normals,
 };
 use solarxy_core::scene::{CookedGeometry, CookedMesh};
 
-/// One extra per-vertex attribute buffer beyond the fixed
-/// position/normal/UV set (PLY vertex colors today; line and point
-/// primitives reserve room here for Tier-2 nodes).
+/// Which element of a mesh an attribute lane describes: one value per
+/// point (vertex) or one value per primitive (triangle, segment, or point
+/// primitive, per the mesh topology). Every 0.8.0 producer writes the
+/// point domain; the primitive domain is the settled growth axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeDomain {
+    Point,
+    Primitive,
+}
+
+/// Reserved well-known attribute names. Operators and the renderer agree on
+/// these by name; a lane under a reserved name must carry the documented
+/// type or consumers refuse it.
+pub mod reserved {
+    /// Per-point color, `Vec4`, linear RGBA (sRGB conversion happens at
+    /// import). Drives vertex-color display.
+    pub const COLOR: &str = "color";
+    /// Per-point normal, `Vec3`, unit length. The attribute-lane twin of
+    /// `KernelMesh::normals`; scatter writes it for copy orientation.
+    pub const NORMAL: &str = "N";
+    /// Per-point texture coordinate, `Vec2`. The attribute-lane twin of
+    /// `KernelMesh::tex_coords`.
+    pub const UV: &str = "uv";
+    /// Per-point uniform scale, `Float`. Reserved: no 0.8.0 producer or
+    /// consumer; `copy_to_points` consumes it in a later release.
+    pub const PSCALE: &str = "pscale";
+}
+
+/// One extra attribute buffer beyond the fixed position/normal/UV set,
+/// with one element per point or per primitive depending on which
+/// [`AttributeDomain`] map holds it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttributeData {
     Float(Arc<Vec<f32>>),
@@ -58,9 +86,10 @@ impl AttributeData {
 /// (matching the workspace convention set by the renderer's `SceneObjects`).
 pub type AttributeMap = BTreeMap<String, AttributeData>;
 
-/// One triangulated mesh inside a [`GeometrySet`]. Buffer field shapes are
-/// identical to `solarxy_core::scene::CookedMesh` so conversion is a
-/// refcount bump, and the two definitions cannot drift apart without
+/// One mesh inside a [`GeometrySet`]: a triangle mesh, a polyline, or a
+/// point cloud per its `topology`. Buffer field shapes are identical to
+/// `solarxy_core::scene::CookedMesh` so conversion is a refcount bump, and
+/// the two definitions cannot drift apart without
 /// [`GeometrySet::to_cooked`] failing to compile.
 #[derive(Debug, Clone)]
 pub struct KernelMesh {
@@ -72,14 +101,22 @@ pub struct KernelMesh {
     pub indices: Arc<Vec<u32>>,
     /// Index into the owning [`GeometrySet::materials`].
     pub material_index: Option<usize>,
-    /// Extra per-vertex attributes. Not carried into [`CookedMesh`] (the
-    /// renderer contract has no attribute channel yet); they survive
-    /// through graph operators for nodes that consume them.
+    /// How `indices` connect `positions` into primitives: triangle triples
+    /// (the default), segment pairs, or ignored for a point cloud.
+    pub topology: MeshTopology,
+    /// Extra point-domain attributes (one value per vertex). Reserved
+    /// names in [`reserved`] carry contractual types; everything else is
+    /// free-form for nodes that consume it.
     pub attributes: AttributeMap,
+    /// Extra primitive-domain attributes (one value per triangle, segment,
+    /// or point primitive). No 0.8.0 producer writes these; the domain
+    /// exists so operators handle both axes from day one.
+    pub primitive_attributes: AttributeMap,
 }
 
 impl KernelMesh {
-    /// A mesh from bare positions and indices, no normals/UVs/material.
+    /// A triangle mesh from bare positions and indices, no
+    /// normals/UVs/material.
     #[must_use]
     pub fn new(name: impl Into<String>, positions: Vec<[f32; 3]>, indices: Vec<u32>) -> Self {
         Self {
@@ -89,8 +126,26 @@ impl KernelMesh {
             tex_coords: None,
             indices: Arc::new(indices),
             material_index: None,
+            topology: MeshTopology::Triangles,
             attributes: AttributeMap::new(),
+            primitive_attributes: AttributeMap::new(),
         }
+    }
+
+    /// A point cloud: every position is a primitive, indices unused.
+    #[must_use]
+    pub fn points(name: impl Into<String>, positions: Vec<[f32; 3]>) -> Self {
+        let mut mesh = Self::new(name, positions, Vec::new());
+        mesh.topology = MeshTopology::Points;
+        mesh
+    }
+
+    /// A polyline mesh: `indices` are read as segment pairs.
+    #[must_use]
+    pub fn polyline(name: impl Into<String>, positions: Vec<[f32; 3]>, indices: Vec<u32>) -> Self {
+        let mut mesh = Self::new(name, positions, indices);
+        mesh.topology = MeshTopology::Lines;
+        mesh
     }
 
     #[must_use]
@@ -98,15 +153,40 @@ impl KernelMesh {
         self.positions.len()
     }
 
+    /// Triangle count; zero for line and point topologies (the cook
+    /// `prims` statistic stays triangles-only by design).
     #[must_use]
     pub fn triangle_count(&self) -> usize {
-        self.indices.len() / 3
+        match self.topology {
+            MeshTopology::Triangles => self.indices.len() / 3,
+            MeshTopology::Lines | MeshTopology::Points => 0,
+        }
     }
 
-    /// Whether this mesh contributes drawable triangles.
+    /// Primitive count under this mesh's own topology: triangles,
+    /// segments, or points. The generalized ceiling/statistics measure for
+    /// operators that scale with primitives regardless of kind.
+    #[must_use]
+    pub fn primitive_count(&self) -> usize {
+        match self.topology {
+            MeshTopology::Triangles => self.indices.len() / 3,
+            MeshTopology::Lines => self.indices.len() / 2,
+            MeshTopology::Points => self.positions.len(),
+        }
+    }
+
+    /// Whether this mesh contributes drawable primitives: at least one
+    /// full triangle or segment, or any position at all for a point cloud.
     #[must_use]
     pub fn is_renderable(&self) -> bool {
-        !self.positions.is_empty() && self.indices.len() >= 3
+        if self.positions.is_empty() {
+            return false;
+        }
+        match self.topology {
+            MeshTopology::Triangles => self.indices.len() >= 3,
+            MeshTopology::Lines => self.indices.len() >= 2,
+            MeshTopology::Points => true,
+        }
     }
 
     /// Tight bounds over this mesh's positions
@@ -116,9 +196,32 @@ impl KernelMesh {
         compute_bounds(&self.positions)
     }
 
+    /// The attribute map for one domain.
+    #[must_use]
+    pub fn domain_attributes(&self, domain: AttributeDomain) -> &AttributeMap {
+        match domain {
+            AttributeDomain::Point => &self.attributes,
+            AttributeDomain::Primitive => &self.primitive_attributes,
+        }
+    }
+
+    /// Mutable access to the attribute map for one domain.
+    pub fn domain_attributes_mut(&mut self, domain: AttributeDomain) -> &mut AttributeMap {
+        match domain {
+            AttributeDomain::Point => &mut self.attributes,
+            AttributeDomain::Primitive => &mut self.primitive_attributes,
+        }
+    }
+
     /// Recomputes per-vertex normals from the triangle topology via the
     /// core face-normal-accumulation kernel, replacing any existing buffer.
+    /// A no-op for line and point topologies, whose indices are not
+    /// triangle triples (their normals, when meaningful, ride the reserved
+    /// `N` attribute lane instead).
     pub fn recompute_normals(&mut self) {
+        if self.topology != MeshTopology::Triangles {
+            return;
+        }
         self.normals = Some(Arc::new(compute_normals(&self.positions, &self.indices)));
     }
 }
@@ -163,7 +266,8 @@ impl GeometrySet {
         }
     }
 
-    /// Renderable-empty means no mesh contributes drawable triangles: the
+    /// Renderable-empty means no mesh contributes drawable primitives
+    /// (triangles, segments, or points per each mesh's topology): the
     /// condition the cook engine's keep-last-good policy tests
     /// (a transiently empty result keeps the previous output visible).
     #[must_use]
@@ -177,7 +281,9 @@ impl GeometrySet {
         self.meshes.iter().map(|m| m.vertex_count() as u64).sum()
     }
 
-    /// Total triangle count (the `prims` cook statistic).
+    /// Total triangle count (the `prims` cook statistic). Deliberately
+    /// triangles-only: line and point meshes contribute zero, so a pure
+    /// point cloud truthfully reads "N pts, 0 prims".
     #[must_use]
     pub fn triangle_count(&self) -> u64 {
         self.meshes.iter().map(|m| m.triangle_count() as u64).sum()
@@ -231,7 +337,9 @@ impl GeometrySet {
                 tex_coords: m.tex_coords.map(Arc::new),
                 indices: Arc::new(m.indices),
                 material_index: m.material_index,
+                topology: m.topology,
                 attributes: AttributeMap::new(),
+                primitive_attributes: AttributeMap::new(),
             })
             .collect();
         let materials = raw.materials.into_iter().map(Arc::new).collect();
@@ -255,6 +363,7 @@ impl GeometrySet {
                     normals: m.normals.as_deref().cloned(),
                     tex_coords: m.tex_coords.as_deref().cloned(),
                     material_index: m.material_index,
+                    topology: m.topology,
                 })
                 .collect(),
             materials: self.materials.iter().map(|m| (**m).clone()).collect(),
@@ -425,6 +534,7 @@ mod tests {
                 normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
                 tex_coords: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
                 material_index: Some(0),
+                topology: MeshTopology::Triangles,
             }],
             materials: vec![material("mat")],
             polygon_count: 1,
@@ -470,5 +580,104 @@ mod tests {
         let mut map = AttributeMap::new();
         map.insert("color".to_string(), a);
         assert!(map.contains_key("color"));
+    }
+
+    #[test]
+    fn renderability_truth_table() {
+        // Triangles: need at least one full triple.
+        assert!(tri_mesh("t", 0.0).is_renderable());
+        assert!(!KernelMesh::new("t", vec![[0.0; 3]; 3], vec![0, 1]).is_renderable());
+        assert!(!KernelMesh::new("t", vec![], vec![]).is_renderable());
+        // Lines: need at least one full pair.
+        assert!(KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0, 1]).is_renderable());
+        assert!(!KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0]).is_renderable());
+        assert!(!KernelMesh::polyline("l", vec![], vec![]).is_renderable());
+        // Points: any position renders; indices are irrelevant.
+        assert!(KernelMesh::points("p", vec![[0.0; 3]]).is_renderable());
+        assert!(!KernelMesh::points("p", vec![]).is_renderable());
+    }
+
+    #[test]
+    fn topology_counts() {
+        let tri = tri_mesh("t", 0.0);
+        assert_eq!(tri.triangle_count(), 1);
+        assert_eq!(tri.primitive_count(), 1);
+
+        let line = KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3], [2.0; 3]], vec![0, 1, 1, 2]);
+        assert_eq!(line.triangle_count(), 0);
+        assert_eq!(line.primitive_count(), 2);
+
+        let pts = KernelMesh::points("p", vec![[0.0; 3]; 5]);
+        assert_eq!(pts.triangle_count(), 0);
+        assert_eq!(pts.primitive_count(), 5);
+
+        // Set-level: prims stays triangles-only, points counts vertices.
+        let set = GeometrySet::from_parts(vec![tri, line, pts], vec![]);
+        assert_eq!(set.triangle_count(), 1);
+        assert_eq!(set.point_count(), 3 + 3 + 5);
+    }
+
+    #[test]
+    fn point_cloud_set_is_not_renderable_empty() {
+        let set = GeometrySet::from_mesh(KernelMesh::points("p", vec![[0.0; 3], [2.0, 4.0, 6.0]]));
+        assert!(!set.is_renderable_empty());
+        // Bounds span the positions like any other mesh.
+        assert_eq!(
+            [set.bounds.max.x, set.bounds.max.y, set.bounds.max.z],
+            [2.0, 4.0, 6.0]
+        );
+    }
+
+    #[test]
+    fn raw_round_trip_preserves_topology() {
+        let set = GeometrySet::from_parts(
+            vec![
+                KernelMesh::points("p", vec![[0.0; 3]]),
+                KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0, 1]),
+            ],
+            vec![],
+        );
+        let raw = set.to_raw();
+        assert_eq!(raw.meshes[0].topology, MeshTopology::Points);
+        assert_eq!(raw.meshes[1].topology, MeshTopology::Lines);
+        let back = GeometrySet::from_raw(raw);
+        assert_eq!(back.meshes[0].topology, MeshTopology::Points);
+        assert_eq!(back.meshes[1].topology, MeshTopology::Lines);
+    }
+
+    #[test]
+    fn domain_attributes_route_to_their_maps() {
+        let mut mesh = tri_mesh("t", 0.0);
+        mesh.domain_attributes_mut(AttributeDomain::Point).insert(
+            reserved::COLOR.to_string(),
+            AttributeData::Vec4(Arc::new(vec![[1.0, 0.0, 0.0, 1.0]; 3])),
+        );
+        mesh.domain_attributes_mut(AttributeDomain::Primitive)
+            .insert(
+                "area".to_string(),
+                AttributeData::Float(Arc::new(vec![0.5])),
+            );
+        // The point-domain accessor is the plain `attributes` field.
+        assert!(mesh.attributes.contains_key(reserved::COLOR));
+        assert!(
+            mesh.domain_attributes(AttributeDomain::Point)
+                .contains_key(reserved::COLOR)
+        );
+        assert!(
+            mesh.domain_attributes(AttributeDomain::Primitive)
+                .contains_key("area")
+        );
+        assert!(!mesh.attributes.contains_key("area"));
+    }
+
+    #[test]
+    fn recompute_normals_is_a_noop_off_triangles() {
+        let mut pts = KernelMesh::points("p", vec![[0.0; 3]; 4]);
+        pts.recompute_normals();
+        assert!(pts.normals.is_none());
+
+        let mut line = KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0, 1]);
+        line.recompute_normals();
+        assert!(line.normals.is_none());
     }
 }

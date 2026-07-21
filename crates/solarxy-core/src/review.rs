@@ -353,6 +353,7 @@ mod tests {
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: crate::geometry::MeshTopology::Triangles,
         }
     }
 

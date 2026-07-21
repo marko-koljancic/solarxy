@@ -186,7 +186,9 @@ fn filter_mesh(mesh: &KernelMesh, mode: DeleteMode, invert: bool) -> (Option<Ker
             tex_coords,
             indices: Arc::new(indices),
             material_index: mesh.material_index,
+            topology: mesh.topology,
             attributes,
+            primitive_attributes: mesh.primitive_attributes.clone(),
         }),
         removed,
     )

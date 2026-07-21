@@ -7,7 +7,7 @@ use std::io::Cursor;
 use ply_rs_bw::ply::Property;
 
 use crate::FormatsError;
-use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, MeshTopology, RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
     match *prop {
@@ -294,6 +294,7 @@ fn parse_ply(
             normals,
             tex_coords,
             material_index: Some(0),
+            topology: MeshTopology::Triangles,
         }],
         materials,
         polygon_count,

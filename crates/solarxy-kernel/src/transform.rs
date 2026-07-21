@@ -190,7 +190,9 @@ pub fn bake_transform(
                 tex_coords: mesh.tex_coords.clone(),
                 indices: mesh.indices.clone(),
                 material_index: mesh.material_index,
+                topology: mesh.topology,
                 attributes: mesh.attributes.clone(),
+                primitive_attributes: mesh.primitive_attributes.clone(),
             }
         })
         .collect();

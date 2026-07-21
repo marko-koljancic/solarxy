@@ -224,7 +224,9 @@ fn box_project_mesh(
         tex_coords: Some(Arc::new(uvs)),
         indices: Arc::new((0..index_count).collect()),
         material_index: mesh.material_index,
+        topology: mesh.topology,
         attributes,
+        primitive_attributes: mesh.primitive_attributes.clone(),
     }
 }
 
