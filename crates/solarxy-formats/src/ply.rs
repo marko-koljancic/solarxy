@@ -265,6 +265,7 @@ fn parse_ply(
         emissive_texture_data: None,
         roughness_factor: 0.5,
         metallic_factor: 0.0,
+        occlusion_strength: 1.0,
         emissive_factor: [0.0, 0.0, 0.0],
         base_color_factor: [1.0, 1.0, 1.0, 1.0],
         alpha_mode: AlphaMode::Opaque,

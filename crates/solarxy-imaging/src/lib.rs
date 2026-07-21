@@ -396,6 +396,234 @@ pub fn noise(width: u32, height: u32, scale: f32, seed: u32) -> Result<RawImageD
     Ok(RawImageData::new(px, width, height))
 }
 
+/// Distance metric for [`voronoi`] cell membership.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoronoiMetric {
+    Euclidean,
+    Manhattan,
+    Chebyshev,
+}
+
+/// What [`voronoi`] writes per texel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoronoiPattern {
+    /// Distance to the nearest feature point (F1).
+    Distance,
+    /// A per-cell hashed value, flat within each cell.
+    CellId,
+    /// Bright lines along the cell boundaries (F2 minus F1).
+    Edges,
+}
+
+/// A 64-bit avalanche hash of a lattice cell and seed (the `noise` hash with
+/// one extra mixing round, so both value lanes are well distributed).
+fn cell_hash(ix: i64, iy: i64, seed: u32) -> u64 {
+    let mut v = (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+        ^ u64::from(seed).wrapping_mul(0x1656_67B1_9E37_79F9);
+    v ^= v >> 33;
+    v = v.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+    v ^= v >> 33;
+    v = v.wrapping_mul(0xC4CE_B9FE_1A85_EC53);
+    v ^= v >> 33;
+    v
+}
+
+/// Worley / Voronoi cellular noise: scatters one jittered feature point per
+/// lattice cell and, per texel, reports the nearest-feature distance, the
+/// owning cell's hashed value, or the cell edges. Deterministic in `seed`.
+#[allow(clippy::too_many_arguments)]
+pub fn voronoi(
+    width: u32,
+    height: u32,
+    scale: f32,
+    seed: u32,
+    jitter: f32,
+    metric: VoronoiMetric,
+    pattern: VoronoiPattern,
+) -> Result<RawImageData, ImagingError> {
+    check_dims(width, height)?;
+    let cells = scale.max(0.5);
+    let jitter = jitter.clamp(0.0, 1.0);
+    let dist = |dx: f32, dy: f32| match metric {
+        VoronoiMetric::Euclidean => (dx * dx + dy * dy).sqrt(),
+        VoronoiMetric::Manhattan => dx.abs() + dy.abs(),
+        VoronoiMetric::Chebyshev => dx.abs().max(dy.abs()),
+    };
+    let mut px = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let fx = x as f32 / width as f32 * cells;
+            let fy = y as f32 / height as f32 * cells;
+            let (cx, cy) = (fx.floor() as i64, fy.floor() as i64);
+            let mut f1 = f32::MAX;
+            let mut f2 = f32::MAX;
+            let mut best_cell = (cx, cy);
+            for oy in -1..=1 {
+                for ox in -1..=1 {
+                    let (gx, gy) = (cx + ox, cy + oy);
+                    let h = cell_hash(gx, gy, seed);
+                    let rx = (h & 0xFFFF) as f32 / 65535.0;
+                    let ry = ((h >> 16) & 0xFFFF) as f32 / 65535.0;
+                    // Feature point: cell centre, displaced by jitter.
+                    let feat_x = gx as f32 + 0.5 + jitter * (rx - 0.5);
+                    let feat_y = gy as f32 + 0.5 + jitter * (ry - 0.5);
+                    let d = dist(fx - feat_x, fy - feat_y);
+                    if d < f1 {
+                        f2 = f1;
+                        f1 = d;
+                        best_cell = (gx, gy);
+                    } else if d < f2 {
+                        f2 = d;
+                    }
+                }
+            }
+            let v = match pattern {
+                VoronoiPattern::Distance => f1.min(1.0),
+                VoronoiPattern::CellId => {
+                    let h = cell_hash(best_cell.0, best_cell.1, seed ^ 0x5A5A_5A5A);
+                    (h & 0xFFFF) as f32 / 65535.0
+                }
+                VoronoiPattern::Edges => (1.0 - (f2 - f1) * 4.0).clamp(0.0, 1.0),
+            };
+            let g = to_u8(v);
+            px.extend_from_slice(&[g, g, g, 255]);
+        }
+    }
+    Ok(RawImageData::new(px, width, height))
+}
+
+/// How [`gradient`] measures its blend factor around the centre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GradientMode {
+    /// Left-to-right, with the centre's x as the midpoint.
+    Linear,
+    /// Outward from the centre.
+    Radial,
+    /// A conic sweep of the angle around the centre.
+    Angular,
+    /// Manhattan distance from the centre (a rotated square).
+    Diamond,
+}
+
+/// A two-color gradient with a movable centre and four falloff modes. Richer
+/// than `ramp`: it adds the angular (conic) and diamond falloffs and a
+/// configurable centre that `ramp`'s fixed horizontal / vertical / radial
+/// lacks.
+pub fn gradient(
+    width: u32,
+    height: u32,
+    mode: GradientMode,
+    color_a: [f32; 4],
+    color_b: [f32; 4],
+    center: [f32; 2],
+) -> Result<RawImageData, ImagingError> {
+    check_dims(width, height)?;
+    let (cx, cy) = (center[0], center[1]);
+    let mut px = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let nx = x as f32 / (width - 1).max(1) as f32;
+            let ny = y as f32 / (height - 1).max(1) as f32;
+            let (dx, dy) = (nx - cx, ny - cy);
+            let t = match mode {
+                GradientMode::Linear => 0.5 + (nx - cx),
+                GradientMode::Radial => (dx * dx + dy * dy).sqrt() * 2.0,
+                GradientMode::Angular => dy.atan2(dx) / std::f32::consts::TAU + 0.5,
+                GradientMode::Diamond => (dx.abs() + dy.abs()) * 2.0,
+            }
+            .clamp(0.0, 1.0);
+            for c in 0..4 {
+                px.push(to_u8(color_a[c] + (color_b[c] - color_a[c]) * t));
+            }
+        }
+    }
+    Ok(RawImageData::new(px, width, height))
+}
+
+/// A two-color checkerboard of `tiles_x` by `tiles_y` cells. Tiles map to a
+/// normalized grid, so a non-square image gets stretched cells.
+pub fn checker(
+    width: u32,
+    height: u32,
+    color_a: [f32; 4],
+    color_b: [f32; 4],
+    tiles_x: u32,
+    tiles_y: u32,
+) -> Result<RawImageData, ImagingError> {
+    check_dims(width, height)?;
+    let tx = u64::from(tiles_x.max(1));
+    let ty = u64::from(tiles_y.max(1));
+    let a = [
+        to_u8(color_a[0]),
+        to_u8(color_a[1]),
+        to_u8(color_a[2]),
+        to_u8(color_a[3]),
+    ];
+    let b = [
+        to_u8(color_b[0]),
+        to_u8(color_b[1]),
+        to_u8(color_b[2]),
+        to_u8(color_b[3]),
+    ];
+    let mut px = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        let cy = u64::from(y) * ty / u64::from(height);
+        for x in 0..width {
+            let cx = u64::from(x) * tx / u64::from(width);
+            px.extend_from_slice(if (cx + cy) % 2 == 0 { &a } else { &b });
+        }
+    }
+    Ok(RawImageData::new(px, width, height))
+}
+
+/// A running-bond brick wall: `columns` by `rows` bricks separated by mortar,
+/// with alternate rows shifted by `row_offset`. `mortar` is the mortar width
+/// as a fraction of a cell (0..0.5).
+#[allow(clippy::too_many_arguments)]
+pub fn brick(
+    width: u32,
+    height: u32,
+    brick_color: [f32; 4],
+    mortar_color: [f32; 4],
+    columns: u32,
+    rows: u32,
+    mortar: f32,
+    row_offset: f32,
+) -> Result<RawImageData, ImagingError> {
+    check_dims(width, height)?;
+    let cols = columns.max(1) as f32;
+    let rows_f = rows.max(1) as f32;
+    let m = mortar.clamp(0.0, 0.5);
+    let offset = row_offset.clamp(0.0, 1.0);
+    let brick = [
+        to_u8(brick_color[0]),
+        to_u8(brick_color[1]),
+        to_u8(brick_color[2]),
+        to_u8(brick_color[3]),
+    ];
+    let mortar_c = [
+        to_u8(mortar_color[0]),
+        to_u8(mortar_color[1]),
+        to_u8(mortar_color[2]),
+        to_u8(mortar_color[3]),
+    ];
+    let mut px = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        let v = y as f32 / height as f32 * rows_f;
+        let row = v.floor();
+        let row_v = v - row;
+        let shift = if (row as i64) % 2 != 0 { offset } else { 0.0 };
+        for x in 0..width {
+            let u = x as f32 / width as f32 * cols + shift;
+            let col_u = u - u.floor();
+            let is_mortar = row_v < m || row_v > 1.0 - m || col_u < m || col_u > 1.0 - m;
+            px.extend_from_slice(if is_mortar { &mortar_c } else { &brick });
+        }
+    }
+    Ok(RawImageData::new(px, width, height))
+}
+
 /// Separable Gaussian blur; `radius` in pixels (0 = identity clone).
 #[must_use]
 pub fn blur(src: &RawImageData, radius: f32) -> RawImageData {
@@ -546,7 +774,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
 mod tests {
     use super::*;
 
-    fn checker() -> RawImageData {
+    fn swatch_2x2() -> RawImageData {
         // 2x2: black, white / white, black.
         RawImageData::new(
             vec![
@@ -560,13 +788,13 @@ mod tests {
 
     #[test]
     fn invert_is_involutive() {
-        let img = checker();
+        let img = swatch_2x2();
         assert_eq!(invert(&invert(&img)).pixels, img.pixels);
     }
 
     #[test]
     fn identity_params_are_identities() {
-        let img = checker();
+        let img = swatch_2x2();
         assert_eq!(levels(&img, 0.0, 1.0, 1.0, 0.0, 1.0).pixels, img.pixels);
         assert_eq!(brightness_contrast(&img, 0.0, 0.0).pixels, img.pixels);
         assert_eq!(gamma(&img, 1.0).pixels, img.pixels);
@@ -595,8 +823,67 @@ mod tests {
     }
 
     #[test]
+    fn voronoi_is_deterministic_and_seed_sensitive() {
+        let opts = (VoronoiMetric::Euclidean, VoronoiPattern::Distance);
+        let a = voronoi(24, 24, 6.0, 3, 1.0, opts.0, opts.1).unwrap();
+        let b = voronoi(24, 24, 6.0, 3, 1.0, opts.0, opts.1).unwrap();
+        let c = voronoi(24, 24, 6.0, 4, 1.0, opts.0, opts.1).unwrap();
+        assert_eq!((a.width, a.height), (24, 24));
+        assert_eq!(a.pixels, b.pixels, "same seed reproduces");
+        assert_ne!(a.pixels, c.pixels, "a new seed changes the pattern");
+        assert!(voronoi(0, 4, 6.0, 0, 1.0, opts.0, opts.1).is_err());
+        assert!(voronoi(9000, 4, 6.0, 0, 1.0, opts.0, opts.1).is_err());
+    }
+
+    #[test]
+    fn gradient_runs_between_its_two_colors() {
+        let g = gradient(
+            16,
+            1,
+            GradientMode::Linear,
+            [0.0, 0.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [0.5, 0.5],
+        )
+        .unwrap();
+        assert_eq!((g.width, g.height), (16, 1));
+        assert!(
+            g.pixels[0] < g.pixels[4 * 15],
+            "dark at left, bright at right"
+        );
+        assert!(gradient(0, 4, GradientMode::Radial, [0.0; 4], [1.0; 4], [0.5, 0.5]).is_err());
+    }
+
+    #[test]
+    fn checker_alternates_two_colors() {
+        let a = [1.0, 0.0, 0.0, 1.0];
+        let b = [0.0, 0.0, 1.0, 1.0];
+        let img = checker(4, 4, a, b, 2, 2).unwrap();
+        assert_eq!((img.width, img.height), (4, 4));
+        // Cell (0,0) is color_a; the second column cell is color_b.
+        assert_eq!(&img.pixels[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&img.pixels[8..12], &[0, 0, 255, 255]);
+        assert!(checker(9000, 4, a, b, 2, 2).is_err());
+    }
+
+    #[test]
+    fn brick_has_mortar_and_brick_texels() {
+        let brick_c = [0.6, 0.2, 0.1, 1.0]; // -> [153, 51, 26, 255]
+        let mortar_c = [0.8, 0.8, 0.8, 1.0]; // -> [204, 204, 204, 255]
+        let img = brick(64, 64, brick_c, mortar_c, 4, 8, 0.1, 0.5).unwrap();
+        assert_eq!((img.width, img.height), (64, 64));
+        // y=0 sits in the horizontal mortar band (row_v < 0.1).
+        assert_eq!(&img.pixels[0..4], &[204, 204, 204, 255]);
+        assert!(
+            img.pixels.chunks_exact(4).any(|c| c == [153, 51, 26, 255]),
+            "brick texels present"
+        );
+        assert!(brick(0, 4, brick_c, mortar_c, 4, 8, 0.1, 0.5).is_err());
+    }
+
+    #[test]
     fn mix_multiply_with_black_is_black() {
-        let img = checker();
+        let img = swatch_2x2();
         let black = constant(2, 2, [0.0, 0.0, 0.0, 1.0]).unwrap();
         let out = mix(&img, &black, BlendMode::Multiply, 1.0);
         assert!(

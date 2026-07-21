@@ -160,6 +160,7 @@ fn build_model(
             emissive_texture_data: None,
             roughness_factor: 0.5,
             metallic_factor: 0.0,
+            occlusion_strength: 1.0,
             emissive_factor: [0.0, 0.0, 0.0],
             base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: AlphaMode::Opaque,
@@ -213,9 +214,12 @@ fn extract_materials(
                 None => (None, None),
             };
 
-            let (occ_path, occ_data) = match mat.occlusion_texture() {
-                Some(info) => resolve_texture(&info.texture(), images, texture_base),
-                None => (None, None),
+            let (occ_path, occ_data, occ_strength) = match mat.occlusion_texture() {
+                Some(occ) => {
+                    let (p, d) = resolve_texture(&occ.texture(), images, texture_base);
+                    (p, d, occ.strength())
+                }
+                None => (None, None, 1.0),
             };
 
             let (emissive_path, emissive_data) = match mat.emissive_texture() {
@@ -248,6 +252,7 @@ fn extract_materials(
                 emissive_texture_data: emissive_data,
                 roughness_factor: pbr.roughness_factor(),
                 metallic_factor: pbr.metallic_factor(),
+                occlusion_strength: occ_strength,
                 emissive_factor,
                 base_color_factor: base_color,
                 alpha_mode,

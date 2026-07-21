@@ -3468,41 +3468,21 @@ impl SolarxyApp {
             &options,
         )
         .map_err(|e| JsError::new(&format!("preview parse failed: {e}")))?;
-        let cooked = std::sync::Arc::new(set.to_cooked());
+        self.preview_render_set(canvas, set)
+    }
 
-        let width = canvas.width().max(16);
-        let height = canvas.height().max(16);
-        let surface = self
-            .instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|e| JsError::new(&format!("preview surface: {e}")))?;
-        let mut config = self.config.clone();
-        config.width = width;
-        config.height = height;
-        surface.configure(&self.device, &config);
-
-        let mut objects = SceneObjects::new();
-        let delta = SceneDelta {
-            ops: vec![SceneOp::UpsertGeometry {
-                id: SceneObjectId(0),
-                geometry: cooked,
-            }],
-        };
-        objects
-            .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
-            .map_err(|e| JsError::new(&format!("preview upload: {e}")))?;
-        let bounds = objects.visible_bounds().unwrap_or_else(default_bounds);
-        let aspect = width as f32 / height.max(1) as f32;
-        let camera = CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect);
-
-        self.preview = Some(PreviewState {
-            surface,
-            config,
-            objects,
-            camera,
-        });
-        self.render_preview();
-        Ok(())
+    /// Opens the model preview from a geometry blob the import worker parsed
+    /// off the main thread (the same `transfer` blob a normal import commits
+    /// through `submit_parsed_model`). This is the hitch-free path: the
+    /// blocking `parse_model` runs in the worker, not on the main thread.
+    pub fn preview_open_parsed(
+        &mut self,
+        canvas: web_sys::HtmlCanvasElement,
+        blob: Vec<u8>,
+    ) -> Result<(), JsError> {
+        let set =
+            transfer::unpack(&blob).map_err(|e| JsError::new(&format!("preview blob: {e}")))?;
+        self.preview_render_set(canvas, set)
     }
 
     /// Orbits the preview camera (canvas-px deltas) and re-renders.
@@ -3551,6 +3531,51 @@ impl SolarxyApp {
 }
 
 impl SolarxyApp {
+    /// Uploads a parsed set to a throwaway preview surface on `canvas`,
+    /// frames a camera on its bounds, and renders the first frame. Shared by
+    /// `preview_open` (host parse) and `preview_open_parsed` (worker parse).
+    fn preview_render_set(
+        &mut self,
+        canvas: web_sys::HtmlCanvasElement,
+        set: solarxy_kernel::GeometrySet,
+    ) -> Result<(), JsError> {
+        let cooked = std::sync::Arc::new(set.to_cooked());
+
+        let width = canvas.width().max(16);
+        let height = canvas.height().max(16);
+        let surface = self
+            .instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|e| JsError::new(&format!("preview surface: {e}")))?;
+        let mut config = self.config.clone();
+        config.width = width;
+        config.height = height;
+        surface.configure(&self.device, &config);
+
+        let mut objects = SceneObjects::new();
+        let delta = SceneDelta {
+            ops: vec![SceneOp::UpsertGeometry {
+                id: SceneObjectId(0),
+                geometry: cooked,
+            }],
+        };
+        objects
+            .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
+            .map_err(|e| JsError::new(&format!("preview upload: {e}")))?;
+        let bounds = objects.visible_bounds().unwrap_or_else(default_bounds);
+        let aspect = width as f32 / height.max(1) as f32;
+        let camera = CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect);
+
+        self.preview = Some(PreviewState {
+            surface,
+            config,
+            objects,
+            camera,
+        });
+        self.render_preview();
+        Ok(())
+    }
+
     /// Renders one preview frame into the preview surface, reusing the shared
     /// render chain at preview size (the screenshot pattern; the next main
     /// frame's `sync_render_target_dims` restores the layout dimensions).

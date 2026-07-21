@@ -2395,7 +2395,8 @@ body.reduce-motion .cook-arc {
   fill: var(--hover-bg);
 }
 .radial-seg.active {
-  /* The active wedge fills the accent; its icon flips to dark ink. */
+  /* The active wedge fills the accent; its icon flips to on-accent ink
+   * (see .radial-icon.active). */
   fill: var(--accent-primary);
 }
 .radial-seg.disabled {
@@ -2407,7 +2408,10 @@ body.reduce-motion .cook-arc {
   transform: translate(-50%, -50%);
   pointer-events: auto;
   cursor: pointer;
-  color: #e6e8ee;
+  /* Muted foreground that flips per theme: light on the dark wedge fill,
+   * dark on the cream light-theme wedge. Was a hardcoded light-gray that
+   * washed out on the light theme. */
+  color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2418,7 +2422,10 @@ body.reduce-motion .cook-arc {
   opacity: 0.5;
 }
 .radial-icon.active {
-  color: #111111;
+  /* On-accent ink: near-black on the dark theme's gold accent, near-white on
+   * the light theme's terracotta accent. Was hardcoded to the dark value, so
+   * the active icon was near-black-on-brown (illegible) on the light theme. */
+  color: var(--text-on-accent);
 }
 .radial-glyph {
   font-style: italic;

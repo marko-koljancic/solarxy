@@ -197,7 +197,7 @@ pub fn upload_model(
         let uniform = material::MaterialUniform {
             roughness_factor: mat.roughness_factor,
             metallic_factor: mat.metallic_factor,
-            ao_strength: 1.0,
+            ao_strength: mat.occlusion_strength,
             alpha_cutoff: mat.alpha_cutoff,
             emissive: mat.emissive_factor,
             alpha_mode: mat.alpha_mode.into(),
@@ -487,7 +487,7 @@ pub(crate) fn upload_cooked_materials(
         let uniform = material::MaterialUniform {
             roughness_factor: mat.roughness_factor,
             metallic_factor: mat.metallic_factor,
-            ao_strength: 1.0,
+            ao_strength: mat.occlusion_strength,
             alpha_cutoff: mat.alpha_cutoff,
             emissive: mat.emissive_factor,
             alpha_mode: mat.alpha_mode.into(),
@@ -791,80 +791,282 @@ fn load_or_fallback_texture(
     }
 }
 
+/// Loads the material's occlusion/roughness/metallic (ORM) texture,
+/// compositing a separate occlusion map into the R channel.
+///
+/// Occlusion survives every source shape: a separate occlusion map with or
+/// without an MR map, occlusion supplied as decoded bytes or (under
+/// `std-fs`) a file path, and an occlusion map whose resolution differs from
+/// the MR map (nearest-resampled onto the ORM grid). Scalar roughness /
+/// metallic ride the shader's `roughness_factor` / `metallic_factor` and
+/// occlusion strength rides `ao_strength`, so this only packs channels and
+/// never applies factors.
 fn load_or_create_orm(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     mat: &RawMaterialData,
     mut cache: Option<&mut TextureCache>,
 ) -> Result<std::sync::Arc<texture::Texture>, RendererError> {
-    let mr_tex = if mat.metallic_roughness_texture_data.is_some()
-        || mat.metallic_roughness_texture_path.is_some()
-    {
-        load_or_fallback_texture(
-            device,
-            queue,
-            mat.metallic_roughness_texture_data.as_deref(),
-            mat.metallic_roughness_texture_path.as_ref(),
-            true,
-            &mat.name,
-            "orm",
-            cache.as_deref_mut(),
-        )?
-    } else {
-        return create_default_orm_texture(device, queue);
+    let has_mr = mat.metallic_roughness_texture_data.is_some()
+        || mat.metallic_roughness_texture_path.is_some();
+    let has_occ = mat.occlusion_texture_data.is_some() || mat.occlusion_texture_path.is_some();
+
+    // The MR map (or a white default) as the ORM: the historic behavior when
+    // there is nothing to composite.
+    let load_mr_or_default = |cache: Option<&mut TextureCache>| {
+        if has_mr {
+            load_or_fallback_texture(
+                device,
+                queue,
+                mat.metallic_roughness_texture_data.as_deref(),
+                mat.metallic_roughness_texture_path.as_ref(),
+                true,
+                &mat.name,
+                "orm",
+                cache,
+            )
+        } else {
+            create_default_orm_texture(device, queue)
+        }
     };
 
-    if mat.occlusion_texture_data.is_some() || mat.occlusion_texture_path.is_some() {
-        let same_image = match (
-            &mat.metallic_roughness_texture_path,
-            &mat.occlusion_texture_path,
-        ) {
-            (Some(a), Some(b)) => a == b,
-            _ => false,
-        };
-        if same_image {
-            return Ok(mr_tex);
-        }
-
-        if let Some(ref occ_data) = mat.occlusion_texture_data
-            && let Some(composited) =
-                composite_orm_pixels(mat.metallic_roughness_texture_data.as_deref(), occ_data)
-        {
-            let build = || {
-                texture::Texture::from_raw_rgba(
-                    device,
-                    queue,
-                    &composited.pixels,
-                    composited.width,
-                    composited.height,
-                    Some(&mat.name),
-                    texture::TextureOpts::material(true),
-                )
-            };
-            let built = match cache {
-                Some(cache) => cache.get_or_try_insert((composited.hash, true), build),
-                None => build().map(std::sync::Arc::new),
-            };
-            return Ok(built.unwrap_or(mr_tex));
-        }
+    // No occlusion map: nothing to composite.
+    if !has_occ {
+        return load_mr_or_default(cache.as_deref_mut());
     }
 
-    Ok(mr_tex)
+    // MR and occlusion are the same file: it is already an ORM pack.
+    if let (Some(a), Some(b)) = (
+        &mat.metallic_roughness_texture_path,
+        &mat.occlusion_texture_path,
+    ) && a == b
+    {
+        return load_mr_or_default(cache.as_deref_mut());
+    }
+
+    // MR and occlusion are the same decoded image (the common glTF ORM pack
+    // referenced from both slots): compositing occ.R into mr.R is a no-op, so
+    // load the MR texture directly instead of re-compositing and re-uploading.
+    if let (Some(mr), Some(occ)) = (
+        &mat.metallic_roughness_texture_data,
+        &mat.occlusion_texture_data,
+    ) && (std::sync::Arc::ptr_eq(mr, occ) || mr.hash == occ.hash)
+    {
+        return load_mr_or_default(cache.as_deref_mut());
+    }
+
+    // Decode both sources to CPU pixels (decoded bytes as-is, or a file path
+    // under std-fs). Owned locals hold any path-decoded image so the refs
+    // outlive the match arms.
+    let mr_owned;
+    let mr_ref: Option<&RawImageData> =
+        if let Some(d) = mat.metallic_roughness_texture_data.as_deref() {
+            Some(d)
+        } else {
+            mr_owned = decode_texture_source(mat.metallic_roughness_texture_path.as_ref());
+            mr_owned.as_ref()
+        };
+    let occ_owned;
+    let occ_ref: Option<&RawImageData> = if let Some(d) = mat.occlusion_texture_data.as_deref() {
+        Some(d)
+    } else {
+        occ_owned = decode_texture_source(mat.occlusion_texture_path.as_ref());
+        occ_owned.as_ref()
+    };
+
+    // Occlusion could not be decoded (a path-only reference with no
+    // filesystem): fall back to the MR map rather than dropping to black.
+    let Some(occ) = occ_ref else {
+        return load_mr_or_default(cache.as_deref_mut());
+    };
+
+    let composited = composite_orm_pixels(mr_ref, occ);
+    let build = || {
+        texture::Texture::from_raw_rgba(
+            device,
+            queue,
+            &composited.pixels,
+            composited.width,
+            composited.height,
+            Some(&mat.name),
+            texture::TextureOpts::material(true),
+        )
+    };
+    match cache {
+        Some(cache) => cache.get_or_try_insert((composited.hash, true), build),
+        None => build().map(std::sync::Arc::new),
+    }
 }
 
-fn composite_orm_pixels(
-    mr_data: Option<&RawImageData>,
-    occ_data: &RawImageData,
-) -> Option<RawImageData> {
-    let mr = mr_data.as_ref()?;
-    if mr.width != occ_data.width || mr.height != occ_data.height {
-        return None;
-    }
-    let mut pixels = mr.pixels.clone();
-    for i in (0..pixels.len()).step_by(4) {
-        if i < occ_data.pixels.len() {
-            pixels[i] = occ_data.pixels[i];
+/// Decodes a texture source for CPU compositing: decoded bytes are returned
+/// as-is; a file path is read and decoded under `std-fs`. Returns `None`
+/// when only a path is available on a build without filesystem access (the
+/// web import pipeline delivers textures as decoded bytes instead).
+fn decode_texture_source(path: Option<&std::path::PathBuf>) -> Option<RawImageData> {
+    #[cfg(feature = "std-fs")]
+    if let Some(p) = path {
+        let p_str = p.to_string_lossy();
+        match load_binary(&p_str) {
+            Ok(bytes) => match image::load_from_memory(&bytes) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    return Some(RawImageData::new(rgba.into_raw(), w, h));
+                }
+                Err(e) => tracing::warn!("Failed to decode ORM source '{}': {e}", p.display()),
+            },
+            Err(e) => tracing::warn!("Failed to read ORM source '{}': {e}", p.display()),
         }
     }
-    Some(RawImageData::new(pixels, mr.width, mr.height))
+    #[cfg(not(feature = "std-fs"))]
+    let _ = path;
+    None
+}
+
+/// Nearest-neighbour sample of one channel of `img` at `(x, y)` on a
+/// `dst_w x dst_h` grid. Identity when `img` already matches the
+/// destination size; otherwise it resamples.
+fn sample_nearest(
+    img: &RawImageData,
+    x: u32,
+    y: u32,
+    dst_w: u32,
+    dst_h: u32,
+    channel: usize,
+) -> u8 {
+    let sx = if dst_w == 0 {
+        0
+    } else {
+        ((u64::from(x) * u64::from(img.width) / u64::from(dst_w)) as u32)
+            .min(img.width.saturating_sub(1))
+    };
+    let sy = if dst_h == 0 {
+        0
+    } else {
+        ((u64::from(y) * u64::from(img.height) / u64::from(dst_h)) as u32)
+            .min(img.height.saturating_sub(1))
+    };
+    let idx = (sy as usize * img.width as usize + sx as usize) * 4 + channel;
+    img.pixels.get(idx).copied().unwrap_or(255)
+}
+
+/// Packs an ORM texture: R = occlusion, G / B = the MR map's roughness /
+/// metallic (or white when there is no MR map, so the shader's scalar
+/// factors alone drive those channels), A = 255. The output takes the MR
+/// map's size when present, else the occlusion map's; occlusion is
+/// nearest-resampled onto that grid so a mismatched resolution still
+/// composites instead of being dropped.
+fn composite_orm_pixels(mr: Option<&RawImageData>, occ: &RawImageData) -> RawImageData {
+    let (w, h) = match mr {
+        Some(m) => (m.width, m.height),
+        None => (occ.width, occ.height),
+    };
+    let mut pixels = vec![0u8; w as usize * h as usize * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y as usize * w as usize + x as usize) * 4;
+            pixels[i] = sample_nearest(occ, x, y, w, h, 0);
+            let (g, b) = match mr {
+                Some(m) => (
+                    sample_nearest(m, x, y, w, h, 1),
+                    sample_nearest(m, x, y, w, h, 2),
+                ),
+                None => (255, 255),
+            };
+            pixels[i + 1] = g;
+            pixels[i + 2] = b;
+            pixels[i + 3] = 255;
+        }
+    }
+    RawImageData::new(pixels, w, h)
+}
+
+#[cfg(test)]
+mod orm_tests {
+    use super::{composite_orm_pixels, sample_nearest};
+    use solarxy_core::RawImageData;
+
+    /// A `w x h` image whose every texel is `rgba`.
+    fn solid(w: u32, h: u32, rgba: [u8; 4]) -> RawImageData {
+        let pixels = (0..w * h).flat_map(|_| rgba).collect();
+        RawImageData::new(pixels, w, h)
+    }
+
+    #[test]
+    fn matched_dims_take_occlusion_r_and_keep_mr_gb() {
+        let mr = solid(2, 2, [99, 10, 20, 255]);
+        let occ = solid(2, 2, [200, 0, 0, 255]);
+        let out = composite_orm_pixels(Some(&mr), &occ);
+        assert_eq!((out.width, out.height), (2, 2));
+        for px in out.pixels.chunks(4) {
+            assert_eq!(px, [200, 10, 20, 255], "R from occ, G/B from mr, A opaque");
+        }
+    }
+
+    #[test]
+    fn compositing_an_image_with_itself_is_identity() {
+        // Justifies the same-image short-circuit in `load_or_create_orm`: when
+        // MR and occlusion are the same decoded image, compositing reproduces
+        // it exactly, so loading the MR texture directly is equivalent.
+        let img = RawImageData::new(
+            vec![
+                10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,
+            ],
+            2,
+            2,
+        );
+        let out = composite_orm_pixels(Some(&img), &img);
+        assert_eq!((out.width, out.height), (2, 2));
+        assert_eq!(out.pixels, img.pixels);
+    }
+
+    #[test]
+    fn mismatched_dims_upsample_occlusion_onto_the_mr_grid() {
+        let mr = solid(2, 2, [0, 30, 40, 255]);
+        let occ = solid(1, 1, [123, 0, 0, 255]);
+        let out = composite_orm_pixels(Some(&mr), &occ);
+        assert_eq!((out.width, out.height), (2, 2), "output takes the mr size");
+        for px in out.pixels.chunks(4) {
+            assert_eq!(px, [123, 30, 40, 255]);
+        }
+    }
+
+    #[test]
+    fn mismatched_dims_downsample_occlusion_onto_the_mr_grid() {
+        let mr = solid(1, 1, [0, 50, 60, 255]);
+        let occ = RawImageData::new(
+            vec![10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255],
+            2,
+            2,
+        );
+        let out = composite_orm_pixels(Some(&mr), &occ);
+        assert_eq!((out.width, out.height), (1, 1));
+        // Nearest sample of the 2x2 occ at the single texel is its (0,0).
+        assert_eq!(out.pixels, vec![10, 50, 60, 255]);
+    }
+
+    #[test]
+    fn absent_mr_builds_white_gb_with_occlusion_r() {
+        // AO-only material: no MR map, so G/B stay white (the shader's
+        // scalar factors drive roughness/metallic) and only R carries AO.
+        let occ = solid(2, 2, [77, 5, 5, 255]);
+        let out = composite_orm_pixels(None, &occ);
+        assert_eq!((out.width, out.height), (2, 2), "output takes the occ size");
+        for px in out.pixels.chunks(4) {
+            assert_eq!(px, [77, 255, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn sample_nearest_is_identity_at_matching_size_and_clamps() {
+        let img = RawImageData::new(
+            vec![1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255],
+            2,
+            2,
+        );
+        // Identity at matching size: channel G of texel (1,1) is 11.
+        assert_eq!(sample_nearest(&img, 1, 1, 2, 2, 1), 11);
+        // An out-of-range destination coordinate clamps to the last texel.
+        assert_eq!(sample_nearest(&img, 9, 9, 2, 2, 0), 10);
+    }
 }

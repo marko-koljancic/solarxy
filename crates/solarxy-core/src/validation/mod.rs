@@ -91,7 +91,7 @@ pub fn validate_raw_model_with_config(
         }
 
         if config.uv_presence {
-            issues.extend(uvs::check_uvs(i, mesh, file_ext));
+            issues.extend(uvs::check_uvs(i, mesh, file_ext, config.uv_presence_forced));
         }
 
         if config.index_buffer {

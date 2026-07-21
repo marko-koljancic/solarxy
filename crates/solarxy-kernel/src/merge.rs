@@ -163,6 +163,7 @@ mod tests {
             emissive_texture_data: None,
             roughness_factor: roughness,
             metallic_factor: 0.0,
+            occlusion_strength: 1.0,
             emissive_factor: [0.0; 3],
             base_color_factor: [1.0, 1.0, 1.0, 1.0],
             alpha_mode: solarxy_core::geometry::AlphaMode::Opaque,

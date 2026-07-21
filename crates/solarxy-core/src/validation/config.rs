@@ -35,6 +35,14 @@ pub struct ValidationConfig {
     #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub uv_presence: bool,
 
+    /// When set, the missing-UV check flags any mesh with no texture
+    /// coordinates regardless of source format. Off by default so cooked,
+    /// legitimately UV-less geometry stays quiet and the file-loading path
+    /// keeps its format-gated behavior; the validate node's `require_uvs`
+    /// param drives this.
+    #[cfg_attr(feature = "serde", serde(default = "default_false"))]
+    pub uv_presence_forced: bool,
+
     #[cfg_attr(feature = "serde", serde(default = "default_true"))]
     pub index_buffer: bool,
 }
@@ -50,6 +58,7 @@ impl Default for ValidationConfig {
             degenerate_triangles: true,
             material_refs: true,
             uv_presence: true,
+            uv_presence_forced: false,
             index_buffer: true,
         }
     }
@@ -104,6 +113,8 @@ mod tests {
         assert!(c.triangle_budget);
         assert!(!c.allow_open_mesh);
         assert!(c.degenerate_triangles);
+        assert!(c.uv_presence);
+        assert!(!c.uv_presence_forced);
     }
 
     #[test]

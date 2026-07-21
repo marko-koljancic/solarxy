@@ -181,6 +181,12 @@ pub struct RawMaterialData {
     pub emissive_texture_data: Option<std::sync::Arc<RawImageData>>,
     pub roughness_factor: f32,
     pub metallic_factor: f32,
+    /// glTF `occlusionTexture.strength`: how strongly the occlusion map
+    /// attenuates ambient light (1.0 = full, 0.0 = none). Defaults to 1.0,
+    /// the glTF default, so materials without an occlusion map and older
+    /// files (which never carried the field) render unchanged.
+    #[cfg_attr(feature = "serde", serde(default = "default_occlusion_strength"))]
+    pub occlusion_strength: f32,
     pub emissive_factor: [f32; 3],
     /// Linear RGBA multiplied into the base-color texture sample (glTF's
     /// `baseColorFactor`); white when a map alone drives the channel.
@@ -220,6 +226,11 @@ fn white_rgba() -> [f32; 4] {
     [1.0, 1.0, 1.0, 1.0]
 }
 
+#[cfg(feature = "serde")]
+fn default_occlusion_strength() -> f32 {
+    1.0
+}
+
 impl Default for RawMaterialData {
     /// Everything zeroed/empty EXCEPT `base_color_factor`, which defaults
     /// to white: it multiplies the base-color sample, so the identity is
@@ -240,6 +251,7 @@ impl Default for RawMaterialData {
             emissive_texture_data: None,
             roughness_factor: 0.0,
             metallic_factor: 0.0,
+            occlusion_strength: 1.0,
             emissive_factor: [0.0; 3],
             base_color_factor: white_rgba(),
             alpha_mode: AlphaMode::default(),

@@ -442,11 +442,15 @@ export function ParameterPanel() {
     <div className="param-panel">
       <div className="param-header">
         <span className="param-title">{nodeLabel(node, desc)}</span>
-        {stats?.points !== undefined && (
+        {stats?.image != null ? (
+          <span className="param-stats">
+            {stats.image[0]} × {stats.image[1]}
+          </span>
+        ) : stats?.points !== undefined ? (
           <span className="param-stats">
             {stats.points} pts · {stats.prims} tris · {stats.meshes} mesh
           </span>
-        )}
+        ) : null}
       </div>
       {tabs.length > 1 && (
         <div className="param-tabs" role="tablist">

@@ -126,6 +126,7 @@ fn parse_obj(
             emissive_texture_data: None,
             roughness_factor,
             metallic_factor,
+            occlusion_strength: 1.0,
             emissive_factor: [0.0, 0.0, 0.0],
             base_color_factor: [kd[0], kd[1], kd[2], base_alpha],
             alpha_mode,

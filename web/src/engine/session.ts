@@ -32,6 +32,7 @@ import type {
   DisplaySettingsDto,
   EventBatch,
   GraphContext,
+  ImportOptions,
   NodeId,
   PaneDisplaySettings,
   ParamSource,
@@ -76,6 +77,68 @@ interface WorkerResult {
 let hdriToken = -1;
 const hdriWaiters = new Map<number, (r: WorkerResult) => void>();
 
+// Asset-preview parses are host-orchestrated the same way: a parse posted
+// with a distinct negative token, resolved through this map rather than the
+// engine's generation guard. Routed by token, so a superseded preview never
+// commits to the document.
+let previewToken = -1_000_000;
+const previewWaiters = new Map<
+  number,
+  { resolve: (blob: Uint8Array) => void; reject: (e: Error) => void }
+>();
+
+/** Parses a staged model in the import worker (off the main thread) and
+ * resolves with its geometry transfer blob, for the live asset preview. Hands
+ * the worker the primary bytes plus every other staged file as a candidate
+ * companion, since OBJ / glTF resolve textures and buffers by name. */
+export async function previewParseModel(hash: string, name: string): Promise<Uint8Array> {
+  // `async` so a synchronous throw in this prologue (getClient/assetBytes/
+  // assetManifest/ensureImportWorker) surfaces as a promise rejection the
+  // caller's `.catch` can handle, rather than an uncaught error in the effect.
+  const c = getClient();
+  const primary = c.assetBytes(hash);
+  if (!primary) throw new Error("asset is not staged");
+  const format = name.split(".").pop()?.toLowerCase() ?? "";
+  const files: { name: string; bytes: Uint8Array }[] = [{ name, bytes: primary }];
+  if (format === "obj" || format === "gltf" || format === "glb") {
+    for (const ref of c.assetManifest()) {
+      if (ref.hash === hash) continue;
+      const b = c.assetBytes(ref.hash);
+      if (b) files.push({ name: ref.name, bytes: b });
+    }
+  }
+  const options: ImportOptions = {
+    scale: 1.0,
+    centerToOrigin: false,
+    recomputeNormals: null,
+    preserveMaterials: null,
+  };
+  const worker = ensureImportWorker();
+  const token = previewToken;
+  previewToken -= 1;
+  return new Promise<Uint8Array>((resolve, reject) => {
+    previewWaiters.set(token, { resolve, reject });
+    try {
+      worker.postMessage(
+        {
+          kind: "parse",
+          jobId: token,
+          ctx: "root",
+          format,
+          optionsJson: JSON.stringify(options),
+          files,
+        },
+        files.map((f) => f.bytes.buffer),
+      );
+    } catch (e) {
+      // A failed post never yields a worker reply; drop the waiter so it
+      // does not leak, and reject so the caller sees the error.
+      previewWaiters.delete(token);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
+  });
+}
+
 /** Runs the CPU IBL stages in the worker; resolves with the packed
  * `PreparedHdri` blob. */
 function prepareHdriInWorker(bytes: Uint8Array, format: string): Promise<Uint8Array> {
@@ -116,6 +179,20 @@ function onWorkerResult(data: WorkerResult): void {
   if (data.kind === "hdri") {
     hdriWaiters.get(data.jobId)?.(data);
     hdriWaiters.delete(data.jobId);
+    return;
+  }
+  // Preview parses resolve their own promise (keyed by the negative token)
+  // and never touch the document, so route them before the engine handling.
+  if (data.kind === "parse" && previewWaiters.has(data.jobId)) {
+    const waiter = previewWaiters.get(data.jobId);
+    previewWaiters.delete(data.jobId);
+    if (waiter) {
+      if (data.error !== undefined || !data.blob) {
+        waiter.reject(new Error(data.error ?? "parse produced no geometry"));
+      } else {
+        waiter.resolve(data.blob);
+      }
+    }
     return;
   }
   if (!client) return;

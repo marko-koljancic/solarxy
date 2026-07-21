@@ -6,7 +6,7 @@
 // the document.
 
 import { useEffect, useRef, useState } from "react";
-import { getClient } from "../engine/session";
+import { getClient, previewParseModel } from "../engine/session";
 import { pushToast } from "../store/toasts";
 import { useUi } from "../store/ui";
 import { assetKind } from "./AssetsPane";
@@ -78,31 +78,41 @@ function ModelPreview({ hash, name }: { hash: string; name: string }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     setError(null);
+    let cancelled = false;
+    let ro: ResizeObserver | null = null;
     const dpr = window.devicePixelRatio || 1;
     const size = () => {
       canvas.width = Math.max(16, Math.round(canvas.clientWidth * dpr));
       canvas.height = Math.max(16, Math.round(canvas.clientHeight * dpr));
     };
     size();
-    try {
-      getClient().previewOpen(canvas, hash, name);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      pushToast(`Model preview failed: ${msg}`, "error");
-      return;
-    }
-    const ro = new ResizeObserver(() => {
-      size();
-      try {
-        getClient().previewResize(canvas.width, canvas.height);
-      } catch {
-        /* closed */
-      }
-    });
-    ro.observe(canvas);
+    // Parse off the main thread in the import worker, then upload on the host,
+    // so opening a large model no longer hitches the UI.
+    previewParseModel(hash, name)
+      .then((blob) => {
+        // A newer preview (or an unmount) superseded this parse: drop the
+        // stale blob so it never displays.
+        if (cancelled || !canvasRef.current) return;
+        getClient().previewOpenParsed(canvas, blob);
+        ro = new ResizeObserver(() => {
+          size();
+          try {
+            getClient().previewResize(canvas.width, canvas.height);
+          } catch {
+            /* closed */
+          }
+        });
+        ro.observe(canvas);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        pushToast(`Model preview failed: ${msg}`, "error");
+      });
     return () => {
-      ro.disconnect();
+      cancelled = true;
+      ro?.disconnect();
       try {
         getClient().previewClose();
       } catch {

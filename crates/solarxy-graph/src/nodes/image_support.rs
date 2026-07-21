@@ -11,15 +11,14 @@ use crate::registry::PortSpec;
 use crate::registry::coerce::{DataType, Value};
 
 /// The working-resolution cap (long edge, pixels): every image op clamps
-/// its inputs here so a 4K source cannot hitch the single-threaded wasm
+/// its inputs here so a large source cannot hitch the single-threaded wasm
 /// cook.
 ///
-/// This cap is TERMINAL today. `image_export`'s save action encodes the
-/// node's already-cooked output as-is (`engine/mod.rs`, the
-/// `("image_export", "save")` arm), so a 4K source exports at 2048. A
-/// full-resolution re-cook on export is planned, not built; this comment
-/// used to describe it as the export node's concern, which read as a
-/// statement of fact and is how it came to be documented as one.
+/// This cap is terminal today: `image_export` encodes the node's
+/// already-cooked, working-resolution output (`engine/mod.rs`, the
+/// `("image_export", "save")` arm), so a source larger than this edge still
+/// exports at this edge. A full-resolution re-cook on export is a
+/// later-milestone item, not built here.
 pub const WORKING_EDGE: u32 = 2048;
 
 /// The default single Image input. Carries the generic port doc; a node

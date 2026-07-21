@@ -119,6 +119,11 @@
         "uv_presence": {
           "default": true,
           "type": "boolean"
+        },
+        "uv_presence_forced": {
+          "default": false,
+          "description": "When set, the missing-UV check flags any mesh with no texture coordinates regardless of source format. Off by default so cooked, legitimately UV-less geometry stays quiet and the file-loading path keeps its format-gated behavior; the validate node's `require_uvs` param drives this.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -203,7 +208,8 @@
         "non_manifold_edges": true,
         "normal_mismatch": true,
         "triangle_budget": true,
-        "uv_presence": true
+        "uv_presence": true,
+        "uv_presence_forced": false
       }
     }
   },

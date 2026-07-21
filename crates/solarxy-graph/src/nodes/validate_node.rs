@@ -54,9 +54,25 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     "uvs",
                     "UVs",
                     "Flags a UV buffer whose length disagrees with the vertex count. \
-                     Geometry carrying no UVs at all is NOT flagged here: that warning \
-                     depends on the source file format expecting them, and cooked \
-                     geometry has no source format. Use `uv_project` to add UVs.",
+                     Geometry carrying no UVs at all is not flagged by default: that \
+                     warning normally depends on the source file format expecting \
+                     them, and cooked geometry has no source format. Turn on Require \
+                     UVs to flag it anyway. Use `uv_project` to add UVs.",
+                ),
+                ParamSpec::new(
+                    "require_uvs",
+                    "Require UVs",
+                    "checks",
+                    ParamType::Bool,
+                    ParamValue::Bool(false),
+                )
+                .show_if("uvs", Pred::Truthy)
+                .doc(
+                    "Off by default. When on, flags any mesh with no texture \
+                     coordinates at all, regardless of source format, so you can \
+                     ask whether cooked geometry lacks UVs before texturing or \
+                     exporting it. Leave it off for procedural geometry that is \
+                     legitimately UV-less. Only has an effect while UVs is on.",
                 ),
                 check(
                     "topology",
@@ -164,6 +180,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         degenerate_triangles: p.bool("topology"),
         material_refs: p.bool("materials"),
         uv_presence: p.bool("uvs"),
+        uv_presence_forced: p.bool("require_uvs"),
         index_buffer: p.bool("topology"),
     };
     let budget = p.i64("triangle_budget");
@@ -251,6 +268,59 @@ mod tests {
         let mesh = KernelMesh::new("broken", vec![[0.0; 3], [0.0; 3], [0.0; 3]], vec![0, 1, 2]);
         let (_points, issues) = run(GeometrySet::from_mesh(mesh));
         assert!(issues > 0, "a degenerate triangle should be reported");
+    }
+
+    #[test]
+    fn require_uvs_flags_uvless_geometry_only_when_on() {
+        use crate::params::ParamSource;
+        // A valid quad carrying no UVs. Cooked geometry has no source format,
+        // so the missing-UV warning is unreachable unless require_uvs forces
+        // it. (The open-mesh boundary warning is present either way; we count
+        // only MissingUvs.)
+        let uvless = || {
+            GeometrySet::from_mesh(KernelMesh::new(
+                "quad",
+                vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                vec![0, 1, 2, 0, 2, 3],
+            ))
+        };
+        let missing_uvs = |require: bool| -> usize {
+            let mut overrides = BTreeMap::new();
+            if require {
+                overrides.insert(
+                    "require_uvs".to_string(),
+                    ParamSource::Literal(ParamValue::Bool(true)),
+                );
+            }
+            let resolved =
+                crate::registry::resolve::resolve_params(&overrides, &descriptor().params).unwrap();
+            let mut slots = BTreeMap::new();
+            slots.insert(
+                "geometry".to_string(),
+                InputSlot::Single(Value::Geometry(Arc::new(uvless()))),
+            );
+            let inputs = Inputs::new(slots);
+            let assets = crate::assets::AssetTable::new();
+            let mut cx = CookCtx::new(&assets, false);
+            let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+                panic!("small input cooks synchronously");
+            };
+            match out.get("report") {
+                Some(Value::Report(r)) => r
+                    .issues
+                    .iter()
+                    .filter(|i| i.kind == solarxy_core::validation::IssueKind::MissingUvs)
+                    .count(),
+                _ => panic!("validate emits a report"),
+            }
+        };
+        assert_eq!(missing_uvs(false), 0, "quiet by default");
+        assert_eq!(missing_uvs(true), 1, "require_uvs flags the UV-less mesh");
     }
 
     #[test]

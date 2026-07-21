@@ -768,6 +768,234 @@
       "role": "standard"
     },
     {
+      "typeId": "brick",
+      "version": 1,
+      "displayName": "Brick",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "contexts": [
+        "tex"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The resulting image: RGBA8, and never more than 2048 px on the long edge, because that is the resolution the texture context cooks at. Being the default output, a drag from the node's body wires from here."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Brick",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's width. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's height. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "brick_color",
+          "label": "Brick",
+          "group": "brick",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.550000011920929,
+            0.25,
+            0.18000000715255737,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color of the bricks themselves. Written straight into the texels with no conversion, alpha included, so it lands exactly as the picker shows it."
+        },
+        {
+          "key": "mortar_color",
+          "label": "Mortar",
+          "group": "brick",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.8500000238418579,
+            0.8500000238418579,
+            0.8199999928474426,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color of the mortar lines between the bricks. Written straight into the texels with no conversion, alpha included."
+        },
+        {
+          "key": "columns",
+          "label": "Columns",
+          "group": "brick",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 6,
+          "hard": [
+            1.0,
+            64.0
+          ],
+          "soft": [
+            2.0,
+            16.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many bricks span the image horizontally. Independent of Rows, so tall or squat bricks are a matter of the two counts."
+        },
+        {
+          "key": "rows",
+          "label": "Rows",
+          "group": "brick",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 12,
+          "hard": [
+            1.0,
+            64.0
+          ],
+          "soft": [
+            2.0,
+            24.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many brick courses span the image vertically. Independent of Columns; alternate courses shift by Row Offset for the running bond."
+        },
+        {
+          "key": "mortar",
+          "label": "Mortar Width",
+          "group": "brick",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.06,
+          "hard": [
+            0.0,
+            0.5
+          ],
+          "soft": null,
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The mortar thickness as a fraction of a cell (0 is no mortar, 0.5 leaves no brick). Applied on all four sides of each brick, so the visible brick shrinks as this grows."
+        },
+        {
+          "key": "row_offset",
+          "label": "Row Offset",
+          "group": "brick",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far alternate courses shift sideways, as a fraction of a brick: 0.5 is the classic running bond, 0 stacks the bricks in straight columns."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A running-bond brick wall: Columns by Rows bricks separated by mortar, with alternate courses shifted by Row Offset.\n\nA ready architectural pattern and a compact test of a texture chain. Feed it into `height_to_normal` for a raised-brick surface, into `levels` for a wear mask, or `mix` it with `noise` to break up the flat colors.\n\nColors are written without conversion, alpha included. The layout is in normalized coordinates, so a non-square image stretches the bricks; Mortar Width is a fraction of a cell, applied on every side, and Row Offset drives the bond from stacked to running.",
+      "searchAliases": [
+        "brick",
+        "wall",
+        "masonry",
+        "bond"
+      ],
+      "glyph": "brick",
+      "role": "imageSource"
+    },
+    {
       "typeId": "brightness_contrast",
       "version": 1,
       "displayName": "Brightness / Contrast",
@@ -1184,6 +1412,198 @@
       ],
       "glyph": "camera",
       "role": "standard"
+    },
+    {
+      "typeId": "checker",
+      "version": 1,
+      "displayName": "Checker",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "contexts": [
+        "tex"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The resulting image: RGBA8, and never more than 2048 px on the long edge, because that is the resolution the texture context cooks at. Being the default output, a drag from the node's body wires from here."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Checker",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's width. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's height. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "color_a",
+          "label": "Color A",
+          "group": "checker",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.10000000149011612,
+            0.10000000149011612,
+            0.10000000149011612,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color of the even tiles (the top-left one). Written straight into the texels with no conversion, alpha included, so it lands exactly as the picker shows it."
+        },
+        {
+          "key": "color_b",
+          "label": "Color B",
+          "group": "checker",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.8999999761581421,
+            0.8999999761581421,
+            0.8999999761581421,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color of the odd tiles, alternating with Color A across the board. Written straight into the texels with no conversion, alpha included."
+        },
+        {
+          "key": "tiles_x",
+          "label": "Tiles X",
+          "group": "checker",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 8,
+          "hard": [
+            1.0,
+            256.0
+          ],
+          "soft": [
+            2.0,
+            32.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many tiles span the image horizontally. Independent of Tiles Y, so an uneven count gives rectangular tiles, and the grid maps to normalized coordinates rather than staying square."
+        },
+        {
+          "key": "tiles_y",
+          "label": "Tiles Y",
+          "group": "checker",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 8,
+          "hard": [
+            1.0,
+            256.0
+          ],
+          "soft": [
+            2.0,
+            32.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many tiles span the image vertically. Independent of Tiles X, so an uneven count gives rectangular tiles."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A two-color checkerboard of Tiles X by Tiles Y alternating cells.\n\nThe classic UV and scale reference: drop it on a model to read texel density and seams at a glance, or use it as a hard-edged mask and tint source. Two checkers at different tile counts through a `mix` gives a quick plaid.\n\nColors are written without conversion, alpha included, so what the picker shows is what the texels hold. Tiles map to a normalized grid, so a non-square image or an uneven tile count yields rectangular cells rather than square ones.",
+      "searchAliases": [
+        "checker",
+        "checkerboard",
+        "grid",
+        "uv"
+      ],
+      "glyph": "checker",
+      "role": "imageSource"
     },
     {
       "typeId": "compute_normals",
@@ -2612,6 +3032,209 @@
       ],
       "glyph": "geo_export",
       "role": "terminal"
+    },
+    {
+      "typeId": "gradient",
+      "version": 1,
+      "displayName": "Gradient",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "contexts": [
+        "tex"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The resulting image: RGBA8, and never more than 2048 px on the long edge, because that is the resolution the texture context cooks at. Being the default output, a drag from the node's body wires from here."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Gradient",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's width. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's height. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "gradient",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "linear",
+              "Linear"
+            ],
+            [
+              "radial",
+              "Radial"
+            ],
+            [
+              "angular",
+              "Angular"
+            ],
+            [
+              "diamond",
+              "Diamond"
+            ]
+          ],
+          "accept": [],
+          "default": "linear",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How the blend factor is measured around the Centre: Linear runs left to right through it, Radial spreads outward from it, Angular sweeps the angle around it (a conic gradient), and Diamond is a rotated square. All four honour Centre."
+        },
+        {
+          "key": "color_a",
+          "label": "From",
+          "group": "gradient",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color at the start of the gradient: the left edge, the centre, or the start of the angular sweep depending on Mode. All four channels interpolate, so an alpha set here ramps as well."
+        },
+        {
+          "key": "color_b",
+          "label": "To",
+          "group": "gradient",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The color at the end of the gradient: the right edge, the outer limit of the falloff, or the end of the angular sweep. Swap it with From to reverse the gradient."
+        },
+        {
+          "key": "center",
+          "label": "Center",
+          "group": "gradient",
+          "paramType": "vec2",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.5,
+            0.5
+          ],
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Where the gradient originates, in normalized 0..1 coordinates (0.5, 0.5 is the image centre). Radial, Angular, and Diamond spread from here; Linear uses only its x as the midpoint."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A two-color gradient with a movable centre and four falloff shapes: linear, radial, angular (conic), or diamond.\n\nThe richer sibling of `ramp`: reach for it when you need a conic or diamond falloff or an off-centre origin that `ramp`'s fixed horizontal / vertical / radial cannot give. Feed it into `mix` as a base or blend layer, or into `levels` to shape the falloff.\n\nAll four channels interpolate, alpha included. Distances are measured in normalized coordinates, so the rings and diamonds become ellipses and rhombi on a non-square image, and the factor is clamped so the corners past the far color sit flat.",
+      "searchAliases": [
+        "gradient",
+        "conic",
+        "radial",
+        "linear"
+      ],
+      "glyph": "gradient",
+      "role": "imageSource"
     },
     {
       "typeId": "height_to_normal",
@@ -8586,7 +9209,22 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Flags a UV buffer whose length disagrees with the vertex count. Geometry carrying no UVs at all is NOT flagged here: that warning depends on the source file format expecting them, and cooked geometry has no source format. Use `uv_project` to add UVs."
+          "doc": "Flags a UV buffer whose length disagrees with the vertex count. Geometry carrying no UVs at all is not flagged by default: that warning normally depends on the source file format expecting them, and cooked geometry has no source format. Turn on Require UVs to flag it anyway. Use `uv_project` to add UVs."
+        },
+        {
+          "key": "require_uvs",
+          "label": "Require UVs",
+          "group": "checks",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Off by default. When on, flags any mesh with no texture coordinates at all, regardless of source format, so you can ask whether cooked geometry lacks UVs before texturing or exporting it. Leave it off for procedural geometry that is legitimately UV-less. Only has an effect while UVs is on."
         },
         {
           "key": "topology",
@@ -8665,6 +9303,229 @@
       ],
       "glyph": "validate",
       "role": "analyzer"
+    },
+    {
+      "typeId": "voronoi",
+      "version": 1,
+      "displayName": "Voronoi",
+      "category": "primitives",
+      "categoryLabel": "Primitives",
+      "contexts": [
+        "tex"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The resulting image: RGBA8, and never more than 2048 px on the long edge, because that is the resolution the texture context cooks at. Being the default output, a drag from the node's body wires from here."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Voronoi",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "width",
+          "label": "Width",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's width. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "group": "size",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 512,
+          "hard": [
+            16.0,
+            2048.0
+          ],
+          "soft": [
+            64.0,
+            1024.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Pixels across the generated image's height. Independent of the other axis, so a non-square image is fine, but the pattern is laid out in normalized coordinates and stretches to fit rather than staying square. The ceiling is 2048, the working resolution the texture context cooks at; these are single-threaded CPU loops, so doubling both dimensions quadruples the pixels a cook touches."
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "voronoi",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 8.0,
+          "hard": [
+            0.5,
+            64.0
+          ],
+          "soft": [
+            2.0,
+            16.0
+          ],
+          "step": 0.5,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many cells span the image: 8 scatters an 8x8 lattice of feature points whatever the pixel size. Raise it for smaller, denser cells, lower it for a few big ones. The count is the same on both axes, so a non-square image gets stretched cells."
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "group": "voronoi",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            9999.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Selects where the feature points land inside their cells. Any change rescatters them into a new pattern rather than shifting the old one, and the same seed always cooks the same pixels, so a saved scene reproduces exactly."
+        },
+        {
+          "key": "jitter",
+          "label": "Jitter",
+          "group": "voronoi",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far each feature point strays from its cell centre: 0 pins every point to the centre for a regular grid, 1 lets it fall anywhere in the cell for a fully irregular pattern."
+        },
+        {
+          "key": "metric",
+          "label": "Metric",
+          "group": "voronoi",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "euclidean",
+              "Euclidean"
+            ],
+            [
+              "manhattan",
+              "Manhattan"
+            ],
+            [
+              "chebyshev",
+              "Chebyshev"
+            ]
+          ],
+          "accept": [],
+          "default": "euclidean",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The distance measure that decides which feature owns a texel: Euclidean gives round cells, Manhattan diamond-shaped ones, and Chebyshev square ones. It reshapes both the cells and the Distance falloff."
+        },
+        {
+          "key": "pattern",
+          "label": "Pattern",
+          "group": "voronoi",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "distance",
+              "Distance"
+            ],
+            [
+              "cell_id",
+              "Cell ID"
+            ],
+            [
+              "edges",
+              "Edges"
+            ]
+          ],
+          "accept": [],
+          "default": "distance",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "What each texel stores: Distance is the nearest-feature distance (a cellular falloff, dark at the centres), Cell ID is a flat hashed grey per cell (a random mask), and Edges draws bright lines along the cell boundaries."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Worley / Voronoi cellular noise: one jittered feature point per lattice cell, read back per texel as a distance falloff, a per-cell value, or the cell edges.\n\nA staple of stone, scale, crackle, and organic-cell texturing. Feed the Distance pattern into `levels` for cracked-earth or reptile masks, the Cell ID pattern into `mix` for a random per-cell tint, or the Edges pattern as a wear or grout mask.\n\nThe output is opaque grey: R, G and B carry the same value and alpha is 1, so this is a scalar field rather than a color. It is deterministic in the seed and, like `noise`, does not tile at the image edge.",
+      "searchAliases": [
+        "voronoi",
+        "worley",
+        "cellular",
+        "cells"
+      ],
+      "glyph": "voronoi",
+      "role": "imageSource"
     }
   ],
   "coercions": [

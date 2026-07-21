@@ -14,12 +14,15 @@ pub(super) fn supports_uvs(file_ext: &str) -> bool {
     )
 }
 
-/// UV checks for one mesh: count-mismatch warning + missing-UV warning
-/// (only when the format supports them).
+/// UV checks for one mesh: count-mismatch warning + missing-UV warning.
+/// The missing-UV warning fires when the source format is expected to carry
+/// UVs (OBJ / glTF / GLB) or when `forced` is set (the validate node's
+/// opt-in `require_uvs`, which flags UV-less geometry regardless of format).
 pub(super) fn check_uvs(
     mesh_index: usize,
     mesh: &RawMeshData,
     file_ext: &str,
+    forced: bool,
 ) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let vertex_count = mesh.positions.len();
@@ -39,7 +42,7 @@ pub(super) fn check_uvs(
         });
     }
 
-    if mesh.tex_coords.is_none() && supports_uvs(file_ext) {
+    if mesh.tex_coords.is_none() && (forced || supports_uvs(file_ext)) {
         issues.push(ValidationIssue {
             severity: Severity::Warning,
             scope: IssueScope::Mesh(mesh_index),
@@ -110,5 +113,41 @@ mod tests {
             .filter(|i| i.kind == IssueKind::MissingUvs)
             .collect();
         assert!(missing.is_empty());
+    }
+
+    fn missing_count(issues: &[ValidationIssue]) -> usize {
+        issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::MissingUvs)
+            .count()
+    }
+
+    #[test]
+    fn forced_flags_missing_uvs_regardless_of_format() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = None;
+        // STL normally exempts missing UVs; forcing overrides the format gate.
+        let issues = check_uvs(0, &raw.meshes[0], "stl", true);
+        assert_eq!(missing_count(&issues), 1);
+        assert_eq!(issues[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn forced_off_stays_quiet_on_unsupported_format() {
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = None;
+        let issues = check_uvs(0, &raw.meshes[0], "stl", false);
+        assert_eq!(missing_count(&issues), 0);
+    }
+
+    #[test]
+    fn forced_flags_cooked_geometry_with_no_source_format() {
+        // The validate node cooks with file_ext = ""; forcing makes the
+        // otherwise-unreachable check fire, and leaving it off keeps the
+        // pre-0.7.2 behavior (empty ext suppresses the warning).
+        let mut raw = single_triangle_raw();
+        raw.meshes[0].tex_coords = None;
+        assert_eq!(missing_count(&check_uvs(0, &raw.meshes[0], "", true)), 1);
+        assert_eq!(missing_count(&check_uvs(0, &raw.meshes[0], "", false)), 0);
     }
 }

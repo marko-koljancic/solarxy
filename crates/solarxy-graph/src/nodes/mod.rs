@@ -115,6 +115,10 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         image_generate::constant_descriptor(),
         image_generate::ramp_descriptor(),
         image_generate::noise_descriptor(),
+        image_generate::voronoi_descriptor(),
+        image_generate::gradient_descriptor(),
+        image_generate::checker_descriptor(),
+        image_generate::brick_descriptor(),
         image_adjust::levels_descriptor(),
         image_adjust::brightness_contrast_descriptor(),
         image_adjust::hue_saturation_descriptor(),
@@ -184,13 +188,13 @@ mod tests {
 
     /// The registry's size is asserted rather than described, because a
     /// description goes stale silently: this comment used to enumerate the
-    /// waves that built the set and its arithmetic came to 33 while the
-    /// assert below read 58. The counts per context are the useful fact, and
-    /// they are derived here rather than recited.
+    /// waves that built the set, and its hand-arithmetic drifted from the
+    /// assert below. The counts per context are the useful fact, and they are
+    /// derived here rather than recited.
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 58);
+        assert_eq!(registry.len(), 62);
 
         let in_context = |kind: ContextKind| {
             builtin_descriptors()

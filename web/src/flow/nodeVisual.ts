@@ -53,11 +53,18 @@ export const GLYPH_PATHS: Record<string, string> = {
   rect_area: "M3 3h6v10h-6z m8 2h2.5m-2.5 3h2.5m-2.5 3h2.5",
   spot: "M6.5 3h3l1.2 3.5h-5.4z m-2.5 10l2.3-6.5m5.7 6.5l-2.3-6.5m-5.7 6.5h8",
 
-  // Texture-context generators: a swatch, a stop bar, a scatter.
+  // Texture-context generators: a swatch, a stop bar, a scatter, cells, a
+  // radial fade, a checkerboard, a brick course.
   constant: "M3 3.5h10v9h-10z m6.8 4.5a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 1 1 3.6 0",
   ramp: "M2.5 5.5h11v3.5h-11z m1.5 5.5v2m4-2v2m4-2v2",
   noise:
     "M4.9 4.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M10.4 3.9a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M13.3 7.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M6.6 8.7a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M11 11.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M5.4 12.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+  voronoi: "M3 3.5h10v9h-10z M8 8l1.5-4.5 M8 8l4 2 M8 8l-3 4.5",
+  gradient:
+    "M3 3.5h10v9h-10z M11 8a3 3 0 1 1-6 0 3 3 0 1 1 6 0 M9.3 8a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 1 1 2.6 0",
+  checker: "M3 3.5h10v9h-10z M8 3.5v9 M3 8h10 M3.7 4.2l3.6 3.6 M8.7 8.7l3.6 3.3",
+  brick:
+    "M3 3.5h10v9h-10z M3 6.5h10 M3 9.5h10 M8 3.5v3 M5.5 6.5v3 M10.5 6.5v3 M8 9.5v3",
 
   // Texture-context adjustments: histogram, split disc, spoked wheel,
   // opposed arrows, the gamma letterform.

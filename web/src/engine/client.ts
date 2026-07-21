@@ -309,6 +309,13 @@ export class SolarxyClient {
     this.app.preview_open(canvas, hash, name);
   }
 
+  /** Opens the live model preview from a geometry blob the import worker
+   * parsed off the main thread, so a large model no longer hitches the UI on
+   * open. */
+  previewOpenParsed(canvas: HTMLCanvasElement, blob: Uint8Array): void {
+    this.app.preview_open_parsed(canvas, blob);
+  }
+
   previewOrbit(dx: number, dy: number): void {
     this.app.preview_orbit(dx, dy);
   }
