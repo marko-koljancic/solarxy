@@ -317,6 +317,11 @@ pub fn pick_node(
         };
         let matrix = geo_world_matrix(doc, registry, previews, geo);
         for mesh in &set.meshes {
+            // The raycaster reads indices as triangle triples; line and
+            // point meshes are unpickable in the viewport (decision M-4).
+            if mesh.topology != solarxy_core::MeshTopology::Triangles {
+                continue;
+            }
             // Transform this mesh's vertices to world space, then raycast.
             let world: Vec<[f32; 3]> = mesh
                 .positions
@@ -379,6 +384,10 @@ pub(crate) fn pick_node_detailed(
         };
         let matrix = geo_world_matrix(doc, registry, previews, geo);
         for (mesh_index, mesh) in set.meshes.iter().enumerate() {
+            // Unpickable off-triangles, matching pick_node (decision M-4).
+            if mesh.topology != solarxy_core::MeshTopology::Triangles {
+                continue;
+            }
             let world: Vec<[f32; 3]> = mesh
                 .positions
                 .iter()

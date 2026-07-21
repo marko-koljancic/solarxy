@@ -49,6 +49,7 @@ struct MeshCaps {
     index_bytes: u64,
     edge_pos_bytes: u64,
     edge_idx_bytes: u64,
+    color_bytes: u64,
 }
 
 /// One renderable object: an owned [`Model`] (the same struct the
@@ -308,11 +309,16 @@ impl SceneObjects {
                 .iter()
                 .zip(&obj.model.meshes)
                 .all(|(b, m)| b.padded_uvs.is_empty() != m.uv_edge_data.is_some())
+            && built
+                .iter()
+                .zip(&obj.model.meshes)
+                .all(|(b, m)| b.wants_color_buffer() == m.color_buffer.is_some())
             && built.iter().zip(&obj.caps).all(|(b, caps)| {
                 b.vertex_bytes() <= caps.vertex_bytes
                     && b.index_bytes() <= caps.index_bytes
                     && b.edge_pos_bytes() <= caps.edge_pos_bytes
                     && b.edge_idx_bytes() <= caps.edge_idx_bytes
+                    && b.color_bytes() <= caps.color_bytes
             })
         {
             let materials_unchanged = obj.geometry.materials.len() == cooked.materials.len()
@@ -335,7 +341,14 @@ impl SceneObjects {
                 queue.write_buffer(&mesh.vertex_buffer, 0, bytemuck::cast_slice(&b.vertices));
                 queue.write_buffer(&mesh.index_buffer, 0, bytemuck::cast_slice(&b.indices));
                 mesh.num_elements = b.indices.len() as u32;
+                mesh.num_vertices = b.vertices.len() as u32;
+                mesh.topology = b.topology;
                 mesh.material = b.material_index;
+                if let (Some(buffer), Some(colors)) = (&mesh.color_buffer, &b.colors)
+                    && b.wants_color_buffer()
+                {
+                    queue.write_buffer(buffer, 0, bytemuck::cast_slice(colors));
+                }
                 if let Some(edge) = &mesh.edge_data {
                     queue.write_buffer(
                         &edge.positions_buffer,
@@ -365,13 +378,7 @@ impl SceneObjects {
                     edge.num_edges = (b.edge_indices.len() / 2) as u32;
                 }
             }
-            obj.model.cpu_meshes = built
-                .iter()
-                .map(|b| CpuMesh {
-                    positions: b.cpu_positions.clone(),
-                    indices: b.indices.clone(),
-                })
-                .collect();
+            obj.model.cpu_meshes = built.iter().map(BuiltMesh::cpu_mesh).collect();
             obj.model.mesh_bounds = built.iter().map(|b| b.bounds).collect();
             obj.model.bounds = cooked.bounds;
             obj.model.has_uvs = built.iter().any(|b| b.has_uvs);
@@ -431,6 +438,22 @@ impl SceneObjects {
             let index_cap = with_headroom(b.index_bytes());
             let edge_pos_cap = with_headroom(b.edge_pos_bytes());
             let edge_idx_cap = with_headroom(b.edge_idx_bytes());
+            let color_cap = with_headroom(b.color_bytes());
+
+            let color_buffer = if b.wants_color_buffer() {
+                b.colors.as_ref().map(|colors| {
+                    create_with_capacity(
+                        device,
+                        queue,
+                        "SceneObject Color Buffer",
+                        color_cap,
+                        bytemuck::cast_slice(colors),
+                        wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    )
+                })
+            } else {
+                None
+            };
 
             let vertex_buffer = create_with_capacity(
                 device,
@@ -517,7 +540,10 @@ impl SceneObjects {
                 vertex_buffer,
                 index_buffer,
                 num_elements: b.indices.len() as u32,
+                num_vertices: b.vertices.len() as u32,
                 material: b.material_index,
+                topology: b.topology,
+                color_buffer,
                 visible: true,
                 edge_data: Some(EdgeData {
                     positions_buffer: edge_positions,
@@ -534,6 +560,7 @@ impl SceneObjects {
                 index_bytes: index_cap,
                 edge_pos_bytes: edge_pos_cap,
                 edge_idx_bytes: edge_idx_cap,
+                color_bytes: color_cap,
             });
         }
 
@@ -542,13 +569,7 @@ impl SceneObjects {
             materials,
             bounds: cooked.bounds,
             mesh_bounds: built.iter().map(|b| b.bounds).collect(),
-            cpu_meshes: built
-                .iter()
-                .map(|b| CpuMesh {
-                    positions: b.cpu_positions.clone(),
-                    indices: b.indices.clone(),
-                })
-                .collect(),
+            cpu_meshes: built.iter().map(BuiltMesh::cpu_mesh).collect(),
             material_thumbnails,
             has_uvs: built.iter().any(|b| b.has_uvs),
         };
@@ -699,7 +720,9 @@ fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
                 && Arc::ptr_eq(&x.indices, &y.indices)
                 && same_opt(x.normals.as_ref(), y.normals.as_ref())
                 && same_opt(x.tex_coords.as_ref(), y.tex_coords.as_ref())
+                && same_opt(x.colors.as_ref(), y.colors.as_ref())
                 && x.material_index == y.material_index
+                && x.topology == y.topology
         })
         && a.materials
             .iter()
@@ -746,6 +769,11 @@ struct BuiltMesh {
     /// (`uv_edge_data`); empty when the mesh has no real UVs. Same length
     /// as `padded_positions`, so the edge-positions capacity covers it.
     padded_uvs: Vec<[f32; 4]>,
+    topology: MeshTopology,
+    /// The cooked color lane, shared by refcount. Triangle and line meshes
+    /// upload it as the location-12 vertex buffer; point meshes instead
+    /// pack it sRGB8 into `padded_positions[i][3]` at build time.
+    colors: Option<Arc<Vec<[f32; 4]>>>,
 }
 
 impl BuiltMesh {
@@ -761,7 +789,57 @@ impl BuiltMesh {
     fn edge_idx_bytes(&self) -> u64 {
         (self.edge_indices.len() * 4) as u64
     }
+    /// Whether this mesh gets a location-12 color vertex buffer (points
+    /// carry their color inside the padded positions instead).
+    fn wants_color_buffer(&self) -> bool {
+        self.colors.is_some() && self.topology != MeshTopology::Points
+    }
+    /// The CPU mirror for picking and review hashing. Both consume the
+    /// index list as triangles, and points/lines are unpickable (M-4), so
+    /// non-triangle meshes keep positions but expose no indices.
+    fn cpu_mesh(&self) -> CpuMesh {
+        CpuMesh {
+            positions: self.cpu_positions.clone(),
+            indices: if self.topology == MeshTopology::Triangles {
+                self.indices.clone()
+            } else {
+                Vec::new()
+            },
+        }
+    }
+    fn color_bytes(&self) -> u64 {
+        if self.wants_color_buffer() {
+            (self.vertices.len() * 16) as u64
+        } else {
+            0
+        }
+    }
 }
+
+/// Encode one linear color channel to its sRGB byte (the GPU-standard
+/// transfer curve; the point shader decodes it back to linear).
+fn linear_to_srgb_u8(linear: f32) -> u8 {
+    let c = linear.clamp(0.0, 1.0);
+    let srgb = if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb * 255.0 + 0.5) as u8
+}
+
+/// Pack a linear RGBA color into the u32 the point shader unpacks
+/// (`unpack4x8unorm` then sRGB decode); bit-preserved through the f32 slot.
+fn pack_point_color(color: [f32; 4]) -> f32 {
+    let bits = u32::from(linear_to_srgb_u8(color[0]))
+        | u32::from(linear_to_srgb_u8(color[1])) << 8
+        | u32::from(linear_to_srgb_u8(color[2])) << 16
+        | 0xFF00_0000;
+    f32::from_bits(bits)
+}
+
+/// The packed white default for uncolored point clouds.
+const POINT_WHITE: u32 = 0xFFFF_FFFF;
 
 /// Interleave cooked meshes into `ModelVertex` data — the same normals /
 /// UV-default / tangent pipeline as `geometry::process_raw_model`, reading
@@ -772,7 +850,11 @@ fn build_meshes(cooked: &CookedGeometry) -> (Vec<BuiltMesh>, Vec<Option<usize>>)
     let mut out = Vec::with_capacity(cooked.meshes.len());
     let mut raw_to_gpu = Vec::with_capacity(cooked.meshes.len());
     for mesh in &cooked.meshes {
-        if mesh.positions.is_empty() || mesh.indices.is_empty() {
+        // Per-topology drawability: a point cloud needs positions only;
+        // indexed topologies also need indices.
+        let drawable = !mesh.positions.is_empty()
+            && (mesh.topology == MeshTopology::Points || !mesh.indices.is_empty());
+        if !drawable {
             raw_to_gpu.push(None);
             continue;
         }
@@ -785,12 +867,18 @@ fn build_meshes(cooked: &CookedGeometry) -> (Vec<BuiltMesh>, Vec<Option<usize>>)
 fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
     let positions: &[[f32; 3]] = &mesh.positions;
     let indices: &[u32] = &mesh.indices;
+    let is_triangles = mesh.topology == MeshTopology::Triangles;
 
     let computed_normals;
     let normals: &[[f32; 3]] = if let Some(n) = &mesh.normals {
         n
-    } else {
+    } else if is_triangles {
         computed_normals = compute_normals(positions, indices);
+        &computed_normals
+    } else {
+        // Face-normal accumulation reads index triples; a pair or empty
+        // list has no faces. Lines and points shade unlit anyway.
+        computed_normals = vec![[0.0, 0.0, 1.0]; positions.len()];
         &computed_normals
     };
 
@@ -821,8 +909,21 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
         })
         .collect();
 
-    let padded_positions: Vec<[f32; 4]> =
-        positions.iter().map(|p| [p[0], p[1], p[2], 0.0]).collect();
+    // The padded position's fourth slot is unused by the wire/validation
+    // shaders (they read xyz); for a point cloud it carries the packed
+    // sRGB8 color the point-quad shader unpacks.
+    let padded_positions: Vec<[f32; 4]> = match (mesh.topology, &mesh.colors) {
+        (MeshTopology::Points, Some(colors)) => positions
+            .iter()
+            .zip(colors.iter())
+            .map(|(p, c)| [p[0], p[1], p[2], pack_point_color(*c)])
+            .collect(),
+        (MeshTopology::Points, None) => positions
+            .iter()
+            .map(|p| [p[0], p[1], p[2], f32::from_bits(POINT_WHITE)])
+            .collect(),
+        _ => positions.iter().map(|p| [p[0], p[1], p[2], 0.0]).collect(),
+    };
     // The UV-space wire positions (V flipped, like the desktop loader).
     let padded_uvs: Vec<[f32; 4]> = if has_uvs {
         tex_coords
@@ -832,7 +933,15 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
     } else {
         Vec::new()
     };
-    let edge_indices = extract_edges(indices);
+    // Wireframe edges: unique triangle edges for meshes, the segments
+    // themselves for a polyline (its wireframe IS the polyline), nothing
+    // for points. `extract_edges` walks index triples, so feeding it a
+    // pair list would fabricate edges.
+    let edge_indices = match mesh.topology {
+        MeshTopology::Triangles => extract_edges(indices),
+        MeshTopology::Lines => indices.to_vec(),
+        MeshTopology::Points => Vec::new(),
+    };
     let bounds = compute_bounds(positions);
 
     BuiltMesh {
@@ -846,6 +955,8 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
         material_index: mesh.material_index.unwrap_or(0),
         has_uvs,
         padded_uvs,
+        topology: mesh.topology,
+        colors: mesh.colors.clone(),
     }
 }
 
@@ -956,5 +1067,141 @@ mod tests {
             bounds: a.bounds,
         };
         assert!(!same_geometry(&a, &grown));
+    }
+
+    /// The W2c dedupe channels: a changed colors Arc or a changed topology
+    /// tag must never be swallowed as "same geometry" (the color-drag and
+    /// topology-switch recook cases).
+    #[test]
+    fn same_geometry_sees_color_and_topology_changes() {
+        let base = tri();
+        let a = CookedGeometry {
+            meshes: vec![CookedMesh {
+                colors: Some(Arc::new(vec![[1.0, 0.0, 0.0, 1.0]; 3])),
+                ..base.clone()
+            }],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        // Same buffers, fresh colors Arc: a color recook, must re-upload.
+        let recolored = CookedGeometry {
+            meshes: vec![CookedMesh {
+                colors: Some(Arc::new(vec![[0.0, 1.0, 0.0, 1.0]; 3])),
+                ..a.meshes[0].clone()
+            }],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(!same_geometry(&a, &recolored));
+
+        // Identical Arcs: dedupe holds.
+        let same = CookedGeometry {
+            meshes: vec![a.meshes[0].clone()],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(same_geometry(&a, &same));
+
+        // Same buffers, different topology tag.
+        let retopo = CookedGeometry {
+            meshes: vec![CookedMesh {
+                topology: MeshTopology::Lines,
+                ..a.meshes[0].clone()
+            }],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(!same_geometry(&a, &retopo));
+    }
+
+    /// W2b: point clouds and polylines build GPU meshes with the right
+    /// counts, edge semantics, and packed point colors.
+    #[test]
+    fn build_meshes_admits_point_clouds_and_polylines() {
+        let cloud = CookedMesh {
+            name: "cloud".to_string(),
+            positions: Arc::new(vec![[0.0; 3], [1.0; 3]]),
+            normals: None,
+            tex_coords: None,
+            indices: Arc::new(vec![]),
+            material_index: None,
+            topology: MeshTopology::Points,
+            colors: Some(Arc::new(vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])),
+        };
+        let wire = CookedMesh {
+            name: "wire".to_string(),
+            positions: Arc::new(vec![[0.0; 3], [1.0; 3], [2.0; 3]]),
+            normals: None,
+            tex_coords: None,
+            indices: Arc::new(vec![0, 1, 1, 2]),
+            material_index: None,
+            topology: MeshTopology::Lines,
+            colors: None,
+        };
+        let cooked = CookedGeometry {
+            meshes: vec![cloud, wire],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        let (built, raw_to_gpu) = build_meshes(&cooked);
+        assert_eq!(raw_to_gpu, vec![Some(0), Some(1)]);
+
+        let cloud_b = &built[0];
+        assert_eq!(cloud_b.topology, MeshTopology::Points);
+        assert_eq!(cloud_b.vertices.len(), 2);
+        assert!(cloud_b.edge_indices.is_empty(), "points have no wire form");
+        assert!(!cloud_b.wants_color_buffer(), "point colors pack instead");
+        // Packed colors: full-red sRGB stays 255; linear black keeps alpha.
+        let red_bits = cloud_b.padded_positions[0][3].to_bits();
+        assert_eq!(red_bits & 0xFF, 0xFF, "red channel");
+        assert_eq!(red_bits >> 24, 0xFF, "alpha forced opaque");
+        let black_bits = cloud_b.padded_positions[1][3].to_bits();
+        assert_eq!(black_bits & 0x00FF_FFFF, 0, "black packs to zero rgb");
+        // The CPU mirror exposes no indices (unpickable per M-4).
+        assert!(cloud_b.cpu_mesh().indices.is_empty());
+
+        let wire_b = &built[1];
+        assert_eq!(wire_b.topology, MeshTopology::Lines);
+        assert_eq!(
+            wire_b.edge_indices,
+            vec![0, 1, 1, 2],
+            "a polyline's wireframe is itself"
+        );
+        assert!(wire_b.cpu_mesh().indices.is_empty());
+
+        // An indexless point cloud is drawable; an indexless line is not.
+        let cooked2 = CookedGeometry {
+            meshes: vec![CookedMesh {
+                name: "empty-wire".to_string(),
+                positions: Arc::new(vec![[0.0; 3]]),
+                normals: None,
+                tex_coords: None,
+                indices: Arc::new(vec![]),
+                material_index: None,
+                topology: MeshTopology::Lines,
+                colors: None,
+            }],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        let (built2, map2) = build_meshes(&cooked2);
+        assert!(built2.is_empty());
+        assert_eq!(map2, vec![None]);
+    }
+
+    #[test]
+    fn point_color_packing_is_srgb8_with_white_default() {
+        assert_eq!(
+            pack_point_color([1.0, 1.0, 1.0, 1.0]).to_bits(),
+            0xFFFF_FFFF
+        );
+        assert_eq!(
+            pack_point_color([0.0, 0.0, 0.0, 0.0]).to_bits(),
+            0xFF00_0000
+        );
+        // Mid-gray linear 0.5 encodes to sRGB ~188.
+        let bits = pack_point_color([0.5, 0.5, 0.5, 1.0]).to_bits();
+        let r = bits & 0xFF;
+        assert!((186..=190).contains(&r), "got {r}");
     }
 }
