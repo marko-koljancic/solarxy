@@ -281,6 +281,15 @@ impl GeometrySet {
         self.meshes.iter().map(|m| m.vertex_count() as u64).sum()
     }
 
+    /// Whether any mesh carries a line or point topology. Triangle-only
+    /// operators test this to warn once about pass-through meshes.
+    #[must_use]
+    pub fn has_non_triangle_meshes(&self) -> bool {
+        self.meshes
+            .iter()
+            .any(|m| m.topology != MeshTopology::Triangles)
+    }
+
     /// Total triangle count (the `prims` cook statistic). Deliberately
     /// triangles-only: line and point meshes contribute zero, so a pure
     /// point cloud truthfully reads "N pts, 0 prims".

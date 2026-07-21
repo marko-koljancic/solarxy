@@ -11,7 +11,8 @@
 //! single old-to-new index remap, following the lane-rebuild pattern
 //! `subdivide` established. Meshes that lose every triangle drop out of the
 //! set entirely, and an empty result is legal (the node warns; it is not a cook
-//! error).
+//! error). Line and point meshes have no triangles for the predicate to see
+//! and pass through untouched.
 
 use std::sync::Arc;
 
@@ -80,6 +81,14 @@ pub fn delete(set: &GeometrySet, mode: DeleteMode, invert: bool) -> DeleteResult
     let mut removed = 0usize;
     let mut meshes: Vec<KernelMesh> = Vec::with_capacity(set.meshes.len());
     for mesh in &set.meshes {
+        // The predicate is defined per triangle; a line or point mesh has
+        // none, and running it through the triangle filter would silently
+        // drop every point. Pass such meshes through untouched (the node
+        // warns); a point-domain predicate is recorded future work.
+        if mesh.topology != solarxy_core::geometry::MeshTopology::Triangles {
+            meshes.push(mesh.clone());
+            continue;
+        }
         let (kept, dropped) = filter_mesh(mesh, mode, invert);
         removed += dropped;
         if let Some(m) = kept {
@@ -282,6 +291,44 @@ mod tests {
 
     fn boxed() -> GeometrySet {
         GeometrySet::from_mesh(generate_box(2.0, 2.0, 2.0, 1, 1, 1))
+    }
+
+    /// The corruption regression this milestone's spec calls out by name:
+    /// the triangle predicate sees no triangles in a point cloud, and
+    /// without the topology gate the compaction would silently delete
+    /// every point. Same hazard for polylines.
+    #[test]
+    fn delete_passes_point_clouds_and_polylines_through_untouched() {
+        let set = GeometrySet::from_parts(
+            vec![
+                KernelMesh::points("p", vec![[0.0; 3]; 8]),
+                KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0, 1]),
+                generate_box(2.0, 2.0, 2.0, 1, 1, 1),
+            ],
+            vec![],
+        );
+        // A region covering everything: every triangle goes; every point
+        // and segment stays.
+        let out = delete(
+            &set,
+            DeleteMode::Bbox {
+                center: [0.0; 3],
+                size: [100.0; 3],
+            },
+            false,
+        );
+        assert_eq!(
+            out.set.mesh_count(),
+            2,
+            "box deleted, cloud and line survive"
+        );
+        assert_eq!(out.set.meshes[0].vertex_count(), 8);
+        assert_eq!(
+            out.set.meshes[0].topology,
+            solarxy_core::geometry::MeshTopology::Points
+        );
+        assert_eq!(out.set.meshes[1].primitive_count(), 1);
+        assert_eq!(out.removed, 12, "only triangles are counted as removed");
     }
 
     #[test]

@@ -3508,7 +3508,6 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         (del, "angle", ParamValue::Float(30.0)),
         (del, "invert", ParamValue::Bool(true)),
         (bnd, "mode", ParamValue::Enum("center".into())),
-        (bnd, "marker_size", ParamValue::Float(0.4)),
         (sw, "index", ParamValue::Int(1)),
     ] {
         e.apply(Command::SetParam {
@@ -3549,8 +3548,9 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         );
     }
 
-    // The switch is on index 1: the SECOND wire, which is bounds (a 0.4 marker
-    // cube), not delete. Its bounds prove which branch came through.
+    // The switch is on index 1: the SECOND wire, which is bounds in center
+    // mode (a single point primitive since v2), not delete. The point-only
+    // shape proves which branch came through.
     let picked = e
         .cook
         .outputs(sw)
@@ -3559,11 +3559,10 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         .and_then(crate::registry::coerce::Value::as_geometry)
         .unwrap()
         .clone();
-    let size = picked.bounds.size();
-    assert!(
-        (size.x - 0.4).abs() < 1e-4,
-        "switch index 1 selected the bounds marker, not delete: {:?}",
-        picked.bounds
+    assert_eq!(
+        (picked.point_count(), picked.triangle_count()),
+        (1, 0),
+        "switch index 1 selected the bounds center point, not delete"
     );
 
     // Round trip through .slxy: params, wire order, and the display flag.
@@ -3587,8 +3586,11 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         .and_then(crate::registry::coerce::Value::as_geometry)
         .unwrap()
         .clone();
-    let size2 = reloaded.bounds.size();
-    assert!((size2.x - 0.4).abs() < 1e-4, "same branch after reload");
+    assert_eq!(
+        (reloaded.point_count(), reloaded.triangle_count()),
+        (1, 0),
+        "same branch after reload"
+    );
 
     // Undo the last param edit and land back on the previous document exactly.
     let before_edit = fingerprint(&e, ctx);

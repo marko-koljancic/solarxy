@@ -16,10 +16,11 @@ use crate::merge::merge;
 use crate::set::{GeometrySet, KernelMesh};
 use crate::transform::{RotateOrder, compose_trs};
 
-/// The output-triangle ceiling, mirroring [`crate::subdivide::MAX_OUTPUT_TRIANGLES`]:
+/// The output-primitive ceiling (triangles, segments, or points per each
+/// mesh's topology), mirroring [`crate::subdivide::MAX_OUTPUT_TRIANGLES`]:
 /// a runaway `count` errors before a single copy is allocated rather than
 /// stalling the cook or exhausting memory.
-pub const MAX_OUTPUT_TRIANGLES: usize = 8_000_000;
+pub const MAX_OUTPUT_PRIMITIVES: usize = 8_000_000;
 
 /// The axis a radial array revolves about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -84,8 +85,8 @@ pub enum ArrayMode {
 }
 
 /// Duplicates `set` `count` times (the original included) and concatenates the
-/// copies. Errors when the projected triangle count would exceed
-/// [`MAX_OUTPUT_TRIANGLES`], before any copy is allocated.
+/// copies. Errors when the projected primitive count would exceed
+/// [`MAX_OUTPUT_PRIMITIVES`], before any copy is allocated.
 ///
 /// # Errors
 /// Returns a user-facing message when the output would exceed the ceiling, and
@@ -96,11 +97,11 @@ pub fn array(set: &GeometrySet, count: u32, mode: ArrayMode) -> Result<GeometryS
         return Ok(set.clone());
     }
 
-    let input_tris: usize = set.meshes.iter().map(KernelMesh::triangle_count).sum();
-    let projected = input_tris.saturating_mul(count as usize);
-    if projected > MAX_OUTPUT_TRIANGLES {
+    let input_prims: usize = set.meshes.iter().map(KernelMesh::primitive_count).sum();
+    let projected = input_prims.saturating_mul(count as usize);
+    if projected > MAX_OUTPUT_PRIMITIVES {
         return Err(format!(
-            "array would produce {projected} triangles (over the {MAX_OUTPUT_TRIANGLES} \
+            "array would produce {projected} primitives (over the {MAX_OUTPUT_PRIMITIVES} \
              ceiling); lower the count"
         ));
     }
@@ -243,9 +244,37 @@ mod tests {
     }
 
     #[test]
-    fn the_triangle_ceiling_errors_before_allocating() {
+    fn the_primitive_ceiling_errors_before_allocating() {
         let set = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 200, 200, 200));
         let err = array(&set, 100_000, ArrayMode::Linear { offset: [1.0; 3] }).unwrap_err();
+        assert!(err.contains("ceiling"), "got: {err}");
+    }
+
+    #[test]
+    fn a_point_cloud_arrays_and_counts_against_the_ceiling() {
+        let set = GeometrySet::from_mesh(KernelMesh::points("p", vec![[0.0; 3], [0.0, 1.0, 0.0]]));
+        let out = array(
+            &set,
+            3,
+            ArrayMode::Linear {
+                offset: [2.0, 0.0, 0.0],
+            },
+        )
+        .unwrap();
+        assert_eq!(out.mesh_count(), 3);
+        for mesh in &out.meshes {
+            assert_eq!(
+                mesh.topology,
+                solarxy_core::geometry::MeshTopology::Points,
+                "topology survives duplication"
+            );
+        }
+        assert!((out.bounds.max.x - 4.0).abs() < 1e-5, "{:?}", out.bounds);
+
+        // The ceiling counts point primitives: a cloud big enough to
+        // project past 8M errors before allocating.
+        let big = GeometrySet::from_mesh(KernelMesh::points("big", vec![[0.0; 3]; 100_000]));
+        let err = array(&big, 100, ArrayMode::Linear { offset: [1.0; 3] }).unwrap_err();
         assert!(err.contains("ceiling"), "got: {err}");
     }
 

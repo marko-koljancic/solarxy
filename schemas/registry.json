@@ -459,7 +459,7 @@
     },
     {
       "typeId": "bounds",
-      "version": 1,
+      "version": 2,
       "displayName": "Bounds",
       "category": "utility",
       "categoryLabel": "Utility",
@@ -544,35 +544,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Box emits the bounding box itself, matching the input's extents on every axis. Center discards the size and emits a fixed-size marker cube at the box's centre, for when the pivot is what you are chasing rather than the volume."
-        },
-        {
-          "key": "marker_size",
-          "label": "Marker Size",
-          "group": "bounds",
-          "paramType": "float",
-          "enumVariants": [],
-          "accept": [],
-          "default": 0.1,
-          "hard": [
-            0.001,
-            100.0
-          ],
-          "soft": [
-            0.01,
-            1.0
-          ],
-          "step": null,
-          "unit": "meters",
-          "drivenByPort": null,
-          "doc": "Edge length of the centre marker cube, in metres. It is absolute, not relative to the input, so a marker sized for a doorknob vanishes inside a building. Only read in Center mode."
+          "doc": "Box emits the bounding box itself, matching the input's extents on every axis. Center discards the volume and emits a single point primitive at the box's centre, for when the pivot is what you are chasing rather than the extents."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Emits the input's axis-aligned bounding box as geometry: a solid box spanning the input's extents, or a small marker cube sitting at its centre. It measures the input and replaces it; the box is the output, not an overlay on the original.\n\nThis is the measuring tape. Tap it off a chain to see how big something actually is, where its centre really sits, or whether two parts occupy the space you think they do -- `merge` the bounds with the model it measured and you can eyeball the fit directly. Bypassing it passes the input through, which makes it cheap to leave wired in as an inspection tap.\n\nThe box is axis-aligned in object space, so a diagonally oriented model gets a box much larger than the model itself; that is the AABB being honest, not a bug. Both modes emit solid triangulated boxes, including Center: there are no line or point primitives to draw a truer marker with, so a small cube stands in. An empty input warns and emits nothing rather than boxing the fallback bounds into a confident unit cube around nothing.",
+      "doc": "Emits the input's axis-aligned bounding box as geometry: a solid box spanning the input's extents, or a single point primitive sitting at its centre. It measures the input and replaces it; the box is the output, not an overlay on the original.\n\nThis is the measuring tape. Tap it off a chain to see how big something actually is, where its centre really sits, or whether two parts occupy the space you think they do -- `merge` the bounds with the model it measured and you can eyeball the fit directly. Bypassing it passes the input through, which makes it cheap to leave wired in as an inspection tap.\n\nThe box is axis-aligned in object space, so a diagonally oriented model gets a box much larger than the model itself; that is the AABB being honest, not a bug. Center mode's point draws at the renderer's uniform on-screen point size and is not pickable in the viewport (select it on the node canvas). An empty input warns and emits nothing rather than boxing the fallback bounds into a confident unit cube around nothing.",
       "searchAliases": [
         "bbox",
         "aabb",
@@ -1690,7 +1669,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Rebuilds every mesh's vertex normals from its triangles. Each triangle's geometric normal is accumulated onto the three points it touches and the sum is normalized, so a point shared by several triangles ends up carrying their area-weighted average.\n\nReach for it when an import arrives with no normals, or with normals that disagree with the surface, or after something upstream left them stale. The `validate` node's Normals check reports exactly what this clears, so the two pair naturally: validate to see the problem, compute_normals to fix it.\n\nIt can only smooth where points are actually shared. Primitives split their corners so that each face carries its own copy -- a box has 24 points for 8 corners -- and recomputing normals on one leaves it just as flat-shaded as before. Smooth shading out of split geometry needs the points welded first, which this node does not do.",
+      "doc": "Rebuilds every mesh's vertex normals from its triangles. Each triangle's geometric normal is accumulated onto the three points it touches and the sum is normalized, so a point shared by several triangles ends up carrying their area-weighted average.\n\nReach for it when an import arrives with no normals, or with normals that disagree with the surface, or after something upstream left them stale. The `validate` node's Normals check reports exactly what this clears, so the two pair naturally: validate to see the problem, compute_normals to fix it.\n\nIt can only smooth where points are actually shared. Primitives split their corners so that each face carries its own copy -- a box has 24 points for 8 corners -- and recomputing normals on one leaves it just as flat-shaded as before. Smooth shading out of split geometry needs the points welded first, which this node does not do. Winding and face normals are triangle concepts: point clouds and polylines pass through untouched with a warning.",
       "searchAliases": [
         "normals",
         "recompute",
@@ -2322,7 +2301,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Removes the triangles the selection picks: in Bounding Box mode the ones whose centroid falls inside the region box, in Normal Direction mode the ones whose face normal points within Angle of Direction. Invert deletes everything the selection did not pick instead.\n\nThe debugging knife. Cut a wall away to see inside a model, strip the ground plane off a scan, drop the half of an import you do not need before it reaches a `merge` or an output. It goes anywhere in a modifier chain and it is usually quicker than going back to fix the source file.\n\nThose two predicates are the whole selection model. There are no groups, no primitive ids, and no per-face attributes to select on, so whatever you want gone has to be describable as a region or as a facing. Points left orphaned by the removal are compacted away, a mesh that loses every triangle drops out of the set, and deleting everything is legal: you get empty geometry and a warning, not an error.",
+      "doc": "Removes the triangles the selection picks: in Bounding Box mode the ones whose centroid falls inside the region box, in Normal Direction mode the ones whose face normal points within Angle of Direction. Invert deletes everything the selection did not pick instead.\n\nThe debugging knife. Cut a wall away to see inside a model, strip the ground plane off a scan, drop the half of an import you do not need before it reaches a `merge` or an output. It goes anywhere in a modifier chain and it is usually quicker than going back to fix the source file.\n\nThose two predicates are the whole selection model. There are no groups, no primitive ids, and no per-face attributes to select on, so whatever you want gone has to be describable as a region or as a facing. Points left orphaned by the removal are compacted away, a mesh that loses every triangle drops out of the set, and deleting everything is legal: you get empty geometry and a warning, not an error. The predicate sees triangles only: point clouds and polylines pass through untouched with a warning rather than being silently emptied.",
       "searchAliases": [
         "remove",
         "cull",
@@ -7879,7 +7858,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Splits every triangle into four at its edge midpoints, one pass per iteration, interpolating normals, UVs, and any named attributes onto the new points. Neighbouring triangles look their shared edge's midpoint up in an edge map instead of each making its own, so both sides land on the same point and the surface stays crack-free.\n\nReach for it to buy resolution for something downstream that needs points to work with: a displacement, a noise, a deform. It sits between the source geometry and that node, and it is the answer when the source is an import rather than a primitive whose segment counts you could have raised instead.\n\nThe subdivision is linear: it adds points onto the existing surface without moving any of them, so a subdivided box is still a box with the same silhouette and four times the triangles. Nothing here smooths. And the growth compounds hard -- at 5 iterations a 10,000-triangle mesh projects to over 10 million, past the kernel's 8 million ceiling, which is a cook error rather than a stall.",
+      "doc": "Splits every triangle into four at its edge midpoints, one pass per iteration, interpolating normals, UVs, and any named attributes onto the new points. Neighbouring triangles look their shared edge's midpoint up in an edge map instead of each making its own, so both sides land on the same point and the surface stays crack-free.\n\nReach for it to buy resolution for something downstream that needs points to work with: a displacement, a noise, a deform. It sits between the source geometry and that node, and it is the answer when the source is an import rather than a primitive whose segment counts you could have raised instead.\n\nThe subdivision is linear: it adds points onto the existing surface without moving any of them, so a subdivided box is still a box with the same silhouette and four times the triangles. Nothing here smooths. And the growth compounds hard -- at 5 iterations a 10,000-triangle mesh projects to over 10 million, past the kernel's 8 million ceiling, which is a cook error rather than a stall. Point clouds and polylines have no triangles to split and pass through untouched with a warning.",
       "searchAliases": [
         "subdivide",
         "smooth",
@@ -9095,7 +9074,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Writes a fresh UV set onto every mesh in the input using one of four projections, normalized over the whole set's bounding box so that a scale of 1 lands the geometry inside 0..1.\n\nImports very often arrive with no UVs at all, and texel density, the checker pattern, and any textured material all need them. This is the node that gives them something to read: it goes after the import or the primitive and before the material. It is a projection rather than an unwrap, so treat it as the fast way to usable UVs, not as a substitute for a real layout.\n\nThree things to expect. Existing UVs are replaced, not merged. The normalization is against the bounds of the whole input set, so several meshes share one consistent mapping and a `transform` upstream drags the UVs along with the bounds. And Box mode rebuilds each mesh non-indexed, three points per triangle, so the point count jumps and validate's topology counts will reflect it.",
+      "doc": "Writes a fresh UV set onto every mesh in the input using one of four projections, normalized over the whole set's bounding box so that a scale of 1 lands the geometry inside 0..1.\n\nImports very often arrive with no UVs at all, and texel density, the checker pattern, and any textured material all need them. This is the node that gives them something to read: it goes after the import or the primitive and before the material. It is a projection rather than an unwrap, so treat it as the fast way to usable UVs, not as a substitute for a real layout.\n\nThree things to expect. Existing UVs are replaced, not merged. The normalization is against the bounds of the whole input set, so several meshes share one consistent mapping and a `transform` upstream drags the UVs along with the bounds. And Box mode rebuilds each mesh non-indexed, three points per triangle, so the point count jumps and validate's topology counts will reflect it. Projection is a surface operation: point clouds and polylines pass through untouched with a warning.",
       "searchAliases": [
         "uv",
         "unwrap",

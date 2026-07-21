@@ -195,6 +195,29 @@ mod tests {
     }
 
     #[test]
+    fn mixed_topologies_concatenate_and_keep_their_tags() {
+        use solarxy_core::geometry::MeshTopology;
+        let sets = [
+            Arc::new(GeometrySet::from_mesh(generate_plane(1.0, 1.0, 1, 1))),
+            Arc::new(GeometrySet::from_mesh(KernelMesh::points(
+                "p",
+                vec![[0.0; 3]],
+            ))),
+            Arc::new(GeometrySet::from_mesh(KernelMesh::polyline(
+                "l",
+                vec![[0.0; 3], [1.0; 3]],
+                vec![0, 1],
+            ))),
+        ];
+        let out = merge(&sets);
+        assert_eq!(out.mesh_count(), 3);
+        assert_eq!(out.meshes[0].topology, MeshTopology::Triangles);
+        assert_eq!(out.meshes[1].topology, MeshTopology::Points);
+        assert_eq!(out.meshes[2].topology, MeshTopology::Lines);
+        assert!(!out.is_renderable_empty());
+    }
+
+    #[test]
     fn empty_input_yields_empty_set() {
         let out = merge(&[]);
         assert!(out.is_renderable_empty());

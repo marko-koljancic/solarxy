@@ -115,7 +115,9 @@ pub fn descriptor() -> NodeTypeDescriptor {
               or as a facing. Points left orphaned by the removal are \
               compacted away, a mesh that loses every triangle drops out of \
               the set, and deleting everything is legal: you get empty \
-              geometry and a warning, not an error.",
+              geometry and a warning, not an error. The predicate sees \
+              triangles only: point clouds and polylines pass through \
+              untouched with a warning rather than being silently emptied.",
         search_aliases: &["remove", "cull", "erase", "filter"],
         glyph: "delete",
         role: NodeRole::Standard,
@@ -142,6 +144,13 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             size: p.vec3_f32("size"),
         },
     };
+
+    if input.has_non_triangle_meshes() {
+        cx.warn(
+            "delete applies to triangle meshes; line and point meshes pass \
+             through unchanged",
+        );
+    }
 
     let result = delete(input, mode, p.bool("invert"));
     if result.degenerate_direction {
@@ -249,5 +258,44 @@ mod tests {
             warns.iter().any(|w| w.contains("zero-length")),
             "got: {warns:?}"
         );
+    }
+
+    /// The node-level half of the point-safety rule: a point cloud riding
+    /// through delete warns and survives even when the region covers
+    /// everything.
+    #[test]
+    fn a_point_cloud_warns_and_survives_a_delete_everything_region() {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "size".to_string(),
+            ParamSource::Literal(ParamValue::Vec3([100.0; 3])),
+        );
+        let resolved =
+            crate::registry::resolve::resolve_params(&stored, &descriptor().params).unwrap();
+        let set = solarxy_kernel::GeometrySet::from_parts(
+            vec![
+                solarxy_kernel::KernelMesh::points("p", vec![[0.0; 3]; 8]),
+                generate_box(2.0, 2.0, 2.0, 1, 1, 1),
+            ],
+            vec![],
+        );
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(set))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("delete cooks synchronously");
+        };
+        let Some(Value::Geometry(out_set)) = out.get("geometry") else {
+            panic!("outputs geometry");
+        };
+        assert_eq!(out_set.mesh_count(), 1, "box gone, cloud survives");
+        assert_eq!(out_set.meshes[0].vertex_count(), 8);
+        let warns = cx.take_warnings();
+        assert!(warns.iter().any(|w| w.contains("pass")), "got: {warns:?}");
     }
 }

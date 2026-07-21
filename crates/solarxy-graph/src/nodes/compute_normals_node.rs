@@ -61,7 +61,9 @@ pub fn descriptor() -> NodeTypeDescriptor {
               box has 24 points for 8 corners -- and recomputing normals on \
               one leaves it just as flat-shaded as before. Smooth shading out \
               of split geometry needs the points welded first, which this node \
-              does not do.",
+              does not do. Winding and face normals are triangle concepts: \
+              point clouds and polylines pass through untouched with a \
+              warning.",
         search_aliases: &["normals", "recompute", "smooth"],
         glyph: "compute_normals",
         role: NodeRole::Standard,
@@ -71,7 +73,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
 }
 
 #[allow(clippy::unnecessary_wraps)] // signature matches CookFn
-fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
             solarxy_kernel::GeometrySet::empty(),
@@ -79,10 +81,22 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
     };
     let flip = p.bool("flip_orientation");
 
+    if input.has_non_triangle_meshes() {
+        cx.warn(
+            "compute_normals applies to triangle meshes; line and point meshes pass \
+             through unchanged",
+        );
+    }
+
     // Clone the set shell; rewrite only the buffers we touch (indices on a
-    // flip, normals always), sharing positions/UVs by refcount.
+    // flip, normals always), sharing positions/UVs by refcount. Winding and
+    // face normals are triangle concepts, so line and point meshes are left
+    // alone (the flip's triple-swap would corrupt a pair list).
     let mut set = (**input).clone();
     for mesh in &mut set.meshes {
+        if mesh.topology != solarxy_core::MeshTopology::Triangles {
+            continue;
+        }
         if flip {
             let mut indices = (*mesh.indices).clone();
             for tri in indices.chunks_exact_mut(3) {
@@ -149,5 +163,39 @@ mod tests {
     fn flip_reverses_the_normal() {
         let n = run(true);
         assert!(n[2] < -0.99, "flipped triangle faces -Z, got {n:?}");
+    }
+
+    /// A polyline through a flipping compute_normals must come out intact:
+    /// the triple-swap over a pair list would scramble segment order, and
+    /// no normals should be invented for it.
+    #[test]
+    fn a_polyline_warns_and_survives_a_flip_untouched() {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "flip_orientation".to_string(),
+            ParamSource::Literal(ParamValue::Bool(true)),
+        );
+        let resolved =
+            crate::registry::resolve::resolve_params(&stored, &descriptor().params).unwrap();
+        let line = KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3], [2.0; 3]], vec![0, 1, 1, 2]);
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(GeometrySet::from_mesh(line)))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("cooks synchronously");
+        };
+        let Some(Value::Geometry(set)) = out.get("geometry") else {
+            panic!("outputs geometry");
+        };
+        assert_eq!(*set.meshes[0].indices, vec![0, 1, 1, 2], "pairs intact");
+        assert!(set.meshes[0].normals.is_none(), "no normals invented");
+        let warns = cx.take_warnings();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("pass"), "got: {}", warns[0]);
     }
 }

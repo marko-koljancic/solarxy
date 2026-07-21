@@ -214,6 +214,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_point_cloud_bakes_positions_like_any_mesh() {
+        let set =
+            GeometrySet::from_mesh(crate::set::KernelMesh::points("p", vec![[1.0, 0.0, 0.0]]));
+        let m = compose_trs(
+            [0.0, 2.0, 0.0],
+            [0.0; 3],
+            RotateOrder::default(),
+            [1.0; 3],
+            [0.0; 3],
+        );
+        let out = bake_transform(&set, &m).unwrap();
+        assert_vec_eq(out.meshes[0].positions[0], [1.0, 2.0, 0.0], 1e-5);
+        assert_eq!(
+            out.meshes[0].topology,
+            solarxy_core::geometry::MeshTopology::Points,
+            "the bake is topology-agnostic and keeps the tag"
+        );
+    }
+
     /// Freezes the order-name -> multiplication mapping: each variant must
     /// equal the explicit product its name spells.
     #[test]

@@ -125,7 +125,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
               upstream drags the UVs along with the bounds. And Box mode \
               rebuilds each mesh non-indexed, three points per triangle, so \
               the point count jumps and validate's topology counts will \
-              reflect it.",
+              reflect it. Projection is a surface operation: point clouds \
+              and polylines pass through untouched with a warning.",
         search_aliases: &["uv", "unwrap", "project", "texture", "mapping"],
         glyph: "uv_project",
         role: NodeRole::Standard,
@@ -138,13 +139,20 @@ pub fn descriptor() -> NodeTypeDescriptor {
 fn cook_uv_project(
     p: &ResolvedParams,
     inputs: &Inputs,
-    _cx: &mut CookCtx,
+    cx: &mut CookCtx,
 ) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+
+    if input.has_non_triangle_meshes() {
+        cx.warn(
+            "uv_project applies to triangle meshes; line and point meshes pass \
+             through unchanged",
+        );
+    }
 
     let mode = match p.enum_key("mode") {
         "box" => UvProjection::Box,
@@ -201,5 +209,36 @@ mod tests {
         };
         let out = outputs.get("geometry").unwrap().as_geometry().unwrap();
         assert!(out.meshes[0].tex_coords.is_some(), "UVs written");
+    }
+
+    #[test]
+    fn a_point_cloud_warns_and_passes_through_without_uvs() {
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        let set = GeometrySet::from_mesh(solarxy_kernel::KernelMesh::points(
+            "p",
+            vec![[0.0; 3], [1.0; 3]],
+        ));
+        let inputs = Inputs::new(
+            [(
+                "geometry".to_string(),
+                InputSlot::Single(Value::Geometry(Arc::new(set))),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let assets = crate::assets::AssetTable::default();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(outputs) = cook_uv_project(&resolved, &inputs, &mut cx).unwrap()
+        else {
+            panic!("synchronous cook");
+        };
+        let out = outputs.get("geometry").unwrap().as_geometry().unwrap();
+        assert!(out.meshes[0].tex_coords.is_none(), "no UVs invented");
+        assert_eq!(out.meshes[0].vertex_count(), 2);
+        let warns = cx.take_warnings();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("pass"), "got: {}", warns[0]);
     }
 }
