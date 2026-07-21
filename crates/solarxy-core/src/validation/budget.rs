@@ -80,6 +80,7 @@ mod tests {
                 tex_coords: None,
                 material_index: None,
                 topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: Vec::new(),
             polygon_count: n,

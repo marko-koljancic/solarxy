@@ -18,6 +18,7 @@ pub(super) fn single_triangle_raw() -> RawModelData {
             tex_coords: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         }],
         materials: vec![],
         polygon_count: 1,

@@ -383,8 +383,10 @@ mod tests {
             "the live param survives"
         );
 
-        // import_ply drops `vertex_colors` (declared in v1, never carried
-        // into the parse path) along with its dead rendering group.
+        // import_ply v1 -> v3: the v1 hook drops the historical inert
+        // `vertex_colors` (its stored value carried no intent), then the
+        // v3 descriptor re-declares it for real and the registry default
+        // fill supplies `true`.
         let loaded = load_node(
             &reg,
             NodeId(4),
@@ -398,8 +400,12 @@ mod tests {
             false,
         );
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.node.type_version, 2);
-        assert!(!loaded.node.params.contains_key("vertex_colors"));
+        assert_eq!(loaded.node.type_version, 3);
+        assert!(
+            !loaded.node.params.contains_key("vertex_colors"),
+            "the dead v1 value is dropped; the restored toggle resolves to \
+             its descriptor default (true) at cook time"
+        );
         assert_eq!(
             loaded.node.params.get("scale"),
             Some(&ParamSource::Literal(ParamValue::Float(2.0)))

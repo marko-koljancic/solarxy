@@ -187,6 +187,7 @@ mod tests {
                     tex_coords: None,
                     material_index: None,
                     topology: MeshTopology::Points,
+                    colors: None,
                 },
                 RawMeshData {
                     name: "wire".to_string(),
@@ -196,6 +197,7 @@ mod tests {
                     tex_coords: None,
                     material_index: None,
                     topology: MeshTopology::Lines,
+                    colors: None,
                 },
             ],
             materials: vec![],
@@ -261,6 +263,7 @@ mod tests {
                     tex_coords: Some(vec![[0.0, 0.0]; 3]),
                     material_index: None,
                     topology: MeshTopology::Triangles,
+                    colors: None,
                 },
                 RawMeshData {
                     name: "broken".to_string(),
@@ -270,6 +273,7 @@ mod tests {
                     tex_coords: None,
                     material_index: None,
                     topology: MeshTopology::Triangles,
+                    colors: None,
                 },
             ],
             materials: vec![],

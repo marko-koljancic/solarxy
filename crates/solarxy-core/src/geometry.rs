@@ -31,8 +31,8 @@ pub enum MeshTopology {
 
 /// One mesh inside a [`RawModelData`].
 /// Indices interpreted per `topology` (triangle triples by default),
-/// optional per-vertex `normals` / `tex_coords`, and an optional
-/// `material_index` into the parent [`RawModelData::materials`].
+/// optional per-vertex `normals` / `tex_coords` / `colors`, and an
+/// optional `material_index` into the parent [`RawModelData::materials`].
 #[derive(Debug)]
 pub struct RawMeshData {
     pub name: String,
@@ -42,6 +42,22 @@ pub struct RawMeshData {
     pub tex_coords: Option<Vec<[f32; 2]>>,
     pub material_index: Option<usize>,
     pub topology: MeshTopology,
+    /// Per-vertex RGBA colors, linear (loaders decode sRGB sources at
+    /// import per decision M-7; glTF `COLOR_0` is already linear).
+    pub colors: Option<Vec<[f32; 4]>>,
+}
+
+/// Decode one sRGB-encoded channel (0..1) to linear, the standard
+/// piecewise transfer curve. Loaders apply it to sRGB color sources (PLY
+/// vertex colors); the renderer's linear pipeline consumes the result.
+#[must_use]
+pub fn srgb_to_linear(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.

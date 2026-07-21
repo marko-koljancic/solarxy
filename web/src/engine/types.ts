@@ -344,6 +344,7 @@ export interface ImportOptions {
   centerToOrigin: boolean;
   recomputeNormals: boolean | null;
   preserveMaterials: boolean | null;
+  vertexColors: boolean | null;
 }
 
 /** A staged asset reference: its content hash and original file name. */

@@ -345,22 +345,35 @@ impl GeometrySet {
 
     /// Ingests a loader result (the import-node path). Buffers move into
     /// `Arc`s without copying; `polygon_count` is dropped (the set derives
-    /// triangle counts from indices).
+    /// triangle counts from indices). Loader colors lift into the reserved
+    /// `color` lane when position-count length (a mismatch is
+    /// loader-invalid and dropped).
     #[must_use]
     pub fn from_raw(raw: RawModelData) -> Self {
         let meshes = raw
             .meshes
             .into_iter()
-            .map(|m| KernelMesh {
-                name: m.name,
-                positions: Arc::new(m.positions),
-                normals: m.normals.map(Arc::new),
-                tex_coords: m.tex_coords.map(Arc::new),
-                indices: Arc::new(m.indices),
-                material_index: m.material_index,
-                topology: m.topology,
-                attributes: AttributeMap::new(),
-                primitive_attributes: AttributeMap::new(),
+            .map(|m| {
+                let mut attributes = AttributeMap::new();
+                if let Some(colors) = m.colors
+                    && colors.len() == m.positions.len()
+                {
+                    attributes.insert(
+                        reserved::COLOR.to_string(),
+                        AttributeData::Vec4(Arc::new(colors)),
+                    );
+                }
+                KernelMesh {
+                    name: m.name,
+                    positions: Arc::new(m.positions),
+                    normals: m.normals.map(Arc::new),
+                    tex_coords: m.tex_coords.map(Arc::new),
+                    indices: Arc::new(m.indices),
+                    material_index: m.material_index,
+                    topology: m.topology,
+                    attributes,
+                    primitive_attributes: AttributeMap::new(),
+                }
             })
             .collect();
         let materials = raw.materials.into_iter().map(Arc::new).collect();
@@ -385,6 +398,14 @@ impl GeometrySet {
                     tex_coords: m.tex_coords.as_deref().cloned(),
                     material_index: m.material_index,
                     topology: m.topology,
+                    // The reserved color lane lowers symmetrically with
+                    // `from_raw`'s lift, so raw round trips keep colors.
+                    colors: match m.attributes.get(reserved::COLOR) {
+                        Some(AttributeData::Vec4(v)) if v.len() == m.positions.len() => {
+                            Some((**v).clone())
+                        }
+                        _ => None,
+                    },
                 })
                 .collect(),
             materials: self.materials.iter().map(|m| (**m).clone()).collect(),
@@ -587,6 +608,7 @@ mod tests {
                 tex_coords: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
                 material_index: Some(0),
                 topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: vec![material("mat")],
             polygon_count: 1,
@@ -678,6 +700,51 @@ mod tests {
             [set.bounds.max.x, set.bounds.max.y, set.bounds.max.z],
             [2.0, 4.0, 6.0]
         );
+    }
+
+    /// W3b: loader colors lift into the reserved lane on `from_raw` and
+    /// lower back on `to_raw`; a length-mismatched array is dropped.
+    #[test]
+    fn raw_colors_lift_into_the_lane_and_lower_back() {
+        let colors = vec![[0.25, 0.5, 0.75, 1.0]; 3];
+        let raw = RawModelData {
+            meshes: vec![
+                RawMeshData {
+                    name: "colored".to_string(),
+                    positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    indices: vec![0, 1, 2],
+                    normals: None,
+                    tex_coords: None,
+                    material_index: None,
+                    topology: MeshTopology::Triangles,
+                    colors: Some(colors.clone()),
+                },
+                RawMeshData {
+                    name: "bad".to_string(),
+                    positions: vec![[0.0; 3], [1.0; 3]],
+                    indices: vec![],
+                    normals: None,
+                    tex_coords: None,
+                    material_index: None,
+                    topology: MeshTopology::Points,
+                    colors: Some(vec![[1.0; 4]]),
+                },
+            ],
+            materials: vec![],
+            polygon_count: 1,
+        };
+        let set = GeometrySet::from_raw(raw);
+        assert_eq!(
+            set.meshes[0].attributes.get(reserved::COLOR),
+            Some(&AttributeData::Vec4(Arc::new(colors.clone())))
+        );
+        assert!(
+            !set.meshes[1].attributes.contains_key(reserved::COLOR),
+            "length mismatch is loader-invalid and dropped"
+        );
+        let back = set.to_raw();
+        assert_eq!(back.meshes[0].colors, Some(colors));
+        assert_eq!(back.meshes[1].colors, None);
     }
 
     #[test]

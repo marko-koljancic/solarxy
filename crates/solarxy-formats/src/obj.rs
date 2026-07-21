@@ -210,6 +210,7 @@ fn parse_obj(
             tex_coords,
             material_index: m.mesh.material_id,
             topology: MeshTopology::Triangles,
+            colors: None,
         });
     }
 

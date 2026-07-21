@@ -141,6 +141,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -205,6 +206,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         };
         let issue = check_flipped_normals(0, &mesh, -0.5).expect("must flag");
         assert!(issue.message.contains("1 of 2"));
@@ -220,6 +222,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         };
         assert!(check_flipped_normals(0, &mesh, -0.5).is_none());
     }

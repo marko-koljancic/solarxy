@@ -41,6 +41,7 @@ pub fn load_stl_bytes(bytes: &[u8], name: &str) -> Result<RawModelData, FormatsE
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         }],
         materials: Vec::new(),
         polygon_count,

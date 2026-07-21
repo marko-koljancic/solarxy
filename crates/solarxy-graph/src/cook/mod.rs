@@ -221,8 +221,7 @@ pub enum CookOutcome {
 /// already-finished geometry: the common uniform scale and recenter, plus
 /// the format-specific toggles. A format-specific field is `Some` only for
 /// the format that declares it (`recompute_normals` on STL,
-/// `preserve_materials` on glTF). PLY's `vertex_colors` is reserved until
-/// the renderer grows a per-vertex color channel, so it is not carried yet.
+/// `preserve_materials` on glTF, `vertex_colors` on PLY).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportOptions {
@@ -230,6 +229,7 @@ pub struct ImportOptions {
     pub center_to_origin: bool,
     pub recompute_normals: Option<bool>,
     pub preserve_materials: Option<bool>,
+    pub vertex_colors: Option<bool>,
 }
 
 /// One async work order (the import worker protocol; runs the

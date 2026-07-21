@@ -120,6 +120,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -137,6 +138,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -185,6 +187,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         };
         let issues = check_non_manifold_edges(0, &mesh, true);
         let errors: Vec<_> = issues
@@ -224,6 +227,7 @@ mod tests {
             tex_coords: None,
             material_index: None,
             topology: MeshTopology::Triangles,
+            colors: None,
         };
         let issues = check_non_manifold_edges(0, &mesh, false);
         let summary: Vec<_> = issues

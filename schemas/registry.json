@@ -4130,7 +4130,7 @@
     },
     {
       "typeId": "import_ply",
-      "version": 2,
+      "version": 3,
       "displayName": "Import PLY",
       "category": "import",
       "categoryLabel": "Import",
@@ -4234,16 +4234,33 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "Moves the model so its bounding-box centre sits at the origin. Applied after Scale. Worth turning on for a file authored far from the origin, which otherwise imports off-screen and orbits around nothing."
+        },
+        {
+          "key": "vertex_colors",
+          "label": "Vertex Colors",
+          "group": "import",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Keep the file's per-vertex colours (red/green/blue, optional alpha). On, colours import as the per-point colour attribute and display in the viewport; off, they are dropped at import for when a scan's colours are noise rather than signal."
         }
       ],
       "bypass": {
         "mode": "mute"
       },
-      "doc": "Loads a PLY mesh, binary or ASCII. Self-contained like STL: one file, no companions, no materials.\n\nPLY is the scanning and photogrammetry format, so this usually heads a cleanup chain and pairs with the validator -- like every import it validates the raw file as it parses, which on a multi-million-point scan is where the issue counts actually matter. On the web the parse runs in an import worker off the main thread.\n\nVertex colours do not survive the import. PLY commonly carries them, and this node had a Vertex Colors toggle once, but no vertex-colour channel exists end to end yet, so the param was removed rather than left lying about doing nothing.",
+      "doc": "Loads a PLY mesh or point cloud, binary or ASCII. Self-contained like STL: one file, no companions, no materials.\n\nPLY is the scanning and photogrammetry format, so this usually heads a cleanup chain and pairs with the validator -- like every import it validates the raw file as it parses, which on a multi-million-point scan is where the issue counts actually matter. On the web the parse runs in an import worker off the main thread.\n\nA file with no face element loads as a true point cloud and draws as camera-facing points. Vertex colours (red/green/blue, optional alpha, uchar or float) survive the import as the per-point colour attribute and display directly; the Vertex Colors toggle drops them at the door when a scan's colours are noise rather than signal. Points and point clouds are not click-selectable in the viewport; select their node on the canvas instead.",
       "searchAliases": [
         "ply",
         "import",
-        "scan"
+        "scan",
+        "points",
+        "cloud"
       ],
       "glyph": "import_ply",
       "role": "standard"

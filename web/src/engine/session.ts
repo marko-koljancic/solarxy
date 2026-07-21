@@ -112,6 +112,7 @@ export async function previewParseModel(hash: string, name: string): Promise<Uin
     centerToOrigin: false,
     recomputeNormals: null,
     preserveMaterials: null,
+    vertexColors: null,
   };
   const worker = ensureImportWorker();
   const token = previewToken;

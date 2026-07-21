@@ -375,3 +375,97 @@ fn dir_resolver_rejects_path_traversal() {
     // even though it exists (the crate's own Cargo.toml sits two levels up).
     assert!(resolver.read("../../Cargo.toml").is_none());
 }
+
+// ---- 0.8.0 vertex-color and point-cloud fixtures (W3a) ----
+
+/// uchar 128 through the sRGB decode: 128/255 = 0.50196 encodes to linear
+/// ~0.2158; the loader stores linear per decision M-7.
+const LINEAR_128: f32 = 0.215_86;
+
+#[test]
+fn ply_colored_triangle_parses_srgb_colors_to_linear() {
+    let raw = ply::load_ply_bytes(&fixture_bytes("colored_tri.ply"), "colored_tri.ply").unwrap();
+    let mesh = &raw.meshes[0];
+    assert_eq!(mesh.topology, solarxy_core::MeshTopology::Triangles);
+    let colors = mesh.colors.as_ref().expect("colors parsed");
+    assert_eq!(colors.len(), 3);
+    assert!((colors[0][0] - 1.0).abs() < 1e-5, "255 -> 1.0: {colors:?}");
+    assert!(colors[0][1].abs() < 1e-6 && colors[0][2].abs() < 1e-6);
+    assert!(
+        (colors[0][3] - 1.0).abs() < 1e-6,
+        "no alpha property -> 1.0"
+    );
+    assert!((colors[1][1] - 1.0).abs() < 1e-5, "green vertex");
+    assert!(
+        (colors[2][2] - LINEAR_128).abs() < 1e-3,
+        "uchar 128 decodes sRGB-to-linear, got {}",
+        colors[2][2]
+    );
+}
+
+#[test]
+fn ply_faceless_file_loads_as_point_cloud() {
+    let raw = ply::load_ply_bytes(&fixture_bytes("cloud.ply"), "cloud.ply").unwrap();
+    assert_eq!(raw.polygon_count, 0);
+    let mesh = &raw.meshes[0];
+    assert_eq!(mesh.topology, solarxy_core::MeshTopology::Points);
+    assert!(mesh.indices.is_empty());
+    assert_eq!(mesh.positions.len(), 4);
+    let colors = mesh.colors.as_ref().expect("cloud colors parsed");
+    assert_eq!(colors.len(), 4);
+    assert!((colors[0][0] - 1.0).abs() < 1e-5, "white point");
+    assert!(
+        (colors[3][3] - 128.0 / 255.0).abs() < 1e-3,
+        "alpha stays normalized, not sRGB-decoded: {}",
+        colors[3][3]
+    );
+}
+
+#[test]
+fn ply_binary_colors_parse_like_ascii() {
+    // A binary_little_endian PLY built in-test: 2 colored points, no faces.
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(
+        b"ply\nformat binary_little_endian 1.0\nelement vertex 2\n\
+property float x\nproperty float y\nproperty float z\n\
+property uchar red\nproperty uchar green\nproperty uchar blue\n\
+end_header\n",
+    );
+    for (pos, rgb) in [
+        ([0.0f32, 0.0, 0.0], [255u8, 0, 0]),
+        ([1.0f32, 2.0, 3.0], [0u8, 128, 255]),
+    ] {
+        for c in pos {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        bytes.extend_from_slice(&rgb);
+    }
+    let raw = ply::load_ply_bytes(&bytes, "binary_cloud").unwrap();
+    let mesh = &raw.meshes[0];
+    assert_eq!(mesh.topology, solarxy_core::MeshTopology::Points);
+    let colors = mesh.colors.as_ref().expect("binary colors parsed");
+    assert!((colors[0][0] - 1.0).abs() < 1e-5);
+    assert!((colors[1][1] - LINEAR_128).abs() < 1e-3);
+    assert!((colors[1][2] - 1.0).abs() < 1e-5);
+    assert_eq!(mesh.positions[1], [1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn glb_color0_parses_as_linear_rgba_without_srgb_decode() {
+    let raw = gltf::load_gltf_bytes(&fixture_bytes("colored_tri.glb"), &mut NoAssets).unwrap();
+    let mesh = &raw.meshes[0];
+    let colors = mesh.colors.as_ref().expect("COLOR_0 parsed");
+    assert_eq!(colors.len(), 3);
+    assert!(
+        (colors[0][0] - 1.0).abs() < 1e-5,
+        "u8 255 normalizes to 1.0"
+    );
+    // glTF colors are already linear: u8 128 must stay 128/255, NOT be
+    // sRGB-decoded like PLY.
+    assert!(
+        (colors[2][2] - 128.0 / 255.0).abs() < 1e-3,
+        "got {}",
+        colors[2][2]
+    );
+    assert!((colors[2][3] - 1.0).abs() < 1e-5);
+}

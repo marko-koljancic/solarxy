@@ -457,6 +457,13 @@ fn collect_meshes_recursive(
                 .read_tex_coords(0)
                 .map(|iter| iter.into_f32().collect());
 
+            // COLOR_0: vec3/vec4 in u8/u16 normalized or f32, already
+            // linear per the glTF 2.0 specification (no sRGB decode here;
+            // `into_rgba_f32` handles widening and normalization).
+            let colors: Option<Vec<[f32; 4]>> = reader
+                .read_colors(0)
+                .map(|iter| iter.into_rgba_f32().collect());
+
             let material_index = Some(primitive.material().index().unwrap_or(0));
 
             *total_polygons += indices.len() / 3;
@@ -469,6 +476,7 @@ fn collect_meshes_recursive(
                 tex_coords,
                 material_index,
                 topology: MeshTopology::Triangles,
+                colors,
             });
         }
     }

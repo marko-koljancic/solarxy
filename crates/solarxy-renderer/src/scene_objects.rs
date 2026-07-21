@@ -830,7 +830,7 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
 
 /// Pack a linear RGBA color into the u32 the point shader unpacks
 /// (`unpack4x8unorm` then sRGB decode); bit-preserved through the f32 slot.
-fn pack_point_color(color: [f32; 4]) -> f32 {
+pub(crate) fn pack_point_color(color: [f32; 4]) -> f32 {
     let bits = u32::from(linear_to_srgb_u8(color[0]))
         | u32::from(linear_to_srgb_u8(color[1])) << 8
         | u32::from(linear_to_srgb_u8(color[2])) << 16

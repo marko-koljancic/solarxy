@@ -286,12 +286,20 @@ pub fn upload_model(
         if vertices.is_empty() {
             continue;
         }
+        let topology = raw.meshes[i].topology;
+        let is_triangles = topology == solarxy_core::MeshTopology::Triangles;
         raw_to_gpu[i] = Some(gpu_meshes.len());
 
         let cpu_positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
+        // Picking and review hashing read the CPU mirror as triangles;
+        // points and lines are unpickable (M-4) and expose no indices.
         cpu_meshes.push(model::CpuMesh {
             positions: cpu_positions,
-            indices: indices.clone(),
+            indices: if is_triangles {
+                indices.clone()
+            } else {
+                Vec::new()
+            },
         });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -305,13 +313,52 @@ pub fn upload_model(
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let edge_indices_data = geometry::extract_edges(indices);
+        // Wireframe edges per topology: unique triangle edges, the
+        // segments themselves for a polyline, nothing for points
+        // (extract_edges walks index triples).
+        let edge_indices_data = match topology {
+            solarxy_core::MeshTopology::Triangles => geometry::extract_edges(indices),
+            solarxy_core::MeshTopology::Lines => indices.clone(),
+            solarxy_core::MeshTopology::Points => Vec::new(),
+        };
         let num_edges = (edge_indices_data.len() / 2) as u32;
 
-        let positions_padded: Vec<[f32; 4]> = vertices
-            .iter()
-            .map(|v| [v.position[0], v.position[1], v.position[2], 0.0])
-            .collect();
+        // A point cloud packs its color sRGB8 into the padded fourth slot
+        // (the point-quad shader unpacks it; white when uncolored). A
+        // length-mismatched color array is loader-invalid and ignored.
+        let raw_colors = raw.meshes[i]
+            .colors
+            .as_deref()
+            .filter(|c| c.len() == vertices.len());
+        let positions_padded: Vec<[f32; 4]> = match (topology, raw_colors) {
+            (solarxy_core::MeshTopology::Points, Some(colors)) => vertices
+                .iter()
+                .zip(colors)
+                .map(|(v, c)| {
+                    [
+                        v.position[0],
+                        v.position[1],
+                        v.position[2],
+                        crate::scene_objects::pack_point_color(*c),
+                    ]
+                })
+                .collect(),
+            (solarxy_core::MeshTopology::Points, None) => vertices
+                .iter()
+                .map(|v| {
+                    [
+                        v.position[0],
+                        v.position[1],
+                        v.position[2],
+                        f32::from_bits(0xFFFF_FFFF),
+                    ]
+                })
+                .collect(),
+            _ => vertices
+                .iter()
+                .map(|v| [v.position[0], v.position[1], v.position[2], 0.0])
+                .collect(),
+        };
         let edge_positions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{:?} Edge Positions {}", file_path, i)),
             contents: bytemuck::cast_slice(&positions_padded),
@@ -389,6 +436,19 @@ pub fn upload_model(
             (Some(buf), num)
         };
 
+        // Triangle and line meshes carry colors as the location-12 vertex
+        // buffer (points pack theirs into the padded positions above).
+        let color_buffer = match (topology, raw_colors) {
+            (solarxy_core::MeshTopology::Points, _) | (_, None) => None,
+            (_, Some(colors)) => Some(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{:?} Color Buffer {}", file_path, i)),
+                    contents: bytemuck::cast_slice(colors),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            )),
+        };
+
         let material_index = raw.meshes[i].material_index.unwrap_or(0);
         gpu_meshes.push(model::Mesh {
             name: raw.meshes[i].name.clone(),
@@ -396,8 +456,8 @@ pub fn upload_model(
             index_buffer,
             num_elements: indices.len() as u32,
             num_vertices: vertices.len() as u32,
-            topology: solarxy_core::MeshTopology::Triangles,
-            color_buffer: None,
+            topology,
+            color_buffer,
             material: material_index,
             visible: true,
             edge_data: Some(model::EdgeData {

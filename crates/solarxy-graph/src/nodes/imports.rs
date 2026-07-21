@@ -110,10 +110,12 @@ struct Format {
     migrate: MigrateFn,
 }
 
-/// v1 -> v2 for `import_ply`: the shared rendering-group strip plus
-/// `vertex_colors`, declared in v1 but never carried into the parse path
-/// (no end-to-end vertex-color channel exists; it returns with the
-/// renderer attribute, backlog note). Silently stripped.
+/// `import_ply` migrations. v1 -> v2: the shared rendering-group strip
+/// plus the historical `vertex_colors`, declared in v1 but never carried
+/// into the parse path (dropping the stored value too: the v1 toggle did
+/// nothing, so its setting carries no intent). v2 -> v3 restores
+/// `vertex_colors` as a real end-to-end control; the registry default
+/// fill supplies `true`, so no hook logic is needed for that step.
 #[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
 fn migrate_ply(
     from: u32,
@@ -124,6 +126,26 @@ fn migrate_ply(
         params.remove("vertex_colors");
     }
     Ok(())
+}
+
+/// The restored `vertex_colors` toggle (v3): PLY colors now travel end to
+/// end, so the param controls a real channel.
+fn vertex_colors_extra() -> Vec<ParamSpec> {
+    vec![
+        ParamSpec::new(
+            "vertex_colors",
+            "Vertex Colors",
+            "import",
+            ParamType::Bool,
+            ParamValue::Bool(true),
+        )
+        .doc(
+            "Keep the file's per-vertex colours (red/green/blue, optional \
+             alpha). On, colours import as the per-point colour attribute \
+             and display in the viewport; off, they are dropped at import \
+             for when a scan's colours are noise rather than signal.",
+        ),
+    ]
 }
 
 fn descriptor_for(f: &Format) -> NodeTypeDescriptor {
@@ -222,22 +244,25 @@ const STL: Format = Format {
 };
 const PLY: Format = Format {
     type_id: "import_ply",
-    version: 2,
+    version: 3,
     display_name: "Import PLY",
     accept: &[".ply"],
-    doc: "Loads a PLY mesh, binary or ASCII. Self-contained like STL: one \
-          file, no companions, no materials.\n\n\
+    doc: "Loads a PLY mesh or point cloud, binary or ASCII. Self-contained \
+          like STL: one file, no companions, no materials.\n\n\
           PLY is the scanning and photogrammetry format, so this usually \
           heads a cleanup chain and pairs with the validator -- like every \
           import it validates the raw file as it parses, which on a \
           multi-million-point scan is where the issue counts actually matter. \
           On the web the parse runs in an import worker off the main thread.\n\n\
-          Vertex colours do not survive the import. PLY commonly carries \
-          them, and this node had a Vertex Colors toggle once, but no \
-          vertex-colour channel exists end to end yet, so the param was \
-          removed rather than left lying about doing nothing.",
-    aliases: &["ply", "import", "scan"],
-    extra: Vec::new,
+          A file with no face element loads as a true point cloud and draws \
+          as camera-facing points. Vertex colours (red/green/blue, optional \
+          alpha, uchar or float) survive the import as the per-point colour \
+          attribute and display directly; the Vertex Colors toggle drops \
+          them at the door when a scan's colours are noise rather than \
+          signal. Points and point clouds are not click-selectable in the \
+          viewport; select their node on the canvas instead.",
+    aliases: &["ply", "import", "scan", "points", "cloud"],
+    extra: vertex_colors_extra,
     migrate: migrate_ply,
 };
 
@@ -351,6 +376,7 @@ fn import_options(p: &ResolvedParams, format: &str) -> ImportOptions {
         recompute_normals: (format == "stl").then(|| p.bool("recompute_normals")),
         preserve_materials: matches!(format, "gltf" | "glb" | "obj")
             .then(|| p.bool("preserve_materials")),
+        vertex_colors: (format == "ply").then(|| p.bool("vertex_colors")),
     }
 }
 
@@ -418,6 +444,13 @@ fn finish_import_set(set: &mut GeometrySet, o: &ImportOptions) {
     if o.recompute_normals == Some(true) {
         for m in &mut set.meshes {
             m.recompute_normals();
+        }
+    }
+    if o.vertex_colors == Some(false) {
+        // The loader lifted the file's colors into the reserved lane;
+        // the toggle off drops them before anything downstream sees them.
+        for m in &mut set.meshes {
+            m.attributes.remove(solarxy_kernel::reserved::COLOR);
         }
     }
     if o.preserve_materials == Some(false) {
@@ -556,6 +589,7 @@ mod tests {
             center_to_origin: false,
             recompute_normals: None,
             preserve_materials: None,
+            vertex_colors: None,
         }
     }
 
@@ -653,5 +687,66 @@ mod tests {
         assert_eq!(stl.preserve_materials, None, "stl has no materials");
         let ply = import_options(&resolved_defaults(ply_descriptor), "ply");
         assert_eq!(ply.preserve_materials, None, "ply has no materials");
+
+        // W3b: vertex_colors is PLY-only, default true.
+        assert_eq!(ply.vertex_colors, Some(true), "ply declares it, on");
+        assert_eq!(stl.vertex_colors, None);
+        assert_eq!(obj.vertex_colors, None);
+    }
+
+    /// W3b: the toggle off strips the loader-lifted color lane before
+    /// anything downstream sees it; on (the default) keeps it.
+    #[test]
+    fn vertex_colors_toggle_strips_the_color_lane() {
+        use solarxy_kernel::{AttributeData, reserved};
+        let colored_tri = || {
+            let mut m = bare_tri();
+            m.attributes.insert(
+                reserved::COLOR.to_string(),
+                AttributeData::Vec4(std::sync::Arc::new(vec![[1.0, 0.0, 0.0, 1.0]; 3])),
+            );
+            GeometrySet::from_mesh(m)
+        };
+
+        let mut kept = colored_tri();
+        finish_import_set(&mut kept, &plain_options());
+        assert!(kept.meshes[0].attributes.contains_key(reserved::COLOR));
+
+        let mut stripped = colored_tri();
+        finish_import_set(
+            &mut stripped,
+            &ImportOptions {
+                vertex_colors: Some(false),
+                ..plain_options()
+            },
+        );
+        assert!(!stripped.meshes[0].attributes.contains_key(reserved::COLOR));
+    }
+
+    /// The v1 hook still strips the historical do-nothing param; the v3
+    /// descriptor re-declares it for real (default true), and stepwise
+    /// migration from v1 ends with the default-filled active toggle.
+    #[test]
+    fn ply_v3_migration_and_descriptor_shape() {
+        let desc = ply_descriptor();
+        assert_eq!(desc.version, 3);
+        let vc = desc
+            .params
+            .iter()
+            .find(|p| p.key == "vertex_colors")
+            .expect("v3 re-declares vertex_colors");
+        assert_eq!(vc.default, ParamValue::Bool(true));
+
+        let mut raw = serde_json::Map::new();
+        raw.insert("vertex_colors".to_string(), serde_json::json!(false));
+        raw.insert("visible".to_string(), serde_json::json!(true));
+        migrate_ply(1, &mut raw).unwrap();
+        assert!(
+            !raw.contains_key("vertex_colors"),
+            "the historical inert value carries no intent and is dropped"
+        );
+        assert!(!raw.contains_key("visible"), "rendering group stripped");
+        migrate_ply(2, &mut raw).unwrap();
+        assert!(raw.is_empty(), "v2 to v3 is a pure default fill");
     }
 }

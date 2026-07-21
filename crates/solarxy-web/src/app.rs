@@ -3459,6 +3459,7 @@ impl SolarxyApp {
             center_to_origin: false,
             recompute_normals: None,
             preserve_materials: None,
+            vertex_colors: None,
         };
         let set = solarxy_graph::nodes::parse_model(
             &format,
