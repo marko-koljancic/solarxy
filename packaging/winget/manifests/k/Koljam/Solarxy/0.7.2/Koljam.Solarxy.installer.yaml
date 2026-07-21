@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+#
+# Installer manifest for Koljam.Solarxy.
+#
+# {{INSTALLER_SHA256}} is filled in by the release-time workflow
+# (`.github/workflows/winget-release.yml`) before submission — the
+# SHA-256 of the produced MSI artifact.
+#
+# ProductCode is intentionally omitted: it is an optional field, the WiX
+# ProductCode rotates every build, and winget reads it from the MSI itself
+# at install time.
+
+PackageIdentifier: Koljam.Solarxy
+PackageVersion: 0.7.2
+InstallerType: wix
+InstallerLocale: en-US
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+Commands:
+  - solarxy
+FileExtensions:
+  - obj
+  - stl
+  - ply
+  - gltf
+  - glb
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/marko-koljancic/solarxy/releases/download/v0.7.2/solarxy-x86_64-pc-windows-msvc.msi
+    InstallerSha256: '{{INSTALLER_SHA256}}'
+ManifestType: installer
+ManifestVersion: 1.6.0
