@@ -1739,13 +1739,66 @@ impl Engine {
                         normals: m.normals.as_deref().map(Vec::as_slice),
                         tex_coords: m.tex_coords.as_deref().map(Vec::as_slice),
                         indices: &m.indices,
+                        topology: m.topology,
+                        // The reserved color lane, under the same guard
+                        // `to_cooked` applies.
+                        colors: match m.attributes.get(solarxy_kernel::reserved::COLOR) {
+                            Some(solarxy_kernel::AttributeData::Vec4(v))
+                                if v.len() == m.positions.len() =>
+                            {
+                                Some(v.as_slice())
+                            }
+                            _ => None,
+                        },
+                        material_index: m.material_index,
                     })
                     .collect();
                 let fail = |e: solarxy_formats::FormatsError| EngineError::InvalidParam {
                     key: key.to_string(),
                     reason: e.to_string(),
                 };
+                // v2's honest control: off exports bare geometry in every
+                // format (single-file OBJ, material-less GLB).
+                let include_materials = resolved.bool("include_materials");
+                let materials: &[std::sync::Arc<solarxy_core::geometry::RawMaterialData>] =
+                    if include_materials {
+                        &set.materials
+                    } else {
+                        &[]
+                    };
                 let (bytes, ext, mime) = match resolved.enum_key("format") {
+                    // OBJ with materials is a multi-file export (.obj +
+                    // .mtl + textures), delivered as a Stored zip
+                    // (decision M-9); without materials it stays the
+                    // classic single file.
+                    "obj" if !materials.is_empty() => {
+                        let base = filename_base(&resolved);
+                        let export =
+                            solarxy_formats::export::write_obj_mtl_bytes(&meshes, materials, &base)
+                                .map_err(fail)?;
+                        let zip_fail = |message: String| EngineError::InvalidParam {
+                            key: key.to_string(),
+                            reason: message,
+                        };
+                        let mut zw = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+                        let opts = zip::write::SimpleFileOptions::default()
+                            .compression_method(zip::CompressionMethod::Stored);
+                        let entries = std::iter::once((format!("{base}.obj"), &export.obj))
+                            .chain(std::iter::once((format!("{base}.mtl"), &export.mtl)))
+                            .chain(export.textures.iter().map(|(n, b)| (n.clone(), b)));
+                        for (name, bytes) in entries {
+                            zw.start_file(name, opts)
+                                .map_err(|e| zip_fail(e.to_string()))?;
+                            std::io::Write::write_all(&mut zw, bytes)
+                                .map_err(|e| zip_fail(e.to_string()))?;
+                        }
+                        let cursor = zw.finish().map_err(|e| zip_fail(e.to_string()))?;
+                        return Ok(ActionResult {
+                            filename: format!("{base}_obj.zip"),
+                            mime: "application/zip".to_string(),
+                            bytes: cursor.into_inner(),
+                        });
+                    }
                     "obj" => (
                         solarxy_formats::export::write_obj_bytes(&meshes),
                         "obj",
@@ -1762,7 +1815,8 @@ impl Engine {
                         "application/octet-stream",
                     ),
                     _ => (
-                        solarxy_formats::export::write_glb_bytes(&meshes).map_err(fail)?,
+                        solarxy_formats::export::write_glb_bytes(&meshes, materials)
+                            .map_err(fail)?,
                         "glb",
                         "model/gltf-binary",
                     ),

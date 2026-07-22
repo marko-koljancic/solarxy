@@ -60,6 +60,20 @@ pub fn srgb_to_linear(c: f32) -> f32 {
     }
 }
 
+/// Encode one linear channel (0..1) to sRGB: the exact inverse of
+/// [`srgb_to_linear`]. Exporters apply it when writing to formats whose
+/// color convention is sRGB (PLY vertex colors), so an import/export pair
+/// round-trips up to 8-bit quantization.
+#[must_use]
+pub fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.
 ///
 /// Carries a content hash computed once at construction: the GPU texture

@@ -19,3 +19,6 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# The OBJ+MTL export archive (decision M-9); Stored entries only, the
+# same wasm-clean configuration the scenefile crate proved out.
+zip = { version = "2", default-features = false }

@@ -437,6 +437,28 @@ mod tests {
             loaded.node.params.get("width"),
             Some(&ParamSource::Literal(ParamValue::Float(25.0)))
         );
+
+        // geo_export v1 -> v2 (0.8.0 material export): hookless pure
+        // default-fill. Stored params survive untouched; the new
+        // `include_materials` stays unset and resolves to its descriptor
+        // default (true) at cook time.
+        let loaded = load_node(
+            &reg,
+            NodeId(5),
+            "geo_export",
+            1,
+            raw(&[("format", serde_json::json!("obj"))]),
+            [0.0; 2],
+            false,
+        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert!(loaded.node.placeholder.is_none());
+        assert_eq!(loaded.node.type_version, 2);
+        assert_eq!(
+            loaded.node.params.get("format"),
+            Some(&ParamSource::Literal(ParamValue::Enum("obj".to_string())))
+        );
+        assert!(!loaded.node.params.contains_key("include_materials"));
     }
 
     #[test]

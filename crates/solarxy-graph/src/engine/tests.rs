@@ -4169,6 +4169,83 @@ fn texture_network_cooks_and_publishes_its_display_image() {
     assert!(e.display_image(geo).is_none());
 }
 
+/// The 0.8.0 procedural chain cooks end to end and recooks on reseed:
+/// box -> scatter -> copy_to_points with a plane template. This is the
+/// milestone's keep-last-good proof on a real graph: a reseeded scatter is
+/// a changed Points payload flowing through a downstream copy, and the
+/// recook must reach the output rather than being swallowed.
+#[test]
+fn scatter_copy_chain_recooks_on_reseed() {
+    let (mut e, ctx) = subflow_engine();
+    let surface = add(&mut e, ctx, "box");
+    let scatter = add(&mut e, ctx, "scatter");
+    let template = add(&mut e, ctx, "plane");
+    let copy = add(&mut e, ctx, "copy_to_points");
+
+    for (from, to, to_port) in [
+        (surface, scatter, "geometry"),
+        (scatter, copy, "points"),
+        (template, copy, "template"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: to_port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(25)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(copy),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let positions_of = |e: &Engine| {
+        let set = e
+            .cook
+            .outputs(copy)
+            .unwrap()
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .unwrap();
+        assert_eq!(
+            set.meshes[0].primitive_count(),
+            2 * 25,
+            "the plane template tiled onto every scattered point"
+        );
+        std::sync::Arc::clone(&set.meshes[0].positions)
+    };
+    let before = positions_of(&e);
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "seed".into(),
+        value: ParamSource::Literal(ParamValue::Int(11)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let after = positions_of(&e);
+    assert_ne!(
+        before, after,
+        "the reseeded cloud flowed through copy_to_points to the output"
+    );
+}
+
 /// The full material pipeline: a texture network feeds a
 /// material network through `tex_ref`, whose `principled` output a
 /// geo-side `material` node consumes in Reference mode; editing the
@@ -4372,4 +4449,64 @@ fn geo_export_action_round_trips_through_the_loaders() {
 
     // An action on a node that has none is a clean error, not a panic.
     assert!(e.invoke_action(sub, box_node, "save").is_err());
+}
+
+/// An OBJ export of a set that carries materials is the multi-file form:
+/// a Stored zip of `.obj` + `.mtl` (decision M-9). GLB stays a single
+/// file, and a material-less OBJ stays the classic single `.obj`.
+#[test]
+fn geo_export_obj_with_materials_delivers_a_zip() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_node = add(&mut e, sub, "box");
+    let material = add(&mut e, sub, "material");
+    let export = add(&mut e, sub, "geo_export");
+    for (from, to) in [(box_node, material), (material, export)] {
+        e.apply(Command::Connect {
+            ctx: sub,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: "geometry".into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: material,
+        key: "mode".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("inline".to_string())),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: export,
+        key: "format".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("obj".to_string())),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(export),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let result = e.invoke_action(sub, export, "save").expect("obj zip");
+    assert_eq!(result.mime, "application/zip");
+    assert!(result.filename.ends_with("_obj.zip"), "{}", result.filename);
+    assert!(result.bytes.starts_with(b"PK"), "a real zip container");
+    let haystack = result.bytes.as_slice();
+    for needle in [b"export.obj".as_slice(), b"export.mtl".as_slice()] {
+        assert!(
+            haystack.windows(needle.len()).any(|w| w == needle),
+            "the archive names its {} entry",
+            String::from_utf8_lossy(needle)
+        );
+    }
 }

@@ -221,6 +221,34 @@ pub fn migrate_strip_rect_area_transform(
     Ok(())
 }
 
+/// Warns when a lane is written under a reserved attribute name with a
+/// type other than its contractual one: the write succeeds (free-form
+/// lanes are legal), but every consumer of the reserved name will ignore
+/// it, which is surprising enough to say out loud. `written` is the
+/// node's type enum key (`float`/`vec2`/`vec3`/`vec4`).
+pub(super) fn warn_reserved_lane_mismatch(cx: &mut CookCtx, name: &str, written: &str) {
+    use solarxy_kernel::reserved;
+    let contractual = if name == reserved::COLOR {
+        Some("vec4")
+    } else if name == reserved::NORMAL {
+        Some("vec3")
+    } else if name == reserved::UV {
+        Some("vec2")
+    } else if name == reserved::PSCALE {
+        Some("float")
+    } else {
+        None
+    };
+    if let Some(expected) = contractual
+        && expected != written
+    {
+        cx.warn(format!(
+            "the reserved attribute `{name}` carries {expected} by contract; \
+             a {written} lane under that name is ignored by its consumers"
+        ));
+    }
+}
+
 /// The default geometry output port, key `geometry` (every geometry node's
 /// single default output).
 #[must_use]

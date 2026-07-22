@@ -58,7 +58,9 @@ fn save_action() -> ParamSpec {
 pub fn geo_export_descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "geo_export",
-        version: 1,
+        // v2 (0.8.0): materials and colors export; `include_materials`
+        // arrives by pure registry default-fill, no hook needed.
+        version: 2,
         display_name: "Export Geometry",
         category: Category::Utility,
         contexts: ContextSet::GEO,
@@ -92,14 +94,30 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
                 )
                 .doc(
                     "Which writer encodes the file. glTF Binary is the \
-                     default and keeps the most: one file, positions, \
-                     normals, and UVs, one node per mesh. OBJ keeps the same \
-                     attributes as text, one `o` block per mesh. PLY merges \
-                     every mesh into one vertex/face list, and only writes \
-                     normals and UVs if every mesh has them. STL is the \
-                     lossiest: triangles and nothing else, no meshes, no UVs, \
-                     with facet normals recomputed on the way out. None of \
-                     the four write materials.",
+                     default and keeps the most: one file with positions, \
+                     normals, UVs, vertex colors, materials with embedded \
+                     textures, and true point/line primitives. OBJ keeps \
+                     geometry as text with `p`/`l`/`f` records; with \
+                     materials it becomes an OBJ + MTL + textures archive. \
+                     PLY merges every mesh into one vertex/face list, writes \
+                     normals, UVs, and colors when every mesh has them, and \
+                     a pure point cloud exports face-less. STL is the \
+                     lossiest: triangle facets and nothing else, so point \
+                     and line geometry is skipped.",
+                ),
+                ParamSpec::new(
+                    "include_materials",
+                    "Include Materials",
+                    "output",
+                    ParamType::Bool,
+                    ParamValue::Bool(true),
+                )
+                .doc(
+                    "Whether materials leave with the geometry. On, GLB \
+                     embeds the material table with its textures and OBJ \
+                     delivers the MTL sidecar archive. Off exports bare \
+                     geometry in every format: smaller files, single-file \
+                     OBJ, and no texture re-encoding.",
                 ),
                 filename_param("export"),
                 save_action(),
@@ -118,13 +136,16 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
               name, and press whichever you need. Saving is a button, not a \
               side effect of cooking -- the node never writes a file on its \
               own.\n\n\
-              Materials do not export. Every writer here takes positions, \
-              normals, UVs, and triangles and nothing else, so a textured \
-              model exports as bare geometry, silently, in all four formats \
-              -- including GLB, which is perfectly capable of carrying them. \
-              Material export is a known gap, not a property of the formats. \
-              The button exports what the node last cooked, so it reports \
-              having nothing to export rather than writing an empty file.",
+              Materials and vertex colors travel with the geometry: GLB \
+              embeds the full material table with its textures and carries \
+              colors as COLOR_0, OBJ with materials arrives as an \
+              OBJ + MTL + textures archive, and PLY writes color properties. \
+              Point clouds and polylines export as true point and line \
+              primitives in GLB and OBJ and as face-less vertices in PLY; \
+              STL is triangle facets only and skips them. Include Materials \
+              turns the material side off for a bare-geometry file. The \
+              button exports what the node last cooked, so it reports having \
+              nothing to export rather than writing an empty file.",
         search_aliases: &[
             "export", "save", "file", "obj", "stl", "ply", "gltf", "glb", "rop",
         ],

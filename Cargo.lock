@@ -4143,6 +4143,7 @@ dependencies = [
  "solarxy-kernel",
  "solarxy-scenefile",
  "thiserror 2.0.17",
+ "zip",
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
-//! The seven parametric primitive generators: box, sphere, cylinder, cone,
-//! plane, torus, torus knot.
+//! The parametric primitive generators: seven surface primitives (box,
+//! sphere, cylinder, cone, plane, torus, torus knot) plus two curve
+//! primitives (line, circle) emitting Lines topology with no normals or
+//! UVs (curves have no surface; they draw unlit).
 //!
 //! Shared conventions, frozen for the whole engine:
 //!
@@ -17,16 +19,20 @@
 //!   totality guard, never as policy.
 
 mod box_gen;
+mod circle;
 mod cone;
 mod cylinder;
+mod line;
 mod plane;
 mod sphere;
 mod torus;
 mod torus_knot;
 
 pub use box_gen::generate_box;
+pub use circle::generate_circle;
 pub use cone::generate_cone;
 pub use cylinder::generate_cylinder;
+pub use line::generate_line;
 pub use plane::generate_plane;
 pub use sphere::generate_sphere;
 pub use torus::generate_torus;
@@ -62,9 +68,12 @@ pub(crate) fn assemble(
 
 #[cfg(test)]
 mod tests {
-    //! Cross-primitive conformance suite: every generator must satisfy the
-    //! frozen invariants (unit outward normals, CCW winding, UV range,
-    //! index validity) at its catalog-default parameters.
+    //! Cross-primitive conformance suite: every surface generator must
+    //! satisfy the frozen invariants (unit outward normals, CCW winding,
+    //! UV range, index validity) at its catalog-default parameters. The
+    //! curve generators (line, circle) are excluded by design: Lines
+    //! topology has no winding, normals, or UVs; they carry their own
+    //! tests in their files.
 
     use super::*;
 

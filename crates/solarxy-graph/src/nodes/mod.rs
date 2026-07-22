@@ -14,8 +14,10 @@ pub(crate) mod common;
 
 // Primitives (subflow).
 mod box_node;
+mod circle_node;
 mod cone_node;
 mod cylinder_node;
+mod line_node;
 mod plane_node;
 mod sphere_node;
 mod torus_knot_node;
@@ -23,11 +25,17 @@ mod torus_node;
 
 // Modifiers (subflow).
 mod array_node;
+mod attribute_create_node;
+mod attribute_randomize_node;
 mod compute_normals_node;
+mod copy_to_points_node;
 mod delete_node;
+mod edges_to_geo_node;
 mod material_node;
 mod merge_node;
 mod mirror_node;
+mod points_from_geo_node;
+mod scatter_node;
 mod subdivide_node;
 mod transform_node;
 mod uv_project_node;
@@ -78,6 +86,8 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         plane_node::descriptor(),
         torus_node::descriptor(),
         torus_knot_node::descriptor(),
+        line_node::descriptor(),
+        circle_node::descriptor(),
         // Modifiers (subflow).
         transform_node::descriptor(),
         merge_node::descriptor(),
@@ -87,8 +97,14 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         uv_project_node::descriptor(),
         subdivide_node::descriptor(),
         array_node::descriptor(),
+        scatter_node::descriptor(),
+        copy_to_points_node::descriptor(),
+        points_from_geo_node::descriptor(),
+        edges_to_geo_node::descriptor(),
         mirror_node::descriptor(),
         delete_node::descriptor(),
+        attribute_create_node::descriptor(),
+        attribute_randomize_node::descriptor(),
         // Utility (subflow).
         null_node::descriptor(),
         switch_node::descriptor(),
@@ -194,7 +210,7 @@ mod tests {
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 62);
+        assert_eq!(registry.len(), 70);
 
         let in_context = |kind: ContextKind| {
             builtin_descriptors()
