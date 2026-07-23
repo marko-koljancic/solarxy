@@ -80,6 +80,10 @@ pub struct CookEngine {
     /// produced (validate node, import load validation). Read by the scene
     /// lowering to attach the effective result to each object.
     validation: BTreeMap<NodeId, Arc<ValidationResult>>,
+    /// Per-node cook warnings from the last completed cook (reserved-lane
+    /// mismatches, lane type replacements, empty-input fallbacks). Absent
+    /// when the last cook warned nothing; read back by the node info UI.
+    warnings: BTreeMap<NodeId, Vec<String>>,
     status: BTreeMap<NodeId, CookStatus>,
     stats: BTreeMap<NodeId, NodeCookStats>,
     /// Monotonic per-node generation, bumped on every (re)cook or
@@ -131,6 +135,7 @@ impl CookEngine {
         self.state.clear();
         self.outputs.clear();
         self.validation.clear();
+        self.warnings.clear();
         self.status.clear();
         self.stats.clear();
         self.generation.clear();
@@ -349,6 +354,10 @@ impl CookEngine {
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;
+        // The cook body's warnings replace the node's previous set in
+        // every arm (a clean recook clears stale warnings; a parked job
+        // keeps what its spawn cook said).
+        self.set_warnings(node, cx.take_warnings());
         match outcome {
             Ok(CookOutcome::Done(outputs)) => {
                 self.commit_outputs(node, outputs, elapsed, report);
@@ -582,6 +591,22 @@ impl CookEngine {
         }
     }
 
+    /// Replaces a node's warning set: non-empty stores, empty clears.
+    fn set_warnings(&mut self, node: NodeId, warnings: Vec<String>) {
+        if warnings.is_empty() {
+            self.warnings.remove(&node);
+        } else {
+            self.warnings.insert(node, warnings);
+        }
+    }
+
+    /// The last completed cook's warnings for one node (empty when the
+    /// cook was quiet or the node never cooked).
+    #[must_use]
+    pub fn warnings(&self, node: NodeId) -> &[String] {
+        self.warnings.get(&node).map_or(&[], Vec::as_slice)
+    }
+
     /// Submits an async job's result under the generation guard. A result
     /// whose token no longer matches the node's current generation (a
     /// newer cook or a re-dirty happened meanwhile) is dropped. On accept,
@@ -806,7 +831,7 @@ mod tests {
             type_id: "gen",
             version: 1,
             display_name: "Gen",
-            category: Category::Primitives,
+            category: Category::Generators,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![],
@@ -842,7 +867,7 @@ mod tests {
             type_id: "pass",
             version: 1,
             display_name: "Pass",
-            category: Category::Modifiers,
+            category: Category::Topology,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![
@@ -886,7 +911,7 @@ mod tests {
             type_id: "pts",
             version: 1,
             display_name: "Pts",
-            category: Category::Primitives,
+            category: Category::Generators,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![],

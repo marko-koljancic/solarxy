@@ -6,26 +6,15 @@
 // Adding files stages them and re-diffs; completing runs the deferred
 // import action (the widget's setParam or the drop flow's node creation).
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { completeModelImport, dispatch, stagedManifestNames, stageFile } from "../engine/session";
 import { hasMissing, missingSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
+import { Modal } from "./Modal";
 
 export function MissingSidecarsModal() {
   const prompt = useUi((s) => s.sidecarPrompt);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!prompt) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        useUi.getState().setSidecarPrompt(null);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [prompt]);
 
   if (!prompt) return null;
 
@@ -61,9 +50,7 @@ export function MissingSidecarsModal() {
   const optional = prompt.missing.optional;
 
   return (
-    <div className="modal-backdrop" onClick={close}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Missing companion files</h3>
+    <Modal title="Missing companion files" onClose={close}>
         <p className="sidecar-intro">
           <strong>{prompt.primaryName}</strong> references files that were not imported. The
           browser can only read files you select, so add them below. Tip: dragging the
@@ -114,7 +101,6 @@ export function MissingSidecarsModal() {
             }}
           />
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

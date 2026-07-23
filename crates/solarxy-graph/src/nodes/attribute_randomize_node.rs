@@ -5,7 +5,9 @@
 
 use solarxy_kernel::attribute_ops::{RandomRange, attribute_randomize};
 
-use super::common::{geometry_output, params_with, warn_reserved_lane_mismatch};
+use super::common::{
+    geometry_output, params_with, warn_input_lane_type_replaced, warn_reserved_lane_mismatch,
+};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -23,7 +25,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "attribute_randomize",
         version: 1,
         display_name: "Attribute Randomize",
-        category: Category::Modifiers,
+        category: Category::Attribute,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
@@ -39,7 +41,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     "attr_name",
                     "Name",
                     "attribute",
-                    ParamType::Text,
+                    ParamType::AttributeName,
                     ParamValue::Text("color".into()),
                 )
                 .doc(
@@ -200,6 +202,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         },
     };
     warn_reserved_lane_mismatch(cx, &name, ty);
+    warn_input_lane_type_replaced(cx, input, &name, ty);
     Ok(CookOutcome::Done(Outputs::geometry(attribute_randomize(
         input,
         &name,
@@ -272,7 +275,69 @@ mod tests {
             ParamSource::Literal(ParamValue::Text(reserved::UV.into())),
         );
         let (_, warnings) = run(stored);
-        assert_eq!(warnings.len(), 1);
+        // Two distinct facts, both said: the reserved contract (uv wants
+        // vec2) and the replacement of the box's fixed uv buffer.
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings[0].contains("vec2"), "{warnings:?}");
+        assert!(warnings[1].contains("replaces"), "{warnings:?}");
+    }
+
+    fn run_with_input(
+        stored: BTreeMap<String, ParamSource>,
+        input: GeometrySet,
+    ) -> (Outputs, Vec<String>) {
+        let resolved =
+            crate::registry::resolve::resolve_params(&stored, &descriptor().params).unwrap();
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(input))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("cooks synchronously");
+        };
+        (out, cx.take_warnings())
+    }
+
+    /// The reporter's scene: a free-form vec3 lane on the input, the
+    /// node's vec4 default silently retyping it. Not silent anymore.
+    #[test]
+    fn replacing_an_input_lane_of_a_different_type_warns() {
+        let mut mesh =
+            solarxy_kernel::KernelMesh::points("pts", vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]);
+        mesh.attributes.insert(
+            "velocity".into(),
+            solarxy_kernel::AttributeData::Vec3(Arc::new(vec![[0.0; 3]; 2])),
+        );
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "attr_name".to_string(),
+            ParamSource::Literal(ParamValue::Text("velocity".into())),
+        );
+        let (_, warnings) = run_with_input(stored, GeometrySet::from_mesh(mesh));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("vec3") && warnings[0].contains("vec4"),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_same_type_replacement_stays_silent() {
+        let mut mesh = solarxy_kernel::KernelMesh::points("pts", vec![[0.0, 0.0, 0.0]]);
+        mesh.attributes.insert(
+            "velocity".into(),
+            solarxy_kernel::AttributeData::Vec4(Arc::new(vec![[0.0; 4]; 1])),
+        );
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "attr_name".to_string(),
+            ParamSource::Literal(ParamValue::Text("velocity".into())),
+        );
+        let (_, warnings) = run_with_input(stored, GeometrySet::from_mesh(mesh));
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }

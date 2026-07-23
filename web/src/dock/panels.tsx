@@ -10,6 +10,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { AssetPreview } from "../components/AssetPreview";
 import { AssetsPane } from "../components/AssetsPane";
+import { AttributesPane } from "../components/AttributesPane";
 import { NodePane } from "../components/NodePane";
 import { ParameterPanel } from "../components/ParameterPanel";
 import { Viewport } from "../components/Viewport";
@@ -69,6 +70,10 @@ function TexturePanel(_props: IDockviewPanelProps) {
   return <TextureViewer />;
 }
 
+function AttributesPanel(_props: IDockviewPanelProps) {
+  return <AttributesPane />;
+}
+
 export const DOCK_COMPONENTS = {
   viewport: ViewportPanel,
   nodes: NodesPanel,
@@ -77,14 +82,15 @@ export const DOCK_COMPONENTS = {
   assets: AssetsPanel,
   assetPreview: AssetPreviewPanel,
   texture: TexturePanel,
+  attributes: AttributesPanel,
 };
 
 // Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four
 // node-category pastels plus extras, so many open panes stay distinguishable.
 // Header/tab only; the pastels are light in both themes and pair with dark ink.
 const PANE_PALETTE = [
-  "#c9dcf2", // blue (primitives)
-  "#c8e8d6", // green (modifiers)
+  "#c9dcf2", // blue (generators)
+  "#c8e8d6", // green (topology)
   "#ddd0ee", // purple (import)
   "#eed9c9", // tan (utility)
   "#c9c2f0", // lavender

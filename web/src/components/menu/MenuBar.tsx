@@ -18,7 +18,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { isAssetsPanelOpen, isTexturePanelOpen, setAssetsPanelOpen, setReviewPanelOpen, setTexturePanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, isAttributesPanelOpen, isTexturePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setReviewPanelOpen, setTexturePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -129,6 +129,8 @@ export function MenuBar() {
     { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
     // The texture viewer: same presence-is-state pattern.
     { label: "Texture Viewer", onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
+    // The attributes spreadsheet: same presence-is-state pattern.
+    { label: "Attributes Panel", onClick: () => setAttributesPanelOpen(!isAttributesPanelOpen()) },
   ];
 
   const reviewMode = useReview((s) => s.reviewMode);

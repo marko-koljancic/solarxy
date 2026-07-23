@@ -1143,6 +1143,7 @@ impl Renderer {
             pass.draw_indexed(0..env.vis.grid_mesh.num_elements, 0, 0..1);
         }
         self.draw_normals(&mut pass, env, objects, cam_bg, pds);
+        self.draw_attr_vectors(&mut pass, env, cam_bg);
         self.draw_axes(&mut pass, env, cam_bg, pds);
         self.draw_local_axes(&mut pass, env, cam_bg, pds);
         self.draw_bounds(&mut pass, env, cam_bg, pds);
@@ -2095,5 +2096,25 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Per-point attribute-vector arrows (the web attribute visualization),
+    /// through the normals line pipeline. Gated purely on the buffer count:
+    /// only the web host populates the channel, so the desktop shell and
+    /// the golden harness draw nothing here by construction.
+    fn draw_attr_vectors<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        env: &'a SceneEnvironment,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if env.vis.attr_lines_count == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.overlay.normals);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, &env.vis.attr_params_bind_group, &[]);
+        pass.set_vertex_buffer(0, env.vis.attr_lines_buf.slice(..));
+        pass.draw(0..env.vis.attr_lines_count, 0..1);
     }
 }

@@ -21,12 +21,18 @@
 import { useStore } from "@xyflow/react";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { dispatch } from "../engine/session";
 import { IconBypass, IconDisplay, IconDive, IconRename, IconTrash, IconVisibility } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
-import { useUi } from "../store/ui";
+import {
+  diveIntoSubflow,
+  removeNode,
+  requestRename,
+  setDisplayFlag,
+  toggleBypass,
+  toggleVisibility,
+} from "./nodeActions";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
@@ -180,7 +186,7 @@ export function RadialMenu() {
           title: "Set the display flag",
           active: isDisplay,
           onPick: (tt) => {
-            dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
+            setDisplayFlag(tt.ctx, tt.nodeId);
             closeRadial();
           },
         }
@@ -193,15 +199,7 @@ export function RadialMenu() {
           active: rootEye && nodeVisible(node),
           disabled: !rootEye,
           onPick: (tt) => {
-            if (rootEye) {
-              dispatch({
-                type: "setParam",
-                ctx: tt.ctx,
-                node: tt.nodeId,
-                key: "visible",
-                value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
-              });
-            }
+            if (rootEye) toggleVisibility(tt.ctx, node);
             closeRadial();
           },
         };
@@ -218,7 +216,7 @@ export function RadialMenu() {
       icon: <IconRename size={13} />,
       title: "Rename (F2)",
       onPick: (tt) => {
-        useUi.getState().setRenameRequest(tt.nodeId);
+        requestRename(tt.nodeId);
         closeRadial();
       },
     },
@@ -231,7 +229,7 @@ export function RadialMenu() {
       title: t.isContainer ? "Enter subflow" : "Not a container",
       disabled: !t.isContainer,
       onPick: (tt) => {
-        if (tt.isContainer) useMirror.getState().setCurrent({ subflow: tt.nodeId });
+        if (tt.isContainer) diveIntoSubflow(tt.nodeId);
         closeRadial();
       },
     },
@@ -252,14 +250,7 @@ export function RadialMenu() {
       active: node.bypassed,
       disabled: !t.bypassable,
       onPick: (tt) => {
-        if (tt.bypassable) {
-          dispatch({
-            type: "setBypass",
-            ctx: tt.ctx,
-            node: tt.nodeId,
-            bypassed: !node.bypassed,
-          });
-        }
+        if (tt.bypassable) toggleBypass(tt.ctx, node);
         closeRadial();
       },
     },
@@ -270,7 +261,7 @@ export function RadialMenu() {
       icon: <IconTrash size={13} />,
       title: "Delete node",
       onPick: (tt) => {
-        dispatch({ type: "removeNodes", ctx: tt.ctx, ids: [tt.nodeId] });
+        removeNode(tt.ctx, tt.nodeId);
         closeRadial();
       },
     },

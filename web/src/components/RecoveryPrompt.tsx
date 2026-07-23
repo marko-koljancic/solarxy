@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { clearAutosaves } from "../persistence/opfs";
 import { isBooted, restoreDocument, takeRecovery } from "../engine/session";
+import { Modal } from "./Modal";
 
 export function RecoveryPrompt() {
   const [rec, setRec] = useState<{ bytes: Uint8Array; when: number } | null>(null);
@@ -28,10 +29,11 @@ export function RecoveryPrompt() {
   if (!rec) return null;
   const when = new Date(rec.when).toLocaleTimeString();
 
+  // Deliberately no onClose: the choice is explicit (no Esc, no
+  // backdrop dismiss, no X); losing work by a stray click is the one
+  // thing this prompt exists to prevent.
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>Recover unsaved work?</h3>
+    <Modal title="Recover unsaved work?">
         <p>An autosave from {when} was found. Restore it, or discard and continue.</p>
         <div className="modal-actions">
           <button
@@ -53,7 +55,6 @@ export function RecoveryPrompt() {
             Restore
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -21,7 +21,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "copy_to_points",
         version: 1,
         display_name: "Copy to Points",
-        category: Category::Modifiers,
+        category: Category::Copy,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

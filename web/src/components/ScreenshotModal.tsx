@@ -10,6 +10,7 @@ import type { ScreenshotResult } from "../engine/types";
 import { usePrefs, type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useUi } from "../store/ui";
+import { Modal } from "./Modal";
 import { useViewState } from "../store/viewState";
 import { Select } from "./Select";
 
@@ -69,16 +70,10 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
   const [preview, setPreview] = useState<{ url: string; blob: Blob; dims: string } | null>(null);
   const pollRef = useRef<number | null>(null);
 
+  // Esc/backdrop close through the shared shell; this cleanup only stops
+  // the poll and frees the preview URL.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
     return () => {
-      window.removeEventListener("keydown", onKey, true);
       if (pollRef.current !== null) cancelAnimationFrame(pollRef.current);
       if (preview) URL.revokeObjectURL(preview.url);
     };
@@ -151,9 +146,12 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide screenshot-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Screenshot</h3>
+    <Modal
+      id="screenshot"
+      title="Screenshot"
+      onClose={onClose}
+      className="modal-wide screenshot-modal"
+    >
         <div className="screenshot-controls">
           <Select
             ariaLabel="Resolution"
@@ -224,7 +222,6 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
             Save PNG
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -34,6 +34,7 @@ import type {
 import { descriptorFor } from "../registry/datatypes";
 import { nodeLabel } from "../flow/nodeLabel";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
+import { AttributeNameField } from "./inputs/AttributeNameField";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
@@ -49,7 +50,14 @@ function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
 
 /** Builds a literal ParamSource of the given descriptor param type. */
 function literal(paramType: string, value: unknown): ParamSource {
-  const tag = paramType === "assetRef" ? "asset" : paramType === "nodePath" ? "nodeRef" : paramType;
+  const tag =
+    paramType === "assetRef"
+      ? "asset"
+      : paramType === "nodePath"
+        ? "nodeRef"
+        : paramType === "attributeName"
+          ? "text" // the widget variant stores plain Text
+          : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
 
@@ -143,6 +151,19 @@ function Field({ ctx, node, spec }: FieldProps) {
             className="input-field text-input"
             value={String(value ?? "")}
             onChange={(e) => commit(e.target.value)}
+          />
+        </div>
+      );
+    case "attributeName":
+      return (
+        <div className="param-row">
+          {label}
+          <AttributeNameField
+            ctx={ctx}
+            node={node}
+            spec={spec}
+            value={String(value ?? "")}
+            onCommit={commit}
           />
         </div>
       );
@@ -485,9 +506,9 @@ export function ParameterPanel() {
                 return <Field key={p.key} ctx={current} node={node} spec={p} />;
               }
               return (
-                <div key={p.key} className="param-driven" title="Driven by the connected map">
+                <div key={p.key} className="param-driven" title="Driven by the connected input">
                   <Field ctx={current} node={node} spec={p} />
-                  <div className="param-driven-hint">Driven by connected map</div>
+                  <div className="param-driven-hint">Driven by connected input</div>
                 </div>
               );
             })}

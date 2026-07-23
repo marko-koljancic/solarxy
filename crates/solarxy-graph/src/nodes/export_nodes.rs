@@ -62,7 +62,7 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
         // arrives by pure registry default-fill, no hook needed.
         version: 2,
         display_name: "Export Geometry",
-        category: Category::Utility,
+        category: Category::Export,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
@@ -180,7 +180,7 @@ pub fn image_export_descriptor() -> NodeTypeDescriptor {
         type_id: "image_export",
         version: 1,
         display_name: "Export Image",
-        category: Category::Utility,
+        category: Category::Export,
         contexts: ContextSet::TEX,
         opens: None,
         inputs: vec![
@@ -284,7 +284,7 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
         type_id: "render",
         version: 1,
         display_name: "Render",
-        category: Category::Utility,
+        category: Category::Export,
         contexts: ContextSet::OBJ,
         opens: None,
         inputs: vec![],

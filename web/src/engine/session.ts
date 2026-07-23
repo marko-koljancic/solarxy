@@ -23,10 +23,12 @@ import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
+import { applyAttrPins, hideAttrPins } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
 import { ctxKey } from "./types";
 import type {
+  AttrVizState,
   CameraCommand,
   Command,
   DisplaySettingsDto,
@@ -423,6 +425,13 @@ export function setTool(tool: ToolMode): void {
   if (!client) return;
   applyViewportBatch(getClient().setTool(tool));
   useViewState.getState().setToolMode(tool);
+}
+
+/** Replaces the host's attribute-visualization state (the right strip's
+ * toggles and lane pick) and mirrors the returned view state. */
+export function setAttrViz(state: AttrVizState): void {
+  if (!client) return;
+  useViewState.getState().setView(getClient().setAttrViz(state));
 }
 
 /** Pushes the gizmo's drag ergonomics into the host. Called on boot and on any
@@ -947,6 +956,13 @@ export function runFrame(dtMs: number): void {
     applyMarkerPositions(getClient().reviewMarkers());
   } else {
     hideAllMarkers();
+  }
+  // Attribute pins ride the same imperative channel.
+  const attrViz = useViewState.getState().view?.attrViz;
+  if (attrViz && (attrViz.labels || attrViz.points)) {
+    applyAttrPins(getClient().attrPins(), attrViz.labels, attrViz.points);
+  } else {
+    hideAttrPins();
   }
   // Both modes: manual drives the amber stale tags + header count, auto
   // drives the transient pending tint on queued-dirty nodes.

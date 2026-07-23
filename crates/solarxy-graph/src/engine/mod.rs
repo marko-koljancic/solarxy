@@ -9,6 +9,7 @@
 //! The monotonic `revision` on every batch lets a desynced mirror recover
 //! by taking a full [`snapshot`](Engine::snapshot).
 
+pub mod attr_table;
 pub mod snapshot;
 
 use std::collections::BTreeMap;
@@ -2481,6 +2482,40 @@ impl Engine {
         node: NodeId,
     ) -> Option<&std::sync::Arc<solarxy_kernel::GeometrySet>> {
         self.cook.outputs(node)?.get("geometry")?.as_geometry()
+    }
+
+    /// The last completed cook's warnings for one node (reserved-lane
+    /// mismatches, lane replacements, fallbacks). Pull-read by the node
+    /// info card; empty when the cook was quiet.
+    #[must_use]
+    pub fn cook_warnings(&self, node: NodeId) -> Vec<String> {
+        self.cook.warnings(node).to_vec()
+    }
+
+    /// The lane inventory of a node's cooked geometry (the attribute-name
+    /// pickers and the Attributes pane header), or `None` while nothing is
+    /// committed.
+    #[must_use]
+    pub fn attribute_summary(&self, node: NodeId) -> Option<attr_table::AttributeSummary> {
+        Some(attr_table::attribute_summary(self.geometry_output(node)?))
+    }
+
+    /// One window of a node's cooked attribute values. Only the requested
+    /// page is materialized; the geometry itself stays behind the facade.
+    #[must_use]
+    pub fn attribute_page(
+        &self,
+        node: NodeId,
+        domain: solarxy_kernel::AttributeDomain,
+        offset: u32,
+        limit: u32,
+    ) -> Option<attr_table::AttributePage> {
+        Some(attr_table::attribute_page(
+            self.geometry_output(node)?,
+            domain,
+            offset,
+            limit,
+        ))
     }
 
     /// The UV pane's source in a context: the first selected node's

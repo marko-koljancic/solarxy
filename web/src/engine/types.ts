@@ -118,6 +118,73 @@ export interface MarkerScreen {
   y: number;
 }
 
+/** Which element axis an attribute lane describes. */
+export type AttrDomain = "point" | "primitive";
+
+/** One named attribute lane in one domain, from `attribute_summary`. */
+export interface AttrLane {
+  name: string;
+  ty: "float" | "vec2" | "vec3" | "vec4";
+  len: number;
+}
+
+/** The lane inventory of a node's cooked geometry (both domains), from
+ * `attribute_summary`; `undefined` while nothing is committed. */
+export interface AttributeSummary {
+  points: number;
+  /** Triangle count (cook-stats convention; lines and points count zero). */
+  prims: number;
+  /** Primitive-domain element count (topology-aware): the primitive
+   * table's row extent. */
+  primitiveElements: number;
+  meshes: number;
+  point: AttrLane[];
+  primitive: AttrLane[];
+}
+
+/** One value column of the paged attribute table: `P` (positions) leads
+ * the point domain, lanes follow in name order. */
+export interface AttrColumn {
+  key: string;
+  ty: AttrLane["ty"];
+  components: number;
+}
+
+/** One window of attribute rows from `attribute_table`. A row
+ * concatenates every column's components; `null` marks a lane missing
+ * (or type-conflicted) on that element's mesh. */
+export interface AttributePage {
+  total: number;
+  offset: number;
+  columns: AttrColumn[];
+  rows: (number | null)[][];
+}
+
+/** Host-owned attribute-visualization state (session-only, scene-wide):
+ * the right strip's toggles, the picked point-lane name, and the pin
+ * budget (0 = the host default). Mirrored through ViewStateDto like the
+ * tool mode; never saved, never in undo. */
+export interface AttrVizState {
+  labels: boolean;
+  vectors: boolean;
+  points: boolean;
+  name: string | null;
+  cap: number;
+}
+
+/** One attribute pin from `attr_pins` (pane-relative CSS px, the
+ * review-marker convention): a stride-sampled point with its per-object
+ * point number, its stable candidate slot (the pool keys on it), and, in
+ * labels mode, the lane's components. */
+export interface AttrPin {
+  pane: number;
+  x: number;
+  y: number;
+  ptnum: number;
+  slot: number;
+  value: number[] | null;
+}
+
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
 export interface ScreenshotOpts {
@@ -299,7 +366,21 @@ export interface NodeTypeSnapshot {
   typeId: string;
   version: number;
   displayName: string;
-  category: "container" | "primitives" | "modifiers" | "import" | "lights" | "utility";
+  category:
+    | "container"
+    | "generators"
+    | "attribute"
+    | "transform"
+    | "copy"
+    | "topology"
+    | "shaders"
+    | "import"
+    | "export"
+    | "lights"
+    | "utility"
+    | "tex_generate"
+    | "tex_adjust"
+    | "tex_composite";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
   /** The network kinds this node may be placed in. Replaces the
@@ -531,6 +612,8 @@ export interface ViewStateDto {
   paneCameraLock: boolean[];
   /** The look-through camera's framing aspect per pane (for the gate), or null. */
   paneGateAspect: (number | null)[];
+  /** The host-owned attribute-visualization state (the right strip). */
+  attrViz: AttrVizState;
 }
 
 /** The current pose of a pane's camera (create-camera-from-view). */

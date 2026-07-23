@@ -17,7 +17,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "merge",
         version: 2,
         display_name: "Merge",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

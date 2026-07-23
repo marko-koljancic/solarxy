@@ -61,6 +61,13 @@ pub struct VisualizationState {
     pub bounds_per_mesh_count: u32,
     pub local_axes_vertex_buf: wgpu::Buffer,
     pub local_axes_vertex_count: u32,
+    /// Per-point attribute-vector arrows (the web host's attribute
+    /// visualization). Always constructed empty; only
+    /// [`VisualizationState::set_attr_lines`] populates it, so the desktop
+    /// shell and the golden harness never draw this channel.
+    pub attr_lines_buf: wgpu::Buffer,
+    pub attr_lines_count: u32,
+    pub attr_params_bind_group: wgpu::BindGroup,
 }
 
 impl VisualizationState {
@@ -243,6 +250,26 @@ impl VisualizationState {
             })
         };
 
+        // The attribute-vector channel starts empty everywhere; only the
+        // web host's set_attr_lines populates it.
+        let (attr_lines_buf, attr_lines_count) =
+            create_normals_buffer(device, &[], "Attr Vectors Buffer");
+        let attr_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Attr Vectors Color Buffer"),
+            contents: bytemuck::cast_slice(&[NormalsColor {
+                color: [1.0, 0.62, 0.15, 1.0],
+            }]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let attr_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Attr Vectors Params Bind Group"),
+            layout: &layouts.normals_params,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: attr_color_buf.as_entire_binding(),
+            }],
+        });
+
         VisualizationState {
             grid_mesh,
             grid_params_bind_group,
@@ -267,7 +294,18 @@ impl VisualizationState {
             bounds_per_mesh_count,
             local_axes_vertex_buf,
             local_axes_vertex_count,
+            attr_lines_buf,
+            attr_lines_count,
+            attr_params_bind_group,
         }
+    }
+
+    /// Replaces the attribute-vector line list (world-space segment pairs).
+    /// An empty slice clears the channel; the draw early-outs on zero.
+    pub fn set_attr_lines(&mut self, device: &wgpu::Device, lines: &[[f32; 3]]) {
+        let (buf, count) = create_normals_buffer(device, lines, "Attr Vectors Buffer");
+        self.attr_lines_buf = buf;
+        self.attr_lines_count = count;
     }
 }
 

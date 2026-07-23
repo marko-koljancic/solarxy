@@ -165,6 +165,34 @@ export function setTexturePanelOpen(open: boolean): void {
   }
 }
 
+// ---- the attributes pane (added and removed on demand) ----
+
+export function isAttributesPanelOpen(): boolean {
+  return api?.getPanel("attributes") !== undefined;
+}
+
+/** Adds the Attributes spreadsheet (tabbed beside Properties, the Assets
+ * pattern) or removes it. */
+export function setAttributesPanelOpen(open: boolean): void {
+  if (!api) return;
+  const existing = api.getPanel("attributes");
+  if (open) {
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const properties = api.getPanel("properties");
+    api.addPanel({
+      id: "attributes",
+      component: "attributes",
+      title: "Attributes",
+      position: properties ? { referenceGroup: properties.api.group } : undefined,
+    });
+  } else if (existing) {
+    api.removePanel(existing);
+  }
+}
+
 // ---- the review panel (added and removed on demand, N) ----
 
 export function isReviewPanelOpen(): boolean {

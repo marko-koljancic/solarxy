@@ -211,7 +211,7 @@ mod tests {
             type_id: "widget",
             version: 2,
             display_name: "Widget",
-            category: Category::Primitives,
+            category: Category::Generators,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![],

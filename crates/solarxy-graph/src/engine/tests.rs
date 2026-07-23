@@ -309,13 +309,15 @@ fn snapshot_and_registry_snapshot_serialize() {
     // Degrees unit is surfaced for the transform's rotate param.
     assert!(json.contains("degrees"));
     // The Title Case category label rides beside the stable snake_case id.
-    assert!(json.contains("\"categoryLabel\":\"Primitives\""));
-    assert!(json.contains("\"category\":\"primitives\""));
+    assert!(json.contains("\"categoryLabel\":\"Generators\""));
+    assert!(json.contains("\"category\":\"generators\""));
     // Node identity for the canvas: the icon key and the silhouette family
     // (merge is the gather-shaped exception).
     assert!(json.contains("\"glyph\":\"box\""));
     assert!(json.contains("\"role\":\"standard\""));
     assert!(json.contains("\"role\":\"gather\""));
+    // The attribute-name widget variant (the attribute nodes' Name param).
+    assert!(json.contains("\"paramType\":\"attributeName\""));
 }
 
 #[test]
@@ -4509,4 +4511,108 @@ fn geo_export_obj_with_materials_delivers_a_zip() {
             String::from_utf8_lossy(needle)
         );
     }
+}
+
+#[test]
+fn attribute_summary_and_page_read_a_cooked_chain() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let rand = add(&mut e, ctx, "attribute_randomize");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: box_id,
+            port: "geometry".to_string(),
+        },
+        to: PortRefDto {
+            node: rand,
+            port: "geometry".to_string(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(rand),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    // The randomize node's defaults write the vec4 `color` lane; the
+    // box's fixed normals and UVs surface as the N/uv pseudo-lanes.
+    let summary = e.attribute_summary(rand).expect("cooked geometry");
+    assert_eq!(summary.points, 24);
+    assert_eq!(
+        summary
+            .point
+            .iter()
+            .map(|l| (l.name.as_str(), l.ty, l.len))
+            .collect::<Vec<_>>(),
+        vec![("N", "vec3", 24), ("color", "vec4", 24), ("uv", "vec2", 24)],
+    );
+    assert!(summary.primitive.is_empty());
+
+    // A window of the point table: P leads, the lane follows, and the
+    // serde form is camelCase like every boundary DTO.
+    let page = e
+        .attribute_page(rand, solarxy_kernel::AttributeDomain::Point, 4, 2)
+        .expect("cooked geometry");
+    assert_eq!(page.total, 24);
+    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.rows[0].len(), 3 + 3 + 4 + 2);
+    let json = serde_json::to_string(&page).unwrap();
+    assert!(json.contains("\"total\":24"));
+    assert!(json.contains("\"columns\""));
+    assert!(json.contains("\"components\""));
+
+    // No committed output: a fresh unconnected node id yields None.
+    assert!(e.attribute_summary(NodeId(u64::MAX)).is_none());
+}
+
+#[test]
+fn cook_warnings_read_back_after_a_cook_and_clear_when_fixed() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let rand = add(&mut e, ctx, "attribute_randomize");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: box_id,
+            port: "geometry".to_string(),
+        },
+        to: PortRefDto {
+            node: rand,
+            port: "geometry".to_string(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(rand),
+    })
+    .unwrap();
+    // Writing `uv` as vec4 warns twice: the reserved contract wants vec2,
+    // and the box's fixed uv buffer is being replaced with a new type.
+    e.apply(Command::SetParam {
+        ctx,
+        node: rand,
+        key: "attr_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("uv".into())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let warnings = e.cook_warnings(rand);
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+
+    // A quiet recook clears the set: the vec4 default under a fresh name
+    // matches nothing on the input and no reserved contract.
+    e.apply(Command::SetParam {
+        ctx,
+        node: rand,
+        key: "attr_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("tint".into())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(e.cook_warnings(rand).is_empty());
+    assert!(e.cook_warnings(box_id).is_empty(), "quiet nodes stay empty");
 }

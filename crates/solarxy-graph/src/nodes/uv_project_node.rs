@@ -21,7 +21,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "uv_project",
         version: 1,
         display_name: "UV Project",
-        category: Category::Modifiers,
+        category: Category::Attribute,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

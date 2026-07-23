@@ -23,8 +23,8 @@ const PROBE: NodeTypeSnapshot = {
   typeId: "probe",
   version: 1,
   displayName: "Probe",
-  category: "primitives",
-  categoryLabel: "Primitives",
+  category: "generators",
+  categoryLabel: "Generators",
   contexts: ["geo"],
   opens: null,
   inputs: [
@@ -42,6 +42,7 @@ const PROBE: NodeTypeSnapshot = {
     { key: "offset", label: "Offset", group: "shape", paramType: "vec3", enumVariants: [], accept: [], default: [0, 0, 0], hard: null, soft: null, step: 0.01, unit: "none", doc: "" },
     { key: "tint", label: "Tint", group: "shape", paramType: "color", enumVariants: [], accept: [], default: [1, 1, 1, 1], hard: null, soft: null, step: null, unit: "none", drivenByPort: "detail_map", doc: "" },
     { key: "material", label: "Material", group: "shape", paramType: "nodePath", nodePath: { kind: "opens", opens: "mat" }, enumVariants: [], accept: [], default: null, hard: null, soft: null, step: null, unit: "none", doc: "" },
+    { key: "lane", label: "Lane", group: "shape", paramType: "attributeName", enumVariants: [], accept: [], default: "color", hard: null, soft: null, step: null, unit: "none", doc: "" },
   ],
   bypass: { mode: "mute" },
   doc: "A fabricated node the frontend has never seen.",
@@ -142,7 +143,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
   it("always resolves drawable node art (revamp D-18: glyph + role hints)", () => {
     const probe = descriptorFor(SNAP, "probe")!;
     // "probe" is a glyph key with no frontend art: the category fallback
-    // (primitives -> box) must produce a real path, never a broken icon.
+    // (generators -> box) must produce a real path, never a broken icon.
     expect(GLYPH_PATHS[probe.glyph]).toBeUndefined();
     expect(glyphPath(probe)).toBe(GLYPH_PATHS.box);
     // A declared, known role resolves as-is.

@@ -20,7 +20,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "scatter",
         version: 1,
         display_name: "Scatter",
-        category: Category::Modifiers,
+        category: Category::Copy,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

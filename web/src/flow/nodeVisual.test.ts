@@ -1,8 +1,10 @@
 // The silhouette generator: rounded-corner polygon paths and the
-// left-right symmetry commitment for every shaped role body.
+// left-right symmetry commitment for every shaped role body, plus the
+// category fallback totality (every taxonomy id must resolve to real art).
 
 import { describe, expect, it } from "vitest";
-import { ROLE_BODY_PATHS, roundedPolygonPath } from "./nodeVisual";
+import type { NodeTypeSnapshot } from "../engine/types";
+import { GLYPH_PATHS, ROLE_BODY_PATHS, glyphPath, nodeRole, roundedPolygonPath } from "./nodeVisual";
 
 /** Every coordinate pair in a path built from M/L/Q commands. */
 function pathPoints(d: string): [number, number][] {
@@ -38,6 +40,47 @@ describe("roundedPolygonPath", () => {
       expect(x).toBeLessThanOrEqual(10);
       expect(y).toBeGreaterThanOrEqual(0);
       expect(y).toBeLessThanOrEqual(10);
+    }
+  });
+});
+
+describe("category fallback totality (the 14-category taxonomy)", () => {
+  const CATEGORIES: NodeTypeSnapshot["category"][] = [
+    "container",
+    "generators",
+    "attribute",
+    "transform",
+    "copy",
+    "topology",
+    "shaders",
+    "import",
+    "export",
+    "lights",
+    "utility",
+    "tex_generate",
+    "tex_adjust",
+    "tex_composite",
+  ];
+
+  const probe = (category: NodeTypeSnapshot["category"]): NodeTypeSnapshot =>
+    ({
+      typeId: "probe",
+      category,
+      glyph: "no_such_glyph",
+      role: "hologram",
+    }) as unknown as NodeTypeSnapshot;
+
+  it("every category id resolves drawable glyph art for an unknown glyph key", () => {
+    for (const cat of CATEGORIES) {
+      const d = glyphPath(probe(cat));
+      expect(d, cat).toBeTypeOf("string");
+      expect(Object.values(GLYPH_PATHS), cat).toContain(d);
+    }
+  });
+
+  it("every category id resolves a silhouette role for an unknown role", () => {
+    for (const cat of CATEGORIES) {
+      expect(nodeRole(probe(cat)), cat).toBeTypeOf("string");
     }
   });
 });

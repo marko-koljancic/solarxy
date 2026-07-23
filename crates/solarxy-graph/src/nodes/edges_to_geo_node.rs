@@ -16,7 +16,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "edges_to_geo",
         version: 1,
         display_name: "Edges to Geo",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

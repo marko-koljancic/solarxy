@@ -6,12 +6,13 @@
 // AddNode. Opens on the "+" button or Tab.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { NodeGlyph } from "./NodeGlyph";
 import { Popover, renderDoc } from "./Popover";
 import { dispatch } from "../engine/session";
 import type { NodeTypeSnapshot } from "../engine/types";
 import { screenToFlow } from "../flow/flowProjection";
 import { MARGIN_PX, palettePlacement, type Point } from "../flow/palettePlacement";
-import { contextKind } from "../registry/datatypes";
+import { compareCategories, contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
@@ -89,13 +90,17 @@ export function NodePalette() {
   );
 
   // Id/label pairs: filtering stays keyed by the stable snake_case id, the
-  // buttons render the Title Case label from the snapshot.
+  // buttons render the Title Case label from the snapshot. The snapshot
+  // lists nodes alphabetically by type id, so the curated CATEGORY_ORDER
+  // decides presentation; plain alphabetical would scatter related
+  // categories.
   const categories = useMemo(() => {
     const labels = new Map(contextNodes.map((n) => [n.category, n.categoryLabel]));
-    const cats = [...labels.keys()].sort();
     return [
       { id: ALL_CATEGORY, label: ALL_CATEGORY },
-      ...cats.map((id) => ({ id, label: labels.get(id) ?? id })),
+      ...[...labels.entries()]
+        .sort(([a], [b]) => compareCategories(a, b))
+        .map(([id, label]) => ({ id, label })),
     ];
   }, [contextNodes]);
 
@@ -254,7 +259,10 @@ export function NodePalette() {
                       onClick={() => add(n.typeId)}
                       onMouseEnter={() => setCursor(i)}
                     >
-                      <span>{n.displayName}</span>
+                      <span className="palette-item-name">
+                        <NodeGlyph desc={n} />
+                        {n.displayName}
+                      </span>
                       <span className="palette-item-cat">{n.categoryLabel}</span>
                     </button>
                   </Popover>

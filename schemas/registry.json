@@ -149,8 +149,8 @@
       "typeId": "array",
       "version": 1,
       "displayName": "Array",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -361,8 +361,8 @@
       "typeId": "attribute_create",
       "version": 1,
       "displayName": "Attribute Create",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -426,7 +426,7 @@
           "key": "attr_name",
           "label": "Name",
           "group": "attribute",
-          "paramType": "text",
+          "paramType": "attributeName",
           "enumVariants": [],
           "accept": [],
           "default": "value",
@@ -561,8 +561,8 @@
       "typeId": "attribute_randomize",
       "version": 1,
       "displayName": "Attribute Randomize",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -626,7 +626,7 @@
           "key": "attr_name",
           "label": "Name",
           "group": "attribute",
-          "paramType": "text",
+          "paramType": "attributeName",
           "enumVariants": [],
           "accept": [],
           "default": "color",
@@ -815,8 +815,8 @@
       "typeId": "blur",
       "version": 1,
       "displayName": "Blur",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -1020,8 +1020,8 @@
       "typeId": "box",
       "version": 2,
       "displayName": "Box",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -1204,8 +1204,8 @@
       "typeId": "brick",
       "version": 1,
       "displayName": "Brick",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -1432,8 +1432,8 @@
       "typeId": "brightness_contrast",
       "version": 1,
       "displayName": "Brightness / Contrast",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -1850,8 +1850,8 @@
       "typeId": "checker",
       "version": 1,
       "displayName": "Checker",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -2042,8 +2042,8 @@
       "typeId": "circle",
       "version": 1,
       "displayName": "Circle",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -2181,8 +2181,8 @@
       "typeId": "compute_normals",
       "version": 2,
       "displayName": "Compute Normals",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -2275,8 +2275,8 @@
       "typeId": "cone",
       "version": 2,
       "displayName": "Cone",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -2419,8 +2419,8 @@
       "typeId": "constant",
       "version": 1,
       "displayName": "Constant",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -2549,8 +2549,8 @@
       "typeId": "copy_to_points",
       "version": 1,
       "displayName": "Copy to Points",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -2728,8 +2728,8 @@
       "typeId": "cylinder",
       "version": 2,
       "displayName": "Cylinder",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -2893,8 +2893,8 @@
       "typeId": "delete",
       "version": 1,
       "displayName": "Delete",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -3331,8 +3331,8 @@
       "typeId": "edges_to_geo",
       "version": 1,
       "displayName": "Edges to Geo",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -3412,8 +3412,8 @@
       "typeId": "gamma",
       "version": 1,
       "displayName": "Gamma",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -3722,8 +3722,8 @@
       "typeId": "geo_export",
       "version": 2,
       "displayName": "Export Geometry",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "geo"
       ],
@@ -3884,8 +3884,8 @@
       "typeId": "gradient",
       "version": 1,
       "displayName": "Gradient",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -4087,8 +4087,8 @@
       "typeId": "height_to_normal",
       "version": 1,
       "displayName": "Height to Normal",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -4350,8 +4350,8 @@
       "typeId": "hue_saturation",
       "version": 1,
       "displayName": "Hue / Saturation",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -4484,8 +4484,8 @@
       "typeId": "image_export",
       "version": 1,
       "displayName": "Export Image",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "tex"
       ],
@@ -5272,8 +5272,8 @@
       "typeId": "invert",
       "version": 1,
       "displayName": "Invert",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -5350,8 +5350,8 @@
       "typeId": "levels",
       "version": 1,
       "displayName": "Levels",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -5523,13 +5523,34 @@
       "typeId": "line",
       "version": 1,
       "displayName": "Line",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
       "opens": null,
-      "inputs": [],
+      "inputs": [
+        {
+          "key": "start_point",
+          "label": "Start Point",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "Optional. When connected, the starting endpoint snaps to point 0 of this geometry's first non-empty mesh, overriding the parameter."
+        },
+        {
+          "key": "end_point",
+          "label": "End Point",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "Optional. When connected, the finishing endpoint snaps to point 0 of this geometry's first non-empty mesh, overriding the parameter."
+        }
+      ],
       "outputs": [
         {
           "key": "geometry",
@@ -5589,8 +5610,8 @@
           "soft": null,
           "step": null,
           "unit": "meters",
-          "drivenByPort": null,
-          "doc": "The starting end of the line, in metres. Both ends are free points; nothing pins the line to the origin."
+          "drivenByPort": "start_point",
+          "doc": "The starting end of the line, in metres. Both ends are free points; nothing pins the line to the origin. A geometry wired into the matching input overrides this with its first point."
         },
         {
           "key": "end",
@@ -5608,8 +5629,8 @@
           "soft": null,
           "step": null,
           "unit": "meters",
-          "drivenByPort": null,
-          "doc": "The finishing end of the line, in metres. Both ends are free points; nothing pins the line to the origin."
+          "drivenByPort": "end_point",
+          "doc": "The finishing end of the line, in metres. Both ends are free points; nothing pins the line to the origin. A geometry wired into the matching input overrides this with its first point."
         },
         {
           "key": "points",
@@ -5636,7 +5657,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A straight polyline from Start to End, subdivided into evenly spaced points. It is the first curve primitive: line topology has no surface, so it draws as an unlit wire at a constant one-pixel width, unaffected by lights and materials.\n\nAt the default 2 points it is a single segment. More points give downstream nodes something to grab: a deform has interior points to move, and `copy_to_points` can stamp a template along the line's vertices.\n\nThe default runs from the origin one metre up the Y axis. Wires and edges are unpickable in the viewport; select the node on the canvas.",
+      "doc": "A straight polyline from Start to End, subdivided into evenly spaced points. It is the first curve primitive: line topology has no surface, so it draws as an unlit wire at a constant one-pixel width, unaffected by lights and materials.\n\nAt the default 2 points it is a single segment. More points give downstream nodes something to grab: a deform has interior points to move, and `copy_to_points` can stamp a template along the line's vertices.\n\nThe default runs from the origin one metre up the Y axis. Wires and edges are unpickable in the viewport; select the node on the canvas.\n\nThe two optional inputs anchor the ends to existing geometry: a connected input overrides its parameter with point 0 of the geometry's first non-empty mesh, so a single-point `scatter` or `points_from_geo` upstream pins that end and the line follows it on every recook.",
       "searchAliases": [
         "curve",
         "segment",
@@ -5651,8 +5672,8 @@
       "typeId": "matcap",
       "version": 1,
       "displayName": "MatCap",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -5765,8 +5786,8 @@
       "typeId": "material",
       "version": 2,
       "displayName": "Material",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "geo"
       ],
@@ -6108,8 +6129,8 @@
       "typeId": "merge",
       "version": 2,
       "displayName": "Merge",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -6188,8 +6209,8 @@
       "typeId": "mirror",
       "version": 1,
       "displayName": "Mirror",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -6331,8 +6352,8 @@
       "typeId": "mix",
       "version": 1,
       "displayName": "Mix",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -6481,8 +6502,8 @@
       "typeId": "mix_material",
       "version": 1,
       "displayName": "Mix Material",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -6604,8 +6625,8 @@
       "typeId": "noise",
       "version": 1,
       "displayName": "Noise",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -6960,8 +6981,8 @@
       "typeId": "pack_orm",
       "version": 1,
       "displayName": "Pack ORM",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -7115,8 +7136,8 @@
       "typeId": "plane",
       "version": 2,
       "displayName": "Plane",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -7524,8 +7545,8 @@
       "typeId": "points_from_geo",
       "version": 1,
       "displayName": "Points from Geo",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -7629,8 +7650,8 @@
       "typeId": "principled",
       "version": 1,
       "displayName": "Principled",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -7845,8 +7866,8 @@
       "typeId": "ramp",
       "version": 1,
       "displayName": "Ramp",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -8222,8 +8243,8 @@
       "typeId": "render",
       "version": 1,
       "displayName": "Render",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "obj"
       ],
@@ -8350,8 +8371,8 @@
       "typeId": "scatter",
       "version": 1,
       "displayName": "Scatter",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -8474,8 +8495,8 @@
       "typeId": "sharpen",
       "version": 1,
       "displayName": "Sharpen",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -8571,8 +8592,8 @@
       "typeId": "sphere",
       "version": 2,
       "displayName": "Sphere",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -9013,8 +9034,8 @@
       "typeId": "subdivide",
       "version": 2,
       "displayName": "Subdivide",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -9361,8 +9382,8 @@
       "typeId": "toon",
       "version": 1,
       "displayName": "Toon",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -9493,8 +9514,8 @@
       "typeId": "torus",
       "version": 2,
       "displayName": "Torus",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -9637,8 +9658,8 @@
       "typeId": "torus_knot",
       "version": 2,
       "displayName": "Torus Knot",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -9817,8 +9838,8 @@
       "typeId": "transform",
       "version": 2,
       "displayName": "Transform",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "transform",
+      "categoryLabel": "Transform",
       "contexts": [
         "geo"
       ],
@@ -10040,8 +10061,8 @@
       "typeId": "unlit",
       "version": 1,
       "displayName": "Unlit",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -10154,8 +10175,8 @@
       "typeId": "uv_project",
       "version": 1,
       "displayName": "UV Project",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -10331,8 +10352,8 @@
       "typeId": "validate",
       "version": 2,
       "displayName": "Validate",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "utility",
+      "categoryLabel": "Utility",
       "contexts": [
         "geo"
       ],
@@ -10529,8 +10550,8 @@
       "typeId": "voronoi",
       "version": 1,
       "displayName": "Voronoi",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],

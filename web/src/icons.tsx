@@ -220,3 +220,39 @@ export function IconToolScale(p: IconProps) {
     </Svg>
   );
 }
+
+export function IconAttrLabels(p: IconProps) {
+  // A value tag beside its anchor point: the labels viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="3.6" cy="12.4" r="1.4" fill="currentColor" stroke="none" />
+      <path d="M6 10.5 8.2 8.3" />
+      <rect x="7" y="3" width="7" height="5.2" rx="1" />
+      <path d="M8.6 5.6 h3.8" />
+    </Svg>
+  );
+}
+
+export function IconAttrVectors(p: IconProps) {
+  // Two arrows leaving their points: the Vec3 arrow viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M5 11 10.4 5.6 M10.4 5.6 h-2.6 M10.4 5.6 v2.6" />
+      <circle cx="11.6" cy="12.6" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M11.6 11.4 V7 M11.6 7 l-1.6 1.7 M11.6 7 l1.6 1.7" />
+    </Svg>
+  );
+}
+
+export function IconAttrPoints(p: IconProps) {
+  // Numbered points: the point-marker viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="4.4" cy="4.6" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="11.4" cy="6.4" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="6.4" cy="11.6" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M12.6 11 h2 M13.6 10 v2" />
+    </Svg>
+  );
+}

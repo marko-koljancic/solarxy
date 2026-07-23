@@ -147,6 +147,11 @@ body.precision-drag-active {
   justify-content: center;
   color: var(--accent-primary);
 }
+.menu-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.6rem;
+}
 
 .menu-label {
   flex: 1;
@@ -289,16 +294,45 @@ body.precision-drag-active {
 }
 
 .crumb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   background: none;
   border: none;
+  border-radius: 3px;
   color: var(--accent-primary);
   cursor: pointer;
-  padding: 0;
+  padding: 0.2rem 0.4rem;
+  margin: 0 -0.2rem;
   font: inherit;
+  line-height: 1;
+}
+
+.crumb-link:hover {
+  background: var(--hover-bg);
+  text-decoration: underline;
+  text-underline-offset: 0.3rem;
+}
+
+/* The current (last) crumb: plain ink, same metrics as the links so the
+ * row does not shift when navigating. */
+.crumb-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  padding: 0.2rem 0.4rem;
+  margin: 0 -0.2rem;
+  line-height: 1;
 }
 
 .crumb-sep {
   color: var(--text-secondary);
+  line-height: 1;
+}
+
+.breadcrumb .node-glyph-icon {
+  opacity: 0.8;
 }
 
 .node-canvas-host {
@@ -476,6 +510,22 @@ body.precision-drag-active {
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* The text-adjacent variant (palette, Add menu, list view): follows the
+ * surrounding text color instead of the pastel-mixed canvas ink. */
+.node-glyph-icon {
+  flex: 0 0 auto;
+  vertical-align: -2px;
+}
+
+.node-glyph-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.75;
 }
 
 /* Wings: bypass left, display right; visual
@@ -865,6 +915,13 @@ body.precision-drag-active {
 .palette-item.cursor {
   background: var(--background-quaternary);
   color: var(--accent-primary);
+}
+
+.palette-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
 }
 
 .palette-item-cat {
@@ -1352,6 +1409,13 @@ body.precision-drag-active {
   padding: 2rem 2.2rem;
   width: 380px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  /* The shared shell: titlebar / scrolling body / (optional) resize
+   * handle. Height is natural until a resize pins it. */
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 3.2rem);
+  max-height: calc(100vh - 3.2rem);
+  position: relative;
 }
 
 .modal h3 {
@@ -1360,6 +1424,70 @@ body.precision-drag-active {
   /* Weight discipline: 600 for headings; 700 stays identity-only. */
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.modal-titlebar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.modal-titlebar:active {
+  cursor: grabbing;
+}
+.modal-titlebar h3 {
+  flex: 1;
+}
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  margin: -0.4rem -0.8rem 0 0;
+  border: none;
+  border-radius: 0.4rem;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.modal-close:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* Breathing room so the scrollbar does not hug the box edge. */
+  margin: 0 -0.6rem;
+  padding: 0 0.6rem;
+}
+
+.modal-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  cursor: nwse-resize;
+  touch-action: none;
+  /* A quiet corner grip: two diagonal strokes. */
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0 50%,
+      var(--border-primary) 50% 58%,
+      transparent 58% 72%,
+      var(--border-primary) 72% 80%,
+      transparent 80%
+    );
+  border-bottom-right-radius: 0.8rem;
 }
 
 .modal p {
@@ -2275,12 +2403,20 @@ body.reduce-motion .cook-arc {
 
 /* Category -> the fill custom property both body kinds consume (the CSS
  * rect bodies via background-color, the shaped SVG bodies via .body-fill). */
-.flow-node.cat-primitives { --cat-fill: var(--node-cat-primitives); }
-.flow-node.cat-modifiers { --cat-fill: var(--node-cat-modifiers); }
+.flow-node.cat-generators { --cat-fill: var(--node-cat-generators); }
+.flow-node.cat-attribute { --cat-fill: var(--node-cat-attribute); }
+.flow-node.cat-transform { --cat-fill: var(--node-cat-transform); }
+.flow-node.cat-copy { --cat-fill: var(--node-cat-copy); }
+.flow-node.cat-topology { --cat-fill: var(--node-cat-topology); }
+.flow-node.cat-shaders { --cat-fill: var(--node-cat-shaders); }
 .flow-node.cat-import { --cat-fill: var(--node-cat-import); }
+.flow-node.cat-export { --cat-fill: var(--node-cat-export); }
 .flow-node.cat-utility { --cat-fill: var(--node-cat-utility); }
 .flow-node.cat-lights { --cat-fill: var(--node-cat-lights); }
 .flow-node.cat-container { --cat-fill: var(--node-cat-container); }
+.flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
+.flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
+.flow-node.cat-tex_composite { --cat-fill: var(--node-cat-tex_composite); }
 
 /* ---- Typed wires (source data-type colors, matching the
  * handle palette in registry/datatypes.ts) ---- */
@@ -2438,6 +2574,10 @@ body.reduce-motion .cook-arc {
   position: fixed;
   z-index: 55;
   width: 320px;
+  /* Resizable: the header and body flex so a pinned height scrolls the
+   * body instead of clipping it. */
+  display: flex;
+  flex-direction: column;
   background: var(--background-secondary);
   border: 1px solid var(--border-primary);
   border-radius: 6px;
@@ -2464,11 +2604,23 @@ body.reduce-motion .cook-arc {
   color: var(--text-secondary);
   font-size: 11px;
 }
+.node-info-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.node-info-warning {
+  color: var(--cat-warning);
+}
+
 .node-info-body {
   padding: 8px 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .node-info-doc {
   color: var(--text-secondary);
@@ -2544,6 +2696,13 @@ body.reduce-motion .cook-arc {
   border-bottom: 1px solid var(--border-primary);
   cursor: default;
 }
+/* Zebra rows: a whisper of the ink color, theme-aware through the token.
+ * Same specificity as the selected/hover rules below (deliberately no
+ * `tbody`, which would add an element tier and win), so declaration
+ * order lets selection and hover paint over the stripe. */
+.flow-list tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
 .flow-list tr.selected td {
   background: var(--selection);
 }
@@ -2566,6 +2725,161 @@ body.reduce-motion .cook-arc {
   position: static;
   display: inline-block;
   margin-right: 6px;
+  /* The base .display-dot centers itself with translateY(-50%) against an
+   * absolute anchor; inline flow must not inherit that shift. */
+  transform: none;
+  vertical-align: middle;
+}
+
+/* The first cell lays out dot, glyph, and label on one centered line. */
+.flow-list td:first-child {
+  white-space: nowrap;
+}
+.flow-list td:first-child .node-glyph-icon {
+  margin-right: 6px;
+  vertical-align: -2.5px;
+  opacity: 0.85;
+}
+
+/* Radial-menu actions as hover-revealed square row buttons. */
+.flow-list-actions-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+.row-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 6px;
+  opacity: 0;
+  transition: opacity 80ms ease;
+  vertical-align: middle;
+}
+.flow-list tr:hover .row-actions,
+.row-actions:focus-within {
+  opacity: 1;
+}
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.row-action:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+.row-action.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.row-action:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.row-action-glyph {
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+/* ---- The Attributes pane: virtualized spreadsheet ---- */
+
+.attr-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.attr-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 1rem 0;
+  border-bottom: 1px solid var(--border-primary);
+}
+.attr-pane-tabs {
+  border-bottom: none;
+  padding: 0;
+}
+.attr-pane-node {
+  font-size: 1.2rem;
+  color: var(--text-primary);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attr-pane-count {
+  margin-left: auto;
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.attr-pane-empty {
+  padding: 2.4rem 1.2rem;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+}
+.attr-pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.attr-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.attr-table-body {
+  position: relative;
+}
+.attr-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  height: 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-primary);
+}
+/* Zebra by DATA parity (rows are windowed, so :nth-child parity would
+ * shift while scrolling; the component stripes by row index instead). */
+.attr-row.striped {
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+.attr-cell {
+  flex: 0 0 9rem;
+  padding: 0 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  text-align: right;
+}
+.attr-cell-num {
+  flex: 0 0 6rem;
+  color: var(--text-secondary);
+}
+.attr-cell-pending {
+  color: var(--text-tertiary, var(--text-secondary));
 }
 
 /* ---- D1: properties underline tabs ---- */
@@ -3170,6 +3484,104 @@ body.reduce-motion .cook-arc {
   user-select: none;
 }
 
+/* The attribute-visualization strip: the tool column's mirror twin on the
+   right edge. Same overlay rules: never a DOM column, never moves the
+   canvas. */
+.attr-column {
+  position: absolute;
+  right: var(--spacing-sm);
+  top: 4.4rem;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  user-select: none;
+}
+
+.attr-lane-picker {
+  position: relative;
+}
+
+.attr-lane-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 12rem;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-secondary) 90%, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.attr-lane-trigger:hover,
+.attr-lane-trigger.open {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+.attr-lane-trigger.stale .attr-lane-name {
+  opacity: 0.5;
+}
+.attr-lane-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.attr-lane-list {
+  right: 0;
+  left: auto;
+  min-width: 12rem;
+}
+
+/* Pooled attribute pins: the review-pane-clip pattern. */
+.attr-pin-clip {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 11;
+}
+/* A pin is a ZERO-SIZE anchor whose origin is the projected point (the
+ * frame patch writes only `transform`); the dot and text position
+ * themselves absolutely around it, so the dot center sits exactly on the
+ * vertex regardless of the text's size. */
+.attr-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  visibility: hidden;
+  will-change: transform;
+}
+.attr-pin-dot {
+  position: absolute;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  transform: translate(-50%, -50%);
+}
+.attr-pin-text {
+  position: absolute;
+  left: 0.55rem;
+  top: 0;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
 /* Flat: the group is a plain backdrop that separates the buttons from the 3D
    scene behind them, with no frame of its own. The gap between groups is what
    separates selection from the transform trio; a border would only add a
@@ -3431,6 +3843,45 @@ body.reduce-motion .cook-arc {
 .select {
   position: relative;
   display: inline-block;
+}
+
+/* The attributeName combobox: a text input with a chevron opening the
+ * upstream-lane list; the list reuses the select's option styling. */
+.attr-name-field {
+  display: inline-flex;
+  align-items: center;
+}
+.attr-name-field .text-input {
+  padding-right: 2rem;
+}
+.attr-name-toggle {
+  position: absolute;
+  right: 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.attr-name-toggle:hover,
+.attr-name-toggle.open {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+.attr-name-list {
+  min-width: 100%;
+}
+.attr-name-empty {
+  padding: 0.6rem 1rem;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  white-space: nowrap;
 }
 
 .select-trigger {

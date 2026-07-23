@@ -18,7 +18,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "points_from_geo",
         version: 1,
         display_name: "Points from Geo",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

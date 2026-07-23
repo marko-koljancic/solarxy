@@ -17,7 +17,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "circle",
         version: 1,
         display_name: "Circle",
-        category: Category::Primitives,
+        category: Category::Generators,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![],

@@ -44,7 +44,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "plane",
         version: 2,
         display_name: "Plane",
-        category: Category::Primitives,
+        category: Category::Generators,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![],

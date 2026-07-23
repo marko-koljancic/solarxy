@@ -5,9 +5,11 @@
 // acts on.
 
 import { dispatch } from "../../engine/session";
-import { contextKind } from "../../registry/datatypes";
+import type { NodeTypeSnapshot } from "../../engine/types";
+import { compareCategories, contextKind } from "../../registry/datatypes";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { useUi } from "../../store/ui";
+import { NodeGlyph } from "../NodeGlyph";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
 export function NodesMenu() {
@@ -17,12 +19,12 @@ export function NodesMenu() {
   const rootNodes = useMirror((s) => selectGraph(s, "root").nodes);
 
   const kind = contextKind(registry, current, rootNodes);
-  const byCat = new Map<string, { label: string; typeId: string }[]>();
+  const byCat = new Map<string, NodeTypeSnapshot[]>();
   const catLabels = new Map<string, string>();
   for (const n of registry?.nodes ?? []) {
     if (!n.contexts.includes(kind)) continue;
     const g = byCat.get(n.category) ?? [];
-    g.push({ label: n.displayName, typeId: n.typeId });
+    g.push(n);
     byCat.set(n.category, g);
     catLabels.set(n.category, n.categoryLabel);
   }
@@ -38,9 +40,17 @@ export function NodesMenu() {
       onClick: () => useUi.getState().setPaletteOpen(true),
     },
     { divider: true },
-    ...[...byCat.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([cat, list]) => ({
+    // The snapshot lists nodes alphabetically by type id; the curated
+    // CATEGORY_ORDER decides submenu order.
+    ...[...byCat.entries()]
+      .sort(([a], [b]) => compareCategories(a, b))
+      .map(([cat, list]) => ({
       label: catLabels.get(cat) ?? cat,
-      submenu: list.map((t) => ({ label: t.label, onClick: () => addNode(t.typeId) })),
+      submenu: list.map((t) => ({
+        label: t.displayName,
+        icon: <NodeGlyph desc={t} size={13} />,
+        onClick: () => addNode(t.typeId),
+      })),
     })),
   ];
 

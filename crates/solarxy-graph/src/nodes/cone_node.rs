@@ -15,7 +15,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "cone",
         version: 2,
         display_name: "Cone",
-        category: Category::Primitives,
+        category: Category::Generators,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![],

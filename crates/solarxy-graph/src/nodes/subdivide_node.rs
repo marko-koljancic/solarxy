@@ -28,7 +28,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "subdivide",
         version: 2,
         display_name: "Subdivide",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

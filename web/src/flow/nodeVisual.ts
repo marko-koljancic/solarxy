@@ -125,22 +125,38 @@ export const GLYPH_PATHS: Record<string, string> = {
  * future Rust node with a novel glyph key degrades to its family icon). */
 const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
   container: "geo",
-  primitives: "box",
-  modifiers: "transform",
+  generators: "box",
+  attribute: "attribute_create",
+  transform: "transform",
+  copy: "copy_to_points",
+  topology: "subdivide",
+  shaders: "material",
   import: "import_obj",
+  export: "geo_export",
   lights: "point",
   utility: "null",
+  tex_generate: "checker",
+  tex_adjust: "levels",
+  tex_composite: "mix",
 };
 
 /** Category -> the silhouette used when a node declares no role (older
  * snapshots, fabricated test nodes). */
 const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
   container: "container",
-  primitives: "standard",
-  modifiers: "standard",
+  generators: "standard",
+  attribute: "standard",
+  transform: "standard",
+  copy: "standard",
+  topology: "standard",
+  shaders: "standard",
   import: "standard",
+  export: "terminal",
   lights: "light",
   utility: "standard",
+  tex_generate: "imageSource",
+  tex_adjust: "standard",
+  tex_composite: "standard",
 };
 
 /** The 16x16 glyph path for a node type: declared key first, category art

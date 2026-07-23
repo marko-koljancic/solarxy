@@ -18,7 +18,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "compute_normals",
         version: 2,
         display_name: "Compute Normals",
-        category: Category::Modifiers,
+        category: Category::Attribute,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

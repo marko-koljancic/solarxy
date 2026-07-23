@@ -8,6 +8,11 @@ import type { GizmoPrefs, SelectionPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
+  AttrDomain,
+  AttrPin,
+  AttrVizState,
+  AttributePage,
+  AttributeSummary,
   CameraCommand,
   CameraPose,
   Command,
@@ -82,6 +87,44 @@ export class SolarxyClient {
    * polled once per animation frame while markers are shown. */
   reviewMarkers(): MarkerScreen[] {
     return this.app.review_markers() as MarkerScreen[];
+  }
+
+  /** The lane inventory of a node's cooked geometry (both domains);
+   * undefined while nothing is committed. Fetched on demand (picker open,
+   * pane refresh), never polled. */
+  attributeSummary(node: NodeId): AttributeSummary | undefined {
+    return (this.app.attribute_summary(node) ?? undefined) as AttributeSummary | undefined;
+  }
+
+  /** The last completed cook's warnings for one node (empty when quiet);
+   * fetched when the info card opens or the cook status changes. */
+  cookWarnings(node: NodeId): string[] {
+    return this.app.cook_warnings(node) as string[];
+  }
+
+  /** One window of a node's cooked attribute values; only the page
+   * crosses the boundary. */
+  attributeTable(
+    node: NodeId,
+    domain: AttrDomain,
+    offset: number,
+    limit: number,
+  ): AttributePage | undefined {
+    return (this.app.attribute_table(node, domain, offset, limit) ?? undefined) as
+      | AttributePage
+      | undefined;
+  }
+
+  /** Replaces the host-owned attribute-visualization state; returns the
+   * refreshed view state (the mutator convention). */
+  setAttrViz(state: AttrVizState): ViewStateDto {
+    return this.app.set_attr_viz(state) as ViewStateDto;
+  }
+
+  /** Attribute pins (nearest-to-camera points per 3D pane, pane-relative
+   * CSS px); polled once per animation frame while a pin mode is on. */
+  attrPins(): AttrPin[] {
+    return this.app.attr_pins() as AttrPin[];
   }
 
   /** Requests an active-pane screenshot (rendered at frame end). */

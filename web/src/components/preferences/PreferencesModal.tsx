@@ -4,7 +4,7 @@
 // right. Four tabs per the ratified scope: Appearance, Review, Autosave,
 // Screenshot, Viewport. Esc and backdrop-click dismiss.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   DEFAULT_PREFS,
   usePrefs,
@@ -16,6 +16,7 @@ import {
   type ThemeChoice,
 } from "../../store/prefs";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { Modal } from "../Modal";
 import { Select } from "../Select";
 
 const TABS = ["Appearance", "Review", "Autosave", "Screenshot", "Viewport"] as const;
@@ -298,17 +299,6 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-
   const patch = (p: Partial<Prefs>) => setDraft((d) => ({ ...d, ...p }));
   const apply = () => usePrefs.getState().setPrefs(draft);
 
@@ -326,9 +316,12 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
     );
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-prefs" onClick={(e) => e.stopPropagation()}>
-        <h3>Preferences{dirty ? " *" : ""}</h3>
+    <Modal
+      id="preferences"
+      title={`Preferences${dirty ? " *" : ""}`}
+      onClose={onClose}
+      className="modal-prefs"
+    >
         <div className="prefs-tabs">
           {TABS.map((t) => (
             <button
@@ -376,7 +369,6 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
             onCancel={() => setConfirmReset(false)}
           />
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

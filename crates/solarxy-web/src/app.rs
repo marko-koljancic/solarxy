@@ -296,6 +296,13 @@ pub struct SolarxyApp {
     /// Whether the normals/bounds visualization aggregate is stale
     /// (geometry changed, env rebuilt, or an overlay mode just turned on).
     viz_dirty: bool,
+    /// Host-owned attribute visualization (session-only, scene-wide; never
+    /// saved into `.slxy`, never in undo). The strip's toggles and the
+    /// picked lane name.
+    attr_viz: AttrVizState,
+    /// Whether the attribute-vector line buffer is stale (mirrors the
+    /// `viz_dirty` sites, plus any `set_attr_viz`).
+    attr_dirty: bool,
 }
 
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
@@ -515,6 +522,8 @@ impl SolarxyApp {
             turntable_request: None,
             pending_screenshot: None,
             viz_dirty: true,
+            attr_viz: AttrVizState::default(),
+            attr_dirty: false,
             gizmo: GizmoState::default(),
             gizmo_readout: None,
         })
@@ -565,6 +574,7 @@ impl SolarxyApp {
         let delta = self.engine.take_scene_delta();
         if !delta.ops.is_empty() {
             self.viz_dirty = true;
+            self.attr_dirty = true;
             if let Err(e) =
                 self.scene_objects
                     .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
@@ -589,6 +599,7 @@ impl SolarxyApp {
 
         self.sync_env_bounds();
         self.sync_visualization();
+        self.sync_attr_vectors();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
         self.follow_look_through_cameras();
@@ -970,6 +981,155 @@ impl SolarxyApp {
         to_js(&annotations)
     }
 
+    /// The lane inventory of a node's cooked geometry (names, types,
+    /// counts, both domains), or `null` while nothing is committed. Feeds
+    /// the attribute-name pickers and the Attributes pane header; values
+    /// page separately through [`SolarxyApp::attribute_table`].
+    pub fn attribute_summary(&self, node: f64) -> Result<JsValue, JsError> {
+        to_js(&self.engine.attribute_summary(NodeId(node as u64)))
+    }
+
+    /// The last completed cook's warnings for one node (a plain string
+    /// array; empty when the cook was quiet). Pull-read by the node info
+    /// card when it opens or the node's cook status changes.
+    pub fn cook_warnings(&self, node: f64) -> Result<JsValue, JsError> {
+        to_js(&self.engine.cook_warnings(NodeId(node as u64)))
+    }
+
+    /// One window of a node's cooked attribute values
+    /// (`domain` is `"point"` or `"primitive"`). Only the requested page
+    /// crosses the boundary; the geometry stays in wasm.
+    pub fn attribute_table(
+        &self,
+        node: f64,
+        domain: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let domain = match domain.as_str() {
+            "primitive" => solarxy_kernel::AttributeDomain::Primitive,
+            _ => solarxy_kernel::AttributeDomain::Point,
+        };
+        to_js(
+            &self
+                .engine
+                .attribute_page(NodeId(node as u64), domain, offset, limit),
+        )
+    }
+
+    /// Replaces the host-owned attribute-visualization state (the right
+    /// strip's toggles and picked lane). Session-only: never saved, never
+    /// in undo. Returns the full view state, the mutator convention.
+    pub fn set_attr_viz(&mut self, state: JsValue) -> Result<JsValue, JsError> {
+        let next: AttrVizState = serde_wasm_bindgen::from_value(state)
+            .map_err(|e| JsError::new(&format!("attrViz: {e}")))?;
+        if next != self.attr_viz {
+            self.attr_viz = next;
+            self.attr_dirty = true;
+        }
+        to_js(&self.view_state_dto())
+    }
+
+    /// Attribute pins for the labels/points modes: a deterministic stride
+    /// sample of every displayed geometry's points (every Nth point, at
+    /// most `cap`), projected per 3D pane into pane-relative CSS px (the
+    /// review-marker convention). The sample is camera-independent, so
+    /// orbiting only hides and reveals pins at the screen edges. Point
+    /// numbers restart per displayed object, matching the Attributes
+    /// pane's table. Called once per animation frame while a pin mode is
+    /// on.
+    pub fn attr_pins(&self) -> Result<JsValue, JsError> {
+        use cgmath::{Matrix4, Transform};
+        let mut out: Vec<AttrPinDto> = Vec::new();
+        if !self.attr_viz.pins_wanted() {
+            return to_js(&out);
+        }
+        let lane = self
+            .attr_viz
+            .name
+            .as_deref()
+            .filter(|_| self.attr_viz.labels);
+        // Deterministic stride sampling: candidate points are every
+        // `stride`-th point of the global sequence, so the SAME points
+        // carry pins regardless of the camera (orbiting only hides and
+        // reveals them at the screen edges), they spread over the whole
+        // model instead of clumping on the nearest patch, and at most
+        // `cap` points are ever transformed per frame.
+        let cap = self.attr_viz.cap();
+        let geos = self.engine.display_geometries();
+        let total: usize = geos
+            .iter()
+            .flat_map(|(_, set, _)| set.meshes.iter())
+            .map(solarxy_kernel::KernelMesh::vertex_count)
+            .sum();
+        if total == 0 {
+            return to_js(&out);
+        }
+        let stride = total.div_ceil(cap).max(1);
+        let mut points: Vec<PinCandidate> = Vec::new();
+        let mut global = 0usize;
+        for (_node, set, m) in &geos {
+            let matrix = Matrix4::from(*m);
+            let mut ptnum: u64 = 0;
+            for mesh in &set.meshes {
+                let len = mesh.vertex_count();
+                let values =
+                    lane.and_then(|n| solarxy_graph::engine::attr_table::resolve_lane(mesh, n));
+                let first = global.next_multiple_of(stride);
+                let mut g = first;
+                while g < global + len {
+                    let i = g - global;
+                    let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
+                    points.push(PinCandidate {
+                        world: [tp.x, tp.y, tp.z],
+                        ptnum: ptnum + i as u64,
+                        slot: (g / stride) as u32,
+                        value: values.map(|l| l.components(i).unwrap_or_default()),
+                    });
+                    g += stride;
+                }
+                ptnum += len as u64;
+                global += len;
+            }
+        }
+        let rects = self.compute_panes();
+        for (pane_i, pane) in rects.iter().enumerate() {
+            if self.view.pane_settings[pane_i].pane_mode == PaneMode::UvMap || pane.height <= 0.0 {
+                continue;
+            }
+            let Some(cam_state) = self.view.cameras[pane_i].as_ref() else {
+                continue;
+            };
+            let mut cam = cam_state.camera;
+            cam.aspect = pane.width / pane.height.max(1.0);
+            let vp = cam.build_view_projection_matrix();
+            for c in &points {
+                let clip = vp * cgmath::Vector4::new(c.world[0], c.world[1], c.world[2], 1.0);
+                // Perspective behind-eye guard (ortho w is a constant 1,
+                // where the z-range cull below does the work instead).
+                if clip.w <= 0.0 {
+                    continue;
+                }
+                let ndc = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+                if ndc.0.abs() > NDC_XY_SLACK
+                    || ndc.1.abs() > NDC_XY_SLACK
+                    || !(NDC_Z_MIN..=NDC_Z_MAX).contains(&ndc.2)
+                {
+                    continue;
+                }
+                out.push(AttrPinDto {
+                    pane: pane_i,
+                    x: (ndc.0 + 1.0) * 0.5 * pane.width / self.dpr,
+                    y: (1.0 - ndc.1) * 0.5 * pane.height / self.dpr,
+                    ptnum: c.ptnum as f64,
+                    slot: c.slot,
+                    value: c.value.clone(),
+                });
+            }
+        }
+        to_js(&out)
+    }
+
     /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
     /// clips one absolutely-positioned box per pane, so pins offset from
     /// their pane's origin), one entry per visible (marker x 3D pane) pair,
@@ -1000,8 +1160,14 @@ impl SolarxyApp {
                 if clip.w <= 0.0 {
                     continue;
                 }
-                let ndc = (clip.x / clip.w, clip.y / clip.w);
-                if ndc.0.abs() > 1.05 || ndc.1.abs() > 1.05 {
+                let ndc = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+                // Same culls as the attribute pins; the z range is what
+                // rejects behind-camera markers under orthographic
+                // projection (clip.w is a constant 1 there).
+                if ndc.0.abs() > NDC_XY_SLACK
+                    || ndc.1.abs() > NDC_XY_SLACK
+                    || !(NDC_Z_MIN..=NDC_Z_MAX).contains(&ndc.2)
+                {
                     continue;
                 }
                 out.push(MarkerScreenDto {
@@ -2621,6 +2787,80 @@ impl SolarxyApp {
             Some(&normals),
             grid_color,
         );
+        // The rebuilt state's attr channel is empty; refill it.
+        self.attr_dirty = true;
+    }
+
+    /// Rebuilds (or clears) the attribute-vector line channel when it is
+    /// stale. Independent of `sync_visualization`: the arrows draw whenever
+    /// the strip enables them, with or without the normals/bounds overlays.
+    fn sync_attr_vectors(&mut self) {
+        if !self.attr_dirty {
+            return;
+        }
+        self.attr_dirty = false;
+        if !(self.attr_viz.vectors && self.attr_viz.name.is_some()) {
+            if self.env.vis.attr_lines_count > 0 {
+                self.env.vis.set_attr_lines(&self.device, &[]);
+            }
+            return;
+        }
+        let lines = self.build_attr_vector_lines();
+        self.env.vis.set_attr_lines(&self.device, &lines);
+    }
+
+    /// World-space arrow segments for the picked point lane (vec3, or the
+    /// xyz of vec4; map lane or the fixed `N` buffer), over
+    /// every displayed geometry: positions through the object matrix,
+    /// directions through the normal matrix for the reserved `N` lane
+    /// (bivector semantics under nonuniform scale) and the plain linear
+    /// part for everything else. Length scales with the value times the
+    /// normals-arrow factor, so magnitude stays readable.
+    fn build_attr_vector_lines(&self) -> Vec<[f32; 3]> {
+        use cgmath::{Matrix3, Matrix4, SquareMatrix, Transform};
+        let Some(name) = self.attr_viz.name.as_deref() else {
+            return Vec::new();
+        };
+        let is_normal_lane = name == solarxy_kernel::reserved::NORMAL;
+        let mut lines: Vec<[f32; 3]> = Vec::new();
+        for (_node, set, m) in self.engine.display_geometries() {
+            let matrix = Matrix4::from(m);
+            let linear = Matrix3::from_cols(
+                matrix.x.truncate(),
+                matrix.y.truncate(),
+                matrix.z.truncate(),
+            );
+            let dir_matrix = if is_normal_lane {
+                linear
+                    .invert()
+                    .map_or(linear, |inv| cgmath::Matrix::transpose(&inv))
+            } else {
+                linear
+            };
+            let scale = {
+                let d = set.bounds.diagonal();
+                if d > 1e-10 { d * 0.05 } else { 0.1 }
+            };
+            for mesh in &set.meshes {
+                // Vec3 and vec4 (xyz) lanes draw, map or fixed-buffer N;
+                // float/vec2 lanes have no spatial reading and skip.
+                let Some(lane) = solarxy_graph::engine::attr_table::resolve_lane(mesh, name) else {
+                    continue;
+                };
+                for (i, p) in mesh.positions.iter().enumerate() {
+                    let Some(v) = lane.direction(i) else { continue };
+                    let tp = matrix.transform_point(Point3::from(*p));
+                    let dir = dir_matrix * Vector3::from(v);
+                    lines.push([tp.x, tp.y, tp.z]);
+                    lines.push([
+                        tp.x + dir.x * scale,
+                        tp.y + dir.y * scale,
+                        tp.z + dir.z * scale,
+                    ]);
+                }
+            }
+        }
+        lines
     }
 
     /// The world-space visualization aggregate over
@@ -2744,8 +2984,10 @@ impl SolarxyApp {
         self.env = env;
         self.env_bounds = bounds;
         // The rebuilt environment starts with empty per-mesh viz data; the
-        // aggregate refills it when a pane wants overlays.
+        // aggregate refills it when a pane wants overlays (and the attr
+        // channel refills on its own dirty pass).
         self.viz_dirty = true;
+        self.attr_dirty = true;
     }
 
     /// Drives each look-through pane's camera from its bound `camera` node, so
@@ -3334,6 +3576,7 @@ impl SolarxyApp {
             pane_look_through,
             pane_camera_locked: self.view.camera_locked,
             pane_gate_aspect,
+            attr_viz: self.attr_viz.clone(),
         }
     }
 
@@ -3896,6 +4139,74 @@ fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {
 // ---- boundary DTOs (camelCase; the engine/scene-file types stay
 // snake_case on disk, so these bridge to the JS convention) ----
 
+/// Screen-edge slack shared by every DOM-pin projection (attribute pins
+/// and review markers): a little beyond the frustum so pins fade at the
+/// edge instead of popping exactly on it.
+const NDC_XY_SLACK: f32 = 1.05;
+/// The wgpu clip-space depth range with the same slack; the z cull is
+/// what rejects behind-camera points under orthographic projection,
+/// where `clip.w` is a constant 1.
+const NDC_Z_MIN: f32 = -0.05;
+const NDC_Z_MAX: f32 = 1.05;
+
+/// Host-owned attribute-visualization state (session-only, scene-wide):
+/// the right strip's three toggles, the picked point-lane name, and the
+/// pin cap. Deliberately NOT in `PaneDisplaySettings` (which is `Copy`,
+/// desktop-shared, and serialized into pane blobs) and never in `.slxy`
+/// or undo.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct AttrVizState {
+    labels: bool,
+    vectors: bool,
+    points: bool,
+    name: Option<String>,
+    /// Pin budget for labels/points; 0 means the default.
+    cap: u32,
+}
+
+impl AttrVizState {
+    const DEFAULT_CAP: usize = 64;
+    const MAX_CAP: usize = 256;
+
+    fn pins_wanted(&self) -> bool {
+        self.labels || self.points
+    }
+
+    fn cap(&self) -> usize {
+        if self.cap == 0 {
+            Self::DEFAULT_CAP
+        } else {
+            (self.cap as usize).min(Self::MAX_CAP)
+        }
+    }
+}
+
+/// One stride-sampled pin candidate, ready to project per pane.
+struct PinCandidate {
+    world: [f32; 3],
+    ptnum: u64,
+    slot: u32,
+    value: Option<Vec<f32>>,
+}
+
+/// One attribute pin: a point projected into a pane (pane-relative CSS
+/// px, the review-marker convention), its per-object point number, its
+/// stable candidate slot (the pin pool keys on it, so a pin element
+/// always shows the same point), and the lane value's components when
+/// labels are on (formatting stays in JS, where string building is
+/// cheap).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttrPinDto {
+    pane: usize,
+    x: f32,
+    y: f32,
+    ptnum: f64,
+    slot: u32,
+    value: Option<Vec<f32>>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ViewStateDto {
@@ -3915,6 +4226,9 @@ struct ViewStateDto {
     /// The framing aspect of each pane's look-through camera (for the gate
     /// overlay); `null` when the pane is a free view.
     pane_gate_aspect: [Option<f32>; 4],
+    /// The host-owned attribute-visualization state (the right strip
+    /// mirrors this, like the tool mode).
+    attr_viz: AttrVizState,
 }
 
 #[derive(Deserialize, Default)]

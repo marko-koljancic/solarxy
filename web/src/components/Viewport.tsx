@@ -28,6 +28,7 @@ import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
 import { GizmoReadout } from "./GizmoReadout";
 import { ToolColumn } from "./ToolColumn";
+import { AttrColumn, AttrPinsOverlay } from "./AttrColumn";
 import { ViewportContextMenu } from "./ViewportContextMenu";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPopup } from "./review/ReviewPopup";
@@ -272,9 +273,11 @@ export function Viewport() {
       <ViewportMenuBar />
       <div className="viewport-canvas-host" ref={hostRef}>
         <ToolColumn />
+        <AttrColumn />
         <GizmoReadout />
         <PaneToolbars />
         <ReviewOverlay />
+        <AttrPinsOverlay />
         <ReviewPopup />
       </div>
       {ctxMenu && (

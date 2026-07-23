@@ -81,6 +81,38 @@ export function portDataType(
   return ports.find((p) => p.key === portKey)?.dataType ?? null;
 }
 
+/** The curated palette/menu order of the node categories (the registry
+ * snapshot lists nodes alphabetically by type id, so presentation order
+ * is a frontend concern). A category id not listed here sorts after the
+ * known ones, alphabetically, so a future Rust category degrades to a
+ * sensible spot instead of crashing or scattering. */
+export const CATEGORY_ORDER: readonly string[] = [
+  "container",
+  "generators",
+  "attribute",
+  "transform",
+  "copy",
+  "topology",
+  "shaders",
+  "import",
+  "export",
+  "lights",
+  "utility",
+  "tex_generate",
+  "tex_adjust",
+  "tex_composite",
+];
+
+/** Comparator over category ids in [`CATEGORY_ORDER`]. */
+export function compareCategories(a: string, b: string): number {
+  const ia = CATEGORY_ORDER.indexOf(a);
+  const ib = CATEGORY_ORDER.indexOf(b);
+  if (ia === -1 && ib === -1) return a.localeCompare(b);
+  if (ia === -1) return 1;
+  if (ib === -1) return -1;
+  return ia - ib;
+}
+
 /** The param types the parameter panel renders a widget for (a new node
  * using only these needs zero frontend changes; a new ParamType is a
  * deliberate frontend addition). `assetRef` lands with imports;
@@ -96,6 +128,7 @@ export const SUPPORTED_PARAM_TYPES = [
   "color",
   "enum",
   "nodePath",
+  "attributeName",
 ] as const;
 
 export function isSupportedParamType(t: string): boolean {

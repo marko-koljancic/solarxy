@@ -21,7 +21,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "delete",
         version: 1,
         display_name: "Delete",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

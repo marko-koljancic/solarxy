@@ -3,7 +3,9 @@
 
 use solarxy_kernel::attribute_ops::{AttributeValue, attribute_create};
 
-use super::common::{geometry_output, params_with, warn_reserved_lane_mismatch};
+use super::common::{
+    geometry_output, params_with, warn_input_lane_type_replaced, warn_reserved_lane_mismatch,
+};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -21,7 +23,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "attribute_create",
         version: 1,
         display_name: "Attribute Create",
-        category: Category::Modifiers,
+        category: Category::Attribute,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
@@ -37,7 +39,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     "attr_name",
                     "Name",
                     "attribute",
-                    ParamType::Text,
+                    ParamType::AttributeName,
                     ParamValue::Text("value".into()),
                 )
                 .doc(
@@ -153,6 +155,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         _ => AttributeValue::Float(p.f32("value_float")),
     };
     warn_reserved_lane_mismatch(cx, &name, ty);
+    warn_input_lane_type_replaced(cx, input, &name, ty);
     Ok(CookOutcome::Done(Outputs::geometry(attribute_create(
         input, &name, value,
     ))))

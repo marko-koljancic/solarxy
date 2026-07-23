@@ -23,7 +23,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "validate",
         version: 2,
         display_name: "Validate",
-        category: Category::Modifiers,
+        category: Category::Utility,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

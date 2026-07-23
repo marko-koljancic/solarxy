@@ -69,7 +69,7 @@ describe("nodeInfoLine", () => {
   });
 
   it("shows primitive dimensions with abbreviations, capped at three", () => {
-    const d = desc("primitives", [
+    const d = desc("generators", [
       param("width", "float", "geometry", 1),
       param("height", "float", "geometry", 2),
       param("depth", "float", "geometry", 1),
@@ -89,7 +89,7 @@ describe("nodeInfoLine", () => {
   });
 
   it("falls back to the first non-general numeric param", () => {
-    const d = desc("modifiers", [
+    const d = desc("topology", [
       param("seed", "int", "general", 4),
       param("angle", "float", "transform", 45),
     ]);

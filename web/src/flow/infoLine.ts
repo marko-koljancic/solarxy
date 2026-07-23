@@ -39,7 +39,7 @@ export function fmtNumber(v: number): string {
 
 /**
  * The one-line node summary. Heuristic per category:
- * lights show intensity; primitives show their dimension params; imports
+ * lights show intensity; generators show their dimension params; imports
  * show the staged asset (name via the lookup, hash prefix otherwise);
  * everything else shows its first float/int/enum param, preferring params
  * outside the General group.
@@ -69,7 +69,7 @@ export function nodeInfoLine(
     }
   }
 
-  if (desc.category === "primitives") {
+  if (desc.category === "generators") {
     const parts: string[] = [];
     for (const [key, abbrev] of DIMENSION_ABBREV) {
       const spec = desc.params.find(

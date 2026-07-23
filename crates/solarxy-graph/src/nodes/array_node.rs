@@ -20,7 +20,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "array",
         version: 1,
         display_name: "Array",
-        category: Category::Modifiers,
+        category: Category::Copy,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
