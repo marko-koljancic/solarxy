@@ -25,11 +25,15 @@ mod torus_node;
 
 // Modifiers (subflow).
 mod array_node;
+mod attribute_copy_node;
 mod attribute_create_node;
+mod attribute_from_image_node;
+mod attribute_promote_node;
 mod attribute_randomize_node;
 mod compute_normals_node;
 mod copy_to_points_node;
 mod delete_node;
+mod displace_node;
 mod edges_to_geo_node;
 mod material_node;
 mod merge_node;
@@ -96,10 +100,14 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         // Attribute (Geo).
         attribute_create_node::descriptor(),
         attribute_randomize_node::descriptor(),
+        attribute_promote_node::descriptor(),
+        attribute_copy_node::descriptor(),
+        attribute_from_image_node::descriptor(),
         compute_normals_node::descriptor(),
         uv_project_node::descriptor(),
         // Transform (Geo).
         transform_node::descriptor(),
+        displace_node::descriptor(),
         // Copy & Instance (Geo).
         array_node::descriptor(),
         copy_to_points_node::descriptor(),
@@ -216,7 +224,7 @@ mod tests {
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 70);
+        assert_eq!(registry.len(), 74);
 
         let in_context = |kind: ContextKind| {
             builtin_descriptors()
@@ -246,8 +254,8 @@ mod tests {
         let expected = [
             (Category::Container, 3),
             (Category::Generators, 9),
-            (Category::Attribute, 4),
-            (Category::Transform, 1),
+            (Category::Attribute, 7),
+            (Category::Transform, 2),
             (Category::Copy, 4),
             (Category::Topology, 5),
             (Category::Shaders, 6),
@@ -262,6 +270,6 @@ mod tests {
         for (cat, n) in expected {
             assert_eq!(count(cat), n, "{}", cat.display_name());
         }
-        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 70);
+        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 74);
     }
 }

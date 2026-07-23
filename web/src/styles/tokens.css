@@ -105,6 +105,12 @@ body.dark-theme {
   --node-cat-utility: #eed9c9;
   --node-cat-lights: var(--light-node-background);
   --node-cat-container: var(--node-background);
+  /* Root containers color-code by the network they open: Geo stays the
+   * neutral tile, Tex leans green-teal (apart from transform's cyan),
+   * Mat echoes the shaders rose family it contains. */
+  --node-cat-container-geo: var(--node-background);
+  --node-cat-container-tex: #bfe0d6;
+  --node-cat-container-mat: #eecdde;
   --node-cat-tex_generate: #e9ddc3;
   --node-cat-tex_adjust: #cfdce8;
   --node-cat-tex_composite: #d2e4dc;
@@ -213,6 +219,9 @@ body.light-theme {
   --node-cat-utility: #f7e6d7;
   --node-cat-lights: var(--light-node-background);
   --node-cat-container: var(--node-background);
+  --node-cat-container-geo: var(--node-background);
+  --node-cat-container-tex: #d9f0e8;
+  --node-cat-container-mat: #f8def0;
   --node-cat-tex_generate: #f3e9d2;
   --node-cat-tex_adjust: #dfe8f4;
   --node-cat-tex_composite: #def0e8;

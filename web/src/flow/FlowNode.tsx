@@ -209,7 +209,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   return (
     <div
       ref={rootRef}
-      className={`flow-node role-${role}${desc ? ` cat-${desc.category}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${emptyGeo ? " empty-geo" : ""}${isDisplay ? " is-display" : ""}`}
+      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${emptyGeo ? " empty-geo" : ""}${isDisplay ? " is-display" : ""}`}
       onPointerEnter={armRadial}
       onPointerDown={cancelRadialTimer}
       onPointerLeave={cancelRadialTimer}

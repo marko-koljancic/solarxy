@@ -170,6 +170,13 @@ export interface AttrVizState {
   points: boolean;
   name: string | null;
   cap: number;
+  /** Multiplier on the bounds-derived arrow length; 1.0 is the default. */
+  vectorScale: number;
+  /** Unit-length directions before scaling. */
+  normalize: boolean;
+  colorMode: "uniform" | "ramp";
+  /** The uniform arrow color, linear RGB 0..1. */
+  color: [number, number, number];
 }
 
 /** One attribute pin from `attr_pins` (pane-relative CSS px, the
@@ -263,6 +270,10 @@ export type Command =
   | { type: "connect"; ctx: GraphContext; from: PortRef; to: PortRef }
   | { type: "disconnect"; ctx: GraphContext; edge: EdgeId }
   | { type: "setParam"; ctx: GraphContext; node: NodeId; key: string; value: ParamSource }
+  // Removes stored overrides so the node falls back to descriptor
+  // defaults: every param when keys is absent, else only the listed ones.
+  // One undo step.
+  | { type: "resetParams"; ctx: GraphContext; node: NodeId; keys?: string[] }
   | { type: "moveNodes"; ctx: GraphContext; moves: [NodeId, [number, number]][] }
   | { type: "setActiveOutput"; ctx: GraphContext; node: NodeId | null }
   | { type: "setSelection"; ctx: GraphContext; ids: NodeId[] }
@@ -336,8 +347,22 @@ export interface ParamSnapshot {
   /** Input-port key whose connection neutralizes this param (the panel
    * dims the row while that port is connected). */
   drivenByPort?: string | null;
+  /** Conditional-visibility clauses (ANDed); absent means always visible.
+   * Predicate values use the same plain encoding as `default`. */
+  showIf?: ShowIfClause[];
   doc: string;
 }
+
+export interface ShowIfClause {
+  param: string;
+  pred: ShowIfPred;
+}
+
+export type ShowIfPred =
+  | { kind: "truthy" }
+  | { kind: "eq"; value: unknown }
+  | { kind: "neq"; value: unknown }
+  | { kind: "in"; values: unknown[] };
 
 export type BypassSnapshot =
   | { mode: "passThrough"; input: string }

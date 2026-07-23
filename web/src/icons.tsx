@@ -245,6 +245,17 @@ export function IconAttrVectors(p: IconProps) {
   );
 }
 
+export function IconAttrSettings(p: IconProps) {
+  // A slider pair: the attribute-viz settings popover.
+  return (
+    <Svg {...p}>
+      <path d="M2.5 5.5 h11 M2.5 10.5 h11" />
+      <circle cx="6" cy="5.5" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="10.5" r="1.7" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function IconAttrPoints(p: IconProps) {
   // Numbered points: the point-marker viz mode.
   return (

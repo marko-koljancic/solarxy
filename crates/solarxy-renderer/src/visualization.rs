@@ -62,12 +62,14 @@ pub struct VisualizationState {
     pub local_axes_vertex_buf: wgpu::Buffer,
     pub local_axes_vertex_count: u32,
     /// Per-point attribute-vector arrows (the web host's attribute
-    /// visualization). Always constructed empty; only
-    /// [`VisualizationState::set_attr_lines`] populates it, so the desktop
-    /// shell and the golden harness never draw this channel.
+    /// visualization), as per-vertex-colored line vertices through the
+    /// gizmo pipeline (which is what lets the host paint a uniform color
+    /// or a magnitude ramp with no pipeline of its own). Always
+    /// constructed empty; only [`VisualizationState::set_attr_lines`]
+    /// populates it, so the desktop shell and the golden harness never
+    /// draw this channel.
     pub attr_lines_buf: wgpu::Buffer,
     pub attr_lines_count: u32,
-    pub attr_params_bind_group: wgpu::BindGroup,
 }
 
 impl VisualizationState {
@@ -253,22 +255,7 @@ impl VisualizationState {
         // The attribute-vector channel starts empty everywhere; only the
         // web host's set_attr_lines populates it.
         let (attr_lines_buf, attr_lines_count) =
-            create_normals_buffer(device, &[], "Attr Vectors Buffer");
-        let attr_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Attr Vectors Color Buffer"),
-            contents: bytemuck::cast_slice(&[NormalsColor {
-                color: [1.0, 0.62, 0.15, 1.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let attr_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Attr Vectors Params Bind Group"),
-            layout: &layouts.normals_params,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: attr_color_buf.as_entire_binding(),
-            }],
-        });
+            create_gizmo_lines_buffer(device, &[], "Attr Vectors Buffer");
 
         VisualizationState {
             grid_mesh,
@@ -296,16 +283,44 @@ impl VisualizationState {
             local_axes_vertex_count,
             attr_lines_buf,
             attr_lines_count,
-            attr_params_bind_group,
         }
     }
 
-    /// Replaces the attribute-vector line list (world-space segment pairs).
-    /// An empty slice clears the channel; the draw early-outs on zero.
-    pub fn set_attr_lines(&mut self, device: &wgpu::Device, lines: &[[f32; 3]]) {
-        let (buf, count) = create_normals_buffer(device, lines, "Attr Vectors Buffer");
+    /// Replaces the attribute-vector line list (world-space segment pairs,
+    /// colored per vertex). An empty slice clears the channel; the draw
+    /// early-outs on zero.
+    pub fn set_attr_lines(&mut self, device: &wgpu::Device, verts: &[model::GizmoVertex]) {
+        let (buf, count) = create_gizmo_lines_buffer(device, verts, "Attr Vectors Buffer");
         self.attr_lines_buf = buf;
         self.attr_lines_count = count;
+    }
+}
+
+/// A gizmo-vertex line buffer with the empty-slice placeholder convention
+/// of [`create_normals_buffer`].
+fn create_gizmo_lines_buffer(
+    device: &wgpu::Device,
+    verts: &[model::GizmoVertex],
+    label: &str,
+) -> (wgpu::Buffer, u32) {
+    if verts.is_empty() {
+        (
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: &[0u8; std::mem::size_of::<model::GizmoVertex>()],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            0,
+        )
+    } else {
+        (
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            verts.len() as u32,
+        )
     }
 }
 

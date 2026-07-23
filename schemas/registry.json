@@ -272,6 +272,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "linear"
+              }
+            }
+          ],
           "doc": "The step between copies: copy i is offset by i times this."
         },
         {
@@ -300,6 +309,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "The axis the copies revolve about."
         },
         {
@@ -321,6 +339,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "How far each copy sits from the axis before it revolves."
         },
         {
@@ -339,6 +366,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "The total angle the copies span. Each copy steps by sweep/count, so a full 360 tiles evenly without doubling up at the seam."
         }
       ],
@@ -355,6 +391,193 @@
         "grid"
       ],
       "glyph": "array",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_copy",
+      "version": 1,
+      "displayName": "Attribute Copy",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry carrying the lane."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Copy",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "source",
+          "label": "Source",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane to copy, resolved in the chosen domain."
+        },
+        {
+          "key": "dest",
+          "label": "Destination",
+          "group": "attribute",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The name the copy is written under, replacing any lane already there. Reserved names activate their contracts: `color` (vec4) displays as vertex color immediately."
+        },
+        {
+          "key": "domain",
+          "label": "Domain",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "point",
+              "Point"
+            ],
+            [
+              "primitive",
+              "Primitive"
+            ]
+          ],
+          "accept": [],
+          "default": "point",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which domain both names live in. Use `attribute_promote` to move a lane between domains."
+        },
+        {
+          "key": "target_type",
+          "label": "Type",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "auto",
+              "Same as source"
+            ],
+            [
+              "float",
+              "Float"
+            ],
+            [
+              "vec2",
+              "Vec2"
+            ],
+            [
+              "vec3",
+              "Vec3"
+            ],
+            [
+              "vec4",
+              "Vec4"
+            ]
+          ],
+          "accept": [],
+          "default": "auto",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The copy's type. Widening pads (a vec4's w fills with 1.0, the color case); narrowing to Float takes the magnitude; other narrowing drops trailing components."
+        },
+        {
+          "key": "delete_source",
+          "label": "Delete Source",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Remove the source lane after copying, making this a rename. Deleting the reserved `N` or `uv` clears the mesh's FIXED normal/uv buffer when no map lane shadows it, which changes shading and texturing downstream."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Copies an attribute lane under a new name, optionally converting its type, in the point or primitive domain. With Delete Source it is a rename.\n\nThe headline use is feeding the reserved lanes: copy any vec3 into `color` and the geometry displays vertex-colored (w pads to 1.0, opaque); copy a vec3 into `N` to override normals. The other direction works too: narrow a `color` to a float magnitude lane and drive `displace` with it.",
+      "searchAliases": [
+        "copy",
+        "rename",
+        "attribute",
+        "convert",
+        "cast",
+        "color"
+      ],
+      "glyph": "attribute_copy",
       "role": "standard"
     },
     {
@@ -482,6 +705,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
           "doc": "The constant every point receives."
         },
         {
@@ -500,6 +732,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec2"
+              }
+            }
+          ],
           "doc": "The constant every point receives."
         },
         {
@@ -519,6 +760,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
           "doc": "The constant every point receives."
         },
         {
@@ -539,6 +789,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
           "doc": "The constant every point receives. As a `color` it is linear RGBA: opaque white by default."
         }
       ],
@@ -555,6 +814,402 @@
         "tag"
       ],
       "glyph": "attribute_create",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_from_image",
+      "version": 1,
+      "displayName": "Attribute from Image",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry the sampled lane is written onto."
+        },
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "The image to sample. Wire a `tex_ref` (pointing at a texture network) or an `import_image`. Unwired, the geometry passes through with a warning."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute from Image",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "color",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane the samples are written under. The default `color` displays as vertex color immediately; any other name is free-form data for downstream nodes."
+        },
+        {
+          "key": "uv_attr",
+          "label": "UV Attribute",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "uv",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The vec2 point lane supplying sample coordinates; `uv` resolves the mesh's texture coordinates. A mesh without it passes through with a warning (chain `uv_project` first)."
+        },
+        {
+          "key": "channels",
+          "label": "Channels",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "rgba",
+              "RGBA (vec4)"
+            ],
+            [
+              "rgb",
+              "RGB (vec3)"
+            ],
+            [
+              "luminance",
+              "Luminance (float)"
+            ],
+            [
+              "r",
+              "Red (float)"
+            ],
+            [
+              "g",
+              "Green (float)"
+            ],
+            [
+              "b",
+              "Blue (float)"
+            ],
+            [
+              "a",
+              "Alpha (float)"
+            ]
+          ],
+          "accept": [],
+          "default": "rgba",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "What lands in the lane: the full color (vec4, the `color` contract), RGB (vec3), or one scalar channel. Luminance uses the Rec. 709 weights."
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "bilinear",
+              "Bilinear"
+            ],
+            [
+              "nearest",
+              "Nearest"
+            ]
+          ],
+          "accept": [],
+          "default": "bilinear",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Blend the four surrounding texels, or read the nearest one."
+        },
+        {
+          "key": "wrap",
+          "label": "Wrap",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "repeat",
+              "Repeat"
+            ],
+            [
+              "clamp",
+              "Clamp"
+            ]
+          ],
+          "accept": [],
+          "default": "repeat",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How UVs outside 0..1 resolve: tile the image, or extend its edges."
+        },
+        {
+          "key": "srgb",
+          "label": "Interpret as sRGB",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Convert the sampled RGB to linear before writing (alpha is untouched). Keep it on for color images: the reserved `color` lane is linear RGBA by contract. Turn it off for data maps (height, masks) whose bytes are already linear."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Samples the connected image through each point's UV and writes the result into an attribute lane: full RGBA into `color` for vertex-color display, or one channel into a float lane.\n\nThis is the image-to-geometry bridge: build a map in a texture network, `tex_ref` it into the geometry graph, sample it here, and drive `displace` (or anything else that reads lanes) with the result. Sampling matches the renderer's orientation exactly, so the written colors line up with the same image textured on the surface.\n\nMeshes without the UV lane, or an unwired image, pass through with a warning.",
+      "searchAliases": [
+        "sample",
+        "map",
+        "texture",
+        "image",
+        "bake",
+        "vertex color"
+      ],
+      "glyph": "attribute_from_image",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_promote",
+      "version": 1,
+      "displayName": "Attribute Promote",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose lane changes domain."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Promote",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane to promote, resolved in the source domain."
+        },
+        {
+          "key": "direction",
+          "label": "Direction",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "pointToPrimitive",
+              "Point to Primitive"
+            ],
+            [
+              "primitiveToPoint",
+              "Primitive to Point"
+            ]
+          ],
+          "accept": [],
+          "default": "pointToPrimitive",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which way the lane moves: corner-point values combining into one value per primitive, or primitive values spreading onto their points."
+        },
+        {
+          "key": "method",
+          "label": "Method",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "average",
+              "Average"
+            ],
+            [
+              "min",
+              "Minimum"
+            ],
+            [
+              "max",
+              "Maximum"
+            ],
+            [
+              "first",
+              "First"
+            ]
+          ],
+          "accept": [],
+          "default": "average",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How the several source values landing on one destination element combine, component-wise for vector lanes."
+        },
+        {
+          "key": "keep_original",
+          "label": "Keep Original",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Keep the source-domain lane beside the promoted one. Off (the default), the promotion MOVES the lane. The fixed normal and uv buffers are never deleted by a promote: promoting `N` or `uv` copies out of them."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Converts an attribute lane between the point and primitive domains: per-corner values combine into one value per triangle, segment, or point primitive (Average / Min / Max / First), and primitive values spread back onto their points, averaging where a point belongs to several primitives.\n\nBy default the lane MOVES to the destination domain; Keep Original leaves the source in place too. A point untouched by any primitive receives zeros on a primitive-to-point promote. The Attributes pane's Point and Primitive tabs show both domains, which is the quickest way to watch this node work.",
+      "searchAliases": [
+        "promote",
+        "domain",
+        "primitive",
+        "point",
+        "demote"
+      ],
+      "glyph": "attribute_promote",
       "role": "standard"
     },
     {
@@ -678,6 +1333,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
           "doc": "The lower bound of the uniform draw."
         },
         {
@@ -693,6 +1357,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
           "doc": "The upper bound of the uniform draw."
         },
         {
@@ -712,6 +1385,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
           "doc": "The per-component lower bounds of the uniform draw."
         },
         {
@@ -731,6 +1413,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
           "doc": "The per-component upper bounds of the uniform draw."
         },
         {
@@ -751,6 +1442,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
           "doc": "The per-component lower bounds of the uniform draw. The default pins alpha at 1 so randomized colors stay opaque."
         },
         {
@@ -771,6 +1471,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
           "doc": "The per-component upper bounds of the uniform draw."
         },
         {
@@ -1671,6 +2380,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "perspective"
+              }
+            }
+          ],
           "doc": "The VERTICAL angle the camera sees, in degrees. Smaller is tighter and flatter, larger is wider and more distorted at the edges; past about 90 the stretch in the corners gets hard to miss. Perspective only -- a physical camera derives this same number from Focal Length and Sensor Width instead, and an orthographic camera has no field of view at all."
         },
         {
@@ -1692,6 +2410,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "physical"
+              }
+            }
+          ],
           "doc": "The lens focal length in millimetres, as a photographer means it: 50 normal, 24 wide, 200 a long telephoto. It only means something against a sensor size -- together with Sensor Width it sets the field of view, as fov = 2 * atan(sensor / (2 * focal)), so a LONGER focal length gives a NARROWER view. Physical projection only. See Sensor Width for how that formula differs from a real camera's."
         },
         {
@@ -1713,6 +2440,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "physical"
+              }
+            }
+          ],
           "doc": "The film-back width in millimetres: 36 is full-frame 35mm, 25 is Super 35, 23.5 is APS-C. A larger sensor at the same Focal Length sees more, which is why the same lens is wide on full-frame and long on a phone. One caveat worth knowing: this value drives the VERTICAL field of view, where a real camera would use its sensor HEIGHT. A 50mm at 36mm here frames about 40 degrees tall; a real full-frame camera, working from its 24mm sensor height, frames about 27. So a physical camera reads wider than the equivalent real lens -- compensate with a longer Focal Length or a smaller Sensor Width."
         },
         {
@@ -1734,6 +2470,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "orthographic"
+              }
+            }
+          ],
           "doc": "Half the visible height, in metres: at the default 5 the camera frames 10 metres top to bottom, and the width follows from the pane's shape. This is the orthographic stand-in for zoom. With no perspective, moving the camera closer changes nothing about the framing, so this is the only way to fit more or less in frame. Orthographic only."
         },
         {
@@ -3010,6 +3755,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "bbox"
+              }
+            }
+          ],
           "doc": "The center of the region box."
         },
         {
@@ -3029,6 +3783,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "bbox"
+              }
+            }
+          ],
           "doc": "The size of the region box. A triangle goes when its centroid is inside."
         },
         {
@@ -3048,6 +3811,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "normal"
+              }
+            }
+          ],
           "doc": "The facing to match against."
         },
         {
@@ -3066,6 +3838,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "normal"
+              }
+            }
+          ],
           "doc": "How far off the direction a face can point and still be selected."
         }
       ],
@@ -3246,6 +4027,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -3264,6 +4053,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -3326,6 +4123,219 @@
       ],
       "glyph": "directional",
       "role": "light"
+    },
+    {
+      "typeId": "displace",
+      "version": 1,
+      "displayName": "Displace",
+      "category": "transform",
+      "categoryLabel": "Transform",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose points move."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Displace",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "direction",
+          "label": "Direction",
+          "group": "displace",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "normal",
+              "Normal"
+            ],
+            [
+              "vector",
+              "Vector"
+            ],
+            [
+              "attribute",
+              "Attribute"
+            ]
+          ],
+          "accept": [],
+          "default": "normal",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Where each point's movement direction comes from: the point normal (`N`), one constant vector for every point, or a vec3/vec4 attribute lane by name."
+        },
+        {
+          "key": "vector",
+          "label": "Vector",
+          "group": "displace",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "direction",
+              "pred": {
+                "kind": "eq",
+                "value": "vector"
+              }
+            }
+          ],
+          "doc": "The constant direction every point moves along."
+        },
+        {
+          "key": "direction_attr",
+          "label": "Direction Attribute",
+          "group": "displace",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "N",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "direction",
+              "pred": {
+                "kind": "eq",
+                "value": "attribute"
+              }
+            }
+          ],
+          "doc": "The vec3 (or vec4, xyz) point lane supplying each point's direction."
+        },
+        {
+          "key": "amplitude",
+          "label": "Amplitude",
+          "group": "displace",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.1,
+          "hard": [
+            -10000.0,
+            10000.0
+          ],
+          "soft": [
+            -2.0,
+            2.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far each point moves, in metres along its (unit) direction. Negative pushes inward. With an amplitude attribute set, this multiplies the lane's value."
+        },
+        {
+          "key": "amp_attr",
+          "label": "Amplitude Attribute",
+          "group": "displace",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Optional float point lane multiplying the amplitude per point. Empty means the constant amplitude alone. This is the driving seat for attribute workflows: randomize a lane, or sample one from an image, and feed it here."
+        },
+        {
+          "key": "normalize",
+          "label": "Normalize Direction",
+          "group": "displace",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Unit-length each direction before scaling, so the amplitude is an honest distance. Off, a longer direction vector moves its point proportionally further."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Moves every point along a direction scaled by an amplitude: the point normal by default, a constant vector, or a vec3 attribute lane, with an optional float lane multiplying the amplitude per point.\n\nThis is where attributes start driving shape: `attribute_randomize` a float lane and feed it to Amplitude Attribute for surface noise, or sample an image into a lane with `attribute_from_image` for map-driven relief.\n\nNormals are left as they were (deliberately, so chained displaces compound predictably); chain `compute_normals` after the last displace to relight the result. A mesh without a usable direction source passes through with a warning.",
+      "searchAliases": [
+        "displacement",
+        "deform",
+        "push",
+        "noise",
+        "height",
+        "relief"
+      ],
+      "glyph": "displace",
+      "role": "standard"
     },
     {
       "typeId": "edges_to_geo",
@@ -4585,6 +5595,15 @@
           "step": 1.0,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "format",
+              "pred": {
+                "kind": "eq",
+                "value": "jpg"
+              }
+            }
+          ],
           "doc": "The JPEG quality factor, 1 to 100: higher is a bigger file with fewer compression artifacts. Only read when Format is JPEG, and hidden otherwise, since PNG has no equivalent knob."
         },
         {
@@ -5938,6 +6957,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "reference"
+              }
+            }
+          ],
           "doc": "The `matnet` to take the material from. What arrives is whatever that network's display node publishes, so re-designating the display node inside it re-points every referrer at once. In Reference mode this is required: unset, dangling, or aimed at a network that publishes nothing all fail the cook rather than quietly assigning a default surface."
         },
         {
@@ -5973,6 +7001,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": "base_color_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "The surface colour of a dielectric, or the reflectance tint of a metal, multiplied into the base-color sample. Connecting a Base Color Map neutralizes this to white so the map alone drives the channel; the value you set is kept for when the map comes off again. Alpha is carried, but these nodes only build Opaque materials today."
         },
         {
@@ -5994,6 +7031,15 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": "metallic_roughness_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "How metallic the surface is. 0 is a dielectric: coloured diffuse plus an uncoloured specular highlight. 1 is bare metal: no diffuse at all, and the reflection takes the base colour. Values in between are not physical -- reach for them for a worn or corroded edge, not as a dial for shininess (that is Roughness)."
         },
         {
@@ -6015,6 +7061,15 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": "metallic_roughness_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "Microsurface scatter, which sets how wide the specular lobe is: 0 is a mirror, 1 is fully diffuse. The shader clamps the low end to 0.04, so a perfect mirror is not reachable and highlights never collapse into a single aliased pixel."
         },
         {
@@ -6035,6 +7090,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": "emissive_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
@@ -7460,6 +8524,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -7478,6 +8550,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -8949,6 +10029,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -8967,6 +10055,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -10466,6 +11562,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "uvs",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Off by default. When on, flags any mesh with no texture coordinates at all, regardless of source format, so you can ask whether cooked geometry lacks UVs before texturing or exporting it. Leave it off for procedural geometry that is legitimately UV-less. Only has an effect while UVs is on."
         },
         {
@@ -10529,6 +11633,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "budget",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "How many triangles this geometry is allowed. 0 means no limit, which is why the check says nothing until you set one. Going over is a warning up to 20 percent above the number and an error beyond that. The count is the whole input set, not per mesh."
         }
       ],

@@ -2391,9 +2391,27 @@ body.reduce-motion .cook-arc {
   margin-left: 0;
 }
 
+/* The Properties panel's menu bar: the shared menu primitives at a
+ * compact size so the parameter area barely shrinks. */
+.properties-menu-bar {
+  margin-left: 0;
+  padding: 0 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+  flex: 0 0 auto;
+}
+.properties-menu-bar .menu-item {
+  font-size: 1.15rem;
+  padding: 0.25rem 0.7rem;
+}
+
 .about-version {
   color: var(--text-secondary);
   font-size: 1.1rem;
+}
+.about-copyright {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  opacity: 0.8;
 }
 .modal a {
   color: var(--accent-primary);
@@ -2414,6 +2432,30 @@ body.reduce-motion .cook-arc {
 .flow-node.cat-utility { --cat-fill: var(--node-cat-utility); }
 .flow-node.cat-lights { --cat-fill: var(--node-cat-lights); }
 .flow-node.cat-container { --cat-fill: var(--node-cat-container); }
+
+/* Root containers color-code by context (Stage 7): the fill token per
+ * opened network kind, with a border accent derived from the fill so the
+ * tint carries in both themes. The glyph follows --cat-fill on its own
+ * (the ink is a fill/ink color-mix). Geo keeps the neutral tile. */
+.flow-node.cat-container.nt-geo {
+  --cat-fill: var(--node-cat-container-geo);
+}
+.flow-node.cat-container.nt-texnet {
+  --cat-fill: var(--node-cat-container-tex);
+  --cat-accent: color-mix(in srgb, var(--node-cat-container-tex) 60%, rgba(0, 0, 0, 0.45));
+  --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-tex) 45%, rgba(0, 0, 0, 0.6));
+}
+.flow-node.cat-container.nt-matnet {
+  --cat-fill: var(--node-cat-container-mat);
+  --cat-accent: color-mix(in srgb, var(--node-cat-container-mat) 60%, rgba(0, 0, 0, 0.45));
+  --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-mat) 45%, rgba(0, 0, 0, 0.6));
+}
+.flow-node.role-container .node-body {
+  border-color: var(--cat-accent, var(--geometry-node-border));
+}
+.flow-node.role-container:hover .node-body {
+  border-color: var(--cat-accent-hover, var(--geometry-node-border-hover));
+}
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
 .flow-node.cat-tex_composite { --cat-fill: var(--node-cat-tex_composite); }
@@ -2983,13 +3025,23 @@ body.reduce-motion .cook-arc {
   color: var(--text-secondary);
   padding: 2px 4px;
 }
+/* The body-level dropdown layer (DropdownPortal): fixed-positioned above
+ * every canvas-host overlay (tool column 9, toolbar anchors 10, attr
+ * pins / dividers 11, inline select lists 40). Inline dropdowns cannot
+ * win that fight from inside the toolbar's own stacking context, which
+ * is exactly why the portal exists. */
+:root {
+  --z-dropdown: 300;
+}
+.dropdown-portal {
+  position: fixed;
+  z-index: var(--z-dropdown);
+}
+
 /* Translucent over the live scene: the blur supplies legibility the 80%
- * ground alone cannot, whatever the scene behind is doing. */
+ * ground alone cannot, whatever the scene behind is doing. Positioning
+ * comes from the portal wrapper. */
 .ghost-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
   min-width: 160px;
   max-height: 60vh;
   overflow-y: auto;
@@ -3000,6 +3052,24 @@ body.reduce-motion .cook-arc {
   backdrop-filter: blur(8px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   padding: 4px 0;
+}
+/* A submenu row: current value as a dim right-aligned hint, then the
+ * caret. The flyout itself is another portaled ghost-dropdown. */
+.ghost-submenu-row .ghost-submenu-hint {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+.ghost-submenu-row .ghost-submenu-caret {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+.ghost-submenu-row.open {
+  color: var(--accent-primary);
+}
+.ghost-flyout {
+  min-width: 130px;
 }
 .ghost-item {
   display: flex;
@@ -3531,10 +3601,99 @@ body.reduce-motion .cook-arc {
   white-space: nowrap;
   font-family: var(--font-mono);
 }
+/* Portaled (DropdownPortal wrapper owns position); neutralize the shared
+ * select-list's inline absolute anchoring. */
 .attr-lane-list {
-  right: 0;
-  left: auto;
+  position: static;
   min-width: 12rem;
+}
+
+/* The viz settings popover: a compact control card off the gear button,
+ * ghost-dropdown surface language at form density. */
+.attr-viz-panel {
+  min-width: 21rem;
+  padding: 0.7rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+.attr-viz-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.attr-viz-row label,
+.attr-viz-label {
+  flex: 0 0 7rem;
+  color: var(--text-secondary);
+}
+.attr-viz-row input[type="range"] {
+  flex: 1;
+  min-width: 6rem;
+}
+.attr-viz-value {
+  flex: 0 0 3.4rem;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.attr-viz-row input[type="number"] {
+  width: 5rem;
+  padding: 0.2rem 0.4rem;
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font: inherit;
+}
+.attr-viz-row input[type="color"] {
+  width: 2.2rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.attr-viz-segment {
+  display: inline-flex;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.attr-viz-segment button {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--text-secondary);
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+.attr-viz-segment button.active {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+.attr-viz-reset {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.attr-viz-reset:hover {
+  color: var(--text-primary);
 }
 
 /* Pooled attribute pins: the review-pane-clip pattern. */

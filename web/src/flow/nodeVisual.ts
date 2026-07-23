@@ -26,12 +26,21 @@ export const GLYPH_PATHS: Record<string, string> = {
   attribute_create: "M2.5 5h6l4.5 3-4.5 3h-6z M5 8h3 M6.5 6.5v3",
   attribute_randomize:
     "M3 3h10v10h-10z M6.4 5.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M8.9 8a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M11.4 10.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+  // Promote: points rising into a primitive; Copy: the echoed-rect motif;
+  // From Image: the image frame pouring down into geometry.
+  attribute_promote:
+    "M8 2.5l2.7 3.6h-5.4z M8 10.6V7.4m-1.5 1.5L8 7.4l1.5 1.5 M4.9 12.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M8.9 12.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M12.9 12.4a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+  attribute_copy: "M3 3h7v7h-7z M6 6h7v7h-7z",
+  attribute_from_image:
+    "M3 2.5h10v6h-10z M4.5 7l2-2.4 1.5 1.7 1.2-1.4 1.8 2.1 M8 9.5v3.5m-1.6-1.6L8 13l1.6-1.6",
   cone: "M8 3l4.5 8.3m-4.5-8.3l-4.5 8.3m9.2 0.7a4.7 1.7 0 1 1-9.4 0 4.7 1.7 0 1 1 9.4 0",
   cylinder:
     "M12.5 4.6a4.5 1.6 0 1 1-9 0 4.5 1.6 0 1 1 9 0m-9 0v6.8m9-6.8v6.8m0 0a4.5 1.6 0 1 0-9 0",
   torus: "M14 8a6 3.6 0 1 1-12 0 6 3.6 0 1 1 12 0m-3.5 0a2.5 1.3 0 1 1-5 0 2.5 1.3 0 1 1 5 0",
   torus_knot: "M10 8a3.5 3.5 0 1 1-7 0 3.5 3.5 0 1 1 7 0m3 0a3.5 3.5 0 1 1-7 0",
   transform: "M8 2v12m-6-6h12m-6-6l-1.8 1.8m1.8-1.8l1.8 1.8m4.2 4.2l-1.8-1.8m1.8 1.8l-1.8 1.8",
+  // Displace: a surface bulging under an upward push.
+  displace: "M2.5 11.5H5c1-3.5 5-3.5 6 0h2.5 M8 8V3.8m-1.6 1.6L8 3.8l1.6 1.6",
   mirror: "M8 2.5v11m-2.5-8.5l-2.5 3 2.5 3m5-6l2.5 3-2.5 3",
   array: "M2.5 9.5h4v4h-4z m3.5-3.5h4v4h-4z m3.5-3.5h4v4h-4z",
   scatter:

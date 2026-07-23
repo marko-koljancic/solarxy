@@ -85,6 +85,16 @@ pub enum Command {
         key: String,
         value: ParamSource,
     },
+    /// Removes stored parameter overrides so the node falls back to its
+    /// descriptor defaults: every param when `keys` is absent, else only
+    /// the listed ones. Removal (not writing defaults) keeps the document
+    /// honestly unset; the whole reset is one undo step.
+    ResetParams {
+        ctx: GraphContext,
+        node: NodeId,
+        #[serde(default)]
+        keys: Option<Vec<String>>,
+    },
     MoveNodes {
         ctx: GraphContext,
         moves: Vec<(NodeId, [f32; 2])>,
@@ -789,6 +799,9 @@ impl Engine {
                 key,
                 value,
             } => self.set_param(ctx, node, &key, value, events, inv),
+            Command::ResetParams { ctx, node, keys } => {
+                self.reset_params(ctx, node, keys, events, inv)
+            }
             Command::MoveNodes { ctx, moves } => self.move_nodes(ctx, moves, events, inv),
             Command::SetActiveOutput { ctx, node } => {
                 self.set_active_output(ctx, node, events, inv)
@@ -1374,6 +1387,73 @@ impl Engine {
                     inv,
                 )?;
             }
+        }
+        Ok(())
+    }
+
+    fn reset_params(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        keys: Option<Vec<String>>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let type_id = self.node_type_in(ctx, node)?;
+        let desc = self
+            .registry
+            .get(&type_id)
+            .ok_or_else(|| EngineError::UnknownNodeType(type_id.clone()))?;
+        // Resolve the scope to (key, default) pairs up front: an unknown
+        // key is a command error (set_param's strictness), and pulling the
+        // defaults here ends the registry borrow before the graph edit.
+        let scope: Vec<(String, ParamValue)> = match keys {
+            Some(list) => list
+                .into_iter()
+                .map(|key| match desc.param(&key) {
+                    Some(spec) => Ok((key, spec.default.clone())),
+                    None => Err(EngineError::InvalidParam {
+                        key,
+                        reason: "no such param on this node type".to_string(),
+                    }),
+                })
+                .collect::<Result<_, _>>()?,
+            None => desc
+                .params
+                .iter()
+                .map(|spec| (spec.key.clone(), spec.default.clone()))
+                .collect(),
+        };
+        let mut removed: Vec<(String, ParamValue, ParamSource)> = Vec::new();
+        {
+            let graph = self.doc.graph_mut(ctx)?;
+            let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+            for (key, default) in scope {
+                // A key with no stored entry is already at its default:
+                // nothing to undo, nothing to announce.
+                if let Some(prev) = node_data.params.remove(&key) {
+                    removed.push((key, default, prev));
+                }
+            }
+        }
+        if removed.is_empty() {
+            return Ok(());
+        }
+        self.mark_dirty(ctx, node);
+        for (key, default, prev) in removed {
+            self.previews.remove(&(node, key.clone()));
+            events.push(EngineEvent::ParamChanged {
+                ctx,
+                node,
+                key: key.clone(),
+                value: ParamSource::Literal(default),
+            });
+            inv.push(UndoOp::RestoreParam {
+                ctx,
+                node,
+                key,
+                prev: Some(prev),
+            });
         }
         Ok(())
     }

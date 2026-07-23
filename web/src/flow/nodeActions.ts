@@ -5,9 +5,11 @@
 
 import { dispatch } from "../engine/session";
 import type { GraphContext, NodeMirror, NodeTypeSnapshot } from "../engine/types";
-import { useMirror } from "../store/mirror";
+import { descriptorFor } from "../registry/datatypes";
+import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial } from "../store/radial";
 import { useUi } from "../store/ui";
+import { nodeLabel } from "./nodeLabel";
 import { nodeRole } from "./nodeVisual";
 import { nodeVisible } from "./visibility";
 
@@ -50,6 +52,17 @@ export function toggleBypass(ctx: GraphContext, node: NodeMirror): void {
 
 export function removeNode(ctx: GraphContext, nodeId: number): void {
   dispatch({ type: "removeNodes", ctx, ids: [nodeId] });
+}
+
+/** The node's display path for the clipboard: `/name` for a root node,
+ * `/container/name` inside a subflow, using the same labels the UI shows
+ * everywhere (the `name` param when renamed, else the type name). */
+export function nodePathOf(ctx: GraphContext, node: NodeMirror): string {
+  const s = useMirror.getState();
+  const seg = (n: NodeMirror) => nodeLabel(n, descriptorFor(s.registry, n.typeId));
+  if (ctx === "root") return `/${seg(node)}`;
+  const container = selectGraph(s, "root").nodes.find((n) => n.id === ctx.subflow);
+  return container ? `/${seg(container)}/${seg(node)}` : `/${seg(node)}`;
 }
 
 /** The same gates the canvas node uses when opening the radial. */

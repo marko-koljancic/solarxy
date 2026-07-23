@@ -2099,9 +2099,11 @@ impl Renderer {
     }
 
     /// Per-point attribute-vector arrows (the web attribute visualization),
-    /// through the normals line pipeline. Gated purely on the buffer count:
-    /// only the web host populates the channel, so the desktop shell and
-    /// the golden harness draw nothing here by construction.
+    /// through the gizmo line pipeline: the host CPU-colors each vertex
+    /// (uniform color or a magnitude ramp), so no params bind group is
+    /// needed. Gated purely on the buffer count: only the web host
+    /// populates the channel, so the desktop shell and the golden harness
+    /// draw nothing here by construction.
     fn draw_attr_vectors<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
@@ -2111,9 +2113,8 @@ impl Renderer {
         if env.vis.attr_lines_count == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipelines.overlay.normals);
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
         pass.set_bind_group(0, cam_bg, &[]);
-        pass.set_bind_group(1, &env.vis.attr_params_bind_group, &[]);
         pass.set_vertex_buffer(0, env.vis.attr_lines_buf.slice(..));
         pass.draw(0..env.vis.attr_lines_count, 0..1);
     }

@@ -35,6 +35,10 @@ mod app;
 // CI runs their tests instead of leaving them to a wasm-only build.
 pub mod gizmo;
 
+// Same convention: the attribute-viz state and its ramp/clamp math are
+// pure data, tested natively.
+pub mod attr_viz;
+
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;
 

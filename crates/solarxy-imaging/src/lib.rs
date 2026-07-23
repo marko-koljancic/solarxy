@@ -30,6 +30,8 @@
 
 use solarxy_core::RawImageData;
 
+pub mod sample;
+
 /// A parameter failure (dimension bounds, empty inputs). Cook bodies map
 /// these onto `CookError::Failed`.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

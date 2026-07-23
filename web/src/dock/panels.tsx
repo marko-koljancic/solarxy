@@ -13,6 +13,7 @@ import { AssetsPane } from "../components/AssetsPane";
 import { AttributesPane } from "../components/AttributesPane";
 import { NodePane } from "../components/NodePane";
 import { ParameterPanel } from "../components/ParameterPanel";
+import { PropertiesMenuBar } from "../components/menu/PropertiesMenus";
 import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
@@ -46,6 +47,7 @@ function PropertiesPanel(_props: IDockviewPanelProps) {
   const title = useSelectedNodeName();
   return (
     <div className="properties-panel">
+      <PropertiesMenuBar />
       {title && <div className="properties-panel-context">{title}</div>}
       <div className="properties-panel-body">
         <ParameterPanel />

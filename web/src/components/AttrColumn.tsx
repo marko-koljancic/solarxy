@@ -8,13 +8,37 @@
 // Also hosts the pooled pin elements the rAF loop patches imperatively
 // (engine/attrPins.ts): one clip box per 3D pane, `cap` slots each.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { getClient, setAttrViz } from "../engine/session";
 import { attrPinKey, registerAttrPin } from "../engine/attrPins";
 import type { AttrLane, AttrVizState } from "../engine/types";
-import { IconAttrLabels, IconAttrPoints, IconAttrVectors, IconChevronDown } from "../icons";
+import {
+  IconAttrLabels,
+  IconAttrPoints,
+  IconAttrSettings,
+  IconAttrVectors,
+  IconChevronDown,
+} from "../icons";
 import { useMirror } from "../store/mirror";
 import { useViewState } from "../store/viewState";
+import { DropdownPortal } from "./DropdownPortal";
+
+/** The host color is raw RGB 0..1 fed straight to the HDR line pipeline
+ * (matching the historical amber constant), so the picker's hex maps
+ * component-for-component with no gamma conversion. Exported for tests. */
+export function rgbToHex([r, g, b]: [number, number, number]): string {
+  const c = (v: number) =>
+    Math.round(Math.max(0, Math.min(1, v)) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const n = Number.parseInt(hex.slice(1), 16);
+  if (Number.isNaN(n)) return [1, 1, 1];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
 
 const GLYPH = 19;
 
@@ -65,29 +89,14 @@ function VizButton({
 function LanePicker({ viz }: { viz: AttrVizState }) {
   const [open, setOpen] = useState(false);
   const [lanes, setLanes] = useState<AttrLane[]>([]);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (!(e.target instanceof Node) || !rootRef.current?.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const stale = viz.name !== null && !lanes.some((l) => l.name === viz.name);
 
   return (
-    <div ref={rootRef} className="attr-lane-picker">
+    <div className="attr-lane-picker">
       <button
+        ref={triggerRef}
         type="button"
         className={`attr-lane-trigger${open ? " open" : ""}${stale && open ? " stale" : ""}`}
         title={
@@ -108,25 +117,141 @@ function LanePicker({ viz }: { viz: AttrVizState }) {
         <IconChevronDown size={10} />
       </button>
       {open && (
-        <div className="select-list attr-lane-list" role="listbox">
-          {lanes.length === 0 && <div className="attr-name-empty">No point attributes.</div>}
-          {lanes.map((lane) => (
-            <button
-              key={lane.name}
-              type="button"
-              role="option"
-              aria-selected={lane.name === viz.name}
-              className={`select-option${lane.name === viz.name ? " active" : ""}`}
-              onClick={() => {
-                setAttrViz({ ...viz, name: lane.name });
-                setOpen(false);
-              }}
-            >
-              <span className="select-option-label">{lane.name}</span>
-              <span className="select-option-hint">{lane.ty}</span>
-            </button>
-          ))}
-        </div>
+        <DropdownPortal anchorRef={triggerRef} align="right" onClose={() => setOpen(false)}>
+          <div className="select-list attr-lane-list" role="listbox">
+            {lanes.length === 0 && <div className="attr-name-empty">No point attributes.</div>}
+            {lanes.map((lane) => (
+              <button
+                key={lane.name}
+                type="button"
+                role="option"
+                aria-selected={lane.name === viz.name}
+                className={`select-option${lane.name === viz.name ? " active" : ""}`}
+                onClick={() => {
+                  setAttrViz({ ...viz, name: lane.name });
+                  setOpen(false);
+                }}
+              >
+                <span className="select-option-label">{lane.name}</span>
+                <span className="select-option-hint">{lane.ty}</span>
+              </button>
+            ))}
+          </div>
+        </DropdownPortal>
+      )}
+    </div>
+  );
+}
+
+/** The gear under the lane pill: a compact popover with the vector
+ * scale, normalize, color mode, uniform color, and pin cap. Every change
+ * flows through the same host mutator as the strip toggles. */
+function VizSettings({ viz }: { viz: AttrVizState }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const patch = (p: Partial<AttrVizState>) => setAttrViz({ ...viz, ...p });
+  const shownCap = viz.cap === 0 ? 64 : viz.cap;
+
+  return (
+    <div className="attr-viz-settings">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`tool-btn${open ? " active" : ""}`}
+        title="Visualization settings"
+        aria-label="Visualization settings"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <IconAttrSettings size={GLYPH} />
+      </button>
+      {open && (
+        <DropdownPortal anchorRef={triggerRef} align="right" onClose={() => setOpen(false)}>
+          <div className="attr-viz-panel">
+            <div className="attr-viz-row">
+              <label htmlFor="attr-viz-scale">Vector scale</label>
+              <input
+                id="attr-viz-scale"
+                type="range"
+                min={0.05}
+                max={10}
+                step={0.05}
+                value={viz.vectorScale}
+                onChange={(e) => patch({ vectorScale: Number(e.target.value) })}
+              />
+              <span className="attr-viz-value">{viz.vectorScale.toFixed(2)}x</span>
+            </div>
+            <div className="attr-viz-row">
+              <label htmlFor="attr-viz-normalize">Normalize</label>
+              <input
+                id="attr-viz-normalize"
+                type="checkbox"
+                checked={viz.normalize}
+                onChange={(e) => patch({ normalize: e.target.checked })}
+              />
+            </div>
+            <div className="attr-viz-row">
+              <span className="attr-viz-label">Color</span>
+              <div className="attr-viz-segment" role="radiogroup" aria-label="Arrow color mode">
+                <button
+                  type="button"
+                  className={viz.colorMode === "uniform" ? "active" : ""}
+                  onClick={() => patch({ colorMode: "uniform" })}
+                >
+                  Uniform
+                </button>
+                <button
+                  type="button"
+                  className={viz.colorMode === "ramp" ? "active" : ""}
+                  title="Cold to warm over the lane's magnitude range"
+                  onClick={() => patch({ colorMode: "ramp" })}
+                >
+                  Ramp
+                </button>
+              </div>
+              {viz.colorMode === "uniform" && (
+                <input
+                  type="color"
+                  aria-label="Arrow color"
+                  value={rgbToHex(viz.color)}
+                  onChange={(e) => patch({ color: hexToRgb(e.target.value) })}
+                />
+              )}
+            </div>
+            <div className="attr-viz-row">
+              <label htmlFor="attr-viz-cap">Pin cap</label>
+              <input
+                id="attr-viz-cap"
+                type="number"
+                min={8}
+                max={256}
+                step={8}
+                value={shownCap}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) patch({ cap: Math.max(8, Math.min(256, n)) });
+                }}
+              />
+            </div>
+            <div className="attr-viz-row">
+              <button
+                type="button"
+                className="attr-viz-reset"
+                onClick={() =>
+                  patch({
+                    vectorScale: 1,
+                    normalize: false,
+                    colorMode: "uniform",
+                    color: [1, 0.62, 0.15],
+                    cap: 0,
+                  })
+                }
+              >
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        </DropdownPortal>
       )}
     </div>
   );
@@ -173,6 +298,7 @@ export function AttrColumn() {
         />
       </div>
       <LanePicker viz={viz} />
+      <VizSettings viz={viz} />
     </div>
   );
 }

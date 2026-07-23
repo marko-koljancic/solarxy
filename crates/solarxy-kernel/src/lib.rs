@@ -57,6 +57,7 @@ pub mod array;
 pub mod attribute_ops;
 pub mod bounds_geo;
 pub mod copy;
+pub mod deform_ops;
 pub mod delete;
 pub mod edges_to_geo;
 mod error;

@@ -27,8 +27,9 @@ use solarxy_core::scene::{CookedGeometry, CookedMesh};
 
 /// Which element of a mesh an attribute lane describes: one value per
 /// point (vertex) or one value per primitive (triangle, segment, or point
-/// primitive, per the mesh topology). Every 0.8.0 producer writes the
-/// point domain; the primitive domain is the settled growth axis.
+/// primitive, per the mesh topology). Most producers write the point
+/// domain; `attribute_promote` and `attribute_copy` populate the
+/// primitive domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeDomain {
     Point,
@@ -109,8 +110,9 @@ pub struct KernelMesh {
     /// free-form for nodes that consume it.
     pub attributes: AttributeMap,
     /// Extra primitive-domain attributes (one value per triangle, segment,
-    /// or point primitive). No 0.8.0 producer writes these; the domain
-    /// exists so operators handle both axes from day one.
+    /// or point primitive). Written by `attribute_promote` and
+    /// `attribute_copy`; read back through the attribute table's
+    /// Primitive tab.
     pub primitive_attributes: AttributeMap,
 }
 

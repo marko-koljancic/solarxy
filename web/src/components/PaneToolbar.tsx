@@ -5,7 +5,16 @@
 // every change goes through the session's view actions (Rust owns the
 // truth). Positioned from the host-computed pane rects.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   cameraCommand,
   createCameraFromView,
@@ -23,9 +32,10 @@ import type {
   ViewAxis,
   ViewStateDto,
 } from "../engine/types";
-import { IconCheck } from "../icons";
+import { IconCheck, IconChevronRight } from "../icons";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useViewState } from "../store/viewState";
+import { DropdownPortal } from "./DropdownPortal";
 
 /** A camera node's display name (its `name` param, else a fallback). */
 function cameraName(n: NodeMirror): string {
@@ -102,31 +112,25 @@ const LINE_WEIGHTS = [
   ["Bold", "Bold (3 px)"],
 ] as const;
 
+/** Submenu flyouts and their parent panel are one menu tree: the portal's
+ * outside-close treats every panel with the tree's id as inside, and a
+ * non-sticky pick anywhere closes the whole tree. */
+const GhostMenuCtx = createContext<{ treeId: string; close: () => void } | null>(null);
+
 /** One frameless bracketed label opening a local dropdown; closes on
- * outside pointerdown, Esc, or picking a non-sticky item. */
+ * outside pointerdown, Esc, or picking a non-sticky item. The panel is
+ * portaled (DropdownPortal) so it paints above the sibling overlay
+ * layers the toolbar anchor's stacking context sits below. */
 function GhostMenu({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || !rootRef.current?.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
+  const treeId = useId();
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = () => setOpen(false);
 
   return (
-    <div ref={rootRef} className="ghost-menu">
+    <div className="ghost-menu">
       <button
+        ref={anchorRef}
         type="button"
         className={`ghost-label${open ? " open" : ""}`}
         onClick={() => setOpen((o) => !o)}
@@ -134,11 +138,89 @@ function GhostMenu({ label, children }: { label: string; children: ReactNode }) 
         [ {label} ]
       </button>
       {open && (
-        <div className="ghost-dropdown" onClick={() => setOpen(false)}>
-          {children}
-        </div>
+        <GhostMenuCtx.Provider value={{ treeId, close }}>
+          <DropdownPortal anchorRef={anchorRef} treeId={treeId} onClose={close}>
+            <div className="ghost-dropdown" onClick={close}>
+              {children}
+            </div>
+          </DropdownPortal>
+        </GhostMenuCtx.Provider>
       )}
     </div>
+  );
+}
+
+const SUBMENU_CLOSE_MS = 150;
+
+/** A submenu row inside a GhostMenu: hover or click opens a side flyout
+ * (portaled; the panel's own overflow scroll would clip an inline one).
+ * The row shows the current value as a dim hint so the collapsed menu
+ * still answers "what is this set to" at a glance. */
+function GhostSubmenu({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  const ctx = useContext(GhostMenuCtx);
+  const [open, setOpen] = useState(false);
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), SUBMENU_CLOSE_MS);
+  };
+  useEffect(() => cancelClose, []);
+
+  return (
+    <>
+      <button
+        ref={rowRef}
+        type="button"
+        className={`ghost-item ghost-submenu-row${open ? " open" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          cancelClose();
+          setOpen((o) => !o);
+        }}
+        onPointerEnter={() => {
+          cancelClose();
+          setOpen(true);
+        }}
+        onPointerLeave={scheduleClose}
+      >
+        <span className="ghost-check" />
+        {label}
+        {hint && <span className="ghost-submenu-hint">{hint}</span>}
+        <span className="ghost-submenu-caret">
+          <IconChevronRight size={11} />
+        </span>
+      </button>
+      {open && (
+        <DropdownPortal
+          anchorRef={rowRef}
+          placement="side"
+          treeId={ctx?.treeId}
+          onClose={() => setOpen(false)}
+          onPointerEnter={cancelClose}
+          onPointerLeave={scheduleClose}
+        >
+          <div className="ghost-dropdown ghost-flyout" onClick={() => ctx?.close()}>
+            {children}
+          </div>
+        </DropdownPortal>
+      )}
+    </>
   );
 }
 
@@ -406,47 +488,57 @@ function PaneControls({ pane, settings, projection, active }: {
           sticky
           onPick={() => patch({ turntableActive: !settings.turntableActive })}
         />
-        <GhostHeading label="Normals" />
-        {NORMALS.map(([v, label]) => (
-          <GhostItem
-            key={v}
-            label={label}
-            checked={settings.normalsMode === v}
-            sticky
-            onPick={() => patch({ normalsMode: v })}
-          />
-        ))}
-        <GhostHeading label="Bounds" />
-        {BOUNDS.map(([v, label]) => (
-          <GhostItem
-            key={v}
-            label={label}
-            checked={settings.boundsMode === v}
-            sticky
-            onPick={() => patch({ boundsMode: v })}
-          />
-        ))}
-        <GhostHeading label="Wireframe" />
-        {LINE_WEIGHTS.map(([v, label]) => (
-          <GhostItem
-            key={v}
-            label={label}
-            checked={settings.lineWeight === v}
-            sticky
-            onPick={() => patch({ lineWeight: v })}
-          />
-        ))}
-        <GhostHeading label="Background" />
-        {BACKGROUNDS.map(([v, label]) => (
-          <GhostItem
-            key={v}
-            label={label}
-            checked={settings.backgroundMode === v}
-            sticky
-            onPick={() => patch({ backgroundMode: v })}
-          />
-        ))}
-        <GhostHeading label="Pane" />
+        <GhostSubmenu label="Normals" hint={labelOf(NORMALS, settings.normalsMode)}>
+          {NORMALS.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.normalsMode === v}
+              sticky
+              onPick={() => patch({ normalsMode: v })}
+            />
+          ))}
+        </GhostSubmenu>
+        <GhostSubmenu label="Bounds" hint={labelOf(BOUNDS, settings.boundsMode)}>
+          {BOUNDS.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.boundsMode === v}
+              sticky
+              onPick={() => patch({ boundsMode: v })}
+            />
+          ))}
+        </GhostSubmenu>
+        <GhostSubmenu label="Wireframe" hint={labelOf(LINE_WEIGHTS, settings.lineWeight)}>
+          {LINE_WEIGHTS.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.lineWeight === v}
+              sticky
+              onPick={() => patch({ lineWeight: v })}
+            />
+          ))}
+        </GhostSubmenu>
+        <GhostSubmenu
+          label="Background"
+          hint={
+            typeof settings.backgroundMode === "string"
+              ? labelOf(BACKGROUNDS, settings.backgroundMode)
+              : undefined
+          }
+        >
+          {BACKGROUNDS.map(([v, label]) => (
+            <GhostItem
+              key={v}
+              label={label}
+              checked={settings.backgroundMode === v}
+              sticky
+              onPick={() => patch({ backgroundMode: v })}
+            />
+          ))}
+        </GhostSubmenu>
         <GhostItem label="UV Layout (3)" onPick={() => patch({ paneMode: "UvMap" })} />
       </GhostMenu>
     </div>

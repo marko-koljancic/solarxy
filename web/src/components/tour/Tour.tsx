@@ -18,24 +18,33 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { usePrefs } from "../../store/prefs";
 import { placeCoachmark, type Placement } from "./placement";
-import { TOUR_STEPS } from "./steps";
+import { OVERVIEW_TOUR, tourById, type TourDef, type TourStep } from "./steps";
 
-/** Bumped when the steps change enough that a returning user should see it
- * again. Stored alongside the completion flag. */
-export const TOUR_VERSION = 1;
+/** The overview's version, stored alongside the completion flag; bumped
+ * when its steps change enough that a returning user should see it again.
+ * Kept as the historical name so the prefs shape never migrates. */
+export const TOUR_VERSION = OVERVIEW_TOUR.version;
 
 const CARD = { width: 320, height: 168 };
 
-/** The first mounted target, so a docked-away panel never strands the tour
- * on an empty spotlight. */
-function visibleSteps() {
-  return TOUR_STEPS.filter((s) => document.querySelector(s.target));
+/** Only completing the OVERVIEW marks onboarding done: replaying a topic
+ * tour from Help must never eat a new user's first-run. Exported for
+ * tests. */
+export function completionWritesOnboarding(tourId: TourDef["id"]): boolean {
+  return tourId === "overview";
+}
+
+/** The mounted targets of one tour, so a docked-away panel never strands
+ * it on an empty spotlight. */
+function visibleSteps(tour: TourDef): TourStep[] {
+  return tour.steps.filter((s) => document.querySelector(s.target));
 }
 
 export function Tour() {
   const prefs = usePrefs((s) => s.prefs);
   const setPrefs = usePrefs((s) => s.setPrefs);
-  const [steps, setSteps] = useState<typeof TOUR_STEPS>([]);
+  const [tour, setTour] = useState<TourDef>(OVERVIEW_TOUR);
+  const [steps, setSteps] = useState<TourStep[]>([]);
   const [i, setI] = useState(0);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const [place, setPlace] = useState<Placement | null>(null);
@@ -46,13 +55,15 @@ export function Tour() {
 
   const finish = useCallback(() => {
     setSteps([]);
-    setPrefs({
-      ...usePrefs.getState().prefs,
-      onboarding: { completed: true, version: TOUR_VERSION },
-    });
-  }, [setPrefs]);
+    if (completionWritesOnboarding(tour.id)) {
+      setPrefs({
+        ...usePrefs.getState().prefs,
+        onboarding: { completed: true, version: TOUR_VERSION },
+      });
+    }
+  }, [setPrefs, tour.id]);
 
-  // Start on first run, or when replayed from Help.
+  // Auto-start the OVERVIEW on first run (topic tours are Help-only).
   //
   // Not a single deferred sample: the pane toolbars mount only once the
   // wasm host has reported pane rects, which can land after any fixed
@@ -67,10 +78,13 @@ export function Tour() {
     let tries = 0;
     const tick = () => {
       if (cancelled) return;
-      const found = visibleSteps();
+      const found = visibleSteps(OVERVIEW_TOUR);
       tries += 1;
       if ((found.length === last && found.length > 0) || tries >= 8) {
-        if (found.length > 0) setSteps(found);
+        if (found.length > 0) {
+          setTour(OVERVIEW_TOUR);
+          setSteps(found);
+        }
         return;
       }
       last = found.length;
@@ -83,10 +97,15 @@ export function Tour() {
     };
   }, [onboarding.completed, onboarding.version]);
 
+  // Replay from Help: a CustomEvent whose detail names the tour; a plain
+  // Event (the pre-submenu shape) falls back to the overview.
   useEffect(() => {
-    const replay = () => {
+    const replay = (e: Event) => {
+      const id = e instanceof CustomEvent ? (e.detail as { id?: unknown } | null)?.id : undefined;
+      const def = tourById(id);
+      setTour(def);
       setI(0);
-      setSteps(visibleSteps());
+      setSteps(visibleSteps(def));
     };
     window.addEventListener("solarxy:tour", replay);
     return () => window.removeEventListener("solarxy:tour", replay);

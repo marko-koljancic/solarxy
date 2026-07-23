@@ -41,13 +41,14 @@ use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
+use crate::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
 use crate::gizmo::{self, GizmoState, ToolMode};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
 use solarxy_renderer::geometry::build_normals_geometry;
-use solarxy_renderer::model::NormalsGeometry;
+use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
 use solarxy_renderer::input::PointerButton;
 use solarxy_renderer::light::LightsUniform;
 use solarxy_renderer::panes::{self, PaneRect};
@@ -2814,15 +2815,22 @@ impl SolarxyApp {
     /// every displayed geometry: positions through the object matrix,
     /// directions through the normal matrix for the reserved `N` lane
     /// (bivector semantics under nonuniform scale) and the plain linear
-    /// part for everything else. Length scales with the value times the
-    /// normals-arrow factor, so magnitude stays readable.
-    fn build_attr_vector_lines(&self) -> Vec<[f32; 3]> {
-        use cgmath::{Matrix3, Matrix4, SquareMatrix, Transform};
+    /// part for everything else. Length is the bounds-derived factor
+    /// times the strip's scale multiplier, over the value (or its unit
+    /// direction under normalize); color is the uniform pick, or the
+    /// cold-to-warm ramp over this frame's magnitude range.
+    fn build_attr_vector_lines(&self) -> Vec<GizmoVertex> {
+        use cgmath::{InnerSpace, Matrix3, Matrix4, SquareMatrix, Transform};
         let Some(name) = self.attr_viz.name.as_deref() else {
             return Vec::new();
         };
         let is_normal_lane = name == solarxy_kernel::reserved::NORMAL;
-        let mut lines: Vec<[f32; 3]> = Vec::new();
+        let multiplier = self.attr_viz.scale_multiplier();
+        let normalize = self.attr_viz.normalize;
+
+        // First pass: world-space segments plus each arrow's magnitude
+        // (pre-normalization), so the ramp can span the real range.
+        let mut segments: Vec<([f32; 3], [f32; 3], f32)> = Vec::new();
         for (_node, set, m) in self.engine.display_geometries() {
             let matrix = Matrix4::from(m);
             let linear = Matrix3::from_cols(
@@ -2840,7 +2848,7 @@ impl SolarxyApp {
             let scale = {
                 let d = set.bounds.diagonal();
                 if d > 1e-10 { d * 0.05 } else { 0.1 }
-            };
+            } * multiplier;
             for mesh in &set.meshes {
                 // Vec3 and vec4 (xyz) lanes draw, map or fixed-buffer N;
                 // float/vec2 lanes have no spatial reading and skip.
@@ -2850,17 +2858,62 @@ impl SolarxyApp {
                 for (i, p) in mesh.positions.iter().enumerate() {
                     let Some(v) = lane.direction(i) else { continue };
                     let tp = matrix.transform_point(Point3::from(*p));
-                    let dir = dir_matrix * Vector3::from(v);
-                    lines.push([tp.x, tp.y, tp.z]);
-                    lines.push([
-                        tp.x + dir.x * scale,
-                        tp.y + dir.y * scale,
-                        tp.z + dir.z * scale,
-                    ]);
+                    let mut dir = dir_matrix * Vector3::from(v);
+                    let magnitude = dir.magnitude();
+                    if normalize {
+                        if magnitude <= 1e-10 {
+                            continue;
+                        }
+                        dir /= magnitude;
+                    }
+                    segments.push((
+                        [tp.x, tp.y, tp.z],
+                        [
+                            tp.x + dir.x * scale,
+                            tp.y + dir.y * scale,
+                            tp.z + dir.z * scale,
+                        ],
+                        magnitude,
+                    ));
                 }
             }
         }
-        lines
+
+        // Second pass: colors. Flat per arrow (both vertices alike) so
+        // direction stays readable under the ramp.
+        let color_for: Box<dyn Fn(f32) -> [f32; 3]> = match self.attr_viz.color_mode {
+            AttrColorMode::Uniform => {
+                let c = self.attr_viz.color;
+                Box::new(move |_| c)
+            }
+            AttrColorMode::Ramp => {
+                let (min, max) = segments.iter().fold(
+                    (f32::INFINITY, f32::NEG_INFINITY),
+                    |(lo, hi), (_, _, m)| (lo.min(*m), hi.max(*m)),
+                );
+                if max - min <= 1e-10 {
+                    // A degenerate range has nothing to rank; fall back
+                    // to the uniform color.
+                    let c = self.attr_viz.color;
+                    Box::new(move |_| c)
+                } else {
+                    Box::new(move |m: f32| {
+                        let t = ((m - min) / (max - min)).clamp(0.0, 1.0);
+                        ramp_color(t)
+                    })
+                }
+            }
+        };
+        segments
+            .into_iter()
+            .flat_map(|(a, b, magnitude)| {
+                let color = color_for(magnitude);
+                [
+                    GizmoVertex { position: a, color },
+                    GizmoVertex { position: b, color },
+                ]
+            })
+            .collect()
     }
 
     /// The world-space visualization aggregate over
@@ -4148,39 +4201,6 @@ const NDC_XY_SLACK: f32 = 1.05;
 /// where `clip.w` is a constant 1.
 const NDC_Z_MIN: f32 = -0.05;
 const NDC_Z_MAX: f32 = 1.05;
-
-/// Host-owned attribute-visualization state (session-only, scene-wide):
-/// the right strip's three toggles, the picked point-lane name, and the
-/// pin cap. Deliberately NOT in `PaneDisplaySettings` (which is `Copy`,
-/// desktop-shared, and serialized into pane blobs) and never in `.slxy`
-/// or undo.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct AttrVizState {
-    labels: bool,
-    vectors: bool,
-    points: bool,
-    name: Option<String>,
-    /// Pin budget for labels/points; 0 means the default.
-    cap: u32,
-}
-
-impl AttrVizState {
-    const DEFAULT_CAP: usize = 64;
-    const MAX_CAP: usize = 256;
-
-    fn pins_wanted(&self) -> bool {
-        self.labels || self.points
-    }
-
-    fn cap(&self) -> usize {
-        if self.cap == 0 {
-            Self::DEFAULT_CAP
-        } else {
-            (self.cap as usize).min(Self::MAX_CAP)
-        }
-    }
-}
 
 /// One stride-sampled pin candidate, ready to project per pane.
 struct PinCandidate {

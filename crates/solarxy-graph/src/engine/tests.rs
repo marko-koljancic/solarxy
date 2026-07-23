@@ -409,6 +409,34 @@ fn command_boundary_json_shape_is_camelcase() {
         }
     ));
 
+    // resetParams: camelCase tag, optional keys (absent means all).
+    let cmd3 = Command::ResetParams {
+        ctx: GraphContext::Root,
+        node: NodeId(7),
+        keys: None,
+    };
+    let v3 = serde_json::to_value(&cmd3).unwrap();
+    assert_eq!(v3["type"], "resetParams");
+    let back3: Command =
+        serde_json::from_value(serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7 }))
+            .unwrap();
+    assert!(matches!(
+        back3,
+        Command::ResetParams {
+            node: NodeId(7),
+            keys: None,
+            ..
+        }
+    ));
+    let back4: Command = serde_json::from_value(
+        serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7, "keys": ["width"] }),
+    )
+    .unwrap();
+    assert!(matches!(
+        back4,
+        Command::ResetParams { keys: Some(k), .. } if k == vec!["width".to_string()]
+    ));
+
     // The event mirror is camelCase too (typeId, not type_id).
     let mut e = engine();
     let geo = add(&mut e, GraphContext::Root, "geo");
@@ -1029,6 +1057,160 @@ fn param_edits_coalesce_within_a_transaction() {
         .get("width")
         .cloned();
     assert_eq!(after, before, "one drag is one undo step");
+}
+
+#[test]
+fn reset_params_restores_defaults_in_one_undo_step() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    for (key, v) in [("width", 3.0), ("height", 4.0)] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: box_id,
+            key: key.into(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+
+    // The stored overrides are gone (the document is honestly unset)...
+    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    assert!(params.get("width").is_none());
+    assert!(params.get("height").is_none());
+    // ...and each removal announced the descriptor default so the mirror
+    // repaints without a snapshot.
+    let changed: Vec<(String, ParamSource)> = batch
+        .events
+        .iter()
+        .filter_map(|ev| match ev {
+            EngineEvent::ParamChanged { key, value, .. } => Some((key.clone(), value.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(changed.contains(&(
+        "width".to_string(),
+        ParamSource::Literal(ParamValue::Float(1.0))
+    )));
+    assert!(changed.contains(&(
+        "height".to_string(),
+        ParamSource::Literal(ParamValue::Float(1.0))
+    )));
+
+    // ONE undo restores both stored values; redo re-resets both.
+    e.apply(Command::Undo).unwrap();
+    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    assert_eq!(
+        params.get("width"),
+        Some(&ParamSource::Literal(ParamValue::Float(3.0)))
+    );
+    assert_eq!(
+        params.get("height"),
+        Some(&ParamSource::Literal(ParamValue::Float(4.0)))
+    );
+    e.apply(Command::Redo).unwrap();
+    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    assert!(params.get("width").is_none());
+    assert!(params.get("height").is_none());
+}
+
+#[test]
+fn reset_params_with_keys_touches_only_those_and_rejects_unknown_ones() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    for (key, v) in [("width", 3.0), ("height", 4.0)] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: box_id,
+            key: key.into(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+
+    e.apply(Command::ResetParams {
+        ctx,
+        node: box_id,
+        keys: Some(vec!["width".into()]),
+    })
+    .unwrap();
+    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    assert!(params.get("width").is_none());
+    assert_eq!(
+        params.get("height"),
+        Some(&ParamSource::Literal(ParamValue::Float(4.0))),
+        "a keyed reset leaves the other overrides alone"
+    );
+
+    assert!(
+        e.apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: Some(vec!["no_such_param".into()]),
+        })
+        .is_err(),
+        "an unknown key is a command error, matching set_param"
+    );
+}
+
+#[test]
+fn reset_params_removes_an_expression_and_skips_unstored_keys() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "2 + 2".into(),
+        },
+    })
+    .unwrap();
+
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    assert!(params.get("width").is_none(), "the expression is removed");
+    // Only the one stored key announced a change: unstored params are
+    // already at their defaults and stay silent.
+    let changed = batch
+        .events
+        .iter()
+        .filter(|ev| matches!(ev, EngineEvent::ParamChanged { .. }))
+        .count();
+    assert_eq!(changed, 1);
+}
+
+#[test]
+fn reset_params_with_nothing_stored_emits_nothing() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+    assert!(
+        !batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::ParamChanged { .. })),
+        "a pristine node has nothing to reset"
+    );
 }
 
 #[test]

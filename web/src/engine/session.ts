@@ -767,6 +767,22 @@ export async function openScene(): Promise<void> {
   if (picked) applyLoadedScene(picked.bytes);
 }
 
+/** Opens a bundled sample scene by filename (fetched from the site's
+ * `samples/` directory; guarded by a Rust fixture test that cooks every
+ * committed sample). Callers own the dirty-check confirm. */
+export async function openSampleScene(file: string): Promise<void> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}samples/${file}`);
+    if (!res.ok) {
+      pushToast(`Could not load the sample scene (${res.status}).`, "error");
+      return;
+    }
+    applyLoadedScene(new Uint8Array(await res.arrayBuffer()));
+  } catch (e) {
+    pushToast(e instanceof Error ? e.message : "Could not load the sample scene.", "error");
+  }
+}
+
 // In-memory clipboard fragment (application/x-solarxy-nodes shape). A
 // system-clipboard bridge for cross-tab paste is a refinement.
 let clipboard: unknown = null;

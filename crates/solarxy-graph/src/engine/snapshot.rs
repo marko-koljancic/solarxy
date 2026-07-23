@@ -256,7 +256,32 @@ pub struct ParamSnapshot {
     /// The input-port key whose connection neutralizes this param (the
     /// panel dims the row while that port is connected).
     pub driven_by_port: Option<String>,
+    /// Visibility conditions (all must hold); empty means always visible.
+    /// Skipped from the JSON when empty so pre-existing param shapes are
+    /// unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub show_if: Vec<ShowIfSnapshot>,
     pub doc: String,
+}
+
+/// One conditional-visibility clause as the panel consumes it: show the
+/// param only while `param`'s current value satisfies `pred`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowIfSnapshot {
+    pub param: String,
+    pub pred: ShowIfPredSnapshot,
+}
+
+/// The predicate, with values in the same schema-v1 plain JSON form as
+/// `ParamSnapshot::default` (so the panel compares one encoding).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind", rename_all_fields = "camelCase")]
+pub enum ShowIfPredSnapshot {
+    Truthy,
+    Eq { value: serde_json::Value },
+    Neq { value: serde_json::Value },
+    In { values: Vec<serde_json::Value> },
 }
 
 /// What a `nodePath` param may point at, as the frontend picker consumes
@@ -343,9 +368,32 @@ impl From<&ParamSpec> for ParamSnapshot {
             hard: p.range.map(|r| r.hard),
             soft: p.range.and_then(|r| r.soft),
             driven_by_port: p.driven_by_port.clone(),
+            show_if: p.show_if.iter().map(ShowIfSnapshot::from).collect(),
             step: p.step,
             unit: p.unit.into(),
             doc: p.doc.clone(),
+        }
+    }
+}
+
+impl From<&crate::registry::param_spec::ShowIf> for ShowIfSnapshot {
+    fn from(s: &crate::registry::param_spec::ShowIf) -> Self {
+        use crate::registry::param_spec::Pred;
+        use crate::registry::resolve::param_value_to_json;
+        Self {
+            param: s.param.clone(),
+            pred: match &s.pred {
+                Pred::Truthy => ShowIfPredSnapshot::Truthy,
+                Pred::Eq(v) => ShowIfPredSnapshot::Eq {
+                    value: param_value_to_json(v),
+                },
+                Pred::Neq(v) => ShowIfPredSnapshot::Neq {
+                    value: param_value_to_json(v),
+                },
+                Pred::In(vs) => ShowIfPredSnapshot::In {
+                    values: vs.iter().map(param_value_to_json).collect(),
+                },
+            },
         }
     }
 }
