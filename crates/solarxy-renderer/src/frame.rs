@@ -322,6 +322,12 @@ pub struct Renderer {
     camera_helper_count: u32,
     manipulator_tri_buf: wgpu::Buffer,
     manipulator_tri_count: u32,
+    /// The GPU attribute-label channel (host-fed like the manipulator; the
+    /// desktop never populates it, so it draws nothing there). Lives here
+    /// and not in `VisualizationState` for the same reason the manipulator
+    /// buffers do: the atlas and grown buffers must survive the
+    /// bounds-driven visualization rebuilds.
+    pub labels: crate::labels::LabelResources,
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
@@ -455,6 +461,8 @@ impl Renderer {
                 resource: wireframe_params_buffer.as_entire_binding(),
             }],
         });
+
+        let labels = crate::labels::LabelResources::new(device, queue, &layouts.labels);
 
         let shared_samplers = SharedSamplers::new(device);
 
@@ -674,6 +682,7 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             manipulator_tri_count: 0,
+            labels,
             light_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Light Helpers"),
                 size: LIGHT_HELPER_BUF_BYTES,
@@ -1144,6 +1153,7 @@ impl Renderer {
         }
         self.draw_normals(&mut pass, env, objects, cam_bg, pds);
         self.draw_attr_vectors(&mut pass, env, cam_bg);
+        self.draw_attr_labels(&mut pass, cam_bg);
         self.draw_axes(&mut pass, env, cam_bg, pds);
         self.draw_local_axes(&mut pass, env, cam_bg, pds);
         self.draw_bounds(&mut pass, env, cam_bg, pds);
@@ -2117,5 +2127,45 @@ impl Renderer {
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_vertex_buffer(0, env.vis.attr_lines_buf.slice(..));
         pass.draw(0..env.vis.attr_lines_count, 0..1);
+    }
+
+    /// The GPU attribute labels: one draw over the whole set (chips, dots,
+    /// glyph quads decoded from `vertex_index` ranges), expanded per pane
+    /// against its camera so orbiting costs no CPU work. Gated purely on
+    /// the count: only the web host populates the channel.
+    fn draw_attr_labels<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, cam_bg: &'a wgpu::BindGroup) {
+        let verts = self.labels.vertex_count();
+        if verts == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.overlay.attr_labels);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
+        pass.set_bind_group(2, &self.labels.bind_group, &[]);
+        pass.draw(0..verts, 0..1);
+    }
+
+    /// Replaces the label set (host-driven, event-paced; see
+    /// [`crate::labels::LabelResources::set_labels`]).
+    pub fn set_attr_labels(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[crate::labels::LabelInstance],
+        glyph_words: &[u32],
+    ) {
+        self.labels
+            .set_labels(device, queue, &self.layouts.labels, instances, glyph_words);
+    }
+
+    /// Pushes the label theme colors / device pixel ratio.
+    pub fn write_label_style(&mut self, queue: &wgpu::Queue, style: &crate::labels::LabelStyle) {
+        self.labels.write_style(queue, style);
+    }
+
+    /// Updates only the labels' device pixel ratio (kept honest across
+    /// browser zoom without the host re-reading theme colors).
+    pub fn write_label_dpr(&mut self, queue: &wgpu::Queue, dpr: f32) {
+        self.labels.write_dpr(queue, dpr);
     }
 }

@@ -10,7 +10,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { getClient, setAttrViz } from "../engine/session";
-import { attrPinKey, registerAttrPin, useAttrPinStats } from "../engine/attrPins";
+import { useAttrPinStats } from "../engine/attrPins";
 import type { AttrLane, AttrVizState, RampPreset } from "../engine/types";
 import {
   IconAttrLabels,
@@ -54,8 +54,8 @@ export function hexToRgb(hex: string): [number, number, number] {
 
 const GLYPH = 19;
 
-/** Mirrors `AttrVizState::MAX_CAP` (the host's pooled-pin ceiling). */
-const PIN_CAP_MAX = 2048;
+/** Mirrors `AttrVizState::MAX_CAP` (the GPU label channel ceiling). */
+const PIN_CAP_MAX = 16384;
 
 /** The union of point-domain lanes across every displayed geometry (each
  * geo subflow's display-flag node), first-seen type per name. Fetched on
@@ -249,7 +249,7 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
               </div>
             )}
             <div className="attr-viz-row">
-              <label htmlFor="attr-viz-cap" title="Default: every point, up to 2048 per scene">
+              <label htmlFor="attr-viz-cap" title="Default: every point, up to 16384 per scene">
                 Pin cap
               </label>
               <input
@@ -356,38 +356,3 @@ export function AttrColumn() {
   );
 }
 
-/** The pooled pin elements (position/text patched imperatively per frame
- * by engine/attrPins.ts). One clip box per 3D pane; the pool sizes to the
- * host's reported capacity (all points up to the ceiling by default), so
- * a 500-point scene allocates 500 slots, never the ceiling. */
-export function AttrPinsOverlay() {
-  const view = useViewState((s) => s.view);
-  const cap = useAttrPinStats((s) => s.capacity);
-  if (!view?.attrViz || !(view.attrViz.labels || view.attrViz.points) || cap === 0) return null;
-
-  return (
-    <>
-      {view.paneRects.map((rect, pane) => {
-        if (view.paneSettings[pane]?.paneMode === "UvMap") return null;
-        return (
-          <div
-            key={pane}
-            className="attr-pin-clip"
-            style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
-          >
-            {Array.from({ length: cap }, (_, slot) => (
-              <div
-                key={slot}
-                className="attr-pin"
-                ref={(el) => registerAttrPin(attrPinKey(pane, slot), el)}
-              >
-                <span className="attr-pin-dot" aria-hidden />
-                <span className="attr-pin-text" />
-              </div>
-            ))}
-          </div>
-        );
-      })}
-    </>
-  );
-}

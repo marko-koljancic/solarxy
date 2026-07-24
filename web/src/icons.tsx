@@ -58,6 +58,24 @@ export function IconChevronRight(p: IconProps) {
   );
 }
 
+export function IconChevronsDown(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m4 4.5 4 4 4-4" />
+      <path d="m4 9 4 4 4-4" />
+    </Svg>
+  );
+}
+
+export function IconChevronsUp(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m4 11.5 4-4 4 4" />
+      <path d="m4 7 4-4 4 4" />
+    </Svg>
+  );
+}
+
 export function IconCheck(p: IconProps) {
   return (
     <Svg {...p}>

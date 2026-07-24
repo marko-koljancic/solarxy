@@ -23,7 +23,7 @@ import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
-import { applyAttrPins, hideAttrPins, useAttrPinStats } from "./attrPins";
+import { useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
 import { ctxKey } from "./types";
@@ -327,6 +327,7 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
     pushSelectionHighlight();
+    pushLabelColors();
     // Boot push (no prev): both pane-seeded display fields apply. This runs
     // before any recovery load, so a restored scene's saved panes still win.
     pushDisplayDefaults();
@@ -334,6 +335,9 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
       if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
       if (state.prefs.selection !== prev.prefs.selection) pushSelectionHighlight();
       if (state.prefs.display !== prev.prefs.display) pushDisplayDefaults(prev.prefs.display);
+      // Body classes flip synchronously in the prefs store before this
+      // subscriber runs, so the tokens read fresh.
+      if (state.resolvedTheme !== prev.resolvedTheme) pushLabelColors();
     });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
@@ -450,6 +454,20 @@ export function pushGizmoSettings(): void {
 export function pushSelectionHighlight(): void {
   if (!client) return;
   getClient().setSelectionHighlight(usePrefs.getState().prefs.selection);
+}
+
+/** Pushes the GPU attribute-label colors from the live theme tokens (the
+ * same tokens the DOM overlay used to consume via CSS). Called at boot and
+ * whenever the resolved theme flips. */
+export function pushLabelColors(): void {
+  if (!client) return;
+  const tokens = getComputedStyle(document.body);
+  const read = (name: string, fallback: string) => tokens.getPropertyValue(name).trim() || fallback;
+  getClient().setLabelColors(
+    read("--text-primary", "#e6e1cf"),
+    read("--background-secondary", "#1f2430"),
+    read("--accent-primary", "#ff9e21"),
+  );
 }
 
 /** Pushes the display defaults (wireframe weight, background, turntable
@@ -981,6 +999,7 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "activePane") useViewState.getState().setActivePaneMirror(ev.pane);
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
+    else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the
@@ -994,16 +1013,8 @@ export function runFrame(dtMs: number): void {
   } else {
     hideAllMarkers();
   }
-  // Attribute pins ride the same imperative channel; the frame's
-  // capacity/total feed the pool size and the sampling notice.
-  const attrViz = useViewState.getState().view?.attrViz;
-  if (attrViz && (attrViz.labels || attrViz.points)) {
-    const frame = getClient().attrPins();
-    useAttrPinStats.getState().set(frame.capacity, frame.total);
-    applyAttrPins(frame.pins, attrViz.labels, attrViz.points);
-  } else {
-    hideAttrPins();
-  }
+  // Attribute labels draw in the GPU pass now; their sampling stats
+  // arrive as attrPinStats host events above, so nothing to pump here.
   // Both modes: manual drives the amber stale tags + header count, auto
   // drives the transient pending tint on queued-dirty nodes.
   refreshStale();

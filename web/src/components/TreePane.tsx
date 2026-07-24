@@ -9,10 +9,15 @@ import { useMemo, useState } from "react";
 import { dispatch } from "../engine/session";
 import { ctxKey } from "../engine/types";
 import { diveIntoSubflow } from "../flow/nodeActions";
-import { IconChevronDown, IconChevronRight } from "../icons";
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconChevronsDown,
+  IconChevronsUp,
+} from "../icons";
 import { useMirror } from "../store/mirror";
 import { NodeGlyph } from "./NodeGlyph";
-import { buildSceneTree, searchTree, type TreeRow } from "./treeModel";
+import { allBranchKeys, buildSceneTree, searchTree, type TreeRow } from "./treeModel";
 
 /** The container-context tints, the exact tokens the canvas tints
  * container tiles with, so the tree's color language matches the graph. */
@@ -26,14 +31,16 @@ export function TreePane() {
   const registry = useMirror((s) => s.registry);
   const contexts = useMirror((s) => s.contexts);
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // COLLAPSED keys, not expanded: the empty-set default means the whole
+  // tree opens expanded, and nodes created later arrive expanded too.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const rows = useMemo(() => buildSceneTree(registry, contexts), [registry, contexts]);
   const search = useMemo(() => searchTree(rows, query), [rows, query]);
   const searching = query.trim().length > 0;
 
   const toggle = (key: string) =>
-    setExpanded((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -59,7 +66,7 @@ export function TreePane() {
     // ancestors (force-expanded); the manual expansion set is untouched,
     // so clearing the query restores it.
     if (searching && !search.matches.has(row.key) && !search.expand.has(row.key)) return null;
-    const isOpen = searching ? search.expand.has(row.key) : expanded.has(row.key);
+    const isOpen = searching ? search.expand.has(row.key) : !collapsed.has(row.key);
     const selected =
       contexts[ctxKey(row.ctx)]?.selection.includes(row.node.id) ?? false;
     const tint = row.opens !== null ? CONTAINER_TINT[row.opens] : undefined;
@@ -121,6 +128,24 @@ export function TreePane() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <button
+          type="button"
+          className="tree-fold-btn"
+          title="Expand all"
+          aria-label="Expand all"
+          onClick={() => setCollapsed(new Set())}
+        >
+          <IconChevronsDown size={12} />
+        </button>
+        <button
+          type="button"
+          className="tree-fold-btn"
+          title="Collapse all"
+          aria-label="Collapse all"
+          onClick={() => setCollapsed(allBranchKeys(rows))}
+        >
+          <IconChevronsUp size={12} />
+        </button>
       </div>
       <div className="tree-body">{body}</div>
     </div>

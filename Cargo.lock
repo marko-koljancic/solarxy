@@ -4169,6 +4169,7 @@ dependencies = [
 name = "solarxy-renderer"
 version = "0.7.2"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "bytemuck",
  "cgmath",

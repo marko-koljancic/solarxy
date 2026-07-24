@@ -713,7 +713,6 @@ impl State {
             (cursor.0 - content.x, cursor.1 - content.y),
             (content.width, content.height),
             camera.build_view_projection_matrix(),
-            camera.eye,
         );
 
         // Raycast only visible meshes — a hidden mesh you cannot see must
@@ -967,7 +966,6 @@ impl State {
                 local,
                 (pane.width, pane.height),
                 view_proj,
-                camera.eye,
             );
             let model = &scene.model;
             let views: Vec<crate::state::raycast::MeshView<'_>> = model
@@ -1021,7 +1019,6 @@ impl State {
             local,
             (pane.width, pane.height),
             view_proj,
-            camera.eye,
         );
 
         let model = &scene.model;

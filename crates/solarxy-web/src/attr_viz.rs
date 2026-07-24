@@ -111,9 +111,11 @@ impl Default for AttrVizState {
 }
 
 impl AttrVizState {
-    /// The hard ceiling on pooled pins per pane: past this the DOM pool
-    /// and the per-frame wasm-boundary traffic stop being free.
-    pub const MAX_CAP: usize = 2048;
+    /// The hard ceiling on labels: the GPU channel draws 12 + 6-per-glyph
+    /// vertices per label per pane, so this bounds vertex throughput (about
+    /// 2M vertices per pane at the ceiling), not memory. The per-cook text
+    /// assembly is the CPU side of the same budget.
+    pub const MAX_CAP: usize = 16_384;
     /// The channel's historical amber.
     pub const DEFAULT_COLOR: [f32; 3] = [1.0, 0.62, 0.15];
 

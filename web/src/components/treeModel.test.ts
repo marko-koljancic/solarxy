@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphMirror, NodeMirror, RegistrySnapshot } from "../engine/types";
-import { buildSceneTree, searchTree } from "./treeModel";
+import { allBranchKeys, buildSceneTree, searchTree } from "./treeModel";
 
 function node(id: number, typeId: string, name?: string): NodeMirror {
   return {
@@ -117,5 +117,19 @@ describe("searchTree", () => {
     const { matches, expand } = searchTree(rows, "   ");
     expect(matches.size).toBe(0);
     expect(expand.size).toBe(0);
+  });
+});
+
+describe("allBranchKeys", () => {
+  it("collects only rows with children, at every depth", () => {
+    const rows = buildSceneTree(REGISTRY, CONTEXTS);
+    const keys = allBranchKeys(rows);
+    // terrain (root container) and the nested inner texnet are branches;
+    // maps has no mirrored sub-context, so it is a leaf, as are box/note.
+    expect(keys).toEqual(new Set(["root:1", "sub:1:5"]));
+  });
+
+  it("is empty for an empty tree", () => {
+    expect(allBranchKeys([]).size).toBe(0);
   });
 });

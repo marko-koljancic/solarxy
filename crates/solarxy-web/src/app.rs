@@ -167,6 +167,11 @@ enum HostEvent {
     /// Host-side pointer input mutated view state (UV pan/zoom); the
     /// frontend refreshes its view-state mirror.
     ViewChanged,
+    /// The attribute-label sampling facts changed (cook, lane, toggle, cap
+    /// edit): `capacity` labels drawn of `total` displayed points; the
+    /// strip's sampling notice reads `capacity < total`. Total rides f64
+    /// for the 53-bit JS number boundary.
+    AttrPinStats { capacity: u32, total: f64 },
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -610,7 +615,7 @@ impl SolarxyApp {
 
         self.sync_env_bounds();
         self.sync_visualization();
-        self.sync_attr_vectors();
+        self.sync_attr_channels();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
         self.follow_look_through_cameras();
@@ -708,6 +713,9 @@ impl SolarxyApp {
         }
         if dpr > 0.0 {
             self.dpr = dpr;
+            // Label px metrics scale by dpr; keep them honest across
+            // browser-zoom and monitor-density changes.
+            self.renderer.write_label_dpr(&self.queue, dpr);
         }
         self.config.width = width;
         self.config.height = height;
@@ -975,7 +983,6 @@ impl SolarxyApp {
             (p.0 - pane.x, p.1 - pane.y),
             (pane.width, pane.height),
             cam.build_view_projection_matrix(),
-            cam.eye,
         );
         let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
         let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
@@ -996,7 +1003,6 @@ impl SolarxyApp {
                 (p.0 - pane.x, p.1 - pane.y),
                 (pane.width, pane.height),
                 cam.build_view_projection_matrix(),
-                cam.eye,
             );
             let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
             let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
@@ -1080,112 +1086,6 @@ impl SolarxyApp {
             self.attr_dirty = true;
         }
         to_js(&self.view_state_dto())
-    }
-
-    /// Attribute pins for the labels/points modes: a deterministic stride
-    /// sample of every displayed geometry's points (all of them up to the
-    /// budget, every Nth beyond it), projected per 3D pane into
-    /// pane-relative CSS px (the review-marker convention). The sample is
-    /// camera-independent, so orbiting only hides and reveals pins at the
-    /// screen edges. Point numbers restart per displayed object, matching
-    /// the Attributes pane's table. Returns a frame `{pins, capacity,
-    /// total}` so the DOM pool can size itself exactly and the strip can
-    /// notice when sampling engaged. Called once per animation frame while
-    /// a pin mode is on.
-    pub fn attr_pins(&self) -> Result<JsValue, JsError> {
-        use cgmath::{Matrix4, Transform};
-        let mut out: Vec<AttrPinDto> = Vec::new();
-        if !self.attr_viz.pins_wanted() {
-            return to_js(&AttrPinsFrameDto { pins: out, capacity: 0, total: 0.0 });
-        }
-        let lane = self
-            .attr_viz
-            .name
-            .as_deref()
-            .filter(|_| self.attr_viz.labels);
-        // Deterministic stride sampling: candidate points are every
-        // `stride`-th point of the global sequence, so the SAME points
-        // carry pins regardless of the camera (orbiting only hides and
-        // reveals them at the screen edges), they spread over the whole
-        // model instead of clumping on the nearest patch, and at most
-        // `cap` points are ever transformed per frame.
-        let geos = self.engine.display_geometries();
-        let total: usize = geos
-            .iter()
-            .flat_map(|(_, set, _)| set.meshes.iter())
-            .map(solarxy_kernel::KernelMesh::vertex_count)
-            .sum();
-        if total == 0 {
-            return to_js(&AttrPinsFrameDto { pins: out, capacity: 0, total: 0.0 });
-        }
-        let cap = self.attr_viz.effective_cap(total);
-        let stride = total.div_ceil(cap).max(1);
-        let mut points: Vec<PinCandidate> = Vec::new();
-        let mut global = 0usize;
-        for (_node, set, m) in &geos {
-            let matrix = Matrix4::from(*m);
-            let mut ptnum: u64 = 0;
-            for mesh in &set.meshes {
-                let len = mesh.vertex_count();
-                let values =
-                    lane.and_then(|n| solarxy_graph::engine::attr_table::resolve_lane(mesh, n));
-                let first = global.next_multiple_of(stride);
-                let mut g = first;
-                while g < global + len {
-                    let i = g - global;
-                    let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
-                    points.push(PinCandidate {
-                        world: [tp.x, tp.y, tp.z],
-                        ptnum: ptnum + i as u64,
-                        slot: (g / stride) as u32,
-                        value: values.map(|l| l.components(i).unwrap_or_default()),
-                    });
-                    g += stride;
-                }
-                ptnum += len as u64;
-                global += len;
-            }
-        }
-        let rects = self.compute_panes();
-        for (pane_i, pane) in rects.iter().enumerate() {
-            if self.view.pane_settings[pane_i].pane_mode == PaneMode::UvMap || pane.height <= 0.0 {
-                continue;
-            }
-            let Some(cam_state) = self.view.cameras[pane_i].as_ref() else {
-                continue;
-            };
-            let mut cam = cam_state.camera;
-            cam.aspect = pane.width / pane.height.max(1.0);
-            let vp = cam.build_view_projection_matrix();
-            for c in &points {
-                let clip = vp * cgmath::Vector4::new(c.world[0], c.world[1], c.world[2], 1.0);
-                // Perspective behind-eye guard (ortho w is a constant 1,
-                // where the z-range cull below does the work instead).
-                if clip.w <= 0.0 {
-                    continue;
-                }
-                let ndc = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
-                if ndc.0.abs() > NDC_XY_SLACK
-                    || ndc.1.abs() > NDC_XY_SLACK
-                    || !(NDC_Z_MIN..=NDC_Z_MAX).contains(&ndc.2)
-                {
-                    continue;
-                }
-                out.push(AttrPinDto {
-                    pane: pane_i,
-                    x: (ndc.0 + 1.0) * 0.5 * pane.width / self.dpr,
-                    y: (1.0 - ndc.1) * 0.5 * pane.height / self.dpr,
-                    ptnum: c.ptnum as f64,
-                    slot: c.slot,
-                    value: c.value.clone(),
-                });
-            }
-        }
-        to_js(&AttrPinsFrameDto {
-            pins: out,
-            capacity: cap as u32,
-            total: total as f64,
-        })
     }
 
     /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
@@ -1582,6 +1482,31 @@ impl SolarxyApp {
         };
         self.renderer
             .set_selection_highlight(&self.queue, style, [r, g, b, a], width);
+    }
+
+    /// Pushes the attribute-label theme colors (linear RGB, converted from
+    /// the CSS tokens frontend-side like the selection highlight): text,
+    /// background chip, anchor dot. Called at boot and on theme change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_label_colors(
+        &mut self,
+        text_r: f32,
+        text_g: f32,
+        text_b: f32,
+        chip_r: f32,
+        chip_g: f32,
+        chip_b: f32,
+        dot_r: f32,
+        dot_g: f32,
+        dot_b: f32,
+    ) {
+        let style = solarxy_renderer::labels::LabelStyle {
+            text: [text_r, text_g, text_b],
+            chip: [chip_r, chip_g, chip_b],
+            dot: [dot_r, dot_g, dot_b],
+            dpr: self.dpr,
+        };
+        self.renderer.write_label_style(&self.queue, &style);
     }
 
     // ---- view-state boundary (host-owned; React mirrors) ----
@@ -2326,7 +2251,6 @@ impl SolarxyApp {
             (p.0 - pane.x, p.1 - pane.y),
             (pane.width, pane.height),
             cam.build_view_projection_matrix(),
-            cam.eye,
         );
         Some((idx, pane, cam, ray))
     }
@@ -2852,22 +2776,94 @@ impl SolarxyApp {
         self.attr_dirty = true;
     }
 
-    /// Rebuilds (or clears) the attribute-vector line channel when it is
-    /// stale. Independent of `sync_visualization`: the arrows draw whenever
-    /// the strip enables them, with or without the normals/bounds overlays.
-    fn sync_attr_vectors(&mut self) {
+    /// Rebuilds (or clears) BOTH attribute channels (vector lines and GPU
+    /// labels) when they are stale, then reports the sampling facts. One
+    /// consumer of `attr_dirty` by construction: splitting the channels
+    /// over two consumers would starve whichever ran second. Independent of
+    /// `sync_visualization`: the overlays draw whenever the strip enables
+    /// them, with or without the normals/bounds overlays.
+    fn sync_attr_channels(&mut self) {
         if !self.attr_dirty {
             return;
         }
         self.attr_dirty = false;
-        if !(self.attr_viz.vectors && self.attr_viz.name.is_some()) {
-            if self.env.vis.attr_lines_count > 0 {
-                self.env.vis.set_attr_lines(&self.device, &[]);
-            }
-            return;
+
+        if self.attr_viz.vectors && self.attr_viz.name.is_some() {
+            let lines = self.build_attr_vector_lines();
+            self.env.vis.set_attr_lines(&self.device, &lines);
+        } else if self.env.vis.attr_lines_count > 0 {
+            self.env.vis.set_attr_lines(&self.device, &[]);
         }
-        let lines = self.build_attr_vector_lines();
-        self.env.vis.set_attr_lines(&self.device, &lines);
+
+        let (capacity, total) = self.rebuild_attr_labels();
+        self.host_events.push(HostEvent::AttrPinStats {
+            capacity,
+            total: total as f64,
+        });
+    }
+
+    /// Rebuilds the GPU label set from a deterministic stride sample of
+    /// every displayed geometry's points (all of them up to the budget):
+    /// world-space anchors plus per-label glyph words, uploaded once here
+    /// and projected in the vertex shader thereafter. Returns
+    /// `(capacity, total displayed points)` for the sampling notice.
+    fn rebuild_attr_labels(&mut self) -> (u32, usize) {
+        use cgmath::{Matrix4, Transform};
+        if !self.attr_viz.pins_wanted() {
+            self.renderer.set_attr_labels(&self.device, &self.queue, &[], &[]);
+            return (0, 0);
+        }
+        let lane = self
+            .attr_viz
+            .name
+            .as_deref()
+            .filter(|_| self.attr_viz.labels);
+        let geos = self.engine.display_geometries();
+        let total: usize = geos
+            .iter()
+            .flat_map(|(_, set, _)| set.meshes.iter())
+            .map(solarxy_kernel::KernelMesh::vertex_count)
+            .sum();
+        if total == 0 {
+            self.renderer.set_attr_labels(&self.device, &self.queue, &[], &[]);
+            return (0, 0);
+        }
+        let cap = self.attr_viz.effective_cap(total);
+        let stride = total.div_ceil(cap).max(1);
+
+        let mut candidates: Vec<crate::attr_labels::LabelCandidate> = Vec::with_capacity(cap);
+        let mut global = 0usize;
+        for (_node, set, m) in &geos {
+            let matrix = Matrix4::from(*m);
+            let mut ptnum: u64 = 0;
+            for mesh in &set.meshes {
+                let len = mesh.vertex_count();
+                let values =
+                    lane.and_then(|n| solarxy_graph::engine::attr_table::resolve_lane(mesh, n));
+                let first = global.next_multiple_of(stride);
+                let mut g = first;
+                while g < global + len {
+                    let i = g - global;
+                    let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
+                    candidates.push(crate::attr_labels::LabelCandidate {
+                        world: [tp.x, tp.y, tp.z],
+                        ptnum: ptnum + i as u64,
+                        value: values.map(|l| l.components(i).unwrap_or_default()),
+                    });
+                    g += stride;
+                }
+                ptnum += len as u64;
+                global += len;
+            }
+        }
+        let (instances, words) = crate::attr_labels::build_labels(
+            &candidates,
+            self.attr_viz.labels,
+            self.attr_viz.points,
+        );
+        self.renderer
+            .set_attr_labels(&self.device, &self.queue, &instances, &words);
+        (cap as u32, total)
     }
 
     /// World-space arrow segments for the picked point lane (vec3, or the
@@ -4238,52 +4234,15 @@ fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {
 // ---- boundary DTOs (camelCase; the engine/scene-file types stay
 // snake_case on disk, so these bridge to the JS convention) ----
 
-/// Screen-edge slack shared by every DOM-pin projection (attribute pins
-/// and review markers): a little beyond the frustum so pins fade at the
-/// edge instead of popping exactly on it.
+/// Screen-edge slack shared by the review-marker DOM projection: a little
+/// beyond the frustum so pins fade at the edge instead of popping exactly
+/// on it.
 const NDC_XY_SLACK: f32 = 1.05;
 /// The wgpu clip-space depth range with the same slack; the z cull is
 /// what rejects behind-camera points under orthographic projection,
 /// where `clip.w` is a constant 1.
 const NDC_Z_MIN: f32 = -0.05;
 const NDC_Z_MAX: f32 = 1.05;
-
-/// One stride-sampled pin candidate, ready to project per pane.
-struct PinCandidate {
-    world: [f32; 3],
-    ptnum: u64,
-    slot: u32,
-    value: Option<Vec<f32>>,
-}
-
-/// One attribute pin: a point projected into a pane (pane-relative CSS
-/// px, the review-marker convention), its per-object point number, its
-/// stable candidate slot (the pin pool keys on it, so a pin element
-/// always shows the same point), and the lane value's components when
-/// labels are on (formatting stays in JS, where string building is
-/// cheap).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AttrPinDto {
-    pane: usize,
-    x: f32,
-    y: f32,
-    ptnum: f64,
-    slot: u32,
-    value: Option<Vec<f32>>,
-}
-
-/// One frame of attribute pins plus the sampling facts the strip needs:
-/// `capacity` sizes the DOM pool (slots run 0..capacity), and
-/// `capacity < total` is the "labels are sampled" notice condition.
-/// `total` rides as f64 for the JS number boundary (the 53-bit rule).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AttrPinsFrameDto {
-    pins: Vec<AttrPinDto>,
-    capacity: u32,
-    total: f64,
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

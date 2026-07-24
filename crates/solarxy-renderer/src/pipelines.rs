@@ -150,6 +150,10 @@ pub struct OverlayPipelines {
     /// depth test and the topology differ.
     pub manipulator_lines: wgpu::RenderPipeline,
     pub manipulator_tris: wgpu::RenderPipeline,
+    /// The GPU attribute-label overlay (chips, dots, SDF glyphs expanded
+    /// from storage buffers). Depth-ignoring like the manipulator: labels
+    /// annotate, they must not be swallowed by the geometry they annotate.
+    pub attr_labels: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
     /// Selection outline: the silhouette mask (validation.wgsl's
@@ -783,6 +787,35 @@ impl Pipelines {
         .sample_count(sample_count)
         .build();
 
+        let label_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Label Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/label.wgsl").into()),
+        });
+        let label_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Label Pipeline Layout"),
+            bind_group_layouts: &[
+                &layouts.camera,
+                &layouts.wireframe_params,
+                &layouts.labels,
+            ],
+            push_constant_ranges: &[],
+        });
+        let attr_labels = PipelineBuilder::new(
+            device,
+            "Attr Labels Pipeline",
+            &label_layout,
+            &label_shader,
+        )
+        .vertex_entry("vs_label")
+        .fragment_entry("fs_label")
+        .buffers(vec![])
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::Always)
+        .sample_count(sample_count)
+        .build();
+
         let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Map Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/uv_map.wgsl").into()),
@@ -1134,6 +1167,7 @@ impl Pipelines {
                 gizmo,
                 manipulator_lines,
                 manipulator_tris,
+                attr_labels,
                 validation_overlay,
                 validation_edge,
                 outline_mask,

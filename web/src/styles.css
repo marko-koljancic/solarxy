@@ -3794,51 +3794,6 @@ body.reduce-motion .cook-arc {
   color: var(--text-primary);
 }
 
-/* Pooled attribute pins: the review-pane-clip pattern. */
-.attr-pin-clip {
-  position: absolute;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 11;
-}
-/* A pin is a ZERO-SIZE anchor whose origin is the projected point (the
- * frame patch writes only `transform`); the dot and text position
- * themselves absolutely around it, so the dot center sits exactly on the
- * vertex regardless of the text's size. */
-.attr-pin {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 0;
-  height: 0;
-  visibility: hidden;
-  will-change: transform;
-}
-.attr-pin-dot {
-  position: absolute;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--accent-primary) 30%, transparent);
-  transform: translate(-50%, -50%);
-}
-.attr-pin-text {
-  position: absolute;
-  left: 0.55rem;
-  top: 0;
-  transform: translateY(-50%);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.9rem;
-  line-height: 1;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
 /* The sampling notice under the attr strip: quiet by design (tertiary
    text on the strip backdrop); it informs, it does not alarm. */
 .attr-pin-notice {
@@ -4413,11 +4368,35 @@ body.reduce-motion .cook-arc {
   background: var(--background-primary);
 }
 .tree-search {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
   padding: 0.6rem;
   border-bottom: 1px solid var(--border-primary);
 }
 .tree-search .input-field {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+/* Expand-all / collapse-all: quiet header micro-buttons on the chevron
+   recipe; the search field keeps the visual weight. */
+.tree-fold-btn {
+  flex: 0 0 2rem;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.tree-fold-btn:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
 }
 .tree-body {
   flex: 1;

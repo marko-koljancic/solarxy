@@ -9,7 +9,6 @@ import type {
   Annotation,
   AssetRef,
   AttrDomain,
-  AttrPinsFrame,
   AttrVizState,
   AttributePage,
   AttributeSummary,
@@ -121,11 +120,14 @@ export class SolarxyClient {
     return this.app.set_attr_viz(state) as ViewStateDto;
   }
 
-  /** Attribute pins (stride-sampled points per 3D pane, pane-relative
-   * CSS px) plus the frame's capacity/total sampling facts; polled once
-   * per animation frame while a pin mode is on. */
-  attrPins(): AttrPinsFrame {
-    return this.app.attr_pins() as AttrPinsFrame;
+  /** Pushes the GPU attribute-label theme colors (CSS hex tokens in,
+   * linear RGB across the boundary, the selection-highlight convention):
+   * text, background chip, anchor dot. */
+  setLabelColors(textHex: string, chipHex: string, dotHex: string): void {
+    const [tr, tg, tb] = hexToLinearRgb(textHex);
+    const [cr, cg, cb] = hexToLinearRgb(chipHex);
+    const [dr, dg, db] = hexToLinearRgb(dotHex);
+    this.app.set_label_colors(tr, tg, tb, cr, cg, cb, dr, dg, db);
   }
 
   /** Requests an active-pane screenshot (rendered at frame end). */

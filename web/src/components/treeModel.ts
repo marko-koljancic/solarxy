@@ -72,6 +72,20 @@ export function buildSceneTree(
   return build("root", contexts.root, 0);
 }
 
+/** Keys of every row that has children: the collapse-all set (the pane
+ * stores COLLAPSED keys so its empty-set default reads fully expanded). */
+export function allBranchKeys(rows: readonly TreeRow[]): Set<string> {
+  const keys = new Set<string>();
+  const walk = (row: TreeRow): void => {
+    if (row.children.length > 0) {
+      keys.add(row.key);
+      for (const child of row.children) walk(child);
+    }
+  };
+  for (const row of rows) walk(row);
+  return keys;
+}
+
 /** Case-insensitive substring search over labels and type ids. Returns the
  * matched row keys plus the ancestor keys to force-expand so every match
  * is reachable. An empty (or whitespace) query returns empty sets, and the

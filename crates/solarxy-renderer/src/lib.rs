@@ -66,6 +66,7 @@ pub mod geometry;
 pub mod helpers;
 pub mod ibl;
 pub mod input;
+pub mod labels;
 pub mod light;
 pub mod manipulator;
 pub mod material;

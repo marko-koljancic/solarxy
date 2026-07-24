@@ -184,28 +184,6 @@ export interface AttrVizState {
 
 export type RampPreset = "coldWarm" | "ember" | "ocean" | "grayscale" | "signal";
 
-/** One attribute pin from `attr_pins` (pane-relative CSS px, the
- * review-marker convention): a stride-sampled point with its per-object
- * point number, its stable candidate slot (the pool keys on it), and, in
- * labels mode, the lane's components. */
-export interface AttrPin {
-  pane: number;
-  x: number;
-  y: number;
-  ptnum: number;
-  slot: number;
-  value: number[] | null;
-}
-
-/** One frame of attribute pins plus the sampling facts: `capacity` sizes
- * the DOM pool (slots run 0..capacity) and `capacity < total` means the
- * host is stride-sampling (the strip's discreet notice condition). */
-export interface AttrPinsFrame {
-  pins: AttrPin[];
-  capacity: number;
-  total: number;
-}
-
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
 export interface ScreenshotOpts {
@@ -666,7 +644,8 @@ export type HostEvent =
   | { type: "paneRects"; rects: PaneRectDto[] }
   | { type: "activePane"; pane: number }
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
-  | { type: "viewChanged" };
+  | { type: "viewChanged" }
+  | { type: "attrPinStats"; capacity: number; total: number };
 
 /** The viewport tool. Rotate and Scale select, draw and
  * grab nothing, which is why their buttons ship disabled rather than dead. */

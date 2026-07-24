@@ -39,6 +39,10 @@ pub mod gizmo;
 // pure data, tested natively.
 pub mod attr_viz;
 
+// Same convention: label text assembly and glyph packing are pure string
+// and bit math, with the DOM-parity cases pinned as native tests.
+pub mod attr_labels;
+
 // Same convention again: the display-defaults parsing is pure string
 // matching, drift-guarded against the enums' serde names by native tests.
 pub mod display_defaults;
