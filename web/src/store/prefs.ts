@@ -47,6 +47,22 @@ export interface ScreenshotPrefs {
 
 export type SelectionHighlightStyle = "outline" | "tint" | "none";
 
+export type WireframeWeight = "Light" | "Medium" | "Bold";
+/** The built-in pane backgrounds, pinned to
+ * `solarxy_core::preferences::BuiltinBg`'s serde names. */
+export type BackgroundChoice = "Gradient" | "White" | "DarkGray" | "AyuMirage" | "Black" | "HdriSky";
+
+/** Viewport display defaults, pushed into the Rust host. Wireframe weight
+ * and background seed every pane's settings (a scene file's saved per-pane
+ * values still win on load; the pane's Display menu stays the live
+ * per-pane override). The turntable speed is the live global rpm. */
+export interface DisplayPrefs {
+  wireframeWeight: WireframeWeight;
+  background: BackgroundChoice;
+  /** Turntable revolutions per minute, clamped 1..60. */
+  turntableRpm: number;
+}
+
 /** How selection presents in the 3D viewport:
  * the jump-flood rim (default), the legacy translucent tint, or nothing.
  * Pushed into the Rust host like the gizmo ergonomics. */
@@ -78,6 +94,7 @@ export interface Prefs {
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
   selection: SelectionPrefs;
+  display: DisplayPrefs;
   /** First-run tour state. `version` lets a materially changed tour show
    * again to someone who has already seen an older one. */
   onboarding: {
@@ -97,6 +114,7 @@ export const DEFAULT_PREFS: Prefs = {
     overlays: { grid: true, axes: true, validation: true },
   },
   selection: { style: "outline", color: "#ff9e21", width: 3 },
+  display: { wireframeWeight: "Light", background: "Gradient", turntableRpm: 6 },
   onboarding: { completed: false, version: 0 },
   viewport: {
     orientation: "world",
@@ -168,6 +186,40 @@ export function sanitizeTheme(raw: unknown): ThemeChoice {
   return THEME_CHOICES.includes(raw as string) ? (raw as ThemeChoice) : DEFAULT_PREFS.appearance.theme;
 }
 
+/** Deep-merges a persisted (possibly older) prefs blob over the defaults so
+ * new fields backfill on upgrade (the Minimystix onRehydrateStorage
+ * pattern): a newly added group needs no persist version bump. Exported for
+ * the backfill tests. */
+export function mergePersistedPrefs(p: Partial<Prefs> | undefined): Prefs {
+  const prefs: Prefs = {
+    appearance: { ...DEFAULT_PREFS.appearance, ...p?.appearance },
+    review: { ...DEFAULT_PREFS.review, ...p?.review },
+    autosave: { ...DEFAULT_PREFS.autosave, ...p?.autosave },
+    screenshot: {
+      ...DEFAULT_PREFS.screenshot,
+      ...p?.screenshot,
+      overlays: {
+        ...DEFAULT_PREFS.screenshot.overlays,
+        ...p?.screenshot?.overlays,
+      },
+    },
+    viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
+    selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
+    display: { ...DEFAULT_PREFS.display, ...p?.display },
+    // An existing user rehydrates with `completed: false` and is offered
+    // the tour once.
+    onboarding: { ...DEFAULT_PREFS.onboarding, ...p?.onboarding },
+  };
+  if (!p) {
+    const migrated = legacyTheme();
+    if (migrated) prefs.appearance.theme = migrated;
+  }
+  // Belt and braces over `migrate`: a blob already stamped at the
+  // current version still gets a renderable theme.
+  prefs.appearance.theme = sanitizeTheme(prefs.appearance.theme);
+  return prefs;
+}
+
 export const usePrefs = create<PrefsStore>()(
   persist(
     (set, get) => ({
@@ -204,40 +256,10 @@ export const usePrefs = create<PrefsStore>()(
         }
         return state;
       },
-      merge: (persisted, current) => {
-        // Deep-merge over the defaults so new fields backfill on upgrade
-        // (the Minimystix onRehydrateStorage pattern).
-        const p = (persisted as { prefs?: Partial<Prefs> } | undefined)?.prefs;
-        const prefs: Prefs = {
-          appearance: { ...DEFAULT_PREFS.appearance, ...p?.appearance },
-          review: { ...DEFAULT_PREFS.review, ...p?.review },
-          autosave: { ...DEFAULT_PREFS.autosave, ...p?.autosave },
-          screenshot: {
-            ...DEFAULT_PREFS.screenshot,
-            ...p?.screenshot,
-            overlays: {
-              ...DEFAULT_PREFS.screenshot.overlays,
-              ...p?.screenshot?.overlays,
-            },
-          },
-          // Backfilled by the same deep merge, so no version bump is needed for
-          // a newly added group.
-          viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
-          selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
-          // Backfilled by this same deep merge, so adding the group needs no
-          // persist version bump: an existing user rehydrates with
-          // `completed: false` and is offered the tour once.
-          onboarding: { ...DEFAULT_PREFS.onboarding, ...p?.onboarding },
-        };
-        if (!p) {
-          const migrated = legacyTheme();
-          if (migrated) prefs.appearance.theme = migrated;
-        }
-        // Belt and braces over `migrate`: a blob already stamped at the
-        // current version still gets a renderable theme.
-        prefs.appearance.theme = sanitizeTheme(prefs.appearance.theme);
-        return { ...current, prefs };
-      },
+      merge: (persisted, current) => ({
+        ...current,
+        prefs: mergePersistedPrefs((persisted as { prefs?: Partial<Prefs> } | undefined)?.prefs),
+      }),
       onRehydrateStorage: () => (state) => {
         if (state) state.setPrefs(state.prefs);
       },

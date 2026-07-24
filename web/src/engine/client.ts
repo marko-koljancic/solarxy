@@ -4,7 +4,7 @@
 
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
-import type { GizmoPrefs, SelectionPrefs } from "../store/prefs";
+import type { DisplayPrefs, GizmoPrefs, SelectionPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
@@ -193,6 +193,21 @@ export class SolarxyClient {
   setSelectionHighlight(s: SelectionPrefs): void {
     const [r, g, b] = hexToLinearRgb(s.color);
     this.app.set_selection_highlight(s.style, r, g, b, 1.0, s.width);
+  }
+
+  /** The display defaults preference (wireframe weight, background,
+   * turntable rpm). The apply flags say which pane-seeded fields should
+   * repaint every pane now: both at boot, only the changed ones on a
+   * mid-session preference save (so per-pane Display-menu overrides
+   * survive unrelated edits). */
+  setDisplayDefaults(d: DisplayPrefs, applyWireframe: boolean, applyBackground: boolean): void {
+    this.app.set_display_defaults(
+      d.wireframeWeight,
+      d.background,
+      d.turntableRpm,
+      applyWireframe,
+      applyBackground,
+    );
   }
 
   /** The displayed image of a texture network, or null when

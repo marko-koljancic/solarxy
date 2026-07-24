@@ -4,7 +4,7 @@
 
 use super::common::{general_params, passive_cook};
 use crate::params::ParamValue;
-use crate::registry::param_spec::{ParamSpec, ParamType};
+use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType};
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 #[must_use]
@@ -68,11 +68,34 @@ pub fn descriptor() -> NodeTypeDescriptor {
              to fit: text longer than the box is clipped, so size the note to \
              its contents.",
         ),
+        ParamSpec::new(
+            "text_size",
+            "Text Size",
+            "note",
+            ParamType::Enum {
+                variants: vec![
+                    EnumVariant::new("small", "Small"),
+                    EnumVariant::new("medium", "Medium"),
+                    EnumVariant::new("large", "Large"),
+                ],
+            },
+            ParamValue::Enum("small".into()),
+        )
+        .doc(
+            "The note text's size on the canvas. Small keeps annotations \
+             quieter than the node labels around them and is the default; \
+             Medium matches the pre-0.8.0 look; Large is for the one heading \
+             a network deserves. Notes saved before this option exists open \
+             as Small, the new default.",
+        ),
     ]);
 
     NodeTypeDescriptor {
         type_id: "note",
-        version: 1,
+        // v2 (0.8.0 Stage 8): added `text_size`. Purely additive, so no
+        // migration hook: a v1 note loads with the param unset and resolves
+        // to the descriptor default.
+        version: 2,
         display_name: "Note",
         category: Category::Utility,
         contexts: ContextSet::ALL,
@@ -102,5 +125,50 @@ pub fn descriptor() -> NodeTypeDescriptor {
         role: NodeRole::Note,
         cook: passive_cook,
         migrate: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Map;
+
+    use crate::document::NodeId;
+    use crate::migration::load_node;
+    use crate::nodes::builtin_registry;
+    use crate::params::{ParamSource, ParamValue};
+    use crate::registry::resolve::resolve_params;
+
+    /// The v1 -> v2 contract: `text_size` is purely additive, so a
+    /// pre-0.8.0 note (every bundled sample scene has them) must load with
+    /// ZERO warnings and resolve the new param to the Small default.
+    #[test]
+    fn a_v1_note_loads_clean_and_defaults_to_small_text() {
+        let reg = builtin_registry().unwrap();
+        let mut raw = Map::new();
+        raw.insert("text".to_string(), serde_json::json!("older note"));
+        raw.insert("width".to_string(), serde_json::json!(290.0));
+        let loaded = load_node(&reg, NodeId(1), "note", 1, raw, [0.0; 2], false);
+        assert!(loaded.node.placeholder.is_none());
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_eq!(loaded.node.type_version, 2);
+        // The param is honestly unset in the document...
+        assert!(!loaded.node.params.contains_key("text_size"));
+        // ...and the resolver fills the Small default.
+        let desc = reg.get("note").unwrap();
+        let resolved = resolve_params(&loaded.node.params, &desc.params).unwrap();
+        assert_eq!(resolved.enum_key("text_size"), "small");
+        assert_eq!(
+            loaded.node.params.get("text"),
+            Some(&ParamSource::Literal(ParamValue::Text("older note".into())))
+        );
+    }
+
+    /// A note from a future build refuses to cook rather than lose data.
+    #[test]
+    fn a_future_note_loads_as_placeholder() {
+        let reg = builtin_registry().unwrap();
+        let loaded = load_node(&reg, NodeId(1), "note", 3, Map::new(), [0.0; 2], false);
+        assert!(loaded.node.placeholder.is_some());
+        assert_eq!(loaded.node.type_version, 3);
     }
 }

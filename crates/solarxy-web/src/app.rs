@@ -42,6 +42,7 @@ use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
 use crate::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
+use crate::display_defaults::{self, DisplayDefaults};
 use crate::gizmo::{self, GizmoState, ToolMode};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
@@ -99,7 +100,10 @@ fn default_pane_settings() -> PaneDisplaySettings {
         background_mode: BackgroundMode::GRADIENT,
         uv_mode: UvMode::Off,
         bounds_mode: BoundsMode::Off,
-        line_weight: LineWeight::Medium,
+        // The enum's own default (Light), matching the desktop; the user's
+        // persisted preference overwrites this at boot via
+        // `set_display_defaults`.
+        line_weight: LineWeight::default(),
         show_grid: true,
         show_axis_gizmo: false,
         show_local_axes: false,
@@ -304,6 +308,10 @@ pub struct SolarxyApp {
     /// Whether the attribute-vector line buffer is stale (mirrors the
     /// `viz_dirty` sites, plus any `set_attr_viz`).
     attr_dirty: bool,
+    /// The preference-backed display defaults (wireframe weight,
+    /// background), pushed from the TS prefs store. Pane seeds, never a
+    /// force-override: a loaded scene's saved per-pane settings win.
+    display_defaults: DisplayDefaults,
 }
 
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
@@ -525,6 +533,7 @@ impl SolarxyApp {
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
             attr_dirty: false,
+            display_defaults: DisplayDefaults::default(),
             gizmo: GizmoState::default(),
             gizmo_readout: None,
         })
@@ -750,6 +759,47 @@ impl SolarxyApp {
             snap_rotate: snap_rotate.max(0.0),
             snap_scale: snap_scale.max(0.0),
         };
+    }
+
+    /// The display defaults, pushed from the TS prefs store (the
+    /// gizmo-settings pattern). The turntable rpm applies immediately, it is
+    /// live session state that never serializes into `.slxy`. Wireframe
+    /// weight and background are stored as the pane seed and, per `apply_*`
+    /// flag, written into every pane: the boot push sets both flags; a
+    /// mid-session preference save sets only the flags for fields that
+    /// actually changed, so per-pane Display-menu overrides survive
+    /// unrelated preference edits.
+    pub fn set_display_defaults(
+        &mut self,
+        wireframe_weight: &str,
+        background: &str,
+        turntable_rpm: f32,
+        apply_wireframe: bool,
+        apply_background: bool,
+    ) {
+        self.display_defaults = DisplayDefaults {
+            line_weight: display_defaults::parse_line_weight(wireframe_weight),
+            background: display_defaults::parse_background(background),
+        };
+        self.view.display.turntable_rpm = if turntable_rpm.is_finite() {
+            turntable_rpm.clamp(1.0, 60.0)
+        } else {
+            6.0
+        };
+        let mut changed = false;
+        for pds in &mut self.view.pane_settings {
+            if apply_wireframe && pds.line_weight != self.display_defaults.line_weight {
+                pds.line_weight = self.display_defaults.line_weight;
+                changed = true;
+            }
+            if apply_background && pds.background_mode != self.display_defaults.background {
+                pds.background_mode = self.display_defaults.background;
+                changed = true;
+            }
+        }
+        if changed {
+            self.host_events.push(HostEvent::ViewChanged);
+        }
     }
 
     /// The live drag readout ("X +1.250 m"), or `null` when nothing is dragging.
@@ -2897,9 +2947,10 @@ impl SolarxyApp {
                     let c = self.attr_viz.color;
                     Box::new(move |_| c)
                 } else {
+                    let preset = self.attr_viz.ramp_preset;
                     Box::new(move |m: f32| {
                         let t = ((m - min) / (max - min)).clamp(0.0, 1.0);
-                        ramp_color(t)
+                        ramp_color(preset, t)
                     })
                 }
             }

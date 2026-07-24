@@ -20,11 +20,13 @@ import {
   createCameraFromView,
   jumpToCamera,
   setActivePane,
+  setDisplaySettings,
   setPaneCamera,
   setPaneCameraLock,
   setPaneSettings,
   setSplitRatio,
 } from "../engine/session";
+import { TURNTABLE_SPEEDS, turntableSpeedLabel } from "./turntableSpeeds";
 import type {
   NodeMirror,
   PaneDisplaySettings,
@@ -277,6 +279,9 @@ function PaneControls({ pane, settings, projection, active }: {
   const cameras = useMemo(() => rootNodes.filter((n) => n.typeId === "camera"), [rootNodes]);
   const lookThrough = useViewState((s) => s.view?.paneLookThrough?.[pane] ?? null);
   const cameraLocked = useViewState((s) => s.view?.paneCameraLock?.[pane] ?? false);
+  // The global display settings: the turntable-speed submenu writes the
+  // scene-wide rpm (per-pane is only the on/off toggle).
+  const display = useViewState((s) => s.view?.display);
   const patch = (p: Partial<PaneDisplaySettings>) => {
     setActivePane(pane);
     setPaneSettings(pane, { ...settings, ...p });
@@ -488,6 +493,19 @@ function PaneControls({ pane, settings, projection, active }: {
           sticky
           onPick={() => patch({ turntableActive: !settings.turntableActive })}
         />
+        {display && (
+          <GhostSubmenu label="Turntable speed" hint={turntableSpeedLabel(display.turntableRpm)}>
+            {TURNTABLE_SPEEDS.map(([label, rpm]) => (
+              <GhostItem
+                key={label}
+                label={label}
+                checked={Math.abs(display.turntableRpm - rpm) < 0.01}
+                sticky
+                onPick={() => setDisplaySettings({ ...display, turntableRpm: rpm })}
+              />
+            ))}
+          </GhostSubmenu>
+        )}
         <GhostSubmenu label="Normals" hint={labelOf(NORMALS, settings.normalsMode)}>
           {NORMALS.map(([v, label]) => (
             <GhostItem

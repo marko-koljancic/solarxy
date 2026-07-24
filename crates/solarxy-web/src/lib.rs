@@ -39,6 +39,10 @@ pub mod gizmo;
 // pure data, tested natively.
 pub mod attr_viz;
 
+// Same convention again: the display-defaults parsing is pure string
+// matching, drift-guarded against the enums' serde names by native tests.
+pub mod display_defaults;
+
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;
 

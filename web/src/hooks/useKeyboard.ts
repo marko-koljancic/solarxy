@@ -6,7 +6,8 @@
 // binding (it owns open state); everything else dispatches here.
 
 import { useEffect } from "react";
-import { exitMaximized, hasMaximizedPanel, setReviewPanelOpen } from "../dock/api";
+import { exitMaximized, hasMaximizedPanel, setReviewPanelOpen, toggleMaximize } from "../dock/api";
+import { getHoveredPanel } from "../dock/hover";
 import {
   cameraCommand,
   cancelGizmoDrag,
@@ -282,6 +283,19 @@ export function useKeyboard(): void {
         case "review-panel": {
           // The dock owns the panel's existence; the review store mirrors it.
           setReviewPanelOpen(!useReview.getState().panelOpen);
+          break;
+        }
+        case "panel-maximize": {
+          // Restore first: while maximized only one group is visible, so the
+          // toggle-out needs no hover target. Otherwise act on the hovered
+          // panel; the viewport flag covers pointer positions over the canvas
+          // chrome that sit outside the panel wrapper.
+          if (hasMaximizedPanel()) {
+            exitMaximized();
+            break;
+          }
+          const target = getHoveredPanel() ?? (vs.pointerOverViewport ? "viewport" : null);
+          if (target) toggleMaximize(target);
           break;
         }
         case "review-cancel": {

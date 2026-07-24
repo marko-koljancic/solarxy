@@ -82,6 +82,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   // Review: mode toggle over the viewport, panel anywhere; Esc
   // walks the cancel ladder (gizmo drag > draft > re-anchor > review mode >
   // maximized panel).
+  { id: "panel-maximize", keys: "`", context: "global", group: "Viewport & Layout", description: "Maximize / restore the panel under the cursor", note: "Esc also restores" },
   { id: "review-mode", keys: "shift+r", context: "viewport", group: "Review", description: "Toggle review mode (click geometry to pin a note)" },
   { id: "review-panel", keys: "n", context: "global", group: "Review", description: "Toggle the review panel" },
   { id: "review-cancel", keys: "escape", context: "global", group: "Review", description: "Cancel the note editor / re-anchor / review mode, or restore a maximized panel" },

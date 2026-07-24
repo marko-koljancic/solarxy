@@ -11,7 +11,7 @@
 import { useMemo, useRef, useState } from "react";
 import { getClient, setAttrViz } from "../engine/session";
 import { attrPinKey, registerAttrPin } from "../engine/attrPins";
-import type { AttrLane, AttrVizState } from "../engine/types";
+import type { AttrLane, AttrVizState, RampPreset } from "../engine/types";
 import {
   IconAttrLabels,
   IconAttrPoints,
@@ -22,6 +22,18 @@ import {
 import { useMirror } from "../store/mirror";
 import { useViewState } from "../store/viewState";
 import { DropdownPortal } from "./DropdownPortal";
+import { Select, type SelectOption } from "./Select";
+
+/** The curated ramp styles. Labels and gradient chips only; the actual
+ * stop colors live in `solarxy_web::attr_viz::RampPreset` (the chips are
+ * a display-only mirror of those stops). */
+const RAMP_PRESETS: readonly SelectOption<RampPreset>[] = [
+  { value: "coldWarm", label: "Cold to Warm", swatch: "linear-gradient(90deg, #4073e6, #ff9e26, #e6261a)" },
+  { value: "ember", label: "Ember", swatch: "linear-gradient(90deg, #0d081f, #731a59, #e6731f, #faeba6)" },
+  { value: "ocean", label: "Ocean", swatch: "linear-gradient(90deg, #081a40, #1a73b3, #d9f7ff)" },
+  { value: "grayscale", label: "Grayscale", swatch: "linear-gradient(90deg, #141414, #f2f2f2)" },
+  { value: "signal", label: "Signal", swatch: "linear-gradient(90deg, #26a64d, #f2d933, #d9261a)" },
+];
 
 /** The host color is raw RGB 0..1 fed straight to the HDR line pipeline
  * (matching the historical amber constant), so the picker's hex maps
@@ -218,6 +230,18 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
                 />
               )}
             </div>
+            {viz.colorMode === "ramp" && (
+              <div className="attr-viz-row">
+                <span className="attr-viz-label">Ramp</span>
+                <Select
+                  ariaLabel="Ramp preset"
+                  value={viz.rampPreset}
+                  options={RAMP_PRESETS}
+                  onChange={(rampPreset) => patch({ rampPreset })}
+                  width="100%"
+                />
+              </div>
+            )}
             <div className="attr-viz-row">
               <label htmlFor="attr-viz-cap">Pin cap</label>
               <input
@@ -243,6 +267,7 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
                     normalize: false,
                     colorMode: "uniform",
                     color: [1, 0.62, 0.15],
+                    rampPreset: "coldWarm",
                     cap: 0,
                   })
                 }
@@ -296,9 +321,12 @@ export function AttrColumn() {
           active={viz.points}
           onClick={() => setAttrViz({ ...viz, points: !viz.points })}
         />
+        {/* The gear closes the square stack (feedback: one grouped strip,
+            all square buttons); only the text-carrying lane pill sits
+            outside it. */}
+        <VizSettings viz={viz} />
       </div>
       <LanePicker viz={viz} />
-      <VizSettings viz={viz} />
     </div>
   );
 }

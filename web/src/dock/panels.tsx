@@ -4,10 +4,14 @@
 
 import {
   DockviewDefaultTab,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
+import { toggleMaximize } from "./api";
+import { clearHoveredPanel, setHoveredPanel } from "./hover";
+import { IconMaximize, IconRestore } from "../icons";
 import { AssetPreview } from "../components/AssetPreview";
 import { AssetsPane } from "../components/AssetsPane";
 import { AttributesPane } from "../components/AttributesPane";
@@ -17,6 +21,7 @@ import { PropertiesMenuBar } from "../components/menu/PropertiesMenus";
 import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
+import { TreePane } from "../components/TreePane";
 import { nodeLabel } from "../flow/nodeLabel";
 import { contextKind, descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
@@ -32,48 +37,103 @@ function useSelectedNodeName(): string {
   return nodeLabel(selected, descriptorFor(registry, selected.typeId));
 }
 
-function ViewportPanel(_props: IDockviewPanelProps) {
-  return <Viewport />;
+/** Records which panel the pointer is over (dock/hover.ts) so the
+ * panel-maximize shortcut can act on the hovered panel. Wraps every panel
+ * body, so the tracking follows the content through grid, floating and
+ * maximized states alike. */
+function HoverTracked({ id, children }: { id: string; children: React.ReactNode }) {
+  useEffect(() => () => clearHoveredPanel(id), [id]);
+  return (
+    <div
+      className="dock-panel-hover"
+      onPointerEnter={() => setHoveredPanel(id)}
+      onPointerLeave={() => clearHoveredPanel(id)}
+    >
+      {children}
+    </div>
+  );
 }
 
-function NodesPanel(_props: IDockviewPanelProps) {
-  return <NodePane />;
+function ViewportPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <Viewport />
+    </HoverTracked>
+  );
+}
+
+function NodesPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <NodePane />
+    </HoverTracked>
+  );
 }
 
 /** The single Properties panel. It replaces the bottom drawer and the
  * right-docked column: dockview owns the docking, resizing and tabbing that
  * those two hand-rolled variants existed to provide. */
-function PropertiesPanel(_props: IDockviewPanelProps) {
+function PropertiesPanel(props: IDockviewPanelProps) {
   const title = useSelectedNodeName();
   return (
-    <div className="properties-panel">
-      <PropertiesMenuBar />
-      {title && <div className="properties-panel-context">{title}</div>}
-      <div className="properties-panel-body">
-        <ParameterPanel />
+    <HoverTracked id={props.api.id}>
+      <div className="properties-panel">
+        <PropertiesMenuBar />
+        {title && <div className="properties-panel-context">{title}</div>}
+        <div className="properties-panel-body">
+          <ParameterPanel />
+        </div>
       </div>
-    </div>
+    </HoverTracked>
   );
 }
 
-function ReviewDockPanel(_props: IDockviewPanelProps) {
-  return <ReviewPanel />;
+function ReviewDockPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <ReviewPanel />
+    </HoverTracked>
+  );
 }
 
-function AssetsPanel(_props: IDockviewPanelProps) {
-  return <AssetsPane />;
+function AssetsPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AssetsPane />
+    </HoverTracked>
+  );
 }
 
-function AssetPreviewPanel(_props: IDockviewPanelProps) {
-  return <AssetPreview />;
+function AssetPreviewPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AssetPreview />
+    </HoverTracked>
+  );
 }
 
-function TexturePanel(_props: IDockviewPanelProps) {
-  return <TextureViewer />;
+function TexturePanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <TextureViewer />
+    </HoverTracked>
+  );
 }
 
-function AttributesPanel(_props: IDockviewPanelProps) {
-  return <AttributesPane />;
+function AttributesPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AttributesPane />
+    </HoverTracked>
+  );
+}
+
+function TreePanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <TreePane />
+    </HoverTracked>
+  );
 }
 
 export const DOCK_COMPONENTS = {
@@ -85,6 +145,7 @@ export const DOCK_COMPONENTS = {
   assetPreview: AssetPreviewPanel,
   texture: TexturePanel,
   attributes: AttributesPanel,
+  tree: TreePanel,
 };
 
 // Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four
@@ -226,3 +287,35 @@ export const DOCK_TAB_COMPONENTS = {
   pinned: PinnedTab,
   colored: ColoredTab,
 };
+
+/** The maximize / restore toggle at the right end of every tab strip, next to
+ * the active tab's close button. Group-level on purpose: dockview maximize is
+ * a group operation, and this is also what gives the pinned Viewport tab (which
+ * has no close button) its maximize control. Grid groups only, maximize has no
+ * meaning for floating or popout groups. */
+export function MaximizeHeaderAction(props: IDockviewHeaderActionsProps) {
+  // isMaximized() is not observable state; re-render on the container event.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const sub = props.containerApi.onDidMaximizedGroupChange(() => setTick((t) => t + 1));
+    return () => sub.dispose();
+  }, [props.containerApi]);
+
+  if (props.group.api.location.type !== "grid") return null;
+  const panel = props.activePanel;
+  if (!panel) return null;
+  const maximized = panel.api.isMaximized();
+  return (
+    <div className="dock-header-actions">
+      <button
+        type="button"
+        className="dock-header-action"
+        title={maximized ? "Restore panel (` or Esc)" : "Maximize panel (`)"}
+        aria-label={maximized ? "Restore panel" : "Maximize panel"}
+        onClick={() => toggleMaximize(panel.id)}
+      >
+        {maximized ? <IconRestore size={13} /> : <IconMaximize size={13} />}
+      </button>
+    </div>
+  );
+}

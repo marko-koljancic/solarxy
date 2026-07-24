@@ -11,7 +11,7 @@ import { InlineEdit } from "../components/InlineEdit";
 import { NodeGlyph } from "../components/NodeGlyph";
 import { dispatch } from "../engine/session";
 import { assetDisplayName } from "../engine/session";
-import { IconBypass, IconDisplay, IconDive, IconRename, IconTrash } from "../icons";
+import { IconBypass, IconDive, IconRename, IconTrash } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
@@ -88,9 +88,6 @@ export function FlowListView() {
                     setRenamingId(n.id);
                   }}
                 >
-                  {graph.activeOutput === n.id && (
-                    <span className="display-dot inline" title="display flag" />
-                  )}
                   <NodeGlyph desc={desc} size={13} />
                   {renamingId === n.id ? (
                     <InlineEdit
@@ -136,6 +133,22 @@ export function FlowListView() {
                       <span className="vis-dot" aria-hidden />
                     </button>
                   )}
+                  {ctx !== "root" && (
+                    // The display flag in the SAME right-side slot the root
+                    // rows use for visibility: one blue dot position at every
+                    // level (the two are different semantics, so the titles
+                    // and the hollow-until-active fill keep them apart).
+                    <button
+                      className={`display-toggle list${graph.activeOutput === n.id ? " active" : ""}`}
+                      title="Display flag (E)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDisplayFlag(ctx, n.id);
+                      }}
+                    >
+                      <span className="display-dot list" aria-hidden />
+                    </button>
+                  )}
                   <span className="row-actions">
                     <button
                       className="row-action"
@@ -147,18 +160,6 @@ export function FlowListView() {
                     >
                       <IconRename size={12} />
                     </button>
-                    {ctx !== "root" && (
-                      <button
-                        className={`row-action${graph.activeOutput === n.id ? " active" : ""}`}
-                        title="Set the display flag"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDisplayFlag(ctx, n.id);
-                        }}
-                      >
-                        <IconDisplay size={12} />
-                      </button>
-                    )}
                     <button
                       className="row-action"
                       title={isContainerType(desc) ? "Enter subflow" : "Not a container"}

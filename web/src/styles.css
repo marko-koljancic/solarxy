@@ -720,6 +720,42 @@ body.precision-drag-active {
   margin-right: 0.4rem;
 }
 
+/* Stage 8: the subflow display-flag toggle in the list view, occupying the
+   SAME right-side slot the root rows give the visibility eye, so the blue
+   dot sits in one place at every level. Same chrome as the eye; the dot is
+   hollow until the flag is on (a per-context radio, not an on/off eye). */
+.display-toggle.list {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-right: 0.4rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+  background: var(--background-tertiary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.display-dot.list {
+  position: static;
+  transform: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--display-flag);
+  pointer-events: none;
+}
+
+.display-toggle.list.active .display-dot.list {
+  background: var(--display-flag);
+  box-shadow: none;
+}
+
 .flow-node-sub {
   color: var(--text-secondary);
   font-size: 1rem;
@@ -2498,12 +2534,13 @@ body.reduce-motion .cook-arc {
 
 /* ---- W-C4: the note sticky ---- */
 
+/* Flat (Stage 8): no border, the fill alone carries the sticky. The font
+   size is inline (the `text_size` param); this rule keeps only the fallback. */
 .note-node {
   position: relative;
   border-radius: 0.6rem;
-  border: 1px solid rgba(0, 0, 0, 0.15);
   color: #374151;
-  font-size: 1.05rem;
+  font-size: 0.85rem;
   line-height: 1.35;
   cursor: move;
   opacity: 0.92;
@@ -2572,9 +2609,45 @@ body.reduce-motion .cook-arc {
 .radial-seg:hover {
   fill: var(--hover-bg);
 }
+
+/* Stage 8: per-action hover color, so the wedge under the cursor names its
+   command. The `.hovered` class is React-paired across the SVG wedge and
+   its sibling HTML icon (CSS :hover on one cannot restyle the other).
+   Mixed against the overlay surface so hover stays quieter than `.active`
+   (rename and info keep the neutral hover; the rules below come BEFORE
+   .active, which must win when a toggled wedge is hovered). */
+.radial-seg.hovered:not(.disabled, .active).seg-display {
+  fill: color-mix(in srgb, var(--accent-primary) 55%, var(--surface-overlay));
+}
+.radial-seg.hovered:not(.disabled, .active).seg-visibility {
+  fill: color-mix(in srgb, var(--accent-green) 55%, var(--surface-overlay));
+}
+.radial-seg.hovered:not(.disabled, .active).seg-dive {
+  fill: color-mix(in srgb, var(--accent-blue) 55%, var(--surface-overlay));
+}
+.radial-seg.hovered:not(.disabled, .active).seg-bypass {
+  fill: color-mix(in srgb, var(--warn-badge) 55%, var(--surface-overlay));
+}
+.radial-seg.hovered:not(.disabled, .active).seg-delete {
+  fill: var(--error-border);
+}
+.radial-icon.hovered:not(.disabled, .active) {
+  color: var(--text-primary);
+}
+.radial-icon.hovered:not(.disabled, .active).seg-bypass {
+  /* Dark ink on the yellow wash, both themes. */
+  color: #1a1a1a;
+}
+.radial-icon.hovered:not(.disabled, .active).seg-delete {
+  /* White on the full-strength red is theme-invariant; --text-on-accent is
+     accent-relative and wrong here. */
+  color: #fff;
+}
+
 .radial-seg.active {
   /* The active wedge fills the accent; its icon flips to on-accent ink
-   * (see .radial-icon.active). */
+   * (see .radial-icon.active). Declared after the hover rules so a
+   * toggled wedge stays accent-filled under the cursor. */
   fill: var(--accent-primary);
 }
 .radial-seg.disabled {
@@ -2763,17 +2836,8 @@ body.reduce-motion .cook-arc {
   color: var(--text-secondary);
   font-size: 12px;
 }
-.display-dot.inline {
-  position: static;
-  display: inline-block;
-  margin-right: 6px;
-  /* The base .display-dot centers itself with translateY(-50%) against an
-   * absolute anchor; inline flow must not inherit that shift. */
-  transform: none;
-  vertical-align: middle;
-}
-
-/* The first cell lays out dot, glyph, and label on one centered line. */
+/* The first cell lays out glyph and label on one centered line (the
+   display dot moved to the right actions slot in Stage 8). */
 .flow-list td:first-child {
   white-space: nowrap;
 }
@@ -3510,6 +3574,46 @@ body.reduce-motion .cook-arc {
   cursor: default;
 }
 
+/* ---- Stage 8: the per-group maximize / restore header action ---- */
+
+.dock-header-actions {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.dock-header-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.dock-header-action:hover {
+  background: var(--background-tertiary);
+  color: var(--text-primary);
+}
+
+/* The hover-tracking wrapper is pure plumbing; it must never affect layout. */
+.dock-panel-hover {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-panel-hover > * {
+  flex: 1;
+  min-height: 0;
+}
+
 /* ---- the Properties panel (replaces the drawer and side column) ---- */
 
 .properties-panel {
@@ -3573,12 +3677,16 @@ body.reduce-motion .cook-arc {
   position: relative;
 }
 
+/* Stage 8: the pill matches the square stack's surface language (same
+   backdrop, same 3.2rem height) so the whole right strip reads as one
+   grouped control; it stays a pill only because it carries text. */
 .attr-lane-trigger {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   max-width: 12rem;
-  padding: 0.4rem 0.7rem;
+  height: 3.2rem;
+  padding: 0 0.8rem;
   border: 0;
   border-radius: 6px;
   background: color-mix(in srgb, var(--background-secondary) 90%, transparent);
@@ -4132,6 +4240,15 @@ body.reduce-motion .cook-arc {
   color: var(--text-tertiary);
   font-size: 1.1rem;
 }
+/* Stage 8: the optional leading swatch chip (a color or gradient), used by
+   the attribute-ramp preset picker. */
+.select-swatch {
+  flex: 0 0 2.6rem;
+  width: 2.6rem;
+  height: 1rem;
+  border-radius: 2px;
+  border: 1px solid var(--border-primary);
+}
 
 /* ---- Node info: ports and parameters ----
  *
@@ -4278,4 +4395,107 @@ body.reduce-motion .cook-arc {
   top: 50%;
   margin-top: -6px;
   border-left-color: var(--border-default);
+}
+
+/* ---- Stage 8: the Tree panel (searchable scene outline) ---- */
+
+.tree-pane {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--background-primary);
+}
+.tree-search {
+  padding: 0.6rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+.tree-search .input-field {
+  width: 100%;
+}
+.tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+.tree-list,
+.tree-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-right: 0.8rem;
+  height: 2.4rem;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+  cursor: default;
+  user-select: none;
+}
+.tree-row:hover {
+  background: var(--hover-bg);
+}
+.tree-row.selected {
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+.tree-row.match .tree-label {
+  color: var(--text-highlight);
+}
+/* The container-context chip: a slim full-height tint at the row's left
+   edge, the same tokens the canvas tints container tiles with, so
+   structure is color-coded without repainting every leaf row. */
+.tree-ctx-chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+.tree-chevron {
+  flex: 0 0 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.tree-chevron:hover {
+  color: var(--text-primary);
+}
+.tree-chevron.spacer {
+  cursor: default;
+}
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-type {
+  margin-left: auto;
+  color: var(--text-quaternary);
+  font-size: 1rem;
+  font-family: var(--font-mono);
+}
+.tree-display-dot {
+  flex: 0 0 0.7rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--display-flag);
+}
+.tree-empty {
+  padding: 1.6rem;
+  color: var(--text-secondary);
+  font-size: 1.15rem;
 }

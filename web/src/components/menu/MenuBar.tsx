@@ -19,7 +19,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { isAssetsPanelOpen, isAttributesPanelOpen, isTexturePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setReviewPanelOpen, setTexturePanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, isAttributesPanelOpen, isNodesPanelOpen, isPropertiesPanelOpen, isTexturePanelOpen, isTreePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setNodesPanelOpen, setPropertiesPanelOpen, setReviewPanelOpen, setTexturePanelOpen, setTreePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -128,6 +128,10 @@ export function MenuBar() {
   // the user drags panels wherever they want now, and a desk captures it.
   const userDesks = useDesks((s) => s.desks);
   const [deskSaveOpen, setDeskSaveOpen] = useState(false);
+  // Subscribe to the persisted dock layout (debounced 400 ms) so the panel
+  // checkmarks below refresh after tabs close or panels reopen.
+  const dockLayout = useUi((s) => s.dockLayout);
+  void dockLayout;
   const desks: MenuEntry[] = [
     ...DESK_PRESETS.map((d) => ({
       label: d.name,
@@ -149,13 +153,15 @@ export function MenuBar() {
       })),
     },
     { divider: true },
-    // The Assets panel: presence in the dock is its open state,
-    // the Review-panel pattern.
-    { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
-    // The texture viewer: same presence-is-state pattern.
-    { label: "Texture Viewer", onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
-    // The attributes spreadsheet: same presence-is-state pattern.
-    { label: "Attributes Panel", onClick: () => setAttributesPanelOpen(!isAttributesPanelOpen()) },
+    // Panels: presence in the dock is the open state (the Review-panel
+    // pattern). Nodes and Properties are here so a closed core panel can be
+    // reopened without applying a whole desk.
+    { label: "Nodes Panel", checked: isNodesPanelOpen(), onClick: () => setNodesPanelOpen(!isNodesPanelOpen()) },
+    { label: "Properties Panel", checked: isPropertiesPanelOpen(), onClick: () => setPropertiesPanelOpen(!isPropertiesPanelOpen()) },
+    { label: "Tree Panel", checked: isTreePanelOpen(), onClick: () => setTreePanelOpen(!isTreePanelOpen()) },
+    { label: "Assets Panel", checked: isAssetsPanelOpen(), onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
+    { label: "Texture Viewer", checked: isTexturePanelOpen(), onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
+    { label: "Attributes Panel", checked: isAttributesPanelOpen(), onClick: () => setAttributesPanelOpen(!isAttributesPanelOpen()) },
   ];
 
   const reviewMode = useReview((s) => s.reviewMode);

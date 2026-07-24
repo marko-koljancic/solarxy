@@ -24,6 +24,10 @@ export interface SelectOption<T extends string> {
   label: string;
   /** Optional right-aligned hint (units, a px figure, a category). */
   hint?: string;
+  /** Optional leading swatch: any CSS background value (a color, a
+   * linear-gradient). Rendered as a small chip before the label and in
+   * the closed trigger. */
+  swatch?: string;
   disabled?: boolean;
 }
 
@@ -180,6 +184,7 @@ export function Select<T extends string>({
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
       >
+        {current?.swatch && <span className="select-swatch" style={{ background: current.swatch }} />}
         <span className="select-value">{current?.label ?? value}</span>
         <IconChevronDown size={12} />
       </button>
@@ -205,6 +210,7 @@ export function Select<T extends string>({
               <span className="select-check">
                 {o.value === value && <IconCheck size={11} />}
               </span>
+              {o.swatch && <span className="select-swatch" style={{ background: o.swatch }} />}
               <span className="select-option-label">{o.label}</span>
               {o.hint && <span className="select-option-hint">{o.hint}</span>}
             </button>

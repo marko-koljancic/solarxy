@@ -82,6 +82,15 @@ export function IconMaximize(p: IconProps) {
   );
 }
 
+export function IconRestore(p: IconProps) {
+  // The maximize corners inverted: arrows collapsing inward.
+  return (
+    <Svg {...p}>
+      <path d="M3 6h3V3M13 6h-3V3M3 10h3v3M13 10h-3v3" />
+    </Svg>
+  );
+}
+
 export function IconDisplay(p: IconProps) {
   // A monitor: the display-flag motif (wing hover glyph, radial wedge).
   return (

@@ -16,7 +16,7 @@ import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { syncCanvasSize } from "./canvas";
 import { useMirror } from "../store/mirror";
-import { usePrefs } from "../store/prefs";
+import { usePrefs, type DisplayPrefs } from "../store/prefs";
 import { useUi } from "../store/ui";
 import { useRadial } from "../store/radial";
 import { useReview } from "../store/review";
@@ -327,9 +327,13 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
     pushSelectionHighlight();
+    // Boot push (no prev): both pane-seeded display fields apply. This runs
+    // before any recovery load, so a restored scene's saved panes still win.
+    pushDisplayDefaults();
     usePrefs.subscribe((state, prev) => {
       if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
       if (state.prefs.selection !== prev.prefs.selection) pushSelectionHighlight();
+      if (state.prefs.display !== prev.prefs.display) pushDisplayDefaults(prev.prefs.display);
     });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
@@ -446,6 +450,20 @@ export function pushGizmoSettings(): void {
 export function pushSelectionHighlight(): void {
   if (!client) return;
   getClient().setSelectionHighlight(usePrefs.getState().prefs.selection);
+}
+
+/** Pushes the display defaults (wireframe weight, background, turntable
+ * rpm) into the host. At boot both pane-seeded fields apply to every pane
+ * (before any scene load, so a restored scene's saved panes still win); a
+ * mid-session preference save applies only the fields that changed, so
+ * per-pane Display-menu overrides survive unrelated edits. The changed
+ * panes come back through a viewChanged host event. */
+export function pushDisplayDefaults(prev?: DisplayPrefs): void {
+  if (!client) return;
+  const d = usePrefs.getState().prefs.display;
+  const applyWireframe = prev === undefined || prev.wireframeWeight !== d.wireframeWeight;
+  const applyBackground = prev === undefined || prev.background !== d.background;
+  getClient().setDisplayDefaults(d, applyWireframe, applyBackground);
 }
 
 /** Escape during a gizmo drag: rolls it back. */

@@ -7832,7 +7832,7 @@
     },
     {
       "typeId": "note",
-      "version": 1,
+      "version": 2,
       "displayName": "Note",
       "category": "utility",
       "categoryLabel": "Utility",
@@ -7946,6 +7946,34 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "The sticky's height on the canvas, in the same units as Width, and likewise usually dragged rather than typed. It does not grow to fit: text longer than the box is clipped, so size the note to its contents."
+        },
+        {
+          "key": "text_size",
+          "label": "Text Size",
+          "group": "note",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "small",
+              "Small"
+            ],
+            [
+              "medium",
+              "Medium"
+            ],
+            [
+              "large",
+              "Large"
+            ]
+          ],
+          "accept": [],
+          "default": "small",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The note text's size on the canvas. Small keeps annotations quieter than the node labels around them and is the default; Medium matches the pre-0.8.0 look; Large is for the one heading a network deserves. Notes saved before this option exists open as Small, the new default."
         }
       ],
       "bypass": {

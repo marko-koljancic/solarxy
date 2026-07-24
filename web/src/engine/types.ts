@@ -177,7 +177,12 @@ export interface AttrVizState {
   colorMode: "uniform" | "ramp";
   /** The uniform arrow color, linear RGB 0..1. */
   color: [number, number, number];
+  /** Which curated ramp the ramp mode draws. Pinned to
+   * `solarxy_web::attr_viz::RampPreset` (serde camelCase). */
+  rampPreset: RampPreset;
 }
+
+export type RampPreset = "coldWarm" | "ember" | "ocean" | "grayscale" | "signal";
 
 /** One attribute pin from `attr_pins` (pane-relative CSS px, the
  * review-marker convention): a stride-sampled point with its per-object
