@@ -3625,16 +3625,6 @@ body.reduce-motion .cook-arc {
   background: var(--background-primary);
 }
 
-.properties-panel-context {
-  padding: 0.4rem 1rem;
-  font-size: 1.1rem;
-  color: var(--text-tertiary);
-  border-bottom: 1px solid var(--border-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .properties-panel-body {
   flex: 1;
   min-height: 0;
@@ -3840,13 +3830,28 @@ body.reduce-motion .cook-arc {
   transform: translateY(-50%);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
   padding: 0.15rem 0.4rem;
   border-radius: 3px;
   white-space: nowrap;
+}
+
+/* The sampling notice under the attr strip: quiet by design (tertiary
+   text on the strip backdrop); it informs, it does not alarm. */
+.attr-pin-notice {
+  margin-top: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--background-secondary) 90%, transparent);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  cursor: default;
 }
 
 /* Flat: the group is a plain backdrop that separates the buttons from the 3D

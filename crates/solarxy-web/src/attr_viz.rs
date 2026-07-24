@@ -76,7 +76,8 @@ pub struct AttrVizState {
     pub vectors: bool,
     pub points: bool,
     pub name: Option<String>,
-    /// Pin budget for labels/points; 0 means the default.
+    /// Pin budget for labels/points; 0 (the default) means every point,
+    /// up to [`Self::MAX_CAP`].
     pub cap: u32,
     /// Multiplier on the bounds-derived arrow length; 1.0 is the
     /// channel's historical look.
@@ -110,8 +111,9 @@ impl Default for AttrVizState {
 }
 
 impl AttrVizState {
-    pub const DEFAULT_CAP: usize = 64;
-    pub const MAX_CAP: usize = 256;
+    /// The hard ceiling on pooled pins per pane: past this the DOM pool
+    /// and the per-frame wasm-boundary traffic stop being free.
+    pub const MAX_CAP: usize = 2048;
     /// The channel's historical amber.
     pub const DEFAULT_COLOR: [f32; 3] = [1.0, 0.62, 0.15];
 
@@ -120,12 +122,16 @@ impl AttrVizState {
         self.labels || self.points
     }
 
+    /// The pin budget against a scene of `total` displayed points: the
+    /// 0 sentinel means every point (so meshes at or under the ceiling
+    /// label completely, the Houdini read), an explicit cap is honored up
+    /// to the same ceiling. Never 0, so a stride division is always safe.
     #[must_use]
-    pub fn cap(&self) -> usize {
+    pub fn effective_cap(&self, total: usize) -> usize {
         if self.cap == 0 {
-            Self::DEFAULT_CAP
+            total.clamp(1, Self::MAX_CAP)
         } else {
-            (self.cap as usize).min(Self::MAX_CAP)
+            (self.cap as usize).clamp(1, Self::MAX_CAP)
         }
     }
 
@@ -162,6 +168,30 @@ mod tests {
     #![allow(clippy::float_cmp)] // exact values constructed by the tests
 
     use super::*;
+
+    #[test]
+    fn the_zero_cap_sentinel_means_all_points_up_to_the_ceiling() {
+        let viz = AttrVizState::default();
+        assert_eq!(viz.cap, 0, "all-points is the out-of-the-box default");
+        assert_eq!(viz.effective_cap(500), 500, "small scenes label every point");
+        assert_eq!(viz.effective_cap(AttrVizState::MAX_CAP), AttrVizState::MAX_CAP);
+        assert_eq!(
+            viz.effective_cap(1_000_000),
+            AttrVizState::MAX_CAP,
+            "dense scenes clamp to the ceiling and sample"
+        );
+        assert_eq!(viz.effective_cap(0), 1, "never zero: stride math divides by it");
+    }
+
+    #[test]
+    fn an_explicit_cap_is_honored_and_clamped() {
+        let mut viz = AttrVizState::default();
+        viz.cap = 64;
+        assert_eq!(viz.effective_cap(1_000_000), 64);
+        assert_eq!(viz.effective_cap(10), 64, "an explicit cap does not shrink to the scene");
+        viz.cap = 999_999;
+        assert_eq!(viz.effective_cap(1_000_000), AttrVizState::MAX_CAP);
+    }
 
     #[test]
     fn the_default_scale_is_one_not_zero() {

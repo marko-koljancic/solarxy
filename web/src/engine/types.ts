@@ -197,6 +197,15 @@ export interface AttrPin {
   value: number[] | null;
 }
 
+/** One frame of attribute pins plus the sampling facts: `capacity` sizes
+ * the DOM pool (slots run 0..capacity) and `capacity < total` means the
+ * host is stride-sampling (the strip's discreet notice condition). */
+export interface AttrPinsFrame {
+  pins: AttrPin[];
+  capacity: number;
+  total: number;
+}
+
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
 export interface ScreenshotOpts {

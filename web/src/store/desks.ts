@@ -64,6 +64,66 @@ export const DESK_PRESETS: DeskSnapshot[] = [
     showFlowControls: false,
     viewLayout: "quad",
   },
+  {
+    // Houdini-style technical desk: a small viewport, a dominant node canvas
+    // with the attributes spreadsheet under it, properties as a full-height
+    // column on the right.
+    name: "Technical",
+    layout: {
+      kind: "recipe",
+      recipe: {
+        viewportSide: "left",
+        propertiesDock: "right",
+        splitPct: 35,
+        review: false,
+        attributes: true,
+        attributesPct: 30,
+      },
+    },
+    showFlowGrid: true,
+    showMinimap: true,
+    showFlowControls: true,
+    viewLayout: "single",
+  },
+  {
+    // Look development: the viewport carries the desk, the texture viewer
+    // tabs with properties, canvas chrome stays out of the way.
+    name: "LookDev",
+    layout: {
+      kind: "recipe",
+      recipe: {
+        viewportSide: "left",
+        propertiesDock: "right",
+        splitPct: 70,
+        review: false,
+        texture: true,
+      },
+    },
+    showFlowGrid: false,
+    showMinimap: false,
+    showFlowControls: false,
+    viewLayout: "single",
+  },
+  {
+    // UV and texturing: a split viewport (flip one pane to UV Map from its
+    // Display menu; a desk arranges panes but does not own per-pane view
+    // modes) with the texture viewer at hand.
+    name: "UV / Texturing",
+    layout: {
+      kind: "recipe",
+      recipe: {
+        viewportSide: "left",
+        propertiesDock: "bottom",
+        splitPct: 60,
+        review: false,
+        texture: true,
+      },
+    },
+    showFlowGrid: false,
+    showMinimap: false,
+    showFlowControls: true,
+    viewLayout: "splitVertical",
+  },
 ];
 
 /** The current arrangement as a desk snapshot. Maximize is not captured:

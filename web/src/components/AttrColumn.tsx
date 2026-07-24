@@ -10,7 +10,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { getClient, setAttrViz } from "../engine/session";
-import { attrPinKey, registerAttrPin } from "../engine/attrPins";
+import { attrPinKey, registerAttrPin, useAttrPinStats } from "../engine/attrPins";
 import type { AttrLane, AttrVizState, RampPreset } from "../engine/types";
 import {
   IconAttrLabels,
@@ -53,6 +53,9 @@ export function hexToRgb(hex: string): [number, number, number] {
 }
 
 const GLYPH = 19;
+
+/** Mirrors `AttrVizState::MAX_CAP` (the host's pooled-pin ceiling). */
+const PIN_CAP_MAX = 2048;
 
 /** The union of point-domain lanes across every displayed geometry (each
  * geo subflow's display-flag node), first-seen type per name. Fetched on
@@ -162,7 +165,10 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const patch = (p: Partial<AttrVizState>) => setAttrViz({ ...viz, ...p });
-  const shownCap = viz.cap === 0 ? 64 : viz.cap;
+  const capacity = useAttrPinStats((s) => s.capacity);
+  // The 0 sentinel means all points (up to the host ceiling); show what
+  // that resolves to right now so the field is never a lie.
+  const shownCap = viz.cap === 0 ? capacity || PIN_CAP_MAX : viz.cap;
 
   return (
     <div className="attr-viz-settings">
@@ -243,17 +249,19 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
               </div>
             )}
             <div className="attr-viz-row">
-              <label htmlFor="attr-viz-cap">Pin cap</label>
+              <label htmlFor="attr-viz-cap" title="Default: every point, up to 2048 per scene">
+                Pin cap
+              </label>
               <input
                 id="attr-viz-cap"
                 type="number"
                 min={8}
-                max={256}
+                max={PIN_CAP_MAX}
                 step={8}
                 value={shownCap}
                 onChange={(e) => {
                   const n = Number(e.target.value);
-                  if (Number.isFinite(n)) patch({ cap: Math.max(8, Math.min(256, n)) });
+                  if (Number.isFinite(n)) patch({ cap: Math.max(8, Math.min(PIN_CAP_MAX, n)) });
                 }}
               />
             </div>
@@ -278,6 +286,22 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
           </div>
         </DropdownPortal>
       )}
+    </div>
+  );
+}
+
+/** The discreet sampling notice: shown only while pins are on and the
+ * host had to stride-sample (more displayed points than the budget), so
+ * a sparse-looking read is never mistaken for complete data. */
+function SamplingNotice({ viz }: { viz: AttrVizState }) {
+  const { capacity, total } = useAttrPinStats();
+  if (!(viz.labels || viz.points) || capacity === 0 || total <= capacity) return null;
+  return (
+    <div
+      className="attr-pin-notice"
+      title={`More points than the pin budget: showing every ${Math.ceil(total / capacity)}th point. Raise the cap in the visualization settings.`}
+    >
+      {capacity.toLocaleString()} of {total.toLocaleString()} pts
     </div>
   );
 }
@@ -327,17 +351,19 @@ export function AttrColumn() {
         <VizSettings viz={viz} />
       </div>
       <LanePicker viz={viz} />
+      <SamplingNotice viz={viz} />
     </div>
   );
 }
 
 /** The pooled pin elements (position/text patched imperatively per frame
- * by engine/attrPins.ts). One clip box per 3D pane; pool size follows the
- * host's cap. */
+ * by engine/attrPins.ts). One clip box per 3D pane; the pool sizes to the
+ * host's reported capacity (all points up to the ceiling by default), so
+ * a 500-point scene allocates 500 slots, never the ceiling. */
 export function AttrPinsOverlay() {
   const view = useViewState((s) => s.view);
-  if (!view?.attrViz || !(view.attrViz.labels || view.attrViz.points)) return null;
-  const cap = view.attrViz.cap === 0 ? 64 : Math.min(view.attrViz.cap, 256);
+  const cap = useAttrPinStats((s) => s.capacity);
+  if (!view?.attrViz || !(view.attrViz.labels || view.attrViz.points) || cap === 0) return null;
 
   return (
     <>

@@ -92,6 +92,44 @@ impl Camera {
             ProjectionMode::Orthographic => 2.0 * self.ortho_scale / height_px,
         }
     }
+
+    /// Switches projection while keeping the model the same apparent size at
+    /// the target: Persp to Ortho derives `ortho_scale` from the eye distance,
+    /// Ortho to Persp inverts that math and moves the eye to the matching
+    /// distance along the current view direction. Without the inverse step a
+    /// toggle back to perspective reuses whatever distance the ortho eye
+    /// happened to sit at (a preset parks it far out) and the framing jumps.
+    pub fn set_projection_preserving_framing(&mut self, mode: ProjectionMode) {
+        use cgmath::InnerSpace;
+        if mode == self.projection {
+            return;
+        }
+        let half_fov_tan = (self.fovy / 2.0).to_radians().tan();
+        match mode {
+            ProjectionMode::Orthographic => {
+                let dist = (self.target - self.eye).magnitude();
+                self.ortho_scale = dist * half_fov_tan;
+            }
+            ProjectionMode::Perspective => {
+                let dist = (self.ortho_scale / half_fov_tan.max(1e-6)).max(0.01);
+                self.eye = self.target - self.forward() * dist;
+            }
+        }
+        self.projection = mode;
+    }
+}
+
+/// The up vector of a world-Y turntable at `(yaw, pitch)`: `+Y` on the
+/// horizon, tilting to `-Z` at the top pose (`pitch` +90 deg, yaw 0) and `+Z`
+/// at the bottom pose -- exactly the ups the view presets use. Orthonormal to
+/// the eye direction by construction, so the orbit can keep `Camera::up` in
+/// lockstep with the angles it rebuilds the eye from.
+pub fn turntable_up(yaw: f32, pitch: f32) -> cgmath::Vector3<f32> {
+    cgmath::Vector3::new(
+        -pitch.sin() * yaw.sin(),
+        pitch.cos(),
+        -pitch.sin() * yaw.cos(),
+    )
 }
 
 pub fn camera_from_bounds(bounds: &model::AABB, aspect: f32) -> Camera {
@@ -364,8 +402,20 @@ impl CameraController {
         if self.orbit_delta.0 != 0.0 || self.orbit_delta.1 != 0.0 {
             let offset = camera.eye - camera.target;
             let r = offset.magnitude();
-            let mut yaw = f32::atan2(offset.x, offset.z);
             let horiz = (offset.x * offset.x + offset.z * offset.z).sqrt();
+            // At a pole pose (top/bottom view) the offset alone leaves yaw
+            // undefined (atan2(0, 0)); recover the heading from the up vector
+            // instead, so the first drag out of a top view tilts in place
+            // rather than snapping to a fixed azimuth.
+            let mut yaw = if horiz < r * 1e-4 {
+                if offset.y > 0.0 {
+                    f32::atan2(-camera.up.x, -camera.up.z)
+                } else {
+                    f32::atan2(camera.up.x, camera.up.z)
+                }
+            } else {
+                f32::atan2(offset.x, offset.z)
+            };
             let mut pitch = f32::atan2(offset.y, horiz);
 
             yaw += self.orbit_delta.0;
@@ -378,6 +428,10 @@ impl CameraController {
                     r * pitch.sin(),
                     r * pitch.cos() * yaw.cos(),
                 );
+            // The turntable owns the frame: a view preset may have left a
+            // tilted up (top view parks it at -Z), and rebuilding only the eye
+            // against that stale up rolls the horizon on every later drag.
+            camera.up = turntable_up(yaw, pitch);
             self.orbit_delta = (0.0, 0.0);
         }
 
@@ -621,5 +675,104 @@ mod tests {
             (near_o - far_o).abs() < 1e-9,
             "ortho does not scale with depth"
         );
+    }
+
+    #[test]
+    fn turntable_up_matches_preset_ups() {
+        use std::f32::consts::FRAC_PI_2;
+        let top = turntable_up(0.0, FRAC_PI_2);
+        assert!(top.x.abs() < 1e-6 && top.y.abs() < 1e-6 && (top.z + 1.0).abs() < 1e-6);
+        let bottom = turntable_up(0.0, -FRAC_PI_2);
+        assert!(bottom.x.abs() < 1e-6 && bottom.y.abs() < 1e-6 && (bottom.z - 1.0).abs() < 1e-6);
+        let horizon = turntable_up(0.7, 0.0);
+        assert!(horizon.x.abs() < 1e-6 && (horizon.y - 1.0).abs() < 1e-6);
+    }
+
+    /// Drives one orbit drag: press, an anchor move, a delta move, update.
+    fn drag(cam: &mut Camera, ctl: &mut CameraController, dx: f32, dy: f32) {
+        ctl.handle_mouse_button(PointerButton::Left, true);
+        ctl.handle_mouse_move(500.0, 500.0);
+        ctl.handle_mouse_move(500.0 + dx, 500.0 + dy);
+        ctl.update_camera(cam);
+        ctl.handle_mouse_button(PointerButton::Left, false);
+    }
+
+    #[test]
+    fn orbit_after_top_preset_keeps_a_continuous_up() {
+        use cgmath::InnerSpace;
+        let bounds = unit_cube_bounds();
+        // The top preset: looking straight down, up parked at -Z.
+        let mut cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::unit_y(),
+            -cgmath::Vector3::unit_z(),
+        );
+        let mut ctl = CameraController::new(0.2);
+
+        // Tilt away from the pole (drag up = pitch down).
+        drag(&mut cam, &mut ctl, 0.0, -30.0);
+        let forward = (cam.target - cam.eye).normalize();
+        assert!((cam.up.magnitude() - 1.0).abs() < 1e-4, "up stays unit");
+        assert!(cam.up.dot(forward).abs() < 1e-4, "up stays orthogonal");
+        let right = forward.cross(cam.up);
+        assert!(right.y.abs() < 1e-4, "no roll: the right vector is level");
+        assert!(cam.up.z < -0.9, "a small tilt keeps up near -Z, no flip");
+        assert!(cam.up.y > 0.0, "tilting down starts raising up toward +Y");
+
+        // Continue down to the horizon: up must arrive upright, still no roll.
+        drag(&mut cam, &mut ctl, 0.0, -284.0);
+        let forward = (cam.target - cam.eye).normalize();
+        assert!(cam.up.y > 0.95, "at the horizon up is world +Y");
+        let right = forward.cross(cam.up);
+        assert!(right.y.abs() < 1e-4, "still no roll after the full sweep");
+    }
+
+    #[test]
+    fn orbit_at_pole_seeds_yaw_from_up() {
+        use std::f32::consts::FRAC_PI_2;
+        let bounds = unit_cube_bounds();
+        let mut cam = camera_from_bounds_axis(
+            &bounds,
+            1.0,
+            cgmath::Vector3::unit_y(),
+            -cgmath::Vector3::unit_z(),
+        );
+        // A top view whose heading was yaw0 when it reached the pole (a
+        // restored .slxy pose, or a preset entered from an angled orbit).
+        let yaw0 = 1.0_f32;
+        cam.up = turntable_up(yaw0, FRAC_PI_2);
+
+        let mut ctl = CameraController::new(0.2);
+        drag(&mut cam, &mut ctl, 0.0, -40.0);
+
+        let off = cam.eye - cam.target;
+        let yaw = off.x.atan2(off.z);
+        assert!(
+            (yaw - yaw0).abs() < 1e-3,
+            "first drag continues the stored heading: {yaw} vs {yaw0}"
+        );
+    }
+
+    #[test]
+    fn projection_toggle_round_trips_framing() {
+        use cgmath::InnerSpace;
+        let mut cam = default_camera();
+        let target = cam.target;
+        let d0 = (cam.eye - cam.target).magnitude();
+        let wpp0 = cam.world_per_pixel(target, 800.0);
+
+        cam.set_projection_preserving_framing(ProjectionMode::Orthographic);
+        let wpp_ortho = cam.world_per_pixel(target, 800.0);
+        assert!(
+            (wpp_ortho - wpp0).abs() < 1e-6,
+            "ortho keeps the apparent size at the target"
+        );
+
+        cam.set_projection_preserving_framing(ProjectionMode::Perspective);
+        let d1 = (cam.eye - cam.target).magnitude();
+        let wpp1 = cam.world_per_pixel(target, 800.0);
+        assert!((d1 - d0).abs() < 1e-4, "distance round-trips: {d1} vs {d0}");
+        assert!((wpp1 - wpp0).abs() < 1e-6, "apparent size round-trips");
     }
 }

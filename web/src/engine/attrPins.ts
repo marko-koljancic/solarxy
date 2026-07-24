@@ -6,9 +6,29 @@
 // pane always shows the same point; a camera move only flips per-slot
 // visibility, never re-binds content. Unused slots hide.
 
+import { create } from "zustand";
 import type { AttrPin } from "./types";
 
 const slots = new Map<string, HTMLElement>();
+
+interface AttrPinStats {
+  /** Pool slots the host is sampling into (0 while pins are off). */
+  capacity: number;
+  /** Displayed points in the scene; capacity < total means sampling. */
+  total: number;
+  set: (capacity: number, total: number) => void;
+}
+
+/** The per-frame sampling facts, published only on change so the React
+ * pool and the strip's notice re-render on cooks, not on every frame. */
+export const useAttrPinStats = create<AttrPinStats>((set, get) => ({
+  capacity: 0,
+  total: 0,
+  set: (capacity, total) => {
+    const s = get();
+    if (s.capacity !== capacity || s.total !== total) set({ capacity, total });
+  },
+}));
 
 export function attrPinKey(pane: number, slot: number): string {
   return `${pane}:${slot}`;

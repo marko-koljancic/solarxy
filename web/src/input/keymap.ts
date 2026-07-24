@@ -39,7 +39,10 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "paste", keys: "mod+v", context: "global", group: "Edit", description: "Paste" },
   { id: "duplicate", keys: "mod+d", context: "global", group: "Edit", description: "Duplicate selection" },
   { id: "cook", keys: "mod+enter", context: "global", group: "Edit", description: "Cook now (manual mode)" },
-  { id: "bypass", keys: "b", context: "global", group: "Node Canvas", description: "Toggle bypass on selection" },
+  // Narrowed from global to canvas (the display-flag precedent): bypass was
+  // always a Node Canvas action, and freeing B over the viewport is what
+  // makes room for the Bottom view preset.
+  { id: "bypass", keys: "b", context: "canvas", group: "Node Canvas", description: "Toggle bypass on selection", note: "Over the viewport, B is the Bottom view" },
   { id: "palette", keys: "tab", context: "global", group: "Node Canvas", description: "Open the node palette", note: "When the canvas has focus" },
   // Narrowed from global to canvas: that is precisely what frees E
   // over the viewport for the Rotate tool. It was always a Node Canvas action.
@@ -51,6 +54,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "flow-controls", keys: "c", context: "canvas", group: "Node Canvas", description: "Toggle the zoom controls" },
   { id: "layout-cycle", keys: "l", context: "canvas", group: "Node Canvas", description: "Auto-layout the graph (cycles Dagre / ELK)" },
   { id: "edge-style-cycle", keys: "s", context: "canvas", group: "Node Canvas", description: "Cycle the connection style" },
+  { id: "canvas-fit", keys: "f", context: "canvas", group: "Node Canvas", description: "Fit the node graph in the pane" },
   { id: "shortcuts", keys: "?", context: "global", group: "File", description: "Show keyboard shortcuts" },
   { id: "preferences", keys: "mod+,", context: "global", group: "File", description: "Open preferences" },
   // Viewport context (cursor over the 3D region). The 1-7 assignments and
@@ -67,9 +71,17 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "layout-split-h", keys: "f3", context: "viewport", group: "Viewport & Layout", description: "Layout: Split Horizontal" },
   { id: "layout-quad", keys: "f4", context: "viewport", group: "Viewport & Layout", description: "Layout: Quad" },
   { id: "layout-three", keys: "f5", context: "viewport", group: "Viewport & Layout", description: "Layout: Three Left Big" },
-  { id: "fit", keys: "f", context: "viewport", group: "Viewport & Layout", description: "Fit view to the scene" },
+  { id: "fit", keys: "z", context: "viewport", group: "Viewport & Layout", description: "Fit view to the scene", note: "Moved from F (now the Front view); Z matches Max zoom extents" },
   { id: "screenshot", keys: "c", context: "viewport", group: "Viewport & Layout", description: "Screenshot the active pane" },
-  { id: "uv-overlap-toggle", keys: "o", context: "viewport", group: "Inspection", description: "Toggle the UV overlap display (UV pane)" },
+  // View presets, 3ds Max style (T/F/L/B for the axis views, P and O for
+  // projection). Right/Back stay menu-only: the desktop R is taken by the
+  // Scale tool here, and the Views menu covers them.
+  { id: "view-top", keys: "t", context: "viewport", group: "Viewport & Layout", description: "View: Top" },
+  { id: "view-front", keys: "f", context: "viewport", group: "Viewport & Layout", description: "View: Front" },
+  { id: "view-left", keys: "l", context: "viewport", group: "Viewport & Layout", description: "View: Left" },
+  { id: "view-bottom", keys: "b", context: "viewport", group: "Viewport & Layout", description: "View: Bottom" },
+  { id: "view-perspective", keys: "p", context: "viewport", group: "Viewport & Layout", description: "Perspective projection" },
+  { id: "view-ortho", keys: "o", context: "viewport", group: "Viewport & Layout", description: "Orthographic projection", note: "In a UV pane, O toggles the overlap display instead (desktop parity)" },
   // Viewport tools (Maya-style Q/W/E/R; Blender's G/R/S collide with the grid,
   // connection-style and review bindings). E is free over the viewport because
  // narrowed the display-flag binding to the canvas context, which was

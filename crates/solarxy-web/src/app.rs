@@ -44,7 +44,7 @@ use solarxy_renderer::manipulator::{self, ManipulatorState};
 use crate::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
 use crate::display_defaults::{self, DisplayDefaults};
 use crate::gizmo::{self, GizmoState, ToolMode};
-use solarxy_renderer::camera::{Camera, CameraUniform};
+use solarxy_renderer::camera::{turntable_up, Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
@@ -53,6 +53,7 @@ use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
 use solarxy_renderer::input::PointerButton;
 use solarxy_renderer::light::LightsUniform;
 use solarxy_renderer::panes::{self, PaneRect};
+use solarxy_renderer::visualization::grid_plane_for;
 use solarxy_renderer::scene::{create_light_bind_group, lights_from_camera, BackgroundModeExt};
 use solarxy_renderer::scene_objects::SceneObjects;
 use solarxy_renderer::texture;
@@ -1082,18 +1083,20 @@ impl SolarxyApp {
     }
 
     /// Attribute pins for the labels/points modes: a deterministic stride
-    /// sample of every displayed geometry's points (every Nth point, at
-    /// most `cap`), projected per 3D pane into pane-relative CSS px (the
-    /// review-marker convention). The sample is camera-independent, so
-    /// orbiting only hides and reveals pins at the screen edges. Point
-    /// numbers restart per displayed object, matching the Attributes
-    /// pane's table. Called once per animation frame while a pin mode is
-    /// on.
+    /// sample of every displayed geometry's points (all of them up to the
+    /// budget, every Nth beyond it), projected per 3D pane into
+    /// pane-relative CSS px (the review-marker convention). The sample is
+    /// camera-independent, so orbiting only hides and reveals pins at the
+    /// screen edges. Point numbers restart per displayed object, matching
+    /// the Attributes pane's table. Returns a frame `{pins, capacity,
+    /// total}` so the DOM pool can size itself exactly and the strip can
+    /// notice when sampling engaged. Called once per animation frame while
+    /// a pin mode is on.
     pub fn attr_pins(&self) -> Result<JsValue, JsError> {
         use cgmath::{Matrix4, Transform};
         let mut out: Vec<AttrPinDto> = Vec::new();
         if !self.attr_viz.pins_wanted() {
-            return to_js(&out);
+            return to_js(&AttrPinsFrameDto { pins: out, capacity: 0, total: 0.0 });
         }
         let lane = self
             .attr_viz
@@ -1106,7 +1109,6 @@ impl SolarxyApp {
         // reveals them at the screen edges), they spread over the whole
         // model instead of clumping on the nearest patch, and at most
         // `cap` points are ever transformed per frame.
-        let cap = self.attr_viz.cap();
         let geos = self.engine.display_geometries();
         let total: usize = geos
             .iter()
@@ -1114,8 +1116,9 @@ impl SolarxyApp {
             .map(solarxy_kernel::KernelMesh::vertex_count)
             .sum();
         if total == 0 {
-            return to_js(&out);
+            return to_js(&AttrPinsFrameDto { pins: out, capacity: 0, total: 0.0 });
         }
+        let cap = self.attr_viz.effective_cap(total);
         let stride = total.div_ceil(cap).max(1);
         let mut points: Vec<PinCandidate> = Vec::new();
         let mut global = 0usize;
@@ -1178,7 +1181,11 @@ impl SolarxyApp {
                 });
             }
         }
-        to_js(&out)
+        to_js(&AttrPinsFrameDto {
+            pins: out,
+            capacity: cap as u32,
+            total: total as f64,
+        })
     }
 
     /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
@@ -1743,13 +1750,16 @@ impl SolarxyApp {
 
     /// A camera command on a pane: `{kind:"fit"}`, `{kind:"view",
     /// axis:"top"|"bottom"|"front"|"back"|"left"|"right"}`, or
-    /// `{kind:"projection", mode:"perspective"|"orthographic"}`.
-    pub fn camera_command(&mut self, pane: usize, cmd: JsValue) -> Result<(), JsError> {
+    /// `{kind:"projection", mode:"perspective"|"orthographic"}`. Returns the
+    /// refreshed [`ViewStateDto`] like every other view mutator -- a view
+    /// preset flips the pane to orthographic, and without the mirror update
+    /// the toolbar's Persp/Ortho label kept showing the stale mode.
+    pub fn camera_command(&mut self, pane: usize, cmd: JsValue) -> Result<JsValue, JsError> {
         let cmd: CameraCommandDto = serde_wasm_bindgen::from_value(cmd)
             .map_err(|e| JsError::new(&format!("bad camera command: {e}")))?;
         let bounds = self.scene_bounds();
         let Some(cam) = self.view.cameras.get_mut(pane).and_then(|c| c.as_mut()) else {
-            return Ok(());
+            return self.view_state();
         };
         match cmd.kind.as_str() {
             "fit" => cam.reset_to_bounds(&bounds),
@@ -1775,7 +1785,7 @@ impl SolarxyApp {
             }
             other => return Err(JsError::new(&format!("bad camera command: {other}"))),
         }
-        Ok(())
+        self.view_state()
     }
 
     /// The current pane rectangles in CSS pixels (DOM toolbar positioning).
@@ -3616,12 +3626,14 @@ impl SolarxyApp {
             bytemuck::cast_slice(&grid),
         );
         // The grid plane follows the pane camera: perspective keeps the XZ
-        // ground; an orthographic elevation view (front/side) gets a view-plane
-        // grid so it is not seen edge-on. Shared buffer, written per
-        // pane before that pane's grid pass, exactly like the color above.
+        // ground; an orthographic axis elevation (front/side) gets a view-plane
+        // grid so it is not seen edge-on. Keyed off the transition destination
+        // so a view-preset animation switches plane once, at click time, not
+        // partway through the lerp. Shared buffer, written per pane before
+        // that pane's grid pass, exactly like the color above.
         let plane: u32 = self.view.cameras[i]
             .as_ref()
-            .map_or(0, |c| grid_plane_for(&c.camera));
+            .map_or(0, |c| grid_plane_for(&c.destination_camera()));
         self.queue.write_buffer(
             &self.env.vis.grid_uniform_buf,
             solarxy_renderer::visualization::GridUniform::PLANE_OFFSET,
@@ -4031,26 +4043,6 @@ fn projection_name(mode: ProjectionMode) -> &'static str {
     }
 }
 
-/// The world plane a pane's grid should lie in (the `GridUniform.plane` code:
-/// 0 = XZ ground, 1 = XY, 2 = YZ). Perspective and top/bottom orthographic
-/// keep the ground grid; a front/back orthographic view uses XY and a
-/// left/right view uses YZ, so the grid is face-on instead of an edge-on
-/// hairline. Chosen from the camera's dominant forward axis.
-fn grid_plane_for(cam: &Camera) -> u32 {
-    if cam.projection != ProjectionMode::Orthographic {
-        return 0;
-    }
-    let f = cam.target - cam.eye;
-    let (ax, ay, az) = (f.x.abs(), f.y.abs(), f.z.abs());
-    if ay >= ax && ay >= az {
-        0 // top / bottom -> XZ ground
-    } else if az >= ax {
-        1 // front / back -> XY
-    } else {
-        2 // left / right -> YZ
-    }
-}
-
 /// Same math as the desktop `compute_depth_bounds`.
 fn compute_depth_bounds(camera: &Camera, bounds: &AABB) -> (f32, f32) {
     let view = camera.build_view_matrix();
@@ -4114,7 +4106,10 @@ fn apply_camera_json(cam: &mut Camera, json: &solarxy_scenefile::CameraJson) {
     let dir = Vector3::new(cp * json.yaw.sin(), json.pitch.sin(), cp * json.yaw.cos());
     cam.target = target;
     cam.eye = target + dir * json.distance.max(1e-4);
-    cam.up = Vector3::unit_y();
+    // A hardcoded +Y up is degenerate for a scene saved in a top/bottom view
+    // (look_at with forward parallel to up); the turntable up at the stored
+    // angles is what the orbit maintains live.
+    cam.up = turntable_up(json.yaw, json.pitch);
     if json.fov_y > 0.0 {
         cam.fovy = json.fov_y.to_degrees();
     }
@@ -4276,6 +4271,18 @@ struct AttrPinDto {
     ptnum: f64,
     slot: u32,
     value: Option<Vec<f32>>,
+}
+
+/// One frame of attribute pins plus the sampling facts the strip needs:
+/// `capacity` sizes the DOM pool (slots run 0..capacity), and
+/// `capacity < total` is the "labels are sampled" notice condition.
+/// `total` rides as f64 for the JS number boundary (the 53-bit rule).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttrPinsFrameDto {
+    pins: Vec<AttrPinDto>,
+    capacity: u32,
+    total: f64,
 }
 
 #[derive(Serialize)]

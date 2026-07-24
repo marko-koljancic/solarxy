@@ -23,7 +23,7 @@ import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
-import { applyAttrPins, hideAttrPins } from "./attrPins";
+import { applyAttrPins, hideAttrPins, useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
 import { ctxKey } from "./types";
@@ -533,7 +533,10 @@ export function setDisplaySettings(settings: DisplaySettingsDto): void {
 }
 
 export function cameraCommand(pane: number, cmd: CameraCommand): void {
-  getClient().cameraCommand(pane, cmd);
+  // Mirror the returned view state like every other view mutator: a view
+  // preset changes the pane's projection, and the Persp/Ortho toolbar label
+  // reads the mirror.
+  useViewState.getState().setView(getClient().cameraCommand(pane, cmd));
 }
 
 /** Binds a pane to look through a camera node (or -1 to clear to free view). */
@@ -991,10 +994,13 @@ export function runFrame(dtMs: number): void {
   } else {
     hideAllMarkers();
   }
-  // Attribute pins ride the same imperative channel.
+  // Attribute pins ride the same imperative channel; the frame's
+  // capacity/total feed the pool size and the sampling notice.
   const attrViz = useViewState.getState().view?.attrViz;
   if (attrViz && (attrViz.labels || attrViz.points)) {
-    applyAttrPins(getClient().attrPins(), attrViz.labels, attrViz.points);
+    const frame = getClient().attrPins();
+    useAttrPinStats.getState().set(frame.capacity, frame.total);
+    applyAttrPins(frame.pins, attrViz.labels, attrViz.points);
   } else {
     hideAttrPins();
   }

@@ -1,9 +1,10 @@
 // Global editor keyboard shortcuts, driven by the typed keymap table
 // (web/src/input/keymap.ts). Contexts follow the
 // cursor-hover focus model: viewport bindings (1-7 inspection, F1-F5
-// layouts, F fit) fire only while the pointer is over the 3D region.
-// Ignored while typing in a field. The palette handles its own Tab
-// binding (it owns open state); everything else dispatches here.
+// layouts, T/F/L/B/P/O view presets, Z fit) fire only while the pointer
+// is over the 3D region. Ignored while typing in a field. The palette
+// handles its own Tab binding (it owns open state); everything else
+// dispatches here.
 
 import { useEffect } from "react";
 import { exitMaximized, hasMaximizedPanel, setReviewPanelOpen, toggleMaximize } from "../dock/api";
@@ -48,6 +49,24 @@ function patchActivePane(patch: Partial<PaneDisplaySettings>, toast: string): vo
 
 function applyLayout(layout: ViewLayout): void {
   setViewLayout(layout);
+}
+
+/** Snaps the active pane to an axis view preset (T/F/L/B). */
+function viewPreset(axis: "top" | "front" | "left" | "bottom", label: string): void {
+  const view = useViewState.getState().view;
+  if (!view) return;
+  setActivePane(view.activePane);
+  cameraCommand(view.activePane, { kind: "view", axis });
+  pushToast(`View: ${label}`, "info");
+}
+
+/** Switches the active pane's projection (P/O and the toolbar menu agree). */
+function setProjection(mode: "perspective" | "orthographic", label: string): void {
+  const view = useViewState.getState().view;
+  if (!view) return;
+  setActivePane(view.activePane);
+  cameraCommand(view.activePane, { kind: "projection", mode });
+  pushToast(label, "info");
 }
 
 export function useKeyboard(): void {
@@ -202,16 +221,40 @@ export function useKeyboard(): void {
           e.preventDefault();
           applyLayout("threeLeftBig");
           break;
-        case "uv-overlap-toggle": {
+        case "view-top":
+          viewPreset("top", "Top");
+          break;
+        case "view-front":
+          viewPreset("front", "Front");
+          break;
+        case "view-left":
+          viewPreset("left", "Left");
+          break;
+        case "view-bottom":
+          viewPreset("bottom", "Bottom");
+          break;
+        case "view-perspective":
+          setProjection("perspective", "Perspective");
+          break;
+        case "view-ortho": {
+          // Desktop parity: O in a UV pane keeps its overlap-toggle meaning;
+          // in a 3D pane it is the orthographic switch.
           const view = useViewState.getState().view;
           if (!view) break;
           const pane = view.activePane;
           const current = view.paneSettings[pane];
-          if (current.paneMode !== "UvMap") break;
-          setPaneSettings(pane, { ...current, showUvOverlap: !current.showUvOverlap });
-          pushToast(current.showUvOverlap ? "Overlap: Off" : "Overlap: On", "info");
+          if (current.paneMode === "UvMap") {
+            setPaneSettings(pane, { ...current, showUvOverlap: !current.showUvOverlap });
+            pushToast(current.showUvOverlap ? "Overlap: Off" : "Overlap: On", "info");
+            break;
+          }
+          setProjection("orthographic", "Orthographic");
           break;
         }
+        case "canvas-fit":
+          // The same listener the auto-layout completion fires.
+          window.dispatchEvent(new Event("solarxy:fitView"));
+          break;
         case "fit": {
           const view = useViewState.getState().view;
           if (view) {

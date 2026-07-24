@@ -9,7 +9,7 @@ import type {
   Annotation,
   AssetRef,
   AttrDomain,
-  AttrPin,
+  AttrPinsFrame,
   AttrVizState,
   AttributePage,
   AttributeSummary,
@@ -121,10 +121,11 @@ export class SolarxyClient {
     return this.app.set_attr_viz(state) as ViewStateDto;
   }
 
-  /** Attribute pins (nearest-to-camera points per 3D pane, pane-relative
-   * CSS px); polled once per animation frame while a pin mode is on. */
-  attrPins(): AttrPin[] {
-    return this.app.attr_pins() as AttrPin[];
+  /** Attribute pins (stride-sampled points per 3D pane, pane-relative
+   * CSS px) plus the frame's capacity/total sampling facts; polled once
+   * per animation frame while a pin mode is on. */
+  attrPins(): AttrPinsFrame {
+    return this.app.attr_pins() as AttrPinsFrame;
   }
 
   /** Requests an active-pane screenshot (rendered at frame end). */
@@ -301,8 +302,8 @@ export class SolarxyClient {
     return this.app.set_display_settings(settings) as ViewStateDto;
   }
 
-  cameraCommand(pane: number, cmd: CameraCommand): void {
-    this.app.camera_command(pane, cmd);
+  cameraCommand(pane: number, cmd: CameraCommand): ViewStateDto {
+    return this.app.camera_command(pane, cmd) as ViewStateDto;
   }
 
   /** Binds a pane to look through a camera node, or -1 to clear to free view. */

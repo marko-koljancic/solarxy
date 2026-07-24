@@ -74,11 +74,11 @@ const MATERIAL_OVERRIDES = [
 ] as const;
 
 const VIEW_AXES: [ViewAxis, string][] = [
-  ["top", "Top"],
-  ["bottom", "Bottom"],
-  ["front", "Front"],
+  ["top", "Top (T)"],
+  ["bottom", "Bottom (B)"],
+  ["front", "Front (F)"],
   ["back", "Back"],
-  ["left", "Left"],
+  ["left", "Left (L)"],
   ["right", "Right"],
 ];
 
@@ -385,7 +385,7 @@ function PaneControls({ pane, settings, projection, active }: {
       </GhostMenu>
       <GhostMenu label={projection === "orthographic" ? "Ortho" : "Persp"}>
         <GhostItem
-          label="Perspective"
+          label="Perspective (P)"
           checked={projection === "perspective"}
           onPick={() => {
             setActivePane(pane);
@@ -393,7 +393,7 @@ function PaneControls({ pane, settings, projection, active }: {
           }}
         />
         <GhostItem
-          label="Orthographic"
+          label="Orthographic (O)"
           checked={projection === "orthographic"}
           onPick={() => {
             setActivePane(pane);
@@ -451,7 +451,7 @@ function PaneControls({ pane, settings, projection, active }: {
       </GhostMenu>
       <GhostMenu label="Views">
         <GhostItem
-          label="Fit view (F)"
+          label="Fit view (Z)"
           onPick={() => {
             setActivePane(pane);
             cameraCommand(pane, { kind: "fit" });

@@ -92,3 +92,35 @@ describe("viewport tools (phase 11)", () => {
     expect(lookupBinding("x", "viewport")?.id).toBe("gizmo-orientation");
   });
 });
+
+describe("view presets (feedback wave 4)", () => {
+  it("binds the Max-style axis views over the viewport", () => {
+    expect(lookupBinding("t", "viewport")?.id).toBe("view-top");
+    expect(lookupBinding("f", "viewport")?.id).toBe("view-front");
+    expect(lookupBinding("l", "viewport")?.id).toBe("view-left");
+    expect(lookupBinding("b", "viewport")?.id).toBe("view-bottom");
+    expect(lookupBinding("p", "viewport")?.id).toBe("view-perspective");
+    expect(lookupBinding("o", "viewport")?.id).toBe("view-ortho");
+  });
+
+  it("moves viewport fit to Z and gives the canvas its own F fit", () => {
+    // F over the viewport is now the Front view (Max muscle memory); the fit
+    // action lives on Z there, while F over the node canvas fits the graph.
+    expect(lookupBinding("z", "viewport")?.id).toBe("fit");
+    expect(lookupBinding("f", "canvas")?.id).toBe("canvas-fit");
+  });
+
+  it("keeps F and L meaning different things per context", () => {
+    expect(lookupBinding("f", "viewport")?.id).toBe("view-front");
+    expect(lookupBinding("l", "canvas")?.id).toBe("layout-cycle");
+    expect(lookupBinding("l", "viewport")?.id).toBe("view-left");
+  });
+
+  it("narrows bypass to the canvas so B can be the Bottom view", () => {
+    const bypass = KEYMAP.find((b) => b.id === "bypass");
+    expect(bypass?.context).toBe("canvas");
+    expect(lookupBinding("b", "canvas")?.id).toBe("bypass");
+    expect(lookupBinding("b", "viewport")?.id).toBe("view-bottom");
+    expect(lookupBinding("b", "global")).toBeNull();
+  });
+});

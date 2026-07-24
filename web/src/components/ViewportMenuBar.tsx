@@ -34,7 +34,7 @@ export function ViewportMenuBar() {
   const entries: MenuEntry[] = [
     {
       label: "Fit View",
-      shortcut: "F",
+      shortcut: "Z",
       onClick: () => {
         if (!view) return;
         setActivePane(view.activePane);

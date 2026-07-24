@@ -22,20 +22,9 @@ import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
 import { TreePane } from "../components/TreePane";
-import { nodeLabel } from "../flow/nodeLabel";
-import { contextKind, descriptorFor } from "../registry/datatypes";
+import { contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
-
-/** The selected node's display label (its `name` param when renamed, else the
- * type display name), shown in the Properties header. */
-function useSelectedNodeName(): string {
-  const registry = useMirror((s) => s.registry);
-  const graph = useMirror((s) => selectGraph(s, s.current));
-  const selected = graph.nodes.find((n) => n.id === graph.selection[0]);
-  if (!selected) return "";
-  return nodeLabel(selected, descriptorFor(registry, selected.typeId));
-}
 
 /** Records which panel the pointer is over (dock/hover.ts) so the
  * panel-maximize shortcut can act on the hovered panel. Wraps every panel
@@ -74,12 +63,12 @@ function NodesPanel(props: IDockviewPanelProps) {
  * right-docked column: dockview owns the docking, resizing and tabbing that
  * those two hand-rolled variants existed to provide. */
 function PropertiesPanel(props: IDockviewPanelProps) {
-  const title = useSelectedNodeName();
+  // No node-name strip here: ParameterPanel's own header carries the name
+  // (plus cook stats), and rendering it twice read as a glitch.
   return (
     <HoverTracked id={props.api.id}>
       <div className="properties-panel">
         <PropertiesMenuBar />
-        {title && <div className="properties-panel-context">{title}</div>}
         <div className="properties-panel-body">
           <ParameterPanel />
         </div>
