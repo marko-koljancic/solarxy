@@ -108,13 +108,24 @@ impl model::Vertex for InstanceRaw {
 
 pub struct ScenePipelines {
     pub main: wgpu::RenderPipeline,
+    /// `main` with the color vertex buffer at slot 2 (`vs_main_colored`);
+    /// selected per mesh when a color lane is present.
+    pub main_colored: wgpu::RenderPipeline,
     pub alpha_blend: wgpu::RenderPipeline,
+    pub alpha_blend_colored: wgpu::RenderPipeline,
     pub shadow: wgpu::RenderPipeline,
     pub floor: wgpu::RenderPipeline,
     pub ghosted_fill: wgpu::RenderPipeline,
     pub edge_wire: wgpu::RenderPipeline,
     pub edge_wire_ghosted: wgpu::RenderPipeline,
     pub gbuffer: wgpu::RenderPipeline,
+    /// Lines-topology scene meshes: 1 px hardware line list, unlit white.
+    pub line: wgpu::RenderPipeline,
+    /// `line` with the color vertex buffer (per-vertex color).
+    pub line_colored: wgpu::RenderPipeline,
+    /// Points-topology scene meshes: camera-facing quads expanded in the
+    /// vertex shader from the edge-geometry storage buffer (M-6).
+    pub point: wgpu::RenderPipeline,
 }
 
 pub struct PostProcessingPipelines {
@@ -139,6 +150,10 @@ pub struct OverlayPipelines {
     /// depth test and the topology differ.
     pub manipulator_lines: wgpu::RenderPipeline,
     pub manipulator_tris: wgpu::RenderPipeline,
+    /// The GPU attribute-label overlay (chips, dots, SDF glyphs expanded
+    /// from storage buffers). Depth-ignoring like the manipulator: labels
+    /// annotate, they must not be swallowed by the geometry they annotate.
+    pub attr_labels: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
     /// Selection outline: the silhouette mask (validation.wgsl's
@@ -146,6 +161,9 @@ pub struct OverlayPipelines {
     /// init and step passes (`Rg32Float` ping-pong), and the rim blit onto
     /// the composited swapchain view.
     pub outline_mask: wgpu::RenderPipeline,
+    /// M-15: line and point meshes silhouette into the same mask.
+    pub outline_mask_line: wgpu::RenderPipeline,
+    pub outline_mask_point: wgpu::RenderPipeline,
     pub outline_jfa_init: wgpu::RenderPipeline,
     pub outline_jfa_step: wgpu::RenderPipeline,
     pub outline_blit: wgpu::RenderPipeline,
@@ -179,6 +197,16 @@ fn model_instance_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
     vec![
         model::ModelVertex::description(),
         InstanceRaw::description(),
+    ]
+}
+
+/// The colored-variant slot set: the regular pair plus the per-vertex
+/// color buffer at slot 2 (shader location 12).
+fn model_instance_color_buffers() -> Vec<wgpu::VertexBufferLayout<'static>> {
+    vec![
+        model::ModelVertex::description(),
+        InstanceRaw::description(),
+        model::color_vertex_layout(),
     ]
 }
 
@@ -243,6 +271,20 @@ impl Pipelines {
             .sample_count(sample_count)
             .build();
 
+        let main_colored = PipelineBuilder::new(
+            device,
+            "Render Pipeline (colored)",
+            &main_layout,
+            &main_shader,
+        )
+        .vertex_entry("vs_main_colored")
+        .buffers(model_instance_color_buffers())
+        .color_format(hdr_format)
+        .cull_back()
+        .depth_compare(wgpu::CompareFunction::Less)
+        .sample_count(sample_count)
+        .build();
+
         let alpha_blend =
             PipelineBuilder::new(device, "Alpha Blend Pipeline", &main_layout, &main_shader)
                 .buffers(model_instance_buffers())
@@ -251,6 +293,20 @@ impl Pipelines {
                 .depth_write(false)
                 .sample_count(sample_count)
                 .build();
+
+        let alpha_blend_colored = PipelineBuilder::new(
+            device,
+            "Alpha Blend Pipeline (colored)",
+            &main_layout,
+            &main_shader,
+        )
+        .vertex_entry("vs_main_colored")
+        .buffers(model_instance_color_buffers())
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .sample_count(sample_count)
+        .build();
 
         let floor_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Floor Pipeline Layout"),
@@ -337,6 +393,25 @@ impl Pipelines {
         .vertex_entry("vs_validation")
         .fragment_entry("fs_validation")
         .buffers(model_instance_buffers())
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .no_blend()
+        .no_depth()
+        .build();
+
+        // Per decision M-15, line and point meshes join the selection
+        // outline like triangles: the same mask target, assembled per
+        // their topology (the point variant is built later, after the
+        // points/lines shader exists; see `outline_mask_point`).
+        let outline_mask_line = PipelineBuilder::new(
+            device,
+            "Outline Mask (lines)",
+            &validation_layout,
+            &validation_shader,
+        )
+        .vertex_entry("vs_validation")
+        .fragment_entry("fs_validation")
+        .buffers(model_instance_buffers())
+        .topology(wgpu::PrimitiveTopology::LineList)
         .color_format(wgpu::TextureFormat::R8Unorm)
         .no_blend()
         .no_depth()
@@ -437,6 +512,90 @@ impl Pipelines {
         .blend_alpha()
         .depth_write(false)
         .sample_count(sample_count)
+        .build();
+
+        // Non-triangle scene topologies (0.8.0): 1 px unlit lines over the
+        // regular vertex buffer, and camera-facing point quads pulled from
+        // the edge-geometry storage buffer (see points_lines.wgsl).
+        let points_lines_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Points/Lines Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/points_lines.wgsl").into()),
+        });
+        let line_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Line Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera],
+            push_constant_ranges: &[],
+        });
+        let line =
+            PipelineBuilder::new(device, "Line Pipeline", &line_layout, &points_lines_shader)
+                .vertex_entry("vs_line")
+                .fragment_entry("fs_unlit")
+                .buffers(vec![
+                    model::position_only_layout(),
+                    InstanceRaw::description(),
+                ])
+                .topology(wgpu::PrimitiveTopology::LineList)
+                .color_format(hdr_format)
+                .depth_compare(wgpu::CompareFunction::Less)
+                .sample_count(sample_count)
+                .build();
+        let line_colored = PipelineBuilder::new(
+            device,
+            "Line Pipeline (colored)",
+            &line_layout,
+            &points_lines_shader,
+        )
+        .vertex_entry("vs_line_colored")
+        .fragment_entry("fs_unlit")
+        .buffers(vec![
+            model::position_only_layout(),
+            InstanceRaw::description(),
+            model::color_vertex_layout(),
+        ])
+        .topology(wgpu::PrimitiveTopology::LineList)
+        .color_format(hdr_format)
+        .depth_compare(wgpu::CompareFunction::Less)
+        .sample_count(sample_count)
+        .build();
+
+        let point_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Point Pipeline Layout"),
+            bind_group_layouts: &[
+                &layouts.camera,
+                &layouts.wireframe_params,
+                &layouts.edge_geometry,
+            ],
+            push_constant_ranges: &[],
+        });
+        let point = PipelineBuilder::new(
+            device,
+            "Point Pipeline",
+            &point_layout,
+            &points_lines_shader,
+        )
+        .vertex_entry("vs_point")
+        .fragment_entry("fs_unlit")
+        .buffers(vec![InstanceRaw::description()])
+        .color_format(hdr_format)
+        .depth_compare(wgpu::CompareFunction::Less)
+        .sample_count(sample_count)
+        .build();
+
+        // The point half of M-15: the same quad expansion into the
+        // outline mask's R8 target (single-sampled, depth-ignoring, like
+        // `outline_mask`).
+        let outline_mask_point = PipelineBuilder::new(
+            device,
+            "Outline Mask (points)",
+            &point_layout,
+            &points_lines_shader,
+        )
+        .vertex_entry("vs_point")
+        .fragment_entry("fs_mask")
+        .buffers(vec![InstanceRaw::description()])
+        .color_format(wgpu::TextureFormat::R8Unorm)
+        .no_blend()
+        .no_depth()
         .build();
 
         let grid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -627,6 +786,27 @@ impl Pipelines {
         .depth_compare(wgpu::CompareFunction::Always)
         .sample_count(sample_count)
         .build();
+
+        let label_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Label Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/label.wgsl").into()),
+        });
+        let label_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Label Pipeline Layout"),
+            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_params, &layouts.labels],
+            push_constant_ranges: &[],
+        });
+        let attr_labels =
+            PipelineBuilder::new(device, "Attr Labels Pipeline", &label_layout, &label_shader)
+                .vertex_entry("vs_label")
+                .fragment_entry("fs_label")
+                .buffers(vec![])
+                .color_format(hdr_format)
+                .blend_alpha()
+                .depth_write(false)
+                .depth_compare(wgpu::CompareFunction::Always)
+                .sample_count(sample_count)
+                .build();
 
         let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Map Shader"),
@@ -949,13 +1129,18 @@ impl Pipelines {
         Pipelines {
             scene: ScenePipelines {
                 main,
+                main_colored,
                 alpha_blend,
+                alpha_blend_colored,
                 shadow,
                 floor,
                 ghosted_fill,
                 edge_wire,
                 edge_wire_ghosted,
                 gbuffer,
+                line,
+                line_colored,
+                point,
             },
             post: PostProcessingPipelines {
                 bloom_extract,
@@ -974,9 +1159,12 @@ impl Pipelines {
                 gizmo,
                 manipulator_lines,
                 manipulator_tris,
+                attr_labels,
                 validation_overlay,
                 validation_edge,
                 outline_mask,
+                outline_mask_line,
+                outline_mask_point,
                 outline_jfa_init,
                 outline_jfa_step,
                 outline_blit,

@@ -16,14 +16,16 @@
 
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 
-export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture"] as const;
+export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture", "attributes", "tree"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export type ViewportSide = "left" | "right";
 export type PropertiesDock = "bottom" | "right";
 
 /** The pre-docking arrangement knobs. Kept as a type because legacy desks and
- * legacy `solarxy.ui.*` keys are expressed in exactly these terms. */
+ * legacy `solarxy.ui.*` keys are expressed in exactly these terms. The
+ * optional fields arrived with the Technical / LookDev / UV desks (feedback
+ * wave 4); absent means false, so every stored desk stays valid. */
 export interface LayoutRecipe {
   viewportSide: ViewportSide;
   propertiesDock: PropertiesDock;
@@ -31,6 +33,14 @@ export interface LayoutRecipe {
   splitPct: number;
   /** Whether the Review panel is part of the arrangement. */
   review: boolean;
+  /** Attributes spreadsheet docked below the nodes canvas. */
+  attributes?: boolean;
+  /** The attributes strip's height share of the dock, in percent. */
+  attributesPct?: number;
+  /** Texture viewer tabbed into the properties group. */
+  texture?: boolean;
+  /** Scene tree tabbed into the nodes group. */
+  tree?: boolean;
 }
 
 export type DeskLayout =
@@ -42,6 +52,10 @@ export const DEFAULT_RECIPE: LayoutRecipe = {
   propertiesDock: "bottom",
   splitPct: 55,
   review: false,
+  attributes: false,
+  attributesPct: 30,
+  texture: false,
+  tree: false,
 };
 
 const SPLIT_MIN_PCT = 20;
@@ -52,6 +66,15 @@ export function clampSplit(pct: number): number {
   return Math.min(SPLIT_MAX_PCT, Math.max(SPLIT_MIN_PCT, pct));
 }
 
+const ATTRIBUTES_PCT_DEFAULT = 30;
+const ATTRIBUTES_PCT_MIN = 15;
+const ATTRIBUTES_PCT_MAX = 50;
+
+export function clampAttributesPct(pct: number): number {
+  if (!Number.isFinite(pct)) return ATTRIBUTES_PCT_DEFAULT;
+  return Math.min(ATTRIBUTES_PCT_MAX, Math.max(ATTRIBUTES_PCT_MIN, pct));
+}
+
 /** Coerces anything (a hand-edited desk, a legacy blob, `undefined`) into a
  * valid recipe. Pure, so it is unit-tested without a DOM. */
 export function sanitizeRecipe(r: Partial<LayoutRecipe> | undefined): LayoutRecipe {
@@ -60,6 +83,10 @@ export function sanitizeRecipe(r: Partial<LayoutRecipe> | undefined): LayoutReci
     propertiesDock: r?.propertiesDock === "right" ? "right" : "bottom",
     splitPct: clampSplit(r?.splitPct ?? DEFAULT_RECIPE.splitPct),
     review: r?.review === true,
+    attributes: r?.attributes === true,
+    attributesPct: clampAttributesPct(r?.attributesPct ?? ATTRIBUTES_PCT_DEFAULT),
+    texture: r?.texture === true,
+    tree: r?.tree === true,
   };
 }
 
@@ -126,9 +153,46 @@ export function applyRecipe(api: DockviewApi, recipe: LayoutRecipe): void {
     });
   }
 
-  // The split percentage is the viewport's share of the width.
+  if (r.texture) {
+    api.addPanel({
+      id: "texture",
+      component: "texture",
+      title: "Texture",
+      position: { referenceGroup: properties.api.group },
+    });
+    // The tab that names the group stays in front.
+    properties.api.setActive();
+  }
+
+  if (r.tree) {
+    api.addPanel({
+      id: "tree",
+      component: "tree",
+      title: "Tree",
+      position: { referenceGroup: nodes.api.group },
+    });
+    nodes.api.setActive();
+  }
+
+  const attributes = r.attributes
+    ? api.addPanel({
+        id: "attributes",
+        component: "attributes",
+        title: "Attributes",
+        position: { direction: "below", referencePanel: nodes },
+      })
+    : null;
+
+  // Sizing runs after every addPanel: dockview redistributes on each add,
+  // so an earlier setSize would be clobbered by a later panel.
   const width = api.width;
   if (width > 0) {
     viewport.api.setSize({ width: Math.round((width * r.splitPct) / 100) });
+  }
+  const height = api.height;
+  if (attributes && height > 0) {
+    attributes.api.setSize({
+      height: Math.round((height * (r.attributesPct ?? ATTRIBUTES_PCT_DEFAULT)) / 100),
+    });
   }
 }

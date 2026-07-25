@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useDesks } from "../store/desks";
+import { Modal } from "./Modal";
 
 export function DeskSaveModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
@@ -15,10 +16,10 @@ export function DeskSaveModal({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
+  // Esc commits through the input's own handler (focus starts there);
+  // the shell adds the backdrop, drag, and resize.
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Save desk</h3>
+    <Modal title="Save desk" onClose={onClose} closeOnEsc={false}>
         <p className="modal-note">
           Saves the current arrangement (panel docking, sizes, canvas chrome, viewport layout) as
           a named desk.
@@ -43,7 +44,6 @@ export function DeskSaveModal({ onClose }: { onClose: () => void }) {
             Save
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

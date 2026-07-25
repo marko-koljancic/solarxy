@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cgmath::{InnerSpace, Matrix as _, Matrix3, Matrix4, SquareMatrix, Vector3, Vector4};
 
 use crate::{AssetResolver, FormatsError};
-use solarxy_core::{AlphaMode, RawImageData, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{AlphaMode, MeshTopology, RawImageData, RawMaterialData, RawMeshData, RawModelData};
 
 /// Load a glTF or GLB from disk via the gltf crate's importer (buffers and
 /// images resolved from the file's directory).
@@ -413,14 +413,23 @@ fn collect_meshes_recursive(
 
     if let Some(mesh) = node.mesh() {
         for primitive in mesh.primitives() {
-            if primitive.mode() != ::gltf::mesh::Mode::Triangles {
-                tracing::warn!(
-                    "Skipping non-triangle primitive in mesh '{}' (mode: {:?})",
-                    mesh.name().unwrap_or("unnamed"),
-                    primitive.mode()
-                );
-                continue;
-            }
+            // Points, lines, and triangles map onto the engine's mesh
+            // topologies (the exporter writes the same three modes); the
+            // strip/loop/fan modes would need index rewriting and stay
+            // unsupported.
+            let topology = match primitive.mode() {
+                ::gltf::mesh::Mode::Triangles => MeshTopology::Triangles,
+                ::gltf::mesh::Mode::Lines => MeshTopology::Lines,
+                ::gltf::mesh::Mode::Points => MeshTopology::Points,
+                other => {
+                    tracing::warn!(
+                        "Skipping unsupported primitive mode {:?} in mesh '{}'",
+                        other,
+                        mesh.name().unwrap_or("unnamed")
+                    );
+                    continue;
+                }
+            };
 
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
@@ -434,9 +443,16 @@ fn collect_meshes_recursive(
                 None => continue,
             };
 
-            let indices: Vec<u32> = match reader.read_indices() {
-                Some(iter) => iter.into_u32().collect(),
-                None => (0..positions.len() as u32).collect(),
+            // A point cloud is index-free by convention (matching the
+            // face-less PLY form); the other topologies keep their index
+            // lists, defaulting to sequential when non-indexed.
+            let indices: Vec<u32> = if topology == MeshTopology::Points {
+                Vec::new()
+            } else {
+                match reader.read_indices() {
+                    Some(iter) => iter.into_u32().collect(),
+                    None => (0..positions.len() as u32).collect(),
+                }
             };
 
             let normals: Option<Vec<[f32; 3]>> = reader.read_normals().map(|iter| {
@@ -457,9 +473,18 @@ fn collect_meshes_recursive(
                 .read_tex_coords(0)
                 .map(|iter| iter.into_f32().collect());
 
+            // COLOR_0: vec3/vec4 in u8/u16 normalized or f32, already
+            // linear per the glTF 2.0 specification (no sRGB decode here;
+            // `into_rgba_f32` handles widening and normalization).
+            let colors: Option<Vec<[f32; 4]>> = reader
+                .read_colors(0)
+                .map(|iter| iter.into_rgba_f32().collect());
+
             let material_index = Some(primitive.material().index().unwrap_or(0));
 
-            *total_polygons += indices.len() / 3;
+            if topology == MeshTopology::Triangles {
+                *total_polygons += indices.len() / 3;
+            }
 
             meshes.push(RawMeshData {
                 name: mesh.name().unwrap_or("gltf_mesh").to_string(),
@@ -468,6 +493,8 @@ fn collect_meshes_recursive(
                 normals,
                 tex_coords,
                 material_index,
+                topology,
+                colors,
             });
         }
     }

@@ -28,7 +28,7 @@ fn tex_node(
         type_id,
         version: 1,
         display_name,
-        category: Category::Modifiers,
+        category: Category::TexComposite,
         contexts: ContextSet::TEX,
         opens: None,
         inputs,

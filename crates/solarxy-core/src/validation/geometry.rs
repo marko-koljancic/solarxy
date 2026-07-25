@@ -120,7 +120,7 @@ mod tests {
     use super::super::test_helpers::single_triangle_raw;
     use super::super::validate_raw_model;
     use super::*;
-    use crate::geometry::{RawMeshData, RawModelData};
+    use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
     #[test]
     fn non_triangulated() {
@@ -179,6 +179,8 @@ mod tests {
                 normals: None,
                 tex_coords: None,
                 material_index: None,
+                topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: vec![],
             polygon_count: 0,
@@ -196,6 +198,8 @@ mod tests {
                 normals: None,
                 tex_coords: None,
                 material_index: None,
+                topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: vec![],
             polygon_count: 0,

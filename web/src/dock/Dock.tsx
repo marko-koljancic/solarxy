@@ -12,7 +12,8 @@
 import { DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { useCallback, useEffect } from "react";
 import { setDockApi, restoreLayout } from "./api";
-import { DOCK_COMPONENTS, DOCK_TAB_COMPONENTS } from "./panels";
+import { clearHoveredPanel } from "./hover";
+import { DOCK_COMPONENTS, DOCK_TAB_COMPONENTS, MaximizeHeaderAction } from "./panels";
 import { DEFAULT_RECIPE, synthesizeRecipe } from "./layouts";
 import { loadLegacyArrangement, useUi } from "../store/ui";
 import { useReview } from "../store/review";
@@ -55,6 +56,10 @@ export function Dock() {
     api.onDidAddPanel(syncReview);
     api.onDidRemovePanel(syncReview);
 
+    // A panel removed under the cursor (close, maximize hiding siblings) must
+    // not leave a stale hover id behind for the maximize shortcut.
+    api.onDidRemovePanel((panel) => clearHoveredPanel(panel.id));
+
     let timer: number | undefined;
     api.onDidLayoutChange(() => {
       window.clearTimeout(timer);
@@ -77,6 +82,7 @@ export function Dock() {
       components={DOCK_COMPONENTS}
       tabComponents={DOCK_TAB_COMPONENTS}
       defaultTabComponent={DOCK_TAB_COMPONENTS.colored}
+      rightHeaderActionsComponent={MaximizeHeaderAction}
       onReady={onReady}
       singleTabMode="fullwidth"
     />

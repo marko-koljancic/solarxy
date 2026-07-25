@@ -27,6 +27,9 @@ pub struct BindGroupLayouts {
     pub outline_texture: wgpu::BindGroupLayout,
     pub outline_params: wgpu::BindGroupLayout,
     pub skybox: wgpu::BindGroupLayout,
+    /// The GPU label channel: params uniform, label + glyph storage, the
+    /// SDF atlas and its sampler.
+    pub labels: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -234,6 +237,18 @@ impl BindGroupLayouts {
             label: Some("skybox_bind_group_layout"),
             entries: &[bgl_texture_entry(0), bgl_sampler_entry(1)],
         });
+        let labels = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("labels_bind_group_layout"),
+            entries: &[
+                // Params: the vertex stage lays out quads from the px
+                // metrics, the fragment stage colors them.
+                bgl_uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT),
+                bgl_storage_entry(1),
+                bgl_storage_entry(2),
+                bgl_texture_entry(3),
+                bgl_sampler_entry(4),
+            ],
+        });
         // Selection-outline jump flood: the source texture is
         // read with textureLoad only (Rg32Float is non-filterable), and
         // one uniform layout serves the per-step and blit params.
@@ -270,6 +285,7 @@ impl BindGroupLayouts {
             outline_texture,
             outline_params,
             skybox,
+            labels,
         }
     }
 }
@@ -280,6 +296,22 @@ fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::Bind
         visibility,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A vertex-stage read-only storage buffer entry (the label channel's
+/// instance and glyph streams; the edge-geometry layout spells out the
+/// same shape inline).
+fn bgl_storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
             has_dynamic_offset: false,
             min_binding_size: None,
         },

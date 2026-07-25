@@ -2,7 +2,7 @@
 // dividers, checkmarks, disabled items, and right-aligned shortcut hints.
 // Ported from the Minimystix Header/MenuItem pair to the token system.
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { IconCheck, IconChevronRight } from "../../icons";
 
 export interface SubMenuEntry {
@@ -11,6 +11,8 @@ export interface SubMenuEntry {
   checked?: boolean;
   disabled?: boolean;
   shortcut?: string;
+  /** Small leading icon (e.g. the node glyph in the Add menu). */
+  icon?: ReactNode;
 }
 
 export interface MenuEntry {
@@ -87,6 +89,7 @@ export function MenuItem({ title, entries }: MenuItemProps) {
                         }}
                       >
                         <span className="menu-check">{sub.checked && <IconCheck size={12} />}</span>
+                        {sub.icon && <span className="menu-icon">{sub.icon}</span>}
                         <span className="menu-label">{sub.label}</span>
                         {sub.shortcut && <span className="menu-shortcut">{sub.shortcut}</span>}
                       </div>

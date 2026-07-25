@@ -46,6 +46,7 @@ fn textured_obj_materials_survive_parse_transfer_and_cook() {
         center_to_origin: false,
         recompute_normals: None,
         preserve_materials: None,
+        vertex_colors: None,
     };
     let set =
         parse_model("obj", obj_fixed.as_bytes(), "model.obj", &table, &options).expect("parse");
@@ -105,6 +106,7 @@ fn multi_file_gltf_resolves_its_external_buffer_through_the_table() {
         center_to_origin: false,
         recompute_normals: None,
         preserve_materials: None,
+        vertex_colors: None,
     };
 
     // Staged under the bare basename (how every entry path stages files),

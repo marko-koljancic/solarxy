@@ -27,7 +27,12 @@ pub(super) fn check_triangle_budget(
     if budget == 0 {
         return None;
     }
-    let count: usize = raw.meshes.iter().map(|m| m.indices.len() / 3).sum();
+    let count: usize = raw
+        .meshes
+        .iter()
+        .filter(|m| m.topology == crate::geometry::MeshTopology::Triangles)
+        .map(|m| m.indices.len() / 3)
+        .sum();
     let count_u32 = u32::try_from(count).unwrap_or(u32::MAX);
     let budget_f = budget as f32;
     let warning_threshold = budget_f * (1.0 + tolerance_percent / 100.0);
@@ -52,7 +57,7 @@ pub(super) fn check_triangle_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{RawMeshData, RawModelData};
+    use crate::geometry::{MeshTopology, RawMeshData, RawModelData};
 
     fn raw_with_triangles(n: usize) -> RawModelData {
         let mut positions = Vec::with_capacity(n * 3);
@@ -74,6 +79,8 @@ mod tests {
                 normals: None,
                 tex_coords: None,
                 material_index: None,
+                topology: MeshTopology::Triangles,
+                colors: None,
             }],
             materials: Vec::new(),
             polygon_count: n,

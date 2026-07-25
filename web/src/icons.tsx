@@ -58,6 +58,24 @@ export function IconChevronRight(p: IconProps) {
   );
 }
 
+export function IconChevronsDown(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m4 4.5 4 4 4-4" />
+      <path d="m4 9 4 4 4-4" />
+    </Svg>
+  );
+}
+
+export function IconChevronsUp(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m4 11.5 4-4 4 4" />
+      <path d="m4 7 4-4 4 4" />
+    </Svg>
+  );
+}
+
 export function IconCheck(p: IconProps) {
   return (
     <Svg {...p}>
@@ -78,6 +96,15 @@ export function IconMaximize(p: IconProps) {
   return (
     <Svg {...p}>
       <path d="M6 3H3v3M10 3h3v3M6 13H3v-3M10 13h3v-3" />
+    </Svg>
+  );
+}
+
+export function IconRestore(p: IconProps) {
+  // The maximize corners inverted: arrows collapsing inward.
+  return (
+    <Svg {...p}>
+      <path d="M3 6h3V3M13 6h-3V3M3 10h3v3M13 10h-3v3" />
     </Svg>
   );
 }
@@ -217,6 +244,53 @@ export function IconToolScale(p: IconProps) {
       <rect x="2.3" y="10.3" width="3.4" height="3.4" fill="currentColor" stroke="none" />
       <rect x="10.3" y="2.3" width="3.4" height="3.4" />
       <path d="M6.4 9.6 9.6 6.4" />
+    </Svg>
+  );
+}
+
+export function IconAttrLabels(p: IconProps) {
+  // A value tag beside its anchor point: the labels viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="3.6" cy="12.4" r="1.4" fill="currentColor" stroke="none" />
+      <path d="M6 10.5 8.2 8.3" />
+      <rect x="7" y="3" width="7" height="5.2" rx="1" />
+      <path d="M8.6 5.6 h3.8" />
+    </Svg>
+  );
+}
+
+export function IconAttrVectors(p: IconProps) {
+  // Two arrows leaving their points: the Vec3 arrow viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M5 11 10.4 5.6 M10.4 5.6 h-2.6 M10.4 5.6 v2.6" />
+      <circle cx="11.6" cy="12.6" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M11.6 11.4 V7 M11.6 7 l-1.6 1.7 M11.6 7 l1.6 1.7" />
+    </Svg>
+  );
+}
+
+export function IconAttrSettings(p: IconProps) {
+  // A slider pair: the attribute-viz settings popover.
+  return (
+    <Svg {...p}>
+      <path d="M2.5 5.5 h11 M2.5 10.5 h11" />
+      <circle cx="6" cy="5.5" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="10.5" r="1.7" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function IconAttrPoints(p: IconProps) {
+  // Numbered points: the point-marker viz mode.
+  return (
+    <Svg {...p}>
+      <circle cx="4.4" cy="4.6" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="11.4" cy="6.4" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="6.4" cy="11.6" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M12.6 11 h2 M13.6 10 v2" />
     </Svg>
   );
 }

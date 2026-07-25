@@ -16,6 +16,7 @@ import type { ScreenshotResult } from "../engine/types";
 import { type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
+import { Modal } from "./Modal";
 import { screenshotDims } from "./ScreenshotModal";
 import { Select } from "./Select";
 
@@ -138,9 +139,16 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-        <h3>Export Turntable</h3>
+    <Modal
+      id="turntable"
+      title="Export Turntable"
+      onClose={onClose}
+      className="modal-wide"
+      // While an export runs, Esc CANCELS the run (the dialog's own
+      // listener below) and the backdrop is inert.
+      closeOnEsc={false}
+      closeOnBackdrop={!busy}
+    >
         <div className="screenshot-controls">
           <label className="prefs-unit">Format</label>
           <Select
@@ -220,7 +228,6 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             {busy ? "Exporting..." : "Export"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

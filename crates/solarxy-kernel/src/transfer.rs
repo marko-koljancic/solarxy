@@ -7,23 +7,24 @@
 //! reconstructs the set with a single memcpy per buffer (aligned
 //! destinations via `bytemuck`, so no per-element loop).
 //!
-//! Geometry crosses as raw buffers: positions, normals, UVs, indices, and
-//! the material index per mesh. Materials follow as a serde-JSON header per
-//! material (factors, paths, alpha mode) plus raw RGBA blobs for the five
-//! texture roles (the `*_texture_data` fields are `serde(skip)` and travel
-//! binary), so the full PBR renderer consumes worker-parsed models
-//! (the geometry-only form was the documented Phase-5 boundary).
-//! Bounds are recomputed by [`GeometrySet::from_parts`] on unpack. The
-//! format is versionless and same-origin (both sides are the same wasm
-//! build), so endianness is fixed little-endian.
+//! Geometry crosses as raw buffers: positions, normals, UVs, indices, the
+//! topology tag, the material index, and both attribute-domain lane
+//! sections (point, then primitive) per mesh. Materials follow as a
+//! serde-JSON header per material (factors, paths, alpha mode) plus raw
+//! RGBA blobs for the five texture roles (the `*_texture_data` fields are
+//! `serde(skip)` and travel binary), so the full PBR renderer consumes
+//! worker-parsed models (the geometry-only form was the documented Phase-5
+//! boundary). Bounds are recomputed by [`GeometrySet::from_parts`] on
+//! unpack. The format is versionless and same-origin (both sides are the
+//! same wasm build), so endianness is fixed little-endian.
 
 use std::sync::Arc;
 
 use bytemuck::{cast_slice, cast_slice_mut};
-use solarxy_core::geometry::{RawImageData, RawMaterialData};
+use solarxy_core::geometry::{MeshTopology, RawImageData, RawMaterialData};
 use thiserror::Error;
 
-use crate::set::{AttributeMap, GeometrySet, KernelMesh};
+use crate::set::{AttributeData, AttributeMap, GeometrySet, KernelMesh};
 
 /// A malformed or truncated transfer blob.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -32,11 +33,32 @@ pub enum TransferError {
     Truncated { at: usize, wanted: usize },
     #[error("transfer blob material header malformed: {0}")]
     BadMaterial(String),
+    #[error("transfer blob attribute lane kind {0} unknown")]
+    BadAttributeKind(u32),
 }
 
 const HAS_NORMALS: u32 = 1;
 const HAS_UVS: u32 = 1 << 1;
 const HAS_MATERIAL: u32 = 1 << 2;
+/// Bits 3-4 of the mesh flags word carry the topology tag.
+const TOPOLOGY_SHIFT: u32 = 3;
+const TOPOLOGY_MASK: u32 = 0b11;
+
+fn topology_to_wire(t: MeshTopology) -> u32 {
+    match t {
+        MeshTopology::Triangles => 0,
+        MeshTopology::Lines => 1,
+        MeshTopology::Points => 2,
+    }
+}
+
+fn topology_from_wire(v: u32) -> MeshTopology {
+    match v {
+        1 => MeshTopology::Lines,
+        2 => MeshTopology::Points,
+        _ => MeshTopology::Triangles,
+    }
+}
 
 /// The five texture roles a material can carry, in wire order.
 const TEXTURE_ROLES: usize = 5;
@@ -84,6 +106,7 @@ pub fn pack(set: &GeometrySet) -> Vec<u8> {
         if mesh.material_index.is_some() {
             flags |= HAS_MATERIAL;
         }
+        flags |= topology_to_wire(mesh.topology) << TOPOLOGY_SHIFT;
         push_u32(&mut out, flags);
 
         out.extend_from_slice(cast_slice::<[f32; 3], u8>(&mesh.positions));
@@ -100,6 +123,9 @@ pub fn pack(set: &GeometrySet) -> Vec<u8> {
         if let Some(mi) = mesh.material_index {
             push_u32(&mut out, mi as u32);
         }
+
+        push_attributes(&mut out, &mesh.attributes);
+        push_attributes(&mut out, &mesh.primitive_attributes);
     }
 
     // Material section: a serde-JSON header per material (texture-data
@@ -165,6 +191,9 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             None
         };
 
+        let attributes = read_attributes(&mut r)?;
+        let primitive_attributes = read_attributes(&mut r)?;
+
         meshes.push(KernelMesh {
             name,
             positions,
@@ -172,7 +201,9 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             tex_coords,
             indices,
             material_index,
-            attributes: AttributeMap::new(),
+            topology: topology_from_wire((flags >> TOPOLOGY_SHIFT) & TOPOLOGY_MASK),
+            attributes,
+            primitive_attributes,
         });
     }
 
@@ -208,6 +239,52 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
 
 fn push_u32(out: &mut Vec<u8>, v: u32) {
     out.extend_from_slice(&v.to_le_bytes());
+}
+
+/// One attribute-domain section: lane count, then per lane the name, a
+/// kind tag (0 Float, 1 Vec2, 2 Vec3, 3 Vec4), the element count, and the
+/// raw little-endian floats.
+fn push_attributes(out: &mut Vec<u8>, map: &AttributeMap) {
+    push_u32(out, map.len() as u32);
+    for (name, data) in map {
+        let bytes = name.as_bytes();
+        push_u32(out, bytes.len() as u32);
+        out.extend_from_slice(bytes);
+        let kind = match data {
+            AttributeData::Float(_) => 0,
+            AttributeData::Vec2(_) => 1,
+            AttributeData::Vec3(_) => 2,
+            AttributeData::Vec4(_) => 3,
+        };
+        push_u32(out, kind);
+        push_u32(out, data.len() as u32);
+        match data {
+            AttributeData::Float(v) => out.extend_from_slice(cast_slice::<f32, u8>(v)),
+            AttributeData::Vec2(v) => out.extend_from_slice(cast_slice::<[f32; 2], u8>(v)),
+            AttributeData::Vec3(v) => out.extend_from_slice(cast_slice::<[f32; 3], u8>(v)),
+            AttributeData::Vec4(v) => out.extend_from_slice(cast_slice::<[f32; 4], u8>(v)),
+        }
+    }
+}
+
+fn read_attributes(r: &mut Reader) -> Result<AttributeMap, TransferError> {
+    let count = r.u32()? as usize;
+    let mut map = AttributeMap::new();
+    for _ in 0..count {
+        let name_len = r.u32()? as usize;
+        let name = String::from_utf8_lossy(r.take(name_len)?).into_owned();
+        let kind = r.u32()?;
+        let len = r.u32()? as usize;
+        let data = match kind {
+            0 => AttributeData::Float(Arc::new(r.f32_vec(len)?)),
+            1 => AttributeData::Vec2(Arc::new(r.vec2(len)?)),
+            2 => AttributeData::Vec3(Arc::new(r.vec3(len)?)),
+            3 => AttributeData::Vec4(Arc::new(r.vec4(len)?)),
+            other => return Err(TransferError::BadAttributeKind(other)),
+        };
+        map.insert(name, data);
+    }
+    Ok(map)
 }
 
 struct Reader<'a> {
@@ -261,6 +338,20 @@ impl Reader<'_> {
         cast_slice_mut::<u32, u8>(&mut v).copy_from_slice(src);
         Ok(v)
     }
+
+    fn f32_vec(&mut self, count: usize) -> Result<Vec<f32>, TransferError> {
+        let src = self.take(count * 4)?;
+        let mut v = vec![0.0f32; count];
+        cast_slice_mut::<f32, u8>(&mut v).copy_from_slice(src);
+        Ok(v)
+    }
+
+    fn vec4(&mut self, count: usize) -> Result<Vec<[f32; 4]>, TransferError> {
+        let src = self.take(count * 16)?;
+        let mut v = vec![[0.0f32; 4]; count];
+        cast_slice_mut::<[f32; 4], u8>(&mut v).copy_from_slice(src);
+        Ok(v)
+    }
 }
 
 #[cfg(test)]
@@ -276,7 +367,9 @@ mod tests {
             tex_coords: Some(Arc::new(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])),
             indices: Arc::new(vec![0, 1, 2]),
             material_index: Some(2),
+            topology: solarxy_core::geometry::MeshTopology::Triangles,
             attributes: AttributeMap::new(),
+            primitive_attributes: AttributeMap::new(),
         };
         let set = GeometrySet::from_parts(vec![mesh], Vec::new());
 
@@ -313,6 +406,52 @@ mod tests {
         assert!(back.meshes[0].normals.is_none());
         assert!(back.meshes[0].tex_coords.is_none());
         assert_eq!(back.meshes[0].material_index, None);
+    }
+
+    #[test]
+    fn topology_tags_and_attribute_lanes_round_trip() {
+        let mut cloud = KernelMesh::points("cloud", vec![[0.0; 3], [1.0, 2.0, 3.0]]);
+        cloud.attributes.insert(
+            crate::set::reserved::COLOR.to_string(),
+            AttributeData::Vec4(Arc::new(vec![[1.0, 0.5, 0.25, 1.0], [0.0, 1.0, 0.0, 0.5]])),
+        );
+        cloud.attributes.insert(
+            "weight".to_string(),
+            AttributeData::Float(Arc::new(vec![0.1, 0.9])),
+        );
+        cloud.primitive_attributes.insert(
+            "tag".to_string(),
+            AttributeData::Vec3(Arc::new(vec![[7.0, 8.0, 9.0], [1.0, 1.0, 1.0]])),
+        );
+        let wire = KernelMesh::polyline("wire", vec![[0.0; 3], [4.0, 0.0, 0.0]], vec![0, 1]);
+        let set = GeometrySet::from_parts(vec![cloud, wire], Vec::new());
+
+        let back = unpack(&pack(&set)).expect("round trip");
+        assert_eq!(back.meshes[0].topology, MeshTopology::Points);
+        assert_eq!(back.meshes[1].topology, MeshTopology::Lines);
+        assert_eq!(
+            back.meshes[0].attributes.get(crate::set::reserved::COLOR),
+            Some(&AttributeData::Vec4(Arc::new(vec![
+                [1.0, 0.5, 0.25, 1.0],
+                [0.0, 1.0, 0.0, 0.5]
+            ])))
+        );
+        assert_eq!(
+            back.meshes[0].attributes.get("weight"),
+            Some(&AttributeData::Float(Arc::new(vec![0.1, 0.9])))
+        );
+        assert_eq!(
+            back.meshes[0].primitive_attributes.get("tag"),
+            Some(&AttributeData::Vec3(Arc::new(vec![
+                [7.0, 8.0, 9.0],
+                [1.0, 1.0, 1.0]
+            ])))
+        );
+        assert!(back.meshes[1].attributes.is_empty());
+        assert!(
+            !back.is_renderable_empty(),
+            "the unpacked cloud stays renderable"
+        );
     }
 
     #[test]

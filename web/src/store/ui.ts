@@ -113,6 +113,10 @@ interface UiState {
   paneColors: Record<string, string>;
   /** The asset the preview panel shows (item 2; not persisted). */
   assetPreview: { hash: string; name: string } | null;
+  /** The Properties panel's active param tab, lifted here so the panel's
+   * menu bar can read it (Reset Current Tab). Not persisted; the panel
+   * falls back to the first tab when the selection lacks this group. */
+  paramTab: string;
   setDockLayout: (layout: SerializedDockview) => void;
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
@@ -132,6 +136,7 @@ interface UiState {
   /** Sets (or clears, with null) a pane's header tint and persists it. */
   setPaneColor: (id: string, color: string | null) => void;
   setAssetPreview: (asset: { hash: string; name: string } | null) => void;
+  setParamTab: (tab: string) => void;
 }
 
 /** The persisted dock arrangement. A corrupt blob is discarded here rather than
@@ -231,6 +236,8 @@ export const useUi = create<UiState>((set) => {
     sidecarPrompt: null,
     paneColors: loadPaneColors(),
     assetPreview: null,
+    paramTab: "",
+    setParamTab: (tab) => set({ paramTab: tab }),
     setDockLayout: (layout) => {
       localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
       set({ dockLayout: layout });

@@ -6,7 +6,7 @@
 // header pointer-capture (no library).
 
 import { useEffect, useRef, useState } from "react";
-import { dispatch } from "../engine/session";
+import { dispatch, getClient } from "../engine/session";
 import { ctxKey, type PortSnapshot } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
 import { useMirror } from "../store/mirror";
@@ -24,9 +24,18 @@ export function NodeInfoModal() {
   const report = useMirror((s) => (info ? s.reports[info.nodeId] : undefined));
   const stale = useMirror((s) => (info ? s.stale.includes(info.nodeId) : false));
 
+  // Cook warnings are a pull query (they ride no event); refetched when
+  // the card retargets or the node's cook status changes.
+  const [warnings, setWarnings] = useState<string[]>([]);
+  useEffect(() => {
+    setWarnings(info ? getClient().cookWarnings(info.nodeId) : []);
+  }, [info, cook?.status]);
+
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const resizeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // Reset position when the modal retargets to another node.
   useEffect(() => {
@@ -86,6 +95,25 @@ export function NodeInfoModal() {
     dragRef.current = null;
   };
 
+  const startResize = (e: React.PointerEvent) => {
+    const rect = cardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizeRef.current = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
+    (e.target as Element).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onResize = (e: React.PointerEvent) => {
+    const r = resizeRef.current;
+    if (!r || !pos) return;
+    setSize({
+      w: Math.min(Math.max(260, r.w + (e.clientX - r.x)), window.innerWidth - pos.x - 8),
+      h: Math.min(Math.max(180, r.h + (e.clientY - r.y)), window.innerHeight - pos.y - 8),
+    });
+  };
+  const endResize = () => {
+    resizeRef.current = null;
+  };
+
   const showReport = () => {
     // Selecting the node surfaces its validation report in the parameter
     // panel; retarget the canvas context first if the modal outlived a
@@ -107,7 +135,11 @@ export function NodeInfoModal() {
             : "not cooked yet";
 
   return (
-    <div ref={cardRef} className="node-info-modal" style={{ left: pos.x, top: pos.y }}>
+    <div
+      ref={cardRef}
+      className="node-info-modal"
+      style={{ left: pos.x, top: pos.y, ...(size ? { width: size.w, height: size.h } : {}) }}
+    >
       <div
         className="node-info-header"
         onPointerDown={startDrag}
@@ -148,6 +180,18 @@ export function NodeInfoModal() {
             <span className="node-info-key">Geometry</span>
             <span>
               {cook.points ?? 0} points, {cook.prims ?? 0} prims, {cook.meshes ?? 0} mesh(es)
+            </span>
+          </div>
+        )}
+        {warnings.length > 0 && (
+          <div className="node-info-row">
+            <span className="node-info-key">Warnings</span>
+            <span className="node-info-warnings">
+              {warnings.map((w, i) => (
+                <span key={i} className="node-info-warning">
+                  {w}
+                </span>
+              ))}
             </span>
           </div>
         )}
@@ -197,6 +241,13 @@ export function NodeInfoModal() {
           </details>
         )}
       </div>
+      <div
+        className="modal-resize"
+        onPointerDown={startResize}
+        onPointerMove={onResize}
+        onPointerUp={endResize}
+        aria-hidden
+      />
     </div>
   );
 }

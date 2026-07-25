@@ -5,6 +5,7 @@
 use std::ops::Range;
 
 pub use solarxy_core::AABB;
+use solarxy_core::MeshTopology;
 
 use super::material::Material;
 
@@ -81,6 +82,37 @@ pub struct ModelVertex {
     pub bitangent: [f32; 3],
 }
 
+/// A position-only view over the interleaved [`ModelVertex`] buffer: the
+/// same stride, only location 0 declared. The line pipelines use it so a
+/// polyline shares the mesh's regular vertex buffer.
+#[must_use]
+pub fn position_only_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 0,
+            format: wgpu::VertexFormat::Float32x3,
+        }],
+    }
+}
+
+/// The per-vertex color buffer (linear RGBA f32) at shader location 12,
+/// bound as an extra slot by the `*_colored` pipeline variants only.
+#[must_use]
+pub fn color_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 16,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 12,
+            format: wgpu::VertexFormat::Float32x4,
+        }],
+    }
+}
+
 impl Vertex for ModelVertex {
     fn description() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -137,7 +169,19 @@ pub struct Mesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
+    /// Vertex count; the point pipeline's draw count is `6 * num_vertices`
+    /// (six expanded quad corners per point).
+    pub num_vertices: u32,
     pub material: usize,
+    /// How the index buffer connects vertices. Triangle meshes take the
+    /// full PBR path; lines and points draw through their own unlit
+    /// pipelines in the main pass only (decision M-15 keeps them in the
+    /// selection-outline mask; shadow/gbuffer/overdraw skip them).
+    pub topology: MeshTopology,
+    /// Per-vertex linear RGBA colors at shader location 12; present only
+    /// when the cooked mesh carried a color lane. Its presence selects the
+    /// `*_colored` pipeline variants for triangle and line meshes.
+    pub color_buffer: Option<wgpu::Buffer>,
     /// Outliner visibility. `false` skips the mesh in every draw pass
     /// (main / shadow / g-buffer / overlays / UV) — see `frame.rs`.
     pub visible: bool,
@@ -212,7 +256,10 @@ where
 {
     fn draw_model_simple(&mut self, model: &'b Model, instances: std::ops::Range<u32>) {
         for mesh in &model.meshes {
-            if !mesh.visible {
+            // Triangle meshes only: every caller of this helper draws an
+            // indexed triangle list; line and point meshes go through
+            // their dedicated pipelines in the main pass.
+            if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                 continue;
             }
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));

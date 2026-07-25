@@ -95,7 +95,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         // so v1 documents keep their exact inline behavior.
         version: 2,
         display_name: "Material",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::GEO,
         opens: None,
         inputs,

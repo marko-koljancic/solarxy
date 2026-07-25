@@ -35,6 +35,18 @@ mod app;
 // CI runs their tests instead of leaving them to a wasm-only build.
 pub mod gizmo;
 
+// Same convention: the attribute-viz state and its ramp/clamp math are
+// pure data, tested natively.
+pub mod attr_viz;
+
+// Same convention: label text assembly and glyph packing are pure string
+// and bit math, with the DOM-parity cases pinned as native tests.
+pub mod attr_labels;
+
+// Same convention again: the display-defaults parsing is pure string
+// matching, drift-guarded against the enums' serde names by native tests.
+pub mod display_defaults;
+
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;
 

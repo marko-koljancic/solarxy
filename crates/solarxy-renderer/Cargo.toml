@@ -33,6 +33,9 @@ thiserror   = { workspace = true }
 pollster = "0.4.0"
 # Binary-style error handling for the golden-capture example only.
 anyhow = { workspace = true }
+# Rasterizes the label glyph atlas in the gen_glyph_atlas example only;
+# examples never compile into the wasm cdylib, so no runtime font dep.
+ab_glyph = "0.2.31"
 
 [dependencies.image]
 version          = "0.25.9"

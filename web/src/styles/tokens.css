@@ -86,15 +86,34 @@ body.dark-theme {
 
   --light-node-background: #f8e7b0;
 
-  /* Houdini-inspired pastel category fills.
-   * Dark text stays readable on all of them; the dark theme uses slightly
-   * muted values. */
-  --node-cat-primitives: #c9dcf2;
-  --node-cat-modifiers: #c8e8d6;
+  /* Houdini-inspired pastel category fills, one var per registry category
+   * id (NodeCanvas derives the var name from the id, so names must match
+   * the snake_case ids exactly). Dark text stays readable on all of them;
+   * the dark theme uses slightly muted values. Hue families: the Geo verb
+   * categories share the cool half (blue generate, teal transform, greens
+   * for copy/topology, rose attribute), byte movers are violet in, amber
+   * out, and the Tex trio lives on warm sand / steel / mint so each canvas
+   * kind reads distinct at a glance. */
+  --node-cat-generators: #c9dcf2;
+  --node-cat-attribute: #f2cfd6;
+  --node-cat-transform: #c5e6e6;
+  --node-cat-copy: #d9ecc4;
+  --node-cat-topology: #c8e8d6;
+  --node-cat-shaders: #f0cfe3;
   --node-cat-import: #ddd0ee;
+  --node-cat-export: #f4d7b0;
   --node-cat-utility: #eed9c9;
   --node-cat-lights: var(--light-node-background);
   --node-cat-container: var(--node-background);
+  /* Root containers color-code by the network they open: Geo stays the
+   * neutral tile, Tex leans green-teal (apart from transform's cyan),
+   * Mat echoes the shaders rose family it contains. */
+  --node-cat-container-geo: var(--node-background);
+  --node-cat-container-tex: #bfe0d6;
+  --node-cat-container-mat: #eecdde;
+  --node-cat-tex_generate: #e9ddc3;
+  --node-cat-tex_adjust: #cfdce8;
+  --node-cat-tex_composite: #d2e4dc;
   --light-node-border: rgba(255, 255, 255, 0.15);
   --light-node-border-hover: rgba(255, 255, 255, 0.25);
 
@@ -189,12 +208,23 @@ body.light-theme {
 
   --light-node-background: #fff7de;
 
-  --node-cat-primitives: #dcebfb;
-  --node-cat-modifiers: #d9f3e4;
+  --node-cat-generators: #dcebfb;
+  --node-cat-attribute: #fbdfe6;
+  --node-cat-transform: #d8f1f1;
+  --node-cat-copy: #e6f5d4;
+  --node-cat-topology: #d9f3e4;
+  --node-cat-shaders: #f9dcef;
   --node-cat-import: #eae0f7;
+  --node-cat-export: #fce4c2;
   --node-cat-utility: #f7e6d7;
   --node-cat-lights: var(--light-node-background);
   --node-cat-container: var(--node-background);
+  --node-cat-container-geo: var(--node-background);
+  --node-cat-container-tex: #d9f0e8;
+  --node-cat-container-mat: #f8def0;
+  --node-cat-tex_generate: #f3e9d2;
+  --node-cat-tex_adjust: #dfe8f4;
+  --node-cat-tex_composite: #def0e8;
   --light-node-border: rgba(0, 0, 0, 0.15);
   --light-node-border-hover: rgba(0, 0, 0, 0.25);
 

@@ -5,7 +5,8 @@
 // depends on properties internals.
 
 import { ReactFlowProvider } from "@xyflow/react";
-import { ctxKey, type GraphContext } from "../engine/types";
+import React from "react";
+import { ctxKey, type GraphContext, type NodeTypeSnapshot } from "../engine/types";
 import { FlowListView } from "../flow/FlowListView";
 import { NodeCanvas } from "../flow/NodeCanvas";
 import { nodeLabel } from "../flow/nodeLabel";
@@ -15,6 +16,7 @@ import { useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 import { NodesMenu } from "./menu/NodesMenu";
 import { NodePaneViewMenu } from "./menu/NodePaneViewMenu";
+import { NodeGlyph } from "./NodeGlyph";
 import { NodePalette } from "./NodePalette";
 
 function Breadcrumb() {
@@ -28,7 +30,7 @@ function Breadcrumb() {
   // Walk the owner chain up to the root (containers nest):
   // each child context's owner node lives in some enclosing graph; that
   // graph is the next crumb out.
-  const chain: { ctx: GraphContext; label: string }[] = [];
+  const chain: { ctx: GraphContext; label: string; desc?: NodeTypeSnapshot }[] = [];
   let cursor: GraphContext = current;
   let guard = 0;
   while (cursor !== "root" && guard < 64) {
@@ -36,18 +38,23 @@ function Breadcrumb() {
     const ownerId = cursor.subflow;
     let holder: GraphContext = "root";
     let ownerLabel = "subflow";
+    let ownerDesc: NodeTypeSnapshot | undefined;
     for (const [key, g] of Object.entries(contexts)) {
       const owner = g.nodes.find((n) => n.id === ownerId);
       if (owner) {
-        ownerLabel = nodeLabel(owner, descriptorFor(registry, owner.typeId));
+        ownerDesc = descriptorFor(registry, owner.typeId);
+        ownerLabel = nodeLabel(owner, ownerDesc);
         holder = key === "root" ? "root" : { subflow: Number(key.slice(4)) };
         break;
       }
     }
-    chain.unshift({ ctx: cursor, label: ownerLabel });
+    chain.unshift({ ctx: cursor, label: ownerLabel, desc: ownerDesc });
     cursor = holder;
   }
 
+  // Crumbs and separators render as direct flex children (no wrapper
+  // spans), so the row's align-items and gap govern every piece and the
+  // separators cannot drift off the text's centerline.
   return (
     <div className="breadcrumb">
       <button className="crumb-link" onClick={() => setCurrent("root")}>
@@ -56,16 +63,20 @@ function Breadcrumb() {
       {chain.map((crumb, i) => {
         const last = i === chain.length - 1;
         return (
-          <span key={ctxKey(crumb.ctx)}>
+          <React.Fragment key={ctxKey(crumb.ctx)}>
             <span className="crumb-sep">›</span>
             {last ? (
-              <span>{crumb.label}</span>
+              <span className="crumb-current">
+                {crumb.desc && <NodeGlyph desc={crumb.desc} size={13} />}
+                {crumb.label}
+              </span>
             ) : (
               <button className="crumb-link" onClick={() => setCurrent(crumb.ctx)}>
+                {crumb.desc && <NodeGlyph desc={crumb.desc} size={13} />}
                 {crumb.label}
               </button>
             )}
-          </span>
+          </React.Fragment>
         );
       })}
     </div>

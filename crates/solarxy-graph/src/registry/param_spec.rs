@@ -36,6 +36,12 @@ pub enum ParamType {
     Int,
     Bool,
     Text,
+    /// A free-text attribute name whose editor offers the lanes present
+    /// on the node's default Geometry input as completions. Stores plain
+    /// [`crate::params::ParamValue::Text`] (documents round-trip with no
+    /// migration); the widget, not the storage, is what this variant
+    /// declares.
+    AttributeName,
     Vec2,
     Vec3,
     Vec4,

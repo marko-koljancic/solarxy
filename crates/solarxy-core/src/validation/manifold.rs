@@ -90,7 +90,7 @@ pub(super) fn check_non_manifold_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::RawMeshData;
+    use crate::geometry::{MeshTopology, RawMeshData};
 
     fn cube_mesh() -> RawMeshData {
         let positions = vec![
@@ -119,6 +119,8 @@ mod tests {
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -135,6 +137,8 @@ mod tests {
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }
     }
 
@@ -182,6 +186,8 @@ mod tests {
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         };
         let issues = check_non_manifold_edges(0, &mesh, true);
         let errors: Vec<_> = issues
@@ -220,6 +226,8 @@ mod tests {
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         };
         let issues = check_non_manifold_edges(0, &mesh, false);
         let summary: Vec<_> = issues

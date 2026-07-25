@@ -64,33 +64,35 @@ pub struct MeshView<'a> {
 ///   passing in.)
 /// - `viewport_size_px` — width / height of the viewport rect.
 /// - `view_proj` — the camera's `clip = view_proj * world` matrix; the
-///   same one written to the GPU camera uniform.
-/// - `camera_eye` — the camera origin in world space.
+///   same one written to the GPU camera uniform (wgpu clip convention,
+///   near plane at NDC z = 0).
 ///
-/// Returns a ray from `camera_eye` aimed through the pixel. Works for
-/// both perspective and orthographic cameras (the ortho case reduces to
-/// a parallel-ray direction).
+/// The ray originates on the NEAR plane under the pixel and aims at the
+/// far-plane point under the same pixel. Unprojecting both endpoints is
+/// what makes this exact for orthographic cameras too: their rays are
+/// parallel with the origin varying per pixel, which an eye-anchored ray
+/// cannot express (every pixel would collapse onto the view axis — the
+/// bug that froze gizmo drags in axis views). Consequence: a hit's
+/// `distance` is measured from the near plane, not the eye; the shift is
+/// uniform along any one ray, so nearest-hit ordering is unaffected.
 pub fn screen_to_world_ray(
     cursor_px: (f32, f32),
     viewport_size_px: (f32, f32),
     view_proj: Matrix4<f32>,
-    camera_eye: Point3<f32>,
 ) -> Ray {
     let inv = view_proj.invert().unwrap_or_else(Matrix4::identity);
     let ndc_x = (cursor_px.0 / viewport_size_px.0) * 2.0 - 1.0;
     let ndc_y = 1.0 - (cursor_px.1 / viewport_size_px.1) * 2.0;
-    let far_clip = Vector4::new(ndc_x, ndc_y, 1.0, 1.0);
-    let far_world_h = inv * far_clip;
-    let far_world = Point3::new(
-        far_world_h.x / far_world_h.w,
-        far_world_h.y / far_world_h.w,
-        far_world_h.z / far_world_h.w,
-    );
+    let unproject = |ndc_z: f32| {
+        let h = inv * Vector4::new(ndc_x, ndc_y, ndc_z, 1.0);
+        Point3::new(h.x / h.w, h.y / h.w, h.z / h.w)
+    };
+    let near_world = unproject(0.0);
+    let far_world = unproject(1.0);
 
-    let direction = (far_world - camera_eye).normalize();
     Ray {
-        origin: camera_eye,
-        direction,
+        origin: near_world,
+        direction: (far_world - near_world).normalize(),
     }
 }
 
@@ -725,13 +727,19 @@ mod tests {
         assert!(raycast_meshes(&r, &[]).is_none());
     }
 
+    // The perspective assertions are clip-convention independent (direction
+    // only), so those tests keep raw cgmath matrices. The ortho tests mirror
+    // production instead: callers pass a wgpu-convention view_proj (near
+    // plane at NDC z = 0), which is what puts the ray origin on the near
+    // plane rather than mid-frustum.
+
     #[test]
     fn center_pixel_hits_origin_for_perspective_looking_down_z() {
         let eye = Point3::new(0.0, 0.0, 5.0);
         let view = Matrix4::look_at_rh(eye, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y());
         let proj = perspective(Deg(45.0_f32), 1.0, 0.1, 100.0);
         let view_proj = proj * view;
-        let r = screen_to_world_ray((400.0, 300.0), (800.0, 600.0), view_proj, eye);
+        let r = screen_to_world_ray((400.0, 300.0), (800.0, 600.0), view_proj);
         assert!((r.direction.x).abs() < 1e-4, "dx {}", r.direction.x);
         assert!((r.direction.y).abs() < 1e-4, "dy {}", r.direction.y);
         assert!((r.direction.z - -1.0).abs() < 1e-4, "dz {}", r.direction.z);
@@ -743,10 +751,86 @@ mod tests {
         let view = Matrix4::look_at_rh(eye, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y());
         let proj = perspective(Deg(60.0_f32), 16.0 / 9.0, 0.1, 100.0);
         let view_proj = proj * view;
-        let r_tl = screen_to_world_ray((0.0, 0.0), (1600.0, 900.0), view_proj, eye);
-        let r_br = screen_to_world_ray((1600.0, 900.0), (1600.0, 900.0), view_proj, eye);
+        let r_tl = screen_to_world_ray((0.0, 0.0), (1600.0, 900.0), view_proj);
+        let r_br = screen_to_world_ray((1600.0, 900.0), (1600.0, 900.0), view_proj);
         assert!(r_tl.direction.x < 0.0 && r_tl.direction.y > 0.0);
         assert!(r_br.direction.x > 0.0 && r_br.direction.y < 0.0);
+    }
+
+    fn ortho_front_view_proj() -> Matrix4<f32> {
+        // A front view: eye on +Z looking at the origin, 4 x 3 world units
+        // visible (the ortho half-extents below), remapped to the wgpu clip
+        // convention exactly like the renderer's view_projection matrix.
+        let eye = Point3::new(0.0, 0.0, 5.0);
+        let view = Matrix4::look_at_rh(eye, Point3::new(0.0, 0.0, 0.0), Vector3::unit_y());
+        let proj = cgmath::ortho(-2.0, 2.0, -1.5, 1.5, 0.1, 100.0);
+        #[rustfmt::skip]
+        let gl_to_wgpu = Matrix4::new(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.5, 0.0,
+            0.0, 0.0, 0.5, 1.0,
+        );
+        gl_to_wgpu * proj * view
+    }
+
+    #[test]
+    fn ortho_rays_are_parallel_and_origins_track_the_pixel() {
+        // The bug this pins: an eye-anchored ray gives every pixel the same
+        // origin, so ortho gizmo drags read a near-constant world point.
+        let vp = ortho_front_view_proj();
+        let center = screen_to_world_ray((400.0, 300.0), (800.0, 600.0), vp);
+        let right = screen_to_world_ray((600.0, 300.0), (800.0, 600.0), vp);
+        let up = screen_to_world_ray((400.0, 150.0), (800.0, 600.0), vp);
+
+        assert!(
+            center.direction.dot(right.direction) > 1.0 - 1e-5,
+            "parallel"
+        );
+        assert!(center.direction.dot(up.direction) > 1.0 - 1e-5, "parallel");
+        // 200 px right = a quarter of the 800 px width = 1.0 world unit of
+        // the 4-unit visible span; 150 px up = 0.75 world units of 3.
+        assert!((right.origin.x - center.origin.x - 1.0).abs() < 1e-4);
+        assert!((up.origin.y - center.origin.y - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn ortho_center_pixel_ray_runs_down_the_view_axis() {
+        let vp = ortho_front_view_proj();
+        let r = screen_to_world_ray((400.0, 300.0), (800.0, 600.0), vp);
+        assert!(r.origin.x.abs() < 1e-4 && r.origin.y.abs() < 1e-4);
+        assert!((r.direction.z - -1.0).abs() < 1e-4, "dz {}", r.direction.z);
+    }
+
+    #[test]
+    fn ortho_pick_hits_the_quad_under_the_pixel() {
+        // A unit quad at the origin in the XY plane; the pixel a quarter
+        // width right of center must hit at world x = 1.0 exactly, which
+        // the old eye-anchored ray missed entirely.
+        let pos = vec![
+            [0.5, -0.5, 0.0],
+            [1.5, -0.5, 0.0],
+            [1.5, 0.5, 0.0],
+            [0.5, 0.5, 0.0],
+        ];
+        let idx = vec![0, 1, 2, 0, 2, 3];
+        let meshes = [MeshView {
+            positions: &pos,
+            indices: &idx,
+            bounds: AABB {
+                min: Point3::new(0.5, -0.5, 0.0),
+                max: Point3::new(1.5, 0.5, 0.0),
+            },
+        }];
+        let vp = ortho_front_view_proj();
+        let r = screen_to_world_ray((600.0, 300.0), (800.0, 600.0), vp);
+        let hit = raycast_meshes(&r, &meshes).expect("the quad under the pixel");
+        assert!(
+            (hit.world_pos[0] - 1.0).abs() < 1e-4,
+            "x {}",
+            hit.world_pos[0]
+        );
+        assert!(hit.world_pos[1].abs() < 1e-4, "y {}", hit.world_pos[1]);
     }
 
     /// Loads `res/models/xyzrgb_dragon.obj` (~720K triangles) and asserts

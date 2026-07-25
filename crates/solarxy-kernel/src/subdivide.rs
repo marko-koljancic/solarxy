@@ -14,7 +14,8 @@ use crate::set::{AttributeData, AttributeMap, GeometrySet, KernelMesh};
 /// memory. 4^5 on a 100k-triangle mesh already exceeds this.
 pub const MAX_OUTPUT_TRIANGLES: usize = 8_000_000;
 
-/// Subdivides every mesh `iterations` times. Errors (with a user-facing
+/// Subdivides every triangle mesh `iterations` times; line and point meshes
+/// pass through untouched (the node warns). Errors (with a user-facing
 /// message) when the resulting triangle count would exceed
 /// [`MAX_OUTPUT_TRIANGLES`]; materials ride along untouched.
 pub fn subdivide_linear(set: &GeometrySet, iterations: u32) -> Result<GeometrySet, String> {
@@ -30,6 +31,9 @@ pub fn subdivide_linear(set: &GeometrySet, iterations: u32) -> Result<GeometrySe
 
     let mut out = set.clone();
     for mesh in &mut out.meshes {
+        if mesh.topology != solarxy_core::geometry::MeshTopology::Triangles {
+            continue;
+        }
         for _ in 0..iterations {
             *mesh = subdivide_mesh_once(mesh);
         }
@@ -105,7 +109,9 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
         tex_coords: uvs.map(Arc::new),
         indices: Arc::new(indices),
         material_index: mesh.material_index,
+        topology: mesh.topology,
         attributes,
+        primitive_attributes: mesh.primitive_attributes.clone(),
     }
 }
 
@@ -164,6 +170,20 @@ mod tests {
     use super::*;
     use crate::primitives::generate_plane;
     use crate::set::GeometrySet;
+
+    #[test]
+    fn line_and_point_meshes_pass_through_untouched() {
+        let cloud = KernelMesh::points("p", vec![[0.0; 3]; 4]);
+        let plane = generate_plane(1.0, 1.0, 1, 1);
+        let set = GeometrySet::from_parts(vec![cloud, plane], vec![]);
+        let out = subdivide_linear(&set, 2).unwrap();
+        assert!(
+            Arc::ptr_eq(&out.meshes[0].positions, &set.meshes[0].positions),
+            "the cloud's buffers are untouched, not rebuilt"
+        );
+        assert_eq!(out.meshes[0].vertex_count(), 4);
+        assert_eq!(out.meshes[1].triangle_count(), 32, "2 tris x4 x4");
+    }
 
     #[test]
     fn one_iteration_quadruples_triangles_and_dedups_midpoints() {

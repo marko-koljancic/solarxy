@@ -13,6 +13,7 @@ import {
 } from "../engine/session";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
+import { Modal } from "./Modal";
 import { Select } from "./Select";
 
 const IBL_MODES: [string, string][] = [
@@ -40,10 +41,10 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  // No Esc close historically (the modal predates the shared shell's Esc
+  // handling); backdrop and Done still dismiss.
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Environment</h3>
+    <Modal id="environment" title="Environment" onClose={onClose} closeOnEsc={false}>
         <div className="env-row">
           <span className="env-label">HDRI</span>
           <span className="env-value">
@@ -104,7 +105,6 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
             e.target.value = "";
           }}
         />
-      </div>
-    </div>
+    </Modal>
   );
 }

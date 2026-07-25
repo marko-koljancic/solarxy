@@ -2,7 +2,13 @@
 // backfills new fields when an older persisted blob rehydrates.
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFS, motionReduced, resolveTheme, sanitizeTheme } from "./prefs";
+import {
+  DEFAULT_PREFS,
+  mergePersistedPrefs,
+  motionReduced,
+  resolveTheme,
+  sanitizeTheme,
+} from "./prefs";
 
 describe("resolveTheme", () => {
   it("passes explicit choices through", () => {
@@ -62,6 +68,37 @@ describe("defaults", () => {
       grid: true,
       axes: true,
       validation: true,
+    });
+  });
+
+  it("ship the Stage 8 display defaults (Light on Gradient at 6 rpm)", () => {
+    // Light is the ratified default (and the desktop's); the previous web
+    // build hardcoded Medium in the host, which this preference replaces.
+    expect(DEFAULT_PREFS.display).toEqual({
+      wireframeWeight: "Light",
+      background: "Gradient",
+      turntableRpm: 6,
+    });
+  });
+});
+
+describe("rehydration backfill", () => {
+  it("a stored blob without the display group backfills it from defaults", () => {
+    // The deep merge is what makes a new group need no persist version
+    // bump; a pre-Stage-8 blob rehydrates with the display defaults.
+    const prefs = mergePersistedPrefs({ appearance: { theme: "light", reducedMotion: "system" } });
+    expect(prefs.appearance.theme).toBe("light");
+    expect(prefs.display).toEqual(DEFAULT_PREFS.display);
+  });
+
+  it("a stored display group survives the merge", () => {
+    const prefs = mergePersistedPrefs({
+      display: { wireframeWeight: "Bold", background: "Black", turntableRpm: 12 },
+    });
+    expect(prefs.display).toEqual({
+      wireframeWeight: "Bold",
+      background: "Black",
+      turntableRpm: 12,
     });
   });
 });

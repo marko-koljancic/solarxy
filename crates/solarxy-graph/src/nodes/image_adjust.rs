@@ -25,7 +25,7 @@ fn adjust_descriptor(
         type_id,
         version: 1,
         display_name,
-        category: Category::Modifiers,
+        category: Category::TexAdjust,
         contexts: ContextSet::TEX,
         opens: None,
         inputs: vec![image_in(true)],

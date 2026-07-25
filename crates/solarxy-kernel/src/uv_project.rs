@@ -71,6 +71,12 @@ pub fn uv_project(
 
     let mut out = set.clone();
     for mesh in &mut out.meshes {
+        // UV projection is a surface operation: line and point meshes pass
+        // through untouched (the node warns), and box mode's per-triangle
+        // rebuild would destroy them outright.
+        if mesh.topology != solarxy_core::geometry::MeshTopology::Triangles {
+            continue;
+        }
         if mode == UvProjection::Box {
             *mesh = box_project_mesh(mesh, min, extent, axis, scale, offset);
         } else {
@@ -224,7 +230,9 @@ fn box_project_mesh(
         tex_coords: Some(Arc::new(uvs)),
         indices: Arc::new((0..index_count).collect()),
         material_index: mesh.material_index,
+        topology: mesh.topology,
         attributes,
+        primitive_attributes: mesh.primitive_attributes.clone(),
     }
 }
 
@@ -235,6 +243,25 @@ mod tests {
 
     fn unit_box_set() -> GeometrySet {
         GeometrySet::from_mesh(generate_box(2.0, 2.0, 2.0, 1, 1, 1))
+    }
+
+    #[test]
+    fn non_triangle_meshes_pass_through_untouched() {
+        let cloud = crate::set::KernelMesh::points("p", vec![[0.0; 3], [1.0; 3]]);
+        let set =
+            GeometrySet::from_parts(vec![cloud, generate_box(2.0, 2.0, 2.0, 1, 1, 1)], vec![]);
+        // Box mode is the destructive one: it rebuilds meshes per triangle,
+        // which would erase a point cloud entirely without the gate.
+        let out = uv_project(&set, UvProjection::Box, UvAxis::Y, [1.0; 2], [0.0; 2]);
+        assert!(
+            Arc::ptr_eq(&out.meshes[0].positions, &set.meshes[0].positions),
+            "cloud buffers untouched"
+        );
+        assert!(
+            out.meshes[0].tex_coords.is_none(),
+            "no UVs invented for points"
+        );
+        assert!(out.meshes[1].tex_coords.is_some(), "the box got its UVs");
     }
 
     #[test]

@@ -105,16 +105,28 @@ impl PortSpec {
     }
 }
 
-/// Palette category.
+/// Palette category. The taxonomy groups by what a node does to the data
+/// (generate, edit attributes, transform, restructure topology, duplicate,
+/// shade, move bytes in or out), so each palette section stays small enough
+/// to scan; the old six-bucket split parked half the registry under one
+/// "Modifiers" heading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Category {
     Container,
-    Primitives,
-    Modifiers,
+    Generators,
+    Attribute,
+    Transform,
+    Copy,
+    Topology,
+    Shaders,
     Import,
+    Export,
     Lights,
     Utility,
+    TexGenerate,
+    TexAdjust,
+    TexComposite,
 }
 
 impl Category {
@@ -125,11 +137,19 @@ impl Category {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Container => "Container",
-            Self::Primitives => "Primitives",
-            Self::Modifiers => "Modifiers",
+            Self::Generators => "Generators",
+            Self::Attribute => "Attribute",
+            Self::Transform => "Transform",
+            Self::Copy => "Copy & Instance",
+            Self::Topology => "Topology",
+            Self::Shaders => "Shaders",
             Self::Import => "Import",
+            Self::Export => "Export",
             Self::Lights => "Lights",
             Self::Utility => "Utility",
+            Self::TexGenerate => "Generate",
+            Self::TexAdjust => "Adjust",
+            Self::TexComposite => "Composite",
         }
     }
 }

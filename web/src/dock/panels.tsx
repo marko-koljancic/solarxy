@@ -4,69 +4,125 @@
 
 import {
   DockviewDefaultTab,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
 import { useEffect, useRef, useState } from "react";
+import { toggleMaximize } from "./api";
+import { clearHoveredPanel, setHoveredPanel } from "./hover";
+import { IconMaximize, IconRestore } from "../icons";
 import { AssetPreview } from "../components/AssetPreview";
 import { AssetsPane } from "../components/AssetsPane";
+import { AttributesPane } from "../components/AttributesPane";
 import { NodePane } from "../components/NodePane";
 import { ParameterPanel } from "../components/ParameterPanel";
+import { PropertiesMenuBar } from "../components/menu/PropertiesMenus";
 import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
-import { nodeLabel } from "../flow/nodeLabel";
-import { contextKind, descriptorFor } from "../registry/datatypes";
+import { TreePane } from "../components/TreePane";
+import { contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
 
-/** The selected node's display label (its `name` param when renamed, else the
- * type display name), shown in the Properties header. */
-function useSelectedNodeName(): string {
-  const registry = useMirror((s) => s.registry);
-  const graph = useMirror((s) => selectGraph(s, s.current));
-  const selected = graph.nodes.find((n) => n.id === graph.selection[0]);
-  if (!selected) return "";
-  return nodeLabel(selected, descriptorFor(registry, selected.typeId));
+/** Records which panel the pointer is over (dock/hover.ts) so the
+ * panel-maximize shortcut can act on the hovered panel. Wraps every panel
+ * body, so the tracking follows the content through grid, floating and
+ * maximized states alike. */
+function HoverTracked({ id, children }: { id: string; children: React.ReactNode }) {
+  useEffect(() => () => clearHoveredPanel(id), [id]);
+  return (
+    <div
+      className="dock-panel-hover"
+      onPointerEnter={() => setHoveredPanel(id)}
+      onPointerLeave={() => clearHoveredPanel(id)}
+    >
+      {children}
+    </div>
+  );
 }
 
-function ViewportPanel(_props: IDockviewPanelProps) {
-  return <Viewport />;
+function ViewportPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <Viewport />
+    </HoverTracked>
+  );
 }
 
-function NodesPanel(_props: IDockviewPanelProps) {
-  return <NodePane />;
+function NodesPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <NodePane />
+    </HoverTracked>
+  );
 }
 
 /** The single Properties panel. It replaces the bottom drawer and the
  * right-docked column: dockview owns the docking, resizing and tabbing that
  * those two hand-rolled variants existed to provide. */
-function PropertiesPanel(_props: IDockviewPanelProps) {
-  const title = useSelectedNodeName();
+function PropertiesPanel(props: IDockviewPanelProps) {
+  // No node-name strip here: ParameterPanel's own header carries the name
+  // (plus cook stats), and rendering it twice read as a glitch.
   return (
-    <div className="properties-panel">
-      {title && <div className="properties-panel-context">{title}</div>}
-      <div className="properties-panel-body">
-        <ParameterPanel />
+    <HoverTracked id={props.api.id}>
+      <div className="properties-panel">
+        <PropertiesMenuBar />
+        <div className="properties-panel-body">
+          <ParameterPanel />
+        </div>
       </div>
-    </div>
+    </HoverTracked>
   );
 }
 
-function ReviewDockPanel(_props: IDockviewPanelProps) {
-  return <ReviewPanel />;
+function ReviewDockPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <ReviewPanel />
+    </HoverTracked>
+  );
 }
 
-function AssetsPanel(_props: IDockviewPanelProps) {
-  return <AssetsPane />;
+function AssetsPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AssetsPane />
+    </HoverTracked>
+  );
 }
 
-function AssetPreviewPanel(_props: IDockviewPanelProps) {
-  return <AssetPreview />;
+function AssetPreviewPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AssetPreview />
+    </HoverTracked>
+  );
 }
 
-function TexturePanel(_props: IDockviewPanelProps) {
-  return <TextureViewer />;
+function TexturePanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <TextureViewer />
+    </HoverTracked>
+  );
+}
+
+function AttributesPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <AttributesPane />
+    </HoverTracked>
+  );
+}
+
+function TreePanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <TreePane />
+    </HoverTracked>
+  );
 }
 
 export const DOCK_COMPONENTS = {
@@ -77,14 +133,16 @@ export const DOCK_COMPONENTS = {
   assets: AssetsPanel,
   assetPreview: AssetPreviewPanel,
   texture: TexturePanel,
+  attributes: AttributesPanel,
+  tree: TreePanel,
 };
 
 // Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four
 // node-category pastels plus extras, so many open panes stay distinguishable.
 // Header/tab only; the pastels are light in both themes and pair with dark ink.
 const PANE_PALETTE = [
-  "#c9dcf2", // blue (primitives)
-  "#c8e8d6", // green (modifiers)
+  "#c9dcf2", // blue (generators)
+  "#c8e8d6", // green (topology)
   "#ddd0ee", // purple (import)
   "#eed9c9", // tan (utility)
   "#c9c2f0", // lavender
@@ -218,3 +276,35 @@ export const DOCK_TAB_COMPONENTS = {
   pinned: PinnedTab,
   colored: ColoredTab,
 };
+
+/** The maximize / restore toggle at the right end of every tab strip, next to
+ * the active tab's close button. Group-level on purpose: dockview maximize is
+ * a group operation, and this is also what gives the pinned Viewport tab (which
+ * has no close button) its maximize control. Grid groups only, maximize has no
+ * meaning for floating or popout groups. */
+export function MaximizeHeaderAction(props: IDockviewHeaderActionsProps) {
+  // isMaximized() is not observable state; re-render on the container event.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const sub = props.containerApi.onDidMaximizedGroupChange(() => setTick((t) => t + 1));
+    return () => sub.dispose();
+  }, [props.containerApi]);
+
+  if (props.group.api.location.type !== "grid") return null;
+  const panel = props.activePanel;
+  if (!panel) return null;
+  const maximized = panel.api.isMaximized();
+  return (
+    <div className="dock-header-actions">
+      <button
+        type="button"
+        className="dock-header-action"
+        title={maximized ? "Restore panel (` or Esc)" : "Maximize panel (`)"}
+        aria-label={maximized ? "Restore panel" : "Maximize panel"}
+        onClick={() => toggleMaximize(panel.id)}
+      >
+        {maximized ? <IconRestore size={13} /> : <IconMaximize size={13} />}
+      </button>
+    </div>
+  );
+}

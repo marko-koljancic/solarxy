@@ -9,6 +9,7 @@
 //! The monotonic `revision` on every batch lets a desynced mirror recover
 //! by taking a full [`snapshot`](Engine::snapshot).
 
+pub mod attr_table;
 pub mod snapshot;
 
 use std::collections::BTreeMap;
@@ -83,6 +84,16 @@ pub enum Command {
         node: NodeId,
         key: String,
         value: ParamSource,
+    },
+    /// Removes stored parameter overrides so the node falls back to its
+    /// descriptor defaults: every param when `keys` is absent, else only
+    /// the listed ones. Removal (not writing defaults) keeps the document
+    /// honestly unset; the whole reset is one undo step.
+    ResetParams {
+        ctx: GraphContext,
+        node: NodeId,
+        #[serde(default)]
+        keys: Option<Vec<String>>,
     },
     MoveNodes {
         ctx: GraphContext,
@@ -788,6 +799,9 @@ impl Engine {
                 key,
                 value,
             } => self.set_param(ctx, node, &key, value, events, inv),
+            Command::ResetParams { ctx, node, keys } => {
+                self.reset_params(ctx, node, keys, events, inv)
+            }
             Command::MoveNodes { ctx, moves } => self.move_nodes(ctx, moves, events, inv),
             Command::SetActiveOutput { ctx, node } => {
                 self.set_active_output(ctx, node, events, inv)
@@ -1377,6 +1391,73 @@ impl Engine {
         Ok(())
     }
 
+    fn reset_params(
+        &mut self,
+        ctx: GraphContext,
+        node: NodeId,
+        keys: Option<Vec<String>>,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) -> Result<(), EngineError> {
+        let type_id = self.node_type_in(ctx, node)?;
+        let desc = self
+            .registry
+            .get(&type_id)
+            .ok_or_else(|| EngineError::UnknownNodeType(type_id.clone()))?;
+        // Resolve the scope to (key, default) pairs up front: an unknown
+        // key is a command error (set_param's strictness), and pulling the
+        // defaults here ends the registry borrow before the graph edit.
+        let scope: Vec<(String, ParamValue)> = match keys {
+            Some(list) => list
+                .into_iter()
+                .map(|key| match desc.param(&key) {
+                    Some(spec) => Ok((key, spec.default.clone())),
+                    None => Err(EngineError::InvalidParam {
+                        key,
+                        reason: "no such param on this node type".to_string(),
+                    }),
+                })
+                .collect::<Result<_, _>>()?,
+            None => desc
+                .params
+                .iter()
+                .map(|spec| (spec.key.clone(), spec.default.clone()))
+                .collect(),
+        };
+        let mut removed: Vec<(String, ParamValue, ParamSource)> = Vec::new();
+        {
+            let graph = self.doc.graph_mut(ctx)?;
+            let node_data = graph.node_mut(node).ok_or(GraphError::UnknownNode(node))?;
+            for (key, default) in scope {
+                // A key with no stored entry is already at its default:
+                // nothing to undo, nothing to announce.
+                if let Some(prev) = node_data.params.remove(&key) {
+                    removed.push((key, default, prev));
+                }
+            }
+        }
+        if removed.is_empty() {
+            return Ok(());
+        }
+        self.mark_dirty(ctx, node);
+        for (key, default, prev) in removed {
+            self.previews.remove(&(node, key.clone()));
+            events.push(EngineEvent::ParamChanged {
+                ctx,
+                node,
+                key: key.clone(),
+                value: ParamSource::Literal(default),
+            });
+            inv.push(UndoOp::RestoreParam {
+                ctx,
+                node,
+                key,
+                prev: Some(prev),
+            });
+        }
+        Ok(())
+    }
+
     fn move_nodes(
         &mut self,
         ctx: GraphContext,
@@ -1739,13 +1820,66 @@ impl Engine {
                         normals: m.normals.as_deref().map(Vec::as_slice),
                         tex_coords: m.tex_coords.as_deref().map(Vec::as_slice),
                         indices: &m.indices,
+                        topology: m.topology,
+                        // The reserved color lane, under the same guard
+                        // `to_cooked` applies.
+                        colors: match m.attributes.get(solarxy_kernel::reserved::COLOR) {
+                            Some(solarxy_kernel::AttributeData::Vec4(v))
+                                if v.len() == m.positions.len() =>
+                            {
+                                Some(v.as_slice())
+                            }
+                            _ => None,
+                        },
+                        material_index: m.material_index,
                     })
                     .collect();
                 let fail = |e: solarxy_formats::FormatsError| EngineError::InvalidParam {
                     key: key.to_string(),
                     reason: e.to_string(),
                 };
+                // v2's honest control: off exports bare geometry in every
+                // format (single-file OBJ, material-less GLB).
+                let include_materials = resolved.bool("include_materials");
+                let materials: &[std::sync::Arc<solarxy_core::geometry::RawMaterialData>] =
+                    if include_materials {
+                        &set.materials
+                    } else {
+                        &[]
+                    };
                 let (bytes, ext, mime) = match resolved.enum_key("format") {
+                    // OBJ with materials is a multi-file export (.obj +
+                    // .mtl + textures), delivered as a Stored zip
+                    // (decision M-9); without materials it stays the
+                    // classic single file.
+                    "obj" if !materials.is_empty() => {
+                        let base = filename_base(&resolved);
+                        let export =
+                            solarxy_formats::export::write_obj_mtl_bytes(&meshes, materials, &base)
+                                .map_err(fail)?;
+                        let zip_fail = |message: String| EngineError::InvalidParam {
+                            key: key.to_string(),
+                            reason: message,
+                        };
+                        let mut zw = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+                        let opts = zip::write::SimpleFileOptions::default()
+                            .compression_method(zip::CompressionMethod::Stored);
+                        let entries = std::iter::once((format!("{base}.obj"), &export.obj))
+                            .chain(std::iter::once((format!("{base}.mtl"), &export.mtl)))
+                            .chain(export.textures.iter().map(|(n, b)| (n.clone(), b)));
+                        for (name, bytes) in entries {
+                            zw.start_file(name, opts)
+                                .map_err(|e| zip_fail(e.to_string()))?;
+                            std::io::Write::write_all(&mut zw, bytes)
+                                .map_err(|e| zip_fail(e.to_string()))?;
+                        }
+                        let cursor = zw.finish().map_err(|e| zip_fail(e.to_string()))?;
+                        return Ok(ActionResult {
+                            filename: format!("{base}_obj.zip"),
+                            mime: "application/zip".to_string(),
+                            bytes: cursor.into_inner(),
+                        });
+                    }
                     "obj" => (
                         solarxy_formats::export::write_obj_bytes(&meshes),
                         "obj",
@@ -1762,7 +1896,8 @@ impl Engine {
                         "application/octet-stream",
                     ),
                     _ => (
-                        solarxy_formats::export::write_glb_bytes(&meshes).map_err(fail)?,
+                        solarxy_formats::export::write_glb_bytes(&meshes, materials)
+                            .map_err(fail)?,
                         "glb",
                         "model/gltf-binary",
                     ),
@@ -2427,6 +2562,40 @@ impl Engine {
         node: NodeId,
     ) -> Option<&std::sync::Arc<solarxy_kernel::GeometrySet>> {
         self.cook.outputs(node)?.get("geometry")?.as_geometry()
+    }
+
+    /// The last completed cook's warnings for one node (reserved-lane
+    /// mismatches, lane replacements, fallbacks). Pull-read by the node
+    /// info card; empty when the cook was quiet.
+    #[must_use]
+    pub fn cook_warnings(&self, node: NodeId) -> Vec<String> {
+        self.cook.warnings(node).to_vec()
+    }
+
+    /// The lane inventory of a node's cooked geometry (the attribute-name
+    /// pickers and the Attributes pane header), or `None` while nothing is
+    /// committed.
+    #[must_use]
+    pub fn attribute_summary(&self, node: NodeId) -> Option<attr_table::AttributeSummary> {
+        Some(attr_table::attribute_summary(self.geometry_output(node)?))
+    }
+
+    /// One window of a node's cooked attribute values. Only the requested
+    /// page is materialized; the geometry itself stays behind the facade.
+    #[must_use]
+    pub fn attribute_page(
+        &self,
+        node: NodeId,
+        domain: solarxy_kernel::AttributeDomain,
+        offset: u32,
+        limit: u32,
+    ) -> Option<attr_table::AttributePage> {
+        Some(attr_table::attribute_page(
+            self.geometry_output(node)?,
+            domain,
+            offset,
+            limit,
+        ))
     }
 
     /// The UV pane's source in a context: the first selected node's

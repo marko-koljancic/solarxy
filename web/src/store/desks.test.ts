@@ -2,8 +2,11 @@
 // and sanitize's coercion of anything stale or hand-edited.
 
 import { describe, expect, it } from "vitest";
-import { sanitizeDesk, type DeskSnapshot } from "./desks";
-import { DEFAULT_RECIPE } from "../dock/layouts";
+import { DESK_PRESETS, sanitizeDesk, type DeskSnapshot } from "./desks";
+import { DEFAULT_RECIPE, sanitizeRecipe } from "../dock/layouts";
+
+/** The wave-4 panel fields at their absent-means-off defaults. */
+const PANEL_DEFAULTS = { attributes: false, attributesPct: 30, texture: false, tree: false };
 
 /** A desk exactly as the pre-Phase-10 shell stored it. */
 const LEGACY_DESK = {
@@ -29,6 +32,7 @@ describe("legacy desk migration", () => {
         propertiesDock: "right",
         splitPct: 63,
         review: false,
+        ...PANEL_DEFAULTS,
       },
     });
     // The non-arrangement fields carry over untouched.
@@ -48,7 +52,13 @@ describe("legacy desk migration", () => {
     });
     expect(wild.layout).toEqual({
       kind: "recipe",
-      recipe: { viewportSide: "left", propertiesDock: "bottom", splitPct: 20, review: false },
+      recipe: {
+        viewportSide: "left",
+        propertiesDock: "bottom",
+        splitPct: 20,
+        review: false,
+        ...PANEL_DEFAULTS,
+      },
     });
 
     const tooWide = sanitizeDesk({ ...LEGACY_DESK, splitPct: 99 });
@@ -84,5 +94,27 @@ describe("sanitizeDesk", () => {
     expect(sanitizeDesk({ ...LEGACY_DESK, viewLayout: "hexview" as never }).viewLayout).toBe(
       "single",
     );
+  });
+});
+
+describe("desk presets", () => {
+  it("every preset recipe sanitizes to itself", () => {
+    // A preset that sanitize would rewrite is a preset that silently applies
+    // something other than what its literal says.
+    for (const desk of DESK_PRESETS) {
+      expect(desk.layout.kind).toBe("recipe");
+      if (desk.layout.kind !== "recipe") continue;
+      const sanitized = sanitizeRecipe(desk.layout.recipe);
+      expect(sanitized).toEqual({ ...PANEL_DEFAULTS, ...desk.layout.recipe });
+    }
+  });
+
+  it("ships the wave-4 desks", () => {
+    const names = DESK_PRESETS.map((d) => d.name);
+    expect(names).toContain("Technical");
+    expect(names).toContain("LookDev");
+    expect(names).toContain("UV / Texturing");
+    const technical = DESK_PRESETS.find((d) => d.name === "Technical");
+    expect(technical?.layout.kind === "recipe" && technical.layout.recipe.attributes).toBe(true);
   });
 });

@@ -197,8 +197,13 @@ fn every_css_var_resolves_to_a_defined_token() {
         // (`.flow-node.cat-import { --cat-fill: ...; }`).
         for (i, _) in css.match_indices("--") {
             let tail = &css[i..];
+            // Underscores are legal in custom property names and appear in
+            // the category fills (`--node-cat-tex_generate`, named after the
+            // registry's snake_case category ids).
             let name_len = tail[2..]
-                .find(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-')
+                .find(|c: char| {
+                    !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-' && c != '_'
+                })
                 .unwrap_or(0);
             let name = &tail[..2 + name_len];
             let after = tail[2 + name_len..].trim_start();

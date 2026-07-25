@@ -4,21 +4,24 @@
 // right. Four tabs per the ratified scope: Appearance, Review, Autosave,
 // Screenshot, Viewport. Esc and backdrop-click dismiss.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   DEFAULT_PREFS,
   usePrefs,
+  type BackgroundChoice,
   type MotionChoice,
   type Prefs,
   type GizmoOrientation,
   type SelectionHighlightStyle,
   type ScreenshotResolution,
   type ThemeChoice,
+  type WireframeWeight,
 } from "../../store/prefs";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { Modal } from "../Modal";
 import { Select } from "../Select";
 
-const TABS = ["Appearance", "Review", "Autosave", "Screenshot", "Viewport"] as const;
+const TABS = ["Appearance", "Display", "Review", "Autosave", "Screenshot", "Viewport"] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -63,6 +66,66 @@ function AppearanceTab({ draft, patch }: TabProps) {
       <div className="prefs-info">
         Reduced motion disables the connection-rejection shake and spinner animations in favor of
         static states.
+      </div>
+    </>
+  );
+}
+
+/** Viewport display defaults. Wireframe and background seed every pane;
+ * the pane's Display menu stays the live per-pane override and a scene
+ * file keeps the per-pane settings it was saved with. */
+function DisplayTab({ draft, patch }: TabProps) {
+  const d = draft.display;
+  const setD = (p: Partial<typeof d>) => patch({ display: { ...d, ...p } });
+  return (
+    <>
+      <p className="prefs-desc">Viewport display defaults.</p>
+      <Row label="Wireframe weight">
+        <Select
+          ariaLabel="Wireframe weight"
+          value={d.wireframeWeight}
+          options={[
+            { value: "Light", label: "Light (1 px)" },
+            { value: "Medium", label: "Medium (2 px)" },
+            { value: "Bold", label: "Bold (3 px)" },
+          ]}
+          onChange={(v) => setD({ wireframeWeight: v as WireframeWeight })}
+        />
+      </Row>
+      <Row label="Background">
+        <Select
+          ariaLabel="Background"
+          value={d.background}
+          options={[
+            { value: "Gradient", label: "Gradient" },
+            { value: "White", label: "White" },
+            { value: "DarkGray", label: "Dark" },
+            { value: "AyuMirage", label: "Ayu" },
+            { value: "Black", label: "Black" },
+            { value: "HdriSky", label: "HDRI Sky" },
+          ]}
+          onChange={(v) => setD({ background: v as BackgroundChoice })}
+        />
+      </Row>
+      <Row label="Turntable speed">
+        <input
+          className="input-field"
+          type="number"
+          min={1}
+          max={60}
+          step={1}
+          value={d.turntableRpm}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ turntableRpm: Math.min(60, Math.max(1, v)) });
+          }}
+        />
+        <span className="prefs-unit">rpm</span>
+      </Row>
+      <div className="prefs-info">
+        Wireframe and background are the defaults for new scenes and panes; a scene file keeps the
+        per-pane settings it was saved with, and the pane&apos;s Display menu overrides the current
+        view. The turntable speed applies immediately.
       </div>
     </>
   );
@@ -298,23 +361,14 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-
   const patch = (p: Partial<Prefs>) => setDraft((d) => ({ ...d, ...p }));
   const apply = () => usePrefs.getState().setPrefs(draft);
 
   const body =
     tab === "Appearance" ? (
       <AppearanceTab draft={draft} patch={patch} />
+    ) : tab === "Display" ? (
+      <DisplayTab draft={draft} patch={patch} />
     ) : tab === "Review" ? (
       <ReviewTab draft={draft} patch={patch} />
     ) : tab === "Autosave" ? (
@@ -326,9 +380,12 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
     );
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-prefs" onClick={(e) => e.stopPropagation()}>
-        <h3>Preferences{dirty ? " *" : ""}</h3>
+    <Modal
+      id="preferences"
+      title={`Preferences${dirty ? " *" : ""}`}
+      onClose={onClose}
+      className="modal-prefs"
+    >
         <div className="prefs-tabs">
           {TABS.map((t) => (
             <button
@@ -376,7 +433,6 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
             onCancel={() => setConfirmReset(false)}
           />
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

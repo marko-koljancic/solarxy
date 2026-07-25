@@ -35,6 +35,36 @@ impl GridUniform {
     pub const PLANE_OFFSET: u64 = std::mem::offset_of!(Self, plane) as u64;
 }
 
+/// The [`GridUniform::plane`] code a camera should see. Perspective always
+/// keeps the XZ ground. Orthographic gets a face-on wall grid (XY or YZ) only
+/// while the view direction is a true axis elevation, within ~2.5 degrees;
+/// once the user orbits an axis view into a free ortho "user view" the ground
+/// grid returns, so the plane cannot flip back and forth at the 45-degree
+/// azimuth crossings of a drag. Callers with an animated camera should pass
+/// the transition destination, not the mid-lerp camera.
+pub fn grid_plane_for(cam: &crate::camera::Camera) -> u32 {
+    use cgmath::InnerSpace;
+    const AXIS_DOT: f32 = 0.999;
+    if cam.projection != solarxy_core::preferences::ProjectionMode::Orthographic {
+        return 0;
+    }
+    let f = cam.target - cam.eye;
+    let m = f.magnitude();
+    if m < 1e-6 {
+        return 0;
+    }
+    let f = f / m;
+    if f.y.abs() >= AXIS_DOT {
+        0 // top / bottom -> XZ ground
+    } else if f.z.abs() >= AXIS_DOT {
+        1 // front / back -> XY
+    } else if f.x.abs() >= AXIS_DOT {
+        2 // left / right -> YZ
+    } else {
+        0 // free ortho user view -> ground, like perspective
+    }
+}
+
 /// Stand-in for the normal-arrow line lists when no `NormalsGeometry` is
 /// supplied (`new_from_parts` with `normals_geo: None`).
 static EMPTY_LINES: &[[f32; 3]] = &[];
@@ -61,6 +91,15 @@ pub struct VisualizationState {
     pub bounds_per_mesh_count: u32,
     pub local_axes_vertex_buf: wgpu::Buffer,
     pub local_axes_vertex_count: u32,
+    /// Per-point attribute-vector arrows (the web host's attribute
+    /// visualization), as per-vertex-colored line vertices through the
+    /// gizmo pipeline (which is what lets the host paint a uniform color
+    /// or a magnitude ramp with no pipeline of its own). Always
+    /// constructed empty; only [`VisualizationState::set_attr_lines`]
+    /// populates it, so the desktop shell and the golden harness never
+    /// draw this channel.
+    pub attr_lines_buf: wgpu::Buffer,
+    pub attr_lines_count: u32,
 }
 
 impl VisualizationState {
@@ -243,6 +282,11 @@ impl VisualizationState {
             })
         };
 
+        // The attribute-vector channel starts empty everywhere; only the
+        // web host's set_attr_lines populates it.
+        let (attr_lines_buf, attr_lines_count) =
+            create_gizmo_lines_buffer(device, &[], "Attr Vectors Buffer");
+
         VisualizationState {
             grid_mesh,
             grid_params_bind_group,
@@ -267,7 +311,46 @@ impl VisualizationState {
             bounds_per_mesh_count,
             local_axes_vertex_buf,
             local_axes_vertex_count,
+            attr_lines_buf,
+            attr_lines_count,
         }
+    }
+
+    /// Replaces the attribute-vector line list (world-space segment pairs,
+    /// colored per vertex). An empty slice clears the channel; the draw
+    /// early-outs on zero.
+    pub fn set_attr_lines(&mut self, device: &wgpu::Device, verts: &[model::GizmoVertex]) {
+        let (buf, count) = create_gizmo_lines_buffer(device, verts, "Attr Vectors Buffer");
+        self.attr_lines_buf = buf;
+        self.attr_lines_count = count;
+    }
+}
+
+/// A gizmo-vertex line buffer with the empty-slice placeholder convention
+/// of [`create_normals_buffer`].
+fn create_gizmo_lines_buffer(
+    device: &wgpu::Device,
+    verts: &[model::GizmoVertex],
+    label: &str,
+) -> (wgpu::Buffer, u32) {
+    if verts.is_empty() {
+        (
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: &[0u8; std::mem::size_of::<model::GizmoVertex>()],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            0,
+        )
+    } else {
+        (
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            verts.len() as u32,
+        )
     }
 }
 
@@ -381,5 +464,73 @@ fn create_normals_buffer(
             }),
             lines.len() as u32,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grid_plane_for;
+    use crate::camera::Camera;
+    use solarxy_core::preferences::ProjectionMode;
+
+    fn cam_toward(eye: [f32; 3], projection: ProjectionMode) -> Camera {
+        Camera {
+            eye: cgmath::Point3::new(eye[0], eye[1], eye[2]),
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
+            up: cgmath::Vector3::unit_y(),
+            aspect: 1.0,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+            projection,
+            ortho_scale: 5.0,
+        }
+    }
+
+    #[test]
+    fn grid_plane_table() {
+        use ProjectionMode::{Orthographic, Perspective};
+        // Perspective always grounds, whatever the angle.
+        assert_eq!(grid_plane_for(&cam_toward([3.0, 2.0, 4.0], Perspective)), 0);
+        assert_eq!(grid_plane_for(&cam_toward([0.0, 5.0, 0.0], Perspective)), 0);
+        // Orthographic axis elevations get their wall planes.
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 5.0, 0.0], Orthographic)),
+            0
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, -5.0, 0.0], Orthographic)),
+            0
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 0.0, 5.0], Orthographic)),
+            1
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 0.0, -5.0], Orthographic)),
+            1
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([5.0, 0.0, 0.0], Orthographic)),
+            2
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([-5.0, 0.0, 0.0], Orthographic)),
+            2
+        );
+    }
+
+    #[test]
+    fn orbited_ortho_user_view_grounds() {
+        use ProjectionMode::Orthographic;
+        // 30 degrees of azimuth off the front axis: no longer an elevation,
+        // the ground grid returns instead of snapping between walls.
+        let eye = [5.0 * 0.5, 0.0, 5.0 * 0.866];
+        assert_eq!(grid_plane_for(&cam_toward(eye, Orthographic)), 0);
+        // But a hair off-axis (inside the ~2.5 degree tolerance) still walls.
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.1, 0.0, 5.0], Orthographic)),
+            1
+        );
     }
 }

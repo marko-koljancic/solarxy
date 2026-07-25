@@ -125,40 +125,56 @@ impl CameraState {
     }
 
     pub fn set_projection(&mut self, mode: ProjectionMode) {
-        if mode == ProjectionMode::Orthographic
-            && self.camera.projection != ProjectionMode::Orthographic
-        {
-            let dist = (self.camera.target - self.camera.eye).magnitude();
-            self.camera.ortho_scale = dist * (self.camera.fovy / 2.0).to_radians().tan();
+        self.finish_transition();
+        self.camera.set_projection_preserving_framing(mode);
+    }
+
+    /// Snaps an in-flight transition to its destination. Input lands here
+    /// first: swallowing events while a transition runs meant a mouse press
+    /// right after a view preset never registered, so the entire following
+    /// drag was dead no matter how far it moved.
+    fn finish_transition(&mut self) {
+        if let Some(t) = self.transition.take() {
+            self.camera.eye = t.dest_eye;
+            self.camera.target = t.dest_target;
+            self.camera.up = t.dest_up;
+            self.camera.ortho_scale = t.dest_ortho_scale;
         }
-        self.camera.projection = mode;
+    }
+
+    /// The camera this state is heading to: the transition destination when
+    /// one is in flight, else the current camera. Discrete camera-derived
+    /// decisions (the grid plane) key off this so they switch once, at
+    /// command time, instead of stepping mid-lerp.
+    pub fn destination_camera(&self) -> Camera {
+        match &self.transition {
+            Some(t) => apply_dest(self.camera, t),
+            None => self.camera,
+        }
     }
 
     pub fn handle_key(&mut self, code: CameraKey, is_pressed: bool) -> bool {
-        if self.transition.is_some() {
-            return false;
+        if is_pressed {
+            self.finish_transition();
         }
         self.controller.handle_key(code, is_pressed)
     }
 
     pub fn handle_mouse_button(&mut self, button: PointerButton, pressed: bool) {
-        if self.transition.is_some() {
-            return;
+        if pressed {
+            self.finish_transition();
         }
         self.controller.handle_mouse_button(button, pressed);
     }
 
     pub fn handle_mouse_move(&mut self, x: f32, y: f32) {
-        if self.transition.is_some() {
-            return;
-        }
+        // Deltas only accumulate while a button is held, and any press has
+        // already finished the transition; hover moves must not cancel it.
         self.controller.handle_mouse_move(x, y);
     }
 
     pub fn handle_scroll(&mut self, delta: f32) {
-        if self.transition.is_some() {
-            return;
-        }
+        self.finish_transition();
         self.controller.handle_scroll(delta);
     }
 
@@ -211,6 +227,17 @@ impl CameraState {
     }
 }
 
+/// The transition's endpoint applied to a camera, as a value: the pure half
+/// of [`CameraState::destination_camera`], kept free of GPU state so it is
+/// unit-testable.
+fn apply_dest(mut cam: Camera, t: &CameraTransition) -> Camera {
+    cam.eye = t.dest_eye;
+    cam.target = t.dest_target;
+    cam.up = t.dest_up;
+    cam.ortho_scale = t.dest_ortho_scale;
+    cam
+}
+
 fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
@@ -242,6 +269,35 @@ mod tests {
         assert!((lerp_f32(10.0, 30.0, 0.5) - 20.0).abs() < f32::EPSILON);
         assert!((lerp_f32(10.0, 30.0, 0.25) - 15.0).abs() < f32::EPSILON);
         assert!((lerp_f32(-5.0, 5.0, 0.5)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn apply_dest_reaches_the_exact_destination() {
+        let cam = Camera {
+            eye: cgmath::Point3::new(0.0, 0.0, 3.0),
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
+            up: cgmath::Vector3::unit_y(),
+            aspect: 1.0,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+            projection: ProjectionMode::Orthographic,
+            ortho_scale: 5.0,
+        };
+        let t = CameraTransition {
+            dest_eye: cgmath::Point3::new(0.0, 9.0, 0.0),
+            dest_target: cgmath::Point3::new(1.0, 0.0, 2.0),
+            dest_up: -cgmath::Vector3::unit_z(),
+            dest_ortho_scale: 2.5,
+        };
+        let dest = apply_dest(cam, &t);
+        assert!((dest.eye.y - 9.0).abs() < f32::EPSILON);
+        assert!((dest.target.x - 1.0).abs() < f32::EPSILON);
+        assert!((dest.up.z + 1.0).abs() < f32::EPSILON);
+        assert!((dest.ortho_scale - 2.5).abs() < f32::EPSILON);
+        // The source camera's non-transitioned fields ride along unchanged.
+        assert!((dest.fovy - 45.0).abs() < f32::EPSILON);
+        assert!(matches!(dest.projection, ProjectionMode::Orthographic));
     }
 
     #[test]

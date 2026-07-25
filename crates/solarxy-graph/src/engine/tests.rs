@@ -309,13 +309,15 @@ fn snapshot_and_registry_snapshot_serialize() {
     // Degrees unit is surfaced for the transform's rotate param.
     assert!(json.contains("degrees"));
     // The Title Case category label rides beside the stable snake_case id.
-    assert!(json.contains("\"categoryLabel\":\"Primitives\""));
-    assert!(json.contains("\"category\":\"primitives\""));
+    assert!(json.contains("\"categoryLabel\":\"Generators\""));
+    assert!(json.contains("\"category\":\"generators\""));
     // Node identity for the canvas: the icon key and the silhouette family
     // (merge is the gather-shaped exception).
     assert!(json.contains("\"glyph\":\"box\""));
     assert!(json.contains("\"role\":\"standard\""));
     assert!(json.contains("\"role\":\"gather\""));
+    // The attribute-name widget variant (the attribute nodes' Name param).
+    assert!(json.contains("\"paramType\":\"attributeName\""));
 }
 
 #[test]
@@ -405,6 +407,35 @@ fn command_boundary_json_shape_is_camelcase() {
             ctx: GraphContext::Subflow(NodeId(5)),
             ..
         }
+    ));
+
+    // resetParams: camelCase tag, optional keys (absent means all).
+    let cmd3 = Command::ResetParams {
+        ctx: GraphContext::Root,
+        node: NodeId(7),
+        keys: None,
+    };
+    let v3 = serde_json::to_value(&cmd3).unwrap();
+    assert_eq!(v3["type"], "resetParams");
+    let back3: Command = serde_json::from_value(
+        serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7 }),
+    )
+    .unwrap();
+    assert!(matches!(
+        back3,
+        Command::ResetParams {
+            node: NodeId(7),
+            keys: None,
+            ..
+        }
+    ));
+    let back4: Command = serde_json::from_value(
+        serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7, "keys": ["width"] }),
+    )
+    .unwrap();
+    assert!(matches!(
+        back4,
+        Command::ResetParams { keys: Some(k), .. } if k == vec!["width".to_string()]
     ));
 
     // The event mirror is camelCase too (typeId, not type_id).
@@ -1027,6 +1058,190 @@ fn param_edits_coalesce_within_a_transaction() {
         .get("width")
         .cloned();
     assert_eq!(after, before, "one drag is one undo step");
+}
+
+#[test]
+fn reset_params_restores_defaults_in_one_undo_step() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    for (key, v) in [("width", 3.0), ("height", 4.0)] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: box_id,
+            key: key.into(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+
+    // The stored overrides are gone (the document is honestly unset)...
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
+    assert!(params.get("width").is_none());
+    assert!(params.get("height").is_none());
+    // ...and each removal announced the descriptor default so the mirror
+    // repaints without a snapshot.
+    let changed: Vec<(String, ParamSource)> = batch
+        .events
+        .iter()
+        .filter_map(|ev| match ev {
+            EngineEvent::ParamChanged { key, value, .. } => Some((key.clone(), value.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(changed.contains(&(
+        "width".to_string(),
+        ParamSource::Literal(ParamValue::Float(1.0))
+    )));
+    assert!(changed.contains(&(
+        "height".to_string(),
+        ParamSource::Literal(ParamValue::Float(1.0))
+    )));
+
+    // ONE undo restores both stored values; redo re-resets both.
+    e.apply(Command::Undo).unwrap();
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
+    assert_eq!(
+        params.get("width"),
+        Some(&ParamSource::Literal(ParamValue::Float(3.0)))
+    );
+    assert_eq!(
+        params.get("height"),
+        Some(&ParamSource::Literal(ParamValue::Float(4.0)))
+    );
+    e.apply(Command::Redo).unwrap();
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
+    assert!(params.get("width").is_none());
+    assert!(params.get("height").is_none());
+}
+
+#[test]
+fn reset_params_with_keys_touches_only_those_and_rejects_unknown_ones() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    for (key, v) in [("width", 3.0), ("height", 4.0)] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: box_id,
+            key: key.into(),
+            value: ParamSource::Literal(ParamValue::Float(v)),
+        })
+        .unwrap();
+    }
+
+    e.apply(Command::ResetParams {
+        ctx,
+        node: box_id,
+        keys: Some(vec!["width".into()]),
+    })
+    .unwrap();
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
+    assert!(params.get("width").is_none());
+    assert_eq!(
+        params.get("height"),
+        Some(&ParamSource::Literal(ParamValue::Float(4.0))),
+        "a keyed reset leaves the other overrides alone"
+    );
+
+    assert!(
+        e.apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: Some(vec!["no_such_param".into()]),
+        })
+        .is_err(),
+        "an unknown key is a command error, matching set_param"
+    );
+}
+
+#[test]
+fn reset_params_removes_an_expression_and_skips_unstored_keys() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "2 + 2".into(),
+        },
+    })
+    .unwrap();
+
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
+    assert!(params.get("width").is_none(), "the expression is removed");
+    // Only the one stored key announced a change: unstored params are
+    // already at their defaults and stay silent.
+    let changed = batch
+        .events
+        .iter()
+        .filter(|ev| matches!(ev, EngineEvent::ParamChanged { .. }))
+        .count();
+    assert_eq!(changed, 1);
+}
+
+#[test]
+fn reset_params_with_nothing_stored_emits_nothing() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let batch = e
+        .apply(Command::ResetParams {
+            ctx,
+            node: box_id,
+            keys: None,
+        })
+        .unwrap();
+    assert!(
+        !batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::ParamChanged { .. })),
+        "a pristine node has nothing to reset"
+    );
 }
 
 #[test]
@@ -3508,7 +3723,6 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         (del, "angle", ParamValue::Float(30.0)),
         (del, "invert", ParamValue::Bool(true)),
         (bnd, "mode", ParamValue::Enum("center".into())),
-        (bnd, "marker_size", ParamValue::Float(0.4)),
         (sw, "index", ParamValue::Int(1)),
     ] {
         e.apply(Command::SetParam {
@@ -3549,8 +3763,9 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         );
     }
 
-    // The switch is on index 1: the SECOND wire, which is bounds (a 0.4 marker
-    // cube), not delete. Its bounds prove which branch came through.
+    // The switch is on index 1: the SECOND wire, which is bounds in center
+    // mode (a single point primitive since v2), not delete. The point-only
+    // shape proves which branch came through.
     let picked = e
         .cook
         .outputs(sw)
@@ -3559,11 +3774,10 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         .and_then(crate::registry::coerce::Value::as_geometry)
         .unwrap()
         .clone();
-    let size = picked.bounds.size();
-    assert!(
-        (size.x - 0.4).abs() < 1e-4,
-        "switch index 1 selected the bounds marker, not delete: {:?}",
-        picked.bounds
+    assert_eq!(
+        (picked.point_count(), picked.triangle_count()),
+        (1, 0),
+        "switch index 1 selected the bounds center point, not delete"
     );
 
     // Round trip through .slxy: params, wire order, and the display flag.
@@ -3587,8 +3801,11 @@ fn modeling_nodes_cook_round_trip_and_undo() {
         .and_then(crate::registry::coerce::Value::as_geometry)
         .unwrap()
         .clone();
-    let size2 = reloaded.bounds.size();
-    assert!((size2.x - 0.4).abs() < 1e-4, "same branch after reload");
+    assert_eq!(
+        (reloaded.point_count(), reloaded.triangle_count()),
+        (1, 0),
+        "same branch after reload"
+    );
 
     // Undo the last param edit and land back on the previous document exactly.
     let before_edit = fingerprint(&e, ctx);
@@ -4167,6 +4384,83 @@ fn texture_network_cooks_and_publishes_its_display_image() {
     assert!(e.display_image(geo).is_none());
 }
 
+/// The 0.8.0 procedural chain cooks end to end and recooks on reseed:
+/// box -> scatter -> copy_to_points with a plane template. This is the
+/// milestone's keep-last-good proof on a real graph: a reseeded scatter is
+/// a changed Points payload flowing through a downstream copy, and the
+/// recook must reach the output rather than being swallowed.
+#[test]
+fn scatter_copy_chain_recooks_on_reseed() {
+    let (mut e, ctx) = subflow_engine();
+    let surface = add(&mut e, ctx, "box");
+    let scatter = add(&mut e, ctx, "scatter");
+    let template = add(&mut e, ctx, "plane");
+    let copy = add(&mut e, ctx, "copy_to_points");
+
+    for (from, to, to_port) in [
+        (surface, scatter, "geometry"),
+        (scatter, copy, "points"),
+        (template, copy, "template"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: to_port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(25)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(copy),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let positions_of = |e: &Engine| {
+        let set = e
+            .cook
+            .outputs(copy)
+            .unwrap()
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .unwrap();
+        assert_eq!(
+            set.meshes[0].primitive_count(),
+            2 * 25,
+            "the plane template tiled onto every scattered point"
+        );
+        std::sync::Arc::clone(&set.meshes[0].positions)
+    };
+    let before = positions_of(&e);
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "seed".into(),
+        value: ParamSource::Literal(ParamValue::Int(11)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let after = positions_of(&e);
+    assert_ne!(
+        before, after,
+        "the reseeded cloud flowed through copy_to_points to the output"
+    );
+}
+
 /// The full material pipeline: a texture network feeds a
 /// material network through `tex_ref`, whose `principled` output a
 /// geo-side `material` node consumes in Reference mode; editing the
@@ -4370,4 +4664,168 @@ fn geo_export_action_round_trips_through_the_loaders() {
 
     // An action on a node that has none is a clean error, not a panic.
     assert!(e.invoke_action(sub, box_node, "save").is_err());
+}
+
+/// An OBJ export of a set that carries materials is the multi-file form:
+/// a Stored zip of `.obj` + `.mtl` (decision M-9). GLB stays a single
+/// file, and a material-less OBJ stays the classic single `.obj`.
+#[test]
+fn geo_export_obj_with_materials_delivers_a_zip() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_node = add(&mut e, sub, "box");
+    let material = add(&mut e, sub, "material");
+    let export = add(&mut e, sub, "geo_export");
+    for (from, to) in [(box_node, material), (material, export)] {
+        e.apply(Command::Connect {
+            ctx: sub,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: "geometry".into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: material,
+        key: "mode".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("inline".to_string())),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx: sub,
+        node: export,
+        key: "format".to_string(),
+        value: ParamSource::Literal(ParamValue::Enum("obj".to_string())),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: Some(export),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let result = e.invoke_action(sub, export, "save").expect("obj zip");
+    assert_eq!(result.mime, "application/zip");
+    assert!(result.filename.ends_with("_obj.zip"), "{}", result.filename);
+    assert!(result.bytes.starts_with(b"PK"), "a real zip container");
+    let haystack = result.bytes.as_slice();
+    for needle in [b"export.obj".as_slice(), b"export.mtl".as_slice()] {
+        assert!(
+            haystack.windows(needle.len()).any(|w| w == needle),
+            "the archive names its {} entry",
+            String::from_utf8_lossy(needle)
+        );
+    }
+}
+
+#[test]
+fn attribute_summary_and_page_read_a_cooked_chain() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let rand = add(&mut e, ctx, "attribute_randomize");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: box_id,
+            port: "geometry".to_string(),
+        },
+        to: PortRefDto {
+            node: rand,
+            port: "geometry".to_string(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(rand),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    // The randomize node's defaults write the vec4 `color` lane; the
+    // box's fixed normals and UVs surface as the N/uv pseudo-lanes.
+    let summary = e.attribute_summary(rand).expect("cooked geometry");
+    assert_eq!(summary.points, 24);
+    assert_eq!(
+        summary
+            .point
+            .iter()
+            .map(|l| (l.name.as_str(), l.ty, l.len))
+            .collect::<Vec<_>>(),
+        vec![("N", "vec3", 24), ("color", "vec4", 24), ("uv", "vec2", 24)],
+    );
+    assert!(summary.primitive.is_empty());
+
+    // A window of the point table: P leads, the lane follows, and the
+    // serde form is camelCase like every boundary DTO.
+    let page = e
+        .attribute_page(rand, solarxy_kernel::AttributeDomain::Point, 4, 2)
+        .expect("cooked geometry");
+    assert_eq!(page.total, 24);
+    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.rows[0].len(), 3 + 3 + 4 + 2);
+    let json = serde_json::to_string(&page).unwrap();
+    assert!(json.contains("\"total\":24"));
+    assert!(json.contains("\"columns\""));
+    assert!(json.contains("\"components\""));
+
+    // No committed output: a fresh unconnected node id yields None.
+    assert!(e.attribute_summary(NodeId(u64::MAX)).is_none());
+}
+
+#[test]
+fn cook_warnings_read_back_after_a_cook_and_clear_when_fixed() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let rand = add(&mut e, ctx, "attribute_randomize");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: box_id,
+            port: "geometry".to_string(),
+        },
+        to: PortRefDto {
+            node: rand,
+            port: "geometry".to_string(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(rand),
+    })
+    .unwrap();
+    // Writing `uv` as vec4 warns twice: the reserved contract wants vec2,
+    // and the box's fixed uv buffer is being replaced with a new type.
+    e.apply(Command::SetParam {
+        ctx,
+        node: rand,
+        key: "attr_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("uv".into())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let warnings = e.cook_warnings(rand);
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+
+    // A quiet recook clears the set: the vec4 default under a fresh name
+    // matches nothing on the input and no reserved contract.
+    e.apply(Command::SetParam {
+        ctx,
+        node: rand,
+        key: "attr_name".into(),
+        value: ParamSource::Literal(ParamValue::Text("tint".into())),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(e.cook_warnings(rand).is_empty());
+    assert!(e.cook_warnings(box_id).is_empty(), "quiet nodes stay empty");
 }

@@ -86,7 +86,11 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
     let mut face_segments: Vec<Range<u32>> = Vec::new();
 
     for mesh in &raw.meshes {
-        if mesh.positions.is_empty() || mesh.indices.is_empty() {
+        // Per-topology drawability: a point cloud needs positions only.
+        let is_triangles = mesh.topology == solarxy_core::MeshTopology::Triangles;
+        let drawable = !mesh.positions.is_empty()
+            && (mesh.topology == solarxy_core::MeshTopology::Points || !mesh.indices.is_empty());
+        if !drawable {
             mesh_vertex_data.push(Vec::new());
             mesh_index_data.push(Vec::new());
             mesh_bounds.push(AABB {
@@ -103,7 +107,10 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
 
         let normals = match &mesh.normals {
             Some(n) => n.clone(),
-            None => compute_normals(&mesh.positions, &mesh.indices),
+            // Face-normal accumulation walks index triples; lines and
+            // points have none and shade unlit anyway.
+            None if is_triangles => compute_normals(&mesh.positions, &mesh.indices),
+            None => vec![[0.0, 0.0, 1.0]; mesh.positions.len()],
         };
 
         let tex_coords: Vec<[f32; 2]> = match &mesh.tex_coords {
@@ -112,7 +119,7 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         };
 
         let has_uvs = mesh.tex_coords.is_some();
-        let (tangents, bitangents) = if has_uvs {
+        let (tangents, bitangents) = if has_uvs && is_triangles {
             compute_tangent_basis(&mesh.positions, &normals, &tex_coords, &mesh.indices)
         } else {
             compute_tangent_from_normal(&normals)
@@ -142,8 +149,13 @@ pub fn process_raw_model(raw: &RawModelData) -> ProcessedModel {
         all_normals.extend_from_slice(&normals);
 
         let bounds = compute_bounds(&mesh.positions);
-        let (v_lines, f_lines) =
-            build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds);
+        // The normals overlay is triangle-derived (face lines walk index
+        // triples); non-triangle meshes contribute empty segments.
+        let (v_lines, f_lines) = if is_triangles {
+            build_normals_geometry(&mesh.positions, &normals, &mesh.indices, &bounds)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         mesh_bounds.push(bounds);
         let v_start = all_vertex_lines.len() as u32;
         let f_start = all_face_lines.len() as u32;

@@ -15,9 +15,24 @@ use cgmath::InnerSpace;
 
 use crate::aabb::AABB;
 
+/// How a mesh's vertices connect into primitives. `indices` are read as
+/// triples for `Triangles` and pairs for `Lines`; `Points` ignores indices
+/// entirely (every position is its own primitive). The tag rides the mesh
+/// from loader output through the kernel to the renderer contract, so every
+/// consumer interprets the same buffers the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MeshTopology {
+    #[default]
+    Triangles,
+    Lines,
+    Points,
+}
+
 /// One mesh inside a [`RawModelData`].
-/// Triangulated indices, optional per-vertex `normals` / `tex_coords`, and
-/// an optional `material_index` into the parent [`RawModelData::materials`].
+/// Indices interpreted per `topology` (triangle triples by default),
+/// optional per-vertex `normals` / `tex_coords` / `colors`, and an
+/// optional `material_index` into the parent [`RawModelData::materials`].
 #[derive(Debug)]
 pub struct RawMeshData {
     pub name: String,
@@ -26,6 +41,37 @@ pub struct RawMeshData {
     pub normals: Option<Vec<[f32; 3]>>,
     pub tex_coords: Option<Vec<[f32; 2]>>,
     pub material_index: Option<usize>,
+    pub topology: MeshTopology,
+    /// Per-vertex RGBA colors, linear (loaders decode sRGB sources at
+    /// import per decision M-7; glTF `COLOR_0` is already linear).
+    pub colors: Option<Vec<[f32; 4]>>,
+}
+
+/// Decode one sRGB-encoded channel (0..1) to linear, the standard
+/// piecewise transfer curve. Loaders apply it to sRGB color sources (PLY
+/// vertex colors); the renderer's linear pipeline consumes the result.
+#[must_use]
+pub fn srgb_to_linear(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Encode one linear channel (0..1) to sRGB: the exact inverse of
+/// [`srgb_to_linear`]. Exporters apply it when writing to formats whose
+/// color convention is sRGB (PLY vertex colors), so an import/export pair
+/// round-trips up to 8-bit quantization.
+#[must_use]
+pub fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// Decoded image bytes (RGBA8) plus dimensions, ready for GPU upload.

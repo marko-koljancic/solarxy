@@ -62,6 +62,7 @@ use solarxy_core::preferences::{IblMode, ToneMode};
 
 use crate::environment::SceneEnvironment;
 use crate::scene::BackgroundModeExt;
+use solarxy_core::MeshTopology;
 use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
 
 #[repr(C)]
@@ -321,6 +322,12 @@ pub struct Renderer {
     camera_helper_count: u32,
     manipulator_tri_buf: wgpu::Buffer,
     manipulator_tri_count: u32,
+    /// The GPU attribute-label channel (host-fed like the manipulator; the
+    /// desktop never populates it, so it draws nothing there). Lives here
+    /// and not in `VisualizationState` for the same reason the manipulator
+    /// buffers do: the atlas and grown buffers must survive the
+    /// bounds-driven visualization rebuilds.
+    pub labels: crate::labels::LabelResources,
     pub uv_overlap: UvOverlapResources,
     pub validation_colors: ValidationColorResources,
     pub overdraw: crate::overdraw::OverdrawResources,
@@ -454,6 +461,8 @@ impl Renderer {
                 resource: wireframe_params_buffer.as_entire_binding(),
             }],
         });
+
+        let labels = crate::labels::LabelResources::new(device, queue, &layouts.labels);
 
         let shared_samplers = SharedSamplers::new(device);
 
@@ -673,6 +682,7 @@ impl Renderer {
                 mapped_at_creation: false,
             }),
             manipulator_tri_count: 0,
+            labels,
             light_helper_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Light Helpers"),
                 size: LIGHT_HELPER_BUF_BYTES,
@@ -795,7 +805,7 @@ impl Renderer {
         for obj in objects {
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
-                if !mesh.visible {
+                if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                     continue;
                 }
                 let material = &obj.model.materials[mesh.material];
@@ -914,7 +924,7 @@ impl Renderer {
             for obj in objects {
                 pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
                 for mesh in &obj.model.meshes {
-                    if !mesh.visible {
+                    if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                         continue;
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -978,7 +988,7 @@ impl Renderer {
             }
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
-                if !mesh.visible {
+                if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                     continue;
                 }
                 let material = &obj.model.materials[mesh.material];
@@ -1122,6 +1132,11 @@ impl Renderer {
             }
         }
 
+        // Line and point meshes draw unlit through their own pipelines in
+        // every view mode: they have no shaded, ghosted, or UV-inspection
+        // variants in v1, and hiding them per mode would read as data loss.
+        self.draw_topology_meshes(&mut pass, objects, cam_bg);
+
         // Overlays below rely on scene-level bindings.
         pass.set_vertex_buffer(1, env.instance_buffer.slice(..));
 
@@ -1137,6 +1152,8 @@ impl Renderer {
             pass.draw_indexed(0..env.vis.grid_mesh.num_elements, 0, 0..1);
         }
         self.draw_normals(&mut pass, env, objects, cam_bg, pds);
+        self.draw_attr_vectors(&mut pass, env, cam_bg);
+        self.draw_attr_labels(&mut pass, cam_bg);
         self.draw_axes(&mut pass, env, cam_bg, pds);
         self.draw_local_axes(&mut pass, env, cam_bg, pds);
         self.draw_bounds(&mut pass, env, cam_bg, pds);
@@ -1343,18 +1360,64 @@ impl Renderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+            // Triangles, then lines (same layout, different assembly),
+            // then points (their own expansion pipeline): every topology
+            // silhouettes into the mask per decision M-15.
             pass.set_pipeline(&self.pipelines.overlay.outline_mask);
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_bind_group(1, &self.outline.white_bind_group, &[]);
             for obj in objects.iter().filter(|o| o.selected) {
                 pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
                 for mesh in &obj.model.meshes {
-                    if !mesh.visible {
+                    if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                         continue;
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                }
+            }
+            let has_selected_topo = |topology: MeshTopology| {
+                objects.iter().filter(|o| o.selected).any(|o| {
+                    o.model
+                        .meshes
+                        .iter()
+                        .any(|m| m.visible && m.topology == topology)
+                })
+            };
+            if has_selected_topo(MeshTopology::Lines) {
+                pass.set_pipeline(&self.pipelines.overlay.outline_mask_line);
+                for obj in objects.iter().filter(|o| o.selected) {
+                    pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                    for mesh in &obj.model.meshes {
+                        if !mesh.visible || mesh.topology != MeshTopology::Lines {
+                            continue;
+                        }
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                    }
+                }
+            }
+            if has_selected_topo(MeshTopology::Points) {
+                pass.set_pipeline(&self.pipelines.overlay.outline_mask_point);
+                pass.set_bind_group(0, cam_bg, &[]);
+                pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
+                for obj in objects.iter().filter(|o| o.selected) {
+                    pass.set_vertex_buffer(0, obj.instance_buffer.slice(..));
+                    for mesh in &obj.model.meshes {
+                        if !mesh.visible || mesh.topology != MeshTopology::Points {
+                            continue;
+                        }
+                        let Some(edge) = &mesh.edge_data else {
+                            continue;
+                        };
+                        pass.set_bind_group(2, &edge.bind_group, &[]);
+                        pass.draw(0..mesh.num_vertices * 6, 0..1);
+                    }
                 }
             }
         }
@@ -1474,7 +1537,7 @@ impl Renderer {
         for obj in objects.iter().filter(|o| o.selected) {
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
-                if !mesh.visible {
+                if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                     continue;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -1491,19 +1554,33 @@ impl Renderer {
         objects: &[DrawObject<'a>],
         cam_bg: &'a wgpu::BindGroup,
     ) {
-        pass.set_pipeline(&self.pipelines.scene.main);
         pass.set_bind_group(1, cam_bg, &[]);
         pass.set_bind_group(2, &env.light_bind_group, &[]);
         pass.set_bind_group(3, &env.shadow.sample_bind_group, &[]);
+        // The colored variant binds the extra color slot; switch lazily so
+        // runs of same-flavor meshes cost one pipeline set.
+        let mut colored_bound: Option<bool> = None;
         for obj in objects {
             pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
             for mesh in &obj.model.meshes {
-                if !mesh.visible {
+                if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                     continue;
                 }
                 let material = &obj.model.materials[mesh.material];
                 if material.uniform.alpha_mode == 2 {
                     continue;
+                }
+                let colored = mesh.color_buffer.is_some();
+                if colored_bound != Some(colored) {
+                    pass.set_pipeline(if colored {
+                        &self.pipelines.scene.main_colored
+                    } else {
+                        &self.pipelines.scene.main
+                    });
+                    colored_bound = Some(colored);
+                }
+                if let Some(colors) = &mesh.color_buffer {
+                    pass.set_vertex_buffer(2, colors.slice(..));
                 }
                 pass.draw_mesh(mesh, material, 0..1);
             }
@@ -1525,10 +1602,11 @@ impl Renderer {
         // ordering stays draw-order; a global sort would need transformed
         // bounds and arrives with the engine work if it proves visible).
         let mut bound_pipeline = false;
+        let mut colored_bound: Option<bool> = None;
         for obj in objects {
             let mut blend_list: Vec<(usize, f32)> = Vec::new();
             for (i, mesh) in obj.model.meshes.iter().enumerate() {
-                if !mesh.visible {
+                if !mesh.visible || mesh.topology != MeshTopology::Triangles {
                     continue;
                 }
                 let material = &obj.model.materials[mesh.material];
@@ -1550,7 +1628,6 @@ impl Renderer {
             });
 
             if !bound_pipeline {
-                pass.set_pipeline(&self.pipelines.scene.alpha_blend);
                 pass.set_bind_group(1, cam_bg, &[]);
                 pass.set_bind_group(2, &env.light_bind_group, &[]);
                 pass.set_bind_group(3, &env.shadow.sample_bind_group, &[]);
@@ -1560,7 +1637,77 @@ impl Renderer {
             for (idx, _) in &blend_list {
                 let mesh = &obj.model.meshes[*idx];
                 let material = &obj.model.materials[mesh.material];
+                let colored = mesh.color_buffer.is_some();
+                if colored_bound != Some(colored) {
+                    pass.set_pipeline(if colored {
+                        &self.pipelines.scene.alpha_blend_colored
+                    } else {
+                        &self.pipelines.scene.alpha_blend
+                    });
+                    colored_bound = Some(colored);
+                }
+                if let Some(colors) = &mesh.color_buffer {
+                    pass.set_vertex_buffer(2, colors.slice(..));
+                }
                 pass.draw_mesh(mesh, material, 0..1);
+            }
+        }
+    }
+
+    /// Draws every visible line and point mesh: 1 px unlit line lists and
+    /// camera-facing point quads (expanded from the edge-geometry storage
+    /// buffer; see `points_lines.wgsl`). Called once per main pass,
+    /// independent of view mode.
+    fn draw_topology_meshes<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        objects: &[DrawObject<'a>],
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        let mut line_bound: Option<bool> = None;
+        for obj in objects {
+            for mesh in &obj.model.meshes {
+                if !mesh.visible || mesh.topology != MeshTopology::Lines {
+                    continue;
+                }
+                let colored = mesh.color_buffer.is_some();
+                if line_bound != Some(colored) {
+                    pass.set_pipeline(if colored {
+                        &self.pipelines.scene.line_colored
+                    } else {
+                        &self.pipelines.scene.line
+                    });
+                    pass.set_bind_group(0, cam_bg, &[]);
+                    line_bound = Some(colored);
+                }
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(1, obj.instance_buffer.slice(..));
+                if let Some(colors) = &mesh.color_buffer {
+                    pass.set_vertex_buffer(2, colors.slice(..));
+                }
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+            }
+        }
+
+        let mut point_bound = false;
+        for obj in objects {
+            for mesh in &obj.model.meshes {
+                if !mesh.visible || mesh.topology != MeshTopology::Points {
+                    continue;
+                }
+                let Some(edge) = &mesh.edge_data else {
+                    continue;
+                };
+                if !point_bound {
+                    pass.set_pipeline(&self.pipelines.scene.point);
+                    pass.set_bind_group(0, cam_bg, &[]);
+                    pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
+                    point_bound = true;
+                }
+                pass.set_bind_group(2, &edge.bind_group, &[]);
+                pass.set_vertex_buffer(0, obj.instance_buffer.slice(..));
+                pass.draw(0..mesh.num_vertices * 6, 0..1);
             }
         }
     }
@@ -1959,5 +2106,70 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Per-point attribute-vector arrows (the web attribute visualization),
+    /// through the gizmo line pipeline: the host CPU-colors each vertex
+    /// (uniform color or a magnitude ramp), so no params bind group is
+    /// needed. Gated purely on the buffer count: only the web host
+    /// populates the channel, so the desktop shell and the golden harness
+    /// draw nothing here by construction.
+    fn draw_attr_vectors<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        env: &'a SceneEnvironment,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        if env.vis.attr_lines_count == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.overlay.gizmo);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_vertex_buffer(0, env.vis.attr_lines_buf.slice(..));
+        pass.draw(0..env.vis.attr_lines_count, 0..1);
+    }
+
+    /// The GPU attribute labels: one draw over the whole set (chips, dots,
+    /// glyph quads decoded from `vertex_index` ranges), expanded per pane
+    /// against its camera so orbiting costs no CPU work. Gated purely on
+    /// the count: only the web host populates the channel.
+    fn draw_attr_labels<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
+        let verts = self.labels.vertex_count();
+        if verts == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.overlay.attr_labels);
+        pass.set_bind_group(0, cam_bg, &[]);
+        pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
+        pass.set_bind_group(2, &self.labels.bind_group, &[]);
+        pass.draw(0..verts, 0..1);
+    }
+
+    /// Replaces the label set (host-driven, event-paced; see
+    /// [`crate::labels::LabelResources::set_labels`]).
+    pub fn set_attr_labels(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[crate::labels::LabelInstance],
+        glyph_words: &[u32],
+    ) {
+        self.labels
+            .set_labels(device, queue, &self.layouts.labels, instances, glyph_words);
+    }
+
+    /// Pushes the label theme colors / device pixel ratio.
+    pub fn write_label_style(&mut self, queue: &wgpu::Queue, style: &crate::labels::LabelStyle) {
+        self.labels.write_style(queue, style);
+    }
+
+    /// Updates only the labels' device pixel ratio (kept honest across
+    /// browser zoom without the host re-reading theme colors).
+    pub fn write_label_dpr(&mut self, queue: &wgpu::Queue, dpr: f32) {
+        self.labels.write_dpr(queue, dpr);
     }
 }

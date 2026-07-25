@@ -33,7 +33,15 @@ import type {
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
 import { nodeLabel } from "../flow/nodeLabel";
+import {
+  paramTabs,
+  paramVisible,
+  resolveActiveTab,
+  tabLabel,
+  VALIDATION_TAB,
+} from "./paramVisibility";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
+import { AttributeNameField } from "./inputs/AttributeNameField";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
@@ -49,7 +57,14 @@ function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
 
 /** Builds a literal ParamSource of the given descriptor param type. */
 function literal(paramType: string, value: unknown): ParamSource {
-  const tag = paramType === "assetRef" ? "asset" : paramType === "nodePath" ? "nodeRef" : paramType;
+  const tag =
+    paramType === "assetRef"
+      ? "asset"
+      : paramType === "nodePath"
+        ? "nodeRef"
+        : paramType === "attributeName"
+          ? "text" // the widget variant stores plain Text
+          : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
 
@@ -143,6 +158,19 @@ function Field({ ctx, node, spec }: FieldProps) {
             className="input-field text-input"
             value={String(value ?? "")}
             onChange={(e) => commit(e.target.value)}
+          />
+        </div>
+      );
+    case "attributeName":
+      return (
+        <div className="param-row">
+          {label}
+          <AttributeNameField
+            ctx={ctx}
+            node={node}
+            spec={spec}
+            value={String(value ?? "")}
+            onCommit={commit}
           />
         </div>
       );
@@ -406,9 +434,11 @@ export function ParameterPanel() {
     () => graph.nodes.find((n) => n.id === selectedId),
     [graph, selectedId],
   );
-  // The active tab; falls back to the first tab whenever the selection's
-  // group set no longer contains it (switching node types).
-  const [tab, setTab] = useState<string>("");
+  // The active tab lives in the ui store so the Properties menu bar can
+  // read it (Reset Current Tab); falls back to the first tab whenever the
+  // selection's group set no longer contains it (switching node types).
+  const tab = useUi((s) => s.paramTab);
+  const setTab = useUi((s) => s.setParamTab);
 
   if (!node) {
     return (
@@ -427,16 +457,11 @@ export function ParameterPanel() {
     g.push(p);
     groups.set(p.group, g);
   }
- // Tabs (Minimystix underline pattern, D1): general first, the
+  // Tabs (Minimystix underline pattern, D1): general first, the
   // rest in declaration order, plus a Validation tab when a report exists.
-  const groupNames = [...groups.keys()];
-  const orderedGroups = [
-    ...groupNames.filter((g) => g.toLowerCase() === "general"),
-    ...groupNames.filter((g) => g.toLowerCase() !== "general"),
-  ];
   const report = reports[node.id];
-  const tabs = report ? [...orderedGroups, VALIDATION_TAB] : orderedGroups;
-  const active = tabs.includes(tab) ? tab : tabs[0];
+  const tabs = paramTabs(desc?.params ?? [], Boolean(report));
+  const active = resolveActiveTab(tabs, tab);
 
   return (
     <div className="param-panel">
@@ -473,7 +498,9 @@ export function ParameterPanel() {
       <div className="param-body">
         {active !== undefined && active !== VALIDATION_TAB && (
           <div className="param-tab-body" role="tabpanel">
-            {(groups.get(active) ?? []).map((p) => {
+            {(groups.get(active) ?? [])
+              .filter((p) => paramVisible(p, desc?.params ?? [], node.params))
+              .map((p) => {
               // Registry-driven map-overrides-factor indicator: a param
               // declaring drivenByPort dims while that input port is
               // connected (the map fully drives the channel; the factor
@@ -485,9 +512,9 @@ export function ParameterPanel() {
                 return <Field key={p.key} ctx={current} node={node} spec={p} />;
               }
               return (
-                <div key={p.key} className="param-driven" title="Driven by the connected map">
+                <div key={p.key} className="param-driven" title="Driven by the connected input">
                   <Field ctx={current} node={node} spec={p} />
-                  <div className="param-driven-hint">Driven by connected map</div>
+                  <div className="param-driven-hint">Driven by connected input</div>
                 </div>
               );
             })}
@@ -502,16 +529,8 @@ export function ParameterPanel() {
   );
 }
 
-/** Sentinel tab name for the validation report (registry groups are
- * lowercase, so the capitalized sentinel cannot collide). */
-const VALIDATION_TAB = "Validation";
 
 /** "general" -> "General". */
-function tabLabel(group: string): string {
-  if (group === VALIDATION_TAB) return group;
-  return group.charAt(0).toUpperCase() + group.slice(1);
-}
-
 /** "degenerateTriangles" -> "Degenerate Triangles". */
 function prettyKind(kind: string): string {
   const spaced = kind.replace(/([a-z])([A-Z])/g, "$1 $2");

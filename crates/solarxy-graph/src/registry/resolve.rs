@@ -239,7 +239,9 @@ pub fn conform_value(value: &ParamValue, ty: &ParamType) -> Result<ParamValue, S
         // Rounds half away from zero, matching the wire matrix.
         (ParamValue::Float(v), ParamType::Int) => Ok(ParamValue::Int(scalar::f64_to_i64(*v))),
         (ParamValue::Bool(v), ParamType::Bool) => Ok(ParamValue::Bool(*v)),
-        (ParamValue::Text(v), ParamType::Text) => Ok(ParamValue::Text(v.clone())),
+        (ParamValue::Text(v), ParamType::Text | ParamType::AttributeName) => {
+            Ok(ParamValue::Text(v.clone()))
+        }
         (ParamValue::Vec2(v), ParamType::Vec2) => Ok(ParamValue::Vec2(*v)),
         (ParamValue::Vec3(v), ParamType::Vec3) => Ok(ParamValue::Vec3(*v)),
         (ParamValue::Vec4(v), ParamType::Vec4) => Ok(ParamValue::Vec4(*v)),
@@ -369,7 +371,7 @@ pub fn param_source_from_json(json: &Json, ty: &ParamType) -> Result<ParamSource
             json.as_bool()
                 .ok_or_else(|| format!("expected a bool, got {json}"))?,
         ),
-        ParamType::Text => ParamValue::Text(
+        ParamType::Text | ParamType::AttributeName => ParamValue::Text(
             json.as_str()
                 .ok_or_else(|| format!("expected a string, got {json}"))?
                 .to_string(),
@@ -634,5 +636,28 @@ mod tests {
         let json = param_source_to_json(&src);
         let back = param_source_from_json(&json, &ParamType::Color).unwrap();
         assert_eq!(back, src);
+    }
+
+    #[test]
+    fn attribute_name_stores_and_loads_as_plain_text() {
+        // The widget variant, not the storage, is what AttributeName
+        // declares: a pre-variant document's plain string literal types
+        // straight into it, so no migration exists or is needed.
+        let json = serde_json::json!("color");
+        assert_eq!(
+            param_source_from_json(&json, &ParamType::AttributeName).unwrap(),
+            ParamSource::Literal(ParamValue::Text("color".to_string()))
+        );
+        let src = ParamSource::Literal(ParamValue::Text("mask".to_string()));
+        assert_eq!(param_source_to_json(&src), serde_json::json!("mask"));
+        // conform accepts the Text value under the AttributeName spec.
+        assert_eq!(
+            conform_value(
+                &ParamValue::Text("mask".to_string()),
+                &ParamType::AttributeName
+            )
+            .unwrap(),
+            ParamValue::Text("mask".to_string())
+        );
     }
 }

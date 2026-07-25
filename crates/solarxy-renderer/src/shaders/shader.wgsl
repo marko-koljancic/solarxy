@@ -47,6 +47,10 @@ struct VertexOutput {
     @location(6) light_clip_pos: vec4<f32>,
     @location(7) world_normal: vec3<f32>,
     @location(8) world_position: vec3<f32>,
+    // Per-vertex linear color; white from vs_main, the mesh's color
+    // attribute from vs_main_colored. Multiplied into the base color
+    // (glTF-consistent, decision M-8).
+    @location(9) vcolor: vec4<f32>,
 };
 
 struct ShadowUniform {
@@ -67,6 +71,25 @@ struct ShadowUniform {
 fn vs_main(
     model: VertexInput,
     instance: InstanceInput,
+) -> VertexOutput {
+    return shade_vertex(model, instance, vec4(1.0));
+}
+
+// The colored-mesh variant: identical, plus the color vertex buffer at
+// location 12 (only bound by the *_colored pipelines).
+@vertex
+fn vs_main_colored(
+    model: VertexInput,
+    instance: InstanceInput,
+    @location(12) color: vec4<f32>,
+) -> VertexOutput {
+    return shade_vertex(model, instance, color);
+}
+
+fn shade_vertex(
+    model: VertexInput,
+    instance: InstanceInput,
+    vcolor: vec4<f32>,
 ) -> VertexOutput {
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
@@ -111,6 +134,7 @@ fn vs_main(
     out.light_clip_pos = shadow_uni.light_vp * world_position;
     out.world_normal = world_normal;
     out.world_position = world_position.xyz;
+    out.vcolor = vcolor;
     return out;
 }
 
@@ -235,7 +259,7 @@ fn rotate_yaw(d: vec3<f32>, yaw: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
-    let base_alpha = albedo_sample.a * material.base_color.a;
+    let base_alpha = albedo_sample.a * material.base_color.a * in.vcolor.a;
 
     if material.alpha_mode == 1u && base_alpha < material.alpha_cutoff {
         discard;
@@ -300,7 +324,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     if model_id == 3u {
         // Unlit: flat factor x map (glTF KHR_materials_unlit).
-        return vec4(material.base_color.rgb * albedo_sample.rgb, base_alpha);
+        return vec4(material.base_color.rgb * albedo_sample.rgb * in.vcolor.rgb, base_alpha);
     }
     if model_id == 1u {
         // Matcap: the base-color texture IS the matcap, sampled by the
@@ -338,7 +362,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
         let emissive_sample = textureSample(t_emissive, s_emissive, in.tex_coords);
 
-        albedo = material.base_color.rgb * albedo_sample.xyz;
+        albedo = material.base_color.rgb * albedo_sample.xyz * in.vcolor.rgb;
         ao = mix(1.0, orm_sample.r, material.ao_strength);
         roughness = clamp(
             material.roughness_factor * orm_sample.g * camera.roughness_scale,

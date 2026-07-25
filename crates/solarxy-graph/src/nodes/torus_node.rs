@@ -15,7 +15,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "torus",
         version: 2,
         display_name: "Torus",
-        category: Category::Primitives,
+        category: Category::Generators,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![],

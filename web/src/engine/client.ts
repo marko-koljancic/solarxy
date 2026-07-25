@@ -4,10 +4,14 @@
 
 import init, { SolarxyApp, start } from "../wasm/pkg/solarxy_web.js";
 import wasmUrl from "../wasm/pkg/solarxy_web_bg.wasm?url";
-import type { GizmoPrefs, SelectionPrefs } from "../store/prefs";
+import type { DisplayPrefs, GizmoPrefs, SelectionPrefs } from "../store/prefs";
 import type {
   Annotation,
   AssetRef,
+  AttrDomain,
+  AttrVizState,
+  AttributePage,
+  AttributeSummary,
   CameraCommand,
   CameraPose,
   Command,
@@ -84,6 +88,48 @@ export class SolarxyClient {
     return this.app.review_markers() as MarkerScreen[];
   }
 
+  /** The lane inventory of a node's cooked geometry (both domains);
+   * undefined while nothing is committed. Fetched on demand (picker open,
+   * pane refresh), never polled. */
+  attributeSummary(node: NodeId): AttributeSummary | undefined {
+    return (this.app.attribute_summary(node) ?? undefined) as AttributeSummary | undefined;
+  }
+
+  /** The last completed cook's warnings for one node (empty when quiet);
+   * fetched when the info card opens or the cook status changes. */
+  cookWarnings(node: NodeId): string[] {
+    return this.app.cook_warnings(node) as string[];
+  }
+
+  /** One window of a node's cooked attribute values; only the page
+   * crosses the boundary. */
+  attributeTable(
+    node: NodeId,
+    domain: AttrDomain,
+    offset: number,
+    limit: number,
+  ): AttributePage | undefined {
+    return (this.app.attribute_table(node, domain, offset, limit) ?? undefined) as
+      | AttributePage
+      | undefined;
+  }
+
+  /** Replaces the host-owned attribute-visualization state; returns the
+   * refreshed view state (the mutator convention). */
+  setAttrViz(state: AttrVizState): ViewStateDto {
+    return this.app.set_attr_viz(state) as ViewStateDto;
+  }
+
+  /** Pushes the GPU attribute-label theme colors (CSS hex tokens in,
+   * linear RGB across the boundary, the selection-highlight convention):
+   * text, background chip, anchor dot. */
+  setLabelColors(textHex: string, chipHex: string, dotHex: string): void {
+    const [tr, tg, tb] = hexToLinearRgb(textHex);
+    const [cr, cg, cb] = hexToLinearRgb(chipHex);
+    const [dr, dg, db] = hexToLinearRgb(dotHex);
+    this.app.set_label_colors(tr, tg, tb, cr, cg, cb, dr, dg, db);
+  }
+
   /** Requests an active-pane screenshot (rendered at frame end). */
   requestScreenshot(opts: ScreenshotOpts): void {
     this.app.request_screenshot(opts);
@@ -150,6 +196,21 @@ export class SolarxyClient {
   setSelectionHighlight(s: SelectionPrefs): void {
     const [r, g, b] = hexToLinearRgb(s.color);
     this.app.set_selection_highlight(s.style, r, g, b, 1.0, s.width);
+  }
+
+  /** The display defaults preference (wireframe weight, background,
+   * turntable rpm). The apply flags say which pane-seeded fields should
+   * repaint every pane now: both at boot, only the changed ones on a
+   * mid-session preference save (so per-pane Display-menu overrides
+   * survive unrelated edits). */
+  setDisplayDefaults(d: DisplayPrefs, applyWireframe: boolean, applyBackground: boolean): void {
+    this.app.set_display_defaults(
+      d.wireframeWeight,
+      d.background,
+      d.turntableRpm,
+      applyWireframe,
+      applyBackground,
+    );
   }
 
   /** The displayed image of a texture network, or null when
@@ -243,8 +304,8 @@ export class SolarxyClient {
     return this.app.set_display_settings(settings) as ViewStateDto;
   }
 
-  cameraCommand(pane: number, cmd: CameraCommand): void {
-    this.app.camera_command(pane, cmd);
+  cameraCommand(pane: number, cmd: CameraCommand): ViewStateDto {
+    return this.app.camera_command(pane, cmd) as ViewStateDto;
   }
 
   /** Binds a pane to look through a camera node, or -1 to clear to free view. */

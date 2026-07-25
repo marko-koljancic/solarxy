@@ -1,15 +1,14 @@
 //! AABB geometry (the `bounds` node's kernel).
 //!
-//! Two shapes, both solid triangulated boxes, because `GeometrySet` has
-//! neither line nor point primitives: `box` emits a box matching the input's
-//! AABB, `center` emits a small marker cube at its center. (The catalog's
-//! original "center point" was unimplementable for exactly that reason; the
-//! marker cube is the ratified substitute.)
+//! `box` emits a solid triangulated box matching the input's AABB; `center`
+//! emits a single true point primitive at its center (the catalog's original
+//! intent, realized once point topology landed; it supersedes the 0.7.x
+//! marker-cube substitute per decision M-3).
 //!
 //! Callers must handle the empty-input case themselves: `compute_bounds(&[])`
 //! returns a (-1,-1,-1)..(1,1,1) unit box rather than a zero box, so blindly
 //! boxing an empty set would emit a misleading unit cube. [`bounds_box`] and
-//! [`marker_cube`] take an [`AABB`] and trust it; the node checks
+//! [`center_point`] take an [`AABB`] and trust it; the node checks
 //! `is_renderable_empty` first and warns.
 
 use solarxy_core::AABB;
@@ -32,13 +31,12 @@ pub fn bounds_box(aabb: &AABB) -> GeometrySet {
     boxed("bounds", w, h, d, [center.x, center.y, center.z])
 }
 
-/// A cube of side `size` centered on `aabb`'s center: the locator that stands
-/// in for a center point.
+/// A single point primitive at `aabb`'s center (Points topology). The true
+/// center marker; its on-screen size is the renderer's uniform point size.
 #[must_use]
-pub fn marker_cube(aabb: &AABB, size: f32) -> GeometrySet {
-    let s = size.max(MIN_EXTENT);
-    let center = aabb.center();
-    boxed("bounds_center", s, s, s, [center.x, center.y, center.z])
+pub fn center_point(aabb: &AABB) -> GeometrySet {
+    let c = aabb.center();
+    GeometrySet::from_mesh(KernelMesh::points("bounds_center", vec![[c.x, c.y, c.z]]))
 }
 
 /// A hairline floor for degenerate extents: a zero-size box would have no
@@ -79,17 +77,24 @@ mod tests {
     }
 
     #[test]
-    fn center_mode_puts_a_marker_at_the_center() {
+    fn center_mode_emits_one_point_primitive_at_the_center() {
         let set = GeometrySet::from_mesh(gen_box(2.0, 2.0, 2.0, 1, 1, 1));
         let set = bake(&set, &Matrix4::from_translation([4.0, 6.0, 8.0].into())).unwrap();
 
-        let out = marker_cube(&set.bounds, 0.5);
-        let c = out.bounds.center();
-        assert!((c.x - 4.0).abs() < 1e-4, "{c:?}");
-        assert!((c.y - 6.0).abs() < 1e-4, "{c:?}");
-        assert!((c.z - 8.0).abs() < 1e-4, "{c:?}");
-        let s = out.bounds.size();
-        assert!((s.x - 0.5).abs() < 1e-4, "marker is marker_size across");
+        let out = center_point(&set.bounds);
+        assert_eq!(out.mesh_count(), 1);
+        let mesh = &out.meshes[0];
+        assert_eq!(
+            mesh.topology,
+            solarxy_core::geometry::MeshTopology::Points,
+            "center mode is a true point primitive, not a marker cube"
+        );
+        assert_eq!(mesh.positions.len(), 1);
+        let p = mesh.positions[0];
+        assert!(
+            (p[0] - 4.0).abs() < 1e-4 && (p[1] - 6.0).abs() < 1e-4 && (p[2] - 8.0).abs() < 1e-4
+        );
+        assert!(!out.is_renderable_empty(), "a lone point renders");
     }
 
     #[test]

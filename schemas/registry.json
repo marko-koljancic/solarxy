@@ -149,8 +149,8 @@
       "typeId": "array",
       "version": 1,
       "displayName": "Array",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -272,6 +272,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "linear"
+              }
+            }
+          ],
           "doc": "The step between copies: copy i is offset by i times this."
         },
         {
@@ -300,6 +309,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "The axis the copies revolve about."
         },
         {
@@ -321,6 +339,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "How far each copy sits from the axis before it revolves."
         },
         {
@@ -339,6 +366,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "radial"
+              }
+            }
+          ],
           "doc": "The total angle the copies span. Each copy steps by sweep/count, so a full 360 tiles evenly without doubling up at the seam."
         }
       ],
@@ -358,11 +394,1138 @@
       "role": "standard"
     },
     {
+      "typeId": "attribute_copy",
+      "version": 1,
+      "displayName": "Attribute Copy",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry carrying the lane."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Copy",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "source",
+          "label": "Source",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane to copy, resolved in the chosen domain."
+        },
+        {
+          "key": "dest",
+          "label": "Destination",
+          "group": "attribute",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The name the copy is written under, replacing any lane already there. Reserved names activate their contracts: `color` (vec4) displays as vertex color immediately."
+        },
+        {
+          "key": "domain",
+          "label": "Domain",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "point",
+              "Point"
+            ],
+            [
+              "primitive",
+              "Primitive"
+            ]
+          ],
+          "accept": [],
+          "default": "point",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which domain both names live in. Use `attribute_promote` to move a lane between domains."
+        },
+        {
+          "key": "target_type",
+          "label": "Type",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "auto",
+              "Same as source"
+            ],
+            [
+              "float",
+              "Float"
+            ],
+            [
+              "vec2",
+              "Vec2"
+            ],
+            [
+              "vec3",
+              "Vec3"
+            ],
+            [
+              "vec4",
+              "Vec4"
+            ]
+          ],
+          "accept": [],
+          "default": "auto",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The copy's type. Widening pads (a vec4's w fills with 1.0, the color case); narrowing to Float takes the magnitude; other narrowing drops trailing components."
+        },
+        {
+          "key": "delete_source",
+          "label": "Delete Source",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Remove the source lane after copying, making this a rename. Deleting the reserved `N` or `uv` clears the mesh's FIXED normal/uv buffer when no map lane shadows it, which changes shading and texturing downstream."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Copies an attribute lane under a new name, optionally converting its type, in the point or primitive domain. With Delete Source it is a rename.\n\nThe headline use is feeding the reserved lanes: copy any vec3 into `color` and the geometry displays vertex-colored (w pads to 1.0, opaque); copy a vec3 into `N` to override normals. The other direction works too: narrow a `color` to a float magnitude lane and drive `displace` with it.",
+      "searchAliases": [
+        "copy",
+        "rename",
+        "attribute",
+        "convert",
+        "cast",
+        "color"
+      ],
+      "glyph": "attribute_copy",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_create",
+      "version": 1,
+      "displayName": "Attribute Create",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry the lane is written onto."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Create",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "value",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane's name. Free-form names are yours to consume downstream; the reserved names carry contracts: `color` (vec4) drives vertex-color display, `N` (vec3) is the point normal copies orient to, `uv` (vec2) the texture coordinate, `pscale` (float) a per-point scale reserved for later."
+        },
+        {
+          "key": "type",
+          "label": "Type",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "float",
+              "Float"
+            ],
+            [
+              "vec2",
+              "Vec2"
+            ],
+            [
+              "vec3",
+              "Vec3"
+            ],
+            [
+              "vec4",
+              "Vec4"
+            ]
+          ],
+          "accept": [],
+          "default": "float",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane's component count. Pick the type a reserved name's consumers expect (vec4 for `color`); the value parameter below follows the choice."
+        },
+        {
+          "key": "value_float",
+          "label": "Value",
+          "group": "attribute",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
+          "doc": "The constant every point receives."
+        },
+        {
+          "key": "value_vec2",
+          "label": "Value",
+          "group": "attribute",
+          "paramType": "vec2",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec2"
+              }
+            }
+          ],
+          "doc": "The constant every point receives."
+        },
+        {
+          "key": "value_vec3",
+          "label": "Value",
+          "group": "attribute",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
+          "doc": "The constant every point receives."
+        },
+        {
+          "key": "value_vec4",
+          "label": "Value",
+          "group": "attribute",
+          "paramType": "vec4",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
+          "doc": "The constant every point receives. As a `color` it is linear RGBA: opaque white by default."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Writes a constant attribute lane onto every point of the input, replacing any lane already under that name. Attributes are named per-point values that ride the geometry through the graph; downstream nodes consume them by name.\n\nThe reserved names are where this shows immediately: write `color` as a vec4 and the geometry displays vertex-colored; write `N` as a vec3 and `copy_to_points` orients to it; `uv` (vec2) feeds texturing. Any other name is free-form data for your own downstream use.\n\nWriting a reserved name with the wrong type is legal but inert, and the node warns rather than guessing. For seeded per-point variation instead of a constant, reach for `attribute_randomize`.",
+      "searchAliases": [
+        "attribute",
+        "lane",
+        "constant",
+        "color",
+        "tag"
+      ],
+      "glyph": "attribute_create",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_from_image",
+      "version": 1,
+      "displayName": "Attribute from Image",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry the sampled lane is written onto."
+        },
+        {
+          "key": "image",
+          "label": "Image",
+          "dataType": "image",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "The image to sample. Wire a `tex_ref` (pointing at a texture network) or an `import_image`. Unwired, the geometry passes through with a warning."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute from Image",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "color",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane the samples are written under. The default `color` displays as vertex color immediately; any other name is free-form data for downstream nodes."
+        },
+        {
+          "key": "uv_attr",
+          "label": "UV Attribute",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "uv",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The vec2 point lane supplying sample coordinates; `uv` resolves the mesh's texture coordinates. A mesh without it passes through with a warning (chain `uv_project` first)."
+        },
+        {
+          "key": "channels",
+          "label": "Channels",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "rgba",
+              "RGBA (vec4)"
+            ],
+            [
+              "rgb",
+              "RGB (vec3)"
+            ],
+            [
+              "luminance",
+              "Luminance (float)"
+            ],
+            [
+              "r",
+              "Red (float)"
+            ],
+            [
+              "g",
+              "Green (float)"
+            ],
+            [
+              "b",
+              "Blue (float)"
+            ],
+            [
+              "a",
+              "Alpha (float)"
+            ]
+          ],
+          "accept": [],
+          "default": "rgba",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "What lands in the lane: the full color (vec4, the `color` contract), RGB (vec3), or one scalar channel. Luminance uses the Rec. 709 weights."
+        },
+        {
+          "key": "filter",
+          "label": "Filter",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "bilinear",
+              "Bilinear"
+            ],
+            [
+              "nearest",
+              "Nearest"
+            ]
+          ],
+          "accept": [],
+          "default": "bilinear",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Blend the four surrounding texels, or read the nearest one."
+        },
+        {
+          "key": "wrap",
+          "label": "Wrap",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "repeat",
+              "Repeat"
+            ],
+            [
+              "clamp",
+              "Clamp"
+            ]
+          ],
+          "accept": [],
+          "default": "repeat",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How UVs outside 0..1 resolve: tile the image, or extend its edges."
+        },
+        {
+          "key": "srgb",
+          "label": "Interpret as sRGB",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Convert the sampled RGB to linear before writing (alpha is untouched). Keep it on for color images: the reserved `color` lane is linear RGBA by contract. Turn it off for data maps (height, masks) whose bytes are already linear."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Samples the connected image through each point's UV and writes the result into an attribute lane: full RGBA into `color` for vertex-color display, or one channel into a float lane.\n\nThis is the image-to-geometry bridge: build a map in a texture network, `tex_ref` it into the geometry graph, sample it here, and drive `displace` (or anything else that reads lanes) with the result. Sampling matches the renderer's orientation exactly, so the written colors line up with the same image textured on the surface.\n\nMeshes without the UV lane, or an unwired image, pass through with a warning.",
+      "searchAliases": [
+        "sample",
+        "map",
+        "texture",
+        "image",
+        "bake",
+        "vertex color"
+      ],
+      "glyph": "attribute_from_image",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_promote",
+      "version": 1,
+      "displayName": "Attribute Promote",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose lane changes domain."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Promote",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane to promote, resolved in the source domain."
+        },
+        {
+          "key": "direction",
+          "label": "Direction",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "pointToPrimitive",
+              "Point to Primitive"
+            ],
+            [
+              "primitiveToPoint",
+              "Primitive to Point"
+            ]
+          ],
+          "accept": [],
+          "default": "pointToPrimitive",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which way the lane moves: corner-point values combining into one value per primitive, or primitive values spreading onto their points."
+        },
+        {
+          "key": "method",
+          "label": "Method",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "average",
+              "Average"
+            ],
+            [
+              "min",
+              "Minimum"
+            ],
+            [
+              "max",
+              "Maximum"
+            ],
+            [
+              "first",
+              "First"
+            ]
+          ],
+          "accept": [],
+          "default": "average",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How the several source values landing on one destination element combine, component-wise for vector lanes."
+        },
+        {
+          "key": "keep_original",
+          "label": "Keep Original",
+          "group": "attribute",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Keep the source-domain lane beside the promoted one. Off (the default), the promotion MOVES the lane. The fixed normal and uv buffers are never deleted by a promote: promoting `N` or `uv` copies out of them."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Converts an attribute lane between the point and primitive domains: per-corner values combine into one value per triangle, segment, or point primitive (Average / Min / Max / First), and primitive values spread back onto their points, averaging where a point belongs to several primitives.\n\nBy default the lane MOVES to the destination domain; Keep Original leaves the source in place too. A point untouched by any primitive receives zeros on a primitive-to-point promote. The Attributes pane's Point and Primitive tabs show both domains, which is the quickest way to watch this node work.",
+      "searchAliases": [
+        "promote",
+        "domain",
+        "primitive",
+        "point",
+        "demote"
+      ],
+      "glyph": "attribute_promote",
+      "role": "standard"
+    },
+    {
+      "typeId": "attribute_randomize",
+      "version": 1,
+      "displayName": "Attribute Randomize",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose points receive the randomized lane."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Attribute Randomize",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "attr_name",
+          "label": "Name",
+          "group": "attribute",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "color",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane to fill. The default `color` drives vertex-color display immediately; `pscale` (float) and free-form names feed downstream consumers instead."
+        },
+        {
+          "key": "type",
+          "label": "Type",
+          "group": "attribute",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "float",
+              "Float"
+            ],
+            [
+              "vec3",
+              "Vec3"
+            ],
+            [
+              "vec4",
+              "Vec4"
+            ]
+          ],
+          "accept": [],
+          "default": "vec4",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The lane's component count; each component draws independently between its Min and Max. `color` consumers expect vec4."
+        },
+        {
+          "key": "min_float",
+          "label": "Min",
+          "group": "attribute",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
+          "doc": "The lower bound of the uniform draw."
+        },
+        {
+          "key": "max_float",
+          "label": "Max",
+          "group": "attribute",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "float"
+              }
+            }
+          ],
+          "doc": "The upper bound of the uniform draw."
+        },
+        {
+          "key": "min_vec3",
+          "label": "Min",
+          "group": "attribute",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
+          "doc": "The per-component lower bounds of the uniform draw."
+        },
+        {
+          "key": "max_vec3",
+          "label": "Max",
+          "group": "attribute",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec3"
+              }
+            }
+          ],
+          "doc": "The per-component upper bounds of the uniform draw."
+        },
+        {
+          "key": "min_vec4",
+          "label": "Min",
+          "group": "attribute",
+          "paramType": "vec4",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
+          "doc": "The per-component lower bounds of the uniform draw. The default pins alpha at 1 so randomized colors stay opaque."
+        },
+        {
+          "key": "max_vec4",
+          "label": "Max",
+          "group": "attribute",
+          "paramType": "vec4",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "type",
+              "pred": {
+                "kind": "eq",
+                "value": "vec4"
+              }
+            }
+          ],
+          "doc": "The per-component upper bounds of the uniform draw."
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "group": "attribute",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            2147483647.0
+          ],
+          "soft": [
+            0.0,
+            9999.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Selects which random values you get. Any change redraws every point; the same seed always cooks the same values, so a saved scene reproduces exactly."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Fills an attribute lane with seeded uniform random values, one draw per point, each component between its Min and Max. At the defaults it writes `color`, so wiring any geometry through it paints every point a different color and the result displays immediately: the quickest proof the attribute system is live.\n\nOn `scatter` output it is the variation workhorse: randomize `color` for per-point tinting, or a free-form lane that a later release's consumers read. The draw is per point, deterministic in the seed, and independent per component, so a fixed alpha is just Min equal to Max in that lane.\n\nWriting a reserved name with the wrong type is legal but inert (the node warns): `color` wants vec4, `N` vec3, `uv` vec2, `pscale` float. It replaces any existing lane under the same name.",
+      "searchAliases": [
+        "random",
+        "variation",
+        "jitter",
+        "noise",
+        "color",
+        "attribute"
+      ],
+      "glyph": "attribute_randomize",
+      "role": "standard"
+    },
+    {
       "typeId": "blur",
       "version": 1,
       "displayName": "Blur",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -459,7 +1622,7 @@
     },
     {
       "typeId": "bounds",
-      "version": 1,
+      "version": 2,
       "displayName": "Bounds",
       "category": "utility",
       "categoryLabel": "Utility",
@@ -544,35 +1707,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Box emits the bounding box itself, matching the input's extents on every axis. Center discards the size and emits a fixed-size marker cube at the box's centre, for when the pivot is what you are chasing rather than the volume."
-        },
-        {
-          "key": "marker_size",
-          "label": "Marker Size",
-          "group": "bounds",
-          "paramType": "float",
-          "enumVariants": [],
-          "accept": [],
-          "default": 0.1,
-          "hard": [
-            0.001,
-            100.0
-          ],
-          "soft": [
-            0.01,
-            1.0
-          ],
-          "step": null,
-          "unit": "meters",
-          "drivenByPort": null,
-          "doc": "Edge length of the centre marker cube, in metres. It is absolute, not relative to the input, so a marker sized for a doorknob vanishes inside a building. Only read in Center mode."
+          "doc": "Box emits the bounding box itself, matching the input's extents on every axis. Center discards the volume and emits a single point primitive at the box's centre, for when the pivot is what you are chasing rather than the extents."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Emits the input's axis-aligned bounding box as geometry: a solid box spanning the input's extents, or a small marker cube sitting at its centre. It measures the input and replaces it; the box is the output, not an overlay on the original.\n\nThis is the measuring tape. Tap it off a chain to see how big something actually is, where its centre really sits, or whether two parts occupy the space you think they do -- `merge` the bounds with the model it measured and you can eyeball the fit directly. Bypassing it passes the input through, which makes it cheap to leave wired in as an inspection tap.\n\nThe box is axis-aligned in object space, so a diagonally oriented model gets a box much larger than the model itself; that is the AABB being honest, not a bug. Both modes emit solid triangulated boxes, including Center: there are no line or point primitives to draw a truer marker with, so a small cube stands in. An empty input warns and emits nothing rather than boxing the fallback bounds into a confident unit cube around nothing.",
+      "doc": "Emits the input's axis-aligned bounding box as geometry: a solid box spanning the input's extents, or a single point primitive sitting at its centre. It measures the input and replaces it; the box is the output, not an overlay on the original.\n\nThis is the measuring tape. Tap it off a chain to see how big something actually is, where its centre really sits, or whether two parts occupy the space you think they do -- `merge` the bounds with the model it measured and you can eyeball the fit directly. Bypassing it passes the input through, which makes it cheap to leave wired in as an inspection tap.\n\nThe box is axis-aligned in object space, so a diagonally oriented model gets a box much larger than the model itself; that is the AABB being honest, not a bug. Center mode's point draws at the renderer's uniform on-screen point size and is not pickable in the viewport (select it on the node canvas). An empty input warns and emits nothing rather than boxing the fallback bounds into a confident unit cube around nothing.",
       "searchAliases": [
         "bbox",
         "aabb",
@@ -587,8 +1729,8 @@
       "typeId": "box",
       "version": 2,
       "displayName": "Box",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -771,8 +1913,8 @@
       "typeId": "brick",
       "version": 1,
       "displayName": "Brick",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -999,8 +2141,8 @@
       "typeId": "brightness_contrast",
       "version": 1,
       "displayName": "Brightness / Contrast",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -1238,6 +2380,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "perspective"
+              }
+            }
+          ],
           "doc": "The VERTICAL angle the camera sees, in degrees. Smaller is tighter and flatter, larger is wider and more distorted at the edges; past about 90 the stretch in the corners gets hard to miss. Perspective only -- a physical camera derives this same number from Focal Length and Sensor Width instead, and an orthographic camera has no field of view at all."
         },
         {
@@ -1259,6 +2410,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "physical"
+              }
+            }
+          ],
           "doc": "The lens focal length in millimetres, as a photographer means it: 50 normal, 24 wide, 200 a long telephoto. It only means something against a sensor size -- together with Sensor Width it sets the field of view, as fov = 2 * atan(sensor / (2 * focal)), so a LONGER focal length gives a NARROWER view. Physical projection only. See Sensor Width for how that formula differs from a real camera's."
         },
         {
@@ -1280,6 +2440,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "physical"
+              }
+            }
+          ],
           "doc": "The film-back width in millimetres: 36 is full-frame 35mm, 25 is Super 35, 23.5 is APS-C. A larger sensor at the same Focal Length sees more, which is why the same lens is wide on full-frame and long on a phone. One caveat worth knowing: this value drives the VERTICAL field of view, where a real camera would use its sensor HEIGHT. A 50mm at 36mm here frames about 40 degrees tall; a real full-frame camera, working from its 24mm sensor height, frames about 27. So a physical camera reads wider than the equivalent real lens -- compensate with a longer Focal Length or a smaller Sensor Width."
         },
         {
@@ -1301,6 +2470,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "kind",
+              "pred": {
+                "kind": "eq",
+                "value": "orthographic"
+              }
+            }
+          ],
           "doc": "Half the visible height, in metres: at the default 5 the camera frames 10 metres top to bottom, and the width follows from the pane's shape. This is the orthographic stand-in for zoom. With no perspective, moving the camera closer changes nothing about the framing, so this is the only way to fit more or less in frame. Orthographic only."
         },
         {
@@ -1417,8 +2595,8 @@
       "typeId": "checker",
       "version": 1,
       "displayName": "Checker",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -1606,11 +2784,150 @@
       "role": "imageSource"
     },
     {
+      "typeId": "circle",
+      "version": 1,
+      "displayName": "Circle",
+      "category": "generators",
+      "categoryLabel": "Generators",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Circle",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "geometry",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.5,
+          "hard": [
+            0.001,
+            10000.0
+          ],
+          "soft": [
+            0.01,
+            100.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "The loop's radius, in metres, centred on the origin."
+        },
+        {
+          "key": "segments",
+          "label": "Segments",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 32,
+          "hard": [
+            3.0,
+            512.0
+          ],
+          "soft": [
+            3.0,
+            128.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many straight segments approximate the circle. 3 is a triangle, 32 reads as smooth at typical sizes; raise it only when the circle is large on screen or feeds a downstream operation that needs the density."
+        },
+        {
+          "key": "axis",
+          "label": "Axis",
+          "group": "geometry",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "x",
+              "X"
+            ],
+            [
+              "y",
+              "Y"
+            ],
+            [
+              "z",
+              "Z"
+            ]
+          ],
+          "accept": [],
+          "default": "y",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The axis the circle rings around: the loop lies in the plane perpendicular to it. The default Y lays it flat in the ground plane."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A closed loop of straight segments at Radius around the chosen axis, centred on the origin. Like `line` it is a curve: no surface, no normals, drawn as an unlit one-pixel wire.\n\nIt is the standard profile shape: the upcoming extrude family consumes closed loops like this one, and until then it serves as a guide, a path for copies, or a scatter-free ring of points via `points_from_geo`.\n\nThe default Y axis lays the loop flat in the ground plane, winding counter-clockwise seen from above. Segments trades smoothness against point count: each segment is one straight piece and one carrier point.",
+      "searchAliases": [
+        "ring",
+        "loop",
+        "profile",
+        "disc",
+        "curve"
+      ],
+      "glyph": "circle",
+      "role": "standard"
+    },
+    {
       "typeId": "compute_normals",
       "version": 2,
       "displayName": "Compute Normals",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -1690,7 +3007,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Rebuilds every mesh's vertex normals from its triangles. Each triangle's geometric normal is accumulated onto the three points it touches and the sum is normalized, so a point shared by several triangles ends up carrying their area-weighted average.\n\nReach for it when an import arrives with no normals, or with normals that disagree with the surface, or after something upstream left them stale. The `validate` node's Normals check reports exactly what this clears, so the two pair naturally: validate to see the problem, compute_normals to fix it.\n\nIt can only smooth where points are actually shared. Primitives split their corners so that each face carries its own copy -- a box has 24 points for 8 corners -- and recomputing normals on one leaves it just as flat-shaded as before. Smooth shading out of split geometry needs the points welded first, which this node does not do.",
+      "doc": "Rebuilds every mesh's vertex normals from its triangles. Each triangle's geometric normal is accumulated onto the three points it touches and the sum is normalized, so a point shared by several triangles ends up carrying their area-weighted average.\n\nReach for it when an import arrives with no normals, or with normals that disagree with the surface, or after something upstream left them stale. The `validate` node's Normals check reports exactly what this clears, so the two pair naturally: validate to see the problem, compute_normals to fix it.\n\nIt can only smooth where points are actually shared. Primitives split their corners so that each face carries its own copy -- a box has 24 points for 8 corners -- and recomputing normals on one leaves it just as flat-shaded as before. Smooth shading out of split geometry needs the points welded first, which this node does not do. Winding and face normals are triangle concepts: point clouds and polylines pass through untouched with a warning.",
       "searchAliases": [
         "normals",
         "recompute",
@@ -1703,8 +3020,8 @@
       "typeId": "cone",
       "version": 2,
       "displayName": "Cone",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -1847,8 +3164,8 @@
       "typeId": "constant",
       "version": 1,
       "displayName": "Constant",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -1974,11 +3291,190 @@
       "role": "imageSource"
     },
     {
+      "typeId": "copy_to_points",
+      "version": 1,
+      "displayName": "Copy to Points",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "template",
+          "label": "Template",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": false,
+          "doc": "The geometry stamped at every point: a primitive or any small assembly you have already merged."
+        },
+        {
+          "key": "points",
+          "label": "Points",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "Where the copies land: every vertex of every input mesh is a target, whatever its topology. Scatter output is the canonical source."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Copy to Points",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "orient",
+          "label": "Orient",
+          "group": "copy",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "none",
+              "None"
+            ],
+            [
+              "normal",
+              "Normal"
+            ]
+          ],
+          "accept": [],
+          "default": "normal",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How each copy turns at its point. Normal rotates the template's up axis onto the point's normal, so copies stand on the surface they were scattered over; points without a normal keep the template orientation. None keeps every copy axis-aligned."
+        },
+        {
+          "key": "scale",
+          "label": "Scale",
+          "group": "copy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.001,
+            1000.0
+          ],
+          "soft": [
+            0.01,
+            10.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A uniform size factor applied to every copy before it lands."
+        },
+        {
+          "key": "scale_variance",
+          "label": "Scale Variance",
+          "group": "copy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            0.95
+          ],
+          "soft": [
+            0.0,
+            0.5
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Per-copy size jitter as a fraction of Scale: 0.2 lets each copy vary twenty percent bigger or smaller, seeded so the variation reproduces exactly. 0 keeps every copy the same size."
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "group": "copy",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            2147483647.0
+          ],
+          "soft": [
+            0.0,
+            9999.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Selects which per-copy size jitter you get when Scale Variance is above zero. The same seed always cooks the same sizes."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "points"
+      },
+      "doc": "Stamps the Template input onto every point of the Points input: scatter a surface, wire the cloud in here, and a forest, a crowd, or a debris field is one node instead of a hand-wired branch per copy. Every vertex of the points input is a target whatever its topology, so mesh vertices work as well as scattered clouds.\n\nOrient turns each copy's up axis onto its point's normal (what scatter writes), so copies stand on the surface rather than all facing the same way; Scale sizes every copy and Scale Variance adds seeded per-copy jitter for a natural, unrepeated look.\n\nThe copies of each template mesh flatten into one concatenated mesh, keeping the viewport responsive at thousands of copies, and the template's materials ride along shared, not duplicated. A copy count whose output would exceed the eight-million primitive ceiling fails the cook with a clear message before anything is allocated.",
+      "searchAliases": [
+        "instance",
+        "stamp",
+        "duplicate",
+        "clone",
+        "template",
+        "forest"
+      ],
+      "glyph": "copy_to_points",
+      "role": "standard"
+    },
+    {
       "typeId": "cylinder",
       "version": 2,
       "displayName": "Cylinder",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -2142,8 +3638,8 @@
       "typeId": "delete",
       "version": 1,
       "displayName": "Delete",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -2259,6 +3755,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "bbox"
+              }
+            }
+          ],
           "doc": "The center of the region box."
         },
         {
@@ -2278,6 +3783,15 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "bbox"
+              }
+            }
+          ],
           "doc": "The size of the region box. A triangle goes when its centroid is inside."
         },
         {
@@ -2297,6 +3811,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "normal"
+              }
+            }
+          ],
           "doc": "The facing to match against."
         },
         {
@@ -2315,6 +3838,15 @@
           "step": null,
           "unit": "degrees",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "normal"
+              }
+            }
+          ],
           "doc": "How far off the direction a face can point and still be selected."
         }
       ],
@@ -2322,7 +3854,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Removes the triangles the selection picks: in Bounding Box mode the ones whose centroid falls inside the region box, in Normal Direction mode the ones whose face normal points within Angle of Direction. Invert deletes everything the selection did not pick instead.\n\nThe debugging knife. Cut a wall away to see inside a model, strip the ground plane off a scan, drop the half of an import you do not need before it reaches a `merge` or an output. It goes anywhere in a modifier chain and it is usually quicker than going back to fix the source file.\n\nThose two predicates are the whole selection model. There are no groups, no primitive ids, and no per-face attributes to select on, so whatever you want gone has to be describable as a region or as a facing. Points left orphaned by the removal are compacted away, a mesh that loses every triangle drops out of the set, and deleting everything is legal: you get empty geometry and a warning, not an error.",
+      "doc": "Removes the triangles the selection picks: in Bounding Box mode the ones whose centroid falls inside the region box, in Normal Direction mode the ones whose face normal points within Angle of Direction. Invert deletes everything the selection did not pick instead.\n\nThe debugging knife. Cut a wall away to see inside a model, strip the ground plane off a scan, drop the half of an import you do not need before it reaches a `merge` or an output. It goes anywhere in a modifier chain and it is usually quicker than going back to fix the source file.\n\nThose two predicates are the whole selection model. There are no groups, no primitive ids, and no per-face attributes to select on, so whatever you want gone has to be describable as a region or as a facing. Points left orphaned by the removal are compacted away, a mesh that loses every triangle drops out of the set, and deleting everything is legal: you get empty geometry and a warning, not an error. The predicate sees triangles only: point clouds and polylines pass through untouched with a warning rather than being silently emptied.",
       "searchAliases": [
         "remove",
         "cull",
@@ -2495,6 +4027,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -2513,6 +4053,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -2577,11 +4125,305 @@
       "role": "light"
     },
     {
+      "typeId": "displace",
+      "version": 1,
+      "displayName": "Displace",
+      "category": "transform",
+      "categoryLabel": "Transform",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose points move."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Displace",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "direction",
+          "label": "Direction",
+          "group": "displace",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "normal",
+              "Normal"
+            ],
+            [
+              "vector",
+              "Vector"
+            ],
+            [
+              "attribute",
+              "Attribute"
+            ]
+          ],
+          "accept": [],
+          "default": "normal",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Where each point's movement direction comes from: the point normal (`N`), one constant vector for every point, or a vec3/vec4 attribute lane by name."
+        },
+        {
+          "key": "vector",
+          "label": "Vector",
+          "group": "displace",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "direction",
+              "pred": {
+                "kind": "eq",
+                "value": "vector"
+              }
+            }
+          ],
+          "doc": "The constant direction every point moves along."
+        },
+        {
+          "key": "direction_attr",
+          "label": "Direction Attribute",
+          "group": "displace",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "N",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "direction",
+              "pred": {
+                "kind": "eq",
+                "value": "attribute"
+              }
+            }
+          ],
+          "doc": "The vec3 (or vec4, xyz) point lane supplying each point's direction."
+        },
+        {
+          "key": "amplitude",
+          "label": "Amplitude",
+          "group": "displace",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.1,
+          "hard": [
+            -10000.0,
+            10000.0
+          ],
+          "soft": [
+            -2.0,
+            2.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far each point moves, in metres along its (unit) direction. Negative pushes inward. With an amplitude attribute set, this multiplies the lane's value."
+        },
+        {
+          "key": "amp_attr",
+          "label": "Amplitude Attribute",
+          "group": "displace",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Optional float point lane multiplying the amplitude per point. Empty means the constant amplitude alone. This is the driving seat for attribute workflows: randomize a lane, or sample one from an image, and feed it here."
+        },
+        {
+          "key": "normalize",
+          "label": "Normalize Direction",
+          "group": "displace",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Unit-length each direction before scaling, so the amplitude is an honest distance. Off, a longer direction vector moves its point proportionally further."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Moves every point along a direction scaled by an amplitude: the point normal by default, a constant vector, or a vec3 attribute lane, with an optional float lane multiplying the amplitude per point.\n\nThis is where attributes start driving shape: `attribute_randomize` a float lane and feed it to Amplitude Attribute for surface noise, or sample an image into a lane with `attribute_from_image` for map-driven relief.\n\nNormals are left as they were (deliberately, so chained displaces compound predictably); chain `compute_normals` after the last displace to relight the result. A mesh without a usable direction source passes through with a warning.",
+      "searchAliases": [
+        "displacement",
+        "deform",
+        "push",
+        "noise",
+        "height",
+        "relief"
+      ],
+      "glyph": "displace",
+      "role": "standard"
+    },
+    {
+      "typeId": "edges_to_geo",
+      "version": 1,
+      "displayName": "Edges to Geo",
+      "category": "topology",
+      "categoryLabel": "Topology",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry whose edges become line segments."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Edges to Geo",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Extracts every unique edge of the input as a real line segment: a triangle mesh becomes its wireframe, drawn unlit at one pixel, and shared edges appear once rather than once per neighboring triangle.\n\nUnlike the wireframe display overlay, this output is geometry: it survives export, feeds downstream modifiers, and its points carry the source's attributes, so a colored scan's wireframe stays colored. Line inputs pass through with duplicate segments folded; point clouds have no edges and contribute nothing.\n\nA typical inspection chain pairs it with `points_from_geo`: edges show the connectivity, points show the sampling. Materials are dropped in the conversion, and wires are unpickable in the viewport.",
+      "searchAliases": [
+        "wireframe",
+        "wire",
+        "outline",
+        "skeleton",
+        "convert"
+      ],
+      "glyph": "edges_to_geo",
+      "role": "standard"
+    },
+    {
       "typeId": "gamma",
       "version": 1,
       "displayName": "Gamma",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -2888,10 +4730,10 @@
     },
     {
       "typeId": "geo_export",
-      "version": 1,
+      "version": 2,
       "displayName": "Export Geometry",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "geo"
       ],
@@ -2981,7 +4823,22 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Which writer encodes the file. glTF Binary is the default and keeps the most: one file, positions, normals, and UVs, one node per mesh. OBJ keeps the same attributes as text, one `o` block per mesh. PLY merges every mesh into one vertex/face list, and only writes normals and UVs if every mesh has them. STL is the lossiest: triangles and nothing else, no meshes, no UVs, with facet normals recomputed on the way out. None of the four write materials."
+          "doc": "Which writer encodes the file. glTF Binary is the default and keeps the most: one file with positions, normals, UVs, vertex colors, materials with embedded textures, and true point/line primitives. OBJ keeps geometry as text with `p`/`l`/`f` records; with materials it becomes an OBJ + MTL + textures archive. PLY merges every mesh into one vertex/face list, writes normals, UVs, and colors when every mesh has them, and a pure point cloud exports face-less. STL is the lossiest: triangle facets and nothing else, so point and line geometry is skipped."
+        },
+        {
+          "key": "include_materials",
+          "label": "Include Materials",
+          "group": "output",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether materials leave with the geometry. On, GLB embeds the material table with its textures and OBJ delivers the MTL sidecar archive. Off exports bare geometry in every format: smaller files, single-file OBJ, and no texture re-encoding."
         },
         {
           "key": "filename",
@@ -3018,7 +4875,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Writes the geometry reaching it out to a file -- OBJ, STL, PLY, or GLB -- and passes that same geometry on unchanged. The output is the input by refcount, not a copy.\n\nBecause it passes through, it taps a chain rather than terminating one: drop it partway down and the nodes after it never notice. That makes it cheap to leave several in a network at the points worth exporting, each with its own format and name, and press whichever you need. Saving is a button, not a side effect of cooking -- the node never writes a file on its own.\n\nMaterials do not export. Every writer here takes positions, normals, UVs, and triangles and nothing else, so a textured model exports as bare geometry, silently, in all four formats -- including GLB, which is perfectly capable of carrying them. Material export is a known gap, not a property of the formats. The button exports what the node last cooked, so it reports having nothing to export rather than writing an empty file.",
+      "doc": "Writes the geometry reaching it out to a file -- OBJ, STL, PLY, or GLB -- and passes that same geometry on unchanged. The output is the input by refcount, not a copy.\n\nBecause it passes through, it taps a chain rather than terminating one: drop it partway down and the nodes after it never notice. That makes it cheap to leave several in a network at the points worth exporting, each with its own format and name, and press whichever you need. Saving is a button, not a side effect of cooking -- the node never writes a file on its own.\n\nMaterials and vertex colors travel with the geometry: GLB embeds the full material table with its textures and carries colors as COLOR_0, OBJ with materials arrives as an OBJ + MTL + textures archive, and PLY writes color properties. Point clouds and polylines export as true point and line primitives in GLB and OBJ and as face-less vertices in PLY; STL is triangle facets only and skips them. Include Materials turns the material side off for a bare-geometry file. The button exports what the node last cooked, so it reports having nothing to export rather than writing an empty file.",
       "searchAliases": [
         "export",
         "save",
@@ -3037,8 +4894,8 @@
       "typeId": "gradient",
       "version": 1,
       "displayName": "Gradient",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -3240,8 +5097,8 @@
       "typeId": "height_to_normal",
       "version": 1,
       "displayName": "Height to Normal",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -3503,8 +5360,8 @@
       "typeId": "hue_saturation",
       "version": 1,
       "displayName": "Hue / Saturation",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -3637,8 +5494,8 @@
       "typeId": "image_export",
       "version": 1,
       "displayName": "Export Image",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "tex"
       ],
@@ -3738,6 +5595,15 @@
           "step": 1.0,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "format",
+              "pred": {
+                "kind": "eq",
+                "value": "jpg"
+              }
+            }
+          ],
           "doc": "The JPEG quality factor, 1 to 100: higher is a bigger file with fewer compression artifacts. Only read when Format is JPEG, and hidden otherwise, since PNG has no equivalent knob."
         },
         {
@@ -4151,7 +6017,7 @@
     },
     {
       "typeId": "import_ply",
-      "version": 2,
+      "version": 3,
       "displayName": "Import PLY",
       "category": "import",
       "categoryLabel": "Import",
@@ -4255,16 +6121,33 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "Moves the model so its bounding-box centre sits at the origin. Applied after Scale. Worth turning on for a file authored far from the origin, which otherwise imports off-screen and orbits around nothing."
+        },
+        {
+          "key": "vertex_colors",
+          "label": "Vertex Colors",
+          "group": "import",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Keep the file's per-vertex colours (red/green/blue, optional alpha). On, colours import as the per-point colour attribute and display in the viewport; off, they are dropped at import for when a scan's colours are noise rather than signal."
         }
       ],
       "bypass": {
         "mode": "mute"
       },
-      "doc": "Loads a PLY mesh, binary or ASCII. Self-contained like STL: one file, no companions, no materials.\n\nPLY is the scanning and photogrammetry format, so this usually heads a cleanup chain and pairs with the validator -- like every import it validates the raw file as it parses, which on a multi-million-point scan is where the issue counts actually matter. On the web the parse runs in an import worker off the main thread.\n\nVertex colours do not survive the import. PLY commonly carries them, and this node had a Vertex Colors toggle once, but no vertex-colour channel exists end to end yet, so the param was removed rather than left lying about doing nothing.",
+      "doc": "Loads a PLY mesh or point cloud, binary or ASCII. Self-contained like STL: one file, no companions, no materials.\n\nPLY is the scanning and photogrammetry format, so this usually heads a cleanup chain and pairs with the validator -- like every import it validates the raw file as it parses, which on a multi-million-point scan is where the issue counts actually matter. On the web the parse runs in an import worker off the main thread.\n\nA file with no face element loads as a true point cloud and draws as camera-facing points. Vertex colours (red/green/blue, optional alpha, uchar or float) survive the import as the per-point colour attribute and display directly; the Vertex Colors toggle drops them at the door when a scan's colours are noise rather than signal. Points and point clouds are not click-selectable in the viewport; select their node on the canvas instead.",
       "searchAliases": [
         "ply",
         "import",
-        "scan"
+        "scan",
+        "points",
+        "cloud"
       ],
       "glyph": "import_ply",
       "role": "standard"
@@ -4408,8 +6291,8 @@
       "typeId": "invert",
       "version": 1,
       "displayName": "Invert",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -4486,8 +6369,8 @@
       "typeId": "levels",
       "version": 1,
       "displayName": "Levels",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_adjust",
+      "categoryLabel": "Adjust",
       "contexts": [
         "tex"
       ],
@@ -4656,11 +6539,160 @@
       "role": "standard"
     },
     {
+      "typeId": "line",
+      "version": 1,
+      "displayName": "Line",
+      "category": "generators",
+      "categoryLabel": "Generators",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "start_point",
+          "label": "Start Point",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "Optional. When connected, the starting endpoint snaps to point 0 of this geometry's first non-empty mesh, overriding the parameter."
+        },
+        {
+          "key": "end_point",
+          "label": "End Point",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": false,
+          "doc": "Optional. When connected, the finishing endpoint snaps to point 0 of this geometry's first non-empty mesh, overriding the parameter."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Line",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "start",
+          "label": "Start",
+          "group": "geometry",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": "start_point",
+          "doc": "The starting end of the line, in metres. Both ends are free points; nothing pins the line to the origin. A geometry wired into the matching input overrides this with its first point."
+        },
+        {
+          "key": "end",
+          "label": "End",
+          "group": "geometry",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": "end_point",
+          "doc": "The finishing end of the line, in metres. Both ends are free points; nothing pins the line to the origin. A geometry wired into the matching input overrides this with its first point."
+        },
+        {
+          "key": "points",
+          "label": "Points",
+          "group": "geometry",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 2,
+          "hard": [
+            2.0,
+            1025.0
+          ],
+          "soft": [
+            2.0,
+            65.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many evenly spaced points the line carries, endpoints included. 2 is a single segment; raise it when a deform or scatter downstream needs interior points to work with."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "A straight polyline from Start to End, subdivided into evenly spaced points. It is the first curve primitive: line topology has no surface, so it draws as an unlit wire at a constant one-pixel width, unaffected by lights and materials.\n\nAt the default 2 points it is a single segment. More points give downstream nodes something to grab: a deform has interior points to move, and `copy_to_points` can stamp a template along the line's vertices.\n\nThe default runs from the origin one metre up the Y axis. Wires and edges are unpickable in the viewport; select the node on the canvas.\n\nThe two optional inputs anchor the ends to existing geometry: a connected input overrides its parameter with point 0 of the geometry's first non-empty mesh, so a single-point `scatter` or `points_from_geo` upstream pins that end and the line follows it on every recook.",
+      "searchAliases": [
+        "curve",
+        "segment",
+        "polyline",
+        "wire",
+        "path"
+      ],
+      "glyph": "line",
+      "role": "standard"
+    },
+    {
       "typeId": "matcap",
       "version": 1,
       "displayName": "MatCap",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -4773,8 +6805,8 @@
       "typeId": "material",
       "version": 2,
       "displayName": "Material",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "geo"
       ],
@@ -4925,6 +6957,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "reference"
+              }
+            }
+          ],
           "doc": "The `matnet` to take the material from. What arrives is whatever that network's display node publishes, so re-designating the display node inside it re-points every referrer at once. In Reference mode this is required: unset, dangling, or aimed at a network that publishes nothing all fail the cook rather than quietly assigning a default surface."
         },
         {
@@ -4960,6 +7001,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": "base_color_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "The surface colour of a dielectric, or the reflectance tint of a metal, multiplied into the base-color sample. Connecting a Base Color Map neutralizes this to white so the map alone drives the channel; the value you set is kept for when the map comes off again. Alpha is carried, but these nodes only build Opaque materials today."
         },
         {
@@ -4981,6 +7031,15 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": "metallic_roughness_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "How metallic the surface is. 0 is a dielectric: coloured diffuse plus an uncoloured specular highlight. 1 is bare metal: no diffuse at all, and the reflection takes the base colour. Values in between are not physical -- reach for them for a worn or corroded edge, not as a dial for shininess (that is Roughness)."
         },
         {
@@ -5002,6 +7061,15 @@
           "step": 0.01,
           "unit": "none",
           "drivenByPort": "metallic_roughness_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "Microsurface scatter, which sets how wide the specular lobe is: 0 is a mirror, 1 is fully diffuse. The shader clamps the low end to 0.04, so a perfect mirror is not reachable and highlights never collapse into a single aliased pixel."
         },
         {
@@ -5022,6 +7090,15 @@
           "step": null,
           "unit": "none",
           "drivenByPort": "emissive_map",
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
@@ -5116,8 +7193,8 @@
       "typeId": "merge",
       "version": 2,
       "displayName": "Merge",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -5196,8 +7273,8 @@
       "typeId": "mirror",
       "version": 1,
       "displayName": "Mirror",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
       "contexts": [
         "geo"
       ],
@@ -5339,8 +7416,8 @@
       "typeId": "mix",
       "version": 1,
       "displayName": "Mix",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -5489,8 +7566,8 @@
       "typeId": "mix_material",
       "version": 1,
       "displayName": "Mix Material",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -5612,8 +7689,8 @@
       "typeId": "noise",
       "version": 1,
       "displayName": "Noise",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -5755,7 +7832,7 @@
     },
     {
       "typeId": "note",
-      "version": 1,
+      "version": 2,
       "displayName": "Note",
       "category": "utility",
       "categoryLabel": "Utility",
@@ -5869,6 +7946,34 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "The sticky's height on the canvas, in the same units as Width, and likewise usually dragged rather than typed. It does not grow to fit: text longer than the box is clipped, so size the note to its contents."
+        },
+        {
+          "key": "text_size",
+          "label": "Text Size",
+          "group": "note",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "small",
+              "Small"
+            ],
+            [
+              "medium",
+              "Medium"
+            ],
+            [
+              "large",
+              "Large"
+            ]
+          ],
+          "accept": [],
+          "default": "small",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The note text's size on the canvas. Small keeps annotations quieter than the node labels around them and is the default; Medium matches the pre-0.8.0 look; Large is for the one heading a network deserves. Notes saved before this option exists open as Small, the new default."
         }
       ],
       "bypass": {
@@ -5968,8 +8073,8 @@
       "typeId": "pack_orm",
       "version": 1,
       "displayName": "Pack ORM",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -6123,8 +8228,8 @@
       "typeId": "plane",
       "version": 2,
       "displayName": "Plane",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -6447,6 +8552,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -6465,6 +8578,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -6529,11 +8650,116 @@
       "role": "light"
     },
     {
+      "typeId": "points_from_geo",
+      "version": 1,
+      "displayName": "Points from Geo",
+      "category": "topology",
+      "categoryLabel": "Topology",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The geometry to collapse into a point cloud."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Points from Geo",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "group": "points",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "vertices",
+              "Vertices"
+            ],
+            [
+              "primitive_centers",
+              "Primitive Centers"
+            ]
+          ],
+          "accept": [],
+          "default": "vertices",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "What each output point corresponds to. Vertices keeps every input vertex with its attributes carried verbatim. Primitive Centers places one point at each triangle centroid or segment midpoint, averaging the corner attributes into it."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Collapses the input to a Points-topology cloud. Vertices mode keeps every vertex where it is, with normals and UVs lifted into the point attributes and every attribute riding along untouched; Primitive Centers places one point per triangle or segment at its center, averaging the corner attributes into it.\n\nTwo jobs, one node: as an inspection lens it strips a surface down to its point structure, showing vertex distribution and density at a glance. As a modeling source it turns any mesh into targets for `copy_to_points` without scattering, so copies land exactly on vertices or face centers rather than randomly.\n\nPoints draw unlit at a uniform screen-space size, colored by their `color` attribute when one exists, and materials are dropped in the conversion.",
+      "searchAliases": [
+        "vertices",
+        "cloud",
+        "convert",
+        "centers",
+        "centroid"
+      ],
+      "glyph": "points_from_geo",
+      "role": "standard"
+    },
+    {
       "typeId": "principled",
       "version": 1,
       "displayName": "Principled",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -6748,8 +8974,8 @@
       "typeId": "ramp",
       "version": 1,
       "displayName": "Ramp",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],
@@ -7125,8 +9351,8 @@
       "typeId": "render",
       "version": 1,
       "displayName": "Render",
-      "category": "utility",
-      "categoryLabel": "Utility",
+      "category": "export",
+      "categoryLabel": "Export",
       "contexts": [
         "obj"
       ],
@@ -7250,11 +9476,135 @@
       "role": "terminal"
     },
     {
+      "typeId": "scatter",
+      "version": 1,
+      "displayName": "Scatter",
+      "category": "copy",
+      "categoryLabel": "Copy & Instance",
+      "contexts": [
+        "geo"
+      ],
+      "opens": null,
+      "inputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": true,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The surface to scatter points over. Only triangle meshes have area; line and point inputs contribute nothing."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "geometry",
+          "label": "Geometry",
+          "dataType": "geometry",
+          "variadic": false,
+          "required": false,
+          "min": 0,
+          "isDefault": true,
+          "doc": "The cooked geometry. Being the default output, a drag from the node's body wires from here, and a bypass passes the input through it."
+        }
+      ],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Scatter",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "count",
+          "label": "Count",
+          "group": "scatter",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 100,
+          "hard": [
+            1.0,
+            1000000.0
+          ],
+          "soft": [
+            1.0,
+            10000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many points to place. The hard ceiling of one million keeps a mistyped count from stalling the cook; past about ten thousand, expect the point display itself to become the cost."
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "group": "scatter",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0,
+          "hard": [
+            0.0,
+            2147483647.0
+          ],
+          "soft": [
+            0.0,
+            9999.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Selects which random placement you get. Any change gives a completely different arrangement rather than a shifted one, so scrub it to hunt for one you like. The same seed always cooks the same points, which is what lets a saved scene reproduce exactly."
+        }
+      ],
+      "bypass": {
+        "mode": "passThrough",
+        "input": "geometry"
+      },
+      "doc": "Sprinkles Count random points over the input's triangle surfaces and outputs them as a point cloud. Placement is area-weighted: a big face receives proportionally more points than a small one, so density stays even no matter how the surface happens to be triangulated, and the same Seed always reproduces the same arrangement.\n\nEach point inherits the surface under it: the interpolated normal (so copies can orient to the surface downstream), the UV, and the vertex color when the source carries one. Feed the cloud to `copy_to_points` to stamp a template onto every point, or use it directly as a visible dressing of the surface.\n\nOnly triangles have area, so line and point inputs scatter nothing and the node warns instead of guessing. Points draw at a uniform screen-space size and are unpickable in the viewport; select them on the node canvas.",
+      "searchAliases": [
+        "points",
+        "distribute",
+        "sprinkle",
+        "sample",
+        "random",
+        "spray"
+      ],
+      "glyph": "scatter",
+      "role": "standard"
+    },
+    {
       "typeId": "sharpen",
       "version": 1,
       "displayName": "Sharpen",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "tex_composite",
+      "categoryLabel": "Composite",
       "contexts": [
         "tex"
       ],
@@ -7350,8 +9700,8 @@
       "typeId": "sphere",
       "version": 2,
       "displayName": "Sphere",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -7707,6 +10057,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "The resolution the shadow map would render at, trading crisper shadow edges against memory and fill cost. This control does nothing today: the shadow map size is fixed by the host (2048 in the web app) and nothing reads this value. It is resolved and saved with the document, waiting on the per-light shadow work, so setting it now changes neither the image nor performance."
         },
         {
@@ -7725,6 +10083,14 @@
           "step": 0.0001,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "cast_shadow",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Depth offset applied when testing against the shadow map, the usual dial for trading shadow acne against peter-panning. This control does nothing today: the shader hardcodes one bias for every caster and nothing reads this value. Dragging it will not change the image; if you are fighting acne, the bias is not currently yours to tune."
         },
         {
@@ -7792,8 +10158,8 @@
       "typeId": "subdivide",
       "version": 2,
       "displayName": "Subdivide",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "topology",
+      "categoryLabel": "Topology",
       "contexts": [
         "geo"
       ],
@@ -7879,7 +10245,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Splits every triangle into four at its edge midpoints, one pass per iteration, interpolating normals, UVs, and any named attributes onto the new points. Neighbouring triangles look their shared edge's midpoint up in an edge map instead of each making its own, so both sides land on the same point and the surface stays crack-free.\n\nReach for it to buy resolution for something downstream that needs points to work with: a displacement, a noise, a deform. It sits between the source geometry and that node, and it is the answer when the source is an import rather than a primitive whose segment counts you could have raised instead.\n\nThe subdivision is linear: it adds points onto the existing surface without moving any of them, so a subdivided box is still a box with the same silhouette and four times the triangles. Nothing here smooths. And the growth compounds hard -- at 5 iterations a 10,000-triangle mesh projects to over 10 million, past the kernel's 8 million ceiling, which is a cook error rather than a stall.",
+      "doc": "Splits every triangle into four at its edge midpoints, one pass per iteration, interpolating normals, UVs, and any named attributes onto the new points. Neighbouring triangles look their shared edge's midpoint up in an edge map instead of each making its own, so both sides land on the same point and the surface stays crack-free.\n\nReach for it to buy resolution for something downstream that needs points to work with: a displacement, a noise, a deform. It sits between the source geometry and that node, and it is the answer when the source is an import rather than a primitive whose segment counts you could have raised instead.\n\nThe subdivision is linear: it adds points onto the existing surface without moving any of them, so a subdivided box is still a box with the same silhouette and four times the triangles. Nothing here smooths. And the growth compounds hard -- at 5 iterations a 10,000-triangle mesh projects to over 10 million, past the kernel's 8 million ceiling, which is a cook error rather than a stall. Point clouds and polylines have no triangles to split and pass through untouched with a warning.",
       "searchAliases": [
         "subdivide",
         "smooth",
@@ -8140,8 +10506,8 @@
       "typeId": "toon",
       "version": 1,
       "displayName": "Toon",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -8272,8 +10638,8 @@
       "typeId": "torus",
       "version": 2,
       "displayName": "Torus",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -8416,8 +10782,8 @@
       "typeId": "torus_knot",
       "version": 2,
       "displayName": "Torus Knot",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "generators",
+      "categoryLabel": "Generators",
       "contexts": [
         "geo"
       ],
@@ -8596,8 +10962,8 @@
       "typeId": "transform",
       "version": 2,
       "displayName": "Transform",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "transform",
+      "categoryLabel": "Transform",
       "contexts": [
         "geo"
       ],
@@ -8819,8 +11185,8 @@
       "typeId": "unlit",
       "version": 1,
       "displayName": "Unlit",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "shaders",
+      "categoryLabel": "Shaders",
       "contexts": [
         "mat"
       ],
@@ -8933,8 +11299,8 @@
       "typeId": "uv_project",
       "version": 1,
       "displayName": "UV Project",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "attribute",
+      "categoryLabel": "Attribute",
       "contexts": [
         "geo"
       ],
@@ -9095,7 +11461,7 @@
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Writes a fresh UV set onto every mesh in the input using one of four projections, normalized over the whole set's bounding box so that a scale of 1 lands the geometry inside 0..1.\n\nImports very often arrive with no UVs at all, and texel density, the checker pattern, and any textured material all need them. This is the node that gives them something to read: it goes after the import or the primitive and before the material. It is a projection rather than an unwrap, so treat it as the fast way to usable UVs, not as a substitute for a real layout.\n\nThree things to expect. Existing UVs are replaced, not merged. The normalization is against the bounds of the whole input set, so several meshes share one consistent mapping and a `transform` upstream drags the UVs along with the bounds. And Box mode rebuilds each mesh non-indexed, three points per triangle, so the point count jumps and validate's topology counts will reflect it.",
+      "doc": "Writes a fresh UV set onto every mesh in the input using one of four projections, normalized over the whole set's bounding box so that a scale of 1 lands the geometry inside 0..1.\n\nImports very often arrive with no UVs at all, and texel density, the checker pattern, and any textured material all need them. This is the node that gives them something to read: it goes after the import or the primitive and before the material. It is a projection rather than an unwrap, so treat it as the fast way to usable UVs, not as a substitute for a real layout.\n\nThree things to expect. Existing UVs are replaced, not merged. The normalization is against the bounds of the whole input set, so several meshes share one consistent mapping and a `transform` upstream drags the UVs along with the bounds. And Box mode rebuilds each mesh non-indexed, three points per triangle, so the point count jumps and validate's topology counts will reflect it. Projection is a surface operation: point clouds and polylines pass through untouched with a warning.",
       "searchAliases": [
         "uv",
         "unwrap",
@@ -9110,8 +11476,8 @@
       "typeId": "validate",
       "version": 2,
       "displayName": "Validate",
-      "category": "modifiers",
-      "categoryLabel": "Modifiers",
+      "category": "utility",
+      "categoryLabel": "Utility",
       "contexts": [
         "geo"
       ],
@@ -9224,6 +11590,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "uvs",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "Off by default. When on, flags any mesh with no texture coordinates at all, regardless of source format, so you can ask whether cooked geometry lacks UVs before texturing or exporting it. Leave it off for procedural geometry that is legitimately UV-less. Only has an effect while UVs is on."
         },
         {
@@ -9287,6 +11661,14 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "budget",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
           "doc": "How many triangles this geometry is allowed. 0 means no limit, which is why the check says nothing until you set one. Going over is a warning up to 20 percent above the number and an error beyond that. The count is the whole input set, not per mesh."
         }
       ],
@@ -9308,8 +11690,8 @@
       "typeId": "voronoi",
       "version": 1,
       "displayName": "Voronoi",
-      "category": "primitives",
-      "categoryLabel": "Primitives",
+      "category": "tex_generate",
+      "categoryLabel": "Generate",
       "contexts": [
         "tex"
       ],

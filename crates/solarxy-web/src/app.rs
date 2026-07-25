@@ -41,16 +41,19 @@ use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
+use crate::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
+use crate::display_defaults::{self, DisplayDefaults};
 use crate::gizmo::{self, GizmoState, ToolMode};
-use solarxy_renderer::camera::{Camera, CameraUniform};
+use solarxy_renderer::camera::{turntable_up, Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
 use solarxy_renderer::geometry::build_normals_geometry;
-use solarxy_renderer::model::NormalsGeometry;
+use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
 use solarxy_renderer::input::PointerButton;
 use solarxy_renderer::light::LightsUniform;
 use solarxy_renderer::panes::{self, PaneRect};
+use solarxy_renderer::visualization::grid_plane_for;
 use solarxy_renderer::scene::{create_light_bind_group, lights_from_camera, BackgroundModeExt};
 use solarxy_renderer::scene_objects::SceneObjects;
 use solarxy_renderer::texture;
@@ -98,7 +101,10 @@ fn default_pane_settings() -> PaneDisplaySettings {
         background_mode: BackgroundMode::GRADIENT,
         uv_mode: UvMode::Off,
         bounds_mode: BoundsMode::Off,
-        line_weight: LineWeight::Medium,
+        // The enum's own default (Light), matching the desktop; the user's
+        // persisted preference overwrites this at boot via
+        // `set_display_defaults`.
+        line_weight: LineWeight::default(),
         show_grid: true,
         show_axis_gizmo: false,
         show_local_axes: false,
@@ -161,6 +167,11 @@ enum HostEvent {
     /// Host-side pointer input mutated view state (UV pan/zoom); the
     /// frontend refreshes its view-state mirror.
     ViewChanged,
+    /// The attribute-label sampling facts changed (cook, lane, toggle, cap
+    /// edit): `capacity` labels drawn of `total` displayed points; the
+    /// strip's sampling notice reads `capacity < total`. Total rides f64
+    /// for the 53-bit JS number boundary.
+    AttrPinStats { capacity: u32, total: f64 },
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -296,6 +307,17 @@ pub struct SolarxyApp {
     /// Whether the normals/bounds visualization aggregate is stale
     /// (geometry changed, env rebuilt, or an overlay mode just turned on).
     viz_dirty: bool,
+    /// Host-owned attribute visualization (session-only, scene-wide; never
+    /// saved into `.slxy`, never in undo). The strip's toggles and the
+    /// picked lane name.
+    attr_viz: AttrVizState,
+    /// Whether the attribute-vector line buffer is stale (mirrors the
+    /// `viz_dirty` sites, plus any `set_attr_viz`).
+    attr_dirty: bool,
+    /// The preference-backed display defaults (wireframe weight,
+    /// background), pushed from the TS prefs store. Pane seeds, never a
+    /// force-override: a loaded scene's saved per-pane settings win.
+    display_defaults: DisplayDefaults,
 }
 
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
@@ -515,6 +537,9 @@ impl SolarxyApp {
             turntable_request: None,
             pending_screenshot: None,
             viz_dirty: true,
+            attr_viz: AttrVizState::default(),
+            attr_dirty: false,
+            display_defaults: DisplayDefaults::default(),
             gizmo: GizmoState::default(),
             gizmo_readout: None,
         })
@@ -565,6 +590,7 @@ impl SolarxyApp {
         let delta = self.engine.take_scene_delta();
         if !delta.ops.is_empty() {
             self.viz_dirty = true;
+            self.attr_dirty = true;
             if let Err(e) =
                 self.scene_objects
                     .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
@@ -589,6 +615,7 @@ impl SolarxyApp {
 
         self.sync_env_bounds();
         self.sync_visualization();
+        self.sync_attr_channels();
         self.sync_uv_preview();
         self.ensure_pane_cameras();
         self.follow_look_through_cameras();
@@ -686,6 +713,9 @@ impl SolarxyApp {
         }
         if dpr > 0.0 {
             self.dpr = dpr;
+            // Label px metrics scale by dpr; keep them honest across
+            // browser-zoom and monitor-density changes.
+            self.renderer.write_label_dpr(&self.queue, dpr);
         }
         self.config.width = width;
         self.config.height = height;
@@ -738,6 +768,47 @@ impl SolarxyApp {
             snap_rotate: snap_rotate.max(0.0),
             snap_scale: snap_scale.max(0.0),
         };
+    }
+
+    /// The display defaults, pushed from the TS prefs store (the
+    /// gizmo-settings pattern). The turntable rpm applies immediately, it is
+    /// live session state that never serializes into `.slxy`. Wireframe
+    /// weight and background are stored as the pane seed and, per `apply_*`
+    /// flag, written into every pane: the boot push sets both flags; a
+    /// mid-session preference save sets only the flags for fields that
+    /// actually changed, so per-pane Display-menu overrides survive
+    /// unrelated preference edits.
+    pub fn set_display_defaults(
+        &mut self,
+        wireframe_weight: &str,
+        background: &str,
+        turntable_rpm: f32,
+        apply_wireframe: bool,
+        apply_background: bool,
+    ) {
+        self.display_defaults = DisplayDefaults {
+            line_weight: display_defaults::parse_line_weight(wireframe_weight),
+            background: display_defaults::parse_background(background),
+        };
+        self.view.display.turntable_rpm = if turntable_rpm.is_finite() {
+            turntable_rpm.clamp(1.0, 60.0)
+        } else {
+            6.0
+        };
+        let mut changed = false;
+        for pds in &mut self.view.pane_settings {
+            if apply_wireframe && pds.line_weight != self.display_defaults.line_weight {
+                pds.line_weight = self.display_defaults.line_weight;
+                changed = true;
+            }
+            if apply_background && pds.background_mode != self.display_defaults.background {
+                pds.background_mode = self.display_defaults.background;
+                changed = true;
+            }
+        }
+        if changed {
+            self.host_events.push(HostEvent::ViewChanged);
+        }
     }
 
     /// The live drag readout ("X +1.250 m"), or `null` when nothing is dragging.
@@ -912,7 +983,6 @@ impl SolarxyApp {
             (p.0 - pane.x, p.1 - pane.y),
             (pane.width, pane.height),
             cam.build_view_projection_matrix(),
-            cam.eye,
         );
         let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
         let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
@@ -933,7 +1003,6 @@ impl SolarxyApp {
                 (p.0 - pane.x, p.1 - pane.y),
                 (pane.width, pane.height),
                 cam.build_view_projection_matrix(),
-                cam.eye,
             );
             let origin = [ray.origin.x, ray.origin.y, ray.origin.z];
             let dir = [ray.direction.x, ray.direction.y, ray.direction.z];
@@ -970,6 +1039,55 @@ impl SolarxyApp {
         to_js(&annotations)
     }
 
+    /// The lane inventory of a node's cooked geometry (names, types,
+    /// counts, both domains), or `null` while nothing is committed. Feeds
+    /// the attribute-name pickers and the Attributes pane header; values
+    /// page separately through [`SolarxyApp::attribute_table`].
+    pub fn attribute_summary(&self, node: f64) -> Result<JsValue, JsError> {
+        to_js(&self.engine.attribute_summary(NodeId(node as u64)))
+    }
+
+    /// The last completed cook's warnings for one node (a plain string
+    /// array; empty when the cook was quiet). Pull-read by the node info
+    /// card when it opens or the node's cook status changes.
+    pub fn cook_warnings(&self, node: f64) -> Result<JsValue, JsError> {
+        to_js(&self.engine.cook_warnings(NodeId(node as u64)))
+    }
+
+    /// One window of a node's cooked attribute values
+    /// (`domain` is `"point"` or `"primitive"`). Only the requested page
+    /// crosses the boundary; the geometry stays in wasm.
+    pub fn attribute_table(
+        &self,
+        node: f64,
+        domain: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let domain = match domain.as_str() {
+            "primitive" => solarxy_kernel::AttributeDomain::Primitive,
+            _ => solarxy_kernel::AttributeDomain::Point,
+        };
+        to_js(
+            &self
+                .engine
+                .attribute_page(NodeId(node as u64), domain, offset, limit),
+        )
+    }
+
+    /// Replaces the host-owned attribute-visualization state (the right
+    /// strip's toggles and picked lane). Session-only: never saved, never
+    /// in undo. Returns the full view state, the mutator convention.
+    pub fn set_attr_viz(&mut self, state: JsValue) -> Result<JsValue, JsError> {
+        let next: AttrVizState = serde_wasm_bindgen::from_value(state)
+            .map_err(|e| JsError::new(&format!("attrViz: {e}")))?;
+        if next != self.attr_viz {
+            self.attr_viz = next;
+            self.attr_dirty = true;
+        }
+        to_js(&self.view_state_dto())
+    }
+
     /// Marker pin positions in PANE-RELATIVE CSS pixels (the DOM overlay
     /// clips one absolutely-positioned box per pane, so pins offset from
     /// their pane's origin), one entry per visible (marker x 3D pane) pair,
@@ -1000,8 +1118,14 @@ impl SolarxyApp {
                 if clip.w <= 0.0 {
                     continue;
                 }
-                let ndc = (clip.x / clip.w, clip.y / clip.w);
-                if ndc.0.abs() > 1.05 || ndc.1.abs() > 1.05 {
+                let ndc = (clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+                // Same culls as the attribute pins; the z range is what
+                // rejects behind-camera markers under orthographic
+                // projection (clip.w is a constant 1 there).
+                if ndc.0.abs() > NDC_XY_SLACK
+                    || ndc.1.abs() > NDC_XY_SLACK
+                    || !(NDC_Z_MIN..=NDC_Z_MAX).contains(&ndc.2)
+                {
                     continue;
                 }
                 out.push(MarkerScreenDto {
@@ -1360,6 +1484,31 @@ impl SolarxyApp {
             .set_selection_highlight(&self.queue, style, [r, g, b, a], width);
     }
 
+    /// Pushes the attribute-label theme colors (linear RGB, converted from
+    /// the CSS tokens frontend-side like the selection highlight): text,
+    /// background chip, anchor dot. Called at boot and on theme change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_label_colors(
+        &mut self,
+        text_r: f32,
+        text_g: f32,
+        text_b: f32,
+        chip_r: f32,
+        chip_g: f32,
+        chip_b: f32,
+        dot_r: f32,
+        dot_g: f32,
+        dot_b: f32,
+    ) {
+        let style = solarxy_renderer::labels::LabelStyle {
+            text: [text_r, text_g, text_b],
+            chip: [chip_r, chip_g, chip_b],
+            dot: [dot_r, dot_g, dot_b],
+            dpr: self.dpr,
+        };
+        self.renderer.write_label_style(&self.queue, &style);
+    }
+
     // ---- view-state boundary (host-owned; React mirrors) ----
 
     /// The full view state for the mirror.
@@ -1526,13 +1675,16 @@ impl SolarxyApp {
 
     /// A camera command on a pane: `{kind:"fit"}`, `{kind:"view",
     /// axis:"top"|"bottom"|"front"|"back"|"left"|"right"}`, or
-    /// `{kind:"projection", mode:"perspective"|"orthographic"}`.
-    pub fn camera_command(&mut self, pane: usize, cmd: JsValue) -> Result<(), JsError> {
+    /// `{kind:"projection", mode:"perspective"|"orthographic"}`. Returns the
+    /// refreshed [`ViewStateDto`] like every other view mutator -- a view
+    /// preset flips the pane to orthographic, and without the mirror update
+    /// the toolbar's Persp/Ortho label kept showing the stale mode.
+    pub fn camera_command(&mut self, pane: usize, cmd: JsValue) -> Result<JsValue, JsError> {
         let cmd: CameraCommandDto = serde_wasm_bindgen::from_value(cmd)
             .map_err(|e| JsError::new(&format!("bad camera command: {e}")))?;
         let bounds = self.scene_bounds();
         let Some(cam) = self.view.cameras.get_mut(pane).and_then(|c| c.as_mut()) else {
-            return Ok(());
+            return self.view_state();
         };
         match cmd.kind.as_str() {
             "fit" => cam.reset_to_bounds(&bounds),
@@ -1558,7 +1710,7 @@ impl SolarxyApp {
             }
             other => return Err(JsError::new(&format!("bad camera command: {other}"))),
         }
-        Ok(())
+        self.view_state()
     }
 
     /// The current pane rectangles in CSS pixels (DOM toolbar positioning).
@@ -2099,7 +2251,6 @@ impl SolarxyApp {
             (p.0 - pane.x, p.1 - pane.y),
             (pane.width, pane.height),
             cam.build_view_projection_matrix(),
-            cam.eye,
         );
         Some((idx, pane, cam, ray))
     }
@@ -2621,6 +2772,208 @@ impl SolarxyApp {
             Some(&normals),
             grid_color,
         );
+        // The rebuilt state's attr channel is empty; refill it.
+        self.attr_dirty = true;
+    }
+
+    /// Rebuilds (or clears) BOTH attribute channels (vector lines and GPU
+    /// labels) when they are stale, then reports the sampling facts. One
+    /// consumer of `attr_dirty` by construction: splitting the channels
+    /// over two consumers would starve whichever ran second. Independent of
+    /// `sync_visualization`: the overlays draw whenever the strip enables
+    /// them, with or without the normals/bounds overlays.
+    fn sync_attr_channels(&mut self) {
+        if !self.attr_dirty {
+            return;
+        }
+        self.attr_dirty = false;
+
+        if self.attr_viz.vectors && self.attr_viz.name.is_some() {
+            let lines = self.build_attr_vector_lines();
+            self.env.vis.set_attr_lines(&self.device, &lines);
+        } else if self.env.vis.attr_lines_count > 0 {
+            self.env.vis.set_attr_lines(&self.device, &[]);
+        }
+
+        let (capacity, total) = self.rebuild_attr_labels();
+        self.host_events.push(HostEvent::AttrPinStats {
+            capacity,
+            total: total as f64,
+        });
+    }
+
+    /// Rebuilds the GPU label set from a deterministic stride sample of
+    /// every displayed geometry's points (all of them up to the budget):
+    /// world-space anchors plus per-label glyph words, uploaded once here
+    /// and projected in the vertex shader thereafter. Returns
+    /// `(capacity, total displayed points)` for the sampling notice.
+    fn rebuild_attr_labels(&mut self) -> (u32, usize) {
+        use cgmath::{Matrix4, Transform};
+        if !self.attr_viz.pins_wanted() {
+            self.renderer
+                .set_attr_labels(&self.device, &self.queue, &[], &[]);
+            return (0, 0);
+        }
+        let lane = self
+            .attr_viz
+            .name
+            .as_deref()
+            .filter(|_| self.attr_viz.labels);
+        let geos = self.engine.display_geometries();
+        let total: usize = geos
+            .iter()
+            .flat_map(|(_, set, _)| set.meshes.iter())
+            .map(solarxy_kernel::KernelMesh::vertex_count)
+            .sum();
+        if total == 0 {
+            self.renderer
+                .set_attr_labels(&self.device, &self.queue, &[], &[]);
+            return (0, 0);
+        }
+        let cap = self.attr_viz.effective_cap(total);
+        let stride = total.div_ceil(cap).max(1);
+
+        let mut candidates: Vec<crate::attr_labels::LabelCandidate> = Vec::with_capacity(cap);
+        let mut global = 0usize;
+        for (_node, set, m) in &geos {
+            let matrix = Matrix4::from(*m);
+            let mut ptnum: u64 = 0;
+            for mesh in &set.meshes {
+                let len = mesh.vertex_count();
+                let values =
+                    lane.and_then(|n| solarxy_graph::engine::attr_table::resolve_lane(mesh, n));
+                let first = global.next_multiple_of(stride);
+                let mut g = first;
+                while g < global + len {
+                    let i = g - global;
+                    let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
+                    candidates.push(crate::attr_labels::LabelCandidate {
+                        world: [tp.x, tp.y, tp.z],
+                        ptnum: ptnum + i as u64,
+                        value: values.map(|l| l.components(i).unwrap_or_default()),
+                    });
+                    g += stride;
+                }
+                ptnum += len as u64;
+                global += len;
+            }
+        }
+        let (instances, words) = crate::attr_labels::build_labels(
+            &candidates,
+            self.attr_viz.labels,
+            self.attr_viz.points,
+        );
+        self.renderer
+            .set_attr_labels(&self.device, &self.queue, &instances, &words);
+        (cap as u32, total)
+    }
+
+    /// World-space arrow segments for the picked point lane (vec3, or the
+    /// xyz of vec4; map lane or the fixed `N` buffer), over
+    /// every displayed geometry: positions through the object matrix,
+    /// directions through the normal matrix for the reserved `N` lane
+    /// (bivector semantics under nonuniform scale) and the plain linear
+    /// part for everything else. Length is the bounds-derived factor
+    /// times the strip's scale multiplier, over the value (or its unit
+    /// direction under normalize); color is the uniform pick, or the
+    /// cold-to-warm ramp over this frame's magnitude range.
+    fn build_attr_vector_lines(&self) -> Vec<GizmoVertex> {
+        use cgmath::{InnerSpace, Matrix3, Matrix4, SquareMatrix, Transform};
+        let Some(name) = self.attr_viz.name.as_deref() else {
+            return Vec::new();
+        };
+        let is_normal_lane = name == solarxy_kernel::reserved::NORMAL;
+        let multiplier = self.attr_viz.scale_multiplier();
+        let normalize = self.attr_viz.normalize;
+
+        // First pass: world-space segments plus each arrow's magnitude
+        // (pre-normalization), so the ramp can span the real range.
+        let mut segments: Vec<([f32; 3], [f32; 3], f32)> = Vec::new();
+        for (_node, set, m) in self.engine.display_geometries() {
+            let matrix = Matrix4::from(m);
+            let linear = Matrix3::from_cols(
+                matrix.x.truncate(),
+                matrix.y.truncate(),
+                matrix.z.truncate(),
+            );
+            let dir_matrix = if is_normal_lane {
+                linear
+                    .invert()
+                    .map_or(linear, |inv| cgmath::Matrix::transpose(&inv))
+            } else {
+                linear
+            };
+            let scale = {
+                let d = set.bounds.diagonal();
+                if d > 1e-10 { d * 0.05 } else { 0.1 }
+            } * multiplier;
+            for mesh in &set.meshes {
+                // Vec3 and vec4 (xyz) lanes draw, map or fixed-buffer N;
+                // float/vec2 lanes have no spatial reading and skip.
+                let Some(lane) = solarxy_graph::engine::attr_table::resolve_lane(mesh, name) else {
+                    continue;
+                };
+                for (i, p) in mesh.positions.iter().enumerate() {
+                    let Some(v) = lane.direction(i) else { continue };
+                    let tp = matrix.transform_point(Point3::from(*p));
+                    let mut dir = dir_matrix * Vector3::from(v);
+                    let magnitude = dir.magnitude();
+                    if normalize {
+                        if magnitude <= 1e-10 {
+                            continue;
+                        }
+                        dir /= magnitude;
+                    }
+                    segments.push((
+                        [tp.x, tp.y, tp.z],
+                        [
+                            tp.x + dir.x * scale,
+                            tp.y + dir.y * scale,
+                            tp.z + dir.z * scale,
+                        ],
+                        magnitude,
+                    ));
+                }
+            }
+        }
+
+        // Second pass: colors. Flat per arrow (both vertices alike) so
+        // direction stays readable under the ramp.
+        let color_for: Box<dyn Fn(f32) -> [f32; 3]> = match self.attr_viz.color_mode {
+            AttrColorMode::Uniform => {
+                let c = self.attr_viz.color;
+                Box::new(move |_| c)
+            }
+            AttrColorMode::Ramp => {
+                let (min, max) = segments
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), (_, _, m)| {
+                        (lo.min(*m), hi.max(*m))
+                    });
+                if max - min <= 1e-10 {
+                    // A degenerate range has nothing to rank; fall back
+                    // to the uniform color.
+                    let c = self.attr_viz.color;
+                    Box::new(move |_| c)
+                } else {
+                    let preset = self.attr_viz.ramp_preset;
+                    Box::new(move |m: f32| {
+                        let t = ((m - min) / (max - min)).clamp(0.0, 1.0);
+                        ramp_color(preset, t)
+                    })
+                }
+            }
+        };
+        segments
+            .into_iter()
+            .flat_map(|(a, b, magnitude)| {
+                let color = color_for(magnitude);
+                [
+                    GizmoVertex { position: a, color },
+                    GizmoVertex { position: b, color },
+                ]
+            })
+            .collect()
     }
 
     /// The world-space visualization aggregate over
@@ -2744,8 +3097,10 @@ impl SolarxyApp {
         self.env = env;
         self.env_bounds = bounds;
         // The rebuilt environment starts with empty per-mesh viz data; the
-        // aggregate refills it when a pane wants overlays.
+        // aggregate refills it when a pane wants overlays (and the attr
+        // channel refills on its own dirty pass).
         self.viz_dirty = true;
+        self.attr_dirty = true;
     }
 
     /// Drives each look-through pane's camera from its bound `camera` node, so
@@ -3270,12 +3625,14 @@ impl SolarxyApp {
             bytemuck::cast_slice(&grid),
         );
         // The grid plane follows the pane camera: perspective keeps the XZ
-        // ground; an orthographic elevation view (front/side) gets a view-plane
-        // grid so it is not seen edge-on. Shared buffer, written per
-        // pane before that pane's grid pass, exactly like the color above.
+        // ground; an orthographic axis elevation (front/side) gets a view-plane
+        // grid so it is not seen edge-on. Keyed off the transition destination
+        // so a view-preset animation switches plane once, at click time, not
+        // partway through the lerp. Shared buffer, written per pane before
+        // that pane's grid pass, exactly like the color above.
         let plane: u32 = self.view.cameras[i]
             .as_ref()
-            .map_or(0, |c| grid_plane_for(&c.camera));
+            .map_or(0, |c| grid_plane_for(&c.destination_camera()));
         self.queue.write_buffer(
             &self.env.vis.grid_uniform_buf,
             solarxy_renderer::visualization::GridUniform::PLANE_OFFSET,
@@ -3334,6 +3691,7 @@ impl SolarxyApp {
             pane_look_through,
             pane_camera_locked: self.view.camera_locked,
             pane_gate_aspect,
+            attr_viz: self.attr_viz.clone(),
         }
     }
 
@@ -3459,6 +3817,7 @@ impl SolarxyApp {
             center_to_origin: false,
             recompute_normals: None,
             preserve_materials: None,
+            vertex_colors: None,
         };
         let set = solarxy_graph::nodes::parse_model(
             &format,
@@ -3683,26 +4042,6 @@ fn projection_name(mode: ProjectionMode) -> &'static str {
     }
 }
 
-/// The world plane a pane's grid should lie in (the `GridUniform.plane` code:
-/// 0 = XZ ground, 1 = XY, 2 = YZ). Perspective and top/bottom orthographic
-/// keep the ground grid; a front/back orthographic view uses XY and a
-/// left/right view uses YZ, so the grid is face-on instead of an edge-on
-/// hairline. Chosen from the camera's dominant forward axis.
-fn grid_plane_for(cam: &Camera) -> u32 {
-    if cam.projection != ProjectionMode::Orthographic {
-        return 0;
-    }
-    let f = cam.target - cam.eye;
-    let (ax, ay, az) = (f.x.abs(), f.y.abs(), f.z.abs());
-    if ay >= ax && ay >= az {
-        0 // top / bottom -> XZ ground
-    } else if az >= ax {
-        1 // front / back -> XY
-    } else {
-        2 // left / right -> YZ
-    }
-}
-
 /// Same math as the desktop `compute_depth_bounds`.
 fn compute_depth_bounds(camera: &Camera, bounds: &AABB) -> (f32, f32) {
     let view = camera.build_view_matrix();
@@ -3766,7 +4105,10 @@ fn apply_camera_json(cam: &mut Camera, json: &solarxy_scenefile::CameraJson) {
     let dir = Vector3::new(cp * json.yaw.sin(), json.pitch.sin(), cp * json.yaw.cos());
     cam.target = target;
     cam.eye = target + dir * json.distance.max(1e-4);
-    cam.up = Vector3::unit_y();
+    // A hardcoded +Y up is degenerate for a scene saved in a top/bottom view
+    // (look_at with forward parallel to up); the turntable up at the stored
+    // angles is what the orbit maintains live.
+    cam.up = turntable_up(json.yaw, json.pitch);
     if json.fov_y > 0.0 {
         cam.fovy = json.fov_y.to_degrees();
     }
@@ -3895,6 +4237,16 @@ fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {
 // ---- boundary DTOs (camelCase; the engine/scene-file types stay
 // snake_case on disk, so these bridge to the JS convention) ----
 
+/// Screen-edge slack shared by the review-marker DOM projection: a little
+/// beyond the frustum so pins fade at the edge instead of popping exactly
+/// on it.
+const NDC_XY_SLACK: f32 = 1.05;
+/// The wgpu clip-space depth range with the same slack; the z cull is
+/// what rejects behind-camera points under orthographic projection,
+/// where `clip.w` is a constant 1.
+const NDC_Z_MIN: f32 = -0.05;
+const NDC_Z_MAX: f32 = 1.05;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ViewStateDto {
@@ -3914,6 +4266,9 @@ struct ViewStateDto {
     /// The framing aspect of each pane's look-through camera (for the gate
     /// overlay); `null` when the pane is a free view.
     pane_gate_aspect: [Option<f32>; 4],
+    /// The host-owned attribute-visualization state (the right strip
+    /// mirrors this, like the tool mode).
+    attr_viz: AttrVizState,
 }
 
 #[derive(Deserialize, Default)]

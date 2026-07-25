@@ -80,6 +80,10 @@ pub struct CookEngine {
     /// produced (validate node, import load validation). Read by the scene
     /// lowering to attach the effective result to each object.
     validation: BTreeMap<NodeId, Arc<ValidationResult>>,
+    /// Per-node cook warnings from the last completed cook (reserved-lane
+    /// mismatches, lane type replacements, empty-input fallbacks). Absent
+    /// when the last cook warned nothing; read back by the node info UI.
+    warnings: BTreeMap<NodeId, Vec<String>>,
     status: BTreeMap<NodeId, CookStatus>,
     stats: BTreeMap<NodeId, NodeCookStats>,
     /// Monotonic per-node generation, bumped on every (re)cook or
@@ -131,6 +135,7 @@ impl CookEngine {
         self.state.clear();
         self.outputs.clear();
         self.validation.clear();
+        self.warnings.clear();
         self.status.clear();
         self.stats.clear();
         self.generation.clear();
@@ -349,6 +354,10 @@ impl CookEngine {
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;
+        // The cook body's warnings replace the node's previous set in
+        // every arm (a clean recook clears stale warnings; a parked job
+        // keeps what its spawn cook said).
+        self.set_warnings(node, cx.take_warnings());
         match outcome {
             Ok(CookOutcome::Done(outputs)) => {
                 self.commit_outputs(node, outputs, elapsed, report);
@@ -582,6 +591,22 @@ impl CookEngine {
         }
     }
 
+    /// Replaces a node's warning set: non-empty stores, empty clears.
+    fn set_warnings(&mut self, node: NodeId, warnings: Vec<String>) {
+        if warnings.is_empty() {
+            self.warnings.remove(&node);
+        } else {
+            self.warnings.insert(node, warnings);
+        }
+    }
+
+    /// The last completed cook's warnings for one node (empty when the
+    /// cook was quiet or the node never cooked).
+    #[must_use]
+    pub fn warnings(&self, node: NodeId) -> &[String] {
+        self.warnings.get(&node).map_or(&[], Vec::as_slice)
+    }
+
     /// Submits an async job's result under the generation guard. A result
     /// whose token no longer matches the node's current generation (a
     /// newer cook or a re-dirty happened meanwhile) is dropped. On accept,
@@ -752,6 +777,27 @@ mod tests {
         Ok(CookOutcome::Done(Outputs::geometry(set)))
     }
 
+    // A scatter-style generator emitting a Points-topology cloud whose
+    // positions derive from `seed`, with an `empty` escape hatch.
+    // Signature matches CookFn.
+    #[allow(clippy::unnecessary_wraps)]
+    fn pts_cook(
+        p: &ResolvedParams,
+        _in: &Inputs,
+        _cx: &mut CookCtx,
+    ) -> Result<CookOutcome, CookError> {
+        let set = if p.bool("empty") {
+            GeometrySet::empty()
+        } else {
+            let seed = p.f32("seed");
+            GeometrySet::from_mesh(KernelMesh::points(
+                "cloud",
+                vec![[seed, 0.0, 0.0], [seed + 1.0, 0.0, 0.0]],
+            ))
+        };
+        Ok(CookOutcome::Done(Outputs::geometry(set)))
+    }
+
     // An image node that always parks on an async decode, so tests can
     // drive `submit_job_result` directly (the import_image path).
     // Signature matches CookFn.
@@ -785,7 +831,7 @@ mod tests {
             type_id: "gen",
             version: 1,
             display_name: "Gen",
-            category: Category::Primitives,
+            category: Category::Generators,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![],
@@ -821,7 +867,7 @@ mod tests {
             type_id: "pass",
             version: 1,
             display_name: "Pass",
-            category: Category::Modifiers,
+            category: Category::Topology,
             contexts: ContextSet::GEO,
             opens: None,
             inputs: vec![
@@ -861,7 +907,42 @@ mod tests {
             cook: img_async_cook,
             migrate: None,
         };
-        Registry::with_descriptors(vec![gen_desc, pass, img_async]).unwrap()
+        let pts = NodeTypeDescriptor {
+            type_id: "pts",
+            version: 1,
+            display_name: "Pts",
+            category: Category::Generators,
+            contexts: ContextSet::GEO,
+            opens: None,
+            inputs: vec![],
+            outputs: vec![
+                PortSpec::single("geometry", "Geometry", DataType::Geometry, false).default_port(),
+            ],
+            params: vec![
+                ParamSpec::new(
+                    "seed",
+                    "Seed",
+                    "geometry",
+                    ParamType::Float,
+                    ParamValue::Float(0.0),
+                ),
+                ParamSpec::new(
+                    "empty",
+                    "Empty",
+                    "geometry",
+                    ParamType::Bool,
+                    ParamValue::Bool(false),
+                ),
+            ],
+            bypass: BypassBehavior::Mute,
+            doc: "",
+            search_aliases: &[],
+            glyph: "pts",
+            role: NodeRole::Standard,
+            cook: pts_cook,
+            migrate: None,
+        };
+        Registry::with_descriptors(vec![gen_desc, pass, img_async, pts]).unwrap()
     }
 
     struct Fixture {
@@ -995,6 +1076,41 @@ mod tests {
         f.set_param(g, "empty", ParamValue::Bool(false));
         f.cook_all();
         assert_eq!(f.points(g), 24);
+    }
+
+    /// The F1 chain-recook proof: a Points-topology output commits through
+    /// the renderable-empty gate, a reseeded cloud REPLACES the old one
+    /// (keep-last-good extended to points, not weakening the recommit),
+    /// and a transiently empty recook still retains the last good cloud.
+    #[test]
+    fn point_cloud_commits_and_recommits_through_keep_last_good() {
+        let mut f = Fixture::new();
+        let s = f.add("pts");
+        let p = f.add("pass");
+        f.connect(s, p);
+        f.set_display(p);
+        f.cook_all();
+        assert_eq!(f.points(p), 2, "a point cloud must commit, not be gated");
+
+        let first_x = |f: &Fixture, node| {
+            f.engine
+                .outputs(node)
+                .and_then(|o| o.get("geometry"))
+                .and_then(Value::as_geometry)
+                .map(|g| g.meshes[0].positions[0][0])
+        };
+        assert_eq!(first_x(&f, p), Some(0.0));
+
+        // Reseed: the fresh cloud must replace the cached one downstream.
+        f.set_param(s, "seed", ParamValue::Float(5.0));
+        f.cook_all();
+        assert_eq!(first_x(&f, p), Some(5.0), "reseeded cloud must recommit");
+
+        // Transient empty keeps the last good cloud on screen.
+        f.set_param(s, "empty", ParamValue::Bool(true));
+        f.cook_all();
+        assert_eq!(f.points(s), 2, "keep-last-good must retain the cloud");
+        assert_eq!(first_x(&f, s), Some(5.0));
     }
 
     #[test]

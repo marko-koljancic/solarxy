@@ -16,17 +16,19 @@ import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { syncCanvasSize } from "./canvas";
 import { useMirror } from "../store/mirror";
-import { usePrefs } from "../store/prefs";
+import { usePrefs, type DisplayPrefs } from "../store/prefs";
 import { useUi } from "../store/ui";
 import { useRadial } from "../store/radial";
 import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
+import { useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
 import { ctxKey } from "./types";
 import type {
+  AttrVizState,
   CameraCommand,
   Command,
   DisplaySettingsDto,
@@ -112,6 +114,7 @@ export async function previewParseModel(hash: string, name: string): Promise<Uin
     centerToOrigin: false,
     recomputeNormals: null,
     preserveMaterials: null,
+    vertexColors: null,
   };
   const worker = ensureImportWorker();
   const token = previewToken;
@@ -324,9 +327,17 @@ export function bootSession(canvas: HTMLCanvasElement): Promise<void> {
     // prefs in once, then keep it in step for the rest of the session.
     pushGizmoSettings();
     pushSelectionHighlight();
+    pushLabelColors();
+    // Boot push (no prev): both pane-seeded display fields apply. This runs
+    // before any recovery load, so a restored scene's saved panes still win.
+    pushDisplayDefaults();
     usePrefs.subscribe((state, prev) => {
       if (state.prefs.viewport !== prev.prefs.viewport) pushGizmoSettings();
       if (state.prefs.selection !== prev.prefs.selection) pushSelectionHighlight();
+      if (state.prefs.display !== prev.prefs.display) pushDisplayDefaults(prev.prefs.display);
+      // Body classes flip synchronously in the prefs store before this
+      // subscriber runs, so the tokens read fresh.
+      if (state.resolvedTheme !== prev.resolvedTheme) pushLabelColors();
     });
     if (import.meta.env.DEV) {
       // Dev-only introspection hook (Chrome-automation verification).
@@ -424,6 +435,13 @@ export function setTool(tool: ToolMode): void {
   useViewState.getState().setToolMode(tool);
 }
 
+/** Replaces the host's attribute-visualization state (the right strip's
+ * toggles and lane pick) and mirrors the returned view state. */
+export function setAttrViz(state: AttrVizState): void {
+  if (!client) return;
+  useViewState.getState().setView(getClient().setAttrViz(state));
+}
+
 /** Pushes the gizmo's drag ergonomics into the host. Called on boot and on any
  * prefs change; the drag loop runs in Rust and never crosses back to ask. */
 export function pushGizmoSettings(): void {
@@ -436,6 +454,34 @@ export function pushGizmoSettings(): void {
 export function pushSelectionHighlight(): void {
   if (!client) return;
   getClient().setSelectionHighlight(usePrefs.getState().prefs.selection);
+}
+
+/** Pushes the GPU attribute-label colors from the live theme tokens (the
+ * same tokens the DOM overlay used to consume via CSS). Called at boot and
+ * whenever the resolved theme flips. */
+export function pushLabelColors(): void {
+  if (!client) return;
+  const tokens = getComputedStyle(document.body);
+  const read = (name: string, fallback: string) => tokens.getPropertyValue(name).trim() || fallback;
+  getClient().setLabelColors(
+    read("--text-primary", "#e6e1cf"),
+    read("--background-secondary", "#1f2430"),
+    read("--accent-primary", "#ff9e21"),
+  );
+}
+
+/** Pushes the display defaults (wireframe weight, background, turntable
+ * rpm) into the host. At boot both pane-seeded fields apply to every pane
+ * (before any scene load, so a restored scene's saved panes still win); a
+ * mid-session preference save applies only the fields that changed, so
+ * per-pane Display-menu overrides survive unrelated edits. The changed
+ * panes come back through a viewChanged host event. */
+export function pushDisplayDefaults(prev?: DisplayPrefs): void {
+  if (!client) return;
+  const d = usePrefs.getState().prefs.display;
+  const applyWireframe = prev === undefined || prev.wireframeWeight !== d.wireframeWeight;
+  const applyBackground = prev === undefined || prev.background !== d.background;
+  getClient().setDisplayDefaults(d, applyWireframe, applyBackground);
 }
 
 /** Escape during a gizmo drag: rolls it back. */
@@ -505,7 +551,10 @@ export function setDisplaySettings(settings: DisplaySettingsDto): void {
 }
 
 export function cameraCommand(pane: number, cmd: CameraCommand): void {
-  getClient().cameraCommand(pane, cmd);
+  // Mirror the returned view state like every other view mutator: a view
+  // preset changes the pane's projection, and the Persp/Ortho toolbar label
+  // reads the mirror.
+  useViewState.getState().setView(getClient().cameraCommand(pane, cmd));
 }
 
 /** Binds a pane to look through a camera node (or -1 to clear to free view). */
@@ -757,6 +806,22 @@ export async function openScene(): Promise<void> {
   if (picked) applyLoadedScene(picked.bytes);
 }
 
+/** Opens a bundled sample scene by filename (fetched from the site's
+ * `samples/` directory; guarded by a Rust fixture test that cooks every
+ * committed sample). Callers own the dirty-check confirm. */
+export async function openSampleScene(file: string): Promise<void> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}samples/${file}`);
+    if (!res.ok) {
+      pushToast(`Could not load the sample scene (${res.status}).`, "error");
+      return;
+    }
+    applyLoadedScene(new Uint8Array(await res.arrayBuffer()));
+  } catch (e) {
+    pushToast(e instanceof Error ? e.message : "Could not load the sample scene.", "error");
+  }
+}
+
 // In-memory clipboard fragment (application/x-solarxy-nodes shape). A
 // system-clipboard bridge for cross-tab paste is a refinement.
 let clipboard: unknown = null;
@@ -934,6 +999,7 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "activePane") useViewState.getState().setActivePaneMirror(ev.pane);
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
+    else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the
@@ -947,6 +1013,8 @@ export function runFrame(dtMs: number): void {
   } else {
     hideAllMarkers();
   }
+  // Attribute labels draw in the GPU pass now; their sampling stats
+  // arrive as attrPinStats host events above, so nothing to pump here.
   // Both modes: manual drives the amber stale tags + header count, auto
   // drives the transient pending tint on queued-dirty nodes.
   refreshStale();

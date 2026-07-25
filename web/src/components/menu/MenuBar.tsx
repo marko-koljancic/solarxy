@@ -11,6 +11,7 @@ import {
   duplicateSelection,
   explicitSave,
   importDroppedFiles,
+  openSampleScene,
   openScene,
   paste,
 } from "../../engine/session";
@@ -18,12 +19,13 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { isAssetsPanelOpen, isTexturePanelOpen, setAssetsPanelOpen, setReviewPanelOpen, setTexturePanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, isAttributesPanelOpen, isNodesPanelOpen, isPropertiesPanelOpen, isTexturePanelOpen, isTreePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setNodesPanelOpen, setPropertiesPanelOpen, setReviewPanelOpen, setTexturePanelOpen, setTreePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
 import { useUi } from "../../store/ui";
 import { DeskSaveModal } from "../DeskSaveModal";
+import { TOURS } from "../tour/steps";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
 const MOD = navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl+";
@@ -37,12 +39,25 @@ async function newScene(): Promise<void> {
   window.location.reload();
 }
 
+/** The bundled sample scenes (web/public/samples/), each a fully
+ * parametric .slxy whose note nodes explain the workflow it teaches. A
+ * Rust fixture test cooks every committed file, so a node change that
+ * breaks one fails CI rather than a learner. */
+const SAMPLE_SCENES: { label: string; file: string }[] = [
+  { label: "Modeling Basics", file: "modeling-basics.slxy" },
+  { label: "Copy & Scatter", file: "copy-and-scatter.slxy" },
+  { label: "Attributes & Displace", file: "attributes-and-displace.slxy" },
+  { label: "Texture to Material", file: "texture-to-material.slxy" },
+  { label: "Lights, Camera, Review", file: "lights-camera-review.slxy" },
+];
+
 export function MenuBar() {
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const importRef = useRef<HTMLInputElement>(null);
   const importFolderRef = useRef<HTMLInputElement>(null);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [confirmSample, setConfirmSample] = useState<{ label: string; file: string } | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
 
   const selection = graph.selection;
@@ -57,6 +72,16 @@ export function MenuBar() {
       },
     },
     { label: "Open Scene...", shortcut: `${MOD}O`, onClick: () => void openScene() },
+    {
+      label: "Sample Scenes",
+      submenu: SAMPLE_SCENES.map((s) => ({
+        label: s.label,
+        onClick: () => {
+          if (useMirror.getState().dirty) setConfirmSample(s);
+          else void openSampleScene(s.file);
+        },
+      })),
+    },
     { label: "Save Scene", shortcut: `${MOD}S`, onClick: () => void explicitSave() },
     { divider: true },
     { label: "Import Model...", onClick: () => importRef.current?.click() },
@@ -103,6 +128,10 @@ export function MenuBar() {
   // the user drags panels wherever they want now, and a desk captures it.
   const userDesks = useDesks((s) => s.desks);
   const [deskSaveOpen, setDeskSaveOpen] = useState(false);
+  // Subscribe to the persisted dock layout (debounced 400 ms) so the panel
+  // checkmarks below refresh after tabs close or panels reopen.
+  const dockLayout = useUi((s) => s.dockLayout);
+  void dockLayout;
   const desks: MenuEntry[] = [
     ...DESK_PRESETS.map((d) => ({
       label: d.name,
@@ -124,11 +153,15 @@ export function MenuBar() {
       })),
     },
     { divider: true },
-    // The Assets panel: presence in the dock is its open state,
-    // the Review-panel pattern.
-    { label: "Assets Panel", onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
-    // The texture viewer: same presence-is-state pattern.
-    { label: "Texture Viewer", onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
+    // Panels: presence in the dock is the open state (the Review-panel
+    // pattern). Nodes and Properties are here so a closed core panel can be
+    // reopened without applying a whole desk.
+    { label: "Nodes Panel", checked: isNodesPanelOpen(), onClick: () => setNodesPanelOpen(!isNodesPanelOpen()) },
+    { label: "Properties Panel", checked: isPropertiesPanelOpen(), onClick: () => setPropertiesPanelOpen(!isPropertiesPanelOpen()) },
+    { label: "Tree Panel", checked: isTreePanelOpen(), onClick: () => setTreePanelOpen(!isTreePanelOpen()) },
+    { label: "Assets Panel", checked: isAssetsPanelOpen(), onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
+    { label: "Texture Viewer", checked: isTexturePanelOpen(), onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
+    { label: "Attributes Panel", checked: isAttributesPanelOpen(), onClick: () => setAttributesPanelOpen(!isAttributesPanelOpen()) },
   ];
 
   const reviewMode = useReview((s) => s.reviewMode);
@@ -163,8 +196,14 @@ export function MenuBar() {
     },
     {
       // Replayable, so skipping the first-run tour is not a one-way door.
-      label: "Take the Tour",
-      onClick: () => window.dispatchEvent(new Event("solarxy:tour")),
+      // The submenu lists the catalog; each entry names its tour in the
+      // event detail (a plain Event still replays the overview).
+      label: "Take a Tour",
+      submenu: TOURS.map((t) => ({
+        label: t.title,
+        onClick: () =>
+          window.dispatchEvent(new CustomEvent("solarxy:tour", { detail: { id: t.id } })),
+      })),
     },
     {
       label: "Wiki",
@@ -197,6 +236,19 @@ export function MenuBar() {
             void newScene();
           }}
           onCancel={() => setConfirmNew(false)}
+        />
+      )}
+      {confirmSample && (
+        <ConfirmDialog
+          title="Open sample scene"
+          message={`Discard unsaved changes and open ${confirmSample.label}?`}
+          confirmLabel="Discard & Open"
+          onConfirm={() => {
+            const picked = confirmSample;
+            setConfirmSample(null);
+            void openSampleScene(picked.file);
+          }}
+          onCancel={() => setConfirmSample(null)}
         />
       )}
       <input

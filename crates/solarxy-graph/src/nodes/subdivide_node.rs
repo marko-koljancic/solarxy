@@ -28,7 +28,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "subdivide",
         version: 2,
         display_name: "Subdivide",
-        category: Category::Modifiers,
+        category: Category::Topology,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![
@@ -83,7 +83,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
               Nothing here smooths. And the growth compounds hard -- at 5 \
               iterations a 10,000-triangle mesh projects to over 10 million, \
               past the kernel's 8 million ceiling, which is a cook error \
-              rather than a stall.",
+              rather than a stall. Point clouds and polylines have no \
+              triangles to split and pass through untouched with a warning.",
         search_aliases: &["subdivide", "smooth", "tessellate", "refine"],
         glyph: "subdivide",
         role: NodeRole::Standard,
@@ -110,7 +111,7 @@ fn migrate_drop_scheme(
 fn cook_subdivide(
     p: &ResolvedParams,
     inputs: &Inputs,
-    _cx: &mut CookCtx,
+    cx: &mut CookCtx,
 ) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
@@ -118,6 +119,13 @@ fn cook_subdivide(
         )));
     };
     let iterations = u32::try_from(p.i64("iterations").max(1)).unwrap_or(1);
+
+    if input.has_non_triangle_meshes() {
+        cx.warn(
+            "subdivide applies to triangle meshes; line and point meshes pass \
+             through unchanged",
+        );
+    }
 
     match subdivide_linear(input, iterations) {
         Ok(set) => Ok(CookOutcome::Done(Outputs::geometry(set))),
@@ -157,5 +165,33 @@ mod tests {
         };
         let out = outputs.get("geometry").unwrap().as_geometry().unwrap();
         assert_eq!(out.meshes[0].triangle_count(), 8);
+    }
+
+    #[test]
+    fn a_point_cloud_warns_and_passes_through() {
+        let resolved =
+            crate::registry::resolve::resolve_params(&BTreeMap::new(), &descriptor().params)
+                .unwrap();
+        let set =
+            GeometrySet::from_mesh(solarxy_kernel::KernelMesh::points("p", vec![[0.0; 3]; 4]));
+        let inputs = Inputs::new(
+            [(
+                "geometry".to_string(),
+                InputSlot::Single(Value::Geometry(Arc::new(set))),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let assets = crate::assets::AssetTable::default();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(outputs) = cook_subdivide(&resolved, &inputs, &mut cx).unwrap()
+        else {
+            panic!("synchronous cook");
+        };
+        let out = outputs.get("geometry").unwrap().as_geometry().unwrap();
+        assert_eq!(out.meshes[0].vertex_count(), 4, "cloud untouched");
+        let warns = cx.take_warnings();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("pass"), "got: {}", warns[0]);
     }
 }

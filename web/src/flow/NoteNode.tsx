@@ -47,6 +47,22 @@ function colorOf(node: NodeMirror): [number, number, number] {
   return NOTE_COLORS[0];
 }
 
+/** The `text_size` enum param (v2) mapped to a font size. Small is the
+ * default and deliberately sits below the node title's 1.2rem, so notes
+ * annotate the graph instead of shouting over it; Medium is the pre-0.8.0
+ * look. */
+const TEXT_SIZES: Record<string, string> = {
+  small: "0.85rem",
+  medium: "1.05rem",
+  large: "1.4rem",
+};
+
+function textSizeOf(node: NodeMirror): string {
+  const p = literalOf(node, "text_size");
+  const key = p && p.kind === "literal" && p.type === "enum" ? p.value : "small";
+  return TEXT_SIZES[key] ?? TEXT_SIZES.small;
+}
+
 function css(rgb: [number, number, number], alpha: number): string {
   const c = rgb.map((v) => Math.round(v * 255));
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
@@ -57,12 +73,16 @@ export function NoteNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const ctx = useMirror((s) => s.current);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // The size mid-drag: the params commit only on release, so without this
+  // the box would ignore the handles until the drop (the "stepped" feel).
+  const [liveSize, setLiveSize] = useState<{ w: number; h: number } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const text = textOf(node);
-  const width = numOf(node, "width", 160);
-  const height = numOf(node, "height", 80);
+  const width = liveSize?.w ?? numOf(node, "width", 160);
+  const height = liveSize?.h ?? numOf(node, "height", 80);
   const rgb = colorOf(node);
+  const fontSize = textSizeOf(node);
 
   useEffect(() => {
     if (editing) {
@@ -102,7 +122,7 @@ export function NoteNode({ data, selected }: NodeProps & { data: FlowNodeData })
   return (
     <div
       className={`note-node${selected ? " selected" : ""}`}
-      style={{ width, height, background: css(rgb, 0.78) }}
+      style={{ width, height, fontSize, background: css(rgb, 0.78) }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         setDraft(text);
@@ -113,7 +133,13 @@ export function NoteNode({ data, selected }: NodeProps & { data: FlowNodeData })
         isVisible={selected}
         minWidth={120}
         minHeight={60}
+        // The max bounds MUST equal the engine hard ranges (120..800 x
+        // 60..600): a larger preview would snap back at commit, the exact
+        // stepped feel the live tracking removes.
+        maxWidth={800}
+        maxHeight={600}
         color="var(--accent-primary)"
+        onResize={(_e, params) => setLiveSize({ w: params.width, h: params.height })}
         onResizeEnd={(_e, params) => {
           dispatch({ type: "beginTransaction", label: "resize note" });
           dispatch({
@@ -131,6 +157,9 @@ export function NoteNode({ data, selected }: NodeProps & { data: FlowNodeData })
             value: { kind: "literal", type: "float", value: Math.round(params.height) },
           });
           dispatch({ type: "endTransaction" });
+          // After the commit, so the box never renders a frame at the old
+          // param size between the drop and the mirror update.
+          setLiveSize(null);
         }}
       />
       <button

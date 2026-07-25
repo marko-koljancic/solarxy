@@ -19,14 +19,20 @@
 // any zoom.
 
 import { useStore } from "@xyflow/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { dispatch } from "../engine/session";
 import { IconBypass, IconDisplay, IconDive, IconRename, IconTrash, IconVisibility } from "../icons";
 import { descriptorFor } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useRadial, type RadialTarget } from "../store/radial";
-import { useUi } from "../store/ui";
+import {
+  diveIntoSubflow,
+  removeNode,
+  requestRename,
+  setDisplayFlag,
+  toggleBypass,
+  toggleVisibility,
+} from "./nodeActions";
 import { radialAnchor, type RadialAnchor } from "./radialAnchor";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
@@ -115,6 +121,10 @@ export function RadialMenu() {
   const registry = useMirror((s) => s.registry);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const anchor = useLiveAnchor(target);
+  // Which wedge the pointer is over. React-side because the SVG path and
+  // its HTML icon are sibling elements: CSS :hover on one cannot restyle
+  // the other, and the hovered action must read as one unit.
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!target) return;
@@ -180,7 +190,7 @@ export function RadialMenu() {
           title: "Set the display flag",
           active: isDisplay,
           onPick: (tt) => {
-            dispatch({ type: "setActiveOutput", ctx: tt.ctx, node: tt.nodeId });
+            setDisplayFlag(tt.ctx, tt.nodeId);
             closeRadial();
           },
         }
@@ -193,15 +203,7 @@ export function RadialMenu() {
           active: rootEye && nodeVisible(node),
           disabled: !rootEye,
           onPick: (tt) => {
-            if (rootEye) {
-              dispatch({
-                type: "setParam",
-                ctx: tt.ctx,
-                node: tt.nodeId,
-                key: "visible",
-                value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
-              });
-            }
+            if (rootEye) toggleVisibility(tt.ctx, node);
             closeRadial();
           },
         };
@@ -218,7 +220,7 @@ export function RadialMenu() {
       icon: <IconRename size={13} />,
       title: "Rename (F2)",
       onPick: (tt) => {
-        useUi.getState().setRenameRequest(tt.nodeId);
+        requestRename(tt.nodeId);
         closeRadial();
       },
     },
@@ -231,7 +233,7 @@ export function RadialMenu() {
       title: t.isContainer ? "Enter subflow" : "Not a container",
       disabled: !t.isContainer,
       onPick: (tt) => {
-        if (tt.isContainer) useMirror.getState().setCurrent({ subflow: tt.nodeId });
+        if (tt.isContainer) diveIntoSubflow(tt.nodeId);
         closeRadial();
       },
     },
@@ -252,14 +254,7 @@ export function RadialMenu() {
       active: node.bypassed,
       disabled: !t.bypassable,
       onPick: (tt) => {
-        if (tt.bypassable) {
-          dispatch({
-            type: "setBypass",
-            ctx: tt.ctx,
-            node: tt.nodeId,
-            bypassed: !node.bypassed,
-          });
-        }
+        if (tt.bypassable) toggleBypass(tt.ctx, node);
         closeRadial();
       },
     },
@@ -270,7 +265,7 @@ export function RadialMenu() {
       icon: <IconTrash size={13} />,
       title: "Delete node",
       onPick: (tt) => {
-        dispatch({ type: "removeNodes", ctx: tt.ctx, ids: [tt.nodeId] });
+        removeNode(tt.ctx, tt.nodeId);
         closeRadial();
       },
     },
@@ -285,12 +280,15 @@ export function RadialMenu() {
         {segments.map((seg) => {
           const a0 = seg.angle - seg.span / 2 + GAP_DEG / 2;
           const a1 = seg.angle + seg.span / 2 - GAP_DEG / 2;
+          const hovered = !seg.disabled && seg.key === hoverKey;
           return (
             <path
               key={seg.key}
-              className={`radial-seg${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}`}
+              className={`radial-seg seg-${seg.key}${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}${hovered ? " hovered" : ""}`}
               d={arcPath(c, c, r0, r1, a0, a1)}
               onClick={() => seg.onPick(t)}
+              onPointerEnter={() => setHoverKey(seg.disabled ? null : seg.key)}
+              onPointerLeave={() => setHoverKey((k) => (k === seg.key ? null : k))}
             >
               <title>{seg.title}</title>
             </path>
@@ -299,12 +297,15 @@ export function RadialMenu() {
       </svg>
       {segments.map((seg) => {
         const [x, y] = polar(c, c, (r0 + r1) / 2, seg.angle);
+        const hovered = !seg.disabled && seg.key === hoverKey;
         return (
           <span
             key={seg.key}
-            className={`radial-icon${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}`}
+            className={`radial-icon seg-${seg.key}${seg.active ? " active" : ""}${seg.disabled ? " disabled" : ""}${hovered ? " hovered" : ""}`}
             style={{ left: x, top: y }}
             onClick={() => seg.onPick(t)}
+            onPointerEnter={() => setHoverKey(seg.disabled ? null : seg.key)}
+            onPointerLeave={() => setHoverKey((k) => (k === seg.key ? null : k))}
             title={seg.title}
           >
             {seg.icon}

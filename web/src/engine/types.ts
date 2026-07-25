@@ -118,6 +118,72 @@ export interface MarkerScreen {
   y: number;
 }
 
+/** Which element axis an attribute lane describes. */
+export type AttrDomain = "point" | "primitive";
+
+/** One named attribute lane in one domain, from `attribute_summary`. */
+export interface AttrLane {
+  name: string;
+  ty: "float" | "vec2" | "vec3" | "vec4";
+  len: number;
+}
+
+/** The lane inventory of a node's cooked geometry (both domains), from
+ * `attribute_summary`; `undefined` while nothing is committed. */
+export interface AttributeSummary {
+  points: number;
+  /** Triangle count (cook-stats convention; lines and points count zero). */
+  prims: number;
+  /** Primitive-domain element count (topology-aware): the primitive
+   * table's row extent. */
+  primitiveElements: number;
+  meshes: number;
+  point: AttrLane[];
+  primitive: AttrLane[];
+}
+
+/** One value column of the paged attribute table: `P` (positions) leads
+ * the point domain, lanes follow in name order. */
+export interface AttrColumn {
+  key: string;
+  ty: AttrLane["ty"];
+  components: number;
+}
+
+/** One window of attribute rows from `attribute_table`. A row
+ * concatenates every column's components; `null` marks a lane missing
+ * (or type-conflicted) on that element's mesh. */
+export interface AttributePage {
+  total: number;
+  offset: number;
+  columns: AttrColumn[];
+  rows: (number | null)[][];
+}
+
+/** Host-owned attribute-visualization state (session-only, scene-wide):
+ * the right strip's toggles, the picked point-lane name, and the pin
+ * budget (0 = the host default). Mirrored through ViewStateDto like the
+ * tool mode; never saved, never in undo. */
+export interface AttrVizState {
+  labels: boolean;
+  vectors: boolean;
+  points: boolean;
+  name: string | null;
+  cap: number;
+  /** Multiplier on the bounds-derived arrow length; 1.0 is the default. */
+  vectorScale: number;
+  /** Unit-length directions before scaling. */
+  normalize: boolean;
+  colorMode: "uniform" | "ramp";
+  /** The uniform arrow color, linear RGB 0..1. */
+  color: [number, number, number];
+  /** Which curated ramp the ramp mode draws. Pinned to
+   * `solarxy_web::attr_viz::RampPreset` (serde camelCase). */
+  rampPreset: RampPreset;
+}
+
+export type RampPreset = "coldWarm" | "ember" | "ocean" | "grayscale" | "signal";
+
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
 export interface ScreenshotOpts {
@@ -196,6 +262,10 @@ export type Command =
   | { type: "connect"; ctx: GraphContext; from: PortRef; to: PortRef }
   | { type: "disconnect"; ctx: GraphContext; edge: EdgeId }
   | { type: "setParam"; ctx: GraphContext; node: NodeId; key: string; value: ParamSource }
+  // Removes stored overrides so the node falls back to descriptor
+  // defaults: every param when keys is absent, else only the listed ones.
+  // One undo step.
+  | { type: "resetParams"; ctx: GraphContext; node: NodeId; keys?: string[] }
   | { type: "moveNodes"; ctx: GraphContext; moves: [NodeId, [number, number]][] }
   | { type: "setActiveOutput"; ctx: GraphContext; node: NodeId | null }
   | { type: "setSelection"; ctx: GraphContext; ids: NodeId[] }
@@ -269,8 +339,22 @@ export interface ParamSnapshot {
   /** Input-port key whose connection neutralizes this param (the panel
    * dims the row while that port is connected). */
   drivenByPort?: string | null;
+  /** Conditional-visibility clauses (ANDed); absent means always visible.
+   * Predicate values use the same plain encoding as `default`. */
+  showIf?: ShowIfClause[];
   doc: string;
 }
+
+export interface ShowIfClause {
+  param: string;
+  pred: ShowIfPred;
+}
+
+export type ShowIfPred =
+  | { kind: "truthy" }
+  | { kind: "eq"; value: unknown }
+  | { kind: "neq"; value: unknown }
+  | { kind: "in"; values: unknown[] };
 
 export type BypassSnapshot =
   | { mode: "passThrough"; input: string }
@@ -299,7 +383,21 @@ export interface NodeTypeSnapshot {
   typeId: string;
   version: number;
   displayName: string;
-  category: "container" | "primitives" | "modifiers" | "import" | "lights" | "utility";
+  category:
+    | "container"
+    | "generators"
+    | "attribute"
+    | "transform"
+    | "copy"
+    | "topology"
+    | "shaders"
+    | "import"
+    | "export"
+    | "lights"
+    | "utility"
+    | "tex_generate"
+    | "tex_adjust"
+    | "tex_composite";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
   /** The network kinds this node may be placed in. Replaces the
@@ -344,6 +442,7 @@ export interface ImportOptions {
   centerToOrigin: boolean;
   recomputeNormals: boolean | null;
   preserveMaterials: boolean | null;
+  vertexColors: boolean | null;
 }
 
 /** A staged asset reference: its content hash and original file name. */
@@ -530,6 +629,8 @@ export interface ViewStateDto {
   paneCameraLock: boolean[];
   /** The look-through camera's framing aspect per pane (for the gate), or null. */
   paneGateAspect: (number | null)[];
+  /** The host-owned attribute-visualization state (the right strip). */
+  attrViz: AttrVizState;
 }
 
 /** The current pose of a pane's camera (create-camera-from-view). */
@@ -543,7 +644,8 @@ export type HostEvent =
   | { type: "paneRects"; rects: PaneRectDto[] }
   | { type: "activePane"; pane: number }
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
-  | { type: "viewChanged" };
+  | { type: "viewChanged" }
+  | { type: "attrPinStats"; capacity: number; total: number };
 
 /** The viewport tool. Rotate and Scale select, draw and
  * grab nothing, which is why their buttons ship disabled rather than dead. */

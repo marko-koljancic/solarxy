@@ -18,6 +18,9 @@
 //!   point positions with inverse-transpose normal handling.
 //! - [`merge`] — `GeometrySet` concatenation with content-hash material
 //!   deduplication.
+//! - [`scatter`] / [`copy`] — the procedural pair: seeded area-weighted
+//!   surface sampling into a point cloud, and template instancing onto
+//!   points ([`rng`] holds the shared avalanche-hash draws).
 //!
 //! Winding + orientation invariant (frozen for the whole engine): triangles
 //! are counter-clockwise front-facing in a Y-up right-handed coordinate
@@ -51,12 +54,19 @@
 )]
 
 pub mod array;
+pub mod attribute_ops;
 pub mod bounds_geo;
+pub mod copy;
+pub mod deform_ops;
 pub mod delete;
+pub mod edges_to_geo;
 mod error;
 pub mod merge;
 pub mod mirror;
+pub mod points_from_geo;
 pub mod primitives;
+pub mod rng;
+pub mod scatter;
 pub mod set;
 pub mod subdivide;
 pub mod transfer;
@@ -64,4 +74,4 @@ pub mod transform;
 pub mod uv_project;
 
 pub use error::KernelError;
-pub use set::{AttributeData, AttributeMap, GeometrySet, KernelMesh};
+pub use set::{AttributeData, AttributeDomain, AttributeMap, GeometrySet, KernelMesh, reserved};

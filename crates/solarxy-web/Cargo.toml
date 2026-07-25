@@ -28,6 +28,13 @@ solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
 # rotations through the kernel, so the kernel has to be reachable natively too.
 solarxy-kernel = { path = "../solarxy-kernel" }
 cgmath = { workspace = true }
+# Native-visible for the same reason as the renderer: `attr_viz.rs` (the
+# attribute-visualization state + ramp math) derives its boundary serde
+# shapes and is tested by native CI.
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wasm-only: the import worker (parse_model_job) and the .slxy boundary use
@@ -40,7 +47,6 @@ bytemuck = { version = "1", features = ["derive"] }
 wasm-bindgen = "=0.2.126"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 # Backend selection for getrandom on wasm32; pairs with the

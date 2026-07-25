@@ -4,7 +4,7 @@
 use std::io::Cursor;
 
 use crate::FormatsError;
-use solarxy_core::{RawMeshData, RawModelData};
+use solarxy_core::{MeshTopology, RawMeshData, RawModelData};
 
 /// Parse STL bytes. `name` becomes the single mesh's name (the path loader
 /// passes the file path, preserving historical naming).
@@ -40,6 +40,8 @@ pub fn load_stl_bytes(bytes: &[u8], name: &str) -> Result<RawModelData, FormatsE
             normals: None,
             tex_coords: None,
             material_index: None,
+            topology: MeshTopology::Triangles,
+            colors: None,
         }],
         materials: Vec::new(),
         polygon_count,

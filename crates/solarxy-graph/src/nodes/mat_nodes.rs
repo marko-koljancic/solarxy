@@ -118,7 +118,7 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
         type_id: "principled",
         version: 1,
         display_name: "Principled",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::MAT,
         opens: None,
         inputs,
@@ -168,7 +168,7 @@ pub fn matcap_descriptor() -> NodeTypeDescriptor {
         type_id: "matcap",
         version: 1,
         display_name: "MatCap",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![
@@ -250,7 +250,7 @@ pub fn toon_descriptor() -> NodeTypeDescriptor {
         type_id: "toon",
         version: 1,
         display_name: "Toon",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![
@@ -356,7 +356,7 @@ pub fn unlit_descriptor() -> NodeTypeDescriptor {
         type_id: "unlit",
         version: 1,
         display_name: "Unlit",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![
@@ -442,7 +442,7 @@ pub fn mix_material_descriptor() -> NodeTypeDescriptor {
         type_id: "mix_material",
         version: 1,
         display_name: "Mix Material",
-        category: Category::Modifiers,
+        category: Category::Shaders,
         contexts: ContextSet::MAT,
         opens: None,
         inputs: vec![

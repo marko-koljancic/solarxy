@@ -1,13 +1,19 @@
 //! PLY loading (binary and ASCII). PLY is self-contained, so the byte API
 //! takes only a mesh name; the filesystem companion-texture heuristic
 //! (`stem_0.jpg` and friends) applies to the path loader only.
+//!
+//! Face-less files (scanner point clouds) load as a Points-topology mesh.
+//! `red`/`green`/`blue` (+ optional `alpha`) vertex properties parse in
+//! uchar and float forms; PLY colors are conventionally sRGB, so both
+//! forms decode sRGB-to-linear at import (decision M-7).
 
 use std::io::Cursor;
 
 use ply_rs_bw::ply::Property;
 
 use crate::FormatsError;
-use solarxy_core::{AlphaMode, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::geometry::srgb_to_linear;
+use solarxy_core::{AlphaMode, MeshTopology, RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
     match *prop {
@@ -20,6 +26,16 @@ fn ply_prop_to_f32(prop: &Property) -> f32 {
         Property::Char(v) => f32::from(v),
         Property::UChar(v) => f32::from(v),
         _ => 0.0,
+    }
+}
+
+/// One color channel to normalized sRGB (0..1): uchar scales by 255,
+/// float passes through; anything else reads as its f32 value clamped.
+fn ply_prop_to_channel(prop: &Property) -> f32 {
+    match *prop {
+        Property::UChar(v) => f32::from(v) / 255.0,
+        Property::UShort(v) => f32::from(v) / 65535.0,
+        _ => ply_prop_to_f32(prop).clamp(0.0, 1.0),
     }
 }
 
@@ -72,6 +88,7 @@ fn parse_ply(
     name: &str,
     companion_tex: Option<std::path::PathBuf>,
 ) -> Result<RawModelData, FormatsError> {
+    static NO_FACES: Vec<ply_rs_bw::ply::DefaultElement> = Vec::new();
     let mut reader = Cursor::new(bytes);
     let parser = ply_rs_bw::parser::Parser::<ply_rs_bw::ply::DefaultElement>::new();
     let ply = parser.read_ply(&mut reader).map_err(FormatsError::Ply)?;
@@ -81,33 +98,44 @@ fn parse_ply(
         .get("vertex")
         .ok_or_else(|| FormatsError::Invalid("PLY file has no 'vertex' element".to_string()))?;
 
-    let ply_faces = ply
-        .payload
-        .get("face")
-        .ok_or_else(|| FormatsError::Invalid("PLY file has no 'face' element".to_string()))?;
+    // A missing or empty face element is a point cloud (scanner exports),
+    // not an error; only a file with no vertices at all has no geometry.
+    let ply_faces = ply.payload.get("face").unwrap_or(&NO_FACES);
+    let is_point_cloud = ply_faces.is_empty();
 
-    if ply_vertices.is_empty() || ply_faces.is_empty() {
+    if ply_vertices.is_empty() {
         return Err(FormatsError::Invalid(
             "PLY file contains no geometry".to_string(),
         ));
     }
 
-    let (has_normals, has_uvs, uv_keys) = if let Some(first) = ply_vertices.first() {
-        let has_normals = first.get("nx").is_some();
-        let uv_keys: Option<(&str, &str)> = if first.get("s").is_some() && first.get("t").is_some()
-        {
-            Some(("s", "t"))
-        } else if first.get("u").is_some() && first.get("v").is_some() {
-            Some(("u", "v"))
-        } else if first.get("texture_u").is_some() && first.get("texture_v").is_some() {
-            Some(("texture_u", "texture_v"))
+    let (has_normals, has_uvs, uv_keys, has_colors, has_alpha) =
+        if let Some(first) = ply_vertices.first() {
+            let has_normals = first.get("nx").is_some();
+            let uv_keys: Option<(&str, &str)> =
+                if first.get("s").is_some() && first.get("t").is_some() {
+                    Some(("s", "t"))
+                } else if first.get("u").is_some() && first.get("v").is_some() {
+                    Some(("u", "v"))
+                } else if first.get("texture_u").is_some() && first.get("texture_v").is_some() {
+                    Some(("texture_u", "texture_v"))
+                } else {
+                    None
+                };
+            let has_colors = first.get("red").is_some()
+                && first.get("green").is_some()
+                && first.get("blue").is_some();
+            let has_alpha = has_colors && first.get("alpha").is_some();
+            (
+                has_normals,
+                uv_keys.is_some(),
+                uv_keys,
+                has_colors,
+                has_alpha,
+            )
         } else {
-            None
+            (false, false, None, false, false)
         };
-        (has_normals, uv_keys.is_some(), uv_keys)
-    } else {
-        (false, false, None)
-    };
 
     let multi_tex_verts = ply.payload.get("multi_texture_vertex");
     let multi_tex_faces = ply.payload.get("multi_texture_face");
@@ -132,6 +160,7 @@ fn parse_ply(
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(ply_vertices.len());
     let mut normals_vec: Vec<[f32; 3]> = Vec::with_capacity(ply_vertices.len());
     let mut tex_coords_vec: Vec<[f32; 2]> = Vec::with_capacity(ply_vertices.len());
+    let mut colors_vec: Vec<[f32; 4]> = Vec::with_capacity(ply_vertices.len());
 
     for elem in ply_vertices {
         let x = elem.get("x").map_or(0.0, ply_prop_to_f32);
@@ -151,6 +180,20 @@ fn parse_ply(
             tex_coords_vec.push([
                 elem.get(u_key).map_or(0.0, ply_prop_to_f32),
                 elem.get(v_key).map_or(0.0, ply_prop_to_f32),
+            ]);
+        }
+
+        if has_colors {
+            let alpha = if has_alpha {
+                elem.get("alpha").map_or(1.0, ply_prop_to_channel)
+            } else {
+                1.0
+            };
+            colors_vec.push([
+                srgb_to_linear(elem.get("red").map_or(0.0, ply_prop_to_channel)),
+                srgb_to_linear(elem.get("green").map_or(0.0, ply_prop_to_channel)),
+                srgb_to_linear(elem.get("blue").map_or(0.0, ply_prop_to_channel)),
+                alpha,
             ]);
         }
     }
@@ -174,6 +217,7 @@ fn parse_ply(
         let mut final_positions: Vec<[f32; 3]> = Vec::new();
         let mut final_normals: Vec<[f32; 3]> = Vec::new();
         let mut final_uvs: Vec<[f32; 2]> = Vec::new();
+        let mut final_colors: Vec<[f32; 4]> = Vec::new();
 
         for (fi, mt_face) in mt_faces.iter().enumerate() {
             let vis = if fi < geo_faces.len() {
@@ -197,6 +241,9 @@ fn parse_ply(
                     if has_normals {
                         final_normals.push(normals_vec[pos_idx as usize]);
                     }
+                    if has_colors {
+                        final_colors.push(colors_vec[pos_idx as usize]);
+                    }
                     if let Some(uv) = multi_tex_uvs.get(uv_idx as usize) {
                         final_uvs.push(*uv);
                     } else {
@@ -217,6 +264,7 @@ fn parse_ply(
         positions = final_positions;
         normals_vec = final_normals;
         tex_coords_vec = final_uvs;
+        colors_vec = final_colors;
     } else {
         for face in ply_faces {
             let vis = face
@@ -240,6 +288,12 @@ fn parse_ply(
 
     let tex_coords = if has_uvs && !tex_coords_vec.is_empty() {
         Some(tex_coords_vec)
+    } else {
+        None
+    };
+
+    let colors = if has_colors && !colors_vec.is_empty() {
+        Some(colors_vec)
     } else {
         None
     };
@@ -294,6 +348,12 @@ fn parse_ply(
             normals,
             tex_coords,
             material_index: Some(0),
+            topology: if is_point_cloud {
+                MeshTopology::Points
+            } else {
+                MeshTopology::Triangles
+            },
+            colors,
         }],
         materials,
         polygon_count,

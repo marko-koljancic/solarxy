@@ -22,7 +22,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         type_id: "transform",
         version: 2,
         display_name: "Transform",
-        category: Category::Modifiers,
+        category: Category::Transform,
         contexts: ContextSet::GEO,
         opens: None,
         inputs: vec![

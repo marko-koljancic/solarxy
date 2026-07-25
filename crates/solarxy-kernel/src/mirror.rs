@@ -70,8 +70,14 @@ fn reflect(set: &GeometrySet, axis: Axis, offset: f32) -> Result<GeometrySet, St
 
     // The determinant is negative, so every triangle now reads clockwise in the
     // reflected frame. Swap two indices to restore CCW. Normals are already
-    // right (see the module docs) and are deliberately left alone.
+    // right (see the module docs) and are deliberately left alone. Winding is
+    // a triangle concept: polylines and point clouds reflect by positions
+    // alone, and swapping inside their pair/empty index lists would corrupt
+    // them.
     for mesh in &mut out.meshes {
+        if mesh.topology != solarxy_core::geometry::MeshTopology::Triangles {
+            continue;
+        }
         let mut indices = (*mesh.indices).clone();
         for tri in indices.chunks_exact_mut(3) {
             tri.swap(1, 2);
@@ -159,6 +165,33 @@ mod tests {
         assert_eq!(a[0], b[0]);
         assert_eq!(a[1], b[2], "the swap is (1, 2)");
         assert_eq!(a[2], b[1]);
+    }
+
+    #[test]
+    fn non_triangle_meshes_reflect_without_index_surgery() {
+        let set = GeometrySet::from_parts(
+            vec![
+                KernelMesh::points("p", vec![[1.0, 0.0, 0.0]]),
+                KernelMesh::polyline("l", vec![[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], vec![0, 1]),
+            ],
+            vec![],
+        );
+        let out = mirror(&set, Axis::X, 0.0, false).unwrap();
+        assert!((out.meshes[0].positions[0][0] - -1.0).abs() < 1e-5);
+        assert_eq!(
+            *out.meshes[1].indices,
+            vec![0, 1],
+            "a pair list gets no winding swap"
+        );
+        assert!((out.meshes[1].positions[1][0] - -2.0).abs() < 1e-5);
+        assert_eq!(
+            out.meshes[0].topology,
+            solarxy_core::geometry::MeshTopology::Points
+        );
+        assert_eq!(
+            out.meshes[1].topology,
+            solarxy_core::geometry::MeshTopology::Lines
+        );
     }
 
     #[test]

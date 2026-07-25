@@ -78,19 +78,47 @@ export function exitMaximized(): void {
   api?.exitMaximizedGroup();
 }
 
-/** Maximizes the group owning `id`, or restores if it is already maximized. */
+/** Maximizes the group owning `id`, or restores if it is already maximized.
+ * Grid groups only: dockview maximize has no meaning for floating or popout
+ * groups, and calling it on one is not supported. */
 export function toggleMaximize(id: string): void {
   if (!api) return;
   const panel = api.getPanel(id);
   if (!panel) return;
   if (panel.api.isMaximized()) {
     api.exitMaximizedGroup();
-  } else {
+  } else if (panel.group.api.location.type === "grid") {
     api.maximizeGroup(panel);
   }
 }
 
-// ---- the asset panels (item 2; added and removed on demand) ----
+// ---- on-demand panels (presence in the dock IS the open state) ----
+
+type PanelPosition = Parameters<DockviewApi["addPanel"]>[0]["position"];
+
+/** The shared open/close body: focus if present, add at `position()` if
+ * absent, remove on close. Panel id doubles as the component name (the
+ * PANEL_IDS convention). */
+function setPanelOpen(id: string, title: string, open: boolean, position: () => PanelPosition): void {
+  if (!api) return;
+  const existing = api.getPanel(id);
+  if (open) {
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    api.addPanel({ id, component: id, title, position: position() });
+  } else if (existing) {
+    api.removePanel(existing);
+  }
+}
+
+/** Tabbed beside Properties when it exists (the aux-panel pattern), else
+ * wherever dockview appends. */
+function besideProperties(): PanelPosition {
+  const properties = api?.getPanel("properties");
+  return properties ? { referenceGroup: properties.api.group } : undefined;
+}
 
 export function isAssetsPanelOpen(): boolean {
   return api?.getPanel("assets") !== undefined;
@@ -99,23 +127,7 @@ export function isAssetsPanelOpen(): boolean {
 /** Adds the Assets panel (tabbed beside Properties, the Review pattern) or
  * removes it. */
 export function setAssetsPanelOpen(open: boolean): void {
-  if (!api) return;
-  const existing = api.getPanel("assets");
-  if (open) {
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-    const properties = api.getPanel("properties");
-    api.addPanel({
-      id: "assets",
-      component: "assets",
-      title: "Assets",
-      position: properties ? { referenceGroup: properties.api.group } : undefined,
-    });
-  } else if (existing) {
-    api.removePanel(existing);
-  }
+  setPanelOpen("assets", "Assets", open, besideProperties);
 }
 
 /** Opens (or focuses) the asset-preview panel, tabbed beside the Assets
@@ -137,8 +149,6 @@ export function openAssetPreviewPanel(title: string): void {
   });
 }
 
-// ---- the texture viewer panel (added and removed on demand) ----
-
 export function isTexturePanelOpen(): boolean {
   return api?.getPanel("texture") !== undefined;
 }
@@ -146,26 +156,28 @@ export function isTexturePanelOpen(): boolean {
 /** Adds the Texture viewer panel (tabbed beside Properties, the Assets
  * pattern) or removes it. */
 export function setTexturePanelOpen(open: boolean): void {
-  if (!api) return;
-  const existing = api.getPanel("texture");
-  if (open) {
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-    const properties = api.getPanel("properties");
-    api.addPanel({
-      id: "texture",
-      component: "texture",
-      title: "Texture",
-      position: properties ? { referenceGroup: properties.api.group } : undefined,
-    });
-  } else if (existing) {
-    api.removePanel(existing);
-  }
+  setPanelOpen("texture", "Texture", open, besideProperties);
 }
 
-// ---- the review panel (added and removed on demand, N) ----
+export function isAttributesPanelOpen(): boolean {
+  return api?.getPanel("attributes") !== undefined;
+}
+
+/** Adds the Attributes spreadsheet (tabbed beside Properties, the Assets
+ * pattern) or removes it. */
+export function setAttributesPanelOpen(open: boolean): void {
+  setPanelOpen("attributes", "Attributes", open, besideProperties);
+}
+
+export function isTreePanelOpen(): boolean {
+  return api?.getPanel("tree") !== undefined;
+}
+
+/** Adds the scene Tree panel (tabbed beside Properties, the aux-panel
+ * pattern) or removes it. */
+export function setTreePanelOpen(open: boolean): void {
+  setPanelOpen("tree", "Tree", open, besideProperties);
+}
 
 export function isReviewPanelOpen(): boolean {
   return api?.getPanel("review") !== undefined;
@@ -174,21 +186,37 @@ export function isReviewPanelOpen(): boolean {
 /** Adds the Review panel (tabbed beside Properties) or removes it. The panel's
  * presence in the dock IS the open state; the review store mirrors it. */
 export function setReviewPanelOpen(open: boolean): void {
-  if (!api) return;
-  const existing = api.getPanel("review");
-  if (open) {
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-    const properties = api.getPanel("properties");
-    api.addPanel({
-      id: "review",
-      component: "review",
-      title: "Review",
-      position: properties ? { referenceGroup: properties.api.group } : undefined,
-    });
-  } else if (existing) {
-    api.removePanel(existing);
-  }
+  setPanelOpen("review", "Review", open, besideProperties);
+}
+
+// ---- the core panels, reopenable after their tab is closed (feedback:
+// closing Properties or Nodes used to be recoverable only by applying a
+// desk) ----
+
+export function isNodesPanelOpen(): boolean {
+  return api?.getPanel("nodes") !== undefined;
+}
+
+/** Reopens the Nodes panel beside the viewport (the recipe's arrangement),
+ * falling back to wherever dockview appends when the viewport is gone too. */
+export function setNodesPanelOpen(open: boolean): void {
+  setPanelOpen("nodes", "Nodes", open, () => {
+    const viewport = api?.getPanel("viewport");
+    return viewport ? { direction: "right", referencePanel: viewport } : undefined;
+  });
+}
+
+export function isPropertiesPanelOpen(): boolean {
+  return api?.getPanel("properties") !== undefined;
+}
+
+/** Reopens the Properties panel below Nodes (mirroring the default recipe),
+ * else beside the viewport, else wherever dockview appends. */
+export function setPropertiesPanelOpen(open: boolean): void {
+  setPanelOpen("properties", "Properties", open, () => {
+    const nodes = api?.getPanel("nodes");
+    if (nodes) return { direction: "below", referencePanel: nodes };
+    const viewport = api?.getPanel("viewport");
+    return viewport ? { direction: "right", referencePanel: viewport } : undefined;
+  });
 }
