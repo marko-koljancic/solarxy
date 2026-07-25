@@ -2133,7 +2133,11 @@ impl Renderer {
     /// glyph quads decoded from `vertex_index` ranges), expanded per pane
     /// against its camera so orbiting costs no CPU work. Gated purely on
     /// the count: only the web host populates the channel.
-    fn draw_attr_labels<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, cam_bg: &'a wgpu::BindGroup) {
+    fn draw_attr_labels<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        cam_bg: &'a wgpu::BindGroup,
+    ) {
         let verts = self.labels.vertex_count();
         if verts == 0 {
             return;

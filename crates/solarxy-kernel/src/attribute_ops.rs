@@ -140,7 +140,10 @@ fn prim_verts(mesh: &KernelMesh, prim: usize) -> ([usize; 3], usize) {
         }
         MeshTopology::Lines => {
             let i = prim * 2;
-            ([mesh.indices[i] as usize, mesh.indices[i + 1] as usize, 0], 2)
+            (
+                [mesh.indices[i] as usize, mesh.indices[i + 1] as usize, 0],
+                2,
+            )
         }
         MeshTopology::Points => ([prim, 0, 0], 1),
     }
@@ -484,19 +487,35 @@ mod tests {
             other => panic!("float expected, got {other:?}"),
         };
         assert_eq!(
-            get(&promote_point_to_primitive(&mesh, &lane, PromoteMethod::Average)),
+            get(&promote_point_to_primitive(
+                &mesh,
+                &lane,
+                PromoteMethod::Average
+            )),
             3.0
         );
         assert_eq!(
-            get(&promote_point_to_primitive(&mesh, &lane, PromoteMethod::Min)),
+            get(&promote_point_to_primitive(
+                &mesh,
+                &lane,
+                PromoteMethod::Min
+            )),
             1.0
         );
         assert_eq!(
-            get(&promote_point_to_primitive(&mesh, &lane, PromoteMethod::Max)),
+            get(&promote_point_to_primitive(
+                &mesh,
+                &lane,
+                PromoteMethod::Max
+            )),
             6.0
         );
         assert_eq!(
-            get(&promote_point_to_primitive(&mesh, &lane, PromoteMethod::First)),
+            get(&promote_point_to_primitive(
+                &mesh,
+                &lane,
+                PromoteMethod::First
+            )),
             1.0
         );
     }
@@ -532,12 +551,7 @@ mod tests {
         // 2 average to 3; points 0 and 3 take their single primitive.
         let mesh = KernelMesh::new(
             "quad",
-            vec![
-                [0.0; 3],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [1.0, 1.0, 0.0],
-            ],
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]],
             vec![0, 1, 2, 1, 3, 2],
         );
         let lane = AttributeData::Float(Arc::new(vec![2.0, 4.0]));
@@ -563,13 +577,10 @@ mod tests {
             vec![[0.0; 3], [1.0, 0.0, 0.0], [9.0, 9.0, 9.0]],
             vec![0, 1],
         );
-        mesh.primitive_attributes.insert(
-            "v".into(),
-            AttributeData::Vec2(Arc::new(vec![[1.0, 2.0]])),
-        );
+        mesh.primitive_attributes
+            .insert("v".into(), AttributeData::Vec2(Arc::new(vec![[1.0, 2.0]])));
         let lane = mesh.primitive_attributes.get("v").unwrap();
-        let AttributeData::Vec2(pts) =
-            promote_primitive_to_point(&mesh, lane, PromoteMethod::Max)
+        let AttributeData::Vec2(pts) = promote_primitive_to_point(&mesh, lane, PromoteMethod::Max)
         else {
             panic!("vec2 expected");
         };

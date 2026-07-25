@@ -132,11 +132,7 @@ pub struct LabelResources {
 }
 
 impl LabelResources {
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        layout: &wgpu::BindGroupLayout,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, layout: &wgpu::BindGroupLayout) -> Self {
         let atlas = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Label Glyph Atlas"),
             size: wgpu::Extent3d {
@@ -416,7 +412,10 @@ mod tests {
         assert!((p.advance_px - 18.0 * ADVANCE_RATIO).abs() < 1e-5);
         assert_eq!(p.label_count, 7);
 
-        let bad = LabelStyle { dpr: f32::NAN, ..style };
+        let bad = LabelStyle {
+            dpr: f32::NAN,
+            ..style
+        };
         assert!((LabelParams::from_style(&bad, 0).text_px - 9.0).abs() < f32::EPSILON);
     }
 }

@@ -1015,11 +1015,8 @@ impl State {
         // cleared before the new-annotation draft (if any) opens.
         self.review.selected = None;
 
-        let ray = crate::state::raycast::screen_to_world_ray(
-            local,
-            (pane.width, pane.height),
-            view_proj,
-        );
+        let ray =
+            crate::state::raycast::screen_to_world_ray(local, (pane.width, pane.height), view_proj);
 
         let model = &scene.model;
         let views: Vec<crate::state::raycast::MeshView<'_>> = model

@@ -127,7 +127,14 @@ pub fn descriptor() -> NodeTypeDescriptor {
               displaces compound predictably); chain `compute_normals` after \
               the last displace to relight the result. A mesh without a \
               usable direction source passes through with a warning.",
-        search_aliases: &["displacement", "deform", "push", "noise", "height", "relief"],
+        search_aliases: &[
+            "displacement",
+            "deform",
+            "push",
+            "noise",
+            "height",
+            "relief",
+        ],
         glyph: "displace",
         role: NodeRole::Standard,
         cook,
@@ -318,10 +325,7 @@ mod tests {
             "direction".to_string(),
             lit(ParamValue::Enum("vector".into())),
         );
-        stored.insert(
-            "vector".to_string(),
-            lit(ParamValue::Vec3([0.0, 0.0, 3.0])),
-        );
+        stored.insert("vector".to_string(), lit(ParamValue::Vec3([0.0, 0.0, 3.0])));
         stored.insert("amplitude".to_string(), lit(ParamValue::Float(0.5)));
         let (out, warnings) = run(stored, set.clone());
         assert!(warnings.is_empty(), "{warnings:?}");

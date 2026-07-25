@@ -783,7 +783,10 @@ mod tests {
         let right = screen_to_world_ray((600.0, 300.0), (800.0, 600.0), vp);
         let up = screen_to_world_ray((400.0, 150.0), (800.0, 600.0), vp);
 
-        assert!(center.direction.dot(right.direction) > 1.0 - 1e-5, "parallel");
+        assert!(
+            center.direction.dot(right.direction) > 1.0 - 1e-5,
+            "parallel"
+        );
         assert!(center.direction.dot(up.direction) > 1.0 - 1e-5, "parallel");
         // 200 px right = a quarter of the 800 px width = 1.0 world unit of
         // the 4-unit visible span; 150 px up = 0.75 world units of 3.
@@ -822,7 +825,11 @@ mod tests {
         let vp = ortho_front_view_proj();
         let r = screen_to_world_ray((600.0, 300.0), (800.0, 600.0), vp);
         let hit = raycast_meshes(&r, &meshes).expect("the quad under the pixel");
-        assert!((hit.world_pos[0] - 1.0).abs() < 1e-4, "x {}", hit.world_pos[0]);
+        assert!(
+            (hit.world_pos[0] - 1.0).abs() < 1e-4,
+            "x {}",
+            hit.world_pos[0]
+        );
         assert!(hit.world_pos[1].abs() < 1e-4, "y {}", hit.world_pos[1]);
     }
 

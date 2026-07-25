@@ -257,7 +257,10 @@ mod tests {
             AttributeValue::Float(2.5),
         );
         let mut stored = BTreeMap::new();
-        stored.insert("attr_name".to_string(), lit(ParamValue::Text("mass".into())));
+        stored.insert(
+            "attr_name".to_string(),
+            lit(ParamValue::Text("mass".into())),
+        );
         let (out, warnings) = run(stored, set);
         assert!(warnings.is_empty(), "{warnings:?}");
         let mesh = &out.meshes[0];
@@ -277,7 +280,10 @@ mod tests {
             AttributeValue::Float(2.5),
         );
         let mut stored = BTreeMap::new();
-        stored.insert("attr_name".to_string(), lit(ParamValue::Text("mass".into())));
+        stored.insert(
+            "attr_name".to_string(),
+            lit(ParamValue::Text("mass".into())),
+        );
         let (up, _) = run(stored.clone(), set);
         stored.insert(
             "direction".to_string(),
@@ -318,7 +324,10 @@ mod tests {
     fn a_missing_lane_warns_and_passes_through() {
         let set = GeometrySet::from_mesh(generate_plane(1.0, 1.0, 1, 1));
         let mut stored = BTreeMap::new();
-        stored.insert("attr_name".to_string(), lit(ParamValue::Text("nope".into())));
+        stored.insert(
+            "attr_name".to_string(),
+            lit(ParamValue::Text("nope".into())),
+        );
         let (out, warnings) = run(stored, set);
         assert!(out.meshes[0].primitive_attributes.is_empty());
         assert_eq!(warnings.len(), 1);
@@ -335,7 +344,10 @@ mod tests {
             AttributeValue::Float(2.5),
         );
         let mut stored = BTreeMap::new();
-        stored.insert("attr_name".to_string(), lit(ParamValue::Text("mass".into())));
+        stored.insert(
+            "attr_name".to_string(),
+            lit(ParamValue::Text("mass".into())),
+        );
         let (out, _) = run(stored, set);
         let summary = attribute_summary(&out);
         assert!(

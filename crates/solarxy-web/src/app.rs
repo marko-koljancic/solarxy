@@ -2810,7 +2810,8 @@ impl SolarxyApp {
     fn rebuild_attr_labels(&mut self) -> (u32, usize) {
         use cgmath::{Matrix4, Transform};
         if !self.attr_viz.pins_wanted() {
-            self.renderer.set_attr_labels(&self.device, &self.queue, &[], &[]);
+            self.renderer
+                .set_attr_labels(&self.device, &self.queue, &[], &[]);
             return (0, 0);
         }
         let lane = self
@@ -2825,7 +2826,8 @@ impl SolarxyApp {
             .map(solarxy_kernel::KernelMesh::vertex_count)
             .sum();
         if total == 0 {
-            self.renderer.set_attr_labels(&self.device, &self.queue, &[], &[]);
+            self.renderer
+                .set_attr_labels(&self.device, &self.queue, &[], &[]);
             return (0, 0);
         }
         let cap = self.attr_viz.effective_cap(total);
@@ -2943,10 +2945,11 @@ impl SolarxyApp {
                 Box::new(move |_| c)
             }
             AttrColorMode::Ramp => {
-                let (min, max) = segments.iter().fold(
-                    (f32::INFINITY, f32::NEG_INFINITY),
-                    |(lo, hi), (_, _, m)| (lo.min(*m), hi.max(*m)),
-                );
+                let (min, max) = segments
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), (_, _, m)| {
+                        (lo.min(*m), hi.max(*m))
+                    });
                 if max - min <= 1e-10 {
                     // A degenerate range has nothing to rank; fall back
                     // to the uniform color.

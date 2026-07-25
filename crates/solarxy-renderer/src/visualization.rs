@@ -494,12 +494,30 @@ mod tests {
         assert_eq!(grid_plane_for(&cam_toward([3.0, 2.0, 4.0], Perspective)), 0);
         assert_eq!(grid_plane_for(&cam_toward([0.0, 5.0, 0.0], Perspective)), 0);
         // Orthographic axis elevations get their wall planes.
-        assert_eq!(grid_plane_for(&cam_toward([0.0, 5.0, 0.0], Orthographic)), 0);
-        assert_eq!(grid_plane_for(&cam_toward([0.0, -5.0, 0.0], Orthographic)), 0);
-        assert_eq!(grid_plane_for(&cam_toward([0.0, 0.0, 5.0], Orthographic)), 1);
-        assert_eq!(grid_plane_for(&cam_toward([0.0, 0.0, -5.0], Orthographic)), 1);
-        assert_eq!(grid_plane_for(&cam_toward([5.0, 0.0, 0.0], Orthographic)), 2);
-        assert_eq!(grid_plane_for(&cam_toward([-5.0, 0.0, 0.0], Orthographic)), 2);
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 5.0, 0.0], Orthographic)),
+            0
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, -5.0, 0.0], Orthographic)),
+            0
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 0.0, 5.0], Orthographic)),
+            1
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([0.0, 0.0, -5.0], Orthographic)),
+            1
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([5.0, 0.0, 0.0], Orthographic)),
+            2
+        );
+        assert_eq!(
+            grid_plane_for(&cam_toward([-5.0, 0.0, 0.0], Orthographic)),
+            2
+        );
     }
 
     #[test]

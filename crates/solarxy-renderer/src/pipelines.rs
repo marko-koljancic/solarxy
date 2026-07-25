@@ -793,28 +793,20 @@ impl Pipelines {
         });
         let label_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Label Pipeline Layout"),
-            bind_group_layouts: &[
-                &layouts.camera,
-                &layouts.wireframe_params,
-                &layouts.labels,
-            ],
+            bind_group_layouts: &[&layouts.camera, &layouts.wireframe_params, &layouts.labels],
             push_constant_ranges: &[],
         });
-        let attr_labels = PipelineBuilder::new(
-            device,
-            "Attr Labels Pipeline",
-            &label_layout,
-            &label_shader,
-        )
-        .vertex_entry("vs_label")
-        .fragment_entry("fs_label")
-        .buffers(vec![])
-        .color_format(hdr_format)
-        .blend_alpha()
-        .depth_write(false)
-        .depth_compare(wgpu::CompareFunction::Always)
-        .sample_count(sample_count)
-        .build();
+        let attr_labels =
+            PipelineBuilder::new(device, "Attr Labels Pipeline", &label_layout, &label_shader)
+                .vertex_entry("vs_label")
+                .fragment_entry("fs_label")
+                .buffers(vec![])
+                .color_format(hdr_format)
+                .blend_alpha()
+                .depth_write(false)
+                .depth_compare(wgpu::CompareFunction::Always)
+                .sample_count(sample_count)
+                .build();
 
         let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Map Shader"),

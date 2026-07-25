@@ -68,7 +68,12 @@ impl Builder {
                     port: to.1.to_string(),
                 },
             })
-            .unwrap_or_else(|e| panic!("connect {}:{} -> {}:{}: {e}", from.0.0, from.1, to.0.0, to.1));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "connect {}:{} -> {}:{}: {e}",
+                    from.0.0, from.1, to.0.0, to.1
+                )
+            });
     }
 
     fn display(&mut self, ctx: GraphContext, node: NodeId) {
@@ -155,7 +160,12 @@ fn modeling_basics() -> Builder {
     let sphere = b.add(g, "sphere", [260.0, 0.0]);
     b.set(g, sphere, "radius", ParamValue::Float(0.55));
     let move_sphere = b.add(g, "transform", [260.0, 120.0]);
-    b.set(g, move_sphere, "translate", ParamValue::Vec3([-0.75, 0.0, 0.0]));
+    b.set(
+        g,
+        move_sphere,
+        "translate",
+        ParamValue::Vec3([-0.75, 0.0, 0.0]),
+    );
     let merge = b.add(g, "merge", [130.0, 240.0]);
     b.connect(g, (box_id, "geometry"), (subdiv, "geometry"));
     b.connect(g, (subdiv, "geometry"), (move_box, "geometry"));
@@ -410,7 +420,12 @@ fn lights_camera_review() -> Builder {
     b.set(g, knot, "tubular_segments", ParamValue::Int(200));
     b.set(g, knot, "radial_segments", ParamValue::Int(24));
     let bind = b.add(g, "material", [0.0, 20.0]);
-    b.set(g, bind, "base_color", ParamValue::Color([0.83, 0.62, 0.21, 1.0]));
+    b.set(
+        g,
+        bind,
+        "base_color",
+        ParamValue::Color([0.83, 0.62, 0.21, 1.0]),
+    );
     b.set(g, bind, "metallic", ParamValue::Float(0.85));
     b.set(g, bind, "roughness", ParamValue::Float(0.3));
     b.set(g, bind, "material_name", ParamValue::Text("gold".into()));
@@ -426,7 +441,12 @@ fn lights_camera_review() -> Builder {
     b.set(ROOT, camera, "position", ParamValue::Vec3([3.2, 2.1, 3.6]));
     b.set(ROOT, camera, "target", ParamValue::Vec3([0.0, 0.0, 0.0]));
     let render = b.add(ROOT, "render", [560.0, 140.0]);
-    b.set(ROOT, render, "camera_path", ParamValue::NodeRef(Some(camera)));
+    b.set(
+        ROOT,
+        render,
+        "camera_path",
+        ParamValue::NodeRef(Some(camera)),
+    );
 
     // The pre-placed review thread needs cooked geometry (the engine
     // stamps the anchor with the display output's hash on add).

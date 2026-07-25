@@ -200,7 +200,8 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             } else {
                 AttributeDomain::Primitive
             };
-            out.domain_attributes_mut(domain).insert(dest.clone(), converted);
+            out.domain_attributes_mut(domain)
+                .insert(dest.clone(), converted);
             if delete_source && source != dest {
                 let map = out.domain_attributes_mut(domain);
                 if map.remove(&source).is_none() && point_domain {

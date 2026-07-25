@@ -44,7 +44,11 @@ impl RampPreset {
     #[must_use]
     pub fn stops(self) -> &'static [[f32; 3]] {
         match self {
-            Self::ColdWarm => &[[0.25, 0.45, 0.9], AttrVizState::DEFAULT_COLOR, [0.9, 0.15, 0.1]],
+            Self::ColdWarm => &[
+                [0.25, 0.45, 0.9],
+                AttrVizState::DEFAULT_COLOR,
+                [0.9, 0.15, 0.1],
+            ],
             Self::Ember => &[
                 [0.05, 0.03, 0.12],
                 [0.45, 0.10, 0.35],
@@ -154,7 +158,11 @@ impl AttrVizState {
 #[must_use]
 // Stop counts are tiny (2..=4), so the usize/f32 casts are exact; t is
 // clamped non-negative before the floor.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn ramp_color(preset: RampPreset, t: f32) -> [f32; 3] {
     let stops = preset.stops();
     let segments = stops.len() - 1;
@@ -175,14 +183,25 @@ mod tests {
     fn the_zero_cap_sentinel_means_all_points_up_to_the_ceiling() {
         let viz = AttrVizState::default();
         assert_eq!(viz.cap, 0, "all-points is the out-of-the-box default");
-        assert_eq!(viz.effective_cap(500), 500, "small scenes label every point");
-        assert_eq!(viz.effective_cap(AttrVizState::MAX_CAP), AttrVizState::MAX_CAP);
+        assert_eq!(
+            viz.effective_cap(500),
+            500,
+            "small scenes label every point"
+        );
+        assert_eq!(
+            viz.effective_cap(AttrVizState::MAX_CAP),
+            AttrVizState::MAX_CAP
+        );
         assert_eq!(
             viz.effective_cap(1_000_000),
             AttrVizState::MAX_CAP,
             "dense scenes clamp to the ceiling and sample"
         );
-        assert_eq!(viz.effective_cap(0), 1, "never zero: stride math divides by it");
+        assert_eq!(
+            viz.effective_cap(0),
+            1,
+            "never zero: stride math divides by it"
+        );
     }
 
     #[test]
@@ -190,7 +209,11 @@ mod tests {
         let mut viz = AttrVizState::default();
         viz.cap = 64;
         assert_eq!(viz.effective_cap(1_000_000), 64);
-        assert_eq!(viz.effective_cap(10), 64, "an explicit cap does not shrink to the scene");
+        assert_eq!(
+            viz.effective_cap(10),
+            64,
+            "an explicit cap does not shrink to the scene"
+        );
         viz.cap = 999_999;
         assert_eq!(viz.effective_cap(1_000_000), AttrVizState::MAX_CAP);
     }
@@ -222,9 +245,10 @@ mod tests {
         // The TS mirror round-trips the host's own DTO, but serde(default)
         // keeps the boundary honest anyway. `rampPreset` is deliberately
         // absent here: a pre-Stage-8 payload must keep the historical ramp.
-        let viz: AttrVizState =
-            serde_json::from_str(r#"{"labels":true,"vectors":true,"points":false,"name":"N","cap":0}"#)
-                .unwrap();
+        let viz: AttrVizState = serde_json::from_str(
+            r#"{"labels":true,"vectors":true,"points":false,"name":"N","cap":0}"#,
+        )
+        .unwrap();
         assert!(viz.labels && viz.vectors);
         assert_eq!(viz.vector_scale, 1.0);
         assert_eq!(viz.color_mode, AttrColorMode::Uniform);
@@ -244,22 +268,35 @@ mod tests {
     fn the_default_ramp_runs_cold_to_warm_through_amber() {
         // The ColdWarm stops are pinned byte-identical to the pre-preset
         // constants: existing users must see no change.
-        let close = |a: [f32; 3], b: [f32; 3]| {
-            a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6)
-        };
-        assert!(close(ramp_color(RampPreset::ColdWarm, 0.0), [0.25, 0.45, 0.9]));
-        assert!(close(ramp_color(RampPreset::ColdWarm, 0.5), AttrVizState::DEFAULT_COLOR));
-        assert!(close(ramp_color(RampPreset::ColdWarm, 1.0), [0.9, 0.15, 0.1]));
+        let close =
+            |a: [f32; 3], b: [f32; 3]| a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6);
+        assert!(close(
+            ramp_color(RampPreset::ColdWarm, 0.0),
+            [0.25, 0.45, 0.9]
+        ));
+        assert!(close(
+            ramp_color(RampPreset::ColdWarm, 0.5),
+            AttrVizState::DEFAULT_COLOR
+        ));
+        assert!(close(
+            ramp_color(RampPreset::ColdWarm, 1.0),
+            [0.9, 0.15, 0.1]
+        ));
         // Out-of-range input clamps instead of extrapolating.
-        assert_eq!(ramp_color(RampPreset::ColdWarm, -1.0), ramp_color(RampPreset::ColdWarm, 0.0));
-        assert_eq!(ramp_color(RampPreset::ColdWarm, 2.0), ramp_color(RampPreset::ColdWarm, 1.0));
+        assert_eq!(
+            ramp_color(RampPreset::ColdWarm, -1.0),
+            ramp_color(RampPreset::ColdWarm, 0.0)
+        );
+        assert_eq!(
+            ramp_color(RampPreset::ColdWarm, 2.0),
+            ramp_color(RampPreset::ColdWarm, 1.0)
+        );
     }
 
     #[test]
     fn every_preset_hits_its_endpoint_stops() {
-        let close = |a: [f32; 3], b: [f32; 3]| {
-            a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6)
-        };
+        let close =
+            |a: [f32; 3], b: [f32; 3]| a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6);
         let presets = [
             RampPreset::ColdWarm,
             RampPreset::Ember,
@@ -270,8 +307,14 @@ mod tests {
         for preset in presets {
             let stops = preset.stops();
             assert!(stops.len() >= 2, "{preset:?} needs at least two stops");
-            assert!(close(ramp_color(preset, 0.0), stops[0]), "{preset:?} low endpoint");
-            assert!(close(ramp_color(preset, 1.0), *stops.last().unwrap()), "{preset:?} high endpoint");
+            assert!(
+                close(ramp_color(preset, 0.0), stops[0]),
+                "{preset:?} low endpoint"
+            );
+            assert!(
+                close(ramp_color(preset, 1.0), *stops.last().unwrap()),
+                "{preset:?} high endpoint"
+            );
         }
     }
 
@@ -280,9 +323,8 @@ mod tests {
         // Ember has 4 stops (3 segments): t = 1/3 lands exactly on the
         // second stop, t = 0.5 halfway between the second and third.
         let stops = RampPreset::Ember.stops();
-        let close = |a: [f32; 3], b: [f32; 3]| {
-            a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6)
-        };
+        let close =
+            |a: [f32; 3], b: [f32; 3]| a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-6);
         assert!(close(ramp_color(RampPreset::Ember, 1.0 / 3.0), stops[1]));
         let mid: [f32; 3] = std::array::from_fn(|c| (stops[1][c] + stops[2][c]) / 2.0);
         assert!(close(ramp_color(RampPreset::Ember, 0.5), mid));

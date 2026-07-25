@@ -282,11 +282,7 @@ mod tests {
 
     /// 1 wide, 2 tall: opaque white on top, opaque black below.
     fn test_image() -> RawImageData {
-        RawImageData::new(
-            vec![255, 255, 255, 255, 0, 0, 0, 255],
-            1,
-            2,
-        )
+        RawImageData::new(vec![255, 255, 255, 255, 0, 0, 0, 255], 1, 2)
     }
 
     fn run(
@@ -367,8 +363,7 @@ mod tests {
         let grey = RawImageData::new(vec![128, 128, 128, 128], 1, 1);
         let set = GeometrySet::from_mesh(generate_plane(1.0, 1.0, 1, 1));
         let (out, _) = run(stored, set, Some(grey));
-        let Some(AttributeData::Vec4(lane)) = out.meshes[0].attributes.get(reserved::COLOR)
-        else {
+        let Some(AttributeData::Vec4(lane)) = out.meshes[0].attributes.get(reserved::COLOR) else {
             panic!("vec4 lane");
         };
         let px = lane[0];
@@ -414,9 +409,6 @@ mod tests {
         ));
         let (out, warnings) = run(BTreeMap::new(), set, Some(test_image()));
         assert!(out.meshes[0].attributes.is_empty());
-        assert!(
-            warnings.iter().any(|w| w.contains("uv")),
-            "{warnings:?}"
-        );
+        assert!(warnings.iter().any(|w| w.contains("uv")), "{warnings:?}");
     }
 }

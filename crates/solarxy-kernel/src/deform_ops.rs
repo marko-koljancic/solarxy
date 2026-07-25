@@ -39,11 +39,7 @@ pub fn displace_mesh(
                 dir
             };
             let a = amp_at(i);
-            [
-                p[0] + dir[0] * a,
-                p[1] + dir[1] * a,
-                p[2] + dir[2] * a,
-            ]
+            [p[0] + dir[0] * a, p[1] + dir[1] * a, p[2] + dir[2] * a]
         })
         .collect();
     let mut out = mesh.clone();
@@ -83,7 +79,13 @@ mod tests {
         let mesh = generate_plane(1.0, 1.0, 1, 1);
         let out = displace_mesh(
             &mesh,
-            |i| Some(if i == 0 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] }),
+            |i| {
+                Some(if i == 0 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                })
+            },
             |i| i as f32,
             true,
         );

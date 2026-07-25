@@ -114,7 +114,10 @@ fn main() -> anyhow::Result<()> {
     std::fs::write(&out_path, &atlas)?;
 
     let advance = scaled.h_advance(font.glyph_id('0'));
-    println!("wrote {out_path}: {ATLAS_W}x{ATLAS_H} R8, {} bytes", atlas.len());
+    println!(
+        "wrote {out_path}: {ATLAS_W}x{ATLAS_H} R8, {} bytes",
+        atlas.len()
+    );
     println!("charset: {CHARSET:?} ({} glyphs)", CHARSET.chars().count());
     println!("advance ratio (advance/em): {:.6}", advance / EM_PX);
     Ok(())

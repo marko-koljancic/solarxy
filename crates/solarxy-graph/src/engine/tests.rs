@@ -417,9 +417,10 @@ fn command_boundary_json_shape_is_camelcase() {
     };
     let v3 = serde_json::to_value(&cmd3).unwrap();
     assert_eq!(v3["type"], "resetParams");
-    let back3: Command =
-        serde_json::from_value(serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7 }))
-            .unwrap();
+    let back3: Command = serde_json::from_value(
+        serde_json::json!({ "type": "resetParams", "ctx": "root", "node": 7 }),
+    )
+    .unwrap();
     assert!(matches!(
         back3,
         Command::ResetParams {
@@ -1082,7 +1083,13 @@ fn reset_params_restores_defaults_in_one_undo_step() {
         .unwrap();
 
     // The stored overrides are gone (the document is honestly unset)...
-    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
     assert!(params.get("width").is_none());
     assert!(params.get("height").is_none());
     // ...and each removal announced the descriptor default so the mirror
@@ -1106,7 +1113,13 @@ fn reset_params_restores_defaults_in_one_undo_step() {
 
     // ONE undo restores both stored values; redo re-resets both.
     e.apply(Command::Undo).unwrap();
-    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
     assert_eq!(
         params.get("width"),
         Some(&ParamSource::Literal(ParamValue::Float(3.0)))
@@ -1116,7 +1129,13 @@ fn reset_params_restores_defaults_in_one_undo_step() {
         Some(&ParamSource::Literal(ParamValue::Float(4.0)))
     );
     e.apply(Command::Redo).unwrap();
-    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
     assert!(params.get("width").is_none());
     assert!(params.get("height").is_none());
 }
@@ -1141,7 +1160,13 @@ fn reset_params_with_keys_touches_only_those_and_rejects_unknown_ones() {
         keys: Some(vec!["width".into()]),
     })
     .unwrap();
-    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
     assert!(params.get("width").is_none());
     assert_eq!(
         params.get("height"),
@@ -1181,7 +1206,13 @@ fn reset_params_removes_an_expression_and_skips_unstored_keys() {
             keys: None,
         })
         .unwrap();
-    let params = &e.document().graph(ctx).unwrap().node(box_id).unwrap().params;
+    let params = &e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(box_id)
+        .unwrap()
+        .params;
     assert!(params.get("width").is_none(), "the expression is removed");
     // Only the one stored key announced a change: unstored params are
     // already at their defaults and stay silent.

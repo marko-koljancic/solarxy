@@ -89,7 +89,11 @@ mod tests {
         ] {
             let name = serde_json::to_value(bg).unwrap();
             let name = name.as_str().expect("BuiltinBg serializes as a string");
-            assert_eq!(parse_background(name), BackgroundMode::Builtin(bg), "{name}");
+            assert_eq!(
+                parse_background(name),
+                BackgroundMode::Builtin(bg),
+                "{name}"
+            );
         }
         assert_eq!(parse_background("garbage"), BackgroundMode::GRADIENT);
         assert_eq!(parse_background(""), BackgroundMode::GRADIENT);

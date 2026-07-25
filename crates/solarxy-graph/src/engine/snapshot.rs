@@ -276,7 +276,11 @@ pub struct ShowIfSnapshot {
 /// The predicate, with values in the same schema-v1 plain JSON form as
 /// `ParamSnapshot::default` (so the panel compares one encoding).
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind", rename_all_fields = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    rename_all_fields = "camelCase"
+)]
 pub enum ShowIfPredSnapshot {
     Truthy,
     Eq { value: serde_json::Value },
