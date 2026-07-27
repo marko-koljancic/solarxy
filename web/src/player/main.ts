@@ -15,6 +15,7 @@
 import { SolarxyClient } from "../engine/client";
 import type { PlayerConfig } from "../export/playerConfig";
 import { DEFAULT_PLAYER_CONFIG } from "../export/playerConfig";
+import { DEFAULT_PREFS } from "../store/prefs";
 
 /// The UV checker the renderer wants at construction.
 ///
@@ -125,7 +126,12 @@ async function main(): Promise<void> {
       // defaults; both apply flags are false so this changes the speed
       // without repainting the pane's own wireframe or background.
       client.setDisplayDefaults(
-        { wireframeWeight: "Light", background: "Gradient", turntableRpm: config.turntableRpm },
+        {
+          wireframeWeight: "Light",
+          background: "Gradient",
+          turntableRpm: config.turntableRpm,
+          pointSize: DEFAULT_PREFS.display.pointSize,
+        },
         false,
         false,
       );

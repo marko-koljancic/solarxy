@@ -76,7 +76,7 @@ struct WireParams {
     width_px: f32,
     viewport_w: f32,
     viewport_h: f32,
-    _pad: f32,
+    point_size_px: f32,
 }
 @group(1) @binding(0)
 var<uniform> params: WireParams;
@@ -90,9 +90,6 @@ struct PointDatum {
 }
 @group(2) @binding(0)
 var<storage, read> points: array<PointDatum>;
-
-/// Uniform on-screen point size, in pixels (renderer constant in v1).
-const POINT_SIZE_PX: f32 = 6.0;
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     let lo = c / 12.92;
@@ -113,7 +110,7 @@ fn vs_point(@builtin(vertex_index) vid: u32, instance: InstanceInput) -> VertexO
 
     var clip = camera.view_proj * model_matrix_of(instance) * vec4(point.pos, 1.0);
     let offset_ndc =
-        corner * POINT_SIZE_PX * 2.0 / vec2(params.viewport_w, params.viewport_h);
+        corner * params.point_size_px * 2.0 / vec2(params.viewport_w, params.viewport_h);
     clip = vec4(clip.xy + offset_ndc * clip.w, clip.zw);
 
     var out: VertexOutput;

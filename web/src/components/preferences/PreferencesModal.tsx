@@ -122,10 +122,26 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">rpm</span>
       </Row>
+      <Row label="Point size">
+        <input
+          className="input-field"
+          type="number"
+          min={1}
+          max={32}
+          step={1}
+          value={d.pointSize}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ pointSize: Math.min(32, Math.max(1, v)) });
+          }}
+        />
+        <span className="prefs-unit">px</span>
+      </Row>
       <div className="prefs-info">
         Wireframe and background are the defaults for new scenes and panes; a scene file keeps the
         per-pane settings it was saved with, and the pane&apos;s Display menu overrides the current
-        view. The turntable speed applies immediately.
+        view. The turntable speed and point size apply immediately. Point size is the on-screen
+        size of a rendered point, which a point cloud and the scatter node both draw with.
       </div>
     </>
   );
