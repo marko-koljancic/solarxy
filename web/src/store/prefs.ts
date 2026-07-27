@@ -61,6 +61,11 @@ export interface DisplayPrefs {
   background: BackgroundChoice;
   /** Turntable revolutions per minute, clamped 1..60. */
   turntableRpm: number;
+  /** On-screen size of a rendered point, in pixels, clamped 1..32.
+   *
+   * Global rather than per pane (decision M-27): there is no comparison
+   * worth two point sizes side by side. */
+  pointSize: number;
 }
 
 /** How selection presents in the 3D viewport:
@@ -114,7 +119,7 @@ export const DEFAULT_PREFS: Prefs = {
     overlays: { grid: true, axes: true, validation: true },
   },
   selection: { style: "outline", color: "#ff9e21", width: 3 },
-  display: { wireframeWeight: "Light", background: "Gradient", turntableRpm: 6 },
+  display: { wireframeWeight: "Light", background: "Gradient", turntableRpm: 6, pointSize: 6 },
   onboarding: { completed: false, version: 0 },
   viewport: {
     orientation: "world",
@@ -190,7 +195,18 @@ export function sanitizeTheme(raw: unknown): ThemeChoice {
  * new fields backfill on upgrade (the Minimystix onRehydrateStorage
  * pattern): a newly added group needs no persist version bump. Exported for
  * the backfill tests. */
-export function mergePersistedPrefs(p: Partial<Prefs> | undefined): Prefs {
+/** A persisted blob: every group optional, and every FIELD within a group
+ * optional too.
+ *
+ * `Partial<Prefs>` would be wrong here, and was: it says a stored group is
+ * complete if present, which is false for every blob written by an older
+ * version -- exactly the case this function exists to handle. A user
+ * upgrading to 0.8.1 has a `display` group with no `pointSize` in it. */
+type PersistedPrefs = {
+  [K in keyof Prefs]?: Prefs[K] extends object ? Partial<Prefs[K]> : Prefs[K];
+};
+
+export function mergePersistedPrefs(p: PersistedPrefs | undefined): Prefs {
   const prefs: Prefs = {
     appearance: { ...DEFAULT_PREFS.appearance, ...p?.appearance },
     review: { ...DEFAULT_PREFS.review, ...p?.review },

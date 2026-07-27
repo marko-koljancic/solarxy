@@ -1,0 +1,7 @@
+# Vertex colours in the unofficial extended-position form: `v x y z r g b`.
+# Written by MeshLab, most scanners, and several photogrammetry pipelines.
+# Red, green, and mid-grey (0.5) so the sRGB decode is observable.
+v 0.0 0.0 0.0 1.0 0.0 0.0
+v 1.0 0.0 0.0 0.0 1.0 0.0
+v 0.0 1.0 0.0 0.5 0.5 0.5
+f 1 2 3

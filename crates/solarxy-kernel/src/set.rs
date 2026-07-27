@@ -49,8 +49,11 @@ pub mod reserved {
     /// Per-point texture coordinate, `Vec2`. The attribute-lane twin of
     /// `KernelMesh::tex_coords`.
     pub const UV: &str = "uv";
-    /// Per-point uniform scale, `Float`. Reserved: no 0.8.0 producer or
-    /// consumer; `copy_to_points` consumes it in a later release.
+    /// Per-point uniform scale, `Float`. Consumed by `copy_to_points`,
+    /// which MULTIPLIES its own Scale parameter by this lane so the
+    /// parameter stays a global dial. Authored by `attribute_wrangle`,
+    /// which is what made the lane useful: it was reserved in 0.8.0 with
+    /// nothing in the product able to write it.
     pub const PSCALE: &str = "pscale";
 }
 

@@ -69,7 +69,17 @@ pub fn descriptor() -> NodeTypeDescriptor {
                 )
                 .hard(0.001, 1000.0)
                 .soft(0.01, 10.0)
-                .doc("A uniform size factor applied to every copy before it lands."),
+                .doc(
+                    "A uniform size factor applied to every copy before it \
+                     lands.\n\n\
+                     If the points carry a `pscale` float attribute, each \
+                     copy multiplies this by its own point's value, so this \
+                     stays the global dial while the attribute varies around \
+                     it. Author one with `attribute_wrangle`: \
+                     `@pscale = fit(rand(@ptnum), 0, 1, 0.4, 1.6);` gives a \
+                     scatter of mixed sizes. Points without the lane copy at \
+                     this size exactly.",
+                ),
                 ParamSpec::new(
                     "scale_variance",
                     "Scale Variance",

@@ -469,3 +469,48 @@ fn glb_color0_parses_as_linear_rgba_without_srgb_decode() {
     );
     assert!((colors[2][3] - 1.0).abs() < 1e-5);
 }
+
+/// The float 0.5 through the same sRGB-to-linear decode PLY uses.
+const LINEAR_HALF: f32 = 0.214_04;
+
+#[test]
+fn obj_parses_vertex_colors_from_the_extended_position_form() {
+    // `v x y z r g b` is unofficial but universal in scan and photogrammetry
+    // output. Decoded sRGB-to-linear, matching PLY's ratified stance so the
+    // same scan exported to either format imports identically.
+    let raw = obj::load_obj(&fixture("colored_tri.obj")).unwrap();
+    let mesh = &raw.meshes[0];
+    assert_eq!(mesh.positions.len(), 3, "positions still parse");
+    let colors = mesh.colors.as_ref().expect("colors parsed");
+    assert_eq!(colors.len(), 3, "one colour per vertex");
+
+    assert!((colors[0][0] - 1.0).abs() < 1e-5, "red vertex: {colors:?}");
+    assert!(colors[0][1].abs() < 1e-6 && colors[0][2].abs() < 1e-6);
+    assert!(
+        (colors[0][3] - 1.0).abs() < 1e-6,
+        "OBJ has no alpha; opaque"
+    );
+    assert!((colors[1][1] - 1.0).abs() < 1e-5, "green vertex");
+    assert!(
+        (colors[2][0] - LINEAR_HALF).abs() < 1e-3,
+        "0.5 decodes sRGB-to-linear, got {}",
+        colors[2][0]
+    );
+}
+
+#[test]
+fn a_plain_obj_still_reports_no_colors() {
+    // The overwhelmingly common case: three components per `v` and no
+    // colour channel at all. It must stay `None` rather than becoming an
+    // all-black lane that vertex-colour display would then honour.
+    let raw = obj::load_obj(&fixture("triangle.obj")).unwrap();
+    assert!(raw.meshes[0].colors.is_none());
+}
+
+#[test]
+fn obj_colors_survive_the_byte_api_identically() {
+    let path = obj::load_obj(&fixture("colored_tri.obj")).unwrap();
+    let mut resolver = NoAssets;
+    let bytes = obj::load_obj_bytes(&fixture_bytes("colored_tri.obj"), &mut resolver).unwrap();
+    assert_eq!(path.meshes[0].colors, bytes.meshes[0].colors);
+}

@@ -265,7 +265,9 @@ impl State {
                     line_width: pds.line_weight.width_px(),
                     screen_width: self.renderer.target_width as f32,
                     screen_height: self.renderer.target_height as f32,
-                    _pad: 0.0,
+                    // The UV pass draws no points; carrying the default keeps
+                    // the shared uniform coherent for the next 3D pass.
+                    point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
                 };
                 self.queue.write_buffer(
                     &self.renderer.wire.wireframe_params_buffer,

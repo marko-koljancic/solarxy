@@ -219,6 +219,19 @@ const UNIFORM_COLOR: [f32; 3] = [0.45, 0.47, 0.50];
 /// Hover and grab both go amber, matching the app's accent.
 const HILIGHT: [f32; 3] = [1.0, 0.78, 0.28];
 
+/// How far an axis fades once it points at the camera, 0 = no fade,
+/// 1 = fully neutral.
+///
+/// Not all the way to the background: a fully invisible handle reads as
+/// broken rather than as unusable, and the axis is still pickable.
+const VIEW_PARALLEL_FADE: f32 = 0.72;
+
+/// Where the fade starts, as `|dot(axis, view)|`. Below this the axis has
+/// enough screen-space extent to drag along and draws at full strength;
+/// above it the projected axis collapses toward a point and a drag stops
+/// meaning anything.
+const FADE_ONSET: f32 = 0.86;
+
 impl ManipulatorState {
     /// The colour a handle draws in, accounting for hover and grab.
     fn color_for(&self, handle: Handle) -> [f32; 3] {
@@ -227,6 +240,51 @@ impl ManipulatorState {
         if self.active == Some(handle) || (self.active.is_none() && self.hovered == Some(handle)) {
             return HILIGHT;
         }
+        let base = Self::base_color(handle);
+        // 3ds Max's cue: an axis pointing at the camera has almost no
+        // screen-space extent, so dragging along it is guesswork. Fading it
+        // says so before the user tries. Purely visual (decision M-29):
+        // picking is untouched, and the hover highlight above still wins, so
+        // a faded axis you do manage to grab reads as grabbed.
+        let fade = self.view_parallel_fade(handle);
+        if fade <= 0.0 {
+            return base;
+        }
+        let mut out = base;
+        for (c, n) in out.iter_mut().zip(VIEW_COLOR) {
+            *c += (n - *c) * fade;
+        }
+        out
+    }
+
+    /// How much `handle` should fade, from its angle to the view direction.
+    /// Zero for handles with no single axis (the planes read fine head-on,
+    /// and the view ring is defined BY the view direction).
+    fn view_parallel_fade(&self, handle: Handle) -> f32 {
+        let Some(axis) = handle
+            .axis()
+            .or_else(|| handle.scale_axis())
+            .or_else(|| handle.ring_axis())
+        else {
+            return 0.0;
+        };
+        // A rotation ring is edge-on when its AXIS faces the camera, which is
+        // the opposite of a translate arrow: the ring is then a line. So the
+        // ring fades on the same measure for the opposite reason, and both
+        // are unusable at the same angle.
+        let alignment = self.axis_dir(axis).dot(self.view_dir).abs();
+        let ring = handle.ring_axis().is_some();
+        let measure = if ring { 1.0 - alignment } else { alignment };
+        if measure <= FADE_ONSET {
+            return 0.0;
+        }
+        // Ramps 0 to 1 across the remaining span, so the cue arrives
+        // gradually rather than snapping on.
+        ((measure - FADE_ONSET) / (1.0 - FADE_ONSET)).clamp(0.0, 1.0) * VIEW_PARALLEL_FADE
+    }
+
+    /// The handle's own colour, before hover and fade.
+    fn base_color(handle: Handle) -> [f32; 3] {
         match handle {
             // A plane handle takes the colour of the axis it is NORMAL to, the
             // way Blender and Maya both do it, so the YZ square reads as "the X
@@ -713,11 +771,20 @@ mod tests {
         // The X ring lies in the YZ plane, seen EDGE-on. A ribbon in its own
         // plane would collapse; a camera-facing one keeps its width, so the ring
         // must still span a measurable range in X.
+        //
+        // Found by the colour the state ACTUALLY assigns rather than by the
+        // raw X_COLOR: an edge-on ring is view-parallel-faded, so a literal
+        // comparison would match nothing and silently measure an empty set.
+        let ring_color = s.color_for(Handle::RingX);
         let x_ring: Vec<_> = tris
             .iter()
-            .filter(|v| same(v.color, X_COLOR))
+            .filter(|v| same(v.color, ring_color))
             .map(|v| v.position[0])
             .collect();
+        assert!(
+            !x_ring.is_empty(),
+            "the X ring must be in the vertex stream"
+        );
         let spread = x_ring.iter().fold(f32::MIN, |a, b| a.max(*b))
             - x_ring.iter().fold(f32::MAX, |a, b| a.min(*b));
         assert!(
@@ -793,5 +860,108 @@ mod tests {
         // outer view ring where the two cross).
         assert_eq!(translate[0], Handle::PlaneXY);
         assert_eq!(rotate[0], Handle::RingX);
+    }
+}
+
+#[cfg(test)]
+mod view_fade_tests {
+    use super::*;
+    use cgmath::{Matrix4, SquareMatrix, Vector3};
+
+    /// A translate manipulator at the origin, viewed down `view_dir`.
+    fn state(view_dir: Vector3<f32>) -> ManipulatorState {
+        ManipulatorState {
+            anchor: Matrix4::identity(),
+            basis: cgmath::Matrix3::identity(),
+            view_dir: view_dir.normalize(),
+            tool: ManipulatorTool::Translate,
+            hovered: None,
+            active: None,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn an_axis_across_the_view_does_not_fade() {
+        // Looking down -Z, the X axis is fully across the screen.
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        assert_eq!(s.view_parallel_fade(Handle::AxisX), 0.0);
+        assert_eq!(s.color_for(Handle::AxisX), X_COLOR);
+    }
+
+    #[test]
+    fn an_axis_pointing_at_the_camera_fades() {
+        // Looking down -Z, the Z axis points at the viewer.
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        let fade = s.view_parallel_fade(Handle::AxisZ);
+        assert!(fade > 0.0, "a view-parallel axis must fade");
+        let c = s.color_for(Handle::AxisZ);
+        assert_ne!(c, Z_COLOR, "and its colour must actually move");
+        // Toward neutral, never past it.
+        for (got, (from, to)) in c.iter().zip(Z_COLOR.iter().zip(VIEW_COLOR.iter())) {
+            let lo = from.min(*to);
+            let hi = from.max(*to);
+            assert!(
+                *got >= lo - 1e-6 && *got <= hi + 1e-6,
+                "{got} outside [{lo}, {hi}]"
+            );
+        }
+    }
+
+    #[test]
+    fn the_fade_never_reaches_the_neutral_colour() {
+        // A fully invisible handle reads as broken, not as unusable.
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        assert!(s.view_parallel_fade(Handle::AxisZ) <= VIEW_PARALLEL_FADE);
+        assert_ne!(s.color_for(Handle::AxisZ), VIEW_COLOR);
+    }
+
+    #[test]
+    fn hover_still_wins_over_the_fade() {
+        // Whatever the angle, a hovered handle has to read as hovered.
+        let mut s = state(Vector3::new(0.0, 0.0, -1.0));
+        s.hovered = Some(Handle::AxisZ);
+        assert_eq!(s.color_for(Handle::AxisZ), HILIGHT);
+    }
+
+    #[test]
+    fn a_grabbed_handle_stays_highlighted_even_view_parallel() {
+        let mut s = state(Vector3::new(0.0, 0.0, -1.0));
+        s.active = Some(Handle::AxisZ);
+        assert_eq!(s.color_for(Handle::AxisZ), HILIGHT);
+    }
+
+    #[test]
+    fn a_rotation_ring_fades_when_it_is_edge_on_not_when_it_faces_us() {
+        // The opposite measure to an arrow: a ring whose axis faces the
+        // camera is a full circle (usable); one whose axis lies across the
+        // view is a line (not).
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        assert_eq!(
+            s.view_parallel_fade(Handle::RingZ),
+            0.0,
+            "facing us, usable"
+        );
+        assert!(
+            s.view_parallel_fade(Handle::RingX) > 0.0,
+            "edge-on, unusable"
+        );
+    }
+
+    #[test]
+    fn a_plane_handle_never_fades() {
+        // A plane reads fine at any angle its normal happens to take.
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        assert_eq!(s.view_parallel_fade(Handle::PlaneXY), 0.0);
+        assert_eq!(s.view_parallel_fade(Handle::PlaneYZ), 0.0);
+    }
+
+    #[test]
+    fn the_view_ring_and_uniform_cube_are_never_faded() {
+        // Neither belongs to an object axis, so neither has an angle to be
+        // wrong at.
+        let s = state(Vector3::new(0.0, 0.0, -1.0));
+        assert_eq!(s.view_parallel_fade(Handle::RingView), 0.0);
+        assert_eq!(s.view_parallel_fade(Handle::ScaleUniform), 0.0);
     }
 }

@@ -82,10 +82,16 @@ pub fn copy_to_points(
                 _ => Matrix3::identity(),
             };
             let factor = 1.0 + (2.0 * rng::unit_f32(i as u64, 0, seed) - 1.0) * scale_variance;
+            // `pscale` MULTIPLIES rather than replaces. The node's own Scale
+            // stays a global dial and the lane varies around it, so a wrangle
+            // can drive per-point size without making the parameter above it
+            // dead. A negative value would mirror the copy inside out, so it
+            // clamps at zero.
+            let per_point = target.pscale.map_or(1.0, |v| v.max(0.0));
             Placement {
                 translate: target.position,
                 rotation,
-                scale: scale * factor,
+                scale: scale * factor * per_point,
             }
         })
         .collect();
@@ -101,6 +107,9 @@ pub fn copy_to_points(
 struct Target {
     position: [f32; 3],
     normal: Option<[f32; 3]>,
+    /// The reserved `pscale` lane's value at this point, or `None` when the
+    /// input does not carry one.
+    pscale: Option<f32>,
 }
 
 struct Placement {
@@ -124,11 +133,19 @@ fn gather_targets(points: &GeometrySet) -> Vec<Target> {
             .as_ref()
             .filter(|buf| buf.len() == mesh.positions.len())
             .map(|buf| buf.as_slice());
+        // The reserved per-point scale. Reserved since 0.8.0 with no
+        // producer; the attribute wrangle is the first thing that can author
+        // it, which is what makes consuming it useful now.
+        let pscale = match mesh.attributes.get(reserved::PSCALE) {
+            Some(AttributeData::Float(v)) if v.len() == mesh.positions.len() => Some(v.as_slice()),
+            _ => None,
+        };
         for (i, position) in mesh.positions.iter().enumerate() {
             let normal = lane.or(fallback).map(|buf| buf[i]);
             targets.push(Target {
                 position: *position,
                 normal,
+                pscale: pscale.map(|buf| buf[i]),
             });
         }
     }
@@ -435,5 +452,118 @@ mod tests {
         let out = copy_to_points(&template, &cloud, CopyOrient::Normal, 1.0, 0.25, 7).unwrap();
         assert_eq!(out.meshes[0].primitive_count(), 12 * 50);
         assert!(!out.is_renderable_empty());
+    }
+}
+
+#[cfg(test)]
+mod pscale_tests {
+    use super::*;
+    use crate::primitives::generate_box;
+    use std::sync::Arc;
+
+    /// Two points, the second carrying twice the first's `pscale`.
+    fn points_with_pscale(values: Option<Vec<f32>>) -> GeometrySet {
+        let mut mesh = KernelMesh::points("pts", vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+        if let Some(v) = values {
+            mesh.attributes.insert(
+                reserved::PSCALE.to_string(),
+                AttributeData::Float(Arc::new(v)),
+            );
+        }
+        GeometrySet::from_parts(vec![mesh], Vec::new())
+    }
+
+    fn template() -> GeometrySet {
+        GeometrySet::from_parts(vec![generate_box(1.0, 1.0, 1.0, 1, 1, 1)], Vec::new())
+    }
+
+    /// The size of copy `i`, measured as its bounding-box width.
+    fn copy_width(set: &GeometrySet, i: usize) -> f32 {
+        let mesh = &set.meshes[0];
+        let per = mesh.positions.len() / 2;
+        let slice = &mesh.positions[i * per..(i + 1) * per];
+        let max = slice.iter().fold(f32::MIN, |a, p| a.max(p[0]));
+        let min = slice.iter().fold(f32::MAX, |a, p| a.min(p[0]));
+        max - min
+    }
+
+    #[test]
+    fn pscale_multiplies_the_scale_parameter_rather_than_replacing_it() {
+        let out = copy_to_points(
+            &template(),
+            &points_with_pscale(Some(vec![1.0, 2.0])),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        let a = copy_width(&out, 0);
+        let b = copy_width(&out, 1);
+        assert!((b - a * 2.0).abs() < 1e-4, "{b} should be twice {a}");
+    }
+
+    #[test]
+    fn the_scale_parameter_still_applies_on_top_of_the_lane() {
+        // The parameter is a global dial: doubling it doubles every copy,
+        // whatever the lane says. Replacing rather than multiplying would
+        // have made this parameter dead.
+        let out = copy_to_points(
+            &template(),
+            &points_with_pscale(Some(vec![1.0, 2.0])),
+            CopyOrient::None,
+            3.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        let plain = copy_to_points(
+            &template(),
+            &points_with_pscale(Some(vec![1.0, 2.0])),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        assert!((copy_width(&out, 0) - copy_width(&plain, 0) * 3.0).abs() < 1e-4);
+        assert!((copy_width(&out, 1) - copy_width(&plain, 1) * 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn points_without_the_lane_copy_at_the_parameter_size() {
+        let with = copy_to_points(
+            &template(),
+            &points_with_pscale(Some(vec![1.0, 1.0])),
+            CopyOrient::None,
+            2.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        let without = copy_to_points(
+            &template(),
+            &points_with_pscale(None),
+            CopyOrient::None,
+            2.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        assert!((copy_width(&with, 0) - copy_width(&without, 0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_negative_pscale_clamps_to_zero_rather_than_mirroring_the_copy() {
+        let out = copy_to_points(
+            &template(),
+            &points_with_pscale(Some(vec![1.0, -3.0])),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+        )
+        .expect("copies");
+        assert!(copy_width(&out, 1) < 1e-5, "collapsed, not inside out");
     }
 }

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tobj::LoadError;
 
 use crate::{AssetResolver, FormatsError};
-use solarxy_core::geometry::RawImageData;
+use solarxy_core::geometry::{RawImageData, srgb_to_linear};
 use solarxy_core::{AlphaMode, MeshTopology, RawMaterialData, RawMeshData, RawModelData};
 
 /// Parse OBJ bytes; `.mtl` libraries resolve through `resolver`. Texture
@@ -202,6 +202,26 @@ fn parse_obj(
             )
         };
 
+        // The unofficial extended-position form, `v x y z r g b`. tobj
+        // parses it into a flat RGB run; `single_index: true` above makes it
+        // index-parallel with `positions`, so the two line up element for
+        // element. Decoded sRGB-to-linear, following PLY's ratified stance
+        // (decision M-7): the two vertex-colour formats must agree, and
+        // consistency between them matters more than either convention on
+        // its own.
+        let colors = (m.mesh.vertex_color.len() >= num_verts * 3).then(|| {
+            (0..num_verts)
+                .map(|i| {
+                    [
+                        srgb_to_linear(m.mesh.vertex_color[i * 3]),
+                        srgb_to_linear(m.mesh.vertex_color[i * 3 + 1]),
+                        srgb_to_linear(m.mesh.vertex_color[i * 3 + 2]),
+                        1.0,
+                    ]
+                })
+                .collect()
+        });
+
         meshes.push(RawMeshData {
             name: m.name,
             positions,
@@ -210,7 +230,7 @@ fn parse_obj(
             tex_coords,
             material_index: m.mesh.material_id,
             topology: MeshTopology::Triangles,
-            colors: None,
+            colors,
         });
     }
 

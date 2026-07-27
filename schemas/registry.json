@@ -3530,7 +3530,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "A uniform size factor applied to every copy before it lands."
+          "doc": "A uniform size factor applied to every copy before it lands.\n\nIf the points carry a `pscale` float attribute, each copy multiplies this by its own point's value, so this stays the global dial while the attribute varies around it. Author one with `attribute_wrangle`: `@pscale = fit(rand(@ptnum), 0, 1, 0.4, 1.6);` gives a scatter of mixed sizes. Points without the lane copy at this size exactly."
         },
         {
           "key": "scale_variance",
@@ -6004,7 +6004,7 @@
     },
     {
       "typeId": "import_obj",
-      "version": 3,
+      "version": 4,
       "displayName": "Import OBJ",
       "category": "import",
       "categoryLabel": "Import",
@@ -6123,16 +6123,32 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "On keeps the materials the file defines. Off drops every material binding and the material table with them, so the whole model draws in the renderer's neutral default -- the clay look you want when judging form, or when a file's own materials are fighting you."
+        },
+        {
+          "key": "vertex_colors",
+          "label": "Vertex Colors",
+          "group": "import",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": true,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Keep the file's per-vertex colours (red/green/blue, optional alpha). On, colours import as the per-point colour attribute and display in the viewport; off, they are dropped at import for when a scan's colours are noise rather than signal."
         }
       ],
       "bypass": {
         "mode": "mute"
       },
-      "doc": "Loads a Wavefront OBJ, triangulating as it parses. Materials come from the companion MTL and its textures, resolved by file name against the staged assets rather than the file system.\n\nThis heads a chain: import, then `transform` to place the model, `merge` to combine it with others, `bounds` to check where it actually landed. It is also the validator's entry point -- an import validates the raw file as it parses, the same check the desktop viewer runs on load, so both products report the same issues on the same file.\n\nOBJ is a multi-file format and the MTL is not optional-by-accident: stage the `.mtl` and its textures together with the `.obj` (the picker is multi-select, and dropping the containing folder traverses it) or the model arrives with geometry and no materials, no error raised. On the web the parse runs in an import worker off the main thread, so a heavy file does not freeze the canvas.",
+      "doc": "Loads a Wavefront OBJ, triangulating as it parses. Materials come from the companion MTL and its textures, resolved by file name against the staged assets rather than the file system.\n\nThis heads a chain: import, then `transform` to place the model, `merge` to combine it with others, `bounds` to check where it actually landed. It is also the validator's entry point -- an import validates the raw file as it parses, the same check the desktop viewer runs on load, so both products report the same issues on the same file.\n\nOBJ is a multi-file format and the MTL is not optional-by-accident: stage the `.mtl` and its textures together with the `.obj` (the picker is multi-select, and dropping the containing folder traverses it) or the model arrives with geometry and no materials, no error raised. On the web the parse runs in an import worker off the main thread, so a heavy file does not freeze the canvas.\n\nPer-vertex colours ride the unofficial extended-position form (`v x y z r g b`), which scanners and MeshLab both write. They survive as the per-point colour attribute and display directly; the Vertex Colors toggle drops them at the door. Colours are read as sRGB, matching PLY, so the same scan exported to either format imports the same.",
       "searchAliases": [
         "obj",
         "wavefront",
-        "import"
+        "import",
+        "colors"
       ],
       "glyph": "import_obj",
       "role": "standard"
@@ -9633,7 +9649,7 @@
     },
     {
       "typeId": "scatter",
-      "version": 1,
+      "version": 2,
       "displayName": "Scatter",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
@@ -9737,6 +9753,21 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "Selects which random placement you get. Any change gives a completely different arrangement rather than a shifted one, so scrub it to hunt for one you like. The same seed always cooks the same points, which is what lets a saved scene reproduce exactly."
+        },
+        {
+          "key": "density",
+          "label": "Density Attribute",
+          "group": "scatter",
+          "paramType": "attributeName",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A float point attribute that biases WHERE the points land. Empty (the default) scatters by area alone. Named, each triangle is weighted by its area times the mean of the attribute at its three corners, so twice the value gathers roughly twice the points.\n\nAuthor it with `attribute_wrangle`: `@density = fit(@P.y, 0, 1, 0, 1);` gathers points toward the top of a surface, and `@density = @Cd.r;` follows a texture already on the geometry. Zero means never; negative clamps to zero rather than flipping the weight."
         }
       ],
       "bypass": {

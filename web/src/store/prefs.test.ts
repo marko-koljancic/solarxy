@@ -71,13 +71,16 @@ describe("defaults", () => {
     });
   });
 
-  it("ship the Stage 8 display defaults (Light on Gradient at 6 rpm)", () => {
+  it("ship the display defaults (Light on Gradient, 6 rpm, 6 px points)", () => {
     // Light is the ratified default (and the desktop's); the previous web
     // build hardcoded Medium in the host, which this preference replaces.
+    // pointSize joined in 0.8.1 and matches the renderer's own default, so
+    // turning the preference on changes nothing until you move it.
     expect(DEFAULT_PREFS.display).toEqual({
       wireframeWeight: "Light",
       background: "Gradient",
       turntableRpm: 6,
+      pointSize: 6,
     });
   });
 });
@@ -93,12 +96,24 @@ describe("rehydration backfill", () => {
 
   it("a stored display group survives the merge", () => {
     const prefs = mergePersistedPrefs({
-      display: { wireframeWeight: "Bold", background: "Black", turntableRpm: 12 },
+      display: { wireframeWeight: "Bold", background: "Black", pointSize: 6, turntableRpm: 12 },
     });
     expect(prefs.display).toEqual({
       wireframeWeight: "Bold",
       background: "Black",
       turntableRpm: 12,
+      pointSize: 6,
     });
+  });
+
+  it("backfills pointSize for a blob persisted before 0.8.1", () => {
+    // The real upgrade path: every existing user's stored prefs predate the
+    // field, and a missing one must become the default rather than 0, which
+    // would render every point invisible.
+    const prefs = mergePersistedPrefs({
+      display: { wireframeWeight: "Bold", background: "Black", turntableRpm: 12 },
+    });
+    expect(prefs.display.pointSize).toBe(6);
+    expect(prefs.display.turntableRpm).toBe(12);
   });
 });

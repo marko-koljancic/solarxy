@@ -131,6 +131,7 @@ fn default_display_settings() -> DisplaySettings {
         roughness_scale: 1.0,
         metallic_scale: 1.0,
         hdri_rotation: 0.0,
+        point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
     }
 }
 
@@ -799,14 +800,6 @@ impl SolarxyApp {
         };
     }
 
-    /// The display defaults, pushed from the TS prefs store (the
-    /// gizmo-settings pattern). The turntable rpm applies immediately, it is
-    /// live session state that never serializes into `.slxy`. Wireframe
-    /// weight and background are stored as the pane seed and, per `apply_*`
-    /// flag, written into every pane: the boot push sets both flags; a
-    /// mid-session preference save sets only the flags for fields that
-    /// actually changed, so per-pane Display-menu overrides survive
-    /// unrelated preference edits.
     /// Enters (or leaves) player mode.
     ///
     /// Locks the layout to a single pane and clears any lingering editing
@@ -845,11 +838,20 @@ impl SolarxyApp {
         self.engine.clock().autoplay
     }
 
+    /// The display defaults, pushed from the TS prefs store (the
+    /// gizmo-settings pattern). The turntable rpm and the point size apply
+    /// immediately: both are live session state that never serializes into
+    /// `.slxy`. Wireframe weight and background are stored as the pane seed
+    /// and, per `apply_*` flag, written into every pane: the boot push sets
+    /// both flags; a mid-session preference save sets only the flags for
+    /// fields that actually changed, so per-pane Display-menu overrides
+    /// survive unrelated preference edits.
     pub fn set_display_defaults(
         &mut self,
         wireframe_weight: &str,
         background: &str,
         turntable_rpm: f32,
+        point_size: f32,
         apply_wireframe: bool,
         apply_background: bool,
     ) {
@@ -861,6 +863,14 @@ impl SolarxyApp {
             turntable_rpm.clamp(1.0, 60.0)
         } else {
             6.0
+        };
+        self.view.display.point_size = if point_size.is_finite() {
+            point_size.clamp(
+                solarxy_core::view_config::MIN_POINT_SIZE,
+                solarxy_core::view_config::MAX_POINT_SIZE,
+            )
+        } else {
+            solarxy_core::view_config::DEFAULT_POINT_SIZE
         };
         let mut changed = false;
         for pds in &mut self.view.pane_settings {
@@ -2755,7 +2765,10 @@ impl SolarxyApp {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            // The UV pass draws no points, but this write clobbers the
+            // shared uniform, so it carries the real size for the next 3D
+            // pass rather than a zero that would make points vanish.
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,
@@ -3699,7 +3712,7 @@ impl SolarxyApp {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,

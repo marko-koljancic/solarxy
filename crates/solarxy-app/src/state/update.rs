@@ -95,7 +95,7 @@ impl State {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,

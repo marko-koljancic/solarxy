@@ -4,7 +4,7 @@
 //! whose points inherit the surface's normal, UV, and color; it is the
 //! canonical points input for `copy_to_points`.
 
-use solarxy_kernel::scatter::scatter;
+use solarxy_kernel::scatter::scatter_weighted;
 
 use super::common::{geometry_output, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
@@ -18,7 +18,9 @@ use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDe
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "scatter",
-        version: 1,
+        // v2: gains `density`. Additive, so the registry default fill
+        // supplies the empty name and an existing scatter is unchanged.
+        version: 2,
         display_name: "Scatter",
         category: Category::Copy,
         contexts: ContextSet::GEO,
@@ -68,6 +70,26 @@ pub fn descriptor() -> NodeTypeDescriptor {
                      cooks the same points, which is what lets a saved scene \
                      reproduce exactly.",
                 ),
+                ParamSpec::new(
+                    "density",
+                    "Density Attribute",
+                    "scatter",
+                    ParamType::AttributeName,
+                    ParamValue::Text(String::new()),
+                )
+                .doc(
+                    "A float point attribute that biases WHERE the points \
+                     land. Empty (the default) scatters by area alone. \
+                     Named, each triangle is weighted by its area times the \
+                     mean of the attribute at its three corners, so twice the \
+                     value gathers roughly twice the points.\n\n\
+                     Author it with `attribute_wrangle`: \
+                     `@density = fit(@P.y, 0, 1, 0, 1);` gathers points \
+                     toward the top of a surface, and `@density = @Cd.r;` \
+                     follows a texture already on the geometry. Zero means \
+                     never; negative clamps to zero rather than flipping the \
+                     weight.",
+                ),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
@@ -111,9 +133,25 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         )));
     };
 
-    let out = scatter(input, p.u32("count"), p.u32("seed"));
+    let density = p.text("density").trim().to_string();
+    let out = scatter_weighted(
+        input,
+        p.u32("count"),
+        p.u32("seed"),
+        (!density.is_empty()).then_some(density.as_str()),
+    );
     if out.is_renderable_empty() {
-        cx.warn("scatter found no triangle surface to sample; output is empty");
+        if density.is_empty() {
+            cx.warn("scatter found no triangle surface to sample; output is empty");
+        } else {
+            // Distinguishing the two is the whole point: "no surface" and
+            // "your density is zero everywhere" need different fixes, and
+            // falling back to an even scatter would hide the second.
+            cx.warn(format!(
+                "scatter produced nothing: either there is no triangle surface to \
+                 sample, or `{density}` is zero across all of it"
+            ));
+        }
     }
     Ok(CookOutcome::Done(Outputs::geometry(out)))
 }

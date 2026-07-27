@@ -209,6 +209,7 @@ export class SolarxyClient {
       d.wireframeWeight,
       d.background,
       d.turntableRpm,
+      d.pointSize,
       applyWireframe,
       applyBackground,
     );
