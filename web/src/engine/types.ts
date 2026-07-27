@@ -34,6 +34,12 @@ export type ParamSource =
   | ({ kind: "literal" } & ParamValue)
   | { kind: "expression"; expr: string };
 
+/** The parameter panel's per-row readout: the current value, or the
+ * message explaining why an expression has none. */
+export type ResolvedParam =
+  | { ok: true; value: ParamValue }
+  | { ok: false; error: string };
+
 // --- Mirror types (Rust -> JS, serialize-only) ---
 
 export interface NodeMirror {

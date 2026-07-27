@@ -579,28 +579,30 @@ pub fn hemisphere_descriptor() -> NodeTypeDescriptor {
 
 #[must_use]
 pub fn rect_area_descriptor() -> NodeTypeDescriptor {
-    // v2 dropped `rotate` / `scale` / `uniform_scale`: the v1 soft
-    // point-light approximation never read them, and keeping controls the
-    // renderer ignores is a lie in the UI. They return with a real LTC
-    // area-light model (backlog note).
+    // v3 restores `rotate` (v2 dropped it, along with `scale` and
+    // `uniform_scale`, because the v1 point-light approximation read none
+    // of them). Scale stays gone for good: Width and Height already say how
+    // big the panel is, and a second way to say it is a second thing to
+    // disagree.
     let mut desc = assemble(
         "rect_area_light",
         "Rect Area Light",
         "A rectangular emitter -- the softbox of the light kit -- with a \
-         Width and Height, sitting at Translate and facing straight down.\n\n\
-         What you would reach for it for: soft key and fill on a product or \
-         character shot, the broad specular roll-off that a panel gives and \
-         a pinpoint source cannot.\n\n\
-         It does not do that yet, and this is the node's central caveat. The \
-         renderer approximates it as a plain point light at Translate: Width \
-         and Height size the helper rectangle and are carried through to the \
-         renderer, but they do not reach the shading at all, so a 10 x 10 \
-         panel lights identically to a 0.1 x 0.1 one -- no softer shadows, \
-         no broader highlight. Helper Size is ignored too (the rectangle \
-         sizes itself from Width and Height), and this light cannot cast \
-         shadows at all, having no Cast Shadow param. It still spends one of \
-         the 8 direct-light slots. Until a real area-light model lands, a \
-         `point_light` is this node with fewer promises.",
+         Width and Height, sitting at Translate and facing straight down \
+         until you rotate it.\n\n\
+         What you reach for it for: soft key and fill on a product or \
+         character shot, and the broad specular roll-off a panel gives that \
+         a pinpoint source cannot. Widen it and the highlight spreads and \
+         the terminator softens; turn it edge-on and it dims, because you \
+         are looking at less of it.\n\n\
+         The shading integrates over the whole rectangle (linearly \
+         transformed cosines), so Width, Height and Rotate all reach the \
+         image rather than only the helper. Two caveats remain. It cannot \
+         cast shadows -- it has no Cast Shadow param, and the exclusive \
+         shadow caster stays with the punctual lights -- so it lights \
+         through geometry. And Helper Size is ignored, because the helper \
+         rectangle takes its size from Width and Height. It spends one of \
+         the 8 direct-light slots like any other.",
         &["light", "area", "softbox", "panel"],
         "rect_area",
         vec![
@@ -613,11 +615,9 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
             )
             .unit(Unit::Meters)
             .doc(
-                "The centre of the rectangle, in metres, and the point the \
-                 approximating point light actually emits from. The \
-                 rectangle always lies flat and faces straight down: v2 \
-                 dropped the rotation params because nothing read them, so \
-                 this is the only way to place the light.",
+                "The centre of the rectangle, in metres. Unrotated, the \
+                 panel lies flat with its Width along X, its Height along \
+                 Z, and its emitting face pointing straight down.",
             ),
             color_param(
                 "color",
@@ -638,12 +638,11 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
             .hard(0.1, 1000.0)
             .unit(Unit::Meters)
             .doc(
-                "One edge length of the emitting rectangle, in metres. Today \
-                 it only sizes the helper rectangle: the shading treats this \
-                 light as a point at Translate and ignores the extent \
-                 entirely, so changing this will not soften a shadow or \
-                 widen a highlight. It is resolved and saved with the \
-                 document, ready for a real area-light model.",
+                "One edge length of the emitting rectangle, in metres, \
+                 along the panel's local X. It reaches the shading: a wider \
+                 panel spreads the specular highlight and softens the \
+                 terminator, and emits more total light, because a bigger \
+                 emitter is a brighter one at the same intensity.",
             ),
             ParamSpec::new(
                 "height",
@@ -655,9 +654,41 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
             .hard(0.1, 1000.0)
             .unit(Unit::Meters)
             .doc(
-                "The other edge length of the emitting rectangle, in metres. \
-                 Like Width, it currently only sizes the helper rectangle \
-                 and has no effect on the shading.",
+                "The other edge length of the emitting rectangle, in \
+                 metres, along the panel's local Z. Setting it far from \
+                 Width gives the long thin source a strip light makes, \
+                 which stretches a highlight along one axis only.",
+            ),
+            ParamSpec::new(
+                "rotate",
+                "Rotate",
+                "transform",
+                ParamType::Vec3,
+                ParamValue::Vec3([0.0; 3]),
+            )
+            .unit(Unit::Degrees)
+            .doc(
+                "Euler angles in degrees, composed in XYZ order, turning \
+                 the panel away from face-down. Rotating about Y is the one \
+                 that matters for a square panel; for a rectangular one it \
+                 also decides which way the long edge runs, which is the \
+                 difference between a strip light lying down and standing \
+                 up.",
+            ),
+            ParamSpec::new(
+                "two_sided",
+                "Two Sided",
+                "light",
+                ParamType::Bool,
+                ParamValue::Bool(false),
+            )
+            .doc(
+                "Emit from the back face as well as the front. Off, the \
+                 panel lights only what it faces and anything behind it is \
+                 untouched, which is what a real softbox does. On, it \
+                 behaves like a floating pane of light, which is useful for \
+                 filling a room from a plane in its middle without placing \
+                 two lights.",
             ),
         ],
         (
@@ -669,7 +700,14 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
              rectangle takes its size from Width and Height instead.",
         ),
     );
-    desc.version = 2;
+    desc.version = 3;
+    // The migration is unchanged from v2 on purpose. It strips a v1
+    // document's `rotate`, `scale` and `uniform_scale`, and v3 must keep
+    // stripping them: a v1 `rotate` was authored against a light that
+    // ignored it, so carrying it forward would silently re-aim panels in
+    // old scenes. v3's own `rotate` and `two_sided` need no arm at all --
+    // an unset param resolves to its spec default, which is the
+    // face-down, single-sided panel v2 documents already describe.
     desc.migrate = Some(super::common::migrate_strip_rect_area_transform);
     desc
 }

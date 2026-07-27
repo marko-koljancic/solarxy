@@ -1,7 +1,7 @@
 {
   "name": "solarxy-web-frontend",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "module",
   "scripts": {
     "build:wasm": "bash ../crates/solarxy-web/build-wasm.sh web/src/wasm/pkg",

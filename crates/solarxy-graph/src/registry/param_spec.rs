@@ -68,6 +68,54 @@ pub enum ParamType {
     },
 }
 
+impl ParamType {
+    /// Whether this type may be driven by an expression (decision M-3).
+    ///
+    /// The numeric types only. There is no string type in the expression
+    /// value lattice, so there is literally nothing an expression could
+    /// produce for a Text, `AttributeName` or Enum param; `AssetRef` and
+    /// `NodePath` are identities rather than values; and an Action carries
+    /// no value at all. `SetParam` refuses the rest up front rather than
+    /// storing something that could only ever badge at cook time.
+    #[must_use]
+    pub fn accepts_expression(&self) -> bool {
+        matches!(
+            self,
+            ParamType::Float
+                | ParamType::Int
+                | ParamType::Bool
+                | ParamType::Vec2
+                | ParamType::Vec3
+                | ParamType::Vec4
+                | ParamType::Color
+        )
+    }
+
+    /// How this type reads in an error message.
+    ///
+    /// Deliberately separate from the camelCase wire names in
+    /// `engine::snapshot`: those are a serialized contract under a drift
+    /// gate, these are prose.
+    #[must_use]
+    pub fn describe(&self) -> &'static str {
+        match self {
+            ParamType::Float => "float",
+            ParamType::Int => "integer",
+            ParamType::Bool => "checkbox",
+            ParamType::Text => "text",
+            ParamType::AttributeName => "attribute name",
+            ParamType::Vec2 => "vec2",
+            ParamType::Vec3 => "vec3",
+            ParamType::Vec4 => "vec4",
+            ParamType::Color => "colour",
+            ParamType::Enum { .. } => "menu",
+            ParamType::AssetRef { .. } => "file reference",
+            ParamType::Action => "action button",
+            ParamType::NodePath { .. } => "node reference",
+        }
+    }
+}
+
 /// What a [`ParamType::NodePath`] param may point at. Covers the ratified
 /// consumers concretely (material networks, texture networks, cameras)
 /// without speculative generality; a new target shape is a new variant.

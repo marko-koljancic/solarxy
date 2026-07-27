@@ -458,6 +458,43 @@ pub enum EngineError {
     /// at set time so the cook never has to detect one.
     #[error("setting '{key}' would create a reference cycle through node {target:?}")]
     ReferenceCycle { key: String, target: NodeId },
+    /// A `SetParam` would make an expression depend, through a chain of
+    /// `ch()` references, on the very param it is being written to.
+    /// Refused at set time so the cook never has to detect one and the
+    /// document can never hold a loop.
+    #[error("setting '{key}' would create a reference cycle through {path}")]
+    ExpressionCycle { key: String, path: String },
+}
+
+/// Whether a command can change the expression dependency graph.
+///
+/// Captured before `dispatch` consumes the command. Moves, selection and
+/// display-flag changes cannot touch a reference, and a canvas drag is a
+/// stream of `MoveNodes`, so excluding them keeps the rebuild off the one
+/// path where it would be felt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExprIndexTouch(bool);
+
+impl ExprIndexTouch {
+    fn of(cmd: &Command) -> Self {
+        Self(matches!(
+            cmd,
+            // Params carry expressions; `name` changes what a path resolves
+            // to; structure changes what exists to be referenced.
+            Command::SetParam { .. }
+                | Command::ResetParams { .. }
+                | Command::AddNode { .. }
+                | Command::RemoveNodes { .. }
+                | Command::PasteNodes { .. }
+                | Command::DuplicateNodes { .. }
+                | Command::Undo
+                | Command::Redo
+        ))
+    }
+
+    fn affects_index(self) -> bool {
+        self.0
+    }
 }
 
 /// What [`Engine::invoke_action`] produced: encoded bytes for the host to
@@ -626,6 +663,15 @@ pub struct Engine {
     /// is stable until the node recooks, so hashes recompute only for
     /// geometry that actually changed).
     review_hash_cache: BTreeMap<NodeId, (usize, u64)>,
+    /// The expression dependency graph, derived from the document.
+    ///
+    /// Rebuilt wholesale after any command that could change it rather
+    /// than patched incrementally, so it can never disagree with the
+    /// document it describes (see `ExprIndex`). Read during dirty
+    /// propagation and cycle refusal, both of which run against the index
+    /// as it stood BEFORE the command being applied, which is exactly
+    /// what those two questions are about.
+    expr_index: crate::refs::ExprIndex,
 }
 
 impl Engine {
@@ -651,7 +697,18 @@ impl Engine {
             pending_jobs: Vec::new(),
             review_stale: BTreeMap::new(),
             review_hash_cache: BTreeMap::new(),
+            expr_index: crate::refs::ExprIndex::default(),
         }
+    }
+
+    /// Re-derives the expression dependency graph from the document.
+    ///
+    /// Called after anything that could change a reference. Cheap enough
+    /// to be unconditional on those paths (one linear pass), and being
+    /// derived rather than maintained is what removes the stale-entry bug
+    /// class the scan never had.
+    fn rebuild_expr_index(&mut self) {
+        self.expr_index = crate::refs::ExprIndex::build(&self.doc, &self.registry);
     }
 
     /// Enables async import offloading (the web host has an import worker).
@@ -756,12 +813,21 @@ impl Engine {
         }
         let mut events = Vec::new();
         let mut inv = Vec::new();
+        let cmd_kind = ExprIndexTouch::of(&cmd);
         self.dispatch(cmd, &mut events, &mut inv)?;
         // Non-cook commands can still change what an anchor sees (display
         // flag moves, node/annotation edits), so staleness refreshes on
         // every mutation, not just after cooks. Cheap: no-op without
         // 3D-anchored annotations.
         self.refresh_review_staleness(&mut events);
+        // Re-derived, not patched: the index is a view of the document, so
+        // rebuilding is what makes a stale entry impossible. Skipped for
+        // the commands that provably cannot change a reference (moves,
+        // selection, display flags), which is what keeps a canvas drag off
+        // this path.
+        if cmd_kind.affects_index() {
+            self.expr_index = crate::refs::ExprIndex::build(&self.doc, &self.registry);
+        }
         self.undo.push_command("edit", inv);
         self.revision += 1;
         Ok(self.batch(events))
@@ -988,6 +1054,19 @@ impl Engine {
         let id = self.doc.mint_node_id();
         let mut node = NodeData::new(id, node_type, desc.version);
         node.position = position;
+        // Every node carries a stored, graph-unique name from birth. It
+        // cannot be a descriptor default (that is per TYPE, which is how
+        // every sphere came to be called "Sphere"), and expressions resolve
+        // by name: `ch("../sphere1/radius")` has nothing to bind to
+        // otherwise.
+        let minted = {
+            let graph = self.doc.graph(ctx)?;
+            crate::naming::mint_name(graph, &self.registry, node_type)
+        };
+        node.params.insert(
+            "name".to_string(),
+            ParamSource::Literal(ParamValue::Text(minted)),
+        );
         // Container nodes open their own canvas, kinded by the descriptor
         // (no type id is special-cased).
         if let Some(child_kind) = desc.opens {
@@ -1313,7 +1392,49 @@ impl Engine {
                 })?;
                 ParamSource::Literal(c)
             }
-            ParamSource::Expression { .. } => value.clone(),
+            ParamSource::Expression { .. } => {
+                // Decision M-3: only the numeric types accept one. This is
+                // a command error, not a badge, because it is a category
+                // mistake rather than a value the user could fix by
+                // editing the text (M-17).
+                if !spec.ty.accepts_expression() {
+                    return Err(EngineError::InvalidParam {
+                        key: key.to_string(),
+                        reason: format!(
+                            "a {} param cannot be driven by an expression",
+                            spec.ty.describe()
+                        ),
+                    });
+                }
+                value.clone()
+            }
+        };
+        // A rename stays graph-unique: expressions resolve by name, so two
+        // nodes called `body` in one network would make `ch("body/size")`
+        // ambiguous. A collision is suffixed rather than refused, because
+        // rejecting a rename mid-typing is hostile, and the STORED value is
+        // what the event carries so the mirror shows what was actually kept.
+        // A rename carries a second job: every expression that referenced
+        // the old name has to follow. Both names are captured here, before
+        // the write, because the rewrite has to resolve paths against the
+        // document as it still stands.
+        let mut rename: Option<(String, String)> = None;
+        let conformed = if key == "name"
+            && let ParamSource::Literal(ParamValue::Text(desired)) = &conformed
+        {
+            let graph = self.doc.graph(ctx)?;
+            let unique = crate::naming::uniquify(graph, &self.registry, desired, node);
+            let old = graph
+                .node(node)
+                .map(|n| crate::naming::node_name(n, &self.registry));
+            if let Some(old) = old
+                && old != unique
+            {
+                rename = Some((old, unique.clone()));
+            }
+            ParamSource::Literal(ParamValue::Text(unique))
+        } else {
+            conformed
         };
         // A reference is refused at SET time if it would close a cycle
         // (a network depending on its own result through any chain of
@@ -1325,6 +1446,37 @@ impl Engine {
                 key: key.to_string(),
                 target: *target,
             });
+        }
+        // The same rule for expressions, over (node, key) pairs rather
+        // than nodes: `width = ch("height")` on one node is legal and
+        // useful, so a node-level check would refuse real work. The index
+        // still describes the document as it stands, which is exactly the
+        // question being asked -- would ADDING this edge close a loop.
+        if let ParamSource::Expression { expr } = &conformed {
+            let me = (node, key.to_string());
+            for target in
+                crate::refs::ExprIndex::targets_of(&self.doc, &self.registry, ctx, node, expr)
+            {
+                if target == me || self.expr_index.reaches(&target, &me) {
+                    return Err(EngineError::ExpressionCycle {
+                        key: key.to_string(),
+                        path: target.1,
+                    });
+                }
+            }
+        }
+        // A rename rewrites every expression that referenced the old name,
+        // INSIDE this same command. `apply` pushes `inv` once, so the
+        // rename and its rewrites are one undo step: undoing a rename can
+        // never strand a path pointing at a name that no longer exists.
+        // This keeps a by-name reference as durable as the by-id `NodeRef`
+        // params already are.
+        //
+        // It runs BEFORE the write because the rewrite resolves each path
+        // segment through the document to confirm it really names this
+        // node, and after the write the old name resolves to nothing.
+        if let Some((old, new)) = rename {
+            self.rewrite_references_to(node, &old, &new, events, inv);
         }
         // The authoritative value clears any transient preview overlay.
         self.previews.remove(&(node, key.to_string()));
@@ -1438,6 +1590,47 @@ impl Engine {
         }
         if removed.is_empty() {
             return Ok(());
+        }
+        // Resetting `name` would drop the node back to its type's display
+        // name, which every node of that type shares -- precisely the state
+        // minting exists to escape, and it would silently break any
+        // expression referencing this node. Re-mint instead, so a reset
+        // still means "forget what I typed" without collapsing the name.
+        if removed.iter().any(|(key, _, _)| key == "name") {
+            let minted = {
+                let graph = self.doc.graph(ctx)?;
+                crate::naming::mint_name(graph, &self.registry, &type_id)
+            };
+            // Re-minting usually reproduces the name the node already had:
+            // removing it frees exactly the slot the mint then reclaims. An
+            // event that announces no change is noise the mirror still has
+            // to apply and undo still has to store, so drop the entry.
+            let unchanged = removed.iter().any(|(key, _, prev)| {
+                key == "name"
+                    && matches!(prev, ParamSource::Literal(ParamValue::Text(t)) if t == &minted)
+            });
+            if unchanged {
+                removed.retain(|(key, _, _)| key != "name");
+            } else {
+                for entry in &mut removed {
+                    if entry.0 == "name" {
+                        entry.1 = ParamValue::Text(minted.clone());
+                    }
+                }
+            }
+            // Re-inserted either way: the param has to stay stored, or the
+            // node falls back to the display name its whole type shares.
+            if let Ok(graph) = self.doc.graph_mut(ctx)
+                && let Some(node_data) = graph.node_mut(node)
+            {
+                node_data.params.insert(
+                    "name".to_string(),
+                    ParamSource::Literal(ParamValue::Text(minted)),
+                );
+            }
+            if removed.is_empty() {
+                return Ok(());
+            }
         }
         self.mark_dirty(ctx, node);
         for (key, default, prev) in removed {
@@ -1989,11 +2182,28 @@ impl Engine {
         // Offset the pasted nodes so they do not sit exactly on the source,
         // and register + dirty them.
         for &id in &result.inserted {
+            // `insert_into` remaps ids but not names, and pasting into the
+            // network you copied from is the common case, so almost every
+            // paste collides. Uniquify one node at a time in insertion
+            // order, so each rename is visible to the next.
+            let unique = {
+                let graph = self.doc.graph(ctx)?;
+                graph.node(id).map(|n| {
+                    let current = crate::naming::node_name(n, &self.registry);
+                    crate::naming::uniquify(graph, &self.registry, &current, id)
+                })
+            };
             if let Ok(graph) = self.doc.graph_mut(ctx)
                 && let Some(node) = graph.node_mut(id)
             {
                 node.position[0] += position[0];
                 node.position[1] += position[1];
+                if let Some(unique) = unique {
+                    node.params.insert(
+                        "name".to_string(),
+                        ParamSource::Literal(ParamValue::Text(unique)),
+                    );
+                }
             }
             self.cook.insert_node(id);
             self.mark_dirty(ctx, id);
@@ -2060,6 +2270,7 @@ impl Engine {
         // Undoing a re-anchor (or any display-affecting edit) must flip the
         // stale flags in the same batch.
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2076,6 +2287,7 @@ impl Engine {
         };
         let (_discarded, mut events) = self.apply_transaction(txn)?;
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2087,6 +2299,7 @@ impl Engine {
         let (undo, mut events) = self.apply_transaction(txn)?;
         self.undo.push_undo(undo);
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2296,6 +2509,70 @@ impl Engine {
         }
     }
 
+    /// One param's current value, as the parameter panel displays it.
+    ///
+    /// **Pulled, never pushed.** Under a playing runtime a per-cook
+    /// resolved value pushed as an event would emit one event per
+    /// expression per frame across the wasm boundary, which is exactly the
+    /// traffic the mirror-and-command model exists to avoid. The panel
+    /// asks for the row it is showing.
+    ///
+    /// Returns the value in the space the user authored it in (degrees,
+    /// not radians), so the readout under an expression field agrees with
+    /// the number they typed.
+    ///
+    /// # Errors
+    /// The node or param not existing, or the expression failing to parse
+    /// or evaluate. The message is what the editor shows in its error
+    /// state.
+    pub fn resolved_param(
+        &self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+    ) -> Result<ParamValue, String> {
+        let graph = self.doc.graph(ctx).map_err(|e| e.to_string())?;
+        let data = graph.node(node).ok_or_else(|| "no such node".to_string())?;
+        let desc = self
+            .registry
+            .get(&data.type_id)
+            .ok_or_else(|| "unknown node type".to_string())?;
+        let spec = desc
+            .param(key)
+            .ok_or_else(|| "no such param on this node type".to_string())?;
+        let params = crate::previews::effective_params(&self.previews, node, &data.params);
+        let refs = crate::refs::DocRefs::new(
+            &self.doc,
+            &self.registry,
+            &self.previews,
+            ctx,
+            node,
+            crate::expr::SceneTime::default(),
+        );
+        // The readout answers geometry queries off the SAME cached inputs
+        // the cook gathered, so the panel and the node's badge cannot
+        // disagree about what `npoints()` sees. Before this, the panel had
+        // no geometry capability at all and reported every geometry query
+        // as unavailable, including on a node whose input was connected
+        // and cooked.
+        //
+        // `None` here means a required port is unconnected, in which case
+        // there is genuinely nothing to read and the capability stays
+        // absent, exactly as it did before.
+        let inputs = self.cook.gathered_inputs(graph, desc, node);
+        let default_port = desc.default_input().map_or("geometry", |p| p.key.as_str());
+        let geo = inputs
+            .as_ref()
+            .map(|i| crate::cook::geo_queries::InputGeo::new(i, default_port));
+        let mut eval =
+            crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+        if let Some(geo) = geo.as_ref() {
+            eval = eval.with_geo(geo);
+        }
+        crate::registry::resolve::resolve_one_authored(&params, spec, &eval)
+            .map_err(|e| e.to_string())
+    }
+
     /// A transient preview value for a param drag: no event, no undo entry,
     /// no document write. It only dirty-marks so the next cook previews it,
     /// and the resolver path consults it until the authoritative `SetParam`
@@ -2307,6 +2584,13 @@ impl Engine {
         key: &str,
         value: ParamSource,
     ) {
+        // The drag lane scrubs a number. An expression here would be
+        // re-parsed every frame of the drag for a value the committing
+        // `SetParam` would then overwrite anyway, so it is ignored rather
+        // than parked.
+        if matches!(value, ParamSource::Expression { .. }) {
+            return;
+        }
         self.previews.insert((node, key.to_string()), value);
         self.mark_dirty(ctx, node);
     }
@@ -2789,6 +3073,9 @@ impl Engine {
         self.undo = UndoStack::default();
         self.previews.clear();
         self.pending_jobs.clear();
+        // A whole new document: the index has nothing in common with the
+        // old one, so it is rebuilt from scratch rather than migrated.
+        self.rebuild_expr_index();
         self.scene = SceneDelta::default();
         // Fresh document: staleness re-derives after the first cook (until
         // then nothing is displayed, so no annotation is flagged).
@@ -2892,6 +3179,31 @@ impl Engine {
         for (r_ctx, referrer) in self.referrers_of(node) {
             self.mark_dirty_inner(r_ctx, referrer, visited);
         }
+        // Every param whose expression reads ANY param on this node has to
+        // recook: `ch()` reads document state, so the reader has no wire to
+        // carry the change. Node-level rather than param-level because
+        // cooking is per node anyway, and the index is keyed finely enough
+        // that this stays a lookup rather than a scan.
+        let referrers: Vec<NodeId> = self
+            .doc
+            .graph(ctx)
+            .ok()
+            .and_then(|g| g.node(node))
+            .map(|n| {
+                n.params
+                    .keys()
+                    .flat_map(|k| {
+                        self.expr_index
+                            .transitive_referrer_nodes(&(node, k.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for r in referrers {
+            let r_ctx = self.context_of(r);
+            self.mark_dirty_inner(r_ctx, r, visited);
+        }
+
         // A dirty node inside a child network changes that network's
         // published result, so the network's CONTAINER counts as changed
         // for everyone referencing it.
@@ -2899,6 +3211,77 @@ impl Engine {
             for (r_ctx, referrer) in self.referrers_of(owner) {
                 self.mark_dirty_inner(r_ctx, referrer, visited);
             }
+        }
+    }
+
+    /// Rewrites every `ch()` path in the document that named `old`.
+    ///
+    /// Must run BEFORE the new name is stored. `rewrite_path_for_rename`
+    /// asks "does this segment resolve to THIS node", which is what makes
+    /// it positional rather than a text substitution, and that lookup goes
+    /// by name: once the rename lands, the old name resolves to nothing and
+    /// every path would silently fail to match.
+    ///
+    /// Collected before mutating, because the scan borrows the document
+    /// that the writes then need mutably.
+    fn rewrite_references_to(
+        &mut self,
+        renamed: NodeId,
+        old: &str,
+        new: &str,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) {
+        if old == new {
+            return;
+        }
+        let mut edits: Vec<(GraphContext, NodeId, String, String)> = Vec::new();
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            let Ok(graph) = self.doc.graph(ctx) else {
+                continue;
+            };
+            for n in graph.nodes() {
+                for (key, src) in &n.params {
+                    let ParamSource::Expression { expr } = src else {
+                        continue;
+                    };
+                    if let Some(rewritten) = crate::refs::rewrite_expression_for_rename(
+                        expr,
+                        &self.doc,
+                        &self.registry,
+                        ctx,
+                        renamed,
+                        new,
+                    ) {
+                        edits.push((ctx, n.id, key.clone(), rewritten));
+                    }
+                }
+            }
+        }
+        for (ctx, n, key, rewritten) in edits {
+            let value = ParamSource::Expression { expr: rewritten };
+            let Ok(graph) = self.doc.graph_mut(ctx) else {
+                continue;
+            };
+            let Some(data) = graph.node_mut(n) else {
+                continue;
+            };
+            let prev = data.params.insert(key.clone(), value.clone());
+            self.mark_dirty(ctx, n);
+            events.push(EngineEvent::ParamChanged {
+                ctx,
+                node: n,
+                key: key.clone(),
+                value,
+            });
+            inv.push(UndoOp::RestoreParam {
+                ctx,
+                node: n,
+                key,
+                prev,
+            });
         }
     }
 

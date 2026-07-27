@@ -9148,7 +9148,7 @@
     },
     {
       "typeId": "rect_area_light",
-      "version": 2,
+      "version": 3,
       "displayName": "Rect Area Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -9206,7 +9206,7 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
-          "doc": "The centre of the rectangle, in metres, and the point the approximating point light actually emits from. The rectangle always lies flat and faces straight down: v2 dropped the rotation params because nothing read them, so this is the only way to place the light."
+          "doc": "The centre of the rectangle, in metres. Unrotated, the panel lies flat with its Width along X, its Height along Z, and its emitting face pointing straight down."
         },
         {
           "key": "color",
@@ -9265,7 +9265,7 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
-          "doc": "One edge length of the emitting rectangle, in metres. Today it only sizes the helper rectangle: the shading treats this light as a point at Translate and ignores the extent entirely, so changing this will not soften a shadow or widen a highlight. It is resolved and saved with the document, ready for a real area-light model."
+          "doc": "One edge length of the emitting rectangle, in metres, along the panel's local X. It reaches the shading: a wider panel spreads the specular highlight and softens the terminator, and emits more total light, because a bigger emitter is a brighter one at the same intensity."
         },
         {
           "key": "height",
@@ -9283,7 +9283,41 @@
           "step": null,
           "unit": "meters",
           "drivenByPort": null,
-          "doc": "The other edge length of the emitting rectangle, in metres. Like Width, it currently only sizes the helper rectangle and has no effect on the shading."
+          "doc": "The other edge length of the emitting rectangle, in metres, along the panel's local Z. Setting it far from Width gives the long thin source a strip light makes, which stretches a highlight along one axis only."
+        },
+        {
+          "key": "rotate",
+          "label": "Rotate",
+          "group": "transform",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "doc": "Euler angles in degrees, composed in XYZ order, turning the panel away from face-down. Rotating about Y is the one that matters for a square panel; for a rectangular one it also decides which way the long edge runs, which is the difference between a strip light lying down and standing up."
+        },
+        {
+          "key": "two_sided",
+          "label": "Two Sided",
+          "group": "light",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Emit from the back face as well as the front. Off, the panel lights only what it faces and anything behind it is untouched, which is what a real softbox does. On, it behaves like a floating pane of light, which is useful for filling a room from a plane in its middle without placing two lights."
         },
         {
           "key": "visible",
@@ -9337,7 +9371,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down.\n\nWhat you would reach for it for: soft key and fill on a product or character shot, the broad specular roll-off that a panel gives and a pinpoint source cannot.\n\nIt does not do that yet, and this is the node's central caveat. The renderer approximates it as a plain point light at Translate: Width and Height size the helper rectangle and are carried through to the renderer, but they do not reach the shading at all, so a 10 x 10 panel lights identically to a 0.1 x 0.1 one -- no softer shadows, no broader highlight. Helper Size is ignored too (the rectangle sizes itself from Width and Height), and this light cannot cast shadows at all, having no Cast Shadow param. It still spends one of the 8 direct-light slots. Until a real area-light model lands, a `point_light` is this node with fewer promises.",
+      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down until you rotate it.\n\nWhat you reach for it for: soft key and fill on a product or character shot, and the broad specular roll-off a panel gives that a pinpoint source cannot. Widen it and the highlight spreads and the terminator softens; turn it edge-on and it dims, because you are looking at less of it.\n\nThe shading integrates over the whole rectangle (linearly transformed cosines), so Width, Height and Rotate all reach the image rather than only the helper. Two caveats remain. It cannot cast shadows -- it has no Cast Shadow param, and the exclusive shadow caster stays with the punctual lights -- so it lights through geometry. And Helper Size is ignored, because the helper rectangle takes its size from Width and Height. It spends one of the 8 direct-light slots like any other.",
       "searchAliases": [
         "light",
         "area",

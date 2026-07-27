@@ -97,6 +97,16 @@ pub struct LightDef {
     pub outer_cone: f32,
     /// `RectArea` width/height (meters).
     pub area_extent: [f32; 2],
+    /// `RectArea` orientation as XYZ Euler angles in radians, applied to a
+    /// panel that lies in the XZ plane and emits straight down.
+    ///
+    /// Only rect-area lights read this. The other kinds are described by
+    /// `direction`, which has no roll to lose; a rectangle does, because a
+    /// 10x1 panel rolled a quarter turn is a different light.
+    pub rotate: [f32; 3],
+    /// `RectArea`: emit from both faces rather than only the one the
+    /// normal points along.
+    pub two_sided: bool,
     /// Hemisphere ground color (linear RGB).
     pub ground_color: [f32; 3],
     /// Exclusive shadow caster: the engine enforces
@@ -119,6 +129,48 @@ impl LightDef {
     pub fn consumes_slot(&self) -> bool {
         !matches!(self.kind, LightKind::Ambient | LightKind::Hemisphere)
     }
+
+    /// The rectangle's half-edge vectors in world space, and the face
+    /// normal it emits along.
+    ///
+    /// Lives here rather than in the renderer because two places need it
+    /// and they must not disagree: the shading integrates over these
+    /// corners, and the viewport helper draws them. A helper that traces a
+    /// different rectangle from the one being integrated is worse than no
+    /// helper, because it looks authoritative.
+    ///
+    /// The unrotated panel lies in the XZ plane with its width along `+x`,
+    /// its height along `+z`, and its normal pointing down `-y`, which is
+    /// the orientation `rect_area_light` has always drawn and described.
+    /// Euler angles apply in XYZ order.
+    #[must_use]
+    pub fn rect_basis(&self) -> RectBasis {
+        use cgmath::{Matrix3, Rad, Vector3};
+        let [rx, ry, rz] = self.rotate;
+        // XYZ order: x applies first, so it is right-most in the product.
+        let rotation = Matrix3::from_angle_z(Rad(rz))
+            * Matrix3::from_angle_y(Rad(ry))
+            * Matrix3::from_angle_x(Rad(rx));
+        let half_x = rotation * Vector3::new(self.area_extent[0] * 0.5, 0.0, 0.0);
+        let half_y = rotation * Vector3::new(0.0, 0.0, self.area_extent[1] * 0.5);
+        let normal = rotation * Vector3::new(0.0, -1.0, 0.0);
+        RectBasis {
+            half_x: half_x.into(),
+            half_y: half_y.into(),
+            normal: normal.into(),
+        }
+    }
+}
+
+/// A rect-area light's oriented frame, from [`LightDef::rect_basis`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RectBasis {
+    /// Half the width edge, world space.
+    pub half_x: [f32; 3],
+    /// Half the height edge, world space.
+    pub half_y: [f32; 3],
+    /// Unit normal of the emitting face.
+    pub normal: [f32; 3],
 }
 
 /// The projection model of a camera node. `Physical` is a perspective camera
@@ -246,6 +298,8 @@ mod tests {
             inner_cone: 0.0,
             outer_cone: 0.0,
             area_extent: [0.0; 2],
+            rotate: [0.0; 3],
+            two_sided: false,
             ground_color: [0.0; 3],
             cast_shadow: false,
             shadow_map_size: 1024,

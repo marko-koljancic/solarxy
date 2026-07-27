@@ -16,11 +16,13 @@ use solarxy_core::scene::{LightDef, LightKind};
 /// hemisphere lights do not consume slots).
 pub const MAX_LIGHTS: usize = 8;
 
-/// `kind` discriminants shared with `shader.wgsl`. Rect-area lights are
-/// approximated as point lights in v1.
+/// `kind` discriminants shared with `shader.wgsl`.
 pub const LIGHT_KIND_POINT: u32 = 0;
 pub const LIGHT_KIND_DIRECTIONAL: u32 = 1;
 pub const LIGHT_KIND_SPOT: u32 = 2;
+/// Shaded through linearly transformed cosines against the rectangle's
+/// four corners, rather than as a point at its centre.
+pub const LIGHT_KIND_RECT_AREA: u32 = 3;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -43,6 +45,14 @@ pub struct LightEntry {
     pub cos_outer: f32,
     /// `1.0` when this entry is the exclusive shadow caster.
     pub shadowed: f32,
+    /// Rect-area: half the width edge, world space. The shading derives the
+    /// four corners from `position ± half_x ± half_y`.
+    pub half_x: [f32; 3],
+    /// Rect-area: `1.0` to emit from both faces.
+    pub two_sided: f32,
+    /// Rect-area: half the height edge, world space.
+    pub half_y: [f32; 3],
+    pub _pad_entry: f32,
 }
 
 impl LightEntry {
@@ -76,8 +86,22 @@ pub struct LightsUniform {
     pub _pad_tail: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<LightEntry>() == 64);
-const _: () = assert!(std::mem::size_of::<LightsUniform>() == 560);
+// 0.8.1 grew the entry from 64 bytes for the rect-area frame. Six vec4-sized
+// rows, no padding wasted:
+//
+//   position  kind      | direction  intensity | color     range
+//   decay cos_inner cos_outer shadowed         | half_x    two_sided
+//   half_y    _pad
+//
+// The array STRIDE changes, so this is not a prefix-safe addition and the
+// WGSL struct pair must move in lockstep. Only `shader.wgsl` declares them.
+//
+// (The 0.8.1 milestone doc predicted 80 bytes. That was arithmetic done in
+// prose: two vec3s and a scalar are seven more floats, which cannot fit in
+// the sixteen spare bytes an 80-byte entry would have. The cost of the
+// extra row is 256 bytes of uniform across all eight slots.)
+const _: () = assert!(std::mem::size_of::<LightEntry>() == 96);
+const _: () = assert!(std::mem::size_of::<LightsUniform>() == 816);
 
 impl LightsUniform {
     /// Build the uniform from resolved light definitions (document order).
@@ -146,13 +170,20 @@ impl LightsUniform {
                     let kind = match def.kind {
                         LightKind::Directional => LIGHT_KIND_DIRECTIONAL,
                         LightKind::Spot => LIGHT_KIND_SPOT,
-                        // Rect-area approximates as a soft point light (v1).
+                        LightKind::RectArea => LIGHT_KIND_RECT_AREA,
                         _ => LIGHT_KIND_POINT,
                     };
+                    // Only a rectangle has a frame. Leaving the others at
+                    // zero means a stale half-vector can never leak into a
+                    // point light's shading if a kind is ever mis-tagged.
+                    let basis = (def.kind == LightKind::RectArea).then(|| def.rect_basis());
                     uniform.lights[slot] = LightEntry {
                         position: def.position,
                         kind,
-                        direction: def.direction,
+                        // A rectangle's direction IS its face normal, so
+                        // the helper's arrow and the shading's back-face
+                        // test read the same value.
+                        direction: basis.map_or(def.direction, |b| b.normal),
                         intensity: def.intensity,
                         color: def.color,
                         range: def.range,
@@ -160,6 +191,10 @@ impl LightsUniform {
                         cos_inner: def.inner_cone.cos(),
                         cos_outer: def.outer_cone.cos(),
                         shadowed: if def.cast_shadow { 1.0 } else { 0.0 },
+                        half_x: basis.map_or([0.0; 3], |b| b.half_x),
+                        two_sided: f32::from(u8::from(def.two_sided)),
+                        half_y: basis.map_or([0.0; 3], |b| b.half_y),
+                        _pad_entry: 0.0,
                     };
                     uniform.count += 1;
                 }
@@ -186,6 +221,8 @@ mod tests {
             inner_cone: 0.3,
             outer_cone: 0.6,
             area_extent: [1.0, 1.0],
+            rotate: [0.0; 3],
+            two_sided: false,
             ground_color: [0.1, 0.2, 0.3],
             cast_shadow: false,
             shadow_map_size: 1024,
@@ -223,11 +260,62 @@ mod tests {
         assert!((uniform.hemi_ground_r - (0.5 * 2.0 + 0.1 * 2.0)).abs() < 1e-6);
     }
 
+    /// Replaces `rect_area_approximates_as_point`, which asserted the v1
+    /// downgrade this milestone exists to remove.
     #[test]
-    fn rect_area_approximates_as_point() {
-        let uniform = LightsUniform::from_defs(&[def(LightKind::RectArea)], 1.0, [0.0; 3]);
+    fn rect_area_carries_its_own_kind_and_frame() {
+        let mut light = def(LightKind::RectArea);
+        light.area_extent = [4.0, 2.0];
+        light.two_sided = true;
+        let uniform = LightsUniform::from_defs(&[light], 1.0, [0.0; 3]);
         assert_eq!(uniform.count, 1);
-        assert_eq!(uniform.lights[0].kind, LIGHT_KIND_POINT);
+        let entry = uniform.lights[0];
+        assert_eq!(entry.kind, LIGHT_KIND_RECT_AREA);
+        // Unrotated: width along +x, height along +z, emitting down -y.
+        assert!((entry.half_x[0] - 2.0).abs() < 1e-6, "{:?}", entry.half_x);
+        assert!((entry.half_y[2] - 1.0).abs() < 1e-6, "{:?}", entry.half_y);
+        assert!(
+            (entry.direction[1] + 1.0).abs() < 1e-6,
+            "{:?}",
+            entry.direction
+        );
+        assert!((entry.two_sided - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// A rotation has to reach the stored frame, or Width and Height are
+    /// back to being controls the renderer ignores.
+    #[test]
+    fn rect_area_rotation_turns_the_frame() {
+        let mut light = def(LightKind::RectArea);
+        light.area_extent = [4.0, 2.0];
+        // A quarter turn about x tips the panel to face -z instead of -y.
+        light.rotate = [std::f32::consts::FRAC_PI_2, 0.0, 0.0];
+        let uniform = LightsUniform::from_defs(&[light], 1.0, [0.0; 3]);
+        let entry = uniform.lights[0];
+        assert!(
+            (entry.direction[2] + 1.0).abs() < 1e-6,
+            "{:?}",
+            entry.direction
+        );
+        // Width is unaffected by a rotation about its own axis.
+        assert!((entry.half_x[0] - 2.0).abs() < 1e-6, "{:?}", entry.half_x);
+        // Height swings from +z to -y.
+        assert!((entry.half_y[1] + 1.0).abs() < 1e-6, "{:?}", entry.half_y);
+    }
+
+    /// Every other kind must leave the frame zeroed, so a mis-tagged entry
+    /// can never light through a stale rectangle.
+    #[test]
+    fn only_rect_area_lights_carry_a_frame() {
+        for kind in [LightKind::Point, LightKind::Directional, LightKind::Spot] {
+            let mut light = def(kind);
+            light.area_extent = [9.0, 9.0];
+            light.two_sided = true;
+            let uniform = LightsUniform::from_defs(&[light], 1.0, [0.0; 3]);
+            let entry = uniform.lights[0];
+            assert_eq!(entry.half_x, [0.0; 3], "{kind:?}");
+            assert_eq!(entry.half_y, [0.0; 3], "{kind:?}");
+        }
     }
 
     #[test]

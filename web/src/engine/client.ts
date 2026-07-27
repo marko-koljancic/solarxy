@@ -30,6 +30,7 @@ import type {
   ParamSource,
   PickDetail,
   RegistrySnapshot,
+  ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
   SaveExtra,
@@ -224,6 +225,14 @@ export class SolarxyClient {
       height: number;
       pixels: Uint8ClampedArray;
     } | null;
+  }
+
+  /** One param's value as the panel displays it, or why it has none.
+   *
+   * Pulled per row rather than pushed: under playback a resolved value
+   * pushed per cook would be one event per expression per frame. */
+  resolvedParam(ctx: GraphContext, node: number, key: string): ResolvedParam {
+    return this.app.resolved_param(ctx, node, key) as ResolvedParam;
   }
 
   /** Executes an export node's Action param; the returned

@@ -20,6 +20,7 @@
 //! node-authoring bug (debug-asserted), never silently absorbed.
 
 pub mod driver;
+pub mod geo_queries;
 pub mod state;
 
 pub use driver::{CookEngine, CookReport};

@@ -32,6 +32,12 @@ import type {
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
+import { ExpressionField } from "./inputs/ExpressionField";
+import {
+  acceptsExpression,
+  paramExpression,
+  seedExpression,
+} from "./inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
 import {
   paramTabs,
@@ -42,6 +48,7 @@ import {
 } from "./paramVisibility";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { AttributeNameField } from "./inputs/AttributeNameField";
+import { TextField } from "./inputs/TextField";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
@@ -75,6 +82,83 @@ interface FieldProps {
 }
 
 function Field({ ctx, node, spec }: FieldProps) {
+  const expr = paramExpression(node, spec);
+  const canExpress = acceptsExpression(spec.paramType);
+  // The mirror's revision changes on every applied command, which is
+  // exactly when an expression's value can have moved (something it reads
+  // was edited, renamed, or undone).
+  const revision = useMirror((s) => s.revision);
+
+  if (expr !== null) {
+    return (
+      <div className="param-row">
+        <label className="param-label">
+          {spec.label}
+          <ExprToggle
+            active
+            onClick={() => revertToLiteral(ctx, node, spec)}
+          />
+        </label>
+        <ExpressionField
+          ctx={ctx}
+          node={node.id}
+          paramKey={spec.key}
+          expr={expr}
+          revision={revision}
+          onRevert={() => revertToLiteral(ctx, node, spec)}
+        />
+      </div>
+    );
+  }
+  return (
+    <LiteralField ctx={ctx} node={node} spec={spec} canExpress={canExpress} />
+  );
+}
+
+/** The small `=` affordance that swaps a row into its expression lane. */
+function ExprToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`param-expr-toggle${active ? " active" : ""}`}
+      title={active ? "Remove the expression" : "Drive this with an expression"}
+      aria-label={active ? "Remove the expression" : "Add an expression"}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      =
+    </button>
+  );
+}
+
+/** Drops the expression, restoring the param to a plain value.
+ *
+ * Writes the value the expression last resolved to rather than the spec
+ * default, so turning an expression off leaves the object where it was
+ * instead of snapping it back to 1. */
+function revertToLiteral(ctx: GraphContext, node: NodeMirror, spec: ParamSnapshot) {
+  let value: unknown = spec.default;
+  try {
+    const r = getClient().resolvedParam(ctx, node.id, spec.key);
+    if (r.ok) value = r.value.value;
+  } catch {
+    // No readout available: the spec default is the honest fallback.
+  }
+  dispatch({
+    type: "setParam",
+    ctx,
+    node: node.id,
+    key: spec.key,
+    value: literal(spec.paramType, value),
+  });
+}
+
+function LiteralField({
+  ctx,
+  node,
+  spec,
+  canExpress,
+}: FieldProps & { canExpress: boolean }) {
   const value = paramValue(node, spec);
   const commit = (v: unknown) => dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal(spec.paramType, v) });
   const preview = (v: unknown) => previewParam(ctx, node.id, spec.key, literal(spec.paramType, v));
@@ -100,6 +184,23 @@ function Field({ ctx, node, spec }: FieldProps) {
       <label className="param-label">
         {spec.label}
         {unitSuffix && <span className="param-unit">{unitSuffix}</span>}
+        {canExpress && (
+          <ExprToggle
+            active={false}
+            onClick={() =>
+              dispatch({
+                type: "setParam",
+                ctx,
+                node: node.id,
+                key: spec.key,
+                // Seeded with the current value, so the field opens on
+                // something that already resolves rather than on a blank
+                // that immediately badges the node.
+                value: { kind: "expression", expr: seedExpression(value) },
+              })
+            }
+          />
+        )}
       </label>
     </Popover>
   );
@@ -153,11 +254,10 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <input
-            type="text"
-            className="input-field text-input"
+          <TextField
             value={String(value ?? "")}
-            onChange={(e) => commit(e.target.value)}
+            ariaLabel={spec.label}
+            onCommit={commit}
           />
         </div>
       );

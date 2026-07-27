@@ -89,6 +89,18 @@ fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
                 ..base
             },
         ),
+        // Clay routes the direct-light loop through `lambert_direct` and
+        // overrides the shading normal, a branch the other five modes all
+        // miss because they run `material_override: None`. Added for the
+        // 0.8.1 world-space hoist (W0a), which rewrites exactly that
+        // override, and kept afterwards so the branch stays gated.
+        (
+            "clay",
+            PaneDisplaySettings {
+                material_override: MaterialOverride::Clay,
+                ..base
+            },
+        ),
     ]
 }
 
@@ -178,6 +190,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         &config,
         background.grid_color(),
         &brdf_placeholder,
+        &renderer.ibl_res.ltc,
         SHADOW_MAP_SIZE,
     )
     .map_err(|e| anyhow::anyhow!("ModelScene::new: {e}"))?;
@@ -541,8 +554,14 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 /// Compared only when BOTH sides of a diff carry them: the base side of
 /// the commit that introduces one cannot have captured it, and a one-sided
 /// absence is a notice rather than a failure.
+///
+/// A name may also be a [`modes`] entry (`clay` is): listing it here is
+/// what makes it *captured* like any other mode but *compared* leniently,
+/// until the base side of a diff has it too. Drop the name from this list
+/// once every branch in flight carries the capture, and it becomes a hard
+/// gate.
 fn grown_captures() -> &'static [&'static str] {
-    &["topology"]
+    &["topology", "clay"]
 }
 
 /// Replicates the app's per-pane partial camera-uniform write (inspection
@@ -671,7 +690,14 @@ fn compare(args: &[String]) -> anyhow::Result<()> {
         .transpose()?
         .unwrap_or(0);
 
-    let mut names: Vec<String> = modes().iter().map(|(n, _)| (*n).to_string()).collect();
+    // Required set = every mode EXCEPT those still flagged as grown; a
+    // grown name is re-added below under the present-on-both-sides rule,
+    // so a newly added mode cannot fail a diff whose base predates it.
+    let mut names: Vec<String> = modes()
+        .iter()
+        .map(|(n, _)| (*n).to_string())
+        .filter(|n| !grown_captures().contains(&n.as_str()))
+        .collect();
     for extra in grown_captures() {
         let pa = format!("{dir_a}/{extra}.png");
         let pb = format!("{dir_b}/{extra}.png");

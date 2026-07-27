@@ -127,12 +127,13 @@ pub fn build_light_helpers(lights: &[LightDef]) -> Vec<GizmoVertex> {
             }
             LightKind::Spot => push_spot(&mut lines, origin, dir_of(light), light, size, color),
             LightKind::RectArea => {
-                // Rect lights always face straight down: `light_from_node` never
-                // overrides the default direction for them, and their v2 schema
-                // deliberately dropped the rotation params. So the rectangle lies
-                // in the XZ plane. If they ever gain an orientation, this follows
-                // it for free.
-                push_rect(&mut lines, origin, dir_of(light), light.area_extent, color);
+                // Drawn from the SAME basis the shading integrates over
+                // (`LightDef::rect_basis`), not from a tangent frame
+                // rebuilt off the normal. Those two agree on where the
+                // rectangle is but not on how it is rolled, and since v3
+                // restored Rotate, roll is now something the user sets and
+                // expects to see.
+                push_rect(&mut lines, origin, light.rect_basis(), color);
             }
             LightKind::Hemisphere => push_dome(&mut lines, origin, size, color),
             // No position, no direction, nothing honest to draw.
@@ -274,23 +275,19 @@ fn push_spot(
 fn push_rect(
     lines: &mut Vec<GizmoVertex>,
     o: Point3<f32>,
-    dir: Vector3<f32>,
-    extent: [f32; 2],
+    basis: solarxy_core::scene::RectBasis,
     color: [f32; 3],
 ) {
-    let (u, v) = plane_basis(dir);
-    let (hw, hh) = (extent[0] * 0.5, extent[1] * 0.5);
-    let corners = [
-        o + u * hw + v * hh,
-        o - u * hw + v * hh,
-        o - u * hw - v * hh,
-        o + u * hw - v * hh,
-    ];
+    let u = Vector3::from(basis.half_x);
+    let v = Vector3::from(basis.half_y);
+    let corners = [o + u + v, o - u + v, o - u - v, o + u - v];
     for i in 0..4 {
         push_line(lines, corners[i], corners[(i + 1) % 4], color);
     }
-    // Which way it emits.
-    push_line(lines, o, o + dir * (hw.min(hh)).max(0.1), color);
+    // Which way it emits. The stub length tracks the shorter edge so a long
+    // thin strip does not sprout an arrow longer than the light.
+    let stub = u.magnitude().min(v.magnitude()).max(0.1);
+    push_line(lines, o, o + Vector3::from(basis.normal) * stub, color);
 }
 
 /// A hemisphere light: a dome. Two vertical arcs plus the horizon ring, which is
@@ -329,6 +326,8 @@ mod tests {
             inner_cone: 0.0,
             outer_cone: 0.5,
             area_extent: [4.0, 2.0],
+            rotate: [0.0; 3],
+            two_sided: false,
             ground_color: [0.2; 3],
             cast_shadow: false,
             shadow_map_size: 1024,

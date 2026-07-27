@@ -18,6 +18,7 @@ use crate::environment::SceneEnvironment;
 use crate::frame::ObjectValidationGpu;
 use crate::ibl::{BrdfLut, IblState};
 use crate::light::{LightEntry, LightsUniform};
+use crate::ltc::LtcLuts;
 use crate::model::Model;
 use crate::resources::ModelStats;
 #[cfg(feature = "std-fs")]
@@ -127,6 +128,7 @@ impl ModelScene {
         config: &wgpu::SurfaceConfiguration,
         initial_grid_color: [f32; 3],
         brdf_lut: &BrdfLut,
+        ltc: &LtcLuts,
         shadow_map_size: u32,
     ) -> Result<Self, crate::error::RendererError> {
         let (model, normals_geo, stats, viewer_validation) = resources::load_model_any(
@@ -146,6 +148,7 @@ impl ModelScene {
             &model.bounds,
             config.width as f32 / config.height as f32,
             brdf_lut,
+            ltc,
             shadow_map_size,
             vis,
         );
@@ -199,8 +202,9 @@ pub fn create_light_bind_group(
     light_buffer: &wgpu::Buffer,
     ibl: &IblState,
     brdf_lut: &BrdfLut,
+    ltc: &LtcLuts,
 ) -> wgpu::BindGroup {
-    create_light_bind_group_selective(device, layouts, light_buffer, ibl, ibl, brdf_lut)
+    create_light_bind_group_selective(device, layouts, light_buffer, ibl, ibl, brdf_lut, ltc)
 }
 
 pub fn create_light_bind_group_selective(
@@ -210,6 +214,7 @@ pub fn create_light_bind_group_selective(
     diffuse_src: &IblState,
     specular_src: &IblState,
     brdf_lut: &BrdfLut,
+    ltc: &LtcLuts,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("light_bind_group"),
@@ -242,6 +247,18 @@ pub fn create_light_bind_group_selective(
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: wgpu::BindingResource::Sampler(&brdf_lut.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&ltc.transform_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(&ltc.magnitude_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::Sampler(&ltc.sampler),
             },
         ],
     })
@@ -285,6 +302,11 @@ pub fn lights_from_camera(
             cos_inner: 0.0,
             cos_outer: 0.0,
             shadowed,
+            // The rig is point lights only, so it carries no rectangle.
+            half_x: [0.0; 3],
+            two_sided: 0.0,
+            half_y: [0.0; 3],
+            _pad_entry: 0.0,
         }
     };
 

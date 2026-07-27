@@ -66,6 +66,11 @@ struct ShadowUniform {
 @group(2) @binding(4) var s_prefiltered: sampler;
 @group(2) @binding(5) var t_brdf_lut: texture_2d<f32>;
 @group(2) @binding(6) var s_brdf_lut: sampler;
+// The rect-area light tables (see `ltc.rs`). Indexed by perceptual
+// roughness and sqrt(1 - dot(N, V)).
+@group(2) @binding(7) var t_ltc_transform: texture_2d<f32>;
+@group(2) @binding(8) var t_ltc_magnitude: texture_2d<f32>;
+@group(2) @binding(9) var s_ltc: sampler;
 
 @vertex
 fn vs_main(
@@ -180,6 +185,13 @@ struct LightEntry {
     cos_inner: f32,
     cos_outer: f32,
     shadowed: f32,
+    // Rect-area only; zero for every other kind. Mirrors
+    // `light::LightEntry`, which is size-asserted at 96 bytes: the array
+    // STRIDE depends on these, so they are not a prefix-safe addition.
+    half_x: vec3<f32>,
+    two_sided: f32,
+    half_y: vec3<f32>,
+    _pad_entry: f32,
 }
 struct LightsUniform {
     lights: array<LightEntry, 8>,
@@ -245,6 +257,117 @@ fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, ro
 fn lambert_direct(N: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
     let NdotL = max(dot(N, L), 0.0);
     return (albedo / PI) * NdotL;
+}
+
+// --- Rect-area lights, via linearly transformed cosines ---
+//
+// Heitz, Dupuy, Hill and Neubelt (2016). A cosine integrated over a
+// polygon has a closed form; a GGX lobe does not. So warp the lobe into a
+// cosine with a matrix, warp the rectangle by the same matrix, and
+// integrate. The matrix is what `ltc.rs` tabulates.
+
+// The diffuse lobe IS a cosine, so its "transform" is the identity.
+const IDENTITY3: mat3x3<f32> = mat3x3<f32>(
+    vec3<f32>(1.0, 0.0, 0.0),
+    vec3<f32>(0.0, 1.0, 0.0),
+    vec3<f32>(0.0, 0.0, 1.0),
+);
+
+const LTC_LUT_SIZE: f32 = 64.0;
+const LTC_LUT_SCALE: f32 = (LTC_LUT_SIZE - 1.0) / LTC_LUT_SIZE;
+const LTC_LUT_BIAS: f32 = 0.5 / LTC_LUT_SIZE;
+
+fn ltc_uv(NdotV: f32, roughness: f32) -> vec2<f32> {
+    // sqrt(1 - cos) rather than the angle: it spends texels where the lobe
+    // changes fastest, which is near grazing.
+    let uv = vec2<f32>(roughness, sqrt(1.0 - clamp(NdotV, 0.0, 1.0)));
+    // Half a texel in from each end so linear filtering can still reach
+    // the first and last rows.
+    return uv * LTC_LUT_SCALE + LTC_LUT_BIAS;
+}
+
+// The integral of a cosine over a spherical polygon, given its vector form
+// factor, with the below-horizon part removed. The rational fit is from
+// Hill's "Real-Time Area Lighting: a Journey from Research to Production".
+fn ltc_clipped_sphere_form_factor(f: vec3<f32>) -> f32 {
+    let l = length(f);
+    return max((l * l + f.z) / (l + 1.0), 0.0);
+}
+
+// One edge's contribution to the vector form factor. The polynomial
+// approximates theta/sin(theta)/2PI, which is what makes this cheap enough
+// to run per light per pixel.
+fn ltc_edge_form_factor(v1: vec3<f32>, v2: vec3<f32>) -> vec3<f32> {
+    let x = dot(v1, v2);
+    let y = abs(x);
+    let a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
+    let b = 3.4175940 + (4.1616724 + y) * y;
+    let v = a / b;
+    var theta_sintheta = 0.5 * inverseSqrt(max(1.0 - x * x, 1e-7)) - v;
+    if x > 0.0 {
+        theta_sintheta = v;
+    }
+    return cross(v1, v2) * theta_sintheta;
+}
+
+// How much of the rectangle `corners` reaches point `P`, through the lobe
+// `m_inv` describes. Pass the identity for the diffuse term.
+fn ltc_evaluate(
+    N: vec3<f32>,
+    V: vec3<f32>,
+    P: vec3<f32>,
+    m_inv: mat3x3<f32>,
+    corners: array<vec3<f32>, 4>,
+    two_sided: bool,
+) -> f32 {
+    var c = corners;
+
+    // Behind the panel is unlit, unless it emits from both faces. The
+    // winding of `corners` defines which side is the front.
+    let light_normal = cross(c[1] - c[0], c[3] - c[0]);
+    let facing = dot(light_normal, P - c[0]);
+    if facing < 0.0 && !two_sided {
+        return 0.0;
+    }
+
+    // A shading frame around N, with the view in its x-z plane, because
+    // that is the frame the table was fitted in.
+    //
+    // t2 is NEGATED so the frame is right-handed. Without it the frame has
+    // determinant -1, every cross product inside the form factor comes out
+    // reversed, the accumulated vector points away from the surface, and
+    // the horizon clip takes the whole thing to zero. The symptom is not a
+    // subtly wrong highlight, it is an area light that emits nothing at
+    // all.
+    let t1 = normalize(V - N * dot(V, N));
+    let t2 = -cross(N, t1);
+    let to_shading = transpose(mat3x3<f32>(t1, t2, N));
+    let m = m_inv * to_shading;
+
+    // Project the rectangle onto the unit sphere around P, warped.
+    var w: array<vec3<f32>, 4>;
+    w[0] = normalize(m * (c[0] - P));
+    w[1] = normalize(m * (c[1] - P));
+    w[2] = normalize(m * (c[2] - P));
+    w[3] = normalize(m * (c[3] - P));
+
+    var form = vec3<f32>(0.0);
+    form += ltc_edge_form_factor(w[0], w[1]);
+    form += ltc_edge_form_factor(w[1], w[2]);
+    form += ltc_edge_form_factor(w[2], w[3]);
+    form += ltc_edge_form_factor(w[3], w[0]);
+
+    return ltc_clipped_sphere_form_factor(form);
+}
+
+// The four corners, counter-clockwise seen from the emitting side.
+fn ltc_corners(center: vec3<f32>, half_x: vec3<f32>, half_y: vec3<f32>) -> array<vec3<f32>, 4> {
+    return array<vec3<f32>, 4>(
+        center - half_x - half_y,
+        center + half_x - half_y,
+        center + half_x + half_y,
+        center - half_x + half_y,
+    );
 }
 
 // Yaw a direction around +Y — rotates IBL cubemap lookups in lockstep
@@ -344,7 +467,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var emissive_color: vec3<f32>;
     var N: vec3<f32>;
 
+    // `tbn` is the WORLD-to-TANGENT matrix (the vertex stage builds it as
+    // transpose(mat3x3(T, B, N))), so its transpose takes a tangent-space
+    // normal-map sample back into world space. Since the 0.8.1 hoist that
+    // is the only thing tangent space is still used for: shading itself
+    // runs in world space.
     let tbn = mat3x3<f32>(in.tbn_col0, in.tbn_col1, in.tbn_col2);
+
+    // Shading basis, needed by both the material branches below (which
+    // override N) and the IBL block further down.
+    let N_world = normalize(in.world_normal);
+    let V_world = normalize(camera.view_pos.xyz - in.world_position);
 
     if camera.material_override == 0u && model_id >= 4u && model_id <= 6u {
         // The promoted per-material Clay / ClayDark / Chrome looks: the
@@ -356,7 +489,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         ao = 1.0;
         emissive_color = vec3(0.0);
-        N = vec3(0.0, 0.0, 1.0);
+        // These looks deliberately ignore normal maps, so the shading
+        // normal is the geometric one (was tangent-space Z pre-hoist).
+        N = N_world;
     } else if camera.material_override == 0u {
         let n_sample = textureSample(t_normal, s_normal, in.tex_coords);
         let orm_sample = textureSample(t_orm, s_orm, in.tex_coords);
@@ -374,7 +509,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             0.0,
             1.0,
         );
-        N = normalize(n_sample.xyz * 2.0 - 1.0);
+        // Tangent-space sample lifted into world space: transpose(tbn) is
+        // mat3x3(T, B, N), the tangent-to-world direction.
+        N = normalize(transpose(tbn) * (n_sample.xyz * 2.0 - 1.0));
         emissive_color = material.emissive * emissive_sample.rgb;
     } else {
         switch camera.material_override {
@@ -385,13 +522,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         ao = 1.0;
         emissive_color = vec3(0.0);
-        N = vec3(0.0, 0.0, 1.0);
+        // These looks deliberately ignore normal maps, so the shading
+        // normal is the geometric one (was tangent-space Z pre-hoist).
+        N = N_world;
     }
 
-    let V = normalize(in.tangent_view_position - in.tangent_position);
-
-    let N_world = normalize(in.world_normal);
-    let V_world = normalize(camera.view_pos.xyz - in.world_position);
     let F0 = mix(vec3(0.04), albedo, metallic);
     let NdotV_ibl = max(dot(N_world, V_world), 0.001);
     let F_ibl = F_schlick(NdotV_ibl, F0);
@@ -439,24 +574,81 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Chrome (global 3u or per-material 6u) is env-reflection-only: it
     // skips the direct-light loop entirely.
     if camera.material_override != 3u && model_id != 6u {
-        // All lighting runs in tangent space; the TBN is orthonormal, so
-        // distances and angles match their world-space values.
+        // All lighting runs in WORLD space (0.8.1 hoist). Pre-hoist this
+        // loop moved each light into tangent space instead; the TBN is
+        // orthonormal so the two agree to within float rounding, and area
+        // lights need world-space rect corners, which tangent space cannot
+        // express per-light.
         for (var i = 0u; i < lights.count; i++) {
             let light = lights.lights[i];
 
             // Explicit vec3 copies: naga's Metal backend emits packed_float3
-            // for struct members, which cannot multiply a float3x3 directly.
+            // for struct members, which several vector ops reject directly.
             let light_dir = vec3<f32>(light.direction);
             let light_pos = vec3<f32>(light.position);
+
+            // Rect area: integrate over the rectangle instead of shading
+            // from a single direction, then skip the point/spot machinery.
+            if light.kind == 3u {
+                let half_x = vec3<f32>(light.half_x);
+                let half_y = vec3<f32>(light.half_y);
+                let corners = ltc_corners(light_pos, half_x, half_y);
+                let two_sided = light.two_sided > 0.5;
+                let scale = light.intensity * 3.0;
+
+                // Diffuse is the plain cosine integral: the identity
+                // transform IS the cosine lobe.
+                let diffuse = ltc_evaluate(
+                    N, V_world, in.world_position, IDENTITY3, corners, two_sided);
+
+                if is_clay {
+                    // Clay is directionless matte by definition, so it takes
+                    // the diffuse integral and no specular, exactly as
+                    // `lambert_direct` drops the specular for a point light.
+                    radiance_acc += light.color * (albedo / PI) * diffuse * scale;
+                } else if is_toon {
+                    // Toon bands on dot(N, L), which an area light has no
+                    // single L for. The direction to the panel's centre is
+                    // the honest stand-in: it degrades to the point-light
+                    // answer as the rectangle shrinks.
+                    let to_center = normalize(light_pos - in.world_position);
+                    let ndotl = max(dot(N, to_center), 0.0);
+                    let banded = floor(ndotl * material.toon_steps)
+                        / max(material.toon_steps - 1.0, 1.0);
+                    radiance_acc += light.color * (albedo / PI)
+                        * clamp(banded, 0.0, 1.0) * diffuse * scale;
+                } else {
+                    let uv = ltc_uv(dot(N, V_world), roughness);
+                    let t1 = textureSampleLevel(t_ltc_transform, s_ltc, uv, 0.0);
+                    let t2 = textureSampleLevel(t_ltc_magnitude, s_ltc, uv, 0.0);
+                    // The packing contract with `gen_ltc_lut`: columns of
+                    // M^-1, with the middle entry normalized to 1.
+                    let m_inv = mat3x3<f32>(
+                        vec3<f32>(t1.x, 0.0, t1.y),
+                        vec3<f32>(0.0, 1.0, 0.0),
+                        vec3<f32>(t1.z, 0.0, t1.w),
+                    );
+                    let specular = ltc_evaluate(
+                        N, V_world, in.world_position, m_inv, corners, two_sided);
+
+                    // Hill's LTC Fresnel: the table's magnitude and Fresnel
+                    // terms rebuild what the split-sum path would have given.
+                    let F0 = mix(vec3(0.04), albedo, metallic);
+                    let fresnel = F0 * t2.x + (vec3(1.0) - F0) * t2.y;
+                    let kD = (1.0 - metallic);
+                    radiance_acc += light.color * scale
+                        * (kD * albedo / PI * diffuse + fresnel * specular);
+                }
+                continue;
+            }
 
             var L: vec3<f32>;
             var atten = 1.0;
             if light.kind == 1u {
                 // Directional: L opposes the light's travel direction.
-                L = normalize(tbn * (-light_dir));
+                L = normalize(-light_dir);
             } else {
-                let light_pos_t = tbn * light_pos;
-                let to_light = light_pos_t - in.tangent_position;
+                let to_light = light_pos - in.world_position;
                 let dist = length(to_light);
                 // normalize() (not to_light / dist): bit-parity with the
                 // pre-generalization shader for the golden comparison.
@@ -474,8 +666,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
                 if light.kind == 2u {
                     // Spot cone: smooth falloff between the cone cosines.
-                    let dir_t = normalize(tbn * light_dir);
-                    let cos_angle = dot(-L, dir_t);
+                    let dir_w = normalize(light_dir);
+                    let cos_angle = dot(-L, dir_w);
                     let cone = clamp(
                         (cos_angle - light.cos_outer)
                             / max(light.cos_inner - light.cos_outer, 1e-4),
@@ -489,7 +681,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let shadow_factor = select(1.0, shadow, light.shadowed > 0.5);
             let scale = light.intensity * 3.0 * atten * shadow_factor;
             var brdf = select(
-                cook_torrance(N, V, L, albedo, roughness, metallic),
+                cook_torrance(N, V_world, L, albedo, roughness, metallic),
                 lambert_direct(N, L, albedo),
                 is_clay,
             );

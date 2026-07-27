@@ -27,8 +27,32 @@ use crate::params::ParamValue;
 use crate::previews::{Previews, effective_params};
 use crate::registry::Registry;
 use crate::registry::coerce::Value;
-use crate::registry::resolve::resolve_params;
+use crate::registry::resolve::resolve_params_with;
 use solarxy_kernel::transform::compose_trs;
+
+/// The evaluation context for a root-context node resolved outside a cook.
+///
+/// These sites have no gathered inputs, so the geometry queries are
+/// genuinely unavailable and say so; `ch()` is available, because it reads
+/// document state rather than cook output. The clock is stopped: it stays
+/// that way until the runtime lands, and every one of these resolves runs
+/// per frame, so a wrong clock here would desynchronise the scene from the
+/// cook.
+fn root_refs<'a>(
+    doc: &'a Document,
+    registry: &'a Registry,
+    previews: &'a Previews,
+    node: NodeId,
+) -> crate::refs::DocRefs<'a> {
+    crate::refs::DocRefs::new(
+        doc,
+        registry,
+        previews,
+        GraphContext::Root,
+        node,
+        crate::expr::SceneTime::default(),
+    )
+}
 
 /// Builds a full scene delta from scratch each frame. The renderer diffs
 /// against its own state, so a full rebuild is safe (and light lists are
@@ -53,12 +77,12 @@ pub fn build_scene_delta(
         match node.type_id.as_str() {
             "geo" => emit_geo(doc, registry, cook, previews, node.id, &mut delta),
             "camera" => {
-                if let Some(cam) = camera_from_node(registry, previews, node) {
+                if let Some(cam) = camera_from_node(doc, registry, previews, node) {
                     cameras.push(cam);
                 }
             }
             id if is_light(id) => {
-                if let Some(light) = light_from_node(registry, previews, node) {
+                if let Some(light) = light_from_node(doc, registry, previews, node) {
                     lights.push(light);
                 }
             }
@@ -131,7 +155,9 @@ pub(crate) fn geo_render_flags(
         return on;
     };
     let params = effective_params(previews, node.id, &node.params);
-    let Ok(p) = resolve_params(&params, &desc.params) else {
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let Ok(p) = resolve_params_with(&params, &desc.params, &eval) else {
         return on;
     };
     GeoRenderFlags {
@@ -257,7 +283,9 @@ pub(crate) fn geo_world_matrix(
         return Matrix4::identity();
     };
     let params = effective_params(previews, node.id, &node.params);
-    let Ok(p) = resolve_params(&params, &desc.params) else {
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let Ok(p) = resolve_params_with(&params, &desc.params, &eval) else {
         return Matrix4::identity();
     };
     let scale = p.vec3_f32("scale");
@@ -428,6 +456,7 @@ pub(crate) fn pick_node_detailed(
 /// camera does not use it. Previews are honored so a locked-camera reframe
 /// (which streams param previews) tracks live.
 fn camera_from_node(
+    doc: &Document,
     registry: &Registry,
     previews: &Previews,
     node: &crate::document::NodeData,
@@ -436,7 +465,9 @@ fn camera_from_node(
 
     let desc = registry.get(&node.type_id)?;
     let params = effective_params(previews, node.id, &node.params);
-    let p = resolve_params(&params, &desc.params).ok()?;
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let p = resolve_params_with(&params, &desc.params, &eval).ok()?;
     let f32p = |key: &str| -> f32 {
         match p.get(key) {
             Some(ParamValue::Float(v)) => *v as f32,
@@ -474,6 +505,7 @@ fn camera_from_node(
 }
 
 fn light_from_node(
+    doc: &Document,
     registry: &Registry,
     previews: &Previews,
     node: &crate::document::NodeData,
@@ -482,7 +514,9 @@ fn light_from_node(
 
     let desc = registry.get(&node.type_id)?;
     let params = effective_params(previews, node.id, &node.params);
-    let p = resolve_params(&params, &desc.params).ok()?;
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let p = resolve_params_with(&params, &desc.params, &eval).ok()?;
     let color = |key: &str| -> [f32; 3] {
         match p.get(key) {
             Some(ParamValue::Color(c)) => [c[0], c[1], c[2]],
@@ -508,6 +542,8 @@ fn light_from_node(
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0; 2],
+        rotate: [0.0; 3],
+        two_sided: false,
         ground_color: [0.0; 3],
         cast_shadow: false,
         shadow_map_size: 1024,
@@ -578,6 +614,13 @@ fn light_from_node(
             light.kind = LightKind::RectArea;
             light.position = p.vec3_f32("translate");
             light.area_extent = [f32p("width"), f32p("height")];
+            // Radians: the resolver owns the degrees conversion, as it does
+            // for every other angle in the registry.
+            light.rotate = p.vec3_f32("rotate");
+            light.two_sided = boolp("two_sided");
+            // The helper draws its arrow along `direction`, so keep it as
+            // the face normal rather than the default straight-down.
+            light.direction = light.rect_basis().normal;
         }
         _ => return None,
     }

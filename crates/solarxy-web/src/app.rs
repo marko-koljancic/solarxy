@@ -473,6 +473,7 @@ impl SolarxyApp {
             &bounds,
             width as f32 / height.max(1) as f32,
             &renderer.ibl_res.brdf_lut,
+            &renderer.ibl_res.ltc,
             SHADOW_MAP_SIZE,
             vis,
         );
@@ -482,6 +483,7 @@ impl SolarxyApp {
             &env.light_buffer,
             &renderer.ibl_res.ibl,
             &renderer.ibl_res.brdf_lut,
+            &renderer.ibl_res.ltc,
         );
 
         let mut engine = Engine::new().map_err(|e| JsError::new(&format!("engine: {e}")))?;
@@ -1052,6 +1054,29 @@ impl SolarxyApp {
     /// card when it opens or the node's cook status changes.
     pub fn cook_warnings(&self, node: f64) -> Result<JsValue, JsError> {
         to_js(&self.engine.cook_warnings(NodeId(node as u64)))
+    }
+
+    /// One param's current value as the panel should display it, or the
+    /// message explaining why it has none.
+    ///
+    /// Pull-read per row rather than pushed: under playback a per-cook
+    /// resolved value would be one event per expression per frame across
+    /// this boundary.
+    pub fn resolved_param(&self, ctx: JsValue, node: f64, key: String) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        match self.engine.resolved_param(ctx, NodeId(node as u64), &key) {
+            Ok(value) => to_js(&ResolvedParamDto {
+                ok: true,
+                value: Some(value),
+                error: None,
+            }),
+            Err(error) => to_js(&ResolvedParamDto {
+                ok: false,
+                value: None,
+                error: Some(error),
+            }),
+        }
     }
 
     /// One window of a node's cooked attribute values
@@ -2521,6 +2546,7 @@ impl SolarxyApp {
                 &self.env.light_buffer,
                 &self.renderer.ibl_res.ibl_fallback,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
             IblMode::Diffuse => solarxy_renderer::scene::create_light_bind_group_selective(
                 &self.device,
@@ -2529,6 +2555,7 @@ impl SolarxyApp {
                 &self.renderer.ibl_res.ibl,
                 &self.renderer.ibl_res.ibl_fallback,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
             IblMode::Full => create_light_bind_group(
                 &self.device,
@@ -2536,6 +2563,7 @@ impl SolarxyApp {
                 &self.env.light_buffer,
                 &self.renderer.ibl_res.ibl,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
         };
         self.env.lights_uniform.ibl_avg_r = ibl_avg[0];
@@ -3084,6 +3112,7 @@ impl SolarxyApp {
             &bounds,
             aspect,
             &self.renderer.ibl_res.brdf_lut,
+            &self.renderer.ibl_res.ltc,
             SHADOW_MAP_SIZE,
             vis,
         );
@@ -3093,6 +3122,7 @@ impl SolarxyApp {
             &env.light_buffer,
             self.active_ibl(),
             &self.renderer.ibl_res.brdf_lut,
+            &self.renderer.ibl_res.ltc,
         );
         self.env = env;
         self.env_bounds = bounds;
@@ -4303,6 +4333,17 @@ struct ImportJobDto {
 struct AssetRefDto {
     hash: String,
     name: String,
+}
+
+/// The parameter panel's per-row readout: a value, or why there is none.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedParamDto {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<solarxy_graph::params::ParamValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

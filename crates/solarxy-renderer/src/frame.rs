@@ -110,6 +110,12 @@ pub struct IblResources {
     pub ibl: IblState,
     pub ibl_fallback: IblState,
     pub brdf_lut: BrdfLut,
+    /// The rect-area light tables. Not image-based lighting, but they sit
+    /// here because this is the bundle the light bind group is built from
+    /// and both are shading lookup tables uploaded once at startup;
+    /// splitting them out would mean threading a second reference through
+    /// the same dozen call sites for no gain.
+    pub ltc: crate::ltc::LtcLuts,
     pub ibl_mode: IblMode,
     pub last_active_ibl_mode: IblMode,
 }
@@ -437,6 +443,7 @@ impl Renderer {
         });
 
         let brdf_lut = BrdfLut::generate(device, queue);
+        let ltc = crate::ltc::LtcLuts::load(device, queue);
         let ibl = IblState::from_sky_colors(device, queue, init.sky_top, init.sky_bottom);
         let ibl_fallback = IblState::fallback(device, queue);
 
@@ -649,6 +656,7 @@ impl Renderer {
                 ibl,
                 ibl_fallback,
                 brdf_lut,
+                ltc,
                 ibl_mode: init.ibl_mode,
                 last_active_ibl_mode: match init.ibl_mode {
                     IblMode::Off => IblMode::Full,

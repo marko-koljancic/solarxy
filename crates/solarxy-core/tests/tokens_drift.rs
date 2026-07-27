@@ -412,3 +412,85 @@ fn every_registry_glyph_key_has_dedicated_art() {
         missing.join("\n  ")
     );
 }
+
+/// The frontend's expression affordance must offer exactly the param types
+/// the engine accepts an expression on.
+///
+/// Two failure modes, both silent without this gate. Offering the `=`
+/// affordance on a type the engine refuses gives the user a control whose
+/// every use is rejected. Omitting it from a type the engine accepts hides
+/// a capability that works perfectly well, which is how a feature ships
+/// half-wired and nobody notices.
+///
+/// Read as text on both sides rather than through a snapshot, because
+/// `accepts_expression` is a predicate rather than serialized data: there
+/// is nothing in `registry.json` to compare against. Mirrors the glyph gate
+/// above, which is the house pattern for a Rust-to-TypeScript contract.
+#[test]
+fn expression_types_match_the_frontend() {
+    let root = workspace_root();
+
+    // Rust: the match arms of ParamType::accepts_expression.
+    let param_spec =
+        std::fs::read_to_string(root.join("crates/solarxy-graph/src/registry/param_spec.rs"))
+            .expect("param_spec.rs must exist");
+    // Bounded by the next item, not by brace matching: the following
+    // method also lists every ParamType variant, so an unbounded slice
+    // would silently claim the engine accepts all of them.
+    let body = param_spec
+        .split("pub fn accepts_expression")
+        .nth(1)
+        .and_then(|s| s.split("pub fn").next())
+        .expect("accepts_expression body");
+    let mut rust: Vec<String> = body
+        .split("ParamType::")
+        .skip(1)
+        .filter_map(|s| {
+            let name: String = s
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            (!name.is_empty()).then(|| lower_camel(&name))
+        })
+        .collect();
+    rust.sort();
+    rust.dedup();
+
+    // TypeScript: the EXPRESSION_TYPES array.
+    let lane = std::fs::read_to_string(root.join("web/src/components/inputs/expressionLane.ts"))
+        .expect("expressionLane.ts must exist");
+    let block = lane
+        .split("export const EXPRESSION_TYPES = [")
+        .nth(1)
+        .and_then(|s| s.split(']').next())
+        .expect("EXPRESSION_TYPES block");
+    let mut ts: Vec<String> = block
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect();
+    ts.sort();
+    ts.dedup();
+
+    assert!(
+        !rust.is_empty(),
+        "parsed no types out of accepts_expression"
+    );
+    assert_eq!(
+        rust, ts,
+        "ParamType::accepts_expression and EXPRESSION_TYPES disagree.\n\
+         Rust: {rust:?}\nTypeScript: {ts:?}\n\
+         Update web/src/components/inputs/expressionLane.ts to match."
+    );
+}
+
+/// `Vec2` -> `vec2`, `Color` -> `color`: the wire spelling the frontend
+/// uses for a param type.
+fn lower_camel(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}

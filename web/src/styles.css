@@ -1090,6 +1090,99 @@ body.precision-drag-active {
   background-color: var(--error-background);
 }
 
+/* Expression lane (0.8.1). A numeric row is either its normal widget or
+ * an expression; the `=` affordance swaps between them. The toggle sits
+ * inside the right-aligned label so it reads as part of the row's identity
+ * rather than as another control competing with the value. */
+.param-expr-toggle {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Invisible until the row is hovered: every numeric param carries one,
+   * and 20 always-on glyphs would read as clutter. */
+  opacity: 0;
+  transition: var(--theme-transition);
+}
+
+.param-row:hover .param-expr-toggle,
+.param-expr-toggle:focus-visible,
+.param-expr-toggle.active {
+  opacity: 1;
+}
+
+.param-expr-toggle:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border-hover);
+}
+
+.param-expr-toggle.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.param-expr {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "input clear"
+    "readout readout";
+  align-items: center;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+}
+
+.param-expr-input {
+  grid-area: input;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.param-expr-input.has-error {
+  border-color: var(--error-border);
+  background-color: var(--error-background);
+}
+
+/* The resolved value, or the parser's message. Always present so the row
+ * does not change height as an expression goes in and out of error. */
+.param-expr-readout {
+  grid-area: readout;
+  min-height: 1.4rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-expr-readout.has-error {
+  color: var(--error-text);
+}
+
+.param-expr-clear {
+  grid-area: clear;
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.param-expr-clear:hover {
+  color: var(--accent-primary);
+}
+
 .number-field {
   width: 72px;
   text-align: right;
@@ -1170,7 +1263,100 @@ body.precision-drag-active {
   text-align: center;
 }
 
-.vector-component .number-field {
+.vector-component /* Expression lane (0.8.1). A numeric row is either its normal widget or
+ * an expression; the `=` affordance swaps between them. The toggle sits
+ * inside the right-aligned label so it reads as part of the row's identity
+ * rather than as another control competing with the value. */
+.param-expr-toggle {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Invisible until the row is hovered: every numeric param carries one,
+   * and 20 always-on glyphs would read as clutter. */
+  opacity: 0;
+  transition: var(--theme-transition);
+}
+
+.param-row:hover .param-expr-toggle,
+.param-expr-toggle:focus-visible,
+.param-expr-toggle.active {
+  opacity: 1;
+}
+
+.param-expr-toggle:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border-hover);
+}
+
+.param-expr-toggle.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.param-expr {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "input clear"
+    "readout readout";
+  align-items: center;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+}
+
+.param-expr-input {
+  grid-area: input;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.param-expr-input.has-error {
+  border-color: var(--error-border);
+  background-color: var(--error-background);
+}
+
+/* The resolved value, or the parser's message. Always present so the row
+ * does not change height as an expression goes in and out of error. */
+.param-expr-readout {
+  grid-area: readout;
+  min-height: 1.4rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-expr-readout.has-error {
+  color: var(--error-text);
+}
+
+.param-expr-clear {
+  grid-area: clear;
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.param-expr-clear:hover {
+  color: var(--accent-primary);
+}
+
+.number-field {
   width: 100%;
   min-width: 0;
 }

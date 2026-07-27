@@ -29,7 +29,7 @@ use crate::assets::AssetTable;
 use crate::document::{Document, Graph, GraphContext, NodeId};
 use crate::registry::coerce::{Value, coerce_value};
 use crate::previews::{Previews, effective_params};
-use crate::registry::resolve::resolve_params;
+use crate::registry::resolve::resolve_params_with;
 use crate::registry::{Arity, BypassBehavior, Registry};
 
 /// One in-flight async job, tagged with the generation it was spawned at.
@@ -94,6 +94,10 @@ pub struct CookEngine {
     /// Whether cook bodies may offload to async jobs (true on web with an
     /// import worker; false natively, where imports parse inline).
     async_jobs: bool,
+    /// The scene clock as expressions see it. Stopped (all zero) until the
+    /// runtime lands, which is what keeps golden captures, CLI cooks and
+    /// `.slxy` reload reproducible.
+    scene_time: crate::expr::SceneTime,
     /// Optional host wall-clock, in milliseconds. A `fn` pointer (not a
     /// closure) so the driver stays wasm-safe and the struct stays
     /// `Debug`/`Default`: the web host installs `performance.now`, native
@@ -112,6 +116,16 @@ impl CookEngine {
     /// default; native cooks parse imports inline.
     pub fn set_async_jobs(&mut self, enabled: bool) {
         self.async_jobs = enabled;
+    }
+
+    /// Sets the scene clock expressions read through `$T` and `$F`.
+    ///
+    /// Distinct from [`Self::set_clock`], which is a host wall-clock used
+    /// only to report cook durations. This one is document time: it is part
+    /// of what a cook computes, so it must be zero whenever the runtime is
+    /// stopped or a saved scene would reload differently than it saved.
+    pub fn set_scene_time(&mut self, time: crate::expr::SceneTime) {
+        self.scene_time = time;
     }
 
     /// Installs a host wall-clock (milliseconds) so successful cooks report
@@ -237,7 +251,16 @@ impl CookEngine {
             if !report.cooked.is_empty() && !should_continue() {
                 break;
             }
-            self.cook_one(doc, graph, registry, assets, previews, node, &mut report);
+            self.cook_one(
+                doc,
+                graph,
+                registry,
+                assets,
+                previews,
+                ctx,
+                node,
+                &mut report,
+            );
         }
 
         report.remaining_dirty = self
@@ -278,6 +301,7 @@ impl CookEngine {
         registry: &Registry,
         assets: &AssetTable,
         previews: &Previews,
+        ctx: GraphContext,
         node: NodeId,
         report: &mut CookReport,
     ) {
@@ -330,11 +354,23 @@ impl CookEngine {
             }
         };
 
-        // Resolve params (v1 refuses expressions), with any in-flight drag
-        // values laid over the stored ones: that overlay IS the preview lane,
-        // and without it a drag would not reach the viewport until release.
+        // Resolve params, with any in-flight drag values laid over the
+        // stored ones: that overlay IS the preview lane, and without it a
+        // drag would not reach the viewport until release.
+        //
+        // The evaluation context is built here because this is the only
+        // resolve site that has gathered inputs, which is what makes
+        // `npoints()` and `bbox()` answerable. Gather runs first (above),
+        // so the values are already there; the wire topology cooked them
+        // before this node.
         let params = effective_params(previews, node, &data.params);
-        let resolved = match resolve_params(&params, &desc.params) {
+        let default_port = desc.default_input().map_or("geometry", |p| p.key.as_str());
+        let geo = super::geo_queries::InputGeo::new(&inputs, default_port);
+        let refs = crate::refs::DocRefs::new(doc, registry, previews, ctx, node, self.scene_time);
+        let eval_ctx = crate::expr::EvalCtx::new(self.scene_time)
+            .with_geo(&geo)
+            .with_refs(&refs);
+        let resolved = match resolve_params_with(&params, &desc.params, &eval_ctx) {
             Ok(r) => r,
             Err(fail) => {
                 self.commit_error(node, &CookError::Params(fail.to_string()), report);
@@ -471,6 +507,24 @@ impl CookEngine {
             }
         }
         None
+    }
+
+    /// The inputs a node would cook with right now, from cached upstream
+    /// outputs, or `None` when a required port is unconnected.
+    ///
+    /// Exists so the parameter panel's resolved-value readout can answer a
+    /// geometry query the same way the cook does. Without it the readout
+    /// claims `npoints()` "is only available on a node with geometry
+    /// inputs" for a node whose input is connected and cooked, which is
+    /// both false and the opposite of what the node's own badge says.
+    #[must_use]
+    pub fn gathered_inputs(
+        &self,
+        graph: &Graph,
+        desc: &crate::registry::NodeTypeDescriptor,
+        node: NodeId,
+    ) -> Option<Inputs> {
+        self.gather(graph, desc, node).ok()
     }
 
     /// Gathers every input port into an [`Inputs`], applying wire
