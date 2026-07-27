@@ -32,6 +32,7 @@ import { AttrColumn } from "./AttrColumn";
 import { ViewportContextMenu } from "./ViewportContextMenu";
 import { ReviewOverlay } from "./review/ReviewOverlay";
 import { ReviewPopup } from "./review/ReviewPopup";
+import { TransportBar } from "./TransportBar";
 import { ViewportMenuBar } from "./ViewportMenuBar";
 
 /** Canvas-relative CSS px, the coordinate space the Rust host expects. */
@@ -279,6 +280,7 @@ export function Viewport() {
         <ReviewOverlay />
         <ReviewPopup />
       </div>
+      <TransportBar />
       {ctxMenu && (
         <ViewportContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
       )}

@@ -4669,3 +4669,191 @@ body.reduce-motion .cook-arc {
   color: var(--text-secondary);
   font-size: 1.15rem;
 }
+
+/* ---- Snippet param (the wrangle's program editor) ----------------------
+ *
+ * A code surface, so it breaks the panel's two-column row: the label sits
+ * above and the editor spans the full width. Line numbers ride a separate
+ * scrolling gutter synced to the textarea, because a textarea cannot paint
+ * its own gutter and overlaying one would fight soft wrap. */
+
+.param-row-stacked {
+  display: block;
+}
+
+.param-row-stacked > label,
+.param-row-stacked > .param-label {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.snippet-field {
+  min-width: 0;
+}
+
+.snippet-body {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background-color: var(--input-background);
+  transition: var(--theme-transition);
+}
+
+.snippet-field.has-error .snippet-body {
+  border-color: var(--error-border);
+}
+
+.snippet-gutter {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.35rem 0.35rem 0.45rem;
+  border-right: 1px solid var(--input-border);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  text-align: right;
+  overflow: hidden;
+  user-select: none;
+}
+
+.snippet-lineno.error {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.snippet-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  border: none;
+  background: none;
+  color: var(--input-text);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.snippet-input:focus {
+  outline: none;
+}
+
+.snippet-field:focus-within .snippet-body {
+  border-color: var(--input-border-focus);
+}
+
+/* Always present so the row does not jump as an error comes and goes,
+ * matching the expression readout's reasoning. */
+.snippet-error,
+.snippet-hint {
+  margin: 0.2rem 0 0;
+  min-height: 1.3rem;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.snippet-error {
+  color: var(--error-text);
+}
+
+.snippet-hint {
+  color: var(--text-tertiary);
+}
+
+/* ---- Transport bar (the scene clock) ----------------------------------
+ *
+ * A single compact strip under the whole viewport region, not per pane:
+ * there is one clock, and repeating it four times in a quad layout would
+ * imply four. Sits inside `.viewport-pane` below `.viewport-canvas-host`,
+ * so the canvas host shrinks by its height and the render target follows
+ * through the existing resize path. */
+
+.transport-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+  padding: 0.25rem 0.5rem;
+  border-top: 1px solid var(--border-primary);
+  background-color: var(--background-secondary);
+  font-size: 1rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.transport-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.transport-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--theme-transition);
+}
+
+.transport-button:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border);
+}
+
+.transport-button:focus-visible {
+  outline: 1px solid var(--input-border-focus);
+  outline-offset: -1px;
+}
+
+/* Playing is a MODE, not a hover: it stays lit so the state is readable
+ * from across the room rather than only from the frame counter. */
+.transport-play.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.transport-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.transport-number {
+  width: 58px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tabular figures so the readout does not jitter as the clock runs. */
+.transport-seconds {
+  flex: 0 0 auto;
+  min-width: 4.5rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-spacer {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
+.transport-loop {
+  padding: 0.1rem 0.3rem;
+  font-size: 1rem;
+}

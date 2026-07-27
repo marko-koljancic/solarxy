@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solarxy scene</title>
+    <meta name="description" content="A Solarxy scene, published as a self-contained page." />
+    <style>
+      /* Inlined rather than imported: the player is one canvas and a status
+         line, and a stylesheet would be a second file in every bundle for
+         about thirty declarations. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #101014;
+        color: #d7d7db;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        overflow: hidden;
+      }
+      #player-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #player-status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        text-align: center;
+        pointer-events: none;
+      }
+      #player-status.error {
+        color: #ff8f7a;
+        max-width: 34rem;
+        margin: 0 auto;
+      }
+      /* Only present when the bundle's config asks for it. */
+      #player-transport {
+        position: fixed;
+        left: 50%;
+        bottom: 1rem;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(20, 20, 26, 0.82);
+        backdrop-filter: blur(6px);
+      }
+      #player-transport button {
+        min-width: 4rem;
+        padding: 0.25rem 0.6rem;
+        border: 1px solid #3a3a44;
+        border-radius: 999px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      #player-transport button:hover {
+        border-color: #7a7a88;
+      }
+      #player-frame {
+        min-width: 6rem;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="player-canvas"></canvas>
+    <div id="player-status">Loading...</div>
+    <script type="module" src="/src/player/main.ts"></script>
+  </body>
+</html>

@@ -54,6 +54,7 @@ import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
 import { FloatInput } from "./inputs/FloatInput";
 import { VectorInput } from "./inputs/VectorInput";
+import { SnippetField } from "./inputs/SnippetField";
 
 /** The current value for a param: the node's override, else the default. */
 function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
@@ -69,8 +70,8 @@ function literal(paramType: string, value: unknown): ParamSource {
       ? "asset"
       : paramType === "nodePath"
         ? "nodeRef"
-        : paramType === "attributeName"
-          ? "text" // the widget variant stores plain Text
+        : paramType === "attributeName" || paramType === "snippet"
+          ? "text" // both widget variants store plain Text
           : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
@@ -274,6 +275,8 @@ function LiteralField({
           />
         </div>
       );
+    case "snippet":
+      return <SnippetRow ctx={ctx} node={node} spec={spec} label={label} onCommit={commit} />;
     case "color":
       return (
         <div className="param-row">
@@ -319,6 +322,34 @@ function LiteralField({
  * control. Selecting a file stages its bytes (content-addressed) and commits
  * the asset hash as the param, which dirties the import node so the next cook
  * yields a parse job to the worker. */
+/** A Snippet param: the multi-line program editor.
+ *
+ * The error line is read from the node's own cook status rather than from a
+ * separate diagnostics channel, so the highlight and the node badge can
+ * never disagree: a wrangle parse failure IS the cook error, formatted by
+ * the engine as "line N, column M: ...". */
+function SnippetRow({
+  node,
+  spec,
+  label,
+  onCommit,
+}: FieldProps & { label: ReactNode; onCommit: (v: string) => void }) {
+  const status = useMirror((s) => s.cook[node.id]?.status);
+  const error = status?.state === "error" ? status.message : undefined;
+  const value = paramValue(node, spec);
+  return (
+    <div className="param-row param-row-stacked">
+      {label}
+      <SnippetField
+        value={String(value ?? "")}
+        ariaLabel={spec.label}
+        error={error}
+        onCommit={onCommit}
+      />
+    </div>
+  );
+}
+
 /** An Action param: a button whose press is routed by node
  * type. Export nodes run the engine's encoder and save the bytes through
  * the File System Access flow; the render node is HOST-interpreted (jump
