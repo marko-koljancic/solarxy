@@ -430,7 +430,7 @@ pub fn conform_value(value: &ParamValue, ty: &ParamType) -> Result<ParamValue, S
         // Rounds half away from zero, matching the wire matrix.
         (ParamValue::Float(v), ParamType::Int) => Ok(ParamValue::Int(scalar::f64_to_i64(*v))),
         (ParamValue::Bool(v), ParamType::Bool) => Ok(ParamValue::Bool(*v)),
-        (ParamValue::Text(v), ParamType::Text | ParamType::AttributeName) => {
+        (ParamValue::Text(v), ParamType::Text | ParamType::AttributeName | ParamType::Snippet) => {
             Ok(ParamValue::Text(v.clone()))
         }
         (ParamValue::Vec2(v), ParamType::Vec2) => Ok(ParamValue::Vec2(*v)),
@@ -562,7 +562,7 @@ pub fn param_source_from_json(json: &Json, ty: &ParamType) -> Result<ParamSource
             json.as_bool()
                 .ok_or_else(|| format!("expected a bool, got {json}"))?,
         ),
-        ParamType::Text | ParamType::AttributeName => ParamValue::Text(
+        ParamType::Text | ParamType::AttributeName | ParamType::Snippet => ParamValue::Text(
             json.as_str()
                 .ok_or_else(|| format!("expected a string, got {json}"))?
                 .to_string(),

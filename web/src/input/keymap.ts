@@ -14,6 +14,7 @@ export const KEY_GROUPS = [
   "Viewport & Layout",
   "Inspection",
   "Review",
+  "Playback",
 ] as const;
 
 export type KeyGroup = (typeof KEY_GROUPS)[number];
@@ -98,6 +99,13 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "review-mode", keys: "shift+r", context: "viewport", group: "Review", description: "Toggle review mode (click geometry to pin a note)" },
   { id: "review-panel", keys: "n", context: "global", group: "Review", description: "Toggle the review panel" },
   { id: "review-cancel", keys: "escape", context: "global", group: "Review", description: "Cancel the note editor / re-anchor / review mode, or restore a maximized panel" },
+  // Playback (0.8.1, decision M-21). All four were checked against the table
+  // above before being taken: `space`, bare `,`, bare `.` and `home` were
+  // unbound. `mod+,` is Preferences and does not collide with a bare comma.
+  { id: "play-pause", keys: "space", context: "global", group: "Playback", description: "Play / pause the scene clock" },
+  { id: "step-back", keys: ",", context: "global", group: "Playback", description: "Step back one frame" },
+  { id: "step-forward", keys: ".", context: "global", group: "Playback", description: "Step forward one frame" },
+  { id: "go-to-start", keys: "home", context: "global", group: "Playback", description: "Stop and rewind to the range start" },
 ] as const;
 
 /** The canonical key string for a keyboard event ("mod+shift+z" form). */

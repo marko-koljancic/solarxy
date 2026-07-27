@@ -129,6 +129,7 @@ export const SUPPORTED_PARAM_TYPES = [
   "enum",
   "nodePath",
   "attributeName",
+  "snippet",
 ] as const;
 
 export function isSupportedParamType(t: string): boolean {

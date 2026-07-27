@@ -37,6 +37,12 @@ pub(super) enum UndoOp {
         node: NodeId,
         bypassed: bool,
     },
+    /// Restore the persisted half of the scene clock. Transport itself
+    /// (play, pause, the current frame) never lands here: it is session
+    /// state, and undoing a pause is not a thing anyone wants.
+    RestoreRuntimeSettings {
+        settings: crate::runtime::RuntimeSettings,
+    },
     SetActiveOutput {
         ctx: GraphContext,
         node: Option<NodeId>,

@@ -351,6 +351,46 @@ pub struct ExprIndex {
     forward: std::collections::BTreeMap<(NodeId, String), Vec<(NodeId, String)>>,
     /// Who reads each param.
     reverse: std::collections::BTreeMap<(NodeId, String), Vec<(NodeId, String)>>,
+    /// Every node whose effective params read `$T` or `$F`, with the context
+    /// to dirty it in.
+    ///
+    /// This is what the runtime's tick keys on, and why a scene with no time
+    /// expression pays nothing per frame: the set is empty, so the tick
+    /// dirties nothing and the cook has nothing to do.
+    ///
+    /// Both kinds of program count. A `ParamSource::Expression` reading `$T`
+    /// is the obvious one; a wrangle's Snippet param is the one that is easy
+    /// to miss, because it is stored as plain Text and would otherwise look
+    /// like any other string.
+    time_dependent: std::collections::BTreeSet<(GraphContext, NodeId)>,
+}
+
+/// Whether any Snippet param on `node` holds a program that reads the clock.
+///
+/// Reads the EFFECTIVE value (stored, else the descriptor default) rather
+/// than the stored one. A node using its default program stores nothing, and
+/// a default that read `$T` would otherwise animate while being invisible to
+/// the tick, which is the sort of bug that presents as "playback does
+/// nothing" and takes an hour to find.
+fn node_program_uses_time(registry: &Registry, node: &crate::document::NodeData) -> bool {
+    let Some(desc) = registry.get(&node.type_id) else {
+        return false;
+    };
+    desc.params
+        .iter()
+        .filter(|spec| spec.ty == crate::registry::param_spec::ParamType::Snippet)
+        .any(|spec| {
+            let source = match node.params.get(&spec.key) {
+                Some(ParamSource::Literal(ParamValue::Text(t))) => t.as_str(),
+                // An expression cannot drive a Snippet (M-3 excludes Text
+                // storage), so anything else falls back to the default.
+                _ => match &spec.default {
+                    ParamValue::Text(t) => t.as_str(),
+                    _ => return false,
+                },
+            };
+            crate::expr::parse_program(source).is_ok_and(|p| p.uses_time)
+        })
 }
 
 impl ExprIndex {
@@ -363,6 +403,9 @@ impl ExprIndex {
         for ctx in contexts {
             let Ok(graph) = doc.graph(ctx) else { continue };
             for node in graph.nodes() {
+                if node_program_uses_time(registry, node) {
+                    index.time_dependent.insert((ctx, node.id));
+                }
                 for (key, src) in &node.params {
                     let ParamSource::Expression { expr } = src else {
                         continue;
@@ -373,6 +416,9 @@ impl ExprIndex {
                         // index.
                         continue;
                     };
+                    if parsed.uses_time {
+                        index.time_dependent.insert((ctx, node.id));
+                    }
                     let from = (node.id, key.clone());
                     for path in parsed.root.ch_paths() {
                         // A path that does not resolve yet (a dangling
@@ -399,6 +445,18 @@ impl ExprIndex {
     #[must_use]
     pub fn referrers(&self, target: &(NodeId, String)) -> &[(NodeId, String)] {
         self.reverse.get(target).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every node a tick has to dirty, with its context.
+    #[must_use]
+    pub fn time_dependent(&self) -> &std::collections::BTreeSet<(GraphContext, NodeId)> {
+        &self.time_dependent
+    }
+
+    /// Whether anything in the document reads the clock at all.
+    #[must_use]
+    pub fn has_time_dependency(&self) -> bool {
+        !self.time_dependent.is_empty()
     }
 
     /// Every node holding an expression that reads `target`, transitively.

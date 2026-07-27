@@ -336,6 +336,34 @@
       },
       "type": "object"
     },
+    "RuntimeJson": {
+      "description": "The scene clock, as saved.\n\nDeliberately only the persisted half: `playing` and the current frame are session state. A format that could round-trip \"I was playing when I hit save\" would make a scene's meaning depend on the author's transport, and would break the reproducibility every golden capture and CLI cook relies on.",
+      "properties": {
+        "autoplay": {
+          "default": false,
+          "description": "Whether a published player starts playing on load. The editor saves it and never acts on it.",
+          "type": "boolean"
+        },
+        "fps": {
+          "default": 24.0,
+          "type": "number"
+        },
+        "frameEnd": {
+          "default": 240,
+          "type": "integer"
+        },
+        "frameStart": {
+          "default": 1,
+          "type": "integer"
+        },
+        "loopMode": {
+          "default": "loop",
+          "description": "`once`, `loop` or `pingPong`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SubGraphJson": {
       "description": "One subflow's contents plus its display node.",
       "properties": {
@@ -453,6 +481,21 @@
         }
       ],
       "default": {}
+    },
+    "runtime": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/RuntimeJson"
+        }
+      ],
+      "default": {
+        "autoplay": false,
+        "fps": 24.0,
+        "frameEnd": 240,
+        "frameStart": 1,
+        "loopMode": "loop"
+      },
+      "description": "The scene clock's persisted half. Defaulted like every other optional section, so a pre-0.8.1 file loads with a stopped default clock and `schema_version` stays 1."
     },
     "schema_version": {
       "description": "The document schema version (0 pre-beta, no guarantees; frozen at 1 at public beta).",

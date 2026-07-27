@@ -70,16 +70,36 @@ pub trait GeoQueries {
     fn centroid(&self) -> Result<[f64; 3], String>;
 }
 
+/// Per-element reads inside a wrangle: `@attributes` and locals, both
+/// addressed by the slot the statement parser assigned them.
+///
+/// Slots rather than names, so the per-element loop indexes an array
+/// instead of hashing a string once per read.
+pub trait ElementScope {
+    /// # Errors
+    /// The lane is absent from the input and nothing has assigned it yet,
+    /// so it has no value to read.
+    fn attr(&self, slot: usize) -> Result<Value, String>;
+    /// # Errors
+    /// The local has not been assigned on this element's path through the
+    /// program.
+    fn local(&self, slot: usize) -> Result<Value, String>;
+}
+
 /// Everything an expression can read beyond its own tree.
 ///
-/// Both capabilities are optional because most resolve sites have neither:
-/// a light's `intensity` has no geometry inputs, and an absent capability
-/// must say so by name rather than quietly evaluating to zero.
+/// Every capability is optional because most resolve sites have none: a
+/// light's `intensity` has no geometry inputs and no element scope, and an
+/// absent capability must say so by name rather than quietly evaluating to
+/// zero. That rule is not theoretical; the geometry queries shipped
+/// answering `0` on an unconnected input and cooked an invisible box with
+/// nothing badged.
 #[derive(Default, Clone, Copy)]
 pub struct EvalCtx<'a> {
     pub time: SceneTime,
     pub refs: Option<&'a dyn ParamRefs>,
     pub geo: Option<&'a dyn GeoQueries>,
+    pub element: Option<&'a dyn ElementScope>,
 }
 
 impl std::fmt::Debug for EvalCtx<'_> {
@@ -88,6 +108,7 @@ impl std::fmt::Debug for EvalCtx<'_> {
             .field("time", &self.time)
             .field("refs", &self.refs.is_some())
             .field("geo", &self.geo.is_some())
+            .field("element", &self.element.is_some())
             .finish()
     }
 }
@@ -99,6 +120,7 @@ impl<'a> EvalCtx<'a> {
             time,
             refs: None,
             geo: None,
+            element: None,
         }
     }
 
@@ -111,6 +133,12 @@ impl<'a> EvalCtx<'a> {
     #[must_use]
     pub fn with_geo(mut self, geo: &'a dyn GeoQueries) -> Self {
         self.geo = Some(geo);
+        self
+    }
+
+    #[must_use]
+    pub fn with_element(mut self, element: &'a dyn ElementScope) -> Self {
+        self.element = Some(element);
         self
     }
 }
@@ -180,6 +208,26 @@ fn eval_inner(expr: &Expr, ctx: &EvalCtx, span: Range<usize>) -> Result<Value, E
             })
         }
         Expr::Call { name, args, span } => eval_call(name, args, ctx, span),
+        // The parser only emits these two under a wrangle scope, so an
+        // absent capability here is a bug rather than user input; it still
+        // names itself instead of yielding a plausible zero.
+        Expr::Attr(slot) => ctx
+            .element
+            .ok_or_else(|| {
+                ExprError::new(
+                    "an `@attribute` is only readable inside a wrangle",
+                    span.clone(),
+                )
+            })?
+            .attr(*slot)
+            .map_err(|m| ExprError::new(m, span)),
+        Expr::Local(slot) => ctx
+            .element
+            .ok_or_else(|| {
+                ExprError::new("a local is only readable inside a wrangle", span.clone())
+            })?
+            .local(*slot)
+            .map_err(|m| ExprError::new(m, span)),
     }
 }
 

@@ -26,8 +26,8 @@ pub use archive::sha256_hex;
 pub use manifest::{AssetManifestEntry, ManifestJson};
 pub use scene::{
     AssetRecordJson, CameraJson, CanvasViewportJson, EditorJson, EdgeJson, EnvironmentJson,
-    GraphJson, JsonObject, MetaJson, NodeJson, PaneJson, ReviewJson, SceneJson, SubGraphJson,
-    ViewJson, SCENE_TOP_LEVEL_KEYS,
+    GraphJson, JsonObject, MetaJson, NodeJson, PaneJson, ReviewJson, RuntimeJson, SceneJson,
+    SubGraphJson, ViewJson, SCENE_TOP_LEVEL_KEYS,
 };
 
 use thiserror::Error;
@@ -381,6 +381,7 @@ mod tests {
             review: ReviewJson::default(),
             assets: Vec::new(),
             editor: EditorJson::default(),
+            runtime: RuntimeJson::default(),
             meta: MetaJson::default(),
         }
     }

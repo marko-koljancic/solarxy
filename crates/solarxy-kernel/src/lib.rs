@@ -72,6 +72,7 @@ pub mod subdivide;
 pub mod transfer;
 pub mod transform;
 pub mod uv_project;
+pub mod wrangle;
 
 pub use error::KernelError;
 pub use set::{AttributeData, AttributeDomain, AttributeMap, GeometrySet, KernelMesh, reserved};

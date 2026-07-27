@@ -46,16 +46,50 @@ fn binary_power(tok: &Tok) -> Option<(BinaryOp, u8)> {
     Some((op, power))
 }
 
-struct Parser {
+/// How the parser treats `@name` and bare identifiers.
+///
+/// The two modes share the whole precedence-climbing parser; they differ
+/// only in what a primary may be. That is deliberate: the wrangle's
+/// expressions ARE parameter expressions plus an element scope, and forking
+/// the grammar would be two grammars to keep in step.
+pub(super) trait Scope {
+    /// Resolves `@name` to a lane slot, or `None` when `@` is illegal here.
+    fn attr(&mut self, name: &str) -> Option<usize>;
+    /// Resolves a bare identifier to a local slot, or `None` when bare
+    /// identifiers are illegal here.
+    fn local(&mut self, name: &str) -> Option<usize>;
+}
+
+/// The parameter-expression scope: no element data of any kind.
+pub(super) struct NoScope;
+
+impl Scope for NoScope {
+    fn attr(&mut self, _name: &str) -> Option<usize> {
+        None
+    }
+    fn local(&mut self, _name: &str) -> Option<usize> {
+        None
+    }
+}
+
+struct Parser<'s> {
     tokens: Vec<Token>,
     pos: usize,
     src_len: usize,
     calls: usize,
     uses_time: bool,
+    scope: &'s mut dyn Scope,
 }
 
 /// Parses one expression, rejecting anything left over.
 pub fn parse(source: &str) -> Result<Parsed, ExprError> {
+    parse_scoped(source, &mut NoScope)
+}
+
+/// Parses one expression under `scope`, which decides whether `@name` and
+/// bare identifiers resolve. The statement layer uses this to reuse the
+/// whole grammar; [`parse`] is the same call with everything refused.
+pub(super) fn parse_scoped(source: &str, scope: &mut dyn Scope) -> Result<Parsed, ExprError> {
     if source.len() > MAX_SOURCE_LEN {
         return Err(ExprError::new(
             format!(
@@ -75,6 +109,7 @@ pub fn parse(source: &str) -> Result<Parsed, ExprError> {
         src_len: source.len(),
         calls: 0,
         uses_time: false,
+        scope,
     };
     let root = p.expr(0, 0)?;
     if let Some(extra) = p.peek() {
@@ -88,7 +123,37 @@ pub fn parse(source: &str) -> Result<Parsed, ExprError> {
     })
 }
 
-impl Parser {
+/// Parses an expression from an already-lexed token run, so the statement
+/// parser can hand over a sub-slice without re-lexing.
+pub(super) fn parse_tokens(
+    tokens: Vec<Token>,
+    src_len: usize,
+    scope: &mut dyn Scope,
+) -> Result<Parsed, ExprError> {
+    if tokens.is_empty() {
+        return Err(ExprError::new("expected a value", 0..src_len));
+    }
+    let mut p = Parser {
+        tokens,
+        pos: 0,
+        src_len,
+        calls: 0,
+        uses_time: false,
+        scope,
+    };
+    let root = p.expr(0, 0)?;
+    if let Some(extra) = p.peek() {
+        let span = extra.span.clone();
+        let what = extra.tok.describe();
+        return Err(ExprError::new(format!("unexpected {what}"), span));
+    }
+    Ok(Parsed {
+        root,
+        uses_time: p.uses_time,
+    })
+}
+
+impl Parser<'_> {
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -264,13 +329,16 @@ impl Parser {
                 "a string is only valid as an argument to ch() or bbox()",
                 span,
             )),
-            Tok::Attr(name) => Err(ExprError::new(
-                format!(
-                    "`@{name}`: the @ attribute scope is only available inside a wrangle, \
-                     not in a parameter expression"
-                ),
-                span,
-            )),
+            Tok::Attr(name) => match self.scope.attr(&name) {
+                Some(slot) => Ok(Expr::Attr(slot)),
+                None => Err(ExprError::new(
+                    format!(
+                        "`@{name}`: the @ attribute scope is only available inside a wrangle, \
+                         not in a parameter expression"
+                    ),
+                    span,
+                )),
+            },
             Tok::LParen => {
                 let inner = self.expr(0, depth + 1)?;
                 self.expect(&Tok::RParen, "to close the group")?;
@@ -279,6 +347,12 @@ impl Parser {
             Tok::Ident(name) => {
                 if self.peek().is_some_and(|t| t.tok == Tok::LParen) {
                     self.call(name, span, depth)
+                } else if let Some(slot) = self.scope.local(&name) {
+                    // Inside a wrangle a bare name may be a local declared
+                    // earlier in the same program. An undeclared one still
+                    // falls through to the error below, so a typo names
+                    // itself rather than reading as zero.
+                    Ok(Expr::Local(slot))
                 } else {
                     // No bare identifiers: every name is either a call or a
                     // `$variable`, so a typo names itself rather than

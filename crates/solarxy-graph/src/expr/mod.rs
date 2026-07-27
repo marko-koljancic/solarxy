@@ -31,10 +31,12 @@ pub mod error;
 pub mod eval;
 mod lexer;
 pub mod parser;
+pub mod stmt;
 pub mod value;
 
 pub use ast::{BinaryOp, Component, Expr, Parsed, UnaryOp, Var};
 pub use error::ExprError;
-pub use eval::{EvalCtx, GeoQueries, ParamRefs, SceneTime, eval};
+pub use eval::{ElementScope, EvalCtx, GeoQueries, ParamRefs, SceneTime, eval};
 pub use parser::{MAX_CALLS, MAX_DEPTH, MAX_SOURCE_LEN, parse};
+pub use stmt::{MAX_STATEMENTS, Program, Runner, parse_program};
 pub use value::Value;

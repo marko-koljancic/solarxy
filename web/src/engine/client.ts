@@ -214,6 +214,25 @@ export class SolarxyClient {
     );
   }
 
+  /** Enters player mode: no manipulator, no picking, no review markers, and
+   * the layout locked to a single pane. Set BEFORE loading a scene so no
+   * frame is ever drawn with editing chrome on it. */
+  setPlayerMode(on: boolean): void {
+    this.app.set_player_mode(on);
+  }
+
+  /** The clock's current frame. Polled, not pushed: see `gizmoReadout`. */
+  clockFrame(): number {
+    return this.app.clock_frame();
+  }
+
+  /** Whether the loaded document asks to start playing. A document setting,
+   * not an export one, so it means the same thing in the editor (which
+   * stores it and does not act on it) and in a player (which does). */
+  autoplay(): boolean {
+    return this.app.autoplay();
+  }
+
   /** The displayed image of a texture network, or null when
    * it publishes nothing. Pull-based; the viewer fetches on cook changes,
    * so cooked pixels never ride the event stream. */

@@ -753,7 +753,10 @@ function markDirtyAndAutosave(): void {
 /** The host `extra` for a `.slxy` save: generator + timestamps. The camera
  * comes from the app itself; canvas viewports and richer metadata are a
  * later refinement. */
-function buildSaveExtra(): SaveExtra {
+/** The host sidecar every save carries (canvas viewports, meta timestamps).
+ * Exported so the web-bundle export writes the same shape a normal save
+ * does: a published scene must be the scene, not a thinner copy of it. */
+export function buildSaveExtra(): SaveExtra {
   const now = new Date().toISOString();
   return {
     generator: `solarxy-web ${__APP_VERSION__}`,

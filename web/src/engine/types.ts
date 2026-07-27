@@ -215,6 +215,22 @@ export type CookStatus =
 
 export type CookMode = "auto" | "manual";
 
+// --- Runtime / playback ---
+
+export type LoopMode = "once" | "loop" | "pingPong";
+
+/** The persisted half of the scene clock. `playing` and the current frame are
+ * session state and deliberately absent: a saved scene always reloads
+ * stopped at its range start. */
+export interface RuntimeSettings {
+  fps: number;
+  frameStart: number;
+  frameEnd: number;
+  loopMode: LoopMode;
+  /** Only a published player acts on this; the editor stores and saves it. */
+  autoplay: boolean;
+}
+
 // --- Events (Rust -> JS) ---
 
 export type EngineEvent =
@@ -249,6 +265,9 @@ export type EngineEvent =
       issues: ValidationIssue[];
     }
   | { type: "cookModeChanged"; mode: CookMode }
+  | { type: "playbackChanged"; playing: boolean }
+  | { type: "frameChanged"; frame: number }
+  | { type: "runtimeSettingsChanged"; settings: RuntimeSettings }
   // The node a gizmo drag will write to. Emitted on BOTH policy paths, because
   // the reuse path mints nothing and so carries no nodeAdded to read an id from.
   | { type: "transformTargetReady"; ctx: GraphContext; node: NodeId }
@@ -279,6 +298,15 @@ export type Command =
   | { type: "reorderVariadicInput"; ctx: GraphContext; node: NodeId; port: string; order: EdgeId[] }
   | { type: "setCookMode"; mode: CookMode }
   | { type: "cookNow" }
+  | { type: "play" }
+  | { type: "pause" }
+  | { type: "stop" }
+  | { type: "stepFrame"; delta: number }
+  | { type: "setFrame"; frame: number }
+  | { type: "setFrameRange"; start: number; end: number }
+  | { type: "setFps"; fps: number }
+  | { type: "setLoopMode"; mode: LoopMode }
+  | { type: "setAutoplay"; autoplay: boolean }
   | { type: "pasteNodes"; ctx: GraphContext; fragment: unknown; position: [number, number] }
   | { type: "duplicateNodes"; ctx: GraphContext; ids: NodeId[] }
   | {

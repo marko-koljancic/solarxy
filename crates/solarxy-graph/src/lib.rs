@@ -56,6 +56,7 @@ pub mod previews;
 pub mod refs;
 pub mod registry;
 pub mod review;
+pub mod runtime;
 pub mod topology;
 
 pub use engine::{Command, Engine, EngineError, EngineEvent, EventBatch};

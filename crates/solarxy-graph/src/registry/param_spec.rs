@@ -42,6 +42,17 @@ pub enum ParamType {
     /// migration); the widget, not the storage, is what this variant
     /// declares.
     AttributeName,
+    /// A multi-line program, edited in a code editor with line numbers and
+    /// error-line highlighting. Stores plain
+    /// [`crate::params::ParamValue::Text`] exactly as `AttributeName` does,
+    /// so documents round-trip with no migration and the variant declares
+    /// only the widget.
+    ///
+    /// The stored text is *not* an expression: it is parsed by the wrangle's
+    /// statement layer ([`crate::expr::stmt`]), which is why this type does
+    /// not accept an expression source. A snippet that fails to parse is a
+    /// cook error naming line and column (decision M-22).
+    Snippet,
     Vec2,
     Vec3,
     Vec4,
@@ -74,9 +85,11 @@ impl ParamType {
     /// The numeric types only. There is no string type in the expression
     /// value lattice, so there is literally nothing an expression could
     /// produce for a Text, `AttributeName` or Enum param; `AssetRef` and
-    /// `NodePath` are identities rather than values; and an Action carries
-    /// no value at all. `SetParam` refuses the rest up front rather than
-    /// storing something that could only ever badge at cook time.
+    /// `NodePath` are identities rather than values; an Action carries no
+    /// value at all; and a Snippet is already a program, evaluated per
+    /// element by the wrangle rather than once by the resolver. `SetParam`
+    /// refuses the rest up front rather than storing something that could
+    /// only ever badge at cook time.
     #[must_use]
     pub fn accepts_expression(&self) -> bool {
         matches!(
@@ -104,6 +117,7 @@ impl ParamType {
             ParamType::Bool => "checkbox",
             ParamType::Text => "text",
             ParamType::AttributeName => "attribute name",
+            ParamType::Snippet => "code snippet",
             ParamType::Vec2 => "vec2",
             ParamType::Vec3 => "vec3",
             ParamType::Vec4 => "vec4",

@@ -328,6 +328,24 @@ export function useKeyboard(): void {
           setReviewPanelOpen(!useReview.getState().panelOpen);
           break;
         }
+        case "play-pause": {
+          // Read `playing` at press time rather than closing over it: the
+          // clock also stops itself at the end of a `once` range.
+          dispatch({ type: useMirror.getState().playing ? "pause" : "play" });
+          break;
+        }
+        case "step-back": {
+          dispatch({ type: "stepFrame", delta: -1 });
+          break;
+        }
+        case "step-forward": {
+          dispatch({ type: "stepFrame", delta: 1 });
+          break;
+        }
+        case "go-to-start": {
+          dispatch({ type: "stop" });
+          break;
+        }
         case "panel-maximize": {
           // Restore first: while maximized only one group is visible, so the
           // toggle-out needs no hover target. Otherwise act on the hovered

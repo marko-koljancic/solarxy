@@ -231,6 +231,12 @@ struct ScreenshotOverlaysDto {
 /// the multi-object scene, the scene environment, per-pane cameras, and
 /// the headless engine.
 #[wasm_bindgen]
+// Four bools, and clippy is right to ask. They stay separate because they
+// share nothing: `uv_use_preview` is a UV-pane source choice, `player_mode`
+// is a session mode, and the two `*_dirty` flags are per-frame recompute
+// latches. A sub-struct would put one name over four unrelated things and
+// make every read longer without making any of them clearer.
+#[allow(clippy::struct_excessive_bools)]
 pub struct SolarxyApp {
     /// Kept for the asset-preview pane: a second surface (its own canvas)
     /// must come from the same instance as the device.
@@ -295,6 +301,16 @@ pub struct SolarxyApp {
     /// original name), for the `.slxy` environment section. `None` when the
     /// procedural sky is active.
     hdri: Option<HdriMeta>,
+    /// Player mode: the host runs a published scene rather than an editing
+    /// session. Suppresses the manipulator, picking and review markers, and
+    /// locks the layout to one pane.
+    ///
+    /// A flag on the editor host rather than a second wasm target (decision
+    /// M-10): a lean player crate would mean a second boot path and a second
+    /// payload gate that could drift from this one, for a saving nobody has
+    /// measured. The follow-up is recorded with an instruction to measure
+    /// first.
+    player_mode: bool,
     /// A screenshot request captured this frame (rendered at frame end).
     screenshot_request: Option<ScreenshotOptsDto>,
     /// A turntable-export frame request: (pane, absolute azimuth in degrees,
@@ -522,6 +538,7 @@ impl SolarxyApp {
             },
             engine,
             host_events: Vec::new(),
+            player_mode: false,
             last_pane_rects: Vec::new(),
             dpr: dpr as f32,
             pointer_buttons_down: 0,
@@ -584,9 +601,15 @@ impl SolarxyApp {
     /// Cooks under a frame budget, applies the scene delta, renders every
     /// pane, and returns the cook `EventBatch` (status + stats).
     pub fn frame(&mut self, dt_ms: f64) -> Result<JsValue, JsError> {
+        // The clock advances BEFORE the cook, so this frame's geometry is
+        // this frame's time. Fixed step (one tick is one frame), so a heavy
+        // scene plays slowly rather than skipping and `$T` stays exactly
+        // `frame / fps`. A stopped clock returns immediately.
+        let mut events = self.engine.tick().events;
+
         // Cook the dirty set under a wall-clock budget.
         let deadline = web_now() + COOK_BUDGET_MS;
-        let events = self.engine.cook(&mut || web_now() < deadline);
+        events.extend(self.engine.cook(&mut || web_now() < deadline));
 
         // Apply the fresh scene delta to the multi-object scene.
         let delta = self.engine.take_scene_delta();
@@ -606,13 +629,17 @@ impl SolarxyApp {
         // an undo therefore moves or removes it with no extra plumbing.
         // `view_dir` and `scale` are per-pane, so they are placeholders here:
         // `Renderer::write_manipulator` overwrites both before each pane's pass.
-        let manip = self
-            .engine
-            .gizmo_target(self.current_ctx)
-            .and_then(|target| {
-                self.gizmo
-                    .manipulator(&target, cgmath::Vector3::unit_z(), 1.0)
-            });
+        let manip = if self.player_mode {
+            // A published scene has nothing to manipulate.
+            None
+        } else {
+            self.engine
+                .gizmo_target(self.current_ctx)
+                .and_then(|target| {
+                    self.gizmo
+                        .manipulator(&target, cgmath::Vector3::unit_z(), 1.0)
+                })
+        };
         self.renderer.set_manipulator(manip);
 
         self.sync_env_bounds();
@@ -780,6 +807,44 @@ impl SolarxyApp {
     /// mid-session preference save sets only the flags for fields that
     /// actually changed, so per-pane Display-menu overrides survive
     /// unrelated preference edits.
+    /// Enters (or leaves) player mode.
+    ///
+    /// Locks the layout to a single pane and clears any lingering editing
+    /// affordance. The clock is NOT started here: whether a published scene
+    /// autoplays is the document's `autoplay` setting, read by the player
+    /// shell, so the same flag means the same thing whether the scene was
+    /// exported or opened in the editor.
+    pub fn set_player_mode(&mut self, on: bool) {
+        self.player_mode = on;
+        if on {
+            self.view.display.layout = ViewLayout::Single;
+            self.view.active_pane = 0;
+            self.selected_object = None;
+            self.gizmo_readout = None;
+            self.renderer.set_manipulator(None);
+            self.host_events.push(HostEvent::ViewChanged);
+        }
+    }
+
+    /// The clock's current frame, polled by the player's transport readout.
+    ///
+    /// Polled rather than pushed for the same reason the gizmo readout is:
+    /// under a playing clock a pushed value would cross the wasm boundary
+    /// once per frame to update a number nobody is reading that closely.
+    #[must_use]
+    pub fn clock_frame(&self) -> f64 {
+        self.engine.clock().frame as f64
+    }
+
+    /// Whether a published scene should start playing, from the document's
+    /// own runtime settings. The player shell reads this after load rather
+    /// than the editor acting on it: autoplay in an authoring tool is a
+    /// surprise, and in a viewer it is the point.
+    #[must_use]
+    pub fn autoplay(&self) -> bool {
+        self.engine.clock().autoplay
+    }
+
     pub fn set_display_defaults(
         &mut self,
         wireframe_weight: &str,
@@ -975,6 +1040,9 @@ impl SolarxyApp {
     /// built from the pane under the cursor with that pane's camera.
     /// Returns the node id as a number, or `undefined` on a miss.
     pub fn pick(&self, x: f32, y: f32) -> Option<f64> {
+        if self.player_mode {
+            return None;
+        }
         let p = (x * self.dpr, y * self.dpr);
         let rects = self.compute_panes();
         let pane_idx = panes::hit_test_pane(&rects, p);
@@ -1121,8 +1189,13 @@ impl SolarxyApp {
     /// by the host loop and applied to the DOM imperatively; markers absent
     /// from the list are hidden. UV panes carry no markers.
     pub fn review_markers(&self) -> Result<JsValue, JsError> {
-        let markers = self.engine.review_markers_world();
         let mut out: Vec<MarkerScreenDto> = Vec::new();
+        if self.player_mode {
+            // Review notes are an authoring conversation, not part of the
+            // published scene.
+            return to_js(&out);
+        }
+        let markers = self.engine.review_markers_world();
         if markers.is_empty() {
             return to_js(&out);
         }

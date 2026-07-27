@@ -387,6 +387,10 @@ impl CookEngine {
         // consumer (previews.rs's standing warning).
         let mut cx = CookCtx::new(assets, self.async_jobs);
         cx.set_referenced(self.resolve_references(doc, registry, &params));
+        // The wrangle runs the expression language inside its own body, so
+        // it needs the context the resolver just used rather than a weaker
+        // one it could build for itself.
+        cx.set_eval(eval_ctx);
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;

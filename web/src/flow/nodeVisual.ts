@@ -26,6 +26,11 @@ export const GLYPH_PATHS: Record<string, string> = {
   attribute_create: "M2.5 5h6l4.5 3-4.5 3h-6z M5 8h3 M6.5 6.5v3",
   attribute_randomize:
     "M3 3h10v10h-10z M6.4 5.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M8.9 8a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M11.4 10.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+  // Wrangle: a code window. The chevron and the caret read as "a program
+  // runs here", which is the one thing that distinguishes this node from
+  // every other attribute node at a glance.
+  attribute_wrangle:
+    "M2.5 3h11v10h-11z M2.5 5.4h11 M5.2 8l1.6 1.6-1.6 1.6 M8.4 11.2h2.6",
   // Promote: points rising into a primitive; Copy: the echoed-rect motif;
   // From Image: the image frame pouring down into geometry.
   attribute_promote:

@@ -136,6 +136,19 @@ pub enum Expr {
         base: Box<Expr>,
         component: Component,
     },
+    /// `@name`, an attribute of the element being wrangled, resolved to a
+    /// slot in the program's lane table at parse time.
+    ///
+    /// The index rather than the name is what lands in the tree, so the
+    /// per-element loop indexes an array instead of hashing a string. The
+    /// name is recovered from the program's table for error messages.
+    /// Only the wrangle's statement parser emits this; a parameter
+    /// expression refuses `@` outright.
+    Attr(usize),
+    /// A local variable declared earlier in the same program, resolved to a
+    /// register-file index at parse time. Emitted only by the statement
+    /// parser, for the same reason as [`Expr::Attr`].
+    Local(usize),
     Call {
         name: String,
         args: Vec<Expr>,
@@ -173,7 +186,9 @@ impl Expr {
 
     fn collect_ch_paths(&self, out: &mut Vec<(Range<usize>, String)>) {
         match self {
-            Expr::Number(_) | Expr::Str(_) | Expr::Var(_) => {}
+            // A slot reference reads element data, never a parameter, so it
+            // contributes nothing to the cross-node dependency index.
+            Expr::Number(_) | Expr::Str(_) | Expr::Var(_) | Expr::Attr(_) | Expr::Local(_) => {}
             Expr::Unary { rhs, .. } => rhs.collect_ch_paths(out),
             Expr::Binary { lhs, rhs, .. } => {
                 lhs.collect_ch_paths(out);

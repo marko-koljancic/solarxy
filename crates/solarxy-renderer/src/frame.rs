@@ -84,7 +84,13 @@ pub struct WireframeParams {
     pub line_width: f32,
     pub screen_width: f32,
     pub screen_height: f32,
-    pub _pad: f32,
+    /// On-screen point size in pixels, for the shader-expanded point quads.
+    ///
+    /// Rides this uniform rather than getting one of its own because the
+    /// points pipeline already binds it for the viewport size, and because
+    /// the slot was a pad: the struct is the same 32 bytes it always was and
+    /// the size assert below did not move.
+    pub point_size: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<WireframeParams>() == 32);
@@ -452,7 +458,7 @@ impl Renderer {
             line_width: init.wireframe_line_width,
             screen_width: width as f32,
             screen_height: height as f32,
-            _pad: 0.0,
+            point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
         };
         let wireframe_params_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

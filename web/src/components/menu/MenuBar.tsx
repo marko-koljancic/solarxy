@@ -25,6 +25,7 @@ import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
 import { useUi } from "../../store/ui";
 import { DeskSaveModal } from "../DeskSaveModal";
+import { WebBundleModal } from "../WebBundleModal";
 import { TOURS } from "../tour/steps";
 import { MenuItem, type MenuEntry } from "./MenuItem";
 
@@ -86,6 +87,8 @@ export function MenuBar() {
     { divider: true },
     { label: "Import Model...", onClick: () => importRef.current?.click() },
     { label: "Import Model Folder...", onClick: () => importFolderRef.current?.click() },
+    { divider: true },
+    { label: "Export web bundle...", onClick: () => setBundleOpen(true) },
   ];
 
   const withBypass = () => {
@@ -128,6 +131,7 @@ export function MenuBar() {
   // the user drags panels wherever they want now, and a desk captures it.
   const userDesks = useDesks((s) => s.desks);
   const [deskSaveOpen, setDeskSaveOpen] = useState(false);
+  const [bundleOpen, setBundleOpen] = useState(false);
   // Subscribe to the persisted dock layout (debounced 400 ms) so the panel
   // checkmarks below refresh after tabs close or panels reopen.
   const dockLayout = useUi((s) => s.dockLayout);
@@ -226,6 +230,7 @@ export function MenuBar() {
       <MenuItem title="Help" entries={help} />
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
       {deskSaveOpen && <DeskSaveModal onClose={() => setDeskSaveOpen(false)} />}
+      {bundleOpen && <WebBundleModal onClose={() => setBundleOpen(false)} />}
       {confirmNew && (
         <ConfirmDialog
           title="New scene"

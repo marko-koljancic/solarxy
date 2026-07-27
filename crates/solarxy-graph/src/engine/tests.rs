@@ -6178,3 +6178,253 @@ fn the_drag_lane_never_carries_an_expression() {
     );
     assert!(e.has_active_previews());
 }
+
+// ---- F3: the runtime foundation ----------------------------------------
+
+use crate::runtime::LoopMode;
+
+/// A subflow holding one box whose `width` is driven by a time expression.
+fn time_driven_engine() -> (Engine, GraphContext, NodeId) {
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: "width".to_string(),
+        value: ParamSource::Expression {
+            expr: "1 + sin($T)".to_string(),
+        },
+    })
+    .unwrap();
+    (e, ctx, node)
+}
+
+#[test]
+fn a_tick_on_a_stopped_clock_does_nothing() {
+    let (mut e, _, _) = time_driven_engine();
+    let before = e.revision();
+    let batch = e.tick();
+    assert!(batch.events.is_empty());
+    assert_eq!(e.revision(), before, "a paused editor costs nothing");
+}
+
+#[test]
+fn playing_advances_the_frame_one_step_per_tick() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    assert_eq!(e.clock().frame, 1);
+    e.tick();
+    assert_eq!(e.clock().frame, 2, "fixed step: one tick is one frame");
+    e.tick();
+    assert_eq!(e.clock().frame, 3);
+}
+
+#[test]
+fn a_tick_emits_the_new_frame() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    let batch = e.tick();
+    let frames: Vec<i64> = batch
+        .events
+        .iter()
+        .filter_map(|ev| match ev {
+            EngineEvent::FrameChanged { frame } => Some(*frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames, vec![2]);
+}
+
+#[test]
+fn a_scene_with_no_time_expression_dirties_nothing_on_a_tick() {
+    // The whole reason the index tracks time-dependence: a static scene
+    // must pay nothing per frame.
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "box");
+    e.cook(&mut || true);
+    assert_eq!(e.cook_state(node), CookState::Clean, "cooked to start with");
+    assert!(!e.expr_index.has_time_dependency());
+
+    e.apply(Command::Play).unwrap();
+    e.tick();
+    // Still clean: nothing time-dependent existed to dirty.
+    assert_eq!(
+        e.cook_state(node),
+        CookState::Clean,
+        "a static node must not re-cook because the clock moved"
+    );
+}
+
+#[test]
+fn a_time_expression_registers_as_time_dependent() {
+    let (e, ctx, node) = time_driven_engine();
+    assert!(e.expr_index.has_time_dependency());
+    assert!(e.expr_index.time_dependent().contains(&(ctx, node)));
+}
+
+#[test]
+fn a_wrangle_program_reading_time_is_time_dependent_too() {
+    // The easy one to miss: a Snippet is stored as plain Text, so nothing
+    // about its ParamSource says "expression".
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "attribute_wrangle");
+    assert!(
+        !e.expr_index.has_time_dependency(),
+        "the default program does not read the clock"
+    );
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: "program".to_string(),
+        value: ParamSource::Literal(ParamValue::Text(
+            "@P = set(@P.x, @P.y + sin($T), @P.z);".to_string(),
+        )),
+    })
+    .unwrap();
+    assert!(e.expr_index.time_dependent().contains(&(ctx, node)));
+}
+
+#[test]
+fn stop_rewinds_and_reports_both_facts() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    e.tick();
+    e.tick();
+    let batch = e.apply(Command::Stop).unwrap();
+    assert_eq!(e.clock().frame, 1);
+    assert!(!e.clock().playing);
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::PlaybackChanged { playing } if !*playing))
+    );
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::FrameChanged { frame } if *frame == 1))
+    );
+}
+
+#[test]
+fn transport_is_not_undoable_but_settings_are() {
+    let (mut e, _, _) = time_driven_engine();
+    let before = e.clock().effective_range();
+
+    // Transport: no undo entry, so undo must reach past it.
+    e.apply(Command::Play).unwrap();
+    e.apply(Command::SetFrame { frame: 5 }).unwrap();
+
+    // Settings: document state, so this IS undoable.
+    e.apply(Command::SetFrameRange { start: 10, end: 20 })
+        .unwrap();
+    assert_eq!(e.clock().effective_range(), (10, 20));
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(
+        e.clock().effective_range(),
+        before,
+        "the range came back, so the transport commands left no undo steps in the way"
+    );
+}
+
+#[test]
+fn changing_fps_retimes_because_seconds_are_derived_from_the_frame() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::SetFrame { frame: 24 }).unwrap();
+    assert!((e.clock().scene_time().seconds - 1.0).abs() < 1e-12);
+    e.apply(Command::SetFps { fps: 48.0 }).unwrap();
+    assert!(
+        (e.clock().scene_time().seconds - 0.5).abs() < 1e-12,
+        "the same frame is half the time at twice the rate"
+    );
+}
+
+#[test]
+fn the_runtime_section_round_trips_and_never_carries_session_state() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::SetFps { fps: 30.0 }).unwrap();
+    e.apply(Command::SetFrameRange { start: 5, end: 60 })
+        .unwrap();
+    e.apply(Command::SetLoopMode {
+        mode: LoopMode::PingPong,
+    })
+    .unwrap();
+    e.apply(Command::SetAutoplay { autoplay: true }).unwrap();
+    e.apply(Command::Play).unwrap();
+    e.apply(Command::SetFrame { frame: 42 }).unwrap();
+
+    let sidecar = crate::engine::scenefile::SceneSidecar::default();
+    let bytes = e.save_slxy(&sidecar).expect("saves");
+
+    let mut loaded = engine();
+    loaded.load_slxy(&bytes).expect("loads");
+
+    assert!((loaded.clock().fps - 30.0).abs() < 1e-12);
+    assert_eq!(loaded.clock().effective_range(), (5, 60));
+    assert_eq!(loaded.clock().loop_mode, LoopMode::PingPong);
+    assert!(loaded.clock().autoplay);
+    // The reproducibility contract.
+    assert!(!loaded.clock().playing, "a loaded scene is never playing");
+    assert_eq!(loaded.clock().frame, 5, "and sits at the range start");
+}
+
+#[test]
+fn a_scene_written_before_the_runtime_existed_reads_a_default_clock() {
+    // schema_version stays 1 and the section is serde-defaulted, so a
+    // pre-0.8.1 file is not a migration: it is a file without the section.
+    // Built by DELETING the key rather than by saving, because a save can
+    // only ever produce the current shape and would test nothing.
+    let (e, _, _) = time_driven_engine();
+    let sidecar = crate::engine::scenefile::SceneSidecar::default();
+    let scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &e.clock.settings(),
+        &sidecar,
+        Vec::new(),
+    );
+
+    let mut raw: serde_json::Value = serde_json::to_value(&scene).expect("serializes");
+    assert!(raw.get("runtime").is_some(), "the current shape has it");
+    raw.as_object_mut().expect("object").remove("runtime");
+
+    let old: solarxy_scenefile::SceneJson =
+        serde_json::from_value(raw).expect("a file without the section still parses");
+    let settings = crate::engine::scenefile::runtime_from_scene(&old);
+    assert!((settings.fps - 24.0).abs() < 1e-12);
+    assert_eq!((settings.frame_start, settings.frame_end), (1, 240));
+    assert_eq!(settings.loop_mode, LoopMode::Loop);
+    assert!(!settings.autoplay);
+}
+
+#[test]
+fn an_unknown_loop_mode_falls_back_instead_of_failing_the_load() {
+    // A file written by a later version must still open; a playback mode is
+    // not worth refusing a document over.
+    let json = serde_json::json!({
+        "fps": 30.0,
+        "frameStart": 2,
+        "frameEnd": 50,
+        "loopMode": "someFutureMode",
+        "autoplay": true,
+    });
+    let runtime: solarxy_scenefile::RuntimeJson = serde_json::from_value(json).expect("parses");
+    let scene = solarxy_scenefile::SceneJson {
+        runtime,
+        ..serde_json::from_str::<solarxy_scenefile::SceneJson>(
+            r#"{"schema_version":1,"min_reader":1,"generator":"t","graph":{}}"#,
+        )
+        .expect("minimal scene")
+    };
+    let settings = crate::engine::scenefile::runtime_from_scene(&scene);
+    assert_eq!(
+        settings.loop_mode,
+        LoopMode::Loop,
+        "the default, not a panic"
+    );
+    assert!(
+        (settings.fps - 30.0).abs() < 1e-12,
+        "the rest still survives"
+    );
+}

@@ -122,6 +122,36 @@ pub enum Command {
         mode: CookMode,
     },
     CookNow,
+    /// Starts playback. Session state: never undoable, because undoing a
+    /// press of play is not a thing anyone wants.
+    Play,
+    Pause,
+    /// Stops and rewinds to the range start.
+    Stop,
+    StepFrame {
+        delta: i64,
+    },
+    SetFrame {
+        frame: i64,
+    },
+    /// Document state, so this one IS undoable: the range saves into
+    /// `.slxy`, and an accidental edit must be recoverable.
+    SetFrameRange {
+        start: i64,
+        end: i64,
+    },
+    /// Document state, undoable (see [`Command::SetFrameRange`]).
+    SetFps {
+        fps: f64,
+    },
+    /// Document state, undoable (see [`Command::SetFrameRange`]).
+    SetLoopMode {
+        mode: crate::runtime::LoopMode,
+    },
+    /// Document state, undoable. Only a player acts on it.
+    SetAutoplay {
+        autoplay: bool,
+    },
     /// Reinserts a copied fragment with fresh ids at `position` (offset
     /// from the fragment's own layout). Context-illegal nodes are skipped.
     PasteNodes {
@@ -312,6 +342,18 @@ pub enum EngineEvent {
     },
     CookModeChanged {
         mode: CookMode,
+    },
+    PlaybackChanged {
+        playing: bool,
+    },
+    FrameChanged {
+        frame: i64,
+    },
+    /// The persisted half of the clock changed. Separate from the two above
+    /// because these are document edits that ride the undo stack, and the
+    /// mirror has to follow an undo as faithfully as a direct edit.
+    RuntimeSettingsChanged {
+        settings: crate::runtime::RuntimeSettings,
     },
     /// The node a gizmo drag will write to (see [`Command::EnsureTransformTarget`]).
     /// Emitted on BOTH policy paths, because the reuse path creates nothing and
@@ -672,6 +714,9 @@ pub struct Engine {
     /// as it stood BEFORE the command being applied, which is exactly
     /// what those two questions are about.
     expr_index: crate::refs::ExprIndex,
+    /// The scene clock. Its settings are document state and save into
+    /// `.slxy`; `playing` and `frame` are session state and do not.
+    clock: crate::runtime::SceneClock,
 }
 
 impl Engine {
@@ -698,6 +743,7 @@ impl Engine {
             review_stale: BTreeMap::new(),
             review_hash_cache: BTreeMap::new(),
             expr_index: crate::refs::ExprIndex::default(),
+            clock: crate::runtime::SceneClock::default(),
         }
     }
 
@@ -1020,6 +1066,73 @@ impl Engine {
             // CookNow arms a manual-mode cook (drains on the next frames).
             Command::CookNow => {
                 self.manual_cook_requested = true;
+                Ok(())
+            }
+            // Transport: session state, so no UndoOp is recorded and
+            // `push_command` no-ops on the empty inventory.
+            Command::Play => {
+                self.clock.play();
+                events.push(EngineEvent::PlaybackChanged {
+                    playing: self.clock.playing,
+                });
+                events.push(EngineEvent::FrameChanged {
+                    frame: self.clock.frame,
+                });
+                Ok(())
+            }
+            Command::Pause => {
+                self.clock.pause();
+                events.push(EngineEvent::PlaybackChanged { playing: false });
+                Ok(())
+            }
+            Command::Stop => {
+                self.clock.stop();
+                events.push(EngineEvent::PlaybackChanged { playing: false });
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::StepFrame { delta } => {
+                self.clock.step(delta);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::SetFrame { frame } => {
+                self.clock.set_frame(frame);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            // Clock SETTINGS are document state: they save into `.slxy`, so
+            // they record an inverse and ride the undo stack.
+            Command::SetFrameRange { start, end } => {
+                let prev = self.clock.settings();
+                self.clock.set_range(start, end);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::SetFps { fps } => {
+                let prev = self.clock.settings();
+                self.clock.set_fps(fps);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                // `$T` is frame/fps, so changing the rate changes what every
+                // time expression resolves to at the SAME frame.
+                self.retime(events);
+                Ok(())
+            }
+            Command::SetLoopMode { mode } => {
+                let prev = self.clock.settings();
+                self.clock.set_loop_mode(mode);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                Ok(())
+            }
+            Command::SetAutoplay { autoplay } => {
+                let prev = self.clock.settings();
+                self.clock.autoplay = autoplay;
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
                 Ok(())
             }
             // The transaction/undo commands are intercepted in `apply`.
@@ -2335,6 +2448,13 @@ impl Engine {
         events: &mut Vec<EngineEvent>,
     ) -> Result<UndoOp, EngineError> {
         match op {
+            UndoOp::RestoreRuntimeSettings { settings } => {
+                let prev = self.clock.settings();
+                self.clock.apply_settings(&settings);
+                self.emit_runtime_settings(events);
+                self.retime(events);
+                Ok(UndoOp::RestoreRuntimeSettings { settings: prev })
+            }
             UndoOp::RestoreParam {
                 ctx,
                 node,
@@ -3151,12 +3271,83 @@ impl Engine {
 
     // Helpers.
 
+    /// Pushes the persisted half of the clock to the mirror.
+    fn emit_runtime_settings(&self, events: &mut Vec<EngineEvent>) {
+        events.push(EngineEvent::RuntimeSettingsChanged {
+            settings: self.clock.settings(),
+        });
+    }
+
+    /// Moves to a frame: pushes the clock into the cook and dirties whatever
+    /// reads time.
+    ///
+    /// Emits `FrameChanged` unconditionally, even when nothing depends on
+    /// time, because the transport's readout has to follow the scrub whether
+    /// or not any geometry does.
+    fn seek(&mut self, frame: i64, events: &mut Vec<EngineEvent>) {
+        events.push(EngineEvent::FrameChanged { frame });
+        self.retime(events);
+    }
+
+    /// Republishes the clock to the cook engine and dirties every
+    /// time-dependent node.
+    ///
+    /// A scene with no time expression pays nothing here: the index's
+    /// time-dependent set is empty, so this is a clock write and an empty
+    /// loop. That is the whole reason the set exists.
+    fn retime(&mut self, _events: &mut [EngineEvent]) {
+        self.cook.set_scene_time(self.clock.scene_time());
+        let targets: Vec<(GraphContext, NodeId)> =
+            self.expr_index.time_dependent().iter().copied().collect();
+        for (ctx, node) in targets {
+            self.mark_dirty(ctx, node);
+        }
+    }
+
+    /// Advances the clock one frame and dirties what depends on it.
+    ///
+    /// **Fixed step** (see [`crate::runtime`]): one call is one frame, not
+    /// `dt` seconds, so `$T` is exactly `frame / fps` and cooking frame 90 is
+    /// reproducible. The host calls this once per frame before cooking.
+    ///
+    /// Returns an empty batch when the clock is stopped or the frame did not
+    /// move, so a paused editor costs one boolean per frame.
+    pub fn tick(&mut self) -> EventBatch {
+        if !self.clock.playing {
+            return self.batch(Vec::new());
+        }
+        let was_playing = self.clock.playing;
+        let moved = self.clock.advance();
+        let mut events = Vec::new();
+        // `Once` clears `playing` when it reaches the end, and the transport
+        // has to hear about that or its button lies.
+        if was_playing != self.clock.playing {
+            events.push(EngineEvent::PlaybackChanged {
+                playing: self.clock.playing,
+            });
+        }
+        if moved {
+            self.seek(self.clock.frame, &mut events);
+        }
+        if events.is_empty() {
+            return self.batch(events);
+        }
+        self.revision += 1;
+        self.batch(events)
+    }
+
+    /// The scene clock, for the host's transport UI and for saving.
+    #[must_use]
+    pub fn clock(&self) -> &crate::runtime::SceneClock {
+        &self.clock
+    }
+
     /// Marks a node dirty in its graph AND propagates across contexts
-    /// through node references: editing a
-    /// node inside a referenced network re-dirties every referrer of that
-    /// network's container, transitively, so a `/mat` edit repaints every
-    /// geo pointing at it without a manual cook. Reference cycles are
-    /// refused at set time, but the visited set also guards diamonds.
+    /// through node references: editing a node inside a referenced network
+    /// re-dirties every referrer of that network's container, transitively,
+    /// so a `/mat` edit repaints every geo pointing at it without a manual
+    /// cook. Reference cycles are refused at set time, but the visited set
+    /// also guards diamonds.
     fn mark_dirty(&mut self, ctx: GraphContext, node: NodeId) {
         let mut visited = std::collections::BTreeSet::new();
         self.mark_dirty_inner(ctx, node, &mut visited);
