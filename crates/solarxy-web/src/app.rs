@@ -3180,6 +3180,16 @@ impl SolarxyApp {
         if self.engine.has_active_previews() {
             return;
         }
+        // The same reasoning one guard up, for the scene clock. An animated
+        // scene bakes new point positions every frame, so the visible bounds
+        // churn continuously and refitting here would make the grid, floor
+        // and shadow frustum breathe in time with the animation. The world is
+        // not something playback is allowed to rescale. Playback stopping
+        // needs no bookkeeping: `frame()` calls this unconditionally, so the
+        // first non-playing tick settles the environment once.
+        if self.engine.clock().playing {
+            return;
+        }
         let Some(bounds) = self.scene_objects.visible_bounds() else {
             return;
         };

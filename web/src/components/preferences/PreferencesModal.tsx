@@ -1,8 +1,13 @@
 // The preferences modal, on the Minimystix pattern: a draft
 // copy edited locally, dirty star in the title, footer with Reset to
 // Defaults (nested confirm) on the left and Cancel / Apply / Save on the
-// right. Four tabs per the ratified scope: Appearance, Review, Autosave,
-// Screenshot, Viewport. Esc and backdrop-click dismiss.
+// right. Six tabs: Appearance, Display, Review, Autosave, Screenshot,
+// Viewport (`TABS` below is the list; keep this sentence in step with it).
+// Esc and backdrop-click dismiss.
+//
+// The dialog is a fixed-height column: `bodyLayout="column"` on the shell is
+// what lets `.prefs-body` grow and keeps `.prefs-footer` on the bottom edge
+// whatever the current tab's height is.
 
 import { useState } from "react";
 import {
@@ -401,54 +406,55 @@ export function PreferencesModal({ onClose }: { onClose: () => void }) {
       title={`Preferences${dirty ? " *" : ""}`}
       onClose={onClose}
       className="modal-prefs"
+      bodyLayout="column"
     >
-        <div className="prefs-tabs">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              className={`prefs-tab${tab === t ? " active" : ""}`}
-              onClick={() => setTab(t)}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="prefs-body">{body}</div>
-        <div className="prefs-footer">
-          <button className="btn" onClick={() => setConfirmReset(true)}>
-            Reset to Defaults
+      <div className="prefs-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            className={`prefs-tab${tab === t ? " active" : ""}`}
+            onClick={() => setTab(t)}
+          >
+            {t}
           </button>
-          <div className="prefs-footer-right">
-            <button className="btn" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="btn" disabled={!dirty} onClick={apply}>
-              Apply
-            </button>
-            <button
-              className="btn primary"
-              disabled={!dirty}
-              onClick={() => {
-                apply();
-                onClose();
-              }}
-            >
-              Save
-            </button>
-          </div>
-        </div>
-        {confirmReset && (
-          <ConfirmDialog
-            title="Reset preferences"
-            message="Reset all preferences to their defaults? This cannot be undone."
-            confirmLabel="Reset"
-            onConfirm={() => {
-              setConfirmReset(false);
-              setDraft(JSON.parse(JSON.stringify(DEFAULT_PREFS)) as Prefs);
+        ))}
+      </div>
+      <div className="prefs-body">{body}</div>
+      <div className="prefs-footer">
+        <button className="btn" onClick={() => setConfirmReset(true)}>
+          Reset to Defaults
+        </button>
+        <div className="prefs-footer-right">
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn" disabled={!dirty} onClick={apply}>
+            Apply
+          </button>
+          <button
+            className="btn primary"
+            disabled={!dirty}
+            onClick={() => {
+              apply();
+              onClose();
             }}
-            onCancel={() => setConfirmReset(false)}
-          />
-        )}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+      {confirmReset && (
+        <ConfirmDialog
+          title="Reset preferences"
+          message="Reset all preferences to their defaults? This cannot be undone."
+          confirmLabel="Reset"
+          onConfirm={() => {
+            setConfirmReset(false);
+            setDraft(JSON.parse(JSON.stringify(DEFAULT_PREFS)) as Prefs);
+          }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
     </Modal>
   );
 }

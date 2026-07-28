@@ -36,6 +36,16 @@ pub enum ParamType {
     Int,
     Bool,
     Text,
+    /// Free text over several lines, edited in a plain auto-growing text
+    /// area rather than a single-line input. Stores plain
+    /// [`crate::params::ParamValue::Text`] exactly as [`ParamType::Text`]
+    /// does, so switching a param between the two is not a migration and
+    /// needs no `type_version` bump: the variant declares only the widget.
+    ///
+    /// Distinct from [`ParamType::Snippet`], which is also multi-line but is
+    /// a *program* -- it carries a line-number gutter, syntax highlighting
+    /// and cook-error line marking, none of which prose wants.
+    MultilineText,
     /// A free-text attribute name whose editor offers the lanes present
     /// on the node's default Geometry input as completions. Stores plain
     /// [`crate::params::ParamValue::Text`] (documents round-trip with no
@@ -84,7 +94,8 @@ impl ParamType {
     ///
     /// The numeric types only. There is no string type in the expression
     /// value lattice, so there is literally nothing an expression could
-    /// produce for a Text, `AttributeName` or Enum param; `AssetRef` and
+    /// produce for a Text, `MultilineText`, `AttributeName` or Enum param;
+    /// `AssetRef` and
     /// `NodePath` are identities rather than values; an Action carries no
     /// value at all; and a Snippet is already a program, evaluated per
     /// element by the wrangle rather than once by the resolver. `SetParam`
@@ -116,6 +127,7 @@ impl ParamType {
             ParamType::Int => "integer",
             ParamType::Bool => "checkbox",
             ParamType::Text => "text",
+            ParamType::MultilineText => "multi-line text",
             ParamType::AttributeName => "attribute name",
             ParamType::Snippet => "code snippet",
             ParamType::Vec2 => "vec2",

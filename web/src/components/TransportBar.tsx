@@ -78,6 +78,7 @@ export function TransportBar() {
         <NumberField
           value={frame}
           int
+          min={0}
           className="transport-number"
           /* Scrubbing the frame IS meaningful live, and `setFrame` records no
            * undo step, so the preview lane can dispatch it directly. */
@@ -95,12 +96,19 @@ export function TransportBar() {
       <div className="transport-spacer" />
 
       {/* Two fields, two labels: one label naming two inputs leaves a
-        * screen reader unable to say which end it is on. */}
+        * screen reader unable to say which end it is on.
+        *
+        * `min={0}` on both: a negative frame has no meaning here. `$T` is
+        * `frame / fps`, so a negative range runs the clock before time
+        * zero, which every expression in the scene then has to defend
+        * against. The engine clamps too (`SceneClock::set_range`), so a
+        * hand-edited `.slxy` cannot smuggle one in either. */}
       <label className="transport-field">
         <span>Start</span>
         <NumberField
           value={runtime.frameStart}
           int
+          min={0}
           className="transport-number"
           onPreview={noPreview}
           onCommit={(v) =>
@@ -118,6 +126,7 @@ export function TransportBar() {
         <NumberField
           value={runtime.frameEnd}
           int
+          min={0}
           className="transport-number"
           onPreview={noPreview}
           onCommit={(v) =>
@@ -144,10 +153,16 @@ export function TransportBar() {
       </label>
 
       {/* The themed dropdown, not the native element: that one draws an OS
-        * popup no theme token can reach, and a drift gate enforces it. */}
+        * popup no theme token can reach, and a drift gate enforces it.
+        *
+        * Portaled, unlike every other Select in the app: this bar is the
+        * last child of the viewport pane, so an inline list would open
+        * below the window edge, and it is narrow enough that any clipping
+        * ancestor swallows it whole. The portal flips it upward. */}
       <div className="transport-field">
         <span>Loop</span>
         <Select<LoopMode>
+          portal
           width={110}
           ariaLabel="Loop mode"
           value={runtime.loopMode}

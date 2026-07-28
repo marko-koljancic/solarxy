@@ -49,6 +49,7 @@ import {
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { AttributeNameField } from "./inputs/AttributeNameField";
 import { TextField } from "./inputs/TextField";
+import { MultilineField } from "./inputs/MultilineField";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
@@ -70,8 +71,10 @@ function literal(paramType: string, value: unknown): ParamSource {
       ? "asset"
       : paramType === "nodePath"
         ? "nodeRef"
-        : paramType === "attributeName" || paramType === "snippet"
-          ? "text" // both widget variants store plain Text
+        : paramType === "attributeName" ||
+            paramType === "snippet" ||
+            paramType === "multilineText"
+          ? "text" // every text-backed widget variant stores plain Text
           : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
@@ -256,6 +259,20 @@ function LiteralField({
         <div className="param-row">
           {label}
           <TextField
+            value={String(value ?? "")}
+            ariaLabel={spec.label}
+            onCommit={commit}
+          />
+        </div>
+      );
+    case "multilineText":
+      // Stacked, like the snippet row: a full-width editor under its label
+      // rather than squeezed into the value column, because prose needs the
+      // width more than the row needs its grid.
+      return (
+        <div className="param-row param-row-stacked">
+          {label}
+          <MultilineField
             value={String(value ?? "")}
             ariaLabel={spec.label}
             onCommit={commit}

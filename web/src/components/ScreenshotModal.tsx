@@ -151,6 +151,10 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
       title="Screenshot"
       onClose={onClose}
       className="modal-wide screenshot-modal"
+      // Fixed height with a growing preview and a pinned action row: the
+      // body has to be a flex column for `.screenshot-preview`'s `flex: 1`
+      // to mean anything.
+      bodyLayout="column"
     >
         <div className="screenshot-controls">
           <Select

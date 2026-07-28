@@ -97,6 +97,9 @@ export const CATEGORY_ORDER: readonly string[] = [
   "import",
   "export",
   "lights",
+  // Beside Lights, not beside Utility: both are scene elements you place in
+  // the root graph and both shape what the render sees.
+  "cameras",
   "utility",
   "tex_generate",
   "tex_adjust",

@@ -65,6 +65,14 @@ impl LoopMode {
 pub const MIN_FPS: f64 = 1.0;
 pub const MAX_FPS: f64 = 240.0;
 
+/// The earliest frame a range may reach.
+///
+/// A clamp, like [`MIN_FPS`], not a preference. `$T` is `frame / fps`, so a
+/// negative frame runs the scene clock before time zero and every expression
+/// in the document inherits the burden of defending against it. Frame 0 is
+/// legitimate (it is simply `$T == 0`); anything below it is not.
+pub const MIN_FRAME: i64 = 0;
+
 /// The default range and rate. 1 to 240 at 24fps is ten seconds of film,
 /// which is the convention every DCC opens with.
 pub const DEFAULT_START: i64 = 1;
@@ -224,7 +232,14 @@ impl SceneClock {
     }
 
     /// Sets the range and pulls the current frame back inside it.
+    ///
+    /// Both ends are floored at [`MIN_FRAME`] before being ordered, so this
+    /// is the one place a negative range can be refused: the transport, the
+    /// undo of a range edit, and loading a hand-edited `.slxy` all arrive
+    /// through here.
     pub fn set_range(&mut self, start: i64, end: i64) {
+        let start = start.max(MIN_FRAME);
+        let end = end.max(MIN_FRAME);
         self.frame_range = if start <= end {
             (start, end)
         } else {
@@ -411,6 +426,36 @@ mod tests {
         let mut c = SceneClock::default();
         c.set_range(50, 10);
         assert_eq!(c.effective_range(), (10, 50));
+    }
+
+    #[test]
+    fn a_negative_range_is_floored_at_frame_zero() {
+        let mut c = SceneClock::default();
+        c.set_range(-50, 100);
+        assert_eq!(c.effective_range(), (MIN_FRAME, 100));
+
+        // Both ends negative collapses onto the floor rather than inverting.
+        c.set_range(-20, -5);
+        assert_eq!(c.effective_range(), (MIN_FRAME, MIN_FRAME));
+
+        // The frame follows the range in, so `$T` can never go negative.
+        assert!(c.frame >= MIN_FRAME);
+    }
+
+    #[test]
+    fn loading_a_hand_edited_negative_range_is_also_floored() {
+        // `apply_settings` is the `.slxy` path; it must not be a way around
+        // the clamp the transport enforces.
+        let mut c = SceneClock::default();
+        c.apply_settings(&RuntimeSettings {
+            fps: 24.0,
+            frame_start: -120,
+            frame_end: 60,
+            loop_mode: LoopMode::Loop,
+            autoplay: false,
+        });
+        assert_eq!(c.effective_range(), (MIN_FRAME, 60));
+        assert_eq!(c.frame, MIN_FRAME, "reload still starts at the range start");
     }
 
     #[test]

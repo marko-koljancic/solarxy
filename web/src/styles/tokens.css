@@ -104,6 +104,10 @@ body.dark-theme {
   --node-cat-export: #f4d7b0;
   --node-cat-utility: #eed9c9;
   --node-cat-lights: var(--light-node-background);
+  /* A cool slate, deliberately not the lights cream: cameras and lights sit
+   * side by side in the root graph and are the two things you place there
+   * that are not geometry, so they have to read apart at a glance. */
+  --node-cat-cameras: #cfd8e8;
   --node-cat-container: var(--node-background);
   /* Root containers color-code by the network they open: Geo stays the
    * neutral tile, Tex leans green-teal (apart from transform's cyan),
@@ -218,6 +222,7 @@ body.light-theme {
   --node-cat-export: #fce4c2;
   --node-cat-utility: #f7e6d7;
   --node-cat-lights: var(--light-node-background);
+  --node-cat-cameras: #dee6f3;
   --node-cat-container: var(--node-background);
   --node-cat-container-geo: var(--node-background);
   --node-cat-container-tex: #d9f0e8;

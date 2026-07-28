@@ -758,8 +758,17 @@ impl CookEngine {
         }
     }
 
+    /// Stores a node's badge state, emitting an event only when the state
+    /// itself changed. Timing is deliberately excluded from that comparison
+    /// (see [`CookStatus::same_state`]): the stored value stays fresh for
+    /// pull queries, but a node re-cooking every frame during playback no
+    /// longer emits a status event per frame just because its milliseconds
+    /// moved.
     fn set_status(&mut self, node: NodeId, status: CookStatus, report: &mut CookReport) {
-        let changed = self.status.get(&node) != Some(&status);
+        let changed = !self
+            .status
+            .get(&node)
+            .is_some_and(|p| p.same_state(&status));
         self.status.insert(node, status.clone());
         if changed {
             report.status_changed.push((node, status));

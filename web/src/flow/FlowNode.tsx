@@ -164,6 +164,21 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
 
   const emptyGeo =
     isContainer && (!subflow || subflow.nodes.length === 0 || subflow.activeOutput === null);
+
+  // The single sub-row's text, by priority. Cook time is suppressed while
+  // the clock runs: a figure that changes sixty times a second is unreadable
+  // noise, and hiding it is the other half of keeping the stack still (the
+  // engine no longer emits a status event per frame either -- see
+  // `CookStatus::same_state`). Empty string keeps the reserved row blank.
+  const playing = useMirror((s) => s.playing);
+  const subLine = emptyGeo
+    ? "empty"
+    : status?.state === "pending"
+      ? "loading geometry..."
+      : status?.state === "ok" && status.ms > 0 && !playing
+        ? `${status.ms.toFixed(1)} ms`
+        : "";
+
   const infoLine = nodeInfoLine(desc, node, assetDisplayName);
   const description = authoredDescription(node);
   // The grey type label disambiguates a renamed node (an un-renamed node's
@@ -368,13 +383,12 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
         )}
         {infoLine && <span className="flow-node-info">{infoLine}</span>}
         {showDescription && <span className="node-desc">{description}</span>}
-        {emptyGeo && <span className="flow-node-sub">empty</span>}
-        {status?.state === "ok" && status.ms > 0 && (
-          <span className="flow-node-sub">{status.ms.toFixed(1)} ms</span>
-        )}
-        {status?.state === "pending" && (
-          <span className="flow-node-sub">loading geometry...</span>
-        )}
+        {/* ONE sub row, always present. The label stack is vertically
+            centered, so a row that comes and goes moves every other row by
+            half a line -- which is exactly what made nodes jump while the
+            clock ran. Reserving the row costs one line of height and buys a
+            stack that never shifts. */}
+        <span className="flow-node-sub">{subLine}</span>
       </div>
 
       {outputs.map((p: PortSnapshot, i: number) => (

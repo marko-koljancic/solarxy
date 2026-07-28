@@ -264,7 +264,9 @@ mod tests {
             (Category::Import, 6),
             (Category::Export, 3),
             (Category::Lights, 6),
-            (Category::Utility, 6),
+            // 0.8.1: `camera` moved out of Utility into its own section.
+            (Category::Cameras, 1),
+            (Category::Utility, 5),
             (Category::TexGenerate, 7),
             (Category::TexAdjust, 5),
             (Category::TexComposite, 5),

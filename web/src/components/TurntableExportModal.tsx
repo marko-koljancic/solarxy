@@ -144,6 +144,7 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
       title="Export Turntable"
       onClose={onClose}
       className="modal-wide"
+      bodyLayout="column"
       // While an export runs, Esc CANCELS the run (the dialog's own
       // listener below) and the backdrop is inert.
       closeOnEsc={false}

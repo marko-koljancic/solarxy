@@ -428,6 +428,7 @@ export interface NodeTypeSnapshot {
     | "import"
     | "export"
     | "lights"
+    | "cameras"
     | "utility"
     | "tex_generate"
     | "tex_adjust"

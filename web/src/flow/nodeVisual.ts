@@ -148,6 +148,7 @@ const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
   import: "import_obj",
   export: "geo_export",
   lights: "point",
+  cameras: "camera",
   utility: "null",
   tex_generate: "checker",
   tex_adjust: "levels",
@@ -167,6 +168,9 @@ const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
   import: "standard",
   export: "terminal",
   lights: "light",
+  // A camera silhouette lands in W2-A; until then the standard body is the
+  // honest fallback rather than a shape that means something else.
+  cameras: "standard",
   utility: "standard",
   tex_generate: "imageSource",
   tex_adjust: "standard",

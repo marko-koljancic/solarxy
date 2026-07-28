@@ -331,6 +331,7 @@ impl From<&ParamSpec> for ParamSnapshot {
             ParamType::Int => ("int", vec![], vec![]),
             ParamType::Bool => ("bool", vec![], vec![]),
             ParamType::Text => ("text", vec![], vec![]),
+            ParamType::MultilineText => ("multilineText", vec![], vec![]),
             ParamType::AttributeName => ("attributeName", vec![], vec![]),
             ParamType::Snippet => ("snippet", vec![], vec![]),
             ParamType::Vec2 => ("vec2", vec![], vec![]),

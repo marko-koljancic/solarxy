@@ -5,6 +5,7 @@
 // engine-side.
 
 import { useRef } from "react";
+import { toggleMaximize } from "../../dock/api";
 import { dispatch } from "../../engine/session";
 import { nodePathOf, openNodeInfo, setDisplayFlag, toggleBypass } from "../../flow/nodeActions";
 import { descriptorFor } from "../../registry/datatypes";
@@ -91,10 +92,22 @@ export function PropertiesMenuBar() {
     },
   ];
 
+  // Panel chrome, not node state: the same role "View" plays on the Viewport
+  // and Nodes bars. Kept separate from the Node menu on purpose -- that one
+  // acts on the selected node, this one acts on the panel around it.
+  const viewEntries: MenuEntry[] = [
+    {
+      label: "Maximize Panel",
+      shortcut: "Esc to restore",
+      onClick: () => toggleMaximize("properties"),
+    },
+  ];
+
   return (
     <nav ref={barRef} className="menu-bar properties-menu-bar">
       <MenuItem title="Node" entries={nodeEntries} />
       <MenuItem title="Params" entries={paramsEntries} />
+      <MenuItem title="View" entries={viewEntries} />
     </nav>
   );
 }

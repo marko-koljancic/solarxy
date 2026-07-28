@@ -243,9 +243,7 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
         type_id: "camera",
         version: 1,
         display_name: "Camera",
-        // No dedicated Camera category; Utility is the root-object home (the
-        // registry invariant gates context, not category).
-        category: Category::Utility,
+        category: Category::Cameras,
         contexts: ContextSet::OBJ,
         opens: None,
         inputs: vec![],

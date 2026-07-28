@@ -756,7 +756,13 @@ body.precision-drag-active {
   box-shadow: none;
 }
 
+/* Always rendered, even when empty: the label stack is vertically centered,
+ * so a row that appears and disappears shifts every other row by half a
+ * line. Reserving one line's height is what keeps a node still while the
+ * scene clock runs. */
 .flow-node-sub {
+  display: block;
+  min-height: 1.25em;
   color: var(--text-secondary);
   font-size: 1rem;
   font-variant-numeric: tabular-nums;
@@ -1193,9 +1199,27 @@ body.precision-drag-active {
   font-variant-numeric: tabular-nums;
 }
 
+/* Tracks the panel rather than stopping at a fixed 220px. The old cap made
+ * Name and Description a third of the width of a docked Properties panel
+ * and a sliver of a maximized one, truncating exactly the long names that
+ * most needed reading. The remaining ceiling keeps a very wide panel from
+ * stretching one field across the whole screen. */
 .text-input {
   width: 100%;
-  max-width: 220px;
+  max-width: 48rem;
+}
+
+/* The MultilineText widget. Full width inside a `.param-row-stacked` row,
+ * grown by its own `rows` and free to be dragged taller. Horizontal resize
+ * is off: the width is the row's to decide. */
+.multiline-input {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .checkbox-input {
@@ -1689,6 +1713,18 @@ body.precision-drag-active {
   /* Breathing room so the scrollbar does not hug the box edge. */
   margin: 0 -0.6rem;
   padding: 0 0.6rem;
+}
+
+/* Opt-in (Modal's `bodyLayout="column"`): dialogs with a fixed height that
+ * pin a footer to the bottom. Without it a child's `flex: 1` is inert inside
+ * the plain block above, and the footer floats wherever the content ends.
+ * `overflow: visible` because in this mode the scrolling child owns its own
+ * overflow; keeping `auto` here would nest two scroll containers. */
+.modal-body-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
 }
 
 .modal-resize {
@@ -2337,7 +2373,11 @@ body.row-resizing .viewport-divider {
 /* ---- Preferences modal (the tabbed pattern) ---- */
 
 .modal.modal-prefs {
-  width: 46rem;
+  /* Six tabs plus a 12rem label column do not fit in the old 46rem: flex
+   * items shrink below their content by default, so the last tab title was
+   * clipped mid-word. Widening is the honest fix; `.prefs-tabs` wrapping
+   * below is the guard for whenever a seventh tab arrives. */
+  width: 54rem;
   max-width: 92vw;
   height: 54rem;
   max-height: 84vh;
@@ -2347,17 +2387,23 @@ body.row-resizing .viewport-divider {
 
 .prefs-tabs {
   display: flex;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
   gap: 0.2rem;
   border-bottom: 1px solid var(--border-primary);
   margin-bottom: 1rem;
 }
 .prefs-tab {
+  /* Never compress a tab below its label: a half-legible tab title is worse
+   * than a second row of tabs. */
+  flex: 0 0 auto;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   font: inherit;
   padding: 0.5rem 1rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 .prefs-tab.active {
@@ -2403,8 +2449,12 @@ body.row-resizing .viewport-divider {
   font-size: 1.1rem;
   margin-top: 0.4rem;
 }
+/* Pinned to the bottom edge, not floating wherever the current tab's content
+ * happens to end. `flex: 0 0 auto` beside `.prefs-body`'s `flex: 1` inside
+ * the column body is what does it. */
 .prefs-footer {
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   align-items: center;
   padding-top: 1rem;
@@ -2653,6 +2703,7 @@ body.reduce-motion .cook-arc {
 .flow-node.cat-export { --cat-fill: var(--node-cat-export); }
 .flow-node.cat-utility { --cat-fill: var(--node-cat-utility); }
 .flow-node.cat-lights { --cat-fill: var(--node-cat-lights); }
+.flow-node.cat-cameras { --cat-fill: var(--node-cat-cameras); }
 .flow-node.cat-container { --cat-fill: var(--node-cat-container); }
 
 /* Root containers color-code by context (Stage 7): the fill token per
@@ -2950,6 +3001,10 @@ body.reduce-motion .cook-arc {
   display: block;
   font-family: var(--font-mono);
   font-size: 0.9rem;
+  /* Tabular figures for the same reason `.flow-node-sub` has them: an
+   * expression-driven param retimes every frame, and proportional digits
+   * would make the summary shimmer as the values change width. */
+  font-variant-numeric: tabular-nums;
   color: var(--node-param);
   white-space: nowrap;
 }
@@ -4349,6 +4404,17 @@ body.reduce-motion .cook-arc {
   box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.45);
 }
 
+/* Portaled: DropdownPortal wraps this in a fixed-position layer and owns
+ * placement (including the upward flip near the window bottom), so the inline
+ * absolute anchoring has to be neutralized. Same override the attr lane list
+ * uses. */
+.select-list.portaled {
+  position: static;
+  top: auto;
+  left: auto;
+  z-index: auto;
+}
+
 .select-option {
   width: 100%;
   display: flex;
@@ -4772,17 +4838,22 @@ body.reduce-motion .cook-arc {
  * so the canvas host shrinks by its height and the render target follows
  * through the existing resize path. */
 
+/* No `overflow-x` here, deliberately. Setting one axis to a non-visible
+ * value makes the OTHER axis compute to `auto` as well, which turned this
+ * 31px strip into a scroll container in both directions: an open dropdown
+ * was clipped to the strip and the resulting vertical scrollbar shoved every
+ * control out of place. The Loop picker portals out instead, and the fields
+ * shrink into the spacer rather than overflowing. */
 .transport-bar {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   flex: 0 0 auto;
+  min-width: 0;
   padding: 0.25rem 0.5rem;
   border-top: 1px solid var(--border-primary);
   background-color: var(--background-secondary);
   font-size: 1rem;
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .transport-buttons {
@@ -4851,9 +4922,4 @@ body.reduce-motion .cook-arc {
 .transport-spacer {
   flex: 1 1 auto;
   min-width: 0.5rem;
-}
-
-.transport-loop {
-  padding: 0.1rem 0.3rem;
-  font-size: 1rem;
 }

@@ -26,7 +26,7 @@ As of v0.7.0 the same Rust core powers three surfaces:
 
 Solarxy Web runs entirely in your browser at **[solarxy.koljam.com](https://solarxy.koljam.com)**. It renders with WebGPU and adds a node graph for building and modifying geometry non-destructively, on the same Rust engine and wgpu renderer as the desktop app.
 
-- **Parametric node graph** - primitives, transforms, arrays, mirrors, materials, UV projection, and more flow through a typed node graph (75 node types across 14 categories). Change a parameter upstream and everything downstream recooks.
+- **Parametric node graph** - primitives, transforms, arrays, mirrors, materials, UV projection, and more flow through a typed node graph (75 node types across 15 categories). Change a parameter upstream and everything downstream recooks.
 - **Typed connections** - ports are typed and color-coded; illegal connections are rejected with feedback and lossy ones are flagged.
 - **Imports as nodes** - OBJ, STL, PLY, and glTF/GLB load through import nodes (off the main thread) and flow into the graph like any other geometry; textures and materials come along.
 - **Full desktop toolset** - PBR rendering, the inspection modes, UV overlap, validation overlays, HDRI/IBL, split viewports, transform gizmos, dockable panes, and the review system, all in the browser.

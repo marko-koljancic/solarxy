@@ -123,6 +123,11 @@ pub enum Category {
     Import,
     Export,
     Lights,
+    /// Cameras get their own section rather than sharing Utility with the
+    /// note node. A camera is a scene element you author and look through,
+    /// not a helper, and the section has room to grow (physical, orthographic
+    /// and stereo cameras are all plausible neighbours).
+    Cameras,
     Utility,
     TexGenerate,
     TexAdjust,
@@ -146,6 +151,7 @@ impl Category {
             Self::Import => "Import",
             Self::Export => "Export",
             Self::Lights => "Lights",
+            Self::Cameras => "Cameras",
             Self::Utility => "Utility",
             Self::TexGenerate => "Generate",
             Self::TexAdjust => "Adjust",
