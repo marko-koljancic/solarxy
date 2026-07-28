@@ -27,6 +27,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "../icons";
 import { DropdownPortal } from "./DropdownPortal";
+import { claimEscape, releaseEscape } from "./escapeClaim";
 
 export interface SelectOption<T extends string> {
   value: T;
@@ -82,6 +83,15 @@ export function Select<T extends string>({
   useEffect(() => {
     if (open) setActive(selectedIndex);
   }, [open, selectedIndex]);
+
+  // An open list owns Escape, so closing it never closes the dialog around
+  // it. The handler below is `onKeyDown` on the trigger -- the target phase,
+  // which a modal's capture-phase listener beats outright. See `escapeClaim`.
+  useEffect(() => {
+    if (!open) return undefined;
+    claimEscape();
+    return releaseEscape;
+  }, [open]);
 
   // Inline only: a portaled list lives outside `rootRef`, so this would read
   // every option click as an outside click. DropdownPortal owns dismissal

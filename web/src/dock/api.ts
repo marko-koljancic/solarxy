@@ -179,6 +179,16 @@ export function setTreePanelOpen(open: boolean): void {
   setPanelOpen("tree", "Tree", open, besideProperties);
 }
 
+export function isTextPanelOpen(): boolean {
+  return api?.getPanel("text") !== undefined;
+}
+
+/** Adds the Text panel (tabbed beside Properties, the aux-panel pattern)
+ * or removes it. */
+export function setTextPanelOpen(open: boolean): void {
+  setPanelOpen("text", "Text", open, besideProperties);
+}
+
 export function isReviewPanelOpen(): boolean {
   return api?.getPanel("review") !== undefined;
 }

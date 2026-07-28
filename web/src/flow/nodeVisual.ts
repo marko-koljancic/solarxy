@@ -70,6 +70,10 @@ export const GLYPH_PATHS: Record<string, string> = {
     "M3 4h10v8h-10z m2.5 4.3a1.1 1.1 0 1 0 0-2.2m-2 5.4l3-3 2.3 2.3 2.2-2.3 2 2",
   geo: "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z m1 5.5h5",
   note: "M3 3h10v6.5l-3.5 3.5h-6.5z m6.5 10v-3.5h3.5",
+  // Text: a full page with lines of writing on it. Deliberately close to
+  // the note glyph, because both hold prose; the folded corner is what
+  // says "note" and its absence is what says "document".
+  text: "M3.5 2.5h9v11h-9z M5.5 5.5h5 M5.5 8h5 M5.5 10.5h3",
   ambient: "M11 8a3 3 0 1 1-6 0 3 3 0 1 1 6 0m-7.8-4.8l1 1m8.6-1l-1 1m-8.6 8.6l1-1m8.6 1l-1-1",
   directional:
     "M5 3v5m0 0l-1.6-1.6m1.6 1.6l1.6-1.6m2.9-3.4v5m0 0l-1.6-1.6m1.6 1.6l1.6-1.6m-8.6 5.6c2.2-1.6 8.8-1.6 11 0",
@@ -194,6 +198,7 @@ const KNOWN_ROLES: ReadonlySet<string> = new Set([
   "imageSource",
   "light",
   "camera",
+  "text",
   "note",
 ]);
 

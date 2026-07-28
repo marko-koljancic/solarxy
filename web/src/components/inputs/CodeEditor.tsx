@@ -159,6 +159,11 @@ export interface CodeEditorProps {
   minLines?: number;
   /** Completion source; omitted for a plain text buffer with no language. */
   completions?: CompletionSource;
+  /** Which language the buffer is. `plain` drops highlighting and bracket
+   * handling, which is what prose wants: auto-closing a quote mid-sentence
+   * is an annoyance rather than a help. Defaults to `wrangle`, because
+   * every caller before the Text panel edited a wrangle program. */
+  language?: SnippetLanguage;
   /** Editor preferences (word wrap, line numbers, font size). */
   prefs?: EditorPrefs;
 }
@@ -170,6 +175,9 @@ export interface EditorPrefs {
   /** Font size in px. */
   fontSize: number;
 }
+
+/** Mirrors the `text` node's `language` enum. */
+export type SnippetLanguage = "plain" | "wrangle";
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   wordWrap: true,
@@ -185,6 +193,7 @@ export function CodeEditor({
   onDirty,
   minLines = 3,
   completions,
+  language = "wrangle",
   prefs = DEFAULT_EDITOR_PREFS,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -221,11 +230,10 @@ export function CodeEditor({
         extensions: [
           ...(prefs.lineNumbers ? [lineNumbers()] : []),
           history(),
-          wrangleLanguage,
-          syntaxHighlighting(highlight),
+          ...(language === "wrangle"
+            ? [wrangleLanguage, syntaxHighlighting(highlight), bracketMatching(), closeBrackets()]
+            : []),
           errorField,
-          bracketMatching(),
-          closeBrackets(),
           search({ top: true }),
           highlightSelectionMatches(),
           ...(completions

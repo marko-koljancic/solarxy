@@ -398,10 +398,11 @@ body.precision-drag-active {
   border-radius: 6px;
 }
 
-/* Rect bodies (standard, gather): fill + border + the top-down sheen in
- * CSS. Shaped roles draw an SVG body instead and keep this layer bare.
+/* Rect bodies (standard, gather, text): fill + border + the top-down sheen
+ * in CSS. Shaped roles draw an SVG body instead and keep this layer bare.
  * Container left this list in 0.8.1 when it gained a folder silhouette. */
 .flow-node.role-standard .node-body,
+.flow-node.role-text .node-body,
 .flow-node.role-gather .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
@@ -413,6 +414,7 @@ body.precision-drag-active {
 
 .flow-node:hover .role-hover,
 .flow-node.role-standard:hover .node-body,
+.flow-node.role-text:hover .node-body,
 .flow-node.role-gather:hover .node-body {
   border-color: var(--geometry-node-border-hover);
 }
@@ -5242,4 +5244,99 @@ body.light-theme {
 .prefs-label.has-doc:hover {
   color: var(--text-primary);
   text-decoration-color: var(--text-tertiary);
+}
+
+/* ---- The Text panel ----
+ *
+ * A dockview panel's parent is `display: block`, so `flex: 1` on a child is
+ * inert: the pane root must claim its own size. Same note as `.node-pane`
+ * and `.properties-panel`. */
+.text-pane {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.text-pane-menu {
+  margin-left: 0;
+  padding: 0 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+  flex: 0 0 auto;
+}
+.text-pane-menu .menu-item {
+  font-size: 1.15rem;
+  padding: 0.25rem 0.7rem;
+}
+
+.text-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.text-pane-list {
+  flex: 0 0 16rem;
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.text-pane-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.8rem;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.text-pane-item:hover {
+  background: var(--hover-bg);
+}
+.text-pane-item.active {
+  border-left-color: var(--accent-primary);
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.text-pane-name {
+  font-size: 1.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.text-pane-ctx {
+  color: var(--text-tertiary);
+  font-size: 1rem;
+}
+
+.text-pane-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  padding: 0.6rem;
+}
+
+.text-pane-empty {
+  padding: 1.2rem;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* The text datablock node: quiet by size, so a script library does not read
+ * as graph structure. Uses the plain rect body. */
+.flow-node.role-text {
+  width: 76px;
+  height: 26px;
 }

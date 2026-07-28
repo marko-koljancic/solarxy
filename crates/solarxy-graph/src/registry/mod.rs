@@ -178,6 +178,10 @@ pub enum NodeRole {
     /// the two sit side by side in the root graph and are the two things
     /// there that are not geometry.
     Camera,
+    /// A stored datablock rather than an operation: a small, plain body.
+    /// Quiet by SIZE rather than by silhouette, because the point is that
+    /// it recedes -- a script library should not read as graph structure.
+    Text,
     Note,
 }
 

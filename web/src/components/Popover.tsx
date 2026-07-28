@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { claimEscape, releaseEscape } from "./escapeClaim";
 
 const OPEN_DELAY_MS = 400;
 const MARGIN = 8;
@@ -96,16 +97,28 @@ export function Popover({
       if (e.key !== "Escape") return;
       // Escape closes THIS popover and goes no further.
       //
-      // Without the stop, a popover open inside a dialog let Escape reach
-      // the dialog's own capture-phase handler as well, so dismissing a
-      // tooltip also dismissed the Preferences window around it -- losing
-      // unsaved edits to answer "what does this row do?". The popover is
-      // the innermost thing on screen, so it is the thing Escape means.
+      // Without this, a popover open inside a dialog let Escape dismiss the
+      // Preferences window around it -- losing unsaved edits to answer
+      // "what does this row do?". The popover is the innermost thing on
+      // screen, so it is the thing Escape means.
+      //
+      // `stopPropagation` alone does NOT achieve that: `Modal` listens on
+      // the same target in the same phase and runs first, so it would have
+      // closed already by the time this fires. `escapeClaim` is how it
+      // knows to stand down; the stop here is belt-and-braces for anything
+      // listening further down the tree.
       e.stopPropagation();
       hide();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
+
+  // Claim Escape for as long as the panel is up (see `escapeClaim`).
+  useEffect(() => {
+    if (!open) return undefined;
+    claimEscape();
+    return releaseEscape;
   }, [open]);
 
   useEffect(() => () => hide(), []); // eslint-disable-line react-hooks/exhaustive-deps

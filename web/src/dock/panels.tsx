@@ -22,6 +22,7 @@ import { Viewport } from "../components/Viewport";
 import { ReviewPanel } from "../components/review/ReviewPanel";
 import { TextureViewer } from "../components/TextureViewer";
 import { TreePane } from "../components/TreePane";
+import { TextPane } from "../components/TextPane";
 import { contextKind } from "../registry/datatypes";
 import { selectGraph, useMirror } from "../store/mirror";
 import { useUi } from "../store/ui";
@@ -125,6 +126,14 @@ function TreePanel(props: IDockviewPanelProps) {
   );
 }
 
+function TextPanel(props: IDockviewPanelProps) {
+  return (
+    <HoverTracked id={props.api.id}>
+      <TextPane />
+    </HoverTracked>
+  );
+}
+
 export const DOCK_COMPONENTS = {
   viewport: ViewportPanel,
   nodes: NodesPanel,
@@ -135,6 +144,7 @@ export const DOCK_COMPONENTS = {
   texture: TexturePanel,
   attributes: AttributesPanel,
   tree: TreePanel,
+  text: TextPanel,
 };
 
 // Item 4: per-pane header tint (Houdini-style). A curated pastel set: the four

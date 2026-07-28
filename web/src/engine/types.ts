@@ -443,6 +443,7 @@ export type NodeRole =
   | "imageSource"
   | "light"
   | "camera"
+  | "text"
   | "note";
 
 /** The network kinds of the typed-context model. The root

@@ -20,6 +20,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { claimEscape, releaseEscape } from "./escapeClaim";
 
 const MARGIN = 8;
 const GAP = 2;
@@ -129,10 +130,15 @@ export function DropdownPortal({
       if (e.key === "Escape") onClose();
     };
     const onResize = () => onClose();
+    // A portaled panel exists only while it is open, so its whole lifetime
+    // is the claim: Escape closes THIS and leaves the dialog under it
+    // alone (see `escapeClaim`).
+    claimEscape();
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", onResize);
     return () => {
+      releaseEscape();
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("resize", onResize);

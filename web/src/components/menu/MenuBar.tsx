@@ -19,7 +19,7 @@ import { clearAutosaves } from "../../persistence/opfs";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DIRECTORY_PICKER } from "../directoryPicker";
 import { AboutModal } from "../AboutModal";
-import { isAssetsPanelOpen, isAttributesPanelOpen, isNodesPanelOpen, isPropertiesPanelOpen, isTexturePanelOpen, isTreePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setNodesPanelOpen, setPropertiesPanelOpen, setReviewPanelOpen, setTexturePanelOpen, setTreePanelOpen } from "../../dock/api";
+import { isAssetsPanelOpen, isAttributesPanelOpen, isNodesPanelOpen, isPropertiesPanelOpen, isTexturePanelOpen, isTextPanelOpen, isTreePanelOpen, setAssetsPanelOpen, setAttributesPanelOpen, setNodesPanelOpen, setPropertiesPanelOpen, setReviewPanelOpen, setTexturePanelOpen, setTextPanelOpen, setTreePanelOpen } from "../../dock/api";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { DESK_PRESETS, useDesks } from "../../store/desks";
 import { useReview } from "../../store/review";
@@ -165,6 +165,7 @@ export function MenuBar() {
     { label: "Nodes Panel", checked: isNodesPanelOpen(), onClick: () => setNodesPanelOpen(!isNodesPanelOpen()) },
     { label: "Properties Panel", checked: isPropertiesPanelOpen(), onClick: () => setPropertiesPanelOpen(!isPropertiesPanelOpen()) },
     { label: "Tree Panel", checked: isTreePanelOpen(), onClick: () => setTreePanelOpen(!isTreePanelOpen()) },
+    { label: "Text Panel", checked: isTextPanelOpen(), onClick: () => setTextPanelOpen(!isTextPanelOpen()) },
     { label: "Assets Panel", checked: isAssetsPanelOpen(), onClick: () => setAssetsPanelOpen(!isAssetsPanelOpen()) },
     { label: "Texture Viewer", checked: isTexturePanelOpen(), onClick: () => setTexturePanelOpen(!isTexturePanelOpen()) },
     { label: "Attributes Panel", checked: isAttributesPanelOpen(), onClick: () => setAttributesPanelOpen(!isAttributesPanelOpen()) },

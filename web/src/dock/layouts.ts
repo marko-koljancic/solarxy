@@ -16,7 +16,7 @@
 
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 
-export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture", "attributes", "tree"] as const;
+export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture", "attributes", "tree", "text"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export type ViewportSide = "left" | "right";

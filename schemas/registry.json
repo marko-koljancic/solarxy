@@ -10690,6 +10690,108 @@
       "role": "container"
     },
     {
+      "typeId": "text",
+      "version": 1,
+      "displayName": "Text",
+      "category": "utility",
+      "categoryLabel": "Utility",
+      "contexts": [
+        "obj",
+        "geo",
+        "mat",
+        "tex"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Text",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "multilineText",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "group": "text",
+          "paramType": "snippet",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The snippet itself. Edited in the Text panel or here; either way it is one parameter on one node, so it saves with the scene and undoes in a single step."
+        },
+        {
+          "key": "language",
+          "label": "Language",
+          "group": "text",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "plain",
+              "Plain"
+            ],
+            [
+              "wrangle",
+              "Wrangle"
+            ]
+          ],
+          "accept": [],
+          "default": "plain",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How the editor presents the snippet. **Wrangle** turns on syntax highlighting, completions and bracket handling; **Plain** leaves the text alone, which is what notes and to-do lists want.\n\nPresentation only. Solarxy does not run a snippet from here: a wrangle snippet is something you paste into an `attribute_wrangle`, and this node stores it rather than executing it."
+        }
+      ],
+      "bypass": {
+        "mode": "notBypassable"
+      },
+      "doc": "A named snippet of text or code, stored in the scene.\n\nSomewhere to keep a wrangle program you are reusing, a note to your future self, or a fragment you are still working out. The Text panel lists every snippet in the document and gives them a full editor; this node is where one actually lives.\n\nIt computes nothing and has no ports. Solarxy does not run snippets: to use one, paste it into an `attribute_wrangle` or an expression field.",
+      "searchAliases": [
+        "text",
+        "script",
+        "snippet",
+        "code",
+        "notepad",
+        "scratch",
+        "datablock"
+      ],
+      "glyph": "text",
+      "role": "text"
+    },
+    {
       "typeId": "toon",
       "version": 1,
       "displayName": "Toon",

@@ -6,6 +6,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useDragResize } from "../hooks/useDragResize";
+import { isEscapeClaimed } from "./escapeClaim";
 
 export function Modal({
   id,
@@ -51,6 +52,10 @@ export function Modal({
     if (!onClose || !closeOnEsc) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // A tooltip or dropdown open above this dialog owns Escape:
+        // dismissing one must not also throw away the edits you opened it
+        // to make. See `escapeClaim` for why the DOM will not do this.
+        if (isEscapeClaimed()) return;
         e.stopPropagation();
         onClose();
       }
