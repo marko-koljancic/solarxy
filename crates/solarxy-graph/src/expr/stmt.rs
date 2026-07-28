@@ -5,7 +5,7 @@
 //! (`@attribute` reads and writes, plus typed locals). Everything else --
 //! operators, precedence, the ~30 builtins, `ch()`, the geometry queries,
 //! `$T` -- is the *same* code, reached through
-//! [`super::parser::parse_scoped`]. Forking the grammar would be two
+//! `super::parser::parse_scoped`. Forking the grammar would be two
 //! grammars to keep in step.
 //!
 //! **No control flow.** There is no `if` and no `for`, so a

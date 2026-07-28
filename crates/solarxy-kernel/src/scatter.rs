@@ -206,7 +206,7 @@ pub fn scatter_weighted(
 ///
 /// Deliberately a question rather than a second return value from
 /// [`scatter_weighted`]: the operator stays a plain `GeometrySet ->
-/// GeometrySet`, and this shares [`triangle_density`]'s acceptance rules
+/// GeometrySet`, and this shares `triangle_density`'s acceptance rules
 /// below, so the two cannot drift into disagreeing about what "resolves"
 /// means.
 #[must_use]
