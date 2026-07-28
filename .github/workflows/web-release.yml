@@ -155,10 +155,17 @@ jobs:
           echo "editor boot JS (gzip): ${JS_GZ} / ${EDITOR_BOOT_JS_GZIP_BUDGET_BYTES}"
           echo "::notice::eager JS (gzip): ${JS_GZ} bytes; wasm (gzip): ${SIZE} bytes"
           if [ "$JS_GZ" -gt "$EDITOR_BOOT_JS_GZIP_BUDGET_BYTES" ]; then
-            echo "::error::the editor's boot JS is ${JS_GZ} bytes gzipped, over the \
-${EDITOR_BOOT_JS_GZIP_BUDGET_BYTES} budget. Something heavy landed on the boot path. \
-If it is a new dependency, import it lazily (see SnippetField's React.lazy around \
-CodeEditor) and add its chunk to the exclusions above."
+            # Built up in steps rather than one backslash-continued string: a
+            # continuation line has to start at column 0 to avoid baking leading
+            # spaces into the message, and a column-0 line ENDS this YAML block
+            # scalar, which fails the whole workflow at startup with no jobs and
+            # no log. That is exactly how v0.8.1's first release run died.
+            MSG="the editor's boot JS is ${JS_GZ} bytes gzipped, over the"
+            MSG="$MSG ${EDITOR_BOOT_JS_GZIP_BUDGET_BYTES} budget. Something heavy"
+            MSG="$MSG landed on the boot path. If it is a new dependency, import it"
+            MSG="$MSG lazily (see SnippetField's React.lazy around CodeEditor) and"
+            MSG="$MSG add its chunk to the exclusions above."
+            echo "::error::$MSG"
             exit 1
           fi
 
@@ -179,10 +186,12 @@ CodeEditor) and add its chunk to the exclusions above."
           done
           echo "player JS (gzip): ${PLAYER_JS} / ${PLAYER_JS_GZIP_BUDGET_BYTES}"
           if [ "$PLAYER_JS" -gt "$PLAYER_JS_GZIP_BUDGET_BYTES" ]; then
-            echo "::error::the player's JS is ${PLAYER_JS} bytes gzipped, over the \
-${PLAYER_JS_GZIP_BUDGET_BYTES} budget. It ships in every exported scene bundle. \
-Check for a value (not type) import that drags the editor's module graph in; \
-crates/solarxy-core/tests/tokens_drift.rs has the source-level rule."
+            MSG="the player's JS is ${PLAYER_JS} bytes gzipped, over the"
+            MSG="$MSG ${PLAYER_JS_GZIP_BUDGET_BYTES} budget. It ships in every"
+            MSG="$MSG exported scene bundle. Check for a value (not type) import"
+            MSG="$MSG that drags the editor's module graph in;"
+            MSG="$MSG crates/solarxy-core/tests/tokens_drift.rs has the source-level rule."
+            echo "::error::$MSG"
             exit 1
           fi
 
