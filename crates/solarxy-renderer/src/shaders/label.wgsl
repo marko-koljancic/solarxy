@@ -56,7 +56,20 @@ struct LabelParams {
     // 1 when chips are drawn. Gates the chip AND shifts the dot and glyph
     // vertex ranges, so it must match `LabelResources::vertex_count`.
     chip_on: u32,
-    _pad: vec3<u32>,
+    // The Rust struct's trailing `[u32; 3]` padding, declared as three
+    // SCALARS rather than a `vec3<u32>`.
+    //
+    // This is not a style choice. A `vec3<u32>` has 16-byte ALIGNMENT in
+    // WGSL, so it would sit at offset 96 instead of 84 and make this struct
+    // span 112 bytes against the Rust struct's 96. Bind-group layouts here
+    // use `min_binding_size: None`, so that mismatch is not caught when the
+    // bind group is built -- it fails at DRAW time, which invalidates the
+    // encoder, and since the pane's encoder also carries the composite pass
+    // the entire frame is discarded and the viewport goes black. Three
+    // scalars keep the span at 96 and matching.
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 @group(2) @binding(0)
 var<uniform> lp: LabelParams;

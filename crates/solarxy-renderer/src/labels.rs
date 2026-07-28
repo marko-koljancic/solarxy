@@ -217,6 +217,13 @@ struct LabelParams {
 }
 const _: () = assert!(std::mem::size_of::<LabelParams>() == 96);
 
+/// The uniform's byte span, exported so `tests/uniform_layout.rs` can hold
+/// the WGSL declaration to the same number rather than repeating a literal.
+///
+/// The struct itself stays private: what the shader has to agree with is its
+/// SIZE, and wgpu compares exactly that.
+pub const LABEL_PARAMS_SIZE: usize = std::mem::size_of::<LabelParams>();
+
 impl LabelParams {
     fn from_style(style: &LabelStyle, label_count: u32) -> Self {
         let d = if style.dpr.is_finite() && style.dpr > 0.0 {
