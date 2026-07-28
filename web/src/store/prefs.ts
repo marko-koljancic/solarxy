@@ -8,6 +8,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefs } from "./displayDefaults";
+
 /** 0.7.1 collapsed three themes into two. The MPW "Balanced Editorial"
  * palette (warm cream + terracotta, the koljam.com design language) used to
  * be a separate "mpw" variant layered over a neutral light theme; it IS the
@@ -47,27 +49,15 @@ export interface ScreenshotPrefs {
 
 export type SelectionHighlightStyle = "outline" | "tint" | "none";
 
-export type WireframeWeight = "Light" | "Medium" | "Bold";
-/** The built-in pane backgrounds, pinned to
- * `solarxy_core::preferences::BuiltinBg`'s serde names. */
-export type BackgroundChoice = "Gradient" | "White" | "DarkGray" | "AyuMirage" | "Black" | "HdriSky";
-
-/** Viewport display defaults, pushed into the Rust host. Wireframe weight
- * and background seed every pane's settings (a scene file's saved per-pane
- * values still win on load; the pane's Display menu stays the live
- * per-pane override). The turntable speed is the live global rpm. */
-export interface DisplayPrefs {
-  wireframeWeight: WireframeWeight;
-  background: BackgroundChoice;
-  /** Turntable revolutions per minute, clamped 1..60. */
-  turntableRpm: number;
-  /** On-screen size of a rendered point, in pixels, clamped 1..32.
-   *
-   * Global rather than per pane (decision M-27): there is no comparison
-   * worth two point sizes side by side. */
-  pointSize: number;
-}
-
+// Display types and their defaults live in a dependency-free module so the
+// player can read them without pulling zustand (and therefore React) into a
+// published bundle. Re-exported here because this has been their import site
+// since 0.7.x and moving that would churn every call site for nothing.
+export type {
+  BackgroundChoice,
+  DisplayPrefs,
+  WireframeWeight,
+} from "./displayDefaults";
 /** How selection presents in the 3D viewport:
  * the jump-flood rim (default), the legacy translucent tint, or nothing.
  * Pushed into the Rust host like the gizmo ergonomics. */
@@ -119,7 +109,7 @@ export const DEFAULT_PREFS: Prefs = {
     overlays: { grid: true, axes: true, validation: true },
   },
   selection: { style: "outline", color: "#ff9e21", width: 3 },
-  display: { wireframeWeight: "Light", background: "Gradient", turntableRpm: 6, pointSize: 6 },
+  display: DEFAULT_DISPLAY_PREFS,
   onboarding: { completed: false, version: 0 },
   viewport: {
     orientation: "world",

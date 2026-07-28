@@ -865,6 +865,11 @@ mod tests {
 
 #[cfg(test)]
 mod view_fade_tests {
+    // Exact comparison is the assertion: the fade's early-return path yields
+    // a literal 0.0, and an unfaded handle must come back byte-identical to
+    // its own constant rather than merely close to it.
+    #![allow(clippy::float_cmp)]
+
     use super::*;
     use cgmath::{Matrix4, SquareMatrix, Vector3};
 

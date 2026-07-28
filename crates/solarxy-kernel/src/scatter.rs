@@ -197,6 +197,29 @@ pub fn scatter_weighted(
     GeometrySet::from_mesh(mesh)
 }
 
+/// Whether a density lane named `name` would actually bias anything.
+///
+/// Exists so the NODE can tell "you named a lane that is not there" from "the
+/// scatter worked", which the geometry alone cannot: an unresolved lane falls
+/// back to area-only weighting and produces a perfectly ordinary even scatter,
+/// so a typo looks exactly like success.
+///
+/// Deliberately a question rather than a second return value from
+/// [`scatter_weighted`]: the operator stays a plain `GeometrySet ->
+/// GeometrySet`, and this shares [`triangle_density`]'s acceptance rules
+/// below, so the two cannot drift into disagreeing about what "resolves"
+/// means.
+#[must_use]
+pub fn density_lane_resolves(set: &GeometrySet, name: &str) -> bool {
+    set.meshes.iter().any(|mesh| {
+        mesh.topology == MeshTopology::Triangles
+            && matches!(
+                mesh.attributes.get(name),
+                Some(AttributeData::Float(v)) if v.len() == mesh.positions.len()
+            )
+    })
+}
+
 /// The density multiplier for one triangle: the mean of its three corners,
 /// clamped at zero.
 ///
@@ -513,6 +536,39 @@ mod density_tests {
         let set = two_quads(Some([0.0; 8]));
         let out = scatter_weighted(&set, 500, 7, Some("density"));
         assert!(out.is_renderable_empty());
+    }
+
+    #[test]
+    fn a_resolvable_lane_is_reported_as_such() {
+        let set = two_quads(Some([1.0; 8]));
+        assert!(density_lane_resolves(&set, "density"));
+    }
+
+    #[test]
+    fn an_absent_lane_is_reported_so_the_node_can_say_so() {
+        // The whole point: the GEOMETRY cannot tell you, because an
+        // unresolved lane produces a perfectly ordinary even scatter.
+        let set = two_quads(Some([1.0; 8]));
+        assert!(!density_lane_resolves(&set, "denstiy"));
+        assert!(!density_lane_resolves(&two_quads(None), "density"));
+    }
+
+    #[test]
+    fn resolution_agrees_with_what_the_weighting_actually_accepts() {
+        // A lane of the wrong TYPE is ignored by `triangle_density`, so it
+        // must also report as unresolved, or the node would stay silent about
+        // a scatter that is not being weighted.
+        let mut set = two_quads(None);
+        set.meshes[0].attributes.insert(
+            "density".to_string(),
+            AttributeData::Vec3(Arc::new(vec![[1.0, 1.0, 1.0]; 8])),
+        );
+        assert!(!density_lane_resolves(&set, "density"));
+        let out = scatter_weighted(&set, 1000, 7, Some("density"));
+        assert!(
+            (right_share(&out) - 0.5).abs() < 0.08,
+            "and it scattered evenly"
+        );
     }
 
     #[test]

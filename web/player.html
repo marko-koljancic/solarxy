@@ -35,8 +35,24 @@
       }
       #player-status.error {
         color: #ff8f7a;
+        text-align: left;
+      }
+      #player-status.error div {
         max-width: 34rem;
-        margin: 0 auto;
+      }
+      #player-status.error p {
+        margin: 0 0 0.75rem;
+      }
+      #player-status code {
+        color: #ffc7b8;
+      }
+      #player-status pre {
+        margin: 0 0 0.75rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 4px;
+        color: #e8e8ec;
+        overflow-x: auto;
       }
       /* Only present when the bundle's config asks for it. */
       #player-transport {
@@ -75,6 +91,37 @@
   <body>
     <canvas id="player-canvas"></canvas>
     <div id="player-status">Loading...</div>
+    <!--
+      A CLASSIC script, not a module, and deliberately before the module tag.
+
+      Everything else on this page is an ES module, and a browser refuses to
+      load one from a file:// origin. When that happens the module never
+      executes, so the friendly "serve this over HTTP" message the player
+      carries never runs: the page sits on "Loading..." while the console
+      fills with CORS errors. Double-clicking index.html is the first thing
+      most people try, so it was the one path with no explanation.
+
+      An inline classic script still runs when module loading fails. That is
+      the whole reason this is not in main.ts.
+    -->
+    <script>
+      if (location.protocol === "file:") {
+        var el = document.getElementById("player-status");
+        if (el) {
+          el.className = "error";
+          el.innerHTML =
+            "<div><p><strong>This page has to be served over HTTP.</strong></p>" +
+            "<p>Browsers refuse to load an ES module or fetch WebAssembly from a " +
+            "<code>file://</code> address, so opening this folder's index.html " +
+            "directly cannot work. That is a browser security rule, not something " +
+            "the bundle can work around.</p>" +
+            "<p>From inside this folder, run:</p>" +
+            "<pre>python3 -m http.server 8000</pre>" +
+            "<p>then open <code>http://localhost:8000</code>. " +
+            "See README.txt for how to publish it.</p></div>";
+        }
+      }
+    </script>
     <script type="module" src="/src/player/main.ts"></script>
   </body>
 </html>

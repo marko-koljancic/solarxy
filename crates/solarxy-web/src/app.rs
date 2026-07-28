@@ -829,6 +829,17 @@ impl SolarxyApp {
         self.engine.clock().frame as f64
     }
 
+    /// Whether the clock is running right now.
+    ///
+    /// Polled beside [`SolarxyApp::clock_frame`] rather than tracked by the
+    /// caller: a `once` range CLEARS `playing` when it reaches the end, so a
+    /// shell holding its own boolean shows "Pause" over a clock that stopped
+    /// by itself.
+    #[must_use]
+    pub fn clock_playing(&self) -> bool {
+        self.engine.clock().playing
+    }
+
     /// Whether a published scene should start playing, from the document's
     /// own runtime settings. The player shell reads this after load rather
     /// than the editor acting on it: autoplay in an authoring tool is a

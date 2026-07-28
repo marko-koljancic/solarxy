@@ -35,6 +35,7 @@
   --lavender: #c9c2f0;
   --coral: #e4aa93;
   --peach: #f2c9a0;
+  --sage: #b6d6bb;
   --on-block: #11110e;
   --nav-bg: rgba(244, 241, 234, 0.85);
   --shadow-lift: 0 18px 40px -24px rgba(17, 17, 14, 0.45);
@@ -61,6 +62,7 @@
     --lavender: #bcb4ea;
     --coral: #dca28b;
     --peach: #e4bc8e;
+    --sage: #a7cbad;
     --nav-bg: rgba(22, 20, 15, 0.85);
     --shadow-lift: 0 18px 44px -22px rgba(0, 0, 0, 0.7);
   }
@@ -370,6 +372,9 @@ a {
 }
 .card-peach {
   background: var(--peach);
+}
+.card-sage {
+  background: var(--sage);
 }
 .card-index {
   font-family: var(--font-mono);

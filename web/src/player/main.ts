@@ -15,7 +15,9 @@
 import { SolarxyClient } from "../engine/client";
 import type { PlayerConfig } from "../export/playerConfig";
 import { DEFAULT_PLAYER_CONFIG } from "../export/playerConfig";
-import { DEFAULT_PREFS } from "../store/prefs";
+// From the dependency-free module, NOT the prefs store: importing the
+// store here pulls zustand, and therefore React, into a published bundle.
+import { DEFAULT_DISPLAY_PREFS } from "../store/displayDefaults";
 
 /// The UV checker the renderer wants at construction.
 ///
@@ -130,7 +132,7 @@ async function main(): Promise<void> {
           wireframeWeight: "Light",
           background: "Gradient",
           turntableRpm: config.turntableRpm,
-          pointSize: DEFAULT_PREFS.display.pointSize,
+          pointSize: DEFAULT_DISPLAY_PREFS.pointSize,
         },
         false,
         false,
@@ -187,16 +189,16 @@ function mountTransport(client: SolarxyClient): void {
     return b;
   };
 
-  let playing = false;
+  // The button asks the ENGINE what it is doing rather than remembering what
+  // it was told. A `once` range clears `playing` when it reaches the end, so a
+  // local boolean would leave the button reading "Pause" over a stopped clock.
   const playBtn = button("Play", "Play or pause", () => {
-    playing = !playing;
-    client.dispatch({ type: playing ? "play" : "pause" });
-    playBtn.textContent = playing ? "Pause" : "Play";
+    client.dispatch({ type: client.clockPlaying() ? "pause" : "play" });
+    refresh();
   });
   button("Stop", "Stop and rewind", () => {
-    playing = false;
-    playBtn.textContent = "Play";
     client.dispatch({ type: "stop" });
+    refresh();
   });
 
   const readout = document.createElement("span");
@@ -204,12 +206,32 @@ function mountTransport(client: SolarxyClient): void {
   bar.appendChild(readout);
   document.body.appendChild(bar);
 
-  // Polled once per second rather than driven by the event batch: a viewer
-  // does not need frame-accurate chrome, and a per-frame DOM write is the
-  // kind of cost the editor deleted its attribute pins to avoid.
-  setInterval(() => {
+  function refresh(): void {
+    const playing = client.clockPlaying();
+    playBtn.textContent = playing ? "Pause" : "Play";
+    playBtn.title = playing ? "Pause" : "Play";
     readout.textContent = `frame ${client.clockFrame()}`;
-  }, 250);
+  }
+
+  // Polled a few times a second rather than driven by the event batch: a
+  // viewer does not need frame-accurate chrome, and a per-frame DOM write is
+  // the kind of cost the editor deleted its attribute pins to avoid. The
+  // handle is kept so the timer has an owner, even though this page lives
+  // until it is closed.
+  refresh();
+  transportTimer = window.setInterval(refresh, 250);
+}
+
+/** The transport's poll timer, when the bundle's config asked for one. */
+let transportTimer: number | undefined;
+
+/** Stops the transport poll. Nothing calls this today; it exists so the timer
+ * is owned rather than merely started. */
+export function stopTransport(): void {
+  if (transportTimer !== undefined) {
+    window.clearInterval(transportTimer);
+    transportTimer = undefined;
+  }
 }
 
 function resize(client: SolarxyClient, canvas: HTMLCanvasElement): void {

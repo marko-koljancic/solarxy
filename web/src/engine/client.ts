@@ -227,6 +227,12 @@ export class SolarxyClient {
     return this.app.clock_frame();
   }
 
+  /** Whether the clock is running. Polled, not tracked: a `once` range stops
+   * itself at the end, so a caller's own boolean would go stale. */
+  clockPlaying(): boolean {
+    return this.app.clock_playing();
+  }
+
   /** Whether the loaded document asks to start playing. A document setting,
    * not an export one, so it means the same thing in the editor (which
    * stores it and does not act on it) and in a player (which does). */

@@ -134,6 +134,17 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
     };
 
     let density = p.text("density").trim().to_string();
+    // Asked BEFORE scattering, because afterwards the two cases are
+    // indistinguishable: an unresolved lane falls back to area-only weighting
+    // and produces a perfectly ordinary even scatter, so a typo looks exactly
+    // like success.
+    if !density.is_empty() && !solarxy_kernel::scatter::density_lane_resolves(input, &density) {
+        cx.warn(format!(
+            "no float point attribute named `{density}` on the incoming geometry, so the \
+             scatter is weighted by area alone. Check the name against the Attributes \
+             pane, or author the lane with `attribute_wrangle`."
+        ));
+    }
     let out = scatter_weighted(
         input,
         p.u32("count"),
@@ -190,6 +201,42 @@ mod tests {
             panic!("outputs geometry");
         };
         set
+    }
+
+    #[test]
+    fn a_mistyped_density_lane_warns_instead_of_scattering_evenly_in_silence() {
+        // The failure this guards: an unresolved lane falls back to area-only
+        // weighting, which looks exactly like a working scatter, so without a
+        // warning a typo is invisible.
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "density".to_string(),
+            ParamSource::Literal(ParamValue::Text("denstiy".into())),
+        );
+        let (out, warnings) = run(
+            stored,
+            GeometrySet::from_mesh(generate_plane(2.0, 2.0, 1, 1)),
+        );
+        assert!(
+            !set_of(&out).is_renderable_empty(),
+            "it still scatters, which is why the warning matters"
+        );
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("denstiy"),
+            "the warning names it: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_density_field_is_not_a_warning() {
+        // The default. Scattering by area alone is the normal case, not a
+        // mistake, and warning about it would train people to ignore warnings.
+        let (_, warnings) = run(
+            BTreeMap::new(),
+            GeometrySet::from_mesh(generate_plane(2.0, 2.0, 1, 1)),
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]

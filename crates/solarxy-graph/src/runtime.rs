@@ -304,6 +304,11 @@ impl Default for RuntimeSettings {
 
 #[cfg(test)]
 mod tests {
+    // Exact comparison is the assertion: fps values are clamped to literals
+    // the test supplies, so "came back as exactly 30" is the claim, not
+    // "came back near 30".
+    #![allow(clippy::float_cmp)]
+
     use super::*;
 
     fn clock(start: i64, end: i64, mode: LoopMode) -> SceneClock {

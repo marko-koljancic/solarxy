@@ -37,6 +37,13 @@ env:
   # serves (the box has gzip_static; it has no brotli module), so gzip is what we
   # gate on. Current: ~1.32 MB.
   WASM_GZIP_BUDGET_BYTES: 2621440   # 2.5 MiB
+  # The PLAYER's own eager JS, gzipped. Separate from the wasm budget and from
+  # the whole-site JS figure below, because a player-only regression is
+  # invisible in both: 0.8.1 shipped a player carrying 431 KB of React and
+  # dockview (one value import from a zustand store) and every gate was green.
+  # Measured at ~17 KB after that was fixed; budgeted at 3x so ordinary growth
+  # does not trip it but an order-of-magnitude regression does.
+  PLAYER_JS_GZIP_BUDGET_BYTES: 51200   # 50 KiB
 
 jobs:
   bundle:
@@ -132,6 +139,30 @@ jobs:
           # excluded because it is dynamically imported and never on the boot path.
           JS_GZ=$(find . -name '*.js.gz' ! -name 'elk*' -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
           echo "::notice::eager JS (gzip): ${JS_GZ} bytes; wasm (gzip): ${SIZE} bytes"
+
+          # The player is gated on its OWN weight. It ships inside every
+          # exported scene bundle, so somebody downloads it who never asked for
+          # an editor, and the whole-site figure above cannot see a regression
+          # confined to it.
+          PLAYER_HTML=$(find . -name 'player.html' -print -quit)
+          if [ -z "$PLAYER_HTML" ]; then
+            echo "::error::player.html not found; the export bundle would have no player."
+            exit 1
+          fi
+          PLAYER_DIR=$(dirname "$PLAYER_HTML")
+          PLAYER_JS=0
+          for REF in $(grep -oE '(src|href)="[^"]*\.js"' "$PLAYER_HTML" | sed -E 's/.*"(.*)"/\1/'); do
+            F="${PLAYER_DIR}/${REF#/}"
+            [ -f "$F.gz" ] && PLAYER_JS=$((PLAYER_JS + $(stat -c%s "$F.gz")))
+          done
+          echo "player JS (gzip): ${PLAYER_JS} / ${PLAYER_JS_GZIP_BUDGET_BYTES}"
+          if [ "$PLAYER_JS" -gt "$PLAYER_JS_GZIP_BUDGET_BYTES" ]; then
+            echo "::error::the player's JS is ${PLAYER_JS} bytes gzipped, over the \
+${PLAYER_JS_GZIP_BUDGET_BYTES} budget. It ships in every exported scene bundle. \
+Check for a value (not type) import that drags the editor's module graph in; \
+crates/solarxy-core/tests/tokens_drift.rs has the source-level rule."
+            exit 1
+          fi
 
       - name: Package
         run: |

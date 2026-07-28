@@ -494,3 +494,125 @@ fn lower_camel(name: &str) -> String {
         None => String::new(),
     }
 }
+
+/// The published player must not carry a UI framework it never renders with.
+///
+/// 0.8.1 shipped a player that pulled **431 KB of React and dockview** into
+/// every exported scene bundle, because one line imported a zustand-backed
+/// store for a single default number: zustand pulls React, and Vite has React
+/// inside the `dock` chunk. Every gate was green through it. The CI wasm
+/// budget is a hard gate but the JS figure is only a log line, and it sums all
+/// pages together, so a player-only regression is invisible there.
+///
+/// This is a SOURCE-level rule, deliberately: it runs on every `cargo test`
+/// with no build required, and it names the mistake rather than a byte count
+/// that would drift. The player reads its defaults from the dependency-free
+/// `store/displayDefaults.ts`.
+#[test]
+fn the_player_does_not_import_the_editors_ui_graph() {
+    let root = workspace_root();
+    let player_dir = root.join("web/src/player");
+    assert!(
+        player_dir.is_dir(),
+        "web/src/player must exist; the published bundle is built from it"
+    );
+
+    // Value imports only. A `import type { ... }` is erased at build time and
+    // costs a published bundle nothing, which is exactly how `engine/client.ts`
+    // is allowed to reference the prefs types.
+    let banned = [
+        (
+            "../store/prefs",
+            "the preferences store is zustand-backed, and zustand pulls React",
+        ),
+        ("zustand", "pulls React into a page that renders no React"),
+        ("react", "the player has no components"),
+        ("dockview", "the player has no docking"),
+        (
+            "../dock/",
+            "the dock module is the editor's layout, not the player's",
+        ),
+    ];
+
+    let mut offenders = Vec::new();
+    for entry in std::fs::read_dir(&player_dir)
+        .expect("read web/src/player")
+        .flatten()
+    {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e == "ts" || e == "tsx") {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let file = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        for (i, line) in src.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("import ") || trimmed.starts_with("import type ") {
+                continue;
+            }
+            for (needle, why) in banned {
+                if line.contains(needle) {
+                    offenders.push(format!("{file}:{} imports `{needle}` ({why})", i + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "the published player would ship the editor's UI graph:\n  {}\n\n\
+         Read a default from `web/src/store/displayDefaults.ts` (no imports) \
+         rather than from the store, or use `import type` if you only need the \
+         shape.",
+        offenders.join("\n  ")
+    );
+}
+
+/// The `file://` guard has to survive as an INLINE CLASSIC script.
+///
+/// Opening a bundle's index.html by double-clicking is the first thing most
+/// people try, and a browser refuses to load an ES module from a `file://`
+/// origin. The player's own error handling lives inside that module, so when
+/// it is blocked nothing runs: the page sits on "Loading..." while the console
+/// fills with CORS errors. An inline classic script still executes, which is
+/// the whole reason this one is not in `main.ts`.
+#[test]
+fn the_player_page_warns_about_file_urls_without_needing_its_module() {
+    let root = workspace_root();
+    let html = std::fs::read_to_string(root.join("web/player.html")).expect("web/player.html");
+
+    let guard = html
+        .find("location.protocol")
+        .expect("the file:// guard must be present in player.html");
+    let status = html
+        .find("id=\"player-status\"")
+        .expect("the status element the guard writes to");
+    assert!(
+        status < guard,
+        "the guard must come after the element it writes to, or getElementById returns null"
+    );
+
+    // It must not be a module: a module would fail for the same reason as the
+    // thing it is reporting on.
+    let open = html[..guard]
+        .rfind("<script")
+        .expect("an enclosing script tag");
+    assert!(
+        !html[open..guard].contains("type=\"module\""),
+        "the file:// guard must be a CLASSIC script; a module cannot run when \
+         module loading is what failed"
+    );
+
+    // And it must say the useful thing rather than merely detecting.
+    for needle in ["served over HTTP", "http.server"] {
+        assert!(
+            html.contains(needle),
+            "the guard should tell the reader how to fix it (missing: {needle:?})"
+        );
+    }
+}
