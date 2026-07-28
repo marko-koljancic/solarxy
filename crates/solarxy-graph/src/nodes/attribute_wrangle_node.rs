@@ -24,10 +24,17 @@ use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDe
 /// **Measured, not guessed** (`cargo run --release -p solarxy-graph
 /// --example wrangle_cost`). Native release, per element: a trivial
 /// assignment costs 0.05 to 0.19 us, the colour-by-position default 0.30 to
-/// 0.87 us, and a local-plus-trig-plus-displace program 0.44 to 0.51 us. So
+/// 0.87 us, and a local-plus-trig-plus-displace program 0.43 to 0.49 us. So
 /// one 60fps frame buys roughly 20,000 to 56,000 elements for a realistic
-/// program, and 66,049 points already costs 19.6 ms on the default and
-/// 29.1 ms on the heavy one.
+/// program, and 66,049 points costs about 30 ms on the heavy one.
+///
+/// The heavy figure was 0.48 to 0.58 us before the statement layer stopped
+/// allocating its register file per element (round 2); an A/B on one build
+/// put the saving at 10 to 20 percent natively. It should be larger in
+/// wasm, whose allocator is slower, but that is not measured here and is
+/// not claimed. Crucially it does NOT bring a heavy program under the 6 ms
+/// cook budget: what makes playback smooth is the clock refusing to advance
+/// past an unfinished cook (`Engine::tick`), not this.
 ///
 /// The ceiling sits at 50,000, *below* the native measurement rather than
 /// at it, for two reasons. The cook is single-threaded and on web runs in
@@ -178,9 +185,10 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         ));
     }
 
-    let runner = Runner::new(&program, cx.eval, source);
-    let out = solarxy_kernel::wrangle::wrangle(input, domain, &program.lane_bindings(), &runner)
-        .map_err(|e| CookError::Params(e.to_string()))?;
+    let mut runner = Runner::new(&program, cx.eval, source);
+    let out =
+        solarxy_kernel::wrangle::wrangle(input, domain, &program.lane_bindings(), &mut runner)
+            .map_err(|e| CookError::Params(e.to_string()))?;
     Ok(CookOutcome::Done(Outputs::geometry(out)))
 }
 

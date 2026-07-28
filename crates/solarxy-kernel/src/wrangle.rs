@@ -100,13 +100,19 @@ pub struct Element<'a> {
 }
 
 /// A program run once per element. Implemented in `solarxy-graph`.
+///
+/// `&mut self` so an implementation can carry a scratch register file and
+/// reuse it across elements. It was `&self`, which forced the statement
+/// layer to allocate its locals inside `run` -- once per element, through
+/// wasm's allocator, on a hot loop that runs per point. Nothing here is
+/// shared across threads, so exclusive access costs nothing.
 pub trait ElementFn {
     /// # Errors
     /// A type mismatch the statement layer can only detect with a value in
     /// hand. Arithmetic conditions such as division by zero are *not*
     /// errors: they yield the IEEE result, so one bad element cannot blank
     /// a scene (decision M-22).
-    fn run(&self, element: &mut Element) -> Result<(), String>;
+    fn run(&mut self, element: &mut Element) -> Result<(), String>;
 }
 
 /// Runs `program` over every element of `domain` on every mesh in `set`.
@@ -123,7 +129,7 @@ pub fn wrangle(
     set: &GeometrySet,
     domain: AttributeDomain,
     lanes: &[LaneBinding],
-    program: &dyn ElementFn,
+    program: &mut dyn ElementFn,
 ) -> Result<GeometrySet, KernelError> {
     let mut meshes = Vec::with_capacity(set.meshes.len());
     for mesh in &set.meshes {
@@ -145,7 +151,7 @@ fn wrangle_mesh(
     mesh: &KernelMesh,
     domain: AttributeDomain,
     lanes: &[LaneBinding],
-    program: &dyn ElementFn,
+    program: &mut dyn ElementFn,
 ) -> Result<KernelMesh, KernelError> {
     let count = element_count(mesh, domain);
     let mut out = mesh.clone();
@@ -466,7 +472,7 @@ mod tests {
     /// A program built from a closure, so a test states its intent inline.
     struct Fn_<F>(F);
     impl<F: Fn(&mut Element) -> Result<(), String>> ElementFn for Fn_<F> {
-        fn run(&self, element: &mut Element) -> Result<(), String> {
+        fn run(&mut self, element: &mut Element) -> Result<(), String> {
             (self.0)(element)
         }
     }
@@ -490,7 +496,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|_: &mut Element| Ok(())),
+            &mut Fn_(|_: &mut Element| Ok(())),
         )
         .expect("runs");
 
@@ -516,7 +522,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 let p = el.slots[0].value;
                 assign(&mut el.slots[0], &[p[0] * 2.0, p[1], p[2]]);
                 Ok(())
@@ -540,7 +546,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 assert!(!el.slots[0].present, "the input carries no `heat`");
                 let t = el.index as f64 / el.count.max(1) as f64;
                 assign(&mut el.slots[0], &[t]);
@@ -562,7 +568,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 if el.index == 0 {
                     assign(&mut el.slots[0], &[1.0]);
                 } else {
@@ -585,7 +591,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 assign(&mut el.slots[0], &[0.5, 0.5]);
                 Ok(())
             }),
@@ -606,7 +612,7 @@ mod tests {
             &set,
             AttributeDomain::Primitive,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 assign(&mut el.slots[0], &[el.count as f64]);
                 Ok(())
             }),
@@ -628,7 +634,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(|el: &mut Element| {
+            &mut Fn_(|el: &mut Element| {
                 if el.index == 2 {
                     return Err("something specific went wrong".into());
                 }
@@ -650,7 +656,7 @@ mod tests {
             &set,
             AttributeDomain::Point,
             &lanes,
-            &Fn_(move |el: &mut Element| {
+            &mut Fn_(move |el: &mut Element| {
                 assert_eq!(el.count, expected);
                 assign(&mut el.slots[0], &[el.index as f64]);
                 Ok(())

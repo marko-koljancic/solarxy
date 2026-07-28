@@ -752,6 +752,10 @@ pub struct Engine {
     /// Host epoch clock (Unix ms) for node timestamps. Distinct from the
     /// cook driver's monotonic duration clock; see `set_epoch_clock`.
     epoch_clock: Option<fn() -> f64>,
+    /// Dirty nodes left over from the last [`Self::cook`], which is what
+    /// [`Self::tick`] refuses to advance the clock past. See the pacing
+    /// rationale on `tick`.
+    last_cook_remaining: usize,
 }
 
 impl Engine {
@@ -780,6 +784,7 @@ impl Engine {
             expr_index: crate::refs::ExprIndex::default(),
             clock: crate::runtime::SceneClock::default(),
             epoch_clock: None,
+            last_cook_remaining: 0,
         }
     }
 
@@ -3025,6 +3030,9 @@ impl Engine {
         if remaining == 0 {
             self.manual_cook_requested = false;
         }
+        // Retained for `tick`'s pacing gate rather than discarded: it is the
+        // only signal that says whether the frame just cooked is complete.
+        self.last_cook_remaining = remaining;
         // Recooked outputs may no longer match anchored geometry hashes.
         self.refresh_review_staleness(&mut events);
         events
@@ -3444,6 +3452,33 @@ impl Engine {
     /// move, so a paused editor costs one boolean per frame.
     pub fn tick(&mut self) -> EventBatch {
         if !self.clock.playing {
+            return self.batch(Vec::new());
+        }
+        // Pacing: never advance past a frame the cook has not finished.
+        //
+        // Without this the clock ran free while the budget cut the cook
+        // short, and `retime` re-dirtied the head of the chain before the
+        // tail was ever reached -- so on a scene whose wrangle costs more
+        // than one budget slice, the DISPLAY node never cooked at all and
+        // the mesh sat frozen while the frame counter climbed. Every
+        // frame's work was thrown away and redone at a new time.
+        //
+        // Waiting means a heavy scene plays below its nominal rate instead
+        // of skipping, which is the honest behaviour: what you watch is
+        // what you would export.
+        //
+        // This cannot deadlock. `remaining_dirty` counts only `Dirty`
+        // nodes (a `Pending` node awaiting an async import is excluded), and
+        // every path out of `cook_one` leaves a node `Clean` or `Pending` --
+        // including the error path. So the dirty set always drains given
+        // passes, and the only thing that re-fills it during playback is
+        // this very `retime`, which cannot run while the gate is closed.
+        //
+        // Manual scrubbing is deliberately NOT gated: `SetFrame` and `Stop`
+        // seek directly, because someone dragging the playhead should get
+        // the frame they asked for rather than the one the cook is ready to
+        // give.
+        if self.last_cook_remaining > 0 {
             return self.batch(Vec::new());
         }
         let was_playing = self.clock.playing;

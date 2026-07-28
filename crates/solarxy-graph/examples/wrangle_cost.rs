@@ -67,15 +67,15 @@ fn main() {
                 }
             };
             let base = EvalCtx::new(SceneTime::default());
-            let runner = Runner::new(&program, base, source);
+            let mut runner = Runner::new(&program, base, source);
             let bindings = program.lane_bindings();
 
             // One warm pass so the first measurement is not paying for
             // first-touch page faults on the freshly built buffers.
-            let _ = wrangle(&set, AttributeDomain::Point, &bindings, &runner);
+            let _ = wrangle(&set, AttributeDomain::Point, &bindings, &mut runner);
 
             let start = Instant::now();
-            let out = wrangle(&set, AttributeDomain::Point, &bindings, &runner);
+            let out = wrangle(&set, AttributeDomain::Point, &bindings, &mut runner);
             let elapsed = start.elapsed();
             assert!(out.is_ok(), "the program must run");
 

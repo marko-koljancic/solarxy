@@ -6554,3 +6554,144 @@ fn cook_totals_accumulate_across_cooks() {
         "the total only grows"
     );
 }
+
+// ---- playback pacing (round 2) ----
+//
+// The bug these pin: the clock used to advance every tick regardless of
+// whether the cook had finished, so on a scene whose cook exceeds one budget
+// slice the retime re-dirtied the head of the chain before the tail was
+// reached and the display node never cooked at all.
+
+/// A cook budget that permits `n` budget CHECKS, then refuses.
+///
+/// Not the same as "n nodes": `cook_until` always cooks the first eligible
+/// node without asking (the forward-progress rule at `driver.rs`), so
+/// `budget_of(0)` still cooks exactly one node and stops.
+fn budget_of(n: usize) -> impl FnMut() -> bool {
+    let mut left = n;
+    move || {
+        let ok = left > 0;
+        left = left.saturating_sub(1);
+        ok
+    }
+}
+
+#[test]
+fn the_clock_waits_for_an_unfinished_cook() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "transform");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: a,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: b,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput { ctx, node: Some(b) })
+        .unwrap();
+
+    // Drain, then start the clock from a clean slate.
+    e.cook(&mut || true);
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+
+    // Dirty the chain and cook it only PARTWAY: one node cooks, the rest
+    // is left over. That is exactly the budget-exhausted state.
+    // One node cooks (forward progress), the second is left Dirty. That is
+    // exactly the state a budget-exhausted frame is in.
+    e.mark_dirty(ctx, a);
+    e.cook(&mut budget_of(0));
+
+    e.tick();
+    assert_eq!(
+        e.clock().frame,
+        start,
+        "the clock must not advance while a cook is still outstanding"
+    );
+
+    // Once the cook drains, it moves again.
+    e.cook(&mut || true);
+    e.tick();
+    assert_eq!(
+        e.clock().frame,
+        start + 1,
+        "a drained cook releases the clock"
+    );
+}
+
+#[test]
+fn pacing_cannot_deadlock_the_clock() {
+    // The property that makes the gate safe: a cook always drains given
+    // passes, because every exit from `cook_one` leaves a node Clean or
+    // Pending and only `retime` re-dirties -- which cannot run while the
+    // gate is closed. A node that ERRORS must not be an exception.
+    let (mut e, ctx) = subflow_engine();
+    let p = add(&mut e, ctx, "transform"); // required input, unconnected -> errors
+    e.apply(Command::SetActiveOutput { ctx, node: Some(p) })
+        .unwrap();
+
+    e.cook(&mut || true);
+    assert!(
+        matches!(e.cook.status(p), Some(CookStatus::Error { .. })),
+        "the fixture needs an erroring node to be meaningful"
+    );
+
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+    // Several frames of the real host loop: tick, then cook.
+    for _ in 0..3 {
+        e.tick();
+        e.cook(&mut || true);
+    }
+    assert!(
+        e.clock().frame > start,
+        "an erroring node must not freeze the clock: a failed cook is a \
+         FINISHED cook, so the dirty set still drains"
+    );
+}
+
+#[test]
+fn a_static_scene_still_plays_at_full_rate() {
+    // Nothing time-dependent: retime dirties nothing, every cook drains
+    // trivially, and the gate must never close.
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    e.apply(Command::SetActiveOutput { ctx, node: Some(b) })
+        .unwrap();
+    e.cook(&mut || true);
+
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+    for _ in 0..5 {
+        e.tick();
+        e.cook(&mut || true);
+    }
+    assert_eq!(
+        e.clock().frame,
+        start + 5,
+        "a scene with nothing to recook must advance one frame per tick"
+    );
+}
+
+#[test]
+fn scrubbing_is_not_gated_by_an_unfinished_cook() {
+    // Pacing governs PLAYBACK. Someone dragging the playhead should land on
+    // the frame they asked for, not the one the cook is ready to give.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetActiveOutput { ctx, node: Some(a) })
+        .unwrap();
+    e.cook(&mut || true);
+
+    e.mark_dirty(ctx, a);
+    e.cook(&mut budget_of(0));
+
+    e.apply(Command::SetFrame { frame: 42 }).unwrap();
+    assert_eq!(e.clock().frame, 42, "an explicit seek is never gated");
+}

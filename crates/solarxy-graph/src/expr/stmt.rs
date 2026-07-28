@@ -573,12 +573,22 @@ pub struct Runner<'a> {
     /// The context minus its element scope; the scope is per element.
     base: EvalCtx<'a>,
     source: &'a str,
+    /// The locals' register file, allocated once here and cleared per
+    /// element.
+    ///
+    /// This used to be a `vec![None; n]` inside `run`, which meant one heap
+    /// allocation PER ELEMENT -- 5,329 of them for a 72x72 grid, through
+    /// wasm's allocator, on the hottest loop in the product. The doc comment
+    /// above already claimed the register file was allocated once; this is
+    /// the field that finally makes that true.
+    locals: Vec<Option<Value>>,
 }
 
 impl<'a> Runner<'a> {
     #[must_use]
     pub fn new(program: &'a Program, base: EvalCtx<'a>, source: &'a str) -> Self {
         Self {
+            locals: vec![None; program.locals.len()],
             program,
             base,
             source,
@@ -593,14 +603,17 @@ impl<'a> Runner<'a> {
 }
 
 impl solarxy_kernel::wrangle::ElementFn for Runner<'_> {
-    fn run(&self, element: &mut solarxy_kernel::wrangle::Element) -> Result<(), String> {
-        let mut locals: Vec<Option<Value>> = vec![None; self.program.locals.len()];
+    fn run(&mut self, element: &mut solarxy_kernel::wrangle::Element) -> Result<(), String> {
+        // Reset rather than reallocate. A local is undeclared until the
+        // statement that assigns it runs, and that must be true afresh for
+        // every element -- element 2 must not see element 1's `d`.
+        self.locals.fill(None);
 
         for stmt in &self.program.stmts {
             let value = {
                 let registers = Registers {
                     slots: element.slots,
-                    locals: &locals,
+                    locals: &self.locals,
                     lanes: &self.program.lanes,
                     local_decls: &self.program.locals,
                     index: element.index,
@@ -624,7 +637,7 @@ impl solarxy_kernel::wrangle::ElementFn for Runner<'_> {
                             value.type_name()
                         )
                     })?;
-                    locals[slot] = Some(widened);
+                    self.locals[slot] = Some(widened);
                 }
                 Target::Attr(slot) => {
                     let lanes = value.lanes().ok_or_else(|| {
@@ -697,8 +710,8 @@ mod tests {
     ) -> Result<GeometrySet, String> {
         let prog = program(src);
         let base = EvalCtx::new(SceneTime::default());
-        let runner = Runner::new(&prog, base, src);
-        wrangle(set, domain, &prog.lane_bindings(), &runner).map_err(|e| e.to_string())
+        let mut runner = Runner::new(&prog, base, src);
+        wrangle(set, domain, &prog.lane_bindings(), &mut runner).map_err(|e| e.to_string())
     }
 
     fn float_lane<'a>(set: &'a GeometrySet, name: &str) -> &'a [f32] {
