@@ -50,6 +50,10 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "display-flag", keys: "e", context: "canvas", group: "Node Canvas", description: "Set the display flag on the selection (subflow)" },
   { id: "rename", keys: "f2", context: "canvas", group: "Node Canvas", description: "Rename the first selected node (inline)" },
   { id: "node-info", keys: "i", context: "canvas", group: "Node Canvas", description: "Show info for the selected node", note: "Ports, parameters and cook status; also on the hover radial" },
+  // Canvas-scoped, so it does not collide with the viewport's P (Perspective).
+  // Both bindings note the other, because the same key doing two things
+  // depending on where the cursor is has to be said out loud.
+  { id: "floating-props", keys: "p", context: "canvas", group: "Node Canvas", description: "Toggle the floating properties panel", note: "Over the viewport, P is the Perspective projection" },
   { id: "flow-grid", keys: "g", context: "canvas", group: "Node Canvas", description: "Toggle the canvas grid" },
   { id: "flow-minimap", keys: "m", context: "canvas", group: "Node Canvas", description: "Toggle the minimap" },
   { id: "flow-controls", keys: "c", context: "canvas", group: "Node Canvas", description: "Toggle the zoom controls" },
@@ -81,7 +85,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "view-front", keys: "f", context: "viewport", group: "Viewport & Layout", description: "View: Front" },
   { id: "view-left", keys: "l", context: "viewport", group: "Viewport & Layout", description: "View: Left" },
   { id: "view-bottom", keys: "b", context: "viewport", group: "Viewport & Layout", description: "View: Bottom" },
-  { id: "view-perspective", keys: "p", context: "viewport", group: "Viewport & Layout", description: "Perspective projection" },
+  { id: "view-perspective", keys: "p", context: "viewport", group: "Viewport & Layout", description: "Perspective projection", note: "Over the node canvas, P toggles the floating properties panel" },
   { id: "view-ortho", keys: "o", context: "viewport", group: "Viewport & Layout", description: "Orthographic projection", note: "In a UV pane, O toggles the overlap display instead (desktop parity)" },
   // Viewport tools (Maya-style Q/W/E/R; Blender's G/R/S collide with the grid,
   // connection-style and review bindings). E is free over the viewport because

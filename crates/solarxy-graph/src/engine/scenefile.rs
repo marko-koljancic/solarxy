@@ -88,6 +88,8 @@ fn node_to_json(n: &NodeData) -> sf::NodeJson {
         params,
         port_order,
         position: n.position,
+        created_ms: n.created_ms,
+        modified_ms: n.modified_ms,
     }
 }
 
@@ -244,6 +246,14 @@ fn graph_from_json(
                 (!parsed.is_empty()).then(|| (port.clone(), parsed))
             })
             .collect();
+
+        // Timestamps ride through untouched, including their absence: a
+        // document written before 0.8.1 (or by a host with no wall clock)
+        // stays "unknown" rather than being restamped with the load time,
+        // which would tell the user this node was created just now.
+        node.created_ms = nj.created_ms;
+        node.modified_ms = nj.modified_ms;
+
         out_nodes.push(node);
     }
 

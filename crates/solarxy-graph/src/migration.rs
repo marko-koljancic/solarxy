@@ -138,6 +138,8 @@ pub fn load_node(
         bypassed,
         port_order: BTreeMap::new(),
         placeholder: None,
+        created_ms: None,
+        modified_ms: None,
     };
     LoadedNode { node, warnings }
 }
@@ -164,6 +166,8 @@ fn placeholder(
         bypassed,
         port_order: BTreeMap::new(),
         placeholder: Some(reason.clone()),
+        created_ms: None,
+        modified_ms: None,
     };
     LoadedNode {
         node,

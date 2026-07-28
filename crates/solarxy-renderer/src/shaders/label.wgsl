@@ -5,8 +5,19 @@
 // rest are one quad per glyph from the packed glyph stream. Screen-space
 // expansion follows the vs_point recipe (points_lines.wgsl): pixel
 // offsets become NDC through the wireframe-params viewport size, scaled
-// by clip.w so orthographic (w = 1) works unchanged. Overlay semantics:
-// no depth test, matching the DOM pins this channel replaced.
+// by clip.w so orthographic (w = 1) works unchanged.
+//
+// Depth: the host picks between two pipelines. In a wireframe-only pane
+// nothing occludes, so labels draw over everything as they always have. In
+// a shaded pane the pipeline depth-tests, and a label on a point facing away
+// from the camera is hidden by the surface in front of it -- which is what
+// makes a dense point cloud readable instead of showing you the far side of
+// the object through the near side. `place` biases the anchor a fixed
+// fraction of its distance TOWARD the eye before projecting, which is exact
+// in screen space (the point slides along its own eye ray, so x and y do not
+// move) and buys the tolerance the test needs: the anchor sits exactly ON
+// the surface it labels, and its chip and glyphs spill over neighbouring
+// pixels whose surface depth differs slightly.
 
 struct Camera {
     view_pos: vec4<f32>,
@@ -42,9 +53,21 @@ struct LabelParams {
     chip_pad_y: f32,
     chip_radius: f32,
     label_count: u32,
+    // 1 when chips are drawn. Gates the chip AND shifts the dot and glyph
+    // vertex ranges, so it must match `LabelResources::vertex_count`.
+    chip_on: u32,
+    _pad: vec3<u32>,
 }
 @group(2) @binding(0)
 var<uniform> lp: LabelParams;
+
+// How far toward the eye the anchor is nudged before projecting, as a
+// fraction of its distance. Must exceed the surface-depth variation across a
+// label's own width (so a label does not clip against the surface it sits
+// on) and stay well under an object's thickness (so a back-face label is
+// still hidden by the near face). One percent clears both by orders of
+// magnitude at any sane zoom.
+const OCCLUSION_BIAS: f32 = 0.01;
 
 struct Label {
     pos: vec3<f32>,
@@ -98,8 +121,14 @@ fn corner_of(id: u32) -> vec2<f32> {
 }
 
 // Anchors a screen-space quad (px offsets, +y down) onto a world point.
+//
+// The anchor slides along its own eye ray by OCCLUSION_BIAS first. That is a
+// no-op in screen space (a point on the eye ray projects to the same pixel
+// however far along it sits) and a depth bias everywhere else, so it is free
+// when the pipeline ignores depth and exactly what is needed when it does not.
 fn place(world: vec3<f32>, offset_px: vec2<f32>) -> vec4<f32> {
-    var clip = camera.view_proj * vec4(world, 1.0);
+    let toward_eye = camera.view_pos.xyz - world;
+    var clip = camera.view_proj * vec4(world + toward_eye * OCCLUSION_BIAS, 1.0);
     let ndc = offset_px * vec2(2.0, -2.0) / vec2(params.viewport_w, params.viewport_h);
     return vec4(clip.xy + ndc * clip.w, clip.zw);
 }
@@ -107,9 +136,13 @@ fn place(world: vec3<f32>, offset_px: vec2<f32>) -> vec4<f32> {
 @vertex
 fn vs_label(@builtin(vertex_index) vid: u32) -> VertexOutput {
     let n = lp.label_count;
+    // Where the dot run begins: after the chips when they are drawn, at zero
+    // when they are not. Mirrors `LabelResources::vertex_count`.
+    let dot_base = n * 6u * lp.chip_on;
+    let glyph_base = dot_base + n * 6u;
     var out: VertexOutput;
 
-    if vid < n * 6u {
+    if vid < dot_base {
         // Chip: spans the text run plus padding, vertically centered.
         let label = labels[vid / 6u];
         let c = corner_of(vid % 6u);
@@ -125,9 +158,9 @@ fn vs_label(@builtin(vertex_index) vid: u32) -> VertexOutput {
         out.mode = 0u;
         out.local = (c - vec2(0.5)) * half * 2.0;
         out.extra = vec3(half, lp.chip_radius);
-    } else if vid < n * 12u {
+    } else if vid < glyph_base {
         // Dot: centered on the anchor, sized for core plus halo.
-        let label = labels[(vid - n * 6u) / 6u];
+        let label = labels[(vid - dot_base) / 6u];
         let c = corner_of(vid % 6u);
         let halo = HALO_CSS_PX * lp.dot_px / 6.0;
         let r = lp.dot_px * 0.5 + halo;
@@ -138,7 +171,7 @@ fn vs_label(@builtin(vertex_index) vid: u32) -> VertexOutput {
         out.extra = vec3(lp.dot_px * 0.5, halo, 0.0);
     } else {
         // Glyph: one atlas cell, positioned by its column in the run.
-        let g = (vid - n * 12u) / 6u;
+        let g = (vid - glyph_base) / 6u;
         let word = glyph_words[g];
         let glyph = word & 31u;
         let col = (word >> 5u) & 63u;

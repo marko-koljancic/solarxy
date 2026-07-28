@@ -12,6 +12,7 @@
 use solarxy_graph::engine::{Command, Engine, EngineEvent, PortRefDto, SceneSidecar};
 use solarxy_graph::document::{GraphContext, NodeId};
 use solarxy_graph::params::{ParamSource, ParamValue};
+use solarxy_graph::runtime::LoopMode;
 use solarxy_graph::review::{ReviewAnchor, ReviewCategory};
 
 struct Builder {
@@ -45,14 +46,52 @@ impl Builder {
     }
 
     fn set(&mut self, ctx: GraphContext, node: NodeId, key: &str, value: ParamValue) {
+        self.set_source(ctx, node, key, ParamSource::Literal(value));
+    }
+
+    /// Sets a param from any source, which is what lets a sample carry an
+    /// expression. `set` above is the literal shorthand; every scene
+    /// written before 0.8.1 uses only that one.
+    fn set_source(&mut self, ctx: GraphContext, node: NodeId, key: &str, value: ParamSource) {
         self.engine
             .apply(Command::SetParam {
                 ctx,
                 node,
                 key: key.to_string(),
-                value: ParamSource::Literal(value),
+                value,
             })
             .unwrap_or_else(|e| panic!("set {key}: {e}"));
+    }
+
+    /// Drives a param with an expression.
+    fn expr(&mut self, ctx: GraphContext, node: NodeId, key: &str, src: &str) {
+        self.set_source(
+            ctx,
+            node,
+            key,
+            ParamSource::Expression {
+                expr: src.to_string(),
+            },
+        );
+    }
+
+    /// The document's runtime settings: frame range, rate, loop mode, and
+    /// whether a published player starts playing on load.
+    ///
+    /// Saved in `.slxy` (the session half -- playing, current frame -- is
+    /// not), so a sample opens with the range its animation was authored
+    /// for rather than the 1-240 default.
+    fn runtime(&mut self, start: i64, end: i64, fps: f64, loop_mode: LoopMode, autoplay: bool) {
+        for cmd in [
+            Command::SetFrameRange { start, end },
+            Command::SetFps { fps },
+            Command::SetLoopMode { mode: loop_mode },
+            Command::SetAutoplay { autoplay },
+        ] {
+            self.engine
+                .apply(cmd)
+                .unwrap_or_else(|e| panic!("runtime: {e}"));
+        }
     }
 
     fn connect(&mut self, ctx: GraphContext, from: (NodeId, &str), to: (NodeId, &str)) {
@@ -476,6 +515,246 @@ fn lights_camera_review() -> Builder {
     b
 }
 
+/// Animated field: the 0.8.1 story end to end. A wrangle drives `@P` and
+/// `@Cd` from `$T`, a `ch()` expression ties one node's parameter to
+/// another's, and the camera and key light are themselves expression-driven,
+/// so pressing Play moves the geometry, the shading and the shot at once.
+fn animated_field() -> Builder {
+    let mut b = Builder::new();
+    b.note(
+        ROOT,
+        [40.0, -200.0],
+        [460.0, 130.0],
+        "Press Play (Space). Everything moving here is an expression or a \
+         wrangle reading the scene clock: no keyframes exist yet. $T is \
+         scene seconds, $F the frame. Scrub the timeline under the viewport \
+         to step through it by hand.",
+    );
+
+    let geo = b.add(ROOT, "geo", [120.0, 0.0]);
+    b.rename(ROOT, geo, "field");
+    let g = sub(geo);
+
+    // The control node: never displayed, exists only to be read. This is
+    // what `ch()` is for, and having a visible source makes the mechanism
+    // legible instead of magic.
+    let control = b.add(g, "box", [-260.0, -180.0]);
+    b.rename(g, control, "control");
+    b.set(g, control, "width", ParamValue::Float(6.0));
+    b.note(
+        g,
+        [-260.0, -300.0],
+        [250.0, 100.0],
+        "A control node. Nothing displays it; the plane below reads its \
+         Width through ch(\"control/width\"). Change it and the field \
+         resizes. Rename it and the expression follows.",
+    );
+
+    let plane = b.add(g, "plane", [0.0, -180.0]);
+    b.rename(g, plane, "subject");
+    b.expr(g, plane, "width", "ch(\"control/width\")");
+    b.expr(g, plane, "height", "ch(\"control/width\")");
+    b.set(g, plane, "width_segments", ParamValue::Int(72));
+    b.set(g, plane, "height_segments", ParamValue::Int(72));
+
+    // Lay the plane flat FIRST. The generator authors it in XY, and the
+    // wrangle below reads @P.x / @P.z and displaces along @P.y, which is
+    // only the right thing once the surface is in the ground plane.
+    // Rotating afterwards instead would tip the ripple on its side.
+    let lay = b.add(g, "transform", [0.0, -120.0]);
+    b.set(g, lay, "rotate", ParamValue::Vec3([-90.0, 0.0, 0.0]));
+    b.connect(g, (plane, "geometry"), (lay, "geometry"));
+
+    // The ripple. Points only: @P is a point attribute, so a primitive
+    // wrangle could not move the surface.
+    let ripple = b.add(g, "attribute_wrangle", [0.0, -60.0]);
+    b.rename(g, ripple, "ripple");
+    b.set(
+        g,
+        ripple,
+        "program",
+        ParamValue::Text(
+            "float d = length(set(@P.x, 0, @P.z));\n\
+             float wave = sin(d * 2.2 - $T * 2.5);\n\
+             float falloff = 1 - clamp(d / 3.5, 0, 1);\n\
+             float h = wave * falloff * 0.45;\n\
+             @P = set(@P.x, @P.y + h, @P.z);\n\
+             @Cd = set(0.55 + h, 0.45, 0.75 - h);"
+                .into(),
+        ),
+    );
+    b.connect(g, (lay, "geometry"), (ripple, "geometry"));
+
+    let normals = b.add(g, "compute_normals", [0.0, 40.0]);
+    b.connect(g, (ripple, "geometry"), (normals, "geometry"));
+    b.display(g, normals);
+    b.note(
+        g,
+        [240.0, -80.0],
+        [280.0, 190.0],
+        "The wrangle runs once per point. It reads $T, so the engine \
+         re-cooks it every frame while the clock runs and leaves it alone \
+         when stopped. @Cd is the reserved colour lane the viewport already \
+         displays, which is why the ripple is coloured without a material. \
+         compute_normals after it re-lights the moved surface.",
+    );
+
+    // An orbiting camera: the expression engine on something other than
+    // geometry, and the reason the scene reads as a shot rather than a
+    // turntable.
+    let camera = b.add(ROOT, "camera", [420.0, -40.0]);
+    b.rename(ROOT, camera, "orbit");
+    b.expr(
+        ROOT,
+        camera,
+        "position",
+        "set(sin($T * 0.35) * 6.5, 3.4 + sin($T * 0.7) * 0.8, cos($T * 0.35) * 6.5)",
+    );
+    b.set(ROOT, camera, "target", ParamValue::Vec3([0.0, 0.0, 0.0]));
+
+    let key = b.add(ROOT, "directional_light", [420.0, 60.0]);
+    b.set(ROOT, key, "position", ParamValue::Vec3([4.0, 5.0, 2.0]));
+    b.expr(ROOT, key, "intensity", "1.5 + sin($T * 1.1) * 0.45");
+    b.set(ROOT, key, "cast_shadow", ParamValue::Bool(true));
+    let fill = b.add(ROOT, "hemisphere_light", [420.0, 160.0]);
+    b.set(ROOT, fill, "intensity", ParamValue::Float(0.7));
+    b.note(
+        ROOT,
+        [620.0, -40.0],
+        [280.0, 160.0],
+        "The camera orbits and the key light breathes, both from plain \
+         expressions on ordinary parameters. Bind a pane to the camera from \
+         its Camera menu to ride along. Any numeric parameter in the scene \
+         can be driven this way: click the = beside its label.",
+    );
+
+    // Ten seconds at 24fps, looping. Autoplay is on so a published scene
+    // moves the moment somebody opens it; the editor deliberately ignores
+    // the flag and opens stopped.
+    b.runtime(1, 240, 24.0, LoopMode::Loop, true);
+    b
+}
+
+/// Procedural look-dev: texture network into a material network onto
+/// geometry, lit by an area light. Static on purpose -- it is about how a
+/// surface is built, and an animation would only get in the way.
+fn procedural_lookdev() -> Builder {
+    let mut b = Builder::new();
+    b.note(
+        ROOT,
+        [40.0, -200.0],
+        [470.0, 120.0],
+        "Three networks, one surface. The texture container builds maps \
+         procedurally, the material container consumes them, and the \
+         geometry container references the material by path. Dive into any \
+         of them by double-clicking.",
+    );
+
+    // --- maps -------------------------------------------------------
+    let tex = b.add(ROOT, "texnet", [120.0, 0.0]);
+    b.rename(ROOT, tex, "maps");
+    let t = sub(tex);
+    let cells = b.add(t, "voronoi", [0.0, -160.0]);
+    b.set(t, cells, "scale", ParamValue::Float(7.0));
+    b.set(t, cells, "seed", ParamValue::Int(4));
+    b.set(t, cells, "jitter", ParamValue::Float(0.85));
+    let grain = b.add(t, "noise", [-220.0, -160.0]);
+    b.set(t, grain, "scale", ParamValue::Float(24.0));
+    b.set(t, grain, "seed", ParamValue::Int(11));
+    let blended = b.add(t, "mix", [0.0, -40.0]);
+    b.set(t, blended, "factor", ParamValue::Float(0.35));
+    b.connect(t, (cells, "image"), (blended, "image"));
+    b.connect(t, (grain, "image"), (blended, "blend"));
+    let shaped = b.add(t, "levels", [0.0, 60.0]);
+    b.set(t, shaped, "gamma", ParamValue::Float(1.35));
+    b.set(t, shaped, "in_black", ParamValue::Float(0.08));
+    b.connect(t, (blended, "image"), (shaped, "image"));
+    b.display(t, shaped);
+    b.note(
+        t,
+        [240.0, -160.0],
+        [280.0, 160.0],
+        "Voronoi cells for the large structure, fine noise on top, mixed \
+         and then shaped with levels. Every map here is generated: the \
+         scene carries no image files, so it is a few kilobytes and looks \
+         the same on any machine.",
+    );
+
+    // --- material ---------------------------------------------------
+    let mat = b.add(ROOT, "matnet", [320.0, 0.0]);
+    b.rename(ROOT, mat, "surface");
+    let m = sub(mat);
+    let map = b.add(m, "tex_ref", [0.0, -120.0]);
+    b.set(m, map, "texture_path", ParamValue::NodeRef(Some(tex)));
+    let surface = b.add(m, "principled", [0.0, 20.0]);
+    b.set(
+        m,
+        surface,
+        "base_color",
+        ParamValue::Color([0.72, 0.44, 0.30, 1.0]),
+    );
+    b.set(m, surface, "roughness", ParamValue::Float(0.55));
+    b.set(m, surface, "metallic", ParamValue::Float(0.15));
+    b.set(
+        m,
+        surface,
+        "material_name",
+        ParamValue::Text("fired clay".into()),
+    );
+    b.connect(m, (map, "image"), (surface, "base_color_map"));
+    b.display(m, surface);
+
+    // --- geometry ---------------------------------------------------
+    let geo = b.add(ROOT, "geo", [520.0, 0.0]);
+    b.rename(ROOT, geo, "subject");
+    let g = sub(geo);
+    let knot = b.add(g, "torus_knot", [0.0, -220.0]);
+    b.set(g, knot, "radius", ParamValue::Float(1.1));
+    b.set(g, knot, "tube", ParamValue::Float(0.34));
+    b.set(g, knot, "tubular_segments", ParamValue::Int(240));
+    b.set(g, knot, "radial_segments", ParamValue::Int(32));
+    let uvs = b.add(g, "uv_project", [0.0, -100.0]);
+    b.set(g, uvs, "scale", ParamValue::Vec2([3.0, 1.0]));
+    b.connect(g, (knot, "geometry"), (uvs, "geometry"));
+    let bind = b.add(g, "material", [0.0, 20.0]);
+    b.set(g, bind, "mode", ParamValue::Enum("reference".into()));
+    b.set(g, bind, "material_path", ParamValue::NodeRef(Some(mat)));
+    b.connect(g, (uvs, "geometry"), (bind, "geometry"));
+    b.display(g, bind);
+    b.note(
+        g,
+        [240.0, -140.0],
+        [280.0, 170.0],
+        "uv_project gives the knot somewhere to put the map before the \
+         material is bound; without UVs a textured surface has nothing to \
+         look up. Open the UV pane (3) to see the layout.",
+    );
+
+    // --- lighting and camera ---------------------------------------
+    let area = b.add(ROOT, "rect_area_light", [720.0, -80.0]);
+    b.set(ROOT, area, "translate", ParamValue::Vec3([2.4, 3.2, 2.0]));
+    b.set(ROOT, area, "rotate", ParamValue::Vec3([-48.0, 32.0, 0.0]));
+    b.set(ROOT, area, "width", ParamValue::Float(4.0));
+    b.set(ROOT, area, "height", ParamValue::Float(2.5));
+    b.set(ROOT, area, "intensity", ParamValue::Float(14.0));
+    let bounce = b.add(ROOT, "hemisphere_light", [720.0, 30.0]);
+    b.set(ROOT, bounce, "intensity", ParamValue::Float(0.55));
+    let camera = b.add(ROOT, "camera", [720.0, 130.0]);
+    b.set(ROOT, camera, "position", ParamValue::Vec3([2.6, 1.7, 3.4]));
+    b.set(ROOT, camera, "target", ParamValue::Vec3([0.0, 0.0, 0.0]));
+    b.set(ROOT, camera, "fov_y", ParamValue::Float(38.0));
+    b.note(
+        ROOT,
+        [920.0, -80.0],
+        [280.0, 170.0],
+        "A rectangular area light: its Width and Height are real, so \
+         widening it broadens the highlight and softens the shadow edge \
+         the way a larger softbox would. Rotate it and the shading \
+         follows.",
+    );
+    b
+}
+
 fn main() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web/public/samples");
     std::fs::create_dir_all(&dir).expect("samples dir");
@@ -484,4 +763,6 @@ fn main() {
     attributes_and_displace().save(&dir, "attributes-and-displace.slxy");
     texture_to_material().save(&dir, "texture-to-material.slxy");
     lights_camera_review().save(&dir, "lights-camera-review.slxy");
+    animated_field().save(&dir, "animated-field.slxy");
+    procedural_lookdev().save(&dir, "procedural-lookdev.slxy");
 }

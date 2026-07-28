@@ -270,7 +270,7 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
               Projection. Up is always world Y: there is no roll.",
         search_aliases: &["camera", "view", "cam", "lens"],
         glyph: "camera",
-        role: NodeRole::Standard,
+        role: NodeRole::Camera,
         cook: passive_cook,
         migrate: None,
     }

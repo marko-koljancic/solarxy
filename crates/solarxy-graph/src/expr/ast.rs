@@ -24,6 +24,10 @@ pub enum Var {
 }
 
 impl Var {
+    /// Every variable, in declaration order. Feeds the editor's syntax
+    /// highlighting, which a drift test holds to this list.
+    pub const ALL: &'static [Var] = &[Var::Time, Var::Frame, Var::Fps, Var::Pi, Var::E];
+
     /// The spelling, without the leading `$`.
     #[must_use]
     pub fn name(self) -> &'static str {

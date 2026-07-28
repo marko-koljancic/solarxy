@@ -174,6 +174,10 @@ pub enum NodeRole {
     Analyzer,
     ImageSource,
     Light,
+    /// A body that points the way it aims. Distinct from `Light` because
+    /// the two sit side by side in the root graph and are the two things
+    /// there that are not geometry.
+    Camera,
     Note,
 }
 

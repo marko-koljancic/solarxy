@@ -13,6 +13,7 @@ import { useMirror } from "../store/mirror";
 import type { LoopMode } from "../engine/types";
 import { NumberField } from "./inputs/NumberField";
 import { Select } from "./Select";
+import { TransportTrack } from "./TransportTrack";
 
 /** The range and rate fields deliberately do NOT preview: each commit is an
  * undo step, and a precision drag would otherwise mint one per pointer tick. */
@@ -33,6 +34,8 @@ export function TransportBar() {
 
   return (
     <div className="transport-bar" role="group" aria-label="Playback">
+      <TransportTrack />
+      <div className="transport-row">
       <div className="transport-buttons">
         <button
           type="button"
@@ -172,6 +175,7 @@ export function TransportBar() {
           }))}
           onChange={(mode) => dispatch({ type: "setLoopMode", mode })}
         />
+      </div>
       </div>
     </div>
   );

@@ -39,6 +39,7 @@ import {
   seedExpression,
 } from "./inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
+import { nodePathOf } from "../flow/nodeActions";
 import {
   paramTabs,
   paramVisible,
@@ -346,6 +347,7 @@ function LiteralField({
  * never disagree: a wrangle parse failure IS the cook error, formatted by
  * the engine as "line N, column M: ...". */
 function SnippetRow({
+  ctx,
   node,
   spec,
   label,
@@ -361,6 +363,9 @@ function SnippetRow({
         value={String(value ?? "")}
         ariaLabel={spec.label}
         error={error}
+        // The window titles itself with the node path and the param key, so
+        // several open editors are tellable apart.
+        path={`${nodePathOf(ctx, node)}/${spec.key}`}
         onCommit={onCommit}
       />
     </div>
@@ -570,17 +575,35 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
   );
 }
 
-export function ParameterPanel() {
+/** The parameter editor, hosted by both the dock panel and the floating
+ * P panel.
+ *
+ * `surface` names which of the two this instance is, which is all it needs
+ * to find its own pin. Everything else is identical, deliberately: one
+ * editor with two hosts, rather than a second editor that drifts. */
+export function ParameterPanel({
+  surface = "docked",
+}: {
+  surface?: "docked" | "floating";
+} = {}) {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
   const reports = useMirror((s) => s.reports);
+  const pinnedId = useUi((s) => s.propsPin[surface]);
 
+  // A pin wins over the selection, and survives the pinned node being in
+  // another context: `graph` is the CURRENT canvas, so a pin followed
+  // across a dive would silently show nothing. Falling back to the
+  // selection in that case would be worse (the header would name one node
+  // while the rows edited another), so an out-of-context pin renders as a
+  // clearly-labelled empty state below.
   const selectedId = graph.selection[0];
+  const targetId = pinnedId ?? selectedId;
   const node = useMemo(
-    () => graph.nodes.find((n) => n.id === selectedId),
-    [graph, selectedId],
+    () => graph.nodes.find((n) => n.id === targetId),
+    [graph, targetId],
   );
   // The active tab lives in the ui store so the Properties menu bar can
   // read it (Reset Current Tab); falls back to the first tab whenever the
@@ -591,7 +614,20 @@ export function ParameterPanel() {
   if (!node) {
     return (
       <div className="param-panel empty">
-        <span>Select a node to edit its parameters.</span>
+        {pinnedId !== null ? (
+          <span>
+            Pinned to a node in another network.{" "}
+            <button
+              className="crumb-link"
+              onClick={() => useUi.getState().setPropsPin(surface, null)}
+            >
+              Unpin
+            </button>{" "}
+            to follow the selection again.
+          </span>
+        ) : (
+          <span>Select a node to edit its parameters.</span>
+        )}
       </div>
     );
   }
@@ -615,6 +651,18 @@ export function ParameterPanel() {
     <div className="param-panel">
       <div className="param-header">
         <span className="param-title">{nodeLabel(node, desc)}</span>
+        {pinnedId !== null && (
+          // The panel must never silently lie about what it is editing: a
+          // pinned surface looks identical to an unpinned one until you
+          // click another node and nothing happens.
+          <button
+            className="param-pinned"
+            title="Pinned to this node. Click to follow the selection again."
+            onClick={() => useUi.getState().setPropsPin(surface, null)}
+          >
+            pinned
+          </button>
+        )}
         {stats?.image != null ? (
           <span className="param-stats">
             {stats.image[0]} × {stats.image[1]}

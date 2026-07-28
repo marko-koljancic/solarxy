@@ -19,6 +19,16 @@ use super::value::{Value, map1, map2};
 use std::ops::Range;
 
 /// Every builtin name, for error messages and editor completion.
+/// The context-reading functions: cross-node parameter reads and geometry
+/// queries. Not in [`BUILTIN_NAMES`] because they are resolved against the
+/// document rather than computed from their arguments, but the editor
+/// highlights them the same way, so they are enumerated here for it.
+pub const QUERY_NAMES: &[&str] = &["ch", "bbox", "npoints", "nprims", "nmeshes", "centroid"];
+
+/// The type keywords a wrangle may declare a local with
+/// (`crate::expr::stmt::LocalType`).
+pub const LOCAL_TYPE_NAMES: &[&str] = &["float", "vector2", "vector", "vector4"];
+
 pub const BUILTIN_NAMES: &[&str] = &[
     "abs",
     "sign",

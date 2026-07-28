@@ -110,6 +110,20 @@ describe("view presets (feedback wave 4)", () => {
     expect(lookupBinding("f", "canvas")?.id).toBe("canvas-fit");
   });
 
+  it("splits P between the canvas and the viewport, and says so on both", () => {
+    // The same key doing two things depending on where the cursor sits is
+    // defensible only if both bindings admit it: the shortcuts modal
+    // renders these notes, so this is what makes the split discoverable
+    // rather than a trap.
+    expect(lookupBinding("p", "canvas")?.id).toBe("floating-props");
+    expect(lookupBinding("p", "viewport")?.id).toBe("view-perspective");
+
+    for (const id of ["floating-props", "view-perspective"]) {
+      const binding = KEYMAP.find((b) => b.id === id);
+      expect(binding?.note, `${id} must name the other P`).toBeTruthy();
+    }
+  });
+
   it("keeps F and L meaning different things per context", () => {
     expect(lookupBinding("f", "viewport")?.id).toBe("view-front");
     expect(lookupBinding("l", "canvas")?.id).toBe("layout-cycle");

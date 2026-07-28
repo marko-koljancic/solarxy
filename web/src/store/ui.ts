@@ -117,6 +117,14 @@ interface UiState {
    * menu bar can read it (Reset Current Tab). Not persisted; the panel
    * falls back to the first tab when the selection lacks this group. */
   paramTab: string;
+  /** Whether the floating properties panel is open (the P key over the
+   * node canvas). Session-only, like every other chrome flag here. */
+  floatingProps: boolean;
+  /** Pinned node per properties surface: `docked` for the dock panel,
+   * `floating` for the P panel. A pinned surface stops following the
+   * selection, so two nodes can be compared side by side. Null follows the
+   * selection, which is the default. */
+  propsPin: { docked: number | null; floating: number | null };
   setDockLayout: (layout: SerializedDockview) => void;
   setShortcutsOpen: (open: boolean) => void;
   setPrefsOpen: (open: boolean) => void;
@@ -137,6 +145,8 @@ interface UiState {
   setPaneColor: (id: string, color: string | null) => void;
   setAssetPreview: (asset: { hash: string; name: string } | null) => void;
   setParamTab: (tab: string) => void;
+  setFloatingProps: (open: boolean) => void;
+  setPropsPin: (surface: "docked" | "floating", node: number | null) => void;
 }
 
 /** The persisted dock arrangement. A corrupt blob is discarded here rather than
@@ -238,6 +248,11 @@ export const useUi = create<UiState>((set) => {
     assetPreview: null,
     paramTab: "",
     setParamTab: (tab) => set({ paramTab: tab }),
+    floatingProps: false,
+    propsPin: { docked: null, floating: null },
+    setFloatingProps: (open) => set({ floatingProps: open }),
+    setPropsPin: (surface, node) =>
+      set((s) => ({ propsPin: { ...s.propsPin, [surface]: node } })),
     setDockLayout: (layout) => {
       localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
       set({ dockLayout: layout });

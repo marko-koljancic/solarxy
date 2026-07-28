@@ -1,4 +1,6 @@
-// A multi-line program param, with line numbers and error-line highlighting.
+// A multi-line program param: a syntax-highlighted editor with line numbers
+// and error-line marking, plus a button that opens the same editor in a
+// resizable window for real work.
 //
 // Same draft-commit contract as TextField and ExpressionField: the edit is
 // ONE command, not one per keystroke. That matters more here than anywhere
@@ -12,15 +14,24 @@
 // engine already formats as "line N, column M: ...". Parsing that back is a
 // small price for not inventing a parallel diagnostics path that could
 // disagree with the badge the user is looking at.
+//
+// CodeMirror is loaded lazily. It is by far the heaviest thing the editor
+// depends on, and a scene with no wrangle in it should never download a code
+// editor; the Suspense fallback is a plain box of the right height, so the
+// panel does not jump when it arrives.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { shouldCommit } from "./draftCommit";
+import { lazy, Suspense, useState } from "react";
+import { SnippetEditorModal } from "./SnippetEditorModal";
+
+const CodeEditor = lazy(() => import("./CodeEditor"));
 
 interface Props {
   value: string;
   ariaLabel: string;
   /** The node's cook error, when it has one. */
   error?: string;
+  /** The node path shown in the window title, e.g. `/obj/geo1/wrangle1`. */
+  path?: string;
   onCommit: (v: string) => void;
 }
 
@@ -33,82 +44,35 @@ export function errorLine(message: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function SnippetField({ value, ariaLabel, error, onCommit }: Props) {
-  const [draft, setDraft] = useState(value);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
-  const guttersRef = useRef<HTMLDivElement>(null);
-  // What we last sent. Enter-to-commit is not used here, but blur still
-  // races the mirror round trip the same way, so the guard stays.
-  const sentRef = useRef(value);
-
-  useEffect(() => {
-    setDraft(value);
-    sentRef.current = value;
-  }, [value]);
-
-  const commit = () => {
-    if (!shouldCommit(draft, sentRef.current)) return;
-    sentRef.current = draft;
-    onCommit(draft);
-  };
-
-  // The gutter is a separate scrolling element, so it has to follow the
-  // textarea rather than share its scrollbar.
-  const syncScroll = () => {
-    if (guttersRef.current && areaRef.current) {
-      guttersRef.current.scrollTop = areaRef.current.scrollTop;
-    }
-  };
-  useLayoutEffect(syncScroll, [draft]);
-
-  // The error belongs to the COMMITTED program. While the draft differs the
-  // highlight would be pointing at a line the engine never saw, so it is
-  // hidden until the two agree again.
-  const dirty = draft !== value;
+export function SnippetField({ value, ariaLabel, error, path, onCommit }: Props) {
+  // The error belongs to the COMMITTED program. While an edit is in flight
+  // the highlight would point at a line the engine never saw, so the editor
+  // reports its dirty state and the mark hides until the two agree again.
+  const [dirty, setDirty] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const badLine = dirty ? null : errorLine(error);
-  const lines = draft.split("\n");
 
   return (
     <div className={`snippet-field${badLine ? " has-error" : ""}`}>
       <div className="snippet-body">
-        <div className="snippet-gutter" ref={guttersRef} aria-hidden="true">
-          {lines.map((_, i) => (
-            <div
-              key={i}
-              className={`snippet-lineno${badLine === i + 1 ? " error" : ""}`}
-            >
-              {i + 1}
-            </div>
-          ))}
-        </div>
-        <textarea
-          ref={areaRef}
-          className="snippet-input"
-          aria-label={ariaLabel}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          rows={Math.min(Math.max(lines.length, 3), 16)}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onScroll={syncScroll}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            // The canvas keymap must not see typing: `b`, `f`, `1`..`7` and
-            // the rest are all bound, and a program full of them would
-            // otherwise fly the viewport around while you write it.
-            e.stopPropagation();
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              commit();
-              areaRef.current?.blur();
-            }
-            if (e.key === "Escape") {
-              setDraft(value);
-              areaRef.current?.blur();
-            }
-          }}
-        />
+        <Suspense fallback={<div className="snippet-loading" aria-busy="true" />}>
+          <CodeEditor
+            value={value}
+            ariaLabel={ariaLabel}
+            errorLine={badLine ?? undefined}
+            onCommit={onCommit}
+            onDirty={setDirty}
+          />
+        </Suspense>
+        <button
+          type="button"
+          className="snippet-expand"
+          title="Edit in a window"
+          aria-label="Edit in a window"
+          onClick={() => setExpanded(true)}
+        >
+          <ExpandGlyph />
+        </button>
       </div>
       {badLine && error ? (
         <p className="snippet-error" role="status">
@@ -116,9 +80,34 @@ export function SnippetField({ value, ariaLabel, error, onCommit }: Props) {
         </p>
       ) : (
         <p className="snippet-hint">
-          {dirty ? "Cmd/Ctrl+Enter or click away to run" : " "}
+          {dirty ? "Cmd/Ctrl+Enter or click away to run" : " "}
         </p>
       )}
+      {expanded && (
+        <SnippetEditorModal
+          value={value}
+          ariaLabel={ariaLabel}
+          error={badLine && error ? error : undefined}
+          errorLine={badLine ?? undefined}
+          path={path}
+          onCommit={onCommit}
+          onClose={() => setExpanded(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function ExpandGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden>
+      <path
+        d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2l-5 5M2 14l5-5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
   );
 }

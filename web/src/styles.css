@@ -377,6 +377,9 @@ body.precision-drag-active {
   color: var(--node-text);
 }
 
+/* Per-role body boxes. These must match the `w`/`h` on the matching entry
+ * in `ROLE_BODIES` (nodeVisual.ts), which is what the SVG viewBox uses:
+ * disagree and the silhouette stretches. */
 .flow-node.role-container {
   width: 48px;
   height: 48px;
@@ -387,18 +390,24 @@ body.precision-drag-active {
   height: 28px;
 }
 
+/* A light is a fixture you place, not a stage in a chain; at the full
+ * 112x32 it out-weighed the operators around it. */
+.flow-node.role-light {
+  width: 96px;
+  height: 28px;
+}
+
 .node-body {
   position: absolute;
   inset: 0;
   border-radius: 6px;
 }
 
-/* Rect bodies (standard, gather, container): fill + border + the top-down
- * sheen in CSS (the segmentation seams are retired). Shaped
- * roles draw an SVG body instead and keep this layer bare. */
+/* Rect bodies (standard, gather): fill + border + the top-down sheen in
+ * CSS. Shaped roles draw an SVG body instead and keep this layer bare.
+ * Container left this list in 0.8.1 when it gained a folder silhouette. */
 .flow-node.role-standard .node-body,
-.flow-node.role-gather .node-body,
-.flow-node.role-container .node-body {
+.flow-node.role-gather .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
@@ -407,14 +416,9 @@ body.precision-drag-active {
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
 }
 
-.flow-node.role-container .node-body {
-  border-radius: 8px;
-}
-
 .flow-node:hover .role-hover,
 .flow-node.role-standard:hover .node-body,
-.flow-node.role-gather:hover .node-body,
-.flow-node.role-container:hover .node-body {
+.flow-node.role-gather:hover .node-body {
   border-color: var(--geometry-node-border-hover);
 }
 
@@ -423,7 +427,8 @@ body.precision-drag-active {
   border-color: rgba(212, 175, 55, 0.55);
 }
 
-/* Shaped silhouettes (branch, analyzer, imageSource, light): the SVG body. */
+/* Shaped silhouettes (branch, analyzer, imageSource, light, camera,
+ * container): the SVG body. */
 .node-body-svg {
   position: absolute;
   inset: 0;
@@ -2723,11 +2728,19 @@ body.reduce-motion .cook-arc {
   --cat-accent: color-mix(in srgb, var(--node-cat-container-mat) 60%, rgba(0, 0, 0, 0.45));
   --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-mat) 45%, rgba(0, 0, 0, 0.6));
 }
-.flow-node.role-container .node-body {
-  border-color: var(--cat-accent, var(--geometry-node-border));
+/* The context tint now rides the SVG stroke rather than a CSS border, since
+ * the container body became a folder silhouette. */
+.flow-node.role-container .node-body-svg .body-stroke {
+  stroke: var(--cat-accent, var(--geometry-node-border));
 }
-.flow-node.role-container:hover .node-body {
-  border-color: var(--cat-accent-hover, var(--geometry-node-border-hover));
+.flow-node.role-container:hover .node-body-svg .body-stroke {
+  stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
+}
+
+/* The glyph centres on the body below the tab, not on the whole 48x48 box:
+ * the tab occupies the top 9px, so a box-centred glyph reads high. */
+.flow-node.role-container .node-chip {
+  margin-top: 4px;
 }
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
@@ -2960,6 +2973,16 @@ body.reduce-motion .cook-arc {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+/* The connection summary: one line per wired port, monospace so the
+ * arrows line up down the column. */
+.node-info-wires {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
 }
 .node-info-warning {
   color: var(--cat-warning);
@@ -4846,14 +4869,95 @@ body.reduce-motion .cook-arc {
  * shrink into the spacer rather than overflowing. */
 .transport-bar {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
+  flex-direction: column;
   flex: 0 0 auto;
   min-width: 0;
-  padding: 0.25rem 0.5rem;
   border-top: 1px solid var(--border-primary);
   background-color: var(--background-secondary);
   font-size: 1rem;
+}
+
+.transport-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+}
+
+/* ---- The frame scrubber ----
+ *
+ * Ticks and playhead are absolutely positioned by percentage across the
+ * track, so the whole thing reflows on resize with no JS beyond the width
+ * measurement that picks the tick density. */
+
+.transport-track {
+  position: relative;
+  flex: 0 0 auto;
+  height: 2.2rem;
+  margin: 0 0.5rem;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.transport-track:focus-visible {
+  outline: 1px solid var(--input-border-focus);
+  outline-offset: -1px;
+}
+
+.transport-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 0.5rem;
+  background: var(--border-secondary);
+  pointer-events: none;
+}
+
+/* A labelled tick is taller and darker: the scale reads at two levels, so
+ * you can count minor ticks between two numbers you can actually see. */
+.transport-tick.major {
+  height: 0.9rem;
+  background: var(--text-tertiary);
+}
+
+.transport-tick-label {
+  position: absolute;
+  bottom: 0.9rem;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+/* The playhead spans the full track height so it reads as a position in
+ * time rather than as one more tick. */
+.transport-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent-primary);
+  pointer-events: none;
+}
+
+.transport-playhead::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  transform: translateX(-50%);
+  border-radius: 0 0 50% 50%;
+  background: var(--accent-primary);
 }
 
 .transport-buttons {
@@ -4922,4 +5026,191 @@ body.reduce-motion .cook-arc {
 .transport-spacer {
   flex: 1 1 auto;
   min-width: 0.5rem;
+}
+
+/* ---- The floating properties panel (P over the node canvas) ----
+ *
+ * Modeless: no backdrop, so the canvas underneath stays usable. That is
+ * what makes it worth having alongside the docked panel -- pin one node
+ * here and let the dock follow the selection, and two nodes are comparable
+ * side by side. Sits above the canvas but below the modal layer, since a
+ * real dialog must still be able to cover it. */
+.floating-props {
+  position: fixed;
+  top: 8rem;
+  right: 6rem;
+  z-index: calc(var(--z-dropdown) - 10);
+  display: flex;
+  flex-direction: column;
+  width: 34rem;
+  height: 40rem;
+  max-width: calc(100vw - 3.2rem);
+  max-height: calc(100vh - 8rem);
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.6rem;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.floating-props-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.4rem 0.4rem 0.9rem;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.floating-props-header:active {
+  cursor: grabbing;
+}
+
+.floating-props-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.floating-props-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.floating-props-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+.floating-props-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Pinned is a MODE, not a hover: it stays lit, for the same reason the
+ * transport's play button does. */
+.floating-props-btn.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.floating-props-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The pinned badge in the parameter header. Deliberately a button: the way
+ * out of a pin should be where the pin is announced. */
+.param-pinned {
+  margin-left: 0.6rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--accent-primary);
+  border-radius: 999px;
+  background: none;
+  color: var(--accent-primary);
+  font: inherit;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.param-pinned:hover {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+/* ---- The wrangle code editor (CodeMirror) ----
+ *
+ * Syntax colors are theme tokens, not a second palette: the editor has to
+ * look like it belongs to the app in both themes, and a hardcoded scheme
+ * would be one more thing to keep in step with the token system. */
+:root {
+  --cm-number: #b48ead;
+  --cm-string: #a3be8c;
+  --cm-attribute: #d08770;
+  --cm-var: #ebcb8b;
+  --cm-builtin: #81a1c1;
+  --cm-query: #88c0d0;
+  --cm-type: #b48ead;
+  --cm-error-bg: color-mix(in srgb, var(--error-badge) 22%, transparent);
+}
+body.light-theme {
+  --cm-number: #8250a8;
+  --cm-string: #4a7c30;
+  --cm-attribute: #b4551d;
+  --cm-var: #9a6b06;
+  --cm-builtin: #2b6cb0;
+  --cm-query: #17708a;
+  --cm-type: #8250a8;
+}
+
+.code-editor {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  background: var(--input-background);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+}
+.code-editor:focus-within {
+  border-color: var(--input-border-focus);
+}
+.snippet-field.has-error .code-editor {
+  border-color: var(--error-badge);
+}
+
+/* Holds the editor's height while the chunk downloads, so the panel does
+ * not jump when it arrives. */
+.snippet-loading {
+  flex: 1;
+  min-height: 4.8em;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--input-background);
+}
+
+.snippet-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.snippet-expand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.snippet-expand:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.snippet-editor-modal {
+  width: 72rem;
+  height: 52rem;
+}
+.snippet-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  margin-bottom: 0.8rem;
 }

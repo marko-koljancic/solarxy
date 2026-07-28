@@ -160,6 +160,15 @@ export function useKeyboard(): void {
           useRadial.getState().openInfo(selection[0], ctx, at.x, at.y);
           break;
         }
+        case "floating-props": {
+          // No selection requirement: opening it empty and then clicking a
+          // node is a perfectly ordinary way to use it, and refusing to
+          // open would look like the key was unbound.
+          e.preventDefault();
+          const ui = useUi.getState();
+          ui.setFloatingProps(!ui.floatingProps);
+          break;
+        }
         case "bypass": {
           if (!selection.length) break;
           const first = s.contexts[ctxKey]?.nodes.find((n) => n.id === selection[0]);

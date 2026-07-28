@@ -6428,3 +6428,129 @@ fn an_unknown_loop_mode_falls_back_instead_of_failing_the_load() {
         "the rest still survives"
     );
 }
+
+/// A fixed, obviously-not-1970 epoch stamp: 2026-07-28T12:00:00Z.
+fn fixed_epoch_ms() -> f64 {
+    1_785_240_000_000.0
+}
+
+#[test]
+fn node_timestamps_stay_unknown_without_a_host_epoch_clock() {
+    // Native cooks, the CLI and every test run with no epoch clock. They
+    // must leave the fields alone rather than write a zero that renders as
+    // "1 Jan 1970".
+    let (mut e, ctx) = subflow_engine();
+    let id = add(&mut e, ctx, "box");
+    let report = e.node_report(ctx, id).expect("node exists");
+    assert_eq!(report.created_ms, None);
+    assert_eq!(report.modified_ms, None);
+}
+
+#[test]
+fn creating_and_editing_a_node_stamps_it() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let id = add(&mut e, ctx, "box");
+    let created = e.node_report(ctx, id).unwrap().created_ms;
+    assert_eq!(created, Some(fixed_epoch_ms()));
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    let after = e.node_report(ctx, id).unwrap();
+    assert_eq!(after.modified_ms, Some(fixed_epoch_ms()));
+    assert_eq!(after.created_ms, created, "creation time never moves");
+}
+
+#[test]
+fn moving_a_node_on_the_canvas_is_not_a_modification() {
+    // The rule that makes the timestamp mean something: auto-layout, or
+    // tidying a graph by hand, must not restamp every node in the scene.
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let id = add(&mut e, ctx, "box");
+    // Clear the creation stamp so a move is the only thing that could set it.
+    e.doc
+        .graph_mut(ctx)
+        .unwrap()
+        .node_mut(id)
+        .unwrap()
+        .modified_ms = None;
+
+    e.apply(Command::MoveNodes {
+        ctx,
+        moves: vec![(id, [42.0, 17.0])],
+    })
+    .unwrap();
+    assert_eq!(
+        e.node_report(ctx, id).unwrap().modified_ms,
+        None,
+        "a canvas move must leave `modified` alone"
+    );
+}
+
+#[test]
+fn connecting_stamps_both_ends() {
+    // A wire changes what BOTH nodes do, so both are modified.
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let src = add(&mut e, ctx, "box");
+    let dst = add(&mut e, ctx, "transform");
+    for id in [src, dst] {
+        e.doc
+            .graph_mut(ctx)
+            .unwrap()
+            .node_mut(id)
+            .unwrap()
+            .modified_ms = None;
+    }
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: src,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: dst,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    assert_eq!(
+        e.node_report(ctx, src).unwrap().modified_ms,
+        Some(fixed_epoch_ms())
+    );
+    assert_eq!(
+        e.node_report(ctx, dst).unwrap().modified_ms,
+        Some(fixed_epoch_ms())
+    );
+}
+
+#[test]
+fn cook_totals_accumulate_across_cooks() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_clock(tick_now);
+    let id = add(&mut e, ctx, "box");
+    e.cook(&mut || true);
+    let first = e.node_report(ctx, id).unwrap();
+    assert_eq!(first.cook_count, 1);
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let second = e.node_report(ctx, id).unwrap();
+    assert_eq!(second.cook_count, 2, "a recook counts");
+    assert!(
+        second.total_cook_us >= first.total_cook_us,
+        "the total only grows"
+    );
+}

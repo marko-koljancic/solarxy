@@ -50,6 +50,8 @@ const SAMPLE_SCENES: { label: string; file: string }[] = [
   { label: "Attributes & Displace", file: "attributes-and-displace.slxy" },
   { label: "Texture to Material", file: "texture-to-material.slxy" },
   { label: "Lights, Camera, Review", file: "lights-camera-review.slxy" },
+  { label: "Animated Field", file: "animated-field.slxy" },
+  { label: "Procedural Look-dev", file: "procedural-lookdev.slxy" },
 ];
 
 export function MenuBar() {

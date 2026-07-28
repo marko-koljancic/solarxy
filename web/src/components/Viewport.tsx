@@ -21,6 +21,7 @@ import {
 } from "../engine/session";
 import { adoptViewportCanvas, viewportCanvas } from "../engine/canvas";
 import { useMirror } from "../store/mirror";
+import { usePrefs } from "../store/prefs";
 import { useReview } from "../store/review";
 import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
@@ -59,6 +60,9 @@ export function Viewport() {
   // Crosshair while review mode is active. A class on a canvas React does not
   // render, so it is applied imperatively.
   const reviewMode = useReview((s) => s.reviewMode);
+  // Hiding the transport hands its height back to the canvas; the existing
+  // resize path picks that up, so nothing else has to know.
+  const showTransport = usePrefs((s) => s.prefs.chrome.transportBar);
 
   // Adopt the canvas into this panel. Runs on every render (not just mount) so
   // a dockview re-parent that swaps the host div is picked up immediately;
@@ -280,7 +284,7 @@ export function Viewport() {
         <ReviewOverlay />
         <ReviewPopup />
       </div>
-      <TransportBar />
+      {showTransport && <TransportBar />}
       {ctxMenu && (
         <ViewportContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
       )}

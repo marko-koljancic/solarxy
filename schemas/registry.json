@@ -2711,7 +2711,7 @@
         "lens"
       ],
       "glyph": "camera",
-      "role": "standard"
+      "role": "camera"
     },
     {
       "typeId": "checker",

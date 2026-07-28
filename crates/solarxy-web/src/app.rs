@@ -68,10 +68,23 @@ const MSAA_SAMPLES: u32 = 4;
 const SHADOW_MAP_SIZE: u32 = 2048;
 
 /// The current host time in milliseconds (`performance.now`).
+///
+/// Monotonic and high-resolution, counting from page load. Right for
+/// measuring how long a cook took; useless as a date, which is why node
+/// timestamps use `web_epoch_ms` instead.
 fn web_now() -> f64 {
     web_sys::window()
         .and_then(|w| w.performance())
         .map_or(0.0, |p| p.now())
+}
+
+/// The current wall time in Unix milliseconds (`Date.now`).
+///
+/// The counterpart to `web_now`: coarse and not monotonic (it moves when
+/// the system clock is set), but it is an actual date, which is what a
+/// node's created / modified stamp has to be.
+fn web_epoch_ms() -> f64 {
+    js_sys::Date::now()
 }
 
 fn log(msg: &str) {
@@ -328,6 +341,11 @@ pub struct SolarxyApp {
     /// saved into `.slxy`, never in undo). The strip's toggles and the
     /// picked lane name.
     attr_viz: AttrVizState,
+    /// Theme label colors (text, chip, dot) as last pushed by the frontend.
+    /// Cached because the style is assembled from two independent halves
+    /// (see `push_label_style`), and a size change must not blank the
+    /// palette any more than a theme change must reset the size.
+    label_colors: [[f32; 3]; 3],
     /// Whether the attribute-vector line buffer is stale (mirrors the
     /// `viz_dirty` sites, plus any `set_attr_viz`).
     attr_dirty: bool,
@@ -505,6 +523,7 @@ impl SolarxyApp {
 
         let mut engine = Engine::new().map_err(|e| JsError::new(&format!("engine: {e}")))?;
         engine.set_clock(web_now);
+        engine.set_epoch_clock(web_epoch_ms);
         // Imports run off the main thread: cooks yield a ParseModel job the
         // frontend pumps to the import worker (`take_import_jobs` ->
         // `submit_parsed_model`), rather than parsing inline.
@@ -558,6 +577,10 @@ impl SolarxyApp {
             pending_screenshot: None,
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
+            label_colors: {
+                let d = solarxy_renderer::labels::LabelStyle::new_default();
+                [d.text, d.chip, d.dot]
+            },
             attr_dirty: false,
             display_defaults: DisplayDefaults::default(),
             gizmo: GizmoState::default(),
@@ -1145,6 +1168,20 @@ impl SolarxyApp {
         to_js(&self.engine.cook_warnings(NodeId(node as u64)))
     }
 
+    /// Bounds, cook accounting, placeholder reason and timestamps for one
+    /// node, or `null` when the node is gone.
+    ///
+    /// Pull-read for the same reason `resolved_param` below is: every field
+    /// moves on each cook of a time-dependent node, so as events these
+    /// would be one message per node per frame under playback.
+    pub fn node_report(&self, ctx: JsValue, node: f64) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let report = self.engine.node_report(ctx, NodeId(node as u64));
+        to_js(&report)
+    }
+
     /// One param's current value as the panel should display it, or the
     /// message explaining why it has none.
     ///
@@ -1196,8 +1233,13 @@ impl SolarxyApp {
         let next: AttrVizState = serde_wasm_bindgen::from_value(state)
             .map_err(|e| JsError::new(&format!("attrViz: {e}")))?;
         if next != self.attr_viz {
+            // Size, background and opacity live in the GPU uniform, not in
+            // the label set, so they need a style push as well as the
+            // rebuild. Decimals go the other way (they change the text), and
+            // `attr_dirty` covers those.
             self.attr_viz = next;
             self.attr_dirty = true;
+            self.push_label_style();
         }
         to_js(&self.view_state_dto())
     }
@@ -1619,12 +1661,27 @@ impl SolarxyApp {
         dot_g: f32,
         dot_b: f32,
     ) {
-        let style = solarxy_renderer::labels::LabelStyle {
-            text: [text_r, text_g, text_b],
-            chip: [chip_r, chip_g, chip_b],
-            dot: [dot_r, dot_g, dot_b],
+        self.label_colors = [
+            [text_r, text_g, text_b],
+            [chip_r, chip_g, chip_b],
+            [dot_r, dot_g, dot_b],
+        ];
+        self.push_label_style();
+    }
+
+    /// Rebuilds the label style from the two halves that own it: the theme
+    /// colors pushed by `set_label_colors`, and the size / background /
+    /// opacity the user picked in the attribute settings. Kept as one
+    /// chokepoint so neither half can push a style that drops the other.
+    fn push_label_style(&mut self) {
+        let base = solarxy_renderer::labels::LabelStyle {
+            text: self.label_colors[0],
+            chip: self.label_colors[1],
+            dot: self.label_colors[2],
             dpr: self.dpr,
+            ..solarxy_renderer::labels::LabelStyle::new_default()
         };
+        let style = self.attr_viz.apply_to_style(base);
         self.renderer.write_label_style(&self.queue, &style);
     }
 
@@ -2987,6 +3044,7 @@ impl SolarxyApp {
             &candidates,
             self.attr_viz.labels,
             self.attr_viz.points,
+            self.attr_viz.label_decimals,
         );
         self.renderer
             .set_attr_labels(&self.device, &self.queue, &instances, &words);

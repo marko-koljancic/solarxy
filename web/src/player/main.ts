@@ -128,12 +128,7 @@ async function main(): Promise<void> {
       // defaults; both apply flags are false so this changes the speed
       // without repainting the pane's own wireframe or background.
       client.setDisplayDefaults(
-        {
-          wireframeWeight: "Light",
-          background: "Gradient",
-          turntableRpm: config.turntableRpm,
-          pointSize: DEFAULT_DISPLAY_PREFS.pointSize,
-        },
+        { ...DEFAULT_DISPLAY_PREFS, turntableRpm: config.turntableRpm },
         false,
         false,
       );

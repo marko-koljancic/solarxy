@@ -142,6 +142,21 @@ pub struct NodeJson {
     pub port_order: BTreeMap<String, Vec<String>>,
     /// Canvas position `[x, y]`.
     pub position: [f32; 2],
+    /// Unix milliseconds when the node was created and when its behaviour
+    /// last changed.
+    ///
+    /// Additive and optional, so `schema_version` stays 1: a document
+    /// written before 0.8.1 simply has neither, and a reader that predates
+    /// them ignores both. Absent (rather than zero) when the writing host
+    /// had no wall clock, so a reader can say "unknown" instead of
+    /// displaying a fabricated 1970.
+    ///
+    /// Canvas position deliberately does not count as a modification; see
+    /// `NodeData` in `solarxy-graph`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<f64>,
 }
 
 /// One edge. `from`/`to` are `[node_id, port_key]` pairs.

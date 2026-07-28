@@ -168,9 +168,7 @@ const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
   import: "standard",
   export: "terminal",
   lights: "light",
-  // A camera silhouette lands in W2-A; until then the standard body is the
-  // honest fallback rather than a shape that means something else.
-  cameras: "standard",
+  cameras: "camera",
   utility: "standard",
   tex_generate: "imageSource",
   tex_adjust: "standard",
@@ -195,6 +193,7 @@ const KNOWN_ROLES: ReadonlySet<string> = new Set([
   "analyzer",
   "imageSource",
   "light",
+  "camera",
   "note",
 ]);
 
@@ -237,41 +236,109 @@ export function roundedPolygonPath(points: RoundedVertex[]): string {
   return parts.join(" ");
 }
 
-/** Shaped 112x32 body outlines: every silhouette left-right
- * symmetric with rounded corners. Roles absent here render as plain CSS
- * rectangles. */
-export const ROLE_BODY_PATHS: Partial<Record<NodeRole, string>> = {
+/** A shaped role body: the outline plus the box it is authored in.
+ *
+ * The box is also the node's CSS size, so a role that wants to be smaller
+ * than the 112x32 default says so here and `ShapedBody` emits a matching
+ * `viewBox`. Scaling one path into a different box instead would stretch
+ * the 1px stroke along with it. */
+export interface RoleBody {
+  path: string;
+  w: number;
+  h: number;
+}
+
+/** The default body box every role uses unless it declares otherwise. */
+const BODY_W = 112;
+const BODY_H = 32;
+
+/** Shaped body outlines. Roles absent here render as plain CSS rectangles.
+ *
+ * Most silhouettes are left-right symmetric, and `nodeVisual.test.ts` holds
+ * them to it. Two are deliberately not: `camera` points the way it aims,
+ * and `container` carries a folder tab. Both asymmetries carry meaning, so
+ * the test names them rather than the rule being dropped. */
+export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
   // The two-way junction: a symmetric hexagon.
-  branch: roundedPolygonPath([
-    [0, 16, 5],
-    [18, 0, 4],
-    [94, 0, 4],
-    [112, 16, 5],
-    [94, 32, 4],
-    [18, 32, 4],
-  ]),
+  branch: {
+    path: roundedPolygonPath([
+      [0, 16, 5],
+      [18, 0, 4],
+      [94, 0, 4],
+      [112, 16, 5],
+      [94, 32, 4],
+      [18, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
   // Wide intake, narrowed readout: a symmetric trapezoid.
-  analyzer: roundedPolygonPath([
-    [0, 0, 4],
-    [112, 0, 4],
-    [102, 32, 4],
-    [10, 32, 4],
-  ]),
+  analyzer: {
+    path: roundedPolygonPath([
+      [0, 0, 4],
+      [112, 0, 4],
+      [102, 32, 4],
+      [10, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
   // A file ticket with both top corners chamfered (the old single-fold
   // motif was asymmetric).
-  imageSource: roundedPolygonPath([
-    [14, 0, 3],
-    [98, 0, 3],
-    [112, 14, 3],
-    [112, 32, 4],
-    [0, 32, 4],
-    [0, 14, 3],
-  ]),
-  // A lamp dome (the old lampshade was asymmetric): heavy top rounding.
-  light: roundedPolygonPath([
-    [0, 0, 14],
-    [112, 0, 14],
-    [112, 32, 4],
-    [0, 32, 4],
-  ]),
+  imageSource: {
+    path: roundedPolygonPath([
+      [14, 0, 3],
+      [98, 0, 3],
+      [112, 14, 3],
+      [112, 32, 4],
+      [0, 32, 4],
+      [0, 14, 3],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
+  // A lamp dome: heavy top rounding, and softened at the bottom too. Sized
+  // down from the standard body because a light is a fixture you place, not
+  // a stage in a chain, and at full width it dominated the graph around it.
+  light: {
+    path: roundedPolygonPath([
+      [0, 0, 12],
+      [96, 0, 12],
+      [96, 28, 10],
+      [0, 28, 10],
+    ]),
+    w: 96,
+    h: 28,
+  },
+  // A camera aims, so its body does too: flat at the back, tapering to a
+  // blunt point at the front. Deliberately asymmetric -- the direction IS
+  // the meaning, and it is what separates this from the branch hexagon,
+  // which points both ways because it forks both ways.
+  camera: {
+    path: roundedPolygonPath([
+      [0, 0, 4],
+      [86, 0, 4],
+      [112, 16, 5],
+      [86, 32, 4],
+      [0, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
+  // A folder: the one silhouette that has to say "there is more inside".
+  // The tab is the universal motif for it, and it survives zooming out in a
+  // way an inset second border does not. Square footprint kept, so
+  // containers stay distinguishable by size as well as by shape.
+  container: {
+    path: roundedPolygonPath([
+      [0, 0, 4],
+      [20, 0, 3],
+      [27, 9, 2],
+      [48, 9, 4],
+      [48, 48, 4],
+      [0, 48, 4],
+    ]),
+    w: 48,
+    h: 48,
+  },
 };

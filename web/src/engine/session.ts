@@ -482,6 +482,41 @@ export function pushDisplayDefaults(prev?: DisplayPrefs): void {
   const applyWireframe = prev === undefined || prev.wireframeWeight !== d.wireframeWeight;
   const applyBackground = prev === undefined || prev.background !== d.background;
   getClient().setDisplayDefaults(d, applyWireframe, applyBackground);
+  pushLabelDefaults(prev);
+}
+
+/** Seeds the session's attribute-label appearance from the saved defaults.
+ *
+ * The same "defaults seed, the live control overrides" shape wireframe
+ * weight and background already have, one level down: these four live in
+ * the host's session `AttrVizState` (never saved, never in undo), and the
+ * Preferences Display tab is where the value a fresh session starts from
+ * lives. A mid-session preference change applies only the fields that
+ * actually moved, so it cannot stamp on a gear override of an unrelated
+ * one. */
+function pushLabelDefaults(prev?: DisplayPrefs): void {
+  const d = usePrefs.getState().prefs.display;
+  const viz = useViewState.getState().view?.attrViz;
+  if (!viz) return;
+  const next = { ...viz };
+  let moved = false;
+  if (prev === undefined || prev.labelSize !== d.labelSize) {
+    next.labelSize = d.labelSize;
+    moved = true;
+  }
+  if (prev === undefined || prev.labelBackground !== d.labelBackground) {
+    next.labelBackground = d.labelBackground;
+    moved = true;
+  }
+  if (prev === undefined || prev.labelOpacity !== d.labelOpacity) {
+    next.labelOpacity = d.labelOpacity;
+    moved = true;
+  }
+  if (prev === undefined || prev.labelDecimals !== d.labelDecimals) {
+    next.labelDecimals = d.labelDecimals;
+    moved = true;
+  }
+  if (moved) setAttrViz(next);
 }
 
 /** Escape during a gizmo drag: rolls it back. */

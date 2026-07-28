@@ -16,6 +16,7 @@ import { ShortcutsModal } from "./components/ShortcutsModal";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { NodeInfoModal } from "./components/NodeInfoModal";
+import { FloatingProperties } from "./components/FloatingProperties";
 import { Tour } from "./components/tour/Tour";
 import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
 import { importDroppedFiles } from "./engine/session";
@@ -103,6 +104,7 @@ export function App() {
       </div>
       <Toasts />
       <NodeInfoModal />
+      <FloatingProperties />
       <Tour />
       <MissingSidecarsModal />
       <RecoveryPrompt />

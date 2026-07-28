@@ -532,6 +532,14 @@ fn the_player_does_not_import_the_editors_ui_graph() {
             "../dock/",
             "the dock module is the editor's layout, not the player's",
         ),
+        // 0.8.1: CodeMirror is the editor's wrangle field. A published
+        // scene shows no parameters at all, so a code editor reaching the
+        // player would be the 431 KB React mistake a second time.
+        (
+            "@codemirror",
+            "a published scene has no editable parameters",
+        ),
+        ("@lezer", "CodeMirror's parser layer, same reasoning"),
     ];
 
     let mut offenders = Vec::new();

@@ -23,15 +23,32 @@ export type BackgroundChoice =
   | "Black"
   | "HdriSky";
 
+/** Attribute-label appearance. Mirrors `solarxy_renderer::labels`, but as
+ * plain string unions so this file keeps its no-import promise. */
+export type LabelSizeChoice = "small" | "medium" | "large";
+export type LabelBackgroundChoice = "chip" | "none";
+
 /** Viewport display defaults, pushed into the Rust host. Wireframe weight
  * and background seed every pane's settings (a scene file's saved per-pane
  * values still win on load; the pane's Display menu stays the live
- * per-pane override). The turntable speed is the live global rpm. */
+ * per-pane override). The turntable speed is the live global rpm.
+ *
+ * The four label fields seed the attribute gear the same way: they are what
+ * a fresh session starts from, and the gear is the live override for the
+ * session in front of you. */
 export interface DisplayPrefs {
   wireframeWeight: WireframeWeight;
   background: BackgroundChoice;
   /** Turntable revolutions per minute, clamped 1..60. */
   turntableRpm: number;
+  /** Attribute-label text size. */
+  labelSize: LabelSizeChoice;
+  /** What an attribute label draws behind its text. */
+  labelBackground: LabelBackgroundChoice;
+  /** Attribute-label opacity, 0..1. */
+  labelOpacity: number;
+  /** Decimal places in an attribute label's value text, 0..4. */
+  labelDecimals: number;
   /** On-screen size of a rendered point, in pixels, clamped 1..32.
    *
    * Global rather than per pane (decision M-27): there is no comparison
@@ -50,4 +67,10 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   background: "Gradient",
   turntableRpm: 6,
   pointSize: 6,
+  // The label defaults match the renderer's own (`LabelStyle::new_default`),
+  // so turning the preference on changes nothing until somebody moves it.
+  labelSize: "medium",
+  labelBackground: "chip",
+  labelOpacity: 1,
+  labelDecimals: 2,
 };

@@ -86,6 +86,11 @@ pub struct CookEngine {
     warnings: BTreeMap<NodeId, Vec<String>>,
     status: BTreeMap<NodeId, CookStatus>,
     stats: BTreeMap<NodeId, NodeCookStats>,
+    /// Per-node `(cook count, total microseconds)` for this session. The
+    /// single last-cook duration cannot answer "which node is costing me
+    /// the frame"; a running total can. Cleared with everything else on
+    /// `reset`, so it never describes a document that is no longer loaded.
+    cooks: BTreeMap<NodeId, (u64, u64)>,
     /// Monotonic per-node generation, bumped on every (re)cook or
     /// (re)spawn; the async stale-drop compares against it.
     generation: BTreeMap<NodeId, u64>,
@@ -152,6 +157,7 @@ impl CookEngine {
         self.warnings.clear();
         self.status.clear();
         self.stats.clear();
+        self.cooks.clear();
         self.generation.clear();
         self.jobs.clear();
         self.next_job = 0;
@@ -735,6 +741,16 @@ impl CookEngine {
     /// ignored by `same_shape` so an unchanged mesh does not spam events).
     /// `elapsed_ms` records the last cook's wall-time on the stored stats
     /// for the info popover; it is `0.0` when no clock is installed.
+    /// How many times a node has cooked this session, and the total time it
+    /// spent doing so. Session-only and pull-read: deliberately NOT an
+    /// event, because these change on every cook of every time-dependent
+    /// node and pushing them would reintroduce exactly the per-frame event
+    /// storm `CookStatus::same_state` exists to prevent.
+    #[must_use]
+    pub fn cook_totals(&self, node: NodeId) -> (u64, u64) {
+        self.cooks.get(&node).copied().unwrap_or((0, 0))
+    }
+
     fn emit_stats(&mut self, node: NodeId, elapsed_ms: f64, report: &mut CookReport) {
         let mut stats = self.outputs.get(&node).map_or(
             NodeCookStats {
@@ -748,6 +764,9 @@ impl CookEngine {
             |o| stats_from_outputs(o),
         );
         stats.duration_us = (elapsed_ms * 1000.0).max(0.0).round() as u64;
+        let entry = self.cooks.entry(node).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 = entry.1.saturating_add(stats.duration_us);
         let changed = self
             .stats
             .get(&node)

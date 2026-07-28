@@ -29,6 +29,7 @@ const ORIENTATIONS: { value: GizmoOrientation; label: string }[] = [
 export function ViewportMenuBar() {
   const view = useViewState((s) => s.view);
   const orientation = usePrefs((s) => s.prefs.viewport.orientation);
+  const showTransport = usePrefs((s) => s.prefs.chrome.transportBar);
   const [envOpen, setEnvOpen] = useState(false);
 
   const entries: MenuEntry[] = [
@@ -62,6 +63,17 @@ export function ViewportMenuBar() {
           setPrefs({ ...prefs, viewport: { ...prefs.viewport, orientation: o.value } });
         },
       })),
+    },
+    {
+      // Writes the saved preference directly, like Gizmo Orientation above:
+      // one source of truth, so the menu tick and the Preferences row can
+      // never disagree, and the choice survives a reload.
+      label: "Transport Bar",
+      checked: showTransport,
+      onClick: () => {
+        const { prefs, setPrefs } = usePrefs.getState();
+        setPrefs({ ...prefs, chrome: { ...prefs.chrome, transportBar: !showTransport } });
+      },
     },
     { divider: true },
     { label: "Environment...", onClick: () => setEnvOpen(true) },

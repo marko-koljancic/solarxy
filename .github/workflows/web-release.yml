@@ -44,6 +44,17 @@ env:
   # Measured at ~17 KB after that was fixed; budgeted at 3x so ordinary growth
   # does not trip it but an order-of-magnitude regression does.
   PLAYER_JS_GZIP_BUDGET_BYTES: 51200   # 50 KiB
+  # The EDITOR's boot-path JS, gzipped: everything downloaded before the app
+  # can show anything. Lazily-imported chunks are excluded, because the whole
+  # point of splitting them out is that nobody waits for them.
+  #
+  # A hard gate as of 0.8.1, when CodeMirror arrived. Until then this figure
+  # was a log line, which is the same shape of blind spot the player budget
+  # above exists to close: a dependency added without a dynamic import would
+  # land on the boot path and nothing would say so. Measured at ~376 KiB;
+  # budgeted at 460 KiB, which leaves room to grow but not room to
+  # accidentally swallow an editor.
+  EDITOR_BOOT_JS_GZIP_BUDGET_BYTES: 471040   # 460 KiB
 
 jobs:
   bundle:
@@ -134,11 +145,22 @@ jobs:
             echo "::error::wasm is $SIZE bytes gzipped, over the $WASM_GZIP_BUDGET_BYTES budget."
             exit 1
           fi
-          # Eager JS is what actually gates cold load; report it so a regression
-          # is visible in the log even though it is not a hard gate. `elk*` is
-          # excluded because it is dynamically imported and never on the boot path.
-          JS_GZ=$(find . -name '*.js.gz' ! -name 'elk*' -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
+          # Eager JS is what actually gates cold load. `elk*` and `CodeEditor*`
+          # are excluded because both are dynamically imported and neither is
+          # ever on the boot path -- which is exactly the property this gate
+          # protects: adding a heavy dependency WITHOUT a dynamic import moves
+          # it into this figure and fails here.
+          JS_GZ=$(find . -name '*.js.gz' ! -name 'elk*' ! -name 'CodeEditor*' \
+            -exec stat -c%s {} \; | awk '{s+=$1} END {print s+0}')
+          echo "editor boot JS (gzip): ${JS_GZ} / ${EDITOR_BOOT_JS_GZIP_BUDGET_BYTES}"
           echo "::notice::eager JS (gzip): ${JS_GZ} bytes; wasm (gzip): ${SIZE} bytes"
+          if [ "$JS_GZ" -gt "$EDITOR_BOOT_JS_GZIP_BUDGET_BYTES" ]; then
+            echo "::error::the editor's boot JS is ${JS_GZ} bytes gzipped, over the \
+${EDITOR_BOOT_JS_GZIP_BUDGET_BYTES} budget. Something heavy landed on the boot path. \
+If it is a new dependency, import it lazily (see SnippetField's React.lazy around \
+CodeEditor) and add its chunk to the exclusions above."
+            exit 1
+          fi
 
           # The player is gated on its OWN weight. It ships inside every
           # exported scene bundle, so somebody downloads it who never asked for

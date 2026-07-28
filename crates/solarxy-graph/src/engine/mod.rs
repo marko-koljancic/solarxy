@@ -369,6 +369,38 @@ pub enum EngineEvent {
     DocumentReplaced,
 }
 
+/// The on-demand half of what the node info surfaces show: everything that
+/// changes too often to be worth an event, plus the two document fields the
+/// live mirror does not carry.
+///
+/// Pull-read (see [`Engine::node_report`]). Every field here moves on each
+/// cook of a time-dependent node.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeReport {
+    /// World-space bounds as `[minX, minY, minZ, maxX, maxY, maxZ]`, or
+    /// `None` for a node with no geometry output (a texture node, a light,
+    /// a node that has not cooked). A flat array rather than a nested pair
+    /// so the wire shape stays trivially stable.
+    pub bounds: Option<[f32; 6]>,
+    /// The last cook's wall time in microseconds. Microseconds, not the
+    /// badge's milliseconds: a fast node reads `0.0 ms` and `340 us`, and
+    /// only one of those is useful.
+    pub last_cook_us: u64,
+    /// Cooks this session, and their summed duration. Session-only: a
+    /// reload starts both at zero, because they describe what this editing
+    /// session has done rather than a property of the document.
+    pub cook_count: u64,
+    pub total_cook_us: u64,
+    /// Why this node loaded as a non-cooking placeholder, when it did.
+    pub placeholder: Option<String>,
+    /// Unix milliseconds. `None` on documents saved before 0.8.1 and
+    /// whenever the host installed no epoch clock; the UI says "unknown"
+    /// rather than showing a fabricated date.
+    pub created_ms: Option<f64>,
+    pub modified_ms: Option<f64>,
+}
+
 /// A coalesced batch of events plus the monotonic document revision.
 #[derive(Debug, Clone, Serialize)]
 pub struct EventBatch {
@@ -717,6 +749,9 @@ pub struct Engine {
     /// The scene clock. Its settings are document state and save into
     /// `.slxy`; `playing` and `frame` are session state and do not.
     clock: crate::runtime::SceneClock,
+    /// Host epoch clock (Unix ms) for node timestamps. Distinct from the
+    /// cook driver's monotonic duration clock; see `set_epoch_clock`.
+    epoch_clock: Option<fn() -> f64>,
 }
 
 impl Engine {
@@ -744,6 +779,7 @@ impl Engine {
             review_hash_cache: BTreeMap::new(),
             expr_index: crate::refs::ExprIndex::default(),
             clock: crate::runtime::SceneClock::default(),
+            epoch_clock: None,
         }
     }
 
@@ -769,6 +805,28 @@ impl Engine {
     /// without one, durations stay `0` (the native/test default).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.cook.set_clock(clock);
+    }
+
+    /// Installs a host **epoch** clock (Unix milliseconds), used to stamp
+    /// node `created` / `modified` times.
+    ///
+    /// Deliberately a second seam rather than reusing [`Self::set_clock`].
+    /// The two measure different things and cannot be the same source: cook
+    /// durations need a monotonic high-resolution clock (`performance.now`,
+    /// which counts from page load and so says a node was created in 1970),
+    /// while a timestamp needs the wall date (`Date.now`, which has
+    /// millisecond resolution and can jump when the system clock is set).
+    /// Without this clock, timestamps stay `None` and the UI says "unknown"
+    /// rather than inventing one.
+    pub fn set_epoch_clock(&mut self, clock: fn() -> f64) {
+        self.epoch_clock = Some(clock);
+    }
+
+    /// The current wall time in Unix milliseconds, or `None` when the host
+    /// installed no epoch clock.
+    #[must_use]
+    pub fn wall_clock_ms(&self) -> Option<f64> {
+        self.epoch_clock.map(|f| f())
     }
 
     #[must_use]
@@ -874,9 +932,54 @@ impl Engine {
         if cmd_kind.affects_index() {
             self.expr_index = crate::refs::ExprIndex::build(&self.doc, &self.registry);
         }
+        self.stamp_modified(&events);
         self.undo.push_command("edit", inv);
         self.revision += 1;
         Ok(self.batch(events))
+    }
+
+    /// Stamps `modified_ms` on every node a command actually changed.
+    ///
+    /// Driven off the emitted events rather than off the command, for two
+    /// reasons: one command can touch several nodes (a paste, a cascade,
+    /// the exclusive-shadow-caster rule releasing another light), and a new
+    /// command is covered the moment it emits the events it already has to
+    /// emit. The set of "what changed" is therefore never a second thing to
+    /// keep in step.
+    ///
+    /// `NodesMoved` is the deliberate omission: canvas position is
+    /// presentation, and an auto-layout pass restamping the whole graph
+    /// would make the timestamp meaningless. `SelectionChanged` likewise.
+    fn stamp_modified(&mut self, events: &[EngineEvent]) {
+        let Some(now) = self.wall_clock_ms() else {
+            // No host clock (native cook, test, CLI): leave the field alone
+            // rather than writing a fabricated or zero time.
+            return;
+        };
+        for ev in events {
+            let (ctx, node) = match ev {
+                EngineEvent::NodeAdded { ctx, node } => (*ctx, node.id),
+                EngineEvent::ParamChanged { ctx, node, .. }
+                | EngineEvent::BypassChanged { ctx, node, .. }
+                | EngineEvent::VariadicReordered { ctx, node, .. } => (*ctx, *node),
+                // A connection changes both ends' behaviour.
+                EngineEvent::EdgeAdded { ctx, edge } => {
+                    self.stamp_one(*ctx, edge.from, now);
+                    (*ctx, edge.to)
+                }
+                _ => continue,
+            };
+            self.stamp_one(ctx, node, now);
+        }
+    }
+
+    fn stamp_one(&mut self, ctx: GraphContext, node: NodeId, now: f64) {
+        if let Ok(graph) = self.doc.graph_mut(ctx)
+            && let Some(data) = graph.node_mut(node)
+        {
+            data.modified_ms = Some(now);
+            data.created_ms.get_or_insert(now);
+        }
     }
 
     fn batch(&self, events: Vec<EngineEvent>) -> EventBatch {
@@ -2974,6 +3077,33 @@ impl Engine {
     #[must_use]
     pub fn cook_warnings(&self, node: NodeId) -> Vec<String> {
         self.cook.warnings(node).to_vec()
+    }
+
+    /// Everything the node info surfaces show beyond the live mirror:
+    /// bounds, cook accounting, the placeholder reason, and timestamps.
+    ///
+    /// A pull query rather than event fields, deliberately. Every value
+    /// here moves on each cook of a time-dependent node, so pushing them
+    /// would put an event per node per frame back on the wire, which is
+    /// precisely what `CookStatus::same_state` was added to stop. The info
+    /// card is open for seconds at a time and reads on demand; nothing else
+    /// needs these at all.
+    #[must_use]
+    pub fn node_report(&self, ctx: GraphContext, node: NodeId) -> Option<NodeReport> {
+        let data = self.doc.graph(ctx).ok()?.node(node)?;
+        let stats = self.cook.stats(node);
+        let (cook_count, total_us) = self.cook.cook_totals(node);
+        Some(NodeReport {
+            bounds: stats
+                .and_then(|s| s.bounds)
+                .map(|b| [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z]),
+            last_cook_us: stats.map_or(0, |s| s.duration_us),
+            cook_count,
+            total_cook_us: total_us,
+            placeholder: data.placeholder.clone(),
+            created_ms: data.created_ms,
+            modified_ms: data.modified_ms,
+        })
     }
 
     /// The lane inventory of a node's cooked geometry (the attribute-name

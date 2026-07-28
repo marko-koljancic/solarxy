@@ -231,8 +231,21 @@
           "description": "Present (and true) only when the node is bypassed.",
           "type": "boolean"
         },
+        "created_ms": {
+          "description": "Unix milliseconds when the node was created and when its behaviour last changed.\n\nAdditive and optional, so `schema_version` stays 1: a document written before 0.8.1 simply has neither, and a reader that predates them ignores both. Absent (rather than zero) when the writing host had no wall clock, so a reader can say \"unknown\" instead of displaying a fabricated 1970.\n\nCanvas position deliberately does not count as a modification; see `NodeData` in `solarxy-graph`.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
+        },
+        "modified_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "name": {
           "type": "string"

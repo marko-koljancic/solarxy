@@ -358,6 +358,8 @@ mod tests {
             params,
             port_order: BTreeMap::new(),
             position: [12.0, -3.5],
+            created_ms: None,
+            modified_ms: None,
         }
     }
 

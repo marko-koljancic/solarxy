@@ -1167,7 +1167,7 @@ impl Renderer {
         }
         self.draw_normals(&mut pass, env, objects, cam_bg, pds);
         self.draw_attr_vectors(&mut pass, env, cam_bg);
-        self.draw_attr_labels(&mut pass, cam_bg);
+        self.draw_attr_labels(&mut pass, cam_bg, pds);
         self.draw_axes(&mut pass, env, cam_bg, pds);
         self.draw_local_axes(&mut pass, env, cam_bg, pds);
         self.draw_bounds(&mut pass, env, cam_bg, pds);
@@ -2147,16 +2147,27 @@ impl Renderer {
     /// glyph quads decoded from `vertex_index` ranges), expanded per pane
     /// against its camera so orbiting costs no CPU work. Gated purely on
     /// the count: only the web host populates the channel.
+    ///
+    /// A shaded pane depth-tests, so a label anchored on the far side of an
+    /// object is hidden by the near side; a wireframe pane draws every
+    /// label, because there is no surface there to hide behind and every
+    /// point is genuinely visible to the user.
     fn draw_attr_labels<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
     ) {
         let verts = self.labels.vertex_count();
         if verts == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipelines.overlay.attr_labels);
+        let occlude = !matches!(pds.view_mode, ViewMode::WireframeOnly);
+        pass.set_pipeline(if occlude {
+            &self.pipelines.overlay.attr_labels_occluded
+        } else {
+            &self.pipelines.overlay.attr_labels
+        });
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         pass.set_bind_group(2, &self.labels.bind_group, &[]);

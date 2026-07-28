@@ -186,9 +186,45 @@ export interface AttrVizState {
   /** Which curated ramp the ramp mode draws. Pinned to
    * `solarxy_web::attr_viz::RampPreset` (serde camelCase). */
   rampPreset: RampPreset;
+  /** Label text size. The renderer scales one SDF bake, so these are
+   * presets rather than a free number. */
+  labelSize: LabelSize;
+  /** What a label draws behind its text. `none` is text plus the anchor
+   * dot, which is quieter but gives up guaranteed contrast. */
+  labelBackground: LabelBackground;
+  /** Overall label opacity, 0..1. The chip keeps its own 82% underneath. */
+  labelOpacity: number;
+  /** Decimal places in a label's value text (0..4). */
+  labelDecimals: number;
+}
+
+/** The on-demand half of the node info card. Pinned to
+ * `solarxy_graph::engine::NodeReport` (serde camelCase).
+ *
+ * Not part of the mirror on purpose: every field here moves on each cook of
+ * a time-dependent node, so mirroring them would put one event per node per
+ * frame back on the wire during playback. */
+export interface NodeReport {
+  /** World bounds as `[minX, minY, minZ, maxX, maxY, maxZ]`, or null for a
+   * node with no geometry output. */
+  bounds: [number, number, number, number, number, number] | null;
+  /** The last cook's wall time. Microseconds, because a fast node reads
+   * `0.0 ms` and `340 us` and only one of those tells you anything. */
+  lastCookUs: number;
+  /** Cooks this session and their summed duration; both reset on load. */
+  cookCount: number;
+  totalCookUs: number;
+  /** Why the node loaded as a non-cooking placeholder, when it did. */
+  placeholder: string | null;
+  /** Unix milliseconds, or null for a scene saved before 0.8.1. Null means
+   * "unknown" and must render as such, never as an epoch date. */
+  createdMs: number | null;
+  modifiedMs: number | null;
 }
 
 export type RampPreset = "coldWarm" | "ember" | "ocean" | "grayscale" | "signal";
+export type LabelSize = "small" | "medium" | "large";
+export type LabelBackground = "chip" | "none";
 
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
@@ -406,6 +442,7 @@ export type NodeRole =
   | "analyzer"
   | "imageSource"
   | "light"
+  | "camera"
   | "note";
 
 /** The network kinds of the typed-context model. The root

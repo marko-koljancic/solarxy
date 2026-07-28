@@ -22,6 +22,10 @@ import {
   type ThemeChoice,
   type WireframeWeight,
 } from "../../store/prefs";
+import type {
+  LabelBackgroundChoice,
+  LabelSizeChoice,
+} from "../../store/displayDefaults";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Modal } from "../Modal";
 import { Select } from "../Select";
@@ -142,11 +146,65 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">px</span>
       </Row>
+      <Row label="Label size">
+        <Select
+          ariaLabel="Attribute label size"
+          value={d.labelSize}
+          options={[
+            { value: "small", label: "Small" },
+            { value: "medium", label: "Medium" },
+            { value: "large", label: "Large" },
+          ]}
+          onChange={(v) => setD({ labelSize: v as LabelSizeChoice })}
+        />
+      </Row>
+      <Row label="Label background">
+        <Select
+          ariaLabel="Attribute label background"
+          value={d.labelBackground}
+          options={[
+            { value: "chip", label: "Chip" },
+            { value: "none", label: "None (text only)" },
+          ]}
+          onChange={(v) => setD({ labelBackground: v as LabelBackgroundChoice })}
+        />
+      </Row>
+      <Row label="Label opacity">
+        <input
+          className="input-field prefs-dim"
+          type="number"
+          min={0.1}
+          max={1}
+          step={0.05}
+          value={d.labelOpacity}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ labelOpacity: Math.min(1, Math.max(0.1, v)) });
+          }}
+        />
+      </Row>
+      <Row label="Label decimals">
+        <input
+          className="input-field prefs-dim"
+          type="number"
+          min={0}
+          max={4}
+          step={1}
+          value={d.labelDecimals}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setD({ labelDecimals: Math.min(4, Math.max(0, Math.round(v))) });
+          }}
+        />
+      </Row>
       <div className="prefs-info">
         Wireframe and background are the defaults for new scenes and panes; a scene file keeps the
         per-pane settings it was saved with, and the pane&apos;s Display menu overrides the current
         view. The turntable speed and point size apply immediately. Point size is the on-screen
-        size of a rendered point, which a point cloud and the scatter node both draw with.
+        size of a rendered point, which a point cloud and the scatter node both draw with. The four
+        label settings are what a session starts from; the gear in the attribute strip is the live
+        override, and in a shaded view labels on the far side of an object are hidden by the near
+        side (a wireframe view shows all of them).
       </div>
     </>
   );
@@ -276,13 +334,21 @@ function ViewportTab({ draft, patch }: TabProps) {
   const setV = (p: Partial<typeof v>) => patch({ viewport: { ...v, ...p } });
   const sel = draft.selection;
   const setSel = (p: Partial<typeof sel>) => patch({ selection: { ...sel, ...p } });
+  const chrome = draft.chrome;
 
   return (
     <>
       <p className="prefs-desc">
-        How selected objects highlight in the 3D view, the transform gizmo orientation, and the
-        increments Ctrl-drag snaps to.
+        Viewport chrome, how selected objects highlight in the 3D view, the transform gizmo
+        orientation, and the increments Ctrl-drag snaps to.
       </p>
+      <Row label="Transport bar">
+        <input
+          type="checkbox"
+          checked={chrome.transportBar}
+          onChange={(e) => patch({ chrome: { ...chrome, transportBar: e.target.checked } })}
+        />
+      </Row>
       <Row label="Selection highlight">
         <Select
           ariaLabel="Selection highlight"

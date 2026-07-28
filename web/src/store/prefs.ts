@@ -36,6 +36,19 @@ export interface GizmoPrefs {
   snapScale: number;
 }
 
+/** Viewport chrome the user can hide.
+ *
+ * UI-only, unlike [`GizmoPrefs`] above: the Rust host draws none of this,
+ * so nothing here crosses the boundary. Kept as its own group rather than
+ * widened onto `GizmoPrefs` precisely so that stays true by construction.
+ */
+export interface ViewportChromePrefs {
+  /** The scene transport strip under the viewport. Hidden, the viewport
+   * reclaims its height; the Space / comma / period bindings still work,
+   * so hiding it gives up the readout, not the clock. */
+  transportBar: boolean;
+}
+
 export interface ScreenshotPrefs {
   resolution: ScreenshotResolution;
   customWidth: number;
@@ -88,6 +101,7 @@ export interface Prefs {
   };
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
+  chrome: ViewportChromePrefs;
   selection: SelectionPrefs;
   display: DisplayPrefs;
   /** First-run tour state. `version` lets a materially changed tour show
@@ -117,6 +131,7 @@ export const DEFAULT_PREFS: Prefs = {
     snapRotate: 15,
     snapScale: 0.1,
   },
+  chrome: { transportBar: true },
 };
 
 interface PrefsStore {
@@ -210,6 +225,7 @@ export function mergePersistedPrefs(p: PersistedPrefs | undefined): Prefs {
       },
     },
     viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
+    chrome: { ...DEFAULT_PREFS.chrome, ...p?.chrome },
     selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
     display: { ...DEFAULT_PREFS.display, ...p?.display },
     // An existing user rehydrates with `completed: false` and is offered

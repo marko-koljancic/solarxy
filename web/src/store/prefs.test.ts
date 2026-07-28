@@ -81,6 +81,12 @@ describe("defaults", () => {
       background: "Gradient",
       turntableRpm: 6,
       pointSize: 6,
+      // The label defaults likewise match `LabelStyle::new_default()` in
+      // the renderer, so they are a no-op until somebody moves them.
+      labelSize: "medium",
+      labelBackground: "chip",
+      labelOpacity: 1,
+      labelDecimals: 2,
     });
   });
 });
@@ -98,12 +104,14 @@ describe("rehydration backfill", () => {
     const prefs = mergePersistedPrefs({
       display: { wireframeWeight: "Bold", background: "Black", pointSize: 6, turntableRpm: 12 },
     });
-    expect(prefs.display).toEqual({
-      wireframeWeight: "Bold",
-      background: "Black",
-      turntableRpm: 12,
-      pointSize: 6,
-    });
+    // Stored fields win; anything the blob predates backfills. Asserted
+    // field-by-field rather than against a whole-object literal, so adding
+    // a display default does not falsely fail this test -- the backfill
+    // cases below are what guard the new fields.
+    expect(prefs.display.wireframeWeight).toBe("Bold");
+    expect(prefs.display.background).toBe("Black");
+    expect(prefs.display.turntableRpm).toBe(12);
+    expect(prefs.display.pointSize).toBe(6);
   });
 
   it("backfills pointSize for a blob persisted before 0.8.1", () => {
@@ -115,5 +123,23 @@ describe("rehydration backfill", () => {
     });
     expect(prefs.display.pointSize).toBe(6);
     expect(prefs.display.turntableRpm).toBe(12);
+  });
+
+  it("backfills the attribute-label defaults for a blob that predates them", () => {
+    // Same upgrade path as pointSize. A missing opacity becoming 0 would
+    // render every label invisible, and a missing decimals becoming 0 would
+    // silently round every value to an integer.
+    const prefs = mergePersistedPrefs({
+      display: { wireframeWeight: "Bold", background: "Black", turntableRpm: 12 },
+    });
+    expect(prefs.display.labelSize).toBe("medium");
+    expect(prefs.display.labelBackground).toBe("chip");
+    expect(prefs.display.labelOpacity).toBe(1);
+    expect(prefs.display.labelDecimals).toBe(2);
+  });
+
+  it("backfills the viewport-chrome group, which no stored blob has yet", () => {
+    const prefs = mergePersistedPrefs({ appearance: { theme: "light", reducedMotion: "system" } });
+    expect(prefs.chrome.transportBar).toBe(true);
   });
 });

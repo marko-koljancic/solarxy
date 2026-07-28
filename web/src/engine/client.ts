@@ -25,6 +25,7 @@ import type {
   ImportJob,
   MarkerScreen,
   NodeId,
+  NodeReport,
   PaneDisplaySettings,
   PaneRectDto,
   ParamSource,
@@ -100,6 +101,13 @@ export class SolarxyClient {
    * fetched when the info card opens or the cook status changes. */
   cookWarnings(node: NodeId): string[] {
     return this.app.cook_warnings(node) as string[];
+  }
+
+  /** Bounds, cook accounting, placeholder reason and timestamps for one
+   * node, or null when the node is gone. Pull-read, not mirrored: every
+   * field moves on each cook of a time-dependent node. */
+  nodeReport(ctx: GraphContext, node: NodeId): NodeReport | null {
+    return this.app.node_report(ctx, node) as NodeReport | null;
   }
 
   /** One window of a node's cooked attribute values; only the page

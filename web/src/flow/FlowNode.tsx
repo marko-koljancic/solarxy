@@ -28,7 +28,7 @@ import { useUi } from "../store/ui";
 import { IconBypass, IconDisplay } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
-import { glyphPath, nodeRole, ROLE_BODY_PATHS } from "./nodeVisual";
+import { glyphPath, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
@@ -86,12 +86,16 @@ function authoredDescription(node: NodeMirror): string | null {
 }
 
 /** Shaped silhouette body as inline SVG (crisp 1px stroke, which CSS
- * clip-path cannot give). */
-function ShapedBody({ path }: { path: string }) {
+ * clip-path cannot give).
+ *
+ * The viewBox comes from the role rather than being fixed at 112x32, so a
+ * role with its own body box (light, container) renders at its authored
+ * proportions instead of being stretched into someone else's. */
+function ShapedBody({ body }: { body: RoleBody }) {
   return (
-    <svg className="node-body-svg" viewBox="0 0 112 32" aria-hidden>
-      <path d={path} className="body-fill" />
-      <path d={path} className="body-stroke" />
+    <svg className="node-body-svg" viewBox={`0 0 ${body.w} ${body.h}`} aria-hidden>
+      <path d={body.path} className="body-fill" />
+      <path d={body.path} className="body-stroke" />
     </svg>
   );
 }
@@ -120,7 +124,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const title = nodeLabel(node, desc);
   const role = nodeRole(desc);
   const glyph = glyphPath(desc);
-  const shapedPath = ROLE_BODY_PATHS[role];
+  const shapedBody = ROLE_BODIES[role];
 
   // Inline rename: opened by double-clicking the label (the node
   // body keeps its container-dive double-click) or by F2 via the ui-store
@@ -283,7 +287,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       ))}
 
       <div className="node-body">
-        {shapedPath ? <ShapedBody path={shapedPath} /> : null}
+        {shapedBody ? <ShapedBody body={shapedBody} /> : null}
         {role === "gather" && <span className="gather-dome" aria-hidden />}
 
         {showBypassWing && (
