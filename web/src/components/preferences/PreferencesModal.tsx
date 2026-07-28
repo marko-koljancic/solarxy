@@ -26,6 +26,7 @@ import type {
   LabelBackgroundChoice,
   LabelSizeChoice,
 } from "../../store/displayDefaults";
+import { Row, Section } from "../DialogRow";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Modal } from "../Modal";
 import { Select } from "../Select";
@@ -33,37 +34,37 @@ import { Select } from "../Select";
 const TABS = ["Appearance", "Display", "Review", "Autosave", "Screenshot", "Viewport"] as const;
 type Tab = (typeof TABS)[number];
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="prefs-row">
-      <span className="prefs-label">{label}</span>
-      {children}
-    </div>
-  );
-}
-
 function AppearanceTab({ draft, patch }: TabProps) {
   return (
     <>
-      <p className="prefs-desc">Theme and motion. System choices follow the OS.</p>
-      <Row label="Theme">
+      <p className="prefs-desc">Theme and motion. Device choices follow the operating system.</p>
+      <Section title="Theme">
+      <Row
+        label="Theme"
+        doc="Which palette the whole interface uses. **Device** follows your operating system and switches with it, including on a schedule if your OS has one."
+      >
         <Select
           ariaLabel="Theme"
           value={draft.appearance.theme}
           options={[
             { value: "dark", label: "Dark" },
             { value: "light", label: "Light" },
-            { value: "system", label: "System" },
+            { value: "system", label: "Device" },
           ]}
           onChange={(v) => patch({ appearance: { ...draft.appearance, theme: v as ThemeChoice } })}
         />
       </Row>
-      <Row label="Reduced motion">
+      </Section>
+      <Section title="Motion">
+      <Row
+        label="Reduced motion"
+        doc="Whether the interface animates. **Follow device** honours the system accessibility setting; **Reduce** forces static states regardless of it."
+      >
         <Select
           ariaLabel="Reduced motion"
           value={draft.appearance.reducedMotion}
           options={[
-            { value: "system", label: "Follow system" },
+            { value: "system", label: "Follow device" },
             { value: "reduce", label: "Reduce" },
             { value: "none", label: "Full motion" },
           ]}
@@ -72,6 +73,7 @@ function AppearanceTab({ draft, patch }: TabProps) {
           }
         />
       </Row>
+      </Section>
       <div className="prefs-info">
         Reduced motion disables the connection-rejection shake and spinner animations in favor of
         static states.
@@ -88,8 +90,15 @@ function DisplayTab({ draft, patch }: TabProps) {
   const setD = (p: Partial<typeof d>) => patch({ display: { ...d, ...p } });
   return (
     <>
-      <p className="prefs-desc">Viewport display defaults.</p>
-      <Row label="Wireframe weight">
+      <p className="prefs-desc">
+        Defaults for new scenes and panes. A saved scene keeps the per-pane settings it was saved
+        with, and a pane&apos;s Display menu overrides the current view.
+      </p>
+      <Section title="Viewport">
+      <Row
+        label="Wireframe weight"
+        doc="Line thickness for wireframe and shaded-wireframe views. Seeds new panes and new scenes; a saved scene keeps the weight it was saved with, and a pane's Display menu overrides the current view."
+      >
         <Select
           ariaLabel="Wireframe weight"
           value={d.wireframeWeight}
@@ -101,7 +110,10 @@ function DisplayTab({ draft, patch }: TabProps) {
           onChange={(v) => setD({ wireframeWeight: v as WireframeWeight })}
         />
       </Row>
-      <Row label="Background">
+      <Row
+        label="Background"
+        doc="The default backdrop for new panes. **HDRI Sky** shows the loaded environment image itself rather than a flat colour, so it only differs from Gradient once you have loaded one."
+      >
         <Select
           ariaLabel="Background"
           value={d.background}
@@ -116,7 +128,10 @@ function DisplayTab({ draft, patch }: TabProps) {
           onChange={(v) => setD({ background: v as BackgroundChoice })}
         />
       </Row>
-      <Row label="Turntable speed">
+      <Row
+        label="Turntable speed"
+        doc="How fast a pane spins when its turntable is running, in revolutions per minute. Applies immediately to a spin already in progress."
+      >
         <input
           className="input-field"
           type="number"
@@ -131,7 +146,12 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">rpm</span>
       </Row>
-      <Row label="Point size">
+      </Section>
+      <Section title="Points and labels">
+      <Row
+        label="Point size"
+        doc="On-screen size of a rendered point, in pixels. Point clouds and the `scatter` node both draw with it. Global rather than per pane: there is no comparison worth two point sizes side by side."
+      >
         <input
           className="input-field"
           type="number"
@@ -146,7 +166,10 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">px</span>
       </Row>
-      <Row label="Label size">
+      <Row
+        label="Label size"
+        doc="Text size for attribute labels in the viewport. Three presets rather than a free number, because the renderer scales one baked glyph atlas."
+      >
         <Select
           ariaLabel="Attribute label size"
           value={d.labelSize}
@@ -158,7 +181,10 @@ function DisplayTab({ draft, patch }: TabProps) {
           onChange={(v) => setD({ labelSize: v as LabelSizeChoice })}
         />
       </Row>
-      <Row label="Label background">
+      <Row
+        label="Label background"
+        doc="What sits behind a label's text. **Chip** guarantees contrast over any scene; **None** is quieter but leaves the text to fend for itself against whatever is behind it."
+      >
         <Select
           ariaLabel="Attribute label background"
           value={d.labelBackground}
@@ -169,7 +195,10 @@ function DisplayTab({ draft, patch }: TabProps) {
           onChange={(v) => setD({ labelBackground: v as LabelBackgroundChoice })}
         />
       </Row>
-      <Row label="Label opacity">
+      <Row
+        label="Label opacity"
+        doc="How solid attribute labels are, from 0.1 to 1. The chip keeps its own 82% underneath, so it always stays the more transparent of the two."
+      >
         <input
           className="input-field prefs-dim"
           type="number"
@@ -183,7 +212,10 @@ function DisplayTab({ draft, patch }: TabProps) {
           }}
         />
       </Row>
-      <Row label="Label decimals">
+      <Row
+        label="Label decimals"
+        doc="Decimal places in a label's value, 0 to 4. Fewer places fit more labels on screen before they start overlapping."
+      >
         <input
           className="input-field prefs-dim"
           type="number"
@@ -197,6 +229,7 @@ function DisplayTab({ draft, patch }: TabProps) {
           }}
         />
       </Row>
+      </Section>
       <div className="prefs-info">
         Wireframe and background are the defaults for new scenes and panes; a scene file keeps the
         per-pane settings it was saved with, and the pane&apos;s Display menu overrides the current
@@ -214,7 +247,10 @@ function ReviewTab({ draft, patch }: TabProps) {
   return (
     <>
       <p className="prefs-desc">Review annotations.</p>
-      <Row label="Author">
+      <Row
+        label="Author"
+        doc="The name written onto review annotations you create. Left empty, annotations are anonymous: attribution is opt-in and never taken from your operating system account."
+      >
         <input
           className="input-field"
           type="text"
@@ -235,14 +271,21 @@ function AutosaveTab({ draft, patch }: TabProps) {
   return (
     <>
       <p className="prefs-desc">Background autosave to browser storage.</p>
-      <Row label="Enabled">
+      <Section title="Background saving">
+      <Row
+        label="Enabled"
+        doc="Whether the scene is saved to browser storage in the background. Autosave is what the recovery prompt restores from after a crash or a closed tab; it never writes to a file you chose."
+      >
         <input
           type="checkbox"
           checked={draft.autosave.enabled}
           onChange={(e) => patch({ autosave: { ...draft.autosave, enabled: e.target.checked } })}
         />
       </Row>
-      <Row label="Delay">
+      <Row
+        label="Delay"
+        doc="How long after your last edit an autosave runs. A hard 15-second cap applies regardless, so a continuous drag still gets saved."
+      >
         <input
           className="input-field"
           type="number"
@@ -259,6 +302,7 @@ function AutosaveTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">seconds after the last edit</span>
       </Row>
+      </Section>
       <div className="prefs-info">
         While edits keep arriving a save is forced at least every 15 seconds. Recovery is offered
         on the next launch after an unclean exit.
@@ -274,7 +318,10 @@ function ScreenshotTab({ draft, patch }: TabProps) {
   return (
     <>
       <p className="prefs-desc">Defaults for the screenshot dialog.</p>
-      <Row label="Resolution">
+      <Row
+        label="Resolution"
+        doc="Capture size for screenshots. The multipliers are relative to the pane's current on-screen size; **Custom** takes exact pixels below."
+      >
         <Select
           ariaLabel="Resolution"
           value={sc.resolution}
@@ -289,7 +336,10 @@ function ScreenshotTab({ draft, patch }: TabProps) {
         />
       </Row>
       {sc.resolution === "custom" && (
-        <Row label="Size">
+        <Row
+        label="Size"
+        doc="Exact capture size in pixels. Captures are budgeted at about 4 megapixels: past that the browser can lose the graphics device."
+      >
           <input
             className="input-field prefs-dim"
             type="number"
@@ -307,14 +357,27 @@ function ScreenshotTab({ draft, patch }: TabProps) {
           />
         </Row>
       )}
+      <Section title="Include in the capture">
       {(
         [
-          ["grid", "Grid"],
-          ["axes", "Axes"],
-          ["validation", "Validation overlay"],
+          [
+            "grid",
+            "Grid",
+            "Whether the ground grid appears in the saved image. Off is usual for a presentation frame, on for a measurement one.",
+          ],
+          [
+            "axes",
+            "Axes",
+            "Whether the corner axis gizmo appears in the saved image.",
+          ],
+          [
+            "validation",
+            "Validation overlay",
+            "Whether validation highlights are baked into the image. On, a screenshot doubles as a bug report showing exactly which faces are flagged.",
+          ],
         ] as const
-      ).map(([key, label]) => (
-        <Row key={key} label={label}>
+      ).map(([key, label, doc]) => (
+        <Row key={key} label={label} doc={doc}>
           <input
             type="checkbox"
             checked={overlays[key]}
@@ -322,6 +385,7 @@ function ScreenshotTab({ draft, patch }: TabProps) {
           />
         </Row>
       ))}
+      </Section>
     </>
   );
 }
@@ -342,14 +406,23 @@ function ViewportTab({ draft, patch }: TabProps) {
         Viewport chrome, how selected objects highlight in the 3D view, the transform gizmo
         orientation, and the increments Ctrl-drag snaps to.
       </p>
-      <Row label="Transport bar">
+      <Section title="Chrome">
+      <Row
+        label="Playbar"
+        doc="The scene-clock strip under the viewport, with the frame scrubber and the range and rate fields. Hidden, the viewport reclaims its height and the Space, comma and period keys still work, so you give up the readout rather than the clock."
+      >
         <input
           type="checkbox"
           checked={chrome.transportBar}
           onChange={(e) => patch({ chrome: { ...chrome, transportBar: e.target.checked } })}
         />
       </Row>
-      <Row label="Selection highlight">
+      </Section>
+      <Section title="Selection">
+      <Row
+        label="Selection highlight"
+        doc="How a selected object is marked in the 3D view. **Outline** draws a rim around its silhouette; **Tint** washes the surface, which is cheaper but hides the material underneath."
+      >
         <Select
           ariaLabel="Selection highlight"
           value={sel.style}
@@ -362,7 +435,10 @@ function ViewportTab({ draft, patch }: TabProps) {
         />
       </Row>
       {sel.style !== "none" && (
-        <Row label="Highlight color">
+        <Row
+        label="Highlight color"
+        doc="The colour of the selection rim or tint. Picked in sRGB and converted for the renderer."
+      >
           <input
             type="color"
             className="input-field prefs-color"
@@ -372,7 +448,10 @@ function ViewportTab({ draft, patch }: TabProps) {
         </Row>
       )}
       {sel.style === "outline" && (
-        <Row label="Outline width (px)">
+        <Row
+        label="Outline width (px)"
+        doc="Thickness of the selection rim, 1 to 16 pixels. Measured on screen, so it stays the same regardless of how far you zoom."
+      >
           <input
             className="input-field"
             type="number"
@@ -386,7 +465,12 @@ function ViewportTab({ draft, patch }: TabProps) {
           />
         </Row>
       )}
-      <Row label="Handle orientation">
+      </Section>
+      <Section title="Transform handles">
+      <Row
+        label="Handle orientation"
+        doc="Which axes the Move and Rotate handles align to. Scale is always object axes: a world-axis scale on a rotated object would shear it, and there is no shear parameter."
+      >
         <Select
           ariaLabel="Handle orientation"
           value={v.orientation}
@@ -397,7 +481,12 @@ function ViewportTab({ draft, patch }: TabProps) {
           onChange={(o) => setV({ orientation: o as GizmoOrientation })}
         />
       </Row>
-      <Row label="Snap: move (m)">
+      </Section>
+      <Section title="Snapping">
+      <Row
+        label="Snap: move (m)"
+        doc="World units a translate drag snaps to while Ctrl or Cmd is held. 0 disables snapping for the Move tool."
+      >
         <input
           className="input-field"
           type="number"
@@ -407,7 +496,10 @@ function ViewportTab({ draft, patch }: TabProps) {
           onChange={(e) => setV({ snapTranslate: Math.max(0, Number(e.target.value) || 0) })}
         />
       </Row>
-      <Row label="Snap: rotate (deg)">
+      <Row
+        label="Snap: rotate (deg)"
+        doc="Degrees a rotate drag snaps to while Ctrl or Cmd is held. 0 disables snapping for the Rotate tool."
+      >
         <input
           className="input-field"
           type="number"
@@ -417,7 +509,10 @@ function ViewportTab({ draft, patch }: TabProps) {
           onChange={(e) => setV({ snapRotate: Math.max(0, Number(e.target.value) || 0) })}
         />
       </Row>
-      <Row label="Snap: scale">
+      <Row
+        label="Snap: scale"
+        doc="The increment a scale drag snaps to while Ctrl or Cmd is held. 0 disables snapping for the Scale tool."
+      >
         <input
           className="input-field"
           type="number"
@@ -427,6 +522,7 @@ function ViewportTab({ draft, patch }: TabProps) {
           onChange={(e) => setV({ snapScale: Math.max(0, Number(e.target.value) || 0) })}
         />
       </Row>
+      </Section>
       <div className="prefs-info">
         Hold Ctrl (or Cmd) while dragging a handle to snap. A step of 0 disables snapping for that
         tool. The Scale tool always uses the object's own axes: a world-axis scale on a rotated

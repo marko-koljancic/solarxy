@@ -380,11 +380,6 @@ body.precision-drag-active {
 /* Per-role body boxes. These must match the `w`/`h` on the matching entry
  * in `ROLE_BODIES` (nodeVisual.ts), which is what the SVG viewBox uses:
  * disagree and the silhouette stretches. */
-.flow-node.role-container {
-  width: 48px;
-  height: 48px;
-}
-
 .flow-node.role-terminal {
   width: 28px;
   height: 28px;
@@ -2737,9 +2732,10 @@ body.reduce-motion .cook-arc {
   stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
 }
 
-/* The glyph centres on the body below the tab, not on the whole 48x48 box:
- * the tab occupies the top 9px, so a box-centred glyph reads high. */
-.flow-node.role-container .node-chip {
+/* The glyph centres on the BODY, not on the whole box: both silhouettes
+ * raise a tab over the top 8px, so a box-centred glyph reads high. */
+.flow-node.role-container .node-chip,
+.flow-node.role-camera .node-chip {
   margin-top: 4px;
 }
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
@@ -3046,11 +3042,6 @@ body.reduce-motion .cook-arc {
   white-space: normal;
   max-width: 20rem;
   line-height: 1.25;
-}
-
-.flow-node.empty-geo .node-body {
-  border-style: dashed;
-  background: transparent;
 }
 
 .flow-list {
@@ -5213,4 +5204,42 @@ body.light-theme {
   min-height: 0;
   display: flex;
   margin-bottom: 0.8rem;
+}
+
+/* ---- Dialog sections and documented rows (round 2) ----
+ *
+ * One idiom across every settings dialog. The section markup generalizes
+ * what the shortcuts dialog already used; before this the app had three
+ * ways of explaining a control (bare rows, a paragraph at the bottom of a
+ * tab, and inline help under a checkbox), which is two too many. */
+
+.dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.dialog-section + .dialog-section {
+  margin-top: 0.4rem;
+}
+
+.dialog-section-title {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+/* A label carrying an explanation. The cue is deliberately quiet: a dotted
+ * underline that only firms up on hover, because on a dialog where EVERY
+ * row is documented a loud affordance twenty times over is just noise. */
+.prefs-label.has-doc {
+  cursor: help;
+  text-decoration: underline dotted var(--border-secondary) 1px;
+  text-underline-offset: 0.25em;
+}
+.prefs-label.has-doc:hover {
+  color: var(--text-primary);
+  text-decoration-color: var(--text-tertiary);
 }

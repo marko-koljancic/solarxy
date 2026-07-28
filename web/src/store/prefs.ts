@@ -43,9 +43,13 @@ export interface GizmoPrefs {
  * widened onto `GizmoPrefs` precisely so that stays true by construction.
  */
 export interface ViewportChromePrefs {
-  /** The scene transport strip under the viewport. Hidden, the viewport
-   * reclaims its height; the Space / comma / period bindings still work,
-   * so hiding it gives up the readout, not the clock. */
+  /** The playbar: the scene-clock strip under the viewport. Hidden, the
+   * viewport reclaims its height; the Space / comma / period bindings still
+   * work, so hiding it gives up the readout, not the clock.
+   *
+   * The KEY stays `transportBar` deliberately. It is what every stored
+   * preference blob already carries, and renaming it would silently reset
+   * the setting for everyone who had turned it off. */
   transportBar: boolean;
 }
 
@@ -113,7 +117,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  appearance: { theme: "dark", reducedMotion: "system" },
+  appearance: { theme: "system", reducedMotion: "system" },
   review: { author: "" },
   autosave: { enabled: true, debounceSec: 2 },
   screenshot: {

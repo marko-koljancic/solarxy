@@ -1,4 +1,7 @@
-// The scene transport: a compact strip under the viewport.
+// The playbar: a compact scene-clock strip under the viewport.
+//
+// Named "Playbar" everywhere a user reads it (Houdini's term). The
+// component, CSS and preference key keep `transport` for continuity.
 //
 // Scene-global, not per pane, so it lives below the whole viewport region
 // rather than on a pane toolbar: there is one clock, and a control that

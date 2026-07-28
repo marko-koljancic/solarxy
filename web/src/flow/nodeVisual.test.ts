@@ -101,8 +101,7 @@ describe("ROLE_BODIES (D-21)", () => {
    * to the symmetry rule below, so an accidental lopsided path still
    * fails. */
   const ASYMMETRIC: Record<string, string> = {
-    camera: "points the way it aims",
-    container: "carries a folder tab",
+    container: "carries a folder tab on the left",
   };
 
   it("covers the six shaped roles", () => {

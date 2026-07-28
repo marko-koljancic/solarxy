@@ -60,7 +60,10 @@ describe("sanitizeTheme", () => {
 
 describe("defaults", () => {
   it("ship the ratified group set", () => {
-    expect(DEFAULT_PREFS.appearance.theme).toBe("dark");
+    // Round 2: the shipped default follows the OS rather than forcing dark.
+    // The stored VALUE stays "system" (the label reads "Device"), so every
+    // preference blob already on disk keeps working.
+    expect(DEFAULT_PREFS.appearance.theme).toBe("system");
     expect(DEFAULT_PREFS.review.author).toBe("");
     expect(DEFAULT_PREFS.autosave).toEqual({ enabled: true, debounceSec: 2 });
     expect(DEFAULT_PREFS.screenshot.resolution).toBe("viewport");

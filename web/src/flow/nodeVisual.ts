@@ -310,16 +310,22 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
     w: 96,
     h: 28,
   },
-  // A camera aims, so its body does too: flat at the back, tapering to a
-  // blunt point at the front. Deliberately asymmetric -- the direction IS
-  // the meaning, and it is what separates this from the branch hexagon,
-  // which points both ways because it forks both ways.
+  // A camera: a body with a CENTRED bump, reading as a viewfinder.
+  //
+  // Shares the raised-tab motif with `container` below, and is told apart
+  // from it by position alone -- centred here, left there. That pairing is
+  // deliberate: both are things you place in the root graph rather than
+  // stages in a chain, so they should look related without looking alike.
+  // Symmetric, unlike the container, and held to the symmetry rule.
   camera: {
     path: roundedPolygonPath([
-      [0, 0, 4],
-      [86, 0, 4],
-      [112, 16, 5],
-      [86, 32, 4],
+      [0, 8, 4],
+      [38, 8, 3],
+      [45, 0, 3],
+      [67, 0, 3],
+      [74, 8, 3],
+      [112, 8, 4],
+      [112, 32, 4],
       [0, 32, 4],
     ]),
     w: BODY_W,
@@ -327,18 +333,21 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
   },
   // A folder: the one silhouette that has to say "there is more inside".
   // The tab is the universal motif for it, and it survives zooming out in a
-  // way an inset second border does not. Square footprint kept, so
-  // containers stay distinguishable by size as well as by shape.
+  // way an inset second border does not.
+  //
+  // Same 112x32 box as every other root-graph node, so a container no
+  // longer stands out by SIZE among the lights and cameras it sits beside;
+  // the tab is what carries the meaning.
   container: {
     path: roundedPolygonPath([
       [0, 0, 4],
       [20, 0, 3],
-      [27, 9, 2],
-      [48, 9, 4],
-      [48, 48, 4],
-      [0, 48, 4],
+      [27, 8, 2],
+      [112, 8, 4],
+      [112, 32, 4],
+      [0, 32, 4],
     ]),
-    w: 48,
-    h: 48,
+    w: BODY_W,
+    h: BODY_H,
   },
 };

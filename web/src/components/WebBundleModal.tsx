@@ -15,6 +15,7 @@ import { saveExportToFile } from "../persistence/opfs";
 import { pushToast } from "../store/toasts";
 import { useMirror } from "../store/mirror";
 import { Modal } from "./Modal";
+import { Row, Section } from "./DialogRow";
 
 function formatSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -58,55 +59,56 @@ export function WebBundleModal({ onClose }: { onClose: () => void }) {
         computing.
       </p>
 
-      <label className="modal-check">
-        <input
-          type="checkbox"
-          checked={autoplay}
-          onChange={(e) => setAutoplay(e.target.checked)}
-        />
-        <span>
-          Allow autoplay
-          <small>
-            {runtime.autoplay
-              ? "This scene is set to autoplay; unchecking stops the published page doing so."
-              : "This scene does not autoplay, so this changes nothing until you turn autoplay on for the scene itself."}
-          </small>
-        </span>
-      </label>
+      <Section title="Playback">
+        <Row
+          label="Allow autoplay"
+          doc={
+            runtime.autoplay
+              ? "Whether the published page starts its clock on load. This scene is set to autoplay, so unchecking stops the published page doing so."
+              : "Whether the published page starts its clock on load. This scene does not autoplay, so this changes nothing until you turn autoplay on for the scene itself."
+          }
+        >
+          <input
+            type="checkbox"
+            checked={autoplay}
+            onChange={(e) => setAutoplay(e.target.checked)}
+          />
+        </Row>
+        <Row
+          label="Show playback controls"
+          doc="Whether a visitor gets play, pause and a frame scrubber. Off by default: most published scenes are meant to be watched rather than driven."
+        >
+          <input
+            type="checkbox"
+            checked={transport}
+            onChange={(e) => setTransport(e.target.checked)}
+          />
+        </Row>
+        <Row
+          label="Turntable"
+          doc="Spins the camera around the scene on the published page. A camera effect rather than scene time, so it works whether or not the scene animates."
+        >
+          <input
+            type="checkbox"
+            checked={turntable}
+            onChange={(e) => setTurntable(e.target.checked)}
+          />
+        </Row>
+      </Section>
 
-      <label className="modal-check">
-        <input
-          type="checkbox"
-          checked={transport}
-          onChange={(e) => setTransport(e.target.checked)}
-        />
-        <span>
-          Show playback controls
-          <small>Lets a visitor scrub and pause. Off by default: most published scenes are meant to be watched, not driven.</small>
-        </span>
-      </label>
-
-      <label className="modal-check">
-        <input
-          type="checkbox"
-          checked={turntable}
-          onChange={(e) => setTurntable(e.target.checked)}
-        />
-        <span>
-          Turntable
-          <small>Spins the camera. A camera effect, not scene time, so it works whether or not the scene animates.</small>
-        </span>
-      </label>
-
-      <label className="modal-row">
-        <span>Page background</span>
-        <input
-          type="color"
-          value={background}
-          onChange={(e) => setBackground(e.target.value)}
-          aria-label="Page background"
-        />
-      </label>
+      <Section title="Appearance">
+        <Row
+          label="Page background"
+          doc="The colour behind the canvas on the published page. Matches the bundle to the site you are embedding it in; it does not change the scene's own viewport background."
+        >
+          <input
+            type="color"
+            value={background}
+            onChange={(e) => setBackground(e.target.value)}
+            aria-label="Page background"
+          />
+        </Row>
+      </Section>
 
       <p className="modal-note">
         The bundle must be served over HTTP. Opening its index.html straight from disk will

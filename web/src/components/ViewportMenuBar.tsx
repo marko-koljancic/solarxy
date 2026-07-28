@@ -68,7 +68,7 @@ export function ViewportMenuBar() {
       // Writes the saved preference directly, like Gizmo Orientation above:
       // one source of truth, so the menu tick and the Preferences row can
       // never disagree, and the choice survives a reload.
-      label: "Transport Bar",
+      label: "Playbar",
       checked: showTransport,
       onClick: () => {
         const { prefs, setPrefs } = usePrefs.getState();

@@ -17,6 +17,7 @@ import { type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { Modal } from "./Modal";
+import { Row, Section } from "./DialogRow";
 import { screenshotDims } from "./ScreenshotModal";
 import { Select } from "./Select";
 
@@ -150,8 +151,11 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
       closeOnEsc={false}
       closeOnBackdrop={!busy}
     >
-        <div className="screenshot-controls">
-          <label className="prefs-unit">Format</label>
+        <Section title="Output">
+        <Row
+          label="Format"
+          doc="What the export produces. **WebM** and **MP4** are single video files and need browser video encoding; **PNG sequence** is a ZIP of numbered frames, which any editor can import and which always works."
+        >
           <Select
             ariaLabel="Format"
             value={format}
@@ -162,7 +166,11 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             ]}
             onChange={(v) => setFormat(v as TurntableFormat)}
           />
-          <label className="prefs-unit">Resolution</label>
+        </Row>
+        <Row
+          label="Resolution"
+          doc="Frame size, relative to the pane's current on-screen size. Larger multipliers cost proportionally more time per frame and are budgeted at about 4 megapixels."
+        >
           <Select
             ariaLabel="Resolution"
             value={resolution}
@@ -173,7 +181,11 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             ]}
             onChange={(v) => setResolution(v as ScreenshotResolution)}
           />
-          <label className="prefs-unit">FPS</label>
+        </Row>
+        <Row
+          label="Frame rate"
+          doc="Frames per second in the exported file. Independent of the scene clock: a turntable is a camera move, not scene time, so this does not read the playbar's rate."
+        >
           <input
             className="input-field prefs-dim"
             type="number"
@@ -182,7 +194,11 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             value={fps}
             onChange={(e) => setFps(Math.max(1, Math.min(60, Number(e.target.value) || fps)))}
           />
-          <label className="prefs-unit">Seconds</label>
+        </Row>
+        <Row
+          label="Duration"
+          doc="How long one full 360-degree rotation takes. Frame rate times duration is the frame count shown below, and every frame is rendered, so both directly cost export time."
+        >
           <input
             className="input-field prefs-dim"
             type="number"
@@ -193,7 +209,9 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
               setDuration(Math.max(1, Math.min(30, Number(e.target.value) || duration)))
             }
           />
-        </div>
+        </Row>
+        </Section>
+        <Section title="Include in each frame">
         <div className="screenshot-controls">
           {(
             [
@@ -215,6 +233,7 @@ export function TurntableExportModal({ onClose }: { onClose: () => void }) {
             {Math.max(2, Math.round(fps * duration))} frames, one 360 rotation
           </span>
         </div>
+        </Section>
         {busy && (
           <div className="turntable-progress">
             <div className="turntable-progress-bar" style={{ width: `${Math.round(progress * 100)}%` }} />

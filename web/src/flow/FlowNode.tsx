@@ -107,9 +107,6 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const cookMode = useMirror((s) => s.cookMode);
   const inStale = useMirror((s) => s.stale.includes(node.id));
   const ctx = useMirror((s) => s.current);
-  // Empty-geo indicator: a container whose subflow has no nodes or no
-  // display flag produces nothing in the scene; render it hollow.
-  const subflow = useMirror((s) => s.contexts[`sub:${node.id}`]);
   // Zoom LOD: the label stack degrades with zoom. Bucketed to the
   // two thresholds so panning never re-renders nodes, only threshold
   // crossings do.
@@ -166,18 +163,18 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const showBypassWing = hasWings && bypassable;
   const showDisplayWing = hasWings && ctx !== "root";
 
-  const emptyGeo =
-    isContainer && (!subflow || subflow.nodes.length === 0 || subflow.activeOutput === null);
-
   // The single sub-row's text, by priority. Cook time is suppressed while
   // the clock runs: a figure that changes sixty times a second is unreadable
   // noise, and hiding it is the other half of keeping the stack still (the
   // engine no longer emits a status event per frame either -- see
   // `CookStatus::same_state`). Empty string keeps the reserved row blank.
+  //
+  // An empty container is deliberately NOT marked. A container you have not
+  // filled in yet is the normal state of one you just made, and both the
+  // dashed border and the word read as a fault rather than a stage.
   const playing = useMirror((s) => s.playing);
-  const subLine = emptyGeo
-    ? "empty"
-    : status?.state === "pending"
+  const subLine =
+    status?.state === "pending"
       ? "loading geometry..."
       : status?.state === "ok" && status.ms > 0 && !playing
         ? `${status.ms.toFixed(1)} ms`
@@ -228,7 +225,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   return (
     <div
       ref={rootRef}
-      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${emptyGeo ? " empty-geo" : ""}${isDisplay ? " is-display" : ""}`}
+      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${isDisplay ? " is-display" : ""}`}
       onPointerEnter={armRadial}
       onPointerDown={cancelRadialTimer}
       onPointerLeave={cancelRadialTimer}

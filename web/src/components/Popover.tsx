@@ -93,7 +93,16 @@ export function Popover({
       setPos({ left, top });
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hide();
+      if (e.key !== "Escape") return;
+      // Escape closes THIS popover and goes no further.
+      //
+      // Without the stop, a popover open inside a dialog let Escape reach
+      // the dialog's own capture-phase handler as well, so dismissing a
+      // tooltip also dismissed the Preferences window around it -- losing
+      // unsaved edits to answer "what does this row do?". The popover is
+      // the innermost thing on screen, so it is the thing Escape means.
+      e.stopPropagation();
+      hide();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
