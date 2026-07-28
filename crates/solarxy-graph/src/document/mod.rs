@@ -50,7 +50,8 @@ pub struct EdgeId(pub u64);
 /// `matnet` opens `Mat`, `texnet` opens `Tex`). Node placement legality is
 /// judged against this kind via the descriptor's `ContextSet`, and adding
 /// a kind here plus a container descriptor is the whole cost of a new
-/// context (the phase-17 generalization of the old root/subflow pair).
+/// context. This generalizes the older root/subflow pair, which could only
+/// ever describe two kinds.
 #[derive(
     Debug,
     Default,

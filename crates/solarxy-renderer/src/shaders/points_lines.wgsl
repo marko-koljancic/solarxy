@@ -5,11 +5,11 @@
 //
 // Points: WebGPU rasterizes point-list primitives at a fixed single pixel
 // with no size control, so points draw as camera-facing quads expanded in
-// the vertex shader from `vertex_index` (decision M-6), following the
+// the vertex shader from `vertex_index`, following the
 // `edge_wire.wgsl` screen-space expansion precedent: positions are pulled
 // from the mesh's edge-geometry storage buffer, whose padded w slot
 // carries the point's packed sRGB8 color (bit-preserved as u32; white when
-// the mesh has no color lane). Unlit by vertex color per decision M-8.
+// the mesh has no color lane). Unlit, coloured by the vertex colour.
 
 struct Camera {
     view_pos: vec4<f32>,

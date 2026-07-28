@@ -5,8 +5,8 @@
 //! conform: an evaluated result becomes a [`crate::params::ParamValue`] of
 //! the spec's type and then travels the same conform, clamp and
 //! degrees-to-radians path a literal does. There is deliberately no string
-//! type (decision M-3), so a path argument is a literal recognised by the
-//! parser rather than a value that can be computed.
+//! type, so a path argument is a literal recognised by the parser rather
+//! than a value that can be computed.
 //!
 //! Vector arithmetic is component-wise, and a scalar mixed with a vector
 //! broadcasts. Mixing two vectors of different width is an error rather

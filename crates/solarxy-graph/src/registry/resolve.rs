@@ -29,9 +29,9 @@ use crate::params::{AssetId, ParamSource, ParamValue};
 /// Every variant names the param, because a node with twenty params and a
 /// bare "syntax error" is a scavenger hunt. The parse and eval variants
 /// carry the [`ExprError`] whole so the editor can underline the offending
-/// span rather than re-parsing to find it (decision M-17: a bad expression
-/// is a value the user can fix by editing, so it badges rather than being
-/// refused at `SetParam`).
+/// span rather than re-parsing to find it. A bad expression is a value the
+/// user can fix by editing, so it badges rather than being refused at
+/// `SetParam`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveFailure {
     /// The expression could not be parsed.
@@ -286,9 +286,9 @@ pub fn resolve_params_with(
 
 /// Lowers an evaluated expression result into the param's declared type.
 ///
-/// This is where decision M-3 is enforced in the resolver: only the seven
-/// numeric types accept an expression. `SetParam` refuses the others up
-/// front (W1g), so reaching this arm means a hand-edited document, and
+/// This is where the accepting-type rule is enforced in the resolver: only
+/// the seven numeric types accept an expression. `SetParam` refuses the
+/// others up front, so reaching this arm means a hand-edited document, and
 /// naming the type beats resolving to a default.
 ///
 /// The lowering deliberately produces the spec's exact type where it can,
@@ -866,7 +866,7 @@ mod tests {
 
     #[test]
     fn an_expression_on_a_non_numeric_param_is_refused_by_type() {
-        // SetParam refuses these up front (M-3), so reaching here means a
+        // SetParam refuses these up front, so reaching here means a
         // hand-edited document; naming the type beats silently defaulting.
         let specs = [ParamSpec::new(
             "label",

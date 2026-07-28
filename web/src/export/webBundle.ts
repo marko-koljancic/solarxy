@@ -162,7 +162,7 @@ export async function buildWebBundle(opts: BundleOptions): Promise<BundleResult>
 
   // Compressed, unlike the turntable exporter: that one ships PNGs, which are
   // already compressed, while this is several megabytes of wasm and text that
-  // roughly a third the size after deflate.
+  // deflate to roughly a third the size.
   const zip = zipSync(files, { level: 6 });
   return { zip, files: Object.keys(files).sort() };
 }

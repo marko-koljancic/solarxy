@@ -24,9 +24,21 @@
 //! lived only in `web/src/flow/nodeLabel.ts` before this module existed,
 //! which is why nothing Rust-side could resolve a path.
 
+use std::collections::HashSet;
+
 use crate::document::{Graph, NodeData, NodeId};
 use crate::params::{ParamSource, ParamValue};
 use crate::registry::Registry;
+
+/// How many suffixes to try before giving up on a unique name.
+///
+/// The search is a scan for the first free integer, so it terminates in at
+/// most (names in the graph + 1) steps and this ceiling is never reached by
+/// any real document. It exists so the loop has a bound rather than relying
+/// on a `panic!` or an unbounded range: a graph that somehow defeated it
+/// gets a name that may collide, which the caller's own uniqueness rules
+/// then handle, instead of taking the process down.
+const MAX_NAME_ATTEMPTS: usize = 1_000_000;
 
 /// The name a node answers to: its stored `name` when that is a non-empty
 /// literal, else the descriptor's display name.
@@ -49,7 +61,11 @@ pub fn node_name(node: &NodeData, registry: &Registry) -> String {
 
 /// Every name in use in one graph, optionally ignoring a single node (the
 /// one being renamed, which must not collide with itself).
-fn names_in_use(graph: &Graph, registry: &Registry, exclude: Option<NodeId>) -> Vec<String> {
+///
+/// A set rather than a list: both callers probe it once per candidate inside
+/// a counting loop, so a list would make minting quadratic in graph size on
+/// the `AddNode` path.
+fn names_in_use(graph: &Graph, registry: &Registry, exclude: Option<NodeId>) -> HashSet<String> {
     graph
         .nodes()
         .filter(|n| Some(n.id) != exclude)
@@ -66,14 +82,16 @@ fn names_in_use(graph: &Graph, registry: &Registry, exclude: Option<NodeId>) -> 
 #[must_use]
 pub fn mint_name(graph: &Graph, registry: &Registry, type_id: &str) -> String {
     let taken = names_in_use(graph, registry, None);
-    for n in 1.. {
+    for n in 1..=MAX_NAME_ATTEMPTS {
         let candidate = format!("{type_id}{n}");
-        if !taken.iter().any(|t| t == &candidate) {
+        if !taken.contains(&candidate) {
             return candidate;
         }
     }
-    // `1..` is unbounded; the loop always returns.
-    unreachable!()
+    // Unreachable for any real document: the scan finds a gap within
+    // `taken.len() + 1` steps. Returning the unsuffixed type id beats
+    // panicking.
+    type_id.to_string()
 }
 
 /// `desired` if it is free in this graph, else `desired` with the smallest
@@ -92,7 +110,7 @@ pub fn uniquify(graph: &Graph, registry: &Registry, desired: &str, exclude: Node
         return desired.to_string();
     }
     let taken = names_in_use(graph, registry, Some(exclude));
-    if !taken.iter().any(|t| t == trimmed) {
+    if !taken.contains(trimmed) {
         return trimmed.to_string();
     }
     // Reuse any trailing digits as the starting point, so renaming a
@@ -100,13 +118,16 @@ pub fn uniquify(graph: &Graph, registry: &Registry, desired: &str, exclude: Node
     // than "body22".
     let stem = trimmed.trim_end_matches(|c: char| c.is_ascii_digit());
     let stem = if stem.is_empty() { trimmed } else { stem };
-    for n in 2.. {
+    for n in 2..=MAX_NAME_ATTEMPTS {
         let candidate = format!("{stem}{n}");
-        if !taken.iter().any(|t| t == &candidate) {
+        if !taken.contains(&candidate) {
             return candidate;
         }
     }
-    unreachable!()
+    // Unreachable for the same reason as in `mint_name`. Keeping the name
+    // the user asked for beats panicking; a collision is then visible to
+    // them rather than fatal.
+    trimmed.to_string()
 }
 
 #[cfg(test)]

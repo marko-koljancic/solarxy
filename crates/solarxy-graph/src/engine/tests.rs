@@ -2351,7 +2351,7 @@ fn stale_job_result_is_dropped_by_the_generation_guard() {
     assert_eq!(e.node_geometry_points(node), 3);
 }
 
-// Phase-4 additions: picking, document save/load, host-clocked durations.
+// Picking, document save/load, host-clocked durations.
 
 #[test]
 fn pick_returns_the_geo_container_under_the_ray() {
@@ -2545,7 +2545,7 @@ fn rect_area_light_reaches_the_scene_with_its_extent_and_orientation() {
     );
 }
 
-// Phase-5 .slxy round-trip fidelity (graph, params, positions, view/camera,
+// .slxy round-trip fidelity (graph, params, positions, view/camera,
 // assets, bypass, type_version, variadic port_order, cook_mode).
 
 #[test]
@@ -2696,7 +2696,7 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     assert!((cam.target[1] - 2.0).abs() < 1e-6);
 }
 
-// Validation systems (W3): implicit import validation, the
+// Validation systems: implicit import validation, the
 // validate node's cache + boundary events, the effective-validation
 // lowering, and the async validate-job protocol.
 
@@ -4720,7 +4720,7 @@ fn geo_export_action_round_trips_through_the_loaders() {
 }
 
 /// An OBJ export of a set that carries materials is the multi-file form:
-/// a Stored zip of `.obj` + `.mtl` (decision M-9). GLB stays a single
+/// a Stored zip of `.obj` + `.mtl`. GLB stays a single
 /// file, and a material-less OBJ stays the classic single `.obj`.
 #[test]
 fn geo_export_obj_with_materials_delivers_a_zip() {
@@ -4883,7 +4883,7 @@ fn cook_warnings_read_back_after_a_cook_and_clear_when_fixed() {
     assert!(e.cook_warnings(box_id).is_empty(), "quiet nodes stay empty");
 }
 
-// Node naming (W1n): expressions resolve by name, so a name has to be
+// Node naming: expressions resolve by name, so a name has to be
 // stored, graph-unique, and stable across paste, rename and reset.
 
 /// The name a node answers to, through the same rule the resolver uses.
@@ -5094,7 +5094,7 @@ fn resetting_the_name_re_mints_rather_than_collapsing_to_the_display_name() {
     assert_eq!(name_of(&e, ctx, a), "box1");
 }
 
-// Expressions (W1a-W1d): the seam is only real if a stored expression
+// Expressions: the seam is only real if a stored expression
 // actually changes what a cook produces.
 
 #[test]
@@ -5118,7 +5118,7 @@ fn an_expression_drives_a_cooked_parameter_end_to_end() {
 
 #[test]
 fn a_bad_expression_badges_the_node_instead_of_cooking() {
-    // Decision M-17: a broken expression is a value the user can fix by
+    // A broken expression is a value the user can fix by
     // editing, so it is a COOK error (the node badges), not a command
     // error that would refuse the keystroke.
     let (mut e, ctx) = subflow_engine();
@@ -5309,7 +5309,8 @@ fn time_is_stopped_so_a_cook_is_reproducible() {
 #[test]
 fn an_expression_driven_transform_keeps_its_gizmo() {
     // `node_transform` (the gizmo read path) is one of the four resolve
-    // sites that fail SILENTLY to a fallback. Before W1c any expression on
+    // sites that fail SILENTLY to a fallback. Before the resolver took an
+    // evaluation context, any expression on
     // a transform param made it return None and the gizmo just vanished;
     // it now resolves like any other value.
     let mut e = engine();
@@ -5361,7 +5362,7 @@ fn an_expression_drives_the_geo_container_world_matrix() {
     assert!((m[3][1] - 3.0).abs() < 1e-6, "matrix was {m:?}");
 }
 
-// ch() cross-node references (W1e).
+// ch() cross-node references.
 
 /// Renames a node, returning the name actually stored.
 fn rename(e: &mut Engine, ctx: GraphContext, node: NodeId, to: &str) -> String {
@@ -6048,7 +6049,7 @@ fn climbing_above_the_root_is_refused_by_name() {
     assert!(err.contains("no parent"), "{err}");
 }
 
-// Param-type gating (W1g, decision M-3).
+// Param-type gating: only the numeric types accept an expression.
 
 #[test]
 fn expressions_are_accepted_on_every_numeric_param_type() {
@@ -6129,7 +6130,7 @@ fn a_refused_expression_leaves_the_param_untouched() {
 
 #[test]
 fn a_parse_error_is_stored_rather_than_refused() {
-    // Decision M-17: a half-typed expression is a value the user is in the
+    // A half-typed expression is a value the user is in the
     // middle of fixing. Refusing the keystroke would make the field
     // unusable; the node badges instead.
     let (mut e, ctx) = subflow_engine();

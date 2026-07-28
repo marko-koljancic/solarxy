@@ -1,6 +1,6 @@
 //! The `SolarxyApp` wasm-bindgen class: the browser host over the engine
-//! and the full `solarxy-renderer` pipeline (the phase-4 stopgap
-//! forward renderer is retired).
+//! and the full `solarxy-renderer` pipeline (the stopgap forward renderer
+//! it started on is retired).
 //!
 //! The React frontend holds one instance: it dispatches `Command`s (in) and
 //! receives `EventBatch`es (out), calls `frame` each rAF tick to cook under
@@ -319,8 +319,8 @@ pub struct SolarxyApp {
     /// session. Suppresses the manipulator, picking and review markers, and
     /// locks the layout to one pane.
     ///
-    /// A flag on the editor host rather than a second wasm target (decision
-    /// M-10): a lean player crate would mean a second boot path and a second
+    /// A flag on the editor host rather than a second wasm target: a lean
+    /// player crate would mean a second boot path and a second
     /// payload gate that could drift from this one, for a saving nobody has
     /// measured. The follow-up is recorded with an instruction to measure
     /// first.
@@ -433,7 +433,7 @@ impl SolarxyApp {
 
         // Chrome exposes only non-sRGB surface formats; render into an
         // sRGB view of the surface texture so the tone-mapped composite
-        // output is gamma-encoded correctly (the phase-0 finding).
+        // output is gamma-encoded correctly.
         let caps = surface.get_capabilities(&adapter);
         let base_format = caps
             .formats

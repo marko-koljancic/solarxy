@@ -1,7 +1,7 @@
 //! The scene clock: the document's sense of time, and the transport that
 //! drives it.
 //!
-//! **Foundation only** (decision M-11). There is a clock, transport control,
+//! **Foundation only.** There is a clock, transport control,
 //! and a tick that dirties what depends on time. There are no event nodes,
 //! no keyframe channels and no actor graph; those wait until this has a real
 //! consumer to be judged against, and its single consumer today is

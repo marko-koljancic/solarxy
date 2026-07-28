@@ -1,4 +1,4 @@
-//! W2f: what a wrangle costs per element (0.8.1 milestone).
+//! What a wrangle costs per element (0.8.1 milestone).
 //!
 //! The question this answers. The milestone requires "a documented
 //! per-element ceiling with a cook warning above it", and says explicitly

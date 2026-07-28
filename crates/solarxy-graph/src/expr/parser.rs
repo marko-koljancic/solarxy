@@ -1,8 +1,8 @@
 //! Tokens to a syntax tree, by precedence climbing.
 //!
 //! The grammar has no loops and no user-defined functions, so the sandbox
-//! (decision M-23) is three numbers enforced here: source length, nesting
-//! depth, and calls per expression. Depth is what stops
+//! is three numbers enforced here: source length, nesting depth, and calls
+//! per expression. Depth is what stops
 //! `((((((...))))))` from overflowing the stack during parsing *and*
 //! during evaluation, since both walk the same tree.
 
@@ -324,7 +324,7 @@ impl Parser<'_> {
                 Ok(Expr::Var(v))
             }
             // A bare string is not a value: there is no string type in the
-            // lattice (M-3), so it is only ever a call argument.
+            // lattice, so it is only ever a call argument.
             Tok::Str(_) => Err(ExprError::new(
                 "a string is only valid as an argument to ch() or bbox()",
                 span,
@@ -610,8 +610,8 @@ mod tests {
         assert!(err("   ").message.contains("empty"));
     }
 
-    // The M-23 sandbox. The grammar has no loops, so these three limits
-    // are the whole of it.
+    // The sandbox. The grammar has no loops, so these three limits are the
+    // whole of it.
 
     #[test]
     fn source_longer_than_the_limit_is_refused_before_lexing() {

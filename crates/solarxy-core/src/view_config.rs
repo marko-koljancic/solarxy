@@ -64,7 +64,7 @@ pub struct DisplaySettings {
     /// Scene-global HDRI yaw, in radians. Rotates the visible HDRI sky
     /// and the IBL it derives together. `0.0` when no HDRI is loaded.
     pub hdri_rotation: f32,
-    /// On-screen point size in pixels (decision M-27).
+    /// On-screen point size in pixels.
     ///
     /// Global rather than per pane, unlike `line_weight`: there is no
     /// comparison worth two point sizes side by side, and a global keeps it

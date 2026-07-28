@@ -40,7 +40,7 @@ function node(params: NodeMirror["params"]): NodeMirror {
 }
 
 describe("which params accept an expression", () => {
-  it("covers exactly the numeric types (decision M-3)", () => {
+  it("covers exactly the numeric types", () => {
     // Held to the Rust set by expression_types_match_the_frontend in
     // crates/solarxy-core/tests/tokens_drift.rs.
     expect([...EXPRESSION_TYPES].sort()).toEqual([

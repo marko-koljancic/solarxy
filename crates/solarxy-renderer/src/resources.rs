@@ -292,7 +292,7 @@ pub fn upload_model(
 
         let cpu_positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
         // Picking and review hashing read the CPU mirror as triangles;
-        // points and lines are unpickable (M-4) and expose no indices.
+        // points and lines are unpickable and expose no indices.
         cpu_meshes.push(model::CpuMesh {
             positions: cpu_positions,
             indices: if is_triangles {

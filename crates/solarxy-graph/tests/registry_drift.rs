@@ -260,3 +260,74 @@ fn node_docs_are_more_than_a_restated_title() {
         thin.join("\n  ")
     );
 }
+
+/// `naming::node_name` and `web/src/flow/nodeLabel.ts` must agree.
+///
+/// The two implement one rule in two languages, and both files say so in
+/// prose while nothing held them to it. The consequence of drift is
+/// specific and nasty rather than cosmetic: expressions address nodes BY
+/// NAME, so if Rust resolves `ch("box1/size")` against one name while the
+/// canvas shows another, a user is typing a path against a label that is
+/// not what the engine sees.
+///
+/// The Rust half is exercised directly. The frontend half is checked at the
+/// source level, because vitest cannot be reached from here and the drift
+/// direction that actually happens is someone tidying `nodeLabel.ts` (a
+/// dropped `.trim()`, a reordered fallback) without knowing Rust mirrors it.
+#[test]
+fn node_name_matches_the_frontend_label() {
+    use solarxy_graph::document::{ContextKind, Graph, NodeData, NodeId};
+    use solarxy_graph::naming::node_name;
+    use solarxy_graph::params::{ParamSource, ParamValue};
+
+    let registry = builtin_registry().expect("builtin registry");
+
+    // The Rust half, against the shared rule's three branches.
+    let named = |name: Option<&str>| {
+        let mut g = Graph::new(ContextKind::Geo);
+        let mut node = NodeData::new(NodeId(1), "box", 1);
+        if let Some(n) = name {
+            node.params.insert(
+                "name".to_string(),
+                ParamSource::Literal(ParamValue::Text(n.to_string())),
+            );
+        }
+        g.add_node(node);
+        let node = g.nodes().next().expect("the node just added");
+        node_name(node, &registry)
+    };
+    assert_eq!(named(Some("body")), "body", "a set name wins");
+    assert_eq!(named(Some("  body  ")), "body", "a name is trimmed");
+    assert_eq!(named(Some("   ")), "Box", "a blank name falls back");
+    assert_eq!(named(None), "Box", "an unset name falls back");
+
+    // The frontend half. Each needle is one load-bearing piece of the same
+    // rule; the message names what breaks if it is gone.
+    let path = workspace_root().join("web/src/flow/nodeLabel.ts");
+    let src = std::fs::read_to_string(&path).expect("web/src/flow/nodeLabel.ts must exist");
+    for (needle, why) in [
+        ("params[\"name\"]", "the label must read the `name` param"),
+        (
+            "\"literal\"",
+            "an expression-valued name must NOT be resolved here",
+        ),
+        ("\"text\"", "only a Text-typed name counts"),
+        (
+            ".trim()",
+            "a whitespace-only name must fall back, not render as blank",
+        ),
+        (
+            "displayName",
+            "the first fallback is the descriptor's display name",
+        ),
+        ("typeId", "the last fallback is the type id"),
+    ] {
+        assert!(
+            src.contains(needle),
+            "web/src/flow/nodeLabel.ts no longer contains {needle:?}, so it may have diverged \
+             from `naming::node_name` in crates/solarxy-graph/src/naming.rs: {why}. \
+             Expressions resolve node paths by name, so a divergence means the engine and the \
+             canvas disagree about what a node is called."
+        );
+    }
+}

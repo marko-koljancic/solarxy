@@ -1,4 +1,4 @@
-// The Properties panel's own menu bar (Stage 7, feedback item 7): a Node
+// The Properties panel's own menu bar: a Node
 // menu (info, path, bypass, display flag) and a Params menu (reset all /
 // reset tab). Pure interpreters of the mirror and registry; every
 // mutation is a Command dispatch, and the reset command is one undo step

@@ -2,8 +2,8 @@
 //!
 //! The evaluator is a leaf: it knows nothing about documents, cooks or
 //! geometry. Everything it cannot compute from the tree alone arrives
-//! through two narrow traits on [`EvalCtx`], which the engine implements in
-//! W1d and W1e. That keeps `expr/` free of a dependency on `Document`,
+//! through two narrow traits on [`EvalCtx`], which the engine implements.
+//! That keeps `expr/` free of a dependency on `Document`,
 //! `Registry` or `Inputs`, and it is what lets the same evaluator serve
 //! both a parameter and, later, a wrangle body.
 
@@ -37,7 +37,7 @@ impl Default for SceneTime {
     }
 }
 
-/// Cross-node parameter reads. Implemented by the engine in W1e.
+/// Cross-node parameter reads. Implemented by the engine, in [`crate::refs`].
 pub trait ParamRefs {
     /// Reads the parameter at `path`, relative to the referring node.
     ///
@@ -47,7 +47,7 @@ pub trait ParamRefs {
 }
 
 /// Queries against the node's own gathered geometry inputs. Implemented by
-/// the engine in W1d.
+/// the engine, in [`crate::cook::geo_queries`].
 pub trait GeoQueries {
     /// # Errors
     /// The queried input is not connected. Every query is fallible for the

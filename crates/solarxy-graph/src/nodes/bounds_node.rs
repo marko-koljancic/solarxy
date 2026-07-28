@@ -4,7 +4,7 @@
 //!
 //! v2 (0.8.0): center mode emits a true point primitive, realizing the
 //! catalog's original intent now that point topology exists. It supersedes
-//! the 0.7.x marker-cube substitute (decision M-3); the `marker_size` param
+//! the 0.7.x marker-cube substitute; the `marker_size` param
 //! went with the cube and is stripped by the v1-to-v2 migration.
 
 use solarxy_kernel::bounds_geo::{bounds_box, center_point};
@@ -91,7 +91,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
     }
 }
 
-/// v1 -> v2: center mode became a true point primitive (decision M-3), so
+/// v1 -> v2: center mode became a true point primitive, so
 /// the marker cube's `marker_size` has nothing left to size and is stripped.
 #[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
 fn migrate_v1_strip_marker_size(

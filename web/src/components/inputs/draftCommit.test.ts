@@ -33,4 +33,41 @@ describe("draft commit", () => {
     expect(shouldCommit("control", lastSent)).toBe(false);
     expect(shouldCommit("driver", lastSent)).toBe(true);
   });
+
+  // The other half of the contract `useDraftCommit` implements: the stored
+  // value is authoritative, so an undo or a rename the engine uniquified
+  // resets both the draft and what counts as already-sent. Without the
+  // second reset, re-typing the value the field had before the undo would
+  // look like a repeat and dispatch nothing, silently losing the edit.
+  it("follows the stored value when it changes underneath", () => {
+    const dispatched: string[] = [];
+    let stored = "box1";
+    let draft = stored;
+    let lastSent = stored;
+    const commit = () => {
+      if (!shouldCommit(draft, lastSent)) return;
+      lastSent = draft;
+      dispatched.push(draft);
+    };
+    /** What the hook's effect does when `value` changes. */
+    const storedChanged = (next: string) => {
+      stored = next;
+      draft = next;
+      lastSent = next;
+    };
+
+    draft = "control";
+    commit();
+    expect(dispatched).toEqual(["control"]);
+
+    // Undo: the engine puts the old name back.
+    storedChanged("box1");
+    expect(draft).toBe("box1");
+
+    // Re-typing "control" must dispatch again, not be swallowed.
+    draft = "control";
+    commit();
+    expect(dispatched).toEqual(["control", "control"]);
+    expect(stored).toBe("box1");
+  });
 });

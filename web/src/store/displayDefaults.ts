@@ -51,8 +51,8 @@ export interface DisplayPrefs {
   labelDecimals: number;
   /** On-screen size of a rendered point, in pixels, clamped 1..32.
    *
-   * Global rather than per pane (decision M-27): there is no comparison
-   * worth two point sizes side by side. */
+   * Global rather than per pane: there is no comparison worth two point
+   * sizes side by side. */
   pointSize: number;
 }
 

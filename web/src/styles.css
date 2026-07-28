@@ -722,7 +722,7 @@ body.precision-drag-active {
   margin-right: 0.4rem;
 }
 
-/* Stage 8: the subflow display-flag toggle in the list view, occupying the
+/* The subflow display-flag toggle in the list view, occupying the
    SAME right-side slot the root rows give the visibility eye, so the blue
    dot sits in one place at every level. Same chrome as the eye; the dot is
    hollow until the flag is on (a per-context radio, not an on/off eye). */
@@ -2678,6 +2678,12 @@ body.reduce-motion .cook-arc {
   padding: 0.25rem 0.7rem;
 }
 
+/* The capability links read as one row of peers, quieter than body prose so
+   the positioning paragraph above still leads. */
+.about-docs {
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
 .about-version {
   color: var(--text-secondary);
   font-size: 1.1rem;
@@ -2691,7 +2697,7 @@ body.reduce-motion .cook-arc {
   color: var(--accent-primary);
 }
 
-/* ---- W-C1: pastel category fills ---- */
+/* ---- Pastel category fills ---- */
 
 /* Category -> the fill custom property both body kinds consume (the CSS
  * rect bodies via background-color, the shaped SVG bodies via .body-fill). */
@@ -2708,7 +2714,7 @@ body.reduce-motion .cook-arc {
 .flow-node.cat-cameras { --cat-fill: var(--node-cat-cameras); }
 .flow-node.cat-container { --cat-fill: var(--node-cat-container); }
 
-/* Root containers color-code by context (Stage 7): the fill token per
+/* Root containers color-code by context: the fill token per
  * opened network kind, with a border accent derived from the fill so the
  * tint carries in both themes. The glyph follows --cat-fill on its own
  * (the ink is a fill/ink color-mix). Geo keeps the neutral tile. */
@@ -2780,9 +2786,9 @@ body.reduce-motion .cook-arc {
   margin: -2px 0 6px;
 }
 
-/* ---- W-C4: the note sticky ---- */
+/* ---- The note sticky ---- */
 
-/* Flat (Stage 8): no border, the fill alone carries the sticky. The font
+/* Flat: no border, the fill alone carries the sticky. The font
    size is inline (the `text_size` param); this rule keeps only the fallback. */
 .note-node {
   position: relative;
@@ -2858,7 +2864,7 @@ body.reduce-motion .cook-arc {
   fill: var(--hover-bg);
 }
 
-/* Stage 8: per-action hover color, so the wedge under the cursor names its
+/* Per-action hover color, so the wedge under the cursor names its
    command. The `.hovered` class is React-paired across the SVG wedge and
    its sibling HTML icon (CSS :hover on one cannot restyle the other).
    Mixed against the overlay surface so hover stays quieter than `.active`
@@ -3094,7 +3100,7 @@ body.reduce-motion .cook-arc {
   font-size: 12px;
 }
 /* The first cell lays out glyph and label on one centered line (the
-   display dot moved to the right actions slot in Stage 8). */
+   display dot lives in the right actions slot). */
 .flow-list td:first-child {
   white-space: nowrap;
 }
@@ -3831,7 +3837,7 @@ body.reduce-motion .cook-arc {
   cursor: default;
 }
 
-/* ---- Stage 8: the per-group maximize / restore header action ---- */
+/* ---- The per-group maximize / restore header action ---- */
 
 .dock-header-actions {
   display: flex;
@@ -3924,7 +3930,7 @@ body.reduce-motion .cook-arc {
   position: relative;
 }
 
-/* Stage 8: the pill matches the square stack's surface language (same
+/* The pill matches the square stack's surface language (same
    backdrop, same 3.2rem height) so the whole right strip reads as one
    grouped control; it stays a pill only because it carries text. */
 .attr-lane-trigger {
@@ -4468,7 +4474,7 @@ body.reduce-motion .cook-arc {
   color: var(--text-tertiary);
   font-size: 1.1rem;
 }
-/* Stage 8: the optional leading swatch chip (a color or gradient), used by
+/* The optional leading swatch chip (a color or gradient), used by
    the attribute-ramp preset picker. */
 .select-swatch {
   flex: 0 0 2.6rem;
@@ -4625,7 +4631,7 @@ body.reduce-motion .cook-arc {
   border-left-color: var(--border-default);
 }
 
-/* ---- Stage 8: the Tree panel (searchable scene outline) ---- */
+/* ---- The Tree panel (searchable scene outline) ---- */
 
 .tree-pane {
   width: 100%;

@@ -97,7 +97,8 @@ describe("defaults", () => {
 describe("rehydration backfill", () => {
   it("a stored blob without the display group backfills it from defaults", () => {
     // The deep merge is what makes a new group need no persist version
-    // bump; a pre-Stage-8 blob rehydrates with the display defaults.
+    // bump; a blob stored before the group existed rehydrates with the
+    // display defaults.
     const prefs = mergePersistedPrefs({ appearance: { theme: "light", reducedMotion: "system" } });
     expect(prefs.appearance.theme).toBe("light");
     expect(prefs.display).toEqual(DEFAULT_PREFS.display);

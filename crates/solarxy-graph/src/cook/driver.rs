@@ -1344,7 +1344,7 @@ mod tests {
 
     #[test]
     fn resubmitted_image_replaces_previous_commit() {
-        // The Phase-17 keep-last-good regression: an image-only node's
+        // The keep-last-good regression the texture context introduced: an image-only node's
         // SECOND commit must replace the first. Before the fix,
         // `is_renderable_empty` treated any non-geometry output as empty,
         // so keep-last-good silently discarded every re-decode (the live

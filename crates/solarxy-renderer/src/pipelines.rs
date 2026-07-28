@@ -124,7 +124,7 @@ pub struct ScenePipelines {
     /// `line` with the color vertex buffer (per-vertex color).
     pub line_colored: wgpu::RenderPipeline,
     /// Points-topology scene meshes: camera-facing quads expanded in the
-    /// vertex shader from the edge-geometry storage buffer (M-6).
+    /// vertex shader from the edge-geometry storage buffer.
     pub point: wgpu::RenderPipeline,
 }
 
@@ -167,7 +167,7 @@ pub struct OverlayPipelines {
     /// init and step passes (`Rg32Float` ping-pong), and the rim blit onto
     /// the composited swapchain view.
     pub outline_mask: wgpu::RenderPipeline,
-    /// M-15: line and point meshes silhouette into the same mask.
+    /// Line and point meshes silhouette into the same mask.
     pub outline_mask_line: wgpu::RenderPipeline,
     pub outline_mask_point: wgpu::RenderPipeline,
     pub outline_jfa_init: wgpu::RenderPipeline,
@@ -404,8 +404,8 @@ impl Pipelines {
         .no_depth()
         .build();
 
-        // Per decision M-15, line and point meshes join the selection
-        // outline like triangles: the same mask target, assembled per
+        // Line and point meshes join the selection outline like
+        // triangles: the same mask target, assembled per
         // their topology (the point variant is built later, after the
         // points/lines shader exists; see `outline_mask_point`).
         let outline_mask_line = PipelineBuilder::new(
@@ -587,7 +587,7 @@ impl Pipelines {
         .sample_count(sample_count)
         .build();
 
-        // The point half of M-15: the same quad expansion into the
+        // The point half of the selection outline: the same quad expansion into the
         // outline mask's R8 target (single-sampled, depth-ignoring, like
         // `outline_mask`).
         let outline_mask_point = PipelineBuilder::new(

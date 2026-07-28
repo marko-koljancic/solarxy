@@ -8,7 +8,7 @@ import { DEFAULT_RECIPE, sanitizeRecipe } from "../dock/layouts";
 /** The wave-4 panel fields at their absent-means-off defaults. */
 const PANEL_DEFAULTS = { attributes: false, attributesPct: 30, texture: false, tree: false };
 
-/** A desk exactly as the pre-Phase-10 shell stored it. */
+/** A desk exactly as the pre-dockview shell stored it. */
 const LEGACY_DESK = {
   name: "My Old Desk",
   viewportSide: "right" as const,

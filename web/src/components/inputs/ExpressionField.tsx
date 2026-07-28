@@ -10,15 +10,15 @@
 // event per expression per frame across the wasm boundary, which is
 // exactly the traffic the mirror-and-command model exists to avoid.
 //
-// Editing is draft-based, following the NoteNode contract: committing per
-// keystroke would re-cook the graph on every character, and a half-typed
-// expression is a cook error by design (M-17), so the node would badge and
-// unbadge as you type.
+// Editing is draft-based through the shared `useDraftCommit`: committing
+// per keystroke would re-cook the graph on every character, and a
+// half-typed expression is a cook error by design, so the node would badge
+// and unbadge as you type.
 
 import { useEffect, useRef, useState } from "react";
 import { dispatch, getClient } from "../../engine/session";
 import type { GraphContext, NodeId } from "../../engine/types";
-import { shouldCommit } from "./draftCommit";
+import { useDraftCommit } from "./draftCommit";
 import { formatResolved } from "./expressionLane";
 
 interface Props {
@@ -42,25 +42,20 @@ export function ExpressionField({
   revision,
   onRevert,
 }: Props) {
-  const [draft, setDraft] = useState(expr);
   const inputRef = useRef<HTMLInputElement>(null);
-  // What we last dispatched, which is NOT the same as `expr`. Enter
-  // commits and then blurs, and the blur handler runs before the new text
-  // has travelled back through the mirror, so comparing against `expr`
-  // alone dispatches the same edit twice and leaves a no-op undo step in
-  // front of the real one.
-  const sentRef = useRef(expr);
+  const { draft, setDraft, commit, revert } = useDraftCommit(expr, (next) =>
+    dispatch({
+      type: "setParam",
+      ctx,
+      node,
+      key: paramKey,
+      value: { kind: "expression", expr: next },
+    }),
+  );
   const [readout, setReadout] = useState<{ text: string; error: boolean }>({
     text: "",
     error: false,
   });
-
-  // The stored text is authoritative: an undo, a rename rewrite, or a
-  // redo all change it under us, and the field must follow.
-  useEffect(() => {
-    setDraft(expr);
-    sentRef.current = expr;
-  }, [expr]);
 
   useEffect(() => {
     try {
@@ -74,18 +69,6 @@ export function ExpressionField({
       setReadout({ text: e instanceof Error ? e.message : String(e), error: true });
     }
   }, [ctx, node, paramKey, expr, revision]);
-
-  const commit = () => {
-    if (!shouldCommit(draft, sentRef.current)) return;
-    sentRef.current = draft;
-    dispatch({
-      type: "setParam",
-      ctx,
-      node,
-      key: paramKey,
-      value: { kind: "expression", expr: draft },
-    });
-  };
 
   return (
     <div className="param-expr">
@@ -110,7 +93,7 @@ export function ExpressionField({
             // expression: that is the `=` toggle's job, and conflating
             // them would make a mistyped character destroy the whole
             // expression.
-            setDraft(expr);
+            revert();
             inputRef.current?.blur();
           }
         }}

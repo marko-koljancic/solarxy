@@ -376,10 +376,10 @@ fn dir_resolver_rejects_path_traversal() {
     assert!(resolver.read("../../Cargo.toml").is_none());
 }
 
-// ---- 0.8.0 vertex-color and point-cloud fixtures (W3a) ----
+// ---- 0.8.0 vertex-color and point-cloud fixtures ----
 
 /// uchar 128 through the sRGB decode: 128/255 = 0.50196 encodes to linear
-/// ~0.2158; the loader stores linear per decision M-7.
+/// ~0.2158; the loader stores linear.
 const LINEAR_128: f32 = 0.215_86;
 
 #[test]

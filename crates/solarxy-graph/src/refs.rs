@@ -287,7 +287,7 @@ impl ParamRefs for DocRefs<'_> {
 }
 
 /// A stored param value as an expression value, or `None` for the types
-/// that are not numbers (decision M-3: no string type in the lattice).
+/// that are not numbers (there is no string type in the lattice).
 fn param_to_value(v: &ParamValue) -> Option<Value> {
     Some(match v {
         ParamValue::Float(f) => Value::Float(*f),
@@ -327,7 +327,8 @@ fn type_name_of(v: &ParamValue) -> &'static str {
 
 /// The expression dependency graph, over `(node, key)` pairs.
 ///
-/// **Why this exists.** W0b measured the alternative: `mark_dirty_inner`
+/// **Why this exists.** The alternative was measured before this was
+/// built: `mark_dirty_inner`
 /// scans once per dirtied node, so a scan-based reverse lookup is
 /// `O(dirtied x document)` and costs 1.68 ms per param write at 210 nodes,
 /// 25.5 ms at 840. One control node driving many params is the canonical
@@ -340,7 +341,7 @@ fn type_name_of(v: &ParamValue) -> &'static str {
 /// from the document after any command that could change it keeps that
 /// property exactly, because the index is never a separate source of
 /// truth. The cost is one linear pass per user command, against O(1)
-/// lookups during propagation, so the quadratic term W0b measured is gone
+/// lookups during propagation, so the measured quadratic term is gone
 /// either way.
 ///
 /// Keys are `(node, key)` pairs, not nodes: `width = ch("height")` on one
@@ -382,8 +383,9 @@ fn node_program_uses_time(registry: &Registry, node: &crate::document::NodeData)
         .any(|spec| {
             let source = match node.params.get(&spec.key) {
                 Some(ParamSource::Literal(ParamValue::Text(t))) => t.as_str(),
-                // An expression cannot drive a Snippet (M-3 excludes Text
-                // storage), so anything else falls back to the default.
+                // An expression cannot drive a Snippet (Text-stored types
+                // are literal-only), so anything else falls back to the
+                // default.
                 _ => match &spec.default {
                     ParamValue::Text(t) => t.as_str(),
                     _ => return false,

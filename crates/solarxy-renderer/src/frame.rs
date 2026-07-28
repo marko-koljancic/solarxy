@@ -368,7 +368,8 @@ pub enum SelectionStyle {
     /// Constant-width jump-flood rim around the screen-space silhouette.
     #[default]
     Outline,
-    /// The pre-phase-18 translucent accent fill over the meshes.
+    /// The legacy translucent accent fill over the meshes, from before the
+    /// jump-flood outline existed.
     Tint,
     /// No viewport highlight.
     None,
@@ -1376,7 +1377,7 @@ impl Renderer {
             });
             // Triangles, then lines (same layout, different assembly),
             // then points (their own expansion pipeline): every topology
-            // silhouettes into the mask per decision M-15.
+            // silhouettes into the mask.
             pass.set_pipeline(&self.pipelines.overlay.outline_mask);
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_bind_group(1, &self.outline.white_bind_group, &[]);
@@ -1519,7 +1520,7 @@ impl Renderer {
 
     /// Applies the selection-highlight preference: the style, and the rim
     /// color/width (the legacy tint reuses the same color at a fixed
-    /// 0.35 alpha, matching its pre-phase-18 look).
+    /// 0.35 alpha, matching how it looked before the outline replaced it).
     pub fn set_selection_highlight(
         &mut self,
         queue: &wgpu::Queue,

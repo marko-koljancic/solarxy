@@ -7,8 +7,8 @@ import type { NodeMirror, ParamSnapshot, ParamValue } from "../../engine/types";
 /** The param types an expression may drive.
  *
  * Mirrors `ParamType::accepts_expression` in
- * `crates/solarxy-graph/src/registry/param_spec.rs` (decision M-3), and is
- * held to it by `expression_types_match_the_frontend` in
+ * `crates/solarxy-graph/src/registry/param_spec.rs`, and is held to it by
+ * `expression_types_match_the_frontend` in
  * `crates/solarxy-core/tests/tokens_drift.rs`. There is no string type in
  * the expression value lattice, so text, menu, file and node-reference
  * params show no affordance at all. */

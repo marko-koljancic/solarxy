@@ -195,7 +195,8 @@ function applyBodyClasses(prefs: Prefs): void {
   );
 }
 
-/** One-time import of the pre-W4 theme key when no prefs blob exists yet. */
+/** One-time import of the standalone theme key, from before preferences
+ * were a single persisted blob, when no blob exists yet. */
 function legacyTheme(): ThemeChoice | null {
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem("solarxy.ui.theme");

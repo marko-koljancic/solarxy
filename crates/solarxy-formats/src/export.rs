@@ -120,8 +120,7 @@ fn obj_text(meshes: &[ExportMesh<'_>], mtl: Option<(&str, &[String])>) -> String
 
 /// A multi-file OBJ export: the `.obj`, its `.mtl` sidecar, and the
 /// referenced texture PNGs, each named as referenced from the MTL. The
-/// caller owns delivery (the web shell packs the trio into a zip,
-/// decision M-9).
+/// caller owns delivery (the web shell packs the trio into a zip).
 pub struct ObjMtlExport {
     pub obj: Vec<u8>,
     pub mtl: Vec<u8>,

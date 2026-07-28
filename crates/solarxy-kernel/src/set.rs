@@ -571,7 +571,7 @@ mod tests {
         assert_eq!(cooked.bounds.max.x, set.bounds.max.x);
     }
 
-    /// The W2a contract: topology crosses into the renderer contract, and
+    /// The topology contract: topology crosses into the renderer contract, and
     /// the reserved `color` lane lifts into `CookedMesh::colors` by
     /// refcount when (and only when) it is a position-count Vec4.
     #[test]
@@ -707,7 +707,7 @@ mod tests {
         );
     }
 
-    /// W3b: loader colors lift into the reserved lane on `from_raw` and
+    /// Loader colors lift into the reserved lane on `from_raw` and
     /// lower back on `to_raw`; a length-mismatched array is dropped.
     #[test]
     fn raw_colors_lift_into_the_lane_and_lower_back() {

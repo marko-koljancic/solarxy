@@ -93,7 +93,7 @@ describe("category fallback totality (the 15-category taxonomy)", () => {
   });
 });
 
-describe("ROLE_BODIES (D-21)", () => {
+describe("ROLE_BODIES", () => {
   const entries = Object.entries(ROLE_BODIES) as [string, RoleBody][];
 
   /** Roles whose silhouette is deliberately NOT left-right symmetric,

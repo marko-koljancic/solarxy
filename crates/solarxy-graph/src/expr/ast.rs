@@ -1,7 +1,7 @@
 //! The expression syntax tree.
 //!
-//! Deliberately small. There is no string type in the value lattice
-//! (decision M-3), so [`Expr::Str`] exists only as a call argument: `ch()`
+//! Deliberately small. There is no string type in the value lattice, so
+//! [`Expr::Str`] exists only as a call argument: `ch()`
 //! and `bbox()` take a path or a field name, and the parser refuses a
 //! string anywhere a value is expected. That keeps every evaluated value
 //! inside the numeric union the resolver already knows how to conform.
@@ -167,7 +167,7 @@ impl Expr {
     ///
     /// The dependency index is built from this: a path is a *string
     /// literal* by construction (there is no string type to compute one
-    /// with, decision M-3), so the set of things an expression can read is
+    /// with), so the set of things an expression can read is
     /// fully known without evaluating it. That is what makes the index
     /// derivable from the document alone.
     #[must_use]

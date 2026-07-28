@@ -1,4 +1,4 @@
-//! W0b: the cost of an expression dependency graph (0.8.1 milestone).
+//! The cost of an expression dependency graph (0.8.1 milestone).
 //!
 //! The question this answers. `referrers_of` deliberately chose a scan over
 //! a maintained index, and documented why: "`NodeRef` literals are
@@ -13,10 +13,10 @@
 //! cargo run --release -p solarxy-graph --example param_graph_cost
 //! ```
 //!
-//! Honest limitations, both recorded in the W0b amendment:
+//! Honest limitations, both recorded in the milestone amendment:
 //!
-//! 1. **The reference extractor here is a stub.** `expr/` does not exist
-//!    yet (it is W1a), so `ch("...")` targets are pulled out by scanning
+//! 1. **The reference extractor here is a stub.** `expr/` did not exist
+//!    when this harness was written, so `ch("...")` targets are pulled out by scanning
 //!    for the call and splitting the path. What is being measured is the
 //!    *shape* of the reverse lookup, an `O(contexts x nodes x params)`
 //!    walk versus one hash probe, not parse cost. A real extractor walks a
@@ -48,7 +48,7 @@ const REPS: usize = 200;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "W0b: expression dependency-graph cost\n\
+        "Expression dependency-graph cost\n\
          density={:.0}% of transform nodes carry a ch() expression, {REPS} reps per measurement\n",
         EXPR_DENSITY * 100.0
     );
@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!(
-        "\nsetparam    = Engine::apply(SetParam) end to end. Since W1e this INCLUDES\n\
+        "\nsetparam    = Engine::apply(SetParam) end to end. This INCLUDES\n\
          \x20             rebuilding the expression dependency index from the document,\n\
          \x20             which is why it is tens of microseconds rather than one or two.\n\
          \x20             That is the deliberate trade: one linear rebuild per user\n\
@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          \x20             class. A drag does not pay it (preview_param does not rebuild).\n\
          \x20             Compare against propagate/scan below, which is what the\n\
          \x20             alternative would have cost on the SAME edit.\n\
-         rebuild     = ExprIndex::build alone, the real code path. W1e re-derives\n\
+         rebuild     = ExprIndex::build alone, the real code path. The engine re-derives\n\
          \x20             the index from the document instead of patching it, so this\n\
          \x20             is what a command pays and it is O(document), not O(refs in\n\
          \x20             the written param). It replaces the hypothetical index+maint\n\
@@ -143,7 +143,7 @@ fn measure(target_nodes: usize) -> Result<Row, Box<dyn std::error::Error>> {
     let geo_count = target_nodes.div_ceil(per_geo).max(1);
 
     // Only transform nodes are tracked for referencing: they carry the
-    // Vec3 params expressions are eligible on (M-3). Boxes are still added
+    // Vec3 params expressions are eligible on. Boxes are still added
     // so the scan has non-expression params to walk past, which is what a
     // real document looks like.
     let mut transforms: Vec<(GraphContext, NodeId, String)> = Vec::new();
@@ -162,7 +162,7 @@ fn measure(target_nodes: usize) -> Result<Row, Box<dyn std::error::Error>> {
     }
 
     // Seed expressions. Each references a sibling by name, which is the
-    // form W1e has to resolve and therefore the form the reverse lookup
+    // form the engine has to resolve and therefore the form the reverse lookup
     // has to recognise.
     let mut exprs = 0usize;
     let step = (1.0 / EXPR_DENSITY).round().max(1.0) as usize;
@@ -212,11 +212,11 @@ fn measure(target_nodes: usize) -> Result<Row, Box<dyn std::error::Error>> {
     }
     let setparam_us = t.elapsed().as_secs_f64() * 1e6 / REPS as f64;
 
-    // 1b. The real `ExprIndex::build`, timed on its own. W1e rebuilds the
-    //     index wholesale on every index-affecting command rather than
+    // 1b. The real `ExprIndex::build`, timed on its own. The engine rebuilds
+    //     the index wholesale on every index-affecting command rather than
     //     patching it, so this is the whole of what a `SetParam` pays for
-    //     the dependency graph, and it is the number the W0b amendment's
-    //     `index+maint` column does NOT describe.
+    //     the dependency graph, and it is the number the milestone
+    //     amendment's `index+maint` column does NOT describe.
     let t = Instant::now();
     for _ in 0..REPS {
         let built = solarxy_graph::refs::ExprIndex::build(engine.document(), engine.registry());
@@ -467,7 +467,7 @@ fn build_index(engine: &Engine) -> HashMap<(String, String), Vec<(NodeId, String
 }
 
 /// Stub reference extraction: pulls `ch("path/key")` targets out of raw
-/// expression text. W1a replaces this with a walk over the cached AST,
+/// expression text. The shipped extractor walks the cached AST instead,
 /// which is cheaper per param than re-scanning a string.
 fn extract_refs(expr: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();

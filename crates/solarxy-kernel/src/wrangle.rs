@@ -111,7 +111,7 @@ pub trait ElementFn {
     /// A type mismatch the statement layer can only detect with a value in
     /// hand. Arithmetic conditions such as division by zero are *not*
     /// errors: they yield the IEEE result, so one bad element cannot blank
-    /// a scene (decision M-22).
+    /// a scene.
     fn run(&mut self, element: &mut Element) -> Result<(), String>;
 }
 

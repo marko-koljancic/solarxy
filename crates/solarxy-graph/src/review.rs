@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn legacy_shaped_annotation_deserializes_with_defaults() {
-        // The pre-Phase-7 wire shape: no mesh/world/hash/author/timestamps.
+        // The original wire shape: no mesh/world/hash/author/timestamps.
         let json = r#"{
             "id": 7,
             "anchor": { "ctx": "root", "node": 3, "face": null, "barycentric": null },

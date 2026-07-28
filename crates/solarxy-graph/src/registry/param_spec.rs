@@ -61,7 +61,7 @@ pub enum ParamType {
     /// The stored text is *not* an expression: it is parsed by the wrangle's
     /// statement layer ([`crate::expr::stmt`]), which is why this type does
     /// not accept an expression source. A snippet that fails to parse is a
-    /// cook error naming line and column (decision M-22).
+    /// cook error naming line and column.
     Snippet,
     Vec2,
     Vec3,
@@ -90,7 +90,7 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    /// Whether this type may be driven by an expression (decision M-3).
+    /// Whether this type may be driven by an expression.
     ///
     /// The numeric types only. There is no string type in the expression
     /// value lattice, so there is literally nothing an expression could

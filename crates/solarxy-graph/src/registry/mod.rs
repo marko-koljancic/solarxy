@@ -186,7 +186,7 @@ pub enum NodeRole {
 }
 
 /// Which network kinds a node type may be placed in: a small bitset over
-/// [`ContextKind`]. The phase-17 generalization of the old two-bool
+/// [`ContextKind`]. This generalizes the older two-bool
 /// root/subflow mask; legality is judged against the target graph's
 /// `kind`, never against its address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

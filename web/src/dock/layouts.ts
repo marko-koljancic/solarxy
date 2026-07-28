@@ -90,8 +90,9 @@ export function sanitizeRecipe(r: Partial<LayoutRecipe> | undefined): LayoutReci
   };
 }
 
-/** The legacy (pre-Phase-10) arrangement fields, as they appear in a stored
- * desk from before the migration and in the retired `solarxy.ui.*` keys. */
+/** The legacy arrangement fields, as stored before the shell moved to
+ * dockview, appearing in an old desk and in the retired `solarxy.ui.*`
+ * keys. */
 export interface LegacyArrangement {
   viewportSide?: ViewportSide;
   propertiesDock?: PropertiesDock;

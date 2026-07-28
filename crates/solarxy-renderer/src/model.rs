@@ -175,8 +175,8 @@ pub struct Mesh {
     pub material: usize,
     /// How the index buffer connects vertices. Triangle meshes take the
     /// full PBR path; lines and points draw through their own unlit
-    /// pipelines in the main pass only (decision M-15 keeps them in the
-    /// selection-outline mask; shadow/gbuffer/overdraw skip them).
+    /// pipelines in the main pass only. They still silhouette into the
+    /// selection-outline mask; shadow/gbuffer/overdraw skip them.
     pub topology: MeshTopology,
     /// Per-vertex linear RGBA colors at shader location 12; present only
     /// when the cooked mesh carried a color lane. Its presence selects the

@@ -13,13 +13,13 @@
 //! - **Hand-rolled, no parser dependency.** A parser crate would pull its
 //!   own error type into a `thiserror` library crate and add bytes to the
 //!   wasm payload, which is the product's largest download.
-//! - **No string type in the value lattice** (decision M-3). Strings exist
+//! - **No string type in the value lattice.** Strings exist
 //!   only as literal arguments to `ch()` and `bbox()`, so every evaluated
 //!   value lands in the numeric union the resolver already conforms.
 //! - **No loops, no user-defined functions.** That is what makes the
 //!   sandbox three numbers ([`parser::MAX_SOURCE_LEN`],
 //!   [`parser::MAX_DEPTH`], [`parser::MAX_CALLS`]) rather than a runtime
-//!   budget (decision M-23).
+//!   budget.
 //!
 //! `@name` is lexed but refused by the expression parser: the attribute
 //! scope belongs to the wrangle's statement layer, and reserving the

@@ -1,5 +1,5 @@
 //! Headless golden-image capture + comparison for renderer regression
-//! testing. Made possible by the phase-1 decoupling: `Renderer::new` builds
+//! testing. Made possible by the winit decoupling: `Renderer::new` builds
 //! the full renderer without a window or surface.
 //!
 //! Capture a baseline before a rendering refactor, re-capture after, and
@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Blocking readback is deliberate here: this is a native-only dev tool,
-//! not part of the app render path (which is async per phase-1 C6).
+//! not part of the app render path, which reads back asynchronously.
 
 use anyhow::{Context, bail};
 
@@ -92,7 +92,7 @@ fn modes() -> Vec<(&'static str, PaneDisplaySettings)> {
         // Clay routes the direct-light loop through `lambert_direct` and
         // overrides the shading normal, a branch the other five modes all
         // miss because they run `material_override: None`. Added for the
-        // 0.8.1 world-space hoist (W0a), which rewrites exactly that
+        // 0.8.1 world-space hoist, which rewrites exactly that
         // override, and kept afterwards so the branch stays gated.
         (
             "clay",
@@ -264,9 +264,9 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         println!("GOLDEN wrote {path}");
     }
 
-    // Extra (not part of the compare set): the phase-2 exit-criterion
-    // proof — two extra objects with independent transforms drawn through
-    // the SceneObjects delta path beside the loaded model.
+    // Extra (not part of the compare set): the multi-object proof — two
+    // extra objects with independent transforms drawn through the
+    // SceneObjects delta path beside the loaded model.
     {
         use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
         use solarxy_renderer::scene_objects::{SceneObjects, cooked_from_parts};

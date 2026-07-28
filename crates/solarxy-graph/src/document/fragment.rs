@@ -175,7 +175,7 @@ impl GraphFragment {
                 clone.port_order.clear();
             }
             // Restore an owned child network (container nodes). Remap of a
-            // subflow's inner ids is a Phase-4+ concern; on remap the paste
+            // subflow's inner ids is deferred; on remap the paste
             // currently reuses inner ids, which is correct for undo
             // (PreserveIds) and acceptable for a single paste (the ids stay
             // document-unique because they were minted before). A future

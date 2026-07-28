@@ -230,7 +230,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       onPointerDown={cancelRadialTimer}
       onPointerLeave={cancelRadialTimer}
     >
-      {/* The display halo (D-3): the one cue readable from across the
+      {/* The display halo: the one cue readable from across the
           graph; the wing (or radial) is the click target. */}
       {isDisplay && <span className="display-halo" aria-hidden />}
 

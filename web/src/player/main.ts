@@ -1,7 +1,7 @@
 // The player: a published Solarxy scene, running on any static host.
 //
-// This is the same wasm the editor runs, in player mode (decision M-10). A
-// lean player-only crate would mean a second boot path and a second payload
+// This is the same wasm the editor runs, in player mode. A lean
+// player-only crate would mean a second boot path and a second payload
 // gate that could drift from the editor's, for a saving nobody has measured;
 // that stays a follow-up with an explicit instruction to measure first.
 //

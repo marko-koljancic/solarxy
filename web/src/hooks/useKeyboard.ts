@@ -195,7 +195,7 @@ export function useKeyboard(): void {
           patchActivePane({ inspectionMode: "AoPreview" }, "Inspection: AO Preview");
           break;
         case "uv-pane-toggle": {
-          // The UV pane renders in W4; the toggle round-trips already.
+          // The UV pane renders already; the toggle round-trips.
           const view = useViewState.getState().view;
           if (!view) break;
           const pane = view.activePane;

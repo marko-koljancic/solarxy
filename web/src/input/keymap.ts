@@ -103,7 +103,7 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: "review-mode", keys: "shift+r", context: "viewport", group: "Review", description: "Toggle review mode (click geometry to pin a note)" },
   { id: "review-panel", keys: "n", context: "global", group: "Review", description: "Toggle the review panel" },
   { id: "review-cancel", keys: "escape", context: "global", group: "Review", description: "Cancel the note editor / re-anchor / review mode, or restore a maximized panel" },
-  // Playback (0.8.1, decision M-21). All four were checked against the table
+  // Playback (0.8.1). All four were checked against the table
   // above before being taken: `space`, bare `,`, bare `.` and `home` were
   // unbound. `mod+,` is Preferences and does not collide with a bare comma.
   { id: "play-pause", keys: "space", context: "global", group: "Playback", description: "Play / pause the scene clock" },

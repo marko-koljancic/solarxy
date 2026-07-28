@@ -5,7 +5,8 @@
 //! Face-less files (scanner point clouds) load as a Points-topology mesh.
 //! `red`/`green`/`blue` (+ optional `alpha`) vertex properties parse in
 //! uchar and float forms; PLY colors are conventionally sRGB, so both
-//! forms decode sRGB-to-linear at import (decision M-7).
+//! forms decode sRGB-to-linear at import, matching OBJ's extended-position
+//! form so the same scan re-imports identically from either.
 
 use std::io::Cursor;
 

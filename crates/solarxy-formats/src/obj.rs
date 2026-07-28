@@ -205,8 +205,8 @@ fn parse_obj(
         // The unofficial extended-position form, `v x y z r g b`. tobj
         // parses it into a flat RGB run; `single_index: true` above makes it
         // index-parallel with `positions`, so the two line up element for
-        // element. Decoded sRGB-to-linear, following PLY's ratified stance
-        // (decision M-7): the two vertex-colour formats must agree, and
+        // element. Decoded sRGB-to-linear, following PLY's stance: the two
+        // vertex-colour formats must agree, and
         // consistency between them matters more than either convention on
         // its own.
         let colors = (m.mesh.vertex_color.len() >= num_verts * 3).then(|| {

@@ -292,7 +292,8 @@ mod tests {
     fn an_old_payload_without_the_new_fields_deserializes_to_defaults() {
         // The TS mirror round-trips the host's own DTO, but serde(default)
         // keeps the boundary honest anyway. `rampPreset` is deliberately
-        // absent here: a pre-Stage-8 payload must keep the historical ramp.
+        // absent here: a payload stored before ramp presets existed must
+        // keep the historical ramp.
         let viz: AttrVizState = serde_json::from_str(
             r#"{"labels":true,"vectors":true,"points":false,"name":"N","cap":0}"#,
         )

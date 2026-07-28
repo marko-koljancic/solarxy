@@ -493,7 +493,7 @@ fn push_validation_events(
 }
 
 /// A whole-document save file: the graph data plus the editor's cook mode.
-/// The Phase-4 web host serializes this to JSON for OPFS autosave and the
+/// The web host serializes this to JSON for OPFS autosave and the
 /// explicit save/load path; the `.slxy` ZIP embeds the same
 /// `DocumentData` as its `document.json`, wrapping asset payloads around it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1614,10 +1614,10 @@ impl Engine {
                 ParamSource::Literal(c)
             }
             ParamSource::Expression { .. } => {
-                // Decision M-3: only the numeric types accept one. This is
-                // a command error, not a badge, because it is a category
-                // mistake rather than a value the user could fix by
-                // editing the text (M-17).
+                // Only the numeric types accept one. This is a command
+                // error, not a badge, because it is a category mistake
+                // rather than a value the user could fix by editing the
+                // text, which is what a broken expression is.
                 if !spec.ty.accepts_expression() {
                     return Err(EngineError::InvalidParam {
                         key: key.to_string(),
@@ -2048,7 +2048,8 @@ impl Engine {
             let stale = match (self.anchor_hash(&anchor), anchor.geometry_hash) {
                 (None, _) => true,
                 (Some(current), Some(stored)) => current != stored,
-                // No reference hash (pre-Phase-7 annotation): nothing to
+                // No reference hash (an annotation stored before geometry
+                // hashing existed): nothing to
                 // compare against, so never flag it.
                 (Some(_), None) => false,
             };
@@ -2263,9 +2264,8 @@ impl Engine {
                     };
                 let (bytes, ext, mime) = match resolved.enum_key("format") {
                     // OBJ with materials is a multi-file export (.obj +
-                    // .mtl + textures), delivered as a Stored zip
-                    // (decision M-9); without materials it stays the
-                    // classic single file.
+                    // .mtl + textures), delivered as a Stored zip;
+                    // without materials it stays the classic single file.
                     "obj" if !materials.is_empty() => {
                         let base = filename_base(&resolved);
                         let export =

@@ -49,7 +49,7 @@ struct VertexOutput {
     @location(8) world_position: vec3<f32>,
     // Per-vertex linear color; white from vs_main, the mesh's color
     // attribute from vs_main_colored. Multiplied into the base color
-    // (glTF-consistent, decision M-8).
+    // (glTF-consistent).
     @location(9) vcolor: vec4<f32>,
 };
 

@@ -63,7 +63,7 @@ describe("keymap table", () => {
   });
 });
 
-describe("viewport tools (phase 11)", () => {
+describe("viewport tools", () => {
   it("binds Q and W over the viewport", () => {
     expect(lookupBinding("q", "viewport")?.id).toBe("tool-select");
     expect(lookupBinding("w", "viewport")?.id).toBe("tool-move");

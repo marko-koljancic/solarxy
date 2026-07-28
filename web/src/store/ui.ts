@@ -1,6 +1,6 @@
 // UI chrome state: the dock layout, canvas chrome toggles, and transient modal
 // flags. Persisted to localStorage; pure presentation, never document truth.
-// Theme moved to the preferences store (store/prefs.ts) in W4.
+// Theme moved to the preferences store (store/prefs.ts).
 //
 // retired the hand-rolled layout state (splitPct, viewportSide,
 // propertiesDock, drawerHeight, drawerWidth, drawerCollapsed, viewportMaximized):
@@ -38,7 +38,7 @@ export const EDGE_STYLE_LABELS: Record<EdgeStyle, string> = {
   smoothStep: "Smooth Step",
 };
 
-/** Reads the pre-Phase-10 arrangement so a returning user's shell comes back the
+/** Reads the pre-dockview arrangement so a returning user's shell comes back the
  * way they left it instead of snapping to the default. Returns null once the
  * user has a dock layout (the normal case) or has never had either. */
 export function loadLegacyArrangement(): LegacyArrangement | null {

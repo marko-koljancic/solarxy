@@ -1,8 +1,7 @@
 //! Debug-build-only developer harness for the multi-object scene: a key
 //! toggle (F9) that inserts two cubes with independent transforms through
-//! the real `SceneDelta` path, proving the phase-2 exit criterion ("a
-//! hidden dev command renders two objects with independent transforms")
-//! without any engine.
+//! the real `SceneDelta` path, proving that a hidden dev command renders
+//! two objects with independent transforms without any engine.
 
 use std::sync::Arc;
 

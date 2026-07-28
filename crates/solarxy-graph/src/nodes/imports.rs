@@ -706,7 +706,7 @@ mod tests {
         let ply = import_options(&resolved_defaults(ply_descriptor), "ply");
         assert_eq!(ply.preserve_materials, None, "ply has no materials");
 
-        // vertex_colors: PLY since W3b, and OBJ since 0.8.1 taught the
+        // vertex_colors: PLY since 0.8.0, and OBJ since 0.8.1 taught the
         // loader the unofficial `v x y z r g b` form. Both default on.
         // STL has no colour channel at all and declares no toggle.
         assert_eq!(ply.vertex_colors, Some(true), "ply declares it, on");
@@ -719,7 +719,7 @@ mod tests {
         );
     }
 
-    /// W3b: the toggle off strips the loader-lifted color lane before
+    /// The toggle off strips the loader-lifted color lane before
     /// anything downstream sees it; on (the default) keeps it.
     #[test]
     fn vertex_colors_toggle_strips_the_color_lane() {

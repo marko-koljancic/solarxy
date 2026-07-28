@@ -473,9 +473,9 @@ export interface NodeTypeSnapshot {
     | "tex_composite";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
-  /** The network kinds this node may be placed in. Replaces the
-   * pre-phase-17 rootContext/subflowContext booleans; the palette filters
-   * against the current canvas's kind. */
+  /** The network kinds this node may be placed in. Replaces the older
+   * rootContext/subflowContext booleans, which could only describe two
+   * kinds; the palette filters against the current canvas's kind. */
   contexts: ContextKind[];
   /** The child-network kind this node opens, for containers (`geo` opens
    * `"geo"`); null otherwise. A canvas's kind derives from its owner's

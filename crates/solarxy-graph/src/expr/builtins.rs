@@ -3,11 +3,11 @@
 //! Two of these are load-bearing for reproducibility and are pinned by
 //! decision rather than convenience:
 //!
-//! - **`rand()` reuses the kernel generator** (`solarxy_kernel::rng`,
-//!   decision M-18), so an expression and a `scatter` drawing from the
-//!   same seed agree. A second, subtly different generator here would make
-//!   "same seed" mean two things.
-//! - **`noise()` is frozen in this file** (decision M-20). It is a value
+//! - **`rand()` reuses the kernel generator** (`solarxy_kernel::rng`), so
+//!   an expression and a `scatter` drawing from the same seed agree. A
+//!   second, subtly different generator here would make "same seed" mean
+//!   two things.
+//! - **`noise()` is frozen in this file.** It is a value
 //!   noise over an integer lattice using the same avalanche constants as
 //!   the kernel's hash, written out here rather than imported from a crate
 //!   whose next version could change its output. A scene using `noise()`
@@ -291,7 +291,7 @@ fn to_seed(v: f64) -> u32 {
     }
 }
 
-// ---- the frozen noise (decision M-20) ----
+// ---- the frozen noise ----
 
 /// Avalanche hash of a lattice cell. The constants match
 /// `solarxy_kernel::rng::hash` so the two generators share a lineage; it is
@@ -475,8 +475,8 @@ mod tests {
 
     #[test]
     fn rand_agrees_with_the_kernel_generator() {
-        // Decision M-18: an expression and a scatter drawing from the same
-        // seed must agree, so this is the kernel's own draw, not a copy.
+        // An expression and a scatter drawing from the same seed must
+        // agree, so this is the kernel's own draw, not a copy.
         let Value::Float(v) = f("rand", &[num(7.0), num(42.0)]) else {
             panic!()
         };
@@ -524,8 +524,8 @@ mod tests {
 
     #[test]
     fn noise_is_exactly_reproducible() {
-        // Decision M-20 pins the output: this value changing means every
-        // scene using noise() re-renders differently.
+        // The output is pinned deliberately: this value changing means
+        // every scene using noise() re-renders differently.
         let Value::Float(v) = f("noise", &[num(0.5), num(0.5), num(0.5)]) else {
             panic!()
         };

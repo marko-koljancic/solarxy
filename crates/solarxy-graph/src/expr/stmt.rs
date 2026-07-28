@@ -8,7 +8,7 @@
 //! [`super::parser::parse_scoped`]. Forking the grammar would be two
 //! grammars to keep in step.
 //!
-//! **No control flow** (decision M-4). There is no `if` and no `for`, so a
+//! **No control flow.** There is no `if` and no `for`, so a
 //! program's cost is exactly (statements x elements) and cannot run away on
 //! a single-threaded cook. A conditional value is still expressible with
 //! the ternary the expression grammar already has.
@@ -18,7 +18,7 @@
 //! survive in [`Program::lanes`] and [`Program::locals`] for error
 //! messages and for telling the kernel which lanes to bind.
 //!
-//! **Errors carry line and column** (decision M-22), via
+//! **Errors carry line and column**, via
 //! [`super::error::ExprError::line_col`]. A parse failure is a cook error;
 //! an arithmetic condition such as division by zero is *not*, because it
 //! yields the IEEE result and one bad element must not blank a scene.
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn division_by_zero_is_an_ieee_value_not_a_cook_failure() {
-        // Decision M-22: one bad element must not blank a scene.
+        // One bad element must not blank a scene.
         let out = run("@v = 1 / 0;", AttributeDomain::Point).expect("must not fail");
         assert!(float_lane(&out, "v").iter().all(|v| v.is_infinite()));
     }

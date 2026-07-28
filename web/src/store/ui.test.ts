@@ -103,7 +103,7 @@ describe("connection style", () => {
   });
 });
 
-describe("canvas chrome: snap to grid (D-24)", () => {
+describe("canvas chrome: snap to grid", () => {
   beforeEach(() => stubStorage());
 
   it("defaults off and persists into the flow-chrome blob when toggled", () => {
@@ -117,7 +117,7 @@ describe("canvas chrome: snap to grid (D-24)", () => {
   });
 });
 
-describe("flow view persistence (D-24)", () => {
+describe("flow view persistence", () => {
   beforeEach(() => stubStorage());
 
   it("returns an empty record when nothing is stored or the blob is corrupt", () => {

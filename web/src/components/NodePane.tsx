@@ -92,7 +92,7 @@ export function NodePane({ children }: { children?: React.ReactNode }) {
       <nav className="menu-bar node-pane-menu node-toolbar">
         <NodesMenu />
         <NodePaneViewMenu />
-        {/* The graph/list switch (D-24): a right-side icon command; the
+        {/* The graph/list switch: a right-side icon command; the
             icon advertises the view a click switches TO. */}
         <button
           className="tbtn icon flow-view-toggle"

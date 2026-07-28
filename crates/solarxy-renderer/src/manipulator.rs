@@ -243,8 +243,8 @@ impl ManipulatorState {
         let base = Self::base_color(handle);
         // 3ds Max's cue: an axis pointing at the camera has almost no
         // screen-space extent, so dragging along it is guesswork. Fading it
-        // says so before the user tries. Purely visual (decision M-29):
-        // picking is untouched, and the hover highlight above still wins, so
+        // says so before the user tries. Purely visual: picking is
+        // untouched, and the hover highlight above still wins, so
         // a faded axis you do manage to grab reads as grabbed.
         let fade = self.view_parallel_fade(handle);
         if fade <= 0.0 {
