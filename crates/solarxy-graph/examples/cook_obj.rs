@@ -4,8 +4,8 @@
 //!
 //! Usage: `cargo run -p solarxy-graph --example cook_obj [out.obj]`
 //!
-//! This is the phase-3 exit-criterion proof that the kernel + document +
-//! registry + cook core produce valid geometry end to end without any UI.
+//! This is the proof that the kernel + document + registry + cook core
+//! produce valid geometry end to end without any UI.
 
 use std::fmt::Write as _;
 

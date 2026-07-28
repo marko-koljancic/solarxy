@@ -75,6 +75,11 @@ pub struct SceneJson {
     pub assets: Vec<AssetRecordJson>,
     #[serde(default)]
     pub editor: EditorJson,
+    /// The scene clock's persisted half. Defaulted like every other
+    /// optional section, so a pre-0.8.1 file loads with a stopped default
+    /// clock and `schema_version` stays 1.
+    #[serde(default)]
+    pub runtime: RuntimeJson,
     #[serde(default)]
     pub meta: MetaJson,
 }
@@ -137,6 +142,21 @@ pub struct NodeJson {
     pub port_order: BTreeMap<String, Vec<String>>,
     /// Canvas position `[x, y]`.
     pub position: [f32; 2],
+    /// Unix milliseconds when the node was created and when its behaviour
+    /// last changed.
+    ///
+    /// Additive and optional, so `schema_version` stays 1: a document
+    /// written before 0.8.1 simply has neither, and a reader that predates
+    /// them ignores both. Absent (rather than zero) when the writing host
+    /// had no wall clock, so a reader can say "unknown" instead of
+    /// displaying a fabricated 1970.
+    ///
+    /// Canvas position deliberately does not count as a modification; see
+    /// `NodeData` in `solarxy-graph`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<f64>,
 }
 
 /// One edge. `from`/`to` are `[node_id, port_key]` pairs.
@@ -297,6 +317,60 @@ pub struct AssetRecordJson {
     pub import_settings: JsonObject,
 }
 
+/// The scene clock, as saved.
+///
+/// Deliberately only the persisted half: `playing` and the current frame are
+/// session state. A format that could round-trip "I was playing when I hit
+/// save" would make a scene's meaning depend on the author's transport, and
+/// would break the reproducibility every golden capture and CLI cook relies
+/// on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeJson {
+    #[serde(default = "default_fps")]
+    pub fps: f64,
+    #[serde(default = "default_frame_start")]
+    pub frame_start: i64,
+    #[serde(default = "default_frame_end")]
+    pub frame_end: i64,
+    /// `once`, `loop` or `pingPong`.
+    #[serde(default = "default_loop_mode")]
+    pub loop_mode: String,
+    /// Whether a published player starts playing on load. The editor saves
+    /// it and never acts on it.
+    #[serde(default)]
+    pub autoplay: bool,
+}
+
+fn default_fps() -> f64 {
+    24.0
+}
+
+fn default_frame_start() -> i64 {
+    1
+}
+
+fn default_frame_end() -> i64 {
+    240
+}
+
+fn default_loop_mode() -> String {
+    "loop".to_string()
+}
+
+impl Default for RuntimeJson {
+    fn default() -> Self {
+        Self {
+            fps: default_fps(),
+            frame_start: default_frame_start(),
+            frame_end: default_frame_end(),
+            loop_mode: default_loop_mode(),
+            autoplay: false,
+        }
+    }
+}
+
 /// Editor-only state: the cook mode and per-context canvas viewports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]
@@ -356,5 +430,6 @@ pub const SCENE_TOP_LEVEL_KEYS: &[&str] = &[
     "review",
     "assets",
     "editor",
+    "runtime",
     "meta",
 ];

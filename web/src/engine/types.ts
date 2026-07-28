@@ -34,6 +34,12 @@ export type ParamSource =
   | ({ kind: "literal" } & ParamValue)
   | { kind: "expression"; expr: string };
 
+/** The parameter panel's per-row readout: the current value, or the
+ * message explaining why an expression has none. */
+export type ResolvedParam =
+  | { ok: true; value: ParamValue }
+  | { ok: false; error: string };
+
 // --- Mirror types (Rust -> JS, serialize-only) ---
 
 export interface NodeMirror {
@@ -180,9 +186,45 @@ export interface AttrVizState {
   /** Which curated ramp the ramp mode draws. Pinned to
    * `solarxy_web::attr_viz::RampPreset` (serde camelCase). */
   rampPreset: RampPreset;
+  /** Label text size. The renderer scales one SDF bake, so these are
+   * presets rather than a free number. */
+  labelSize: LabelSize;
+  /** What a label draws behind its text. `none` is text plus the anchor
+   * dot, which is quieter but gives up guaranteed contrast. */
+  labelBackground: LabelBackground;
+  /** Overall label opacity, 0..1. The chip keeps its own 82% underneath. */
+  labelOpacity: number;
+  /** Decimal places in a label's value text (0..4). */
+  labelDecimals: number;
+}
+
+/** The on-demand half of the node info card. Pinned to
+ * `solarxy_graph::engine::NodeReport` (serde camelCase).
+ *
+ * Not part of the mirror on purpose: every field here moves on each cook of
+ * a time-dependent node, so mirroring them would put one event per node per
+ * frame back on the wire during playback. */
+export interface NodeReport {
+  /** World bounds as `[minX, minY, minZ, maxX, maxY, maxZ]`, or null for a
+   * node with no geometry output. */
+  bounds: [number, number, number, number, number, number] | null;
+  /** The last cook's wall time. Microseconds, because a fast node reads
+   * `0.0 ms` and `340 us` and only one of those tells you anything. */
+  lastCookUs: number;
+  /** Cooks this session and their summed duration; both reset on load. */
+  cookCount: number;
+  totalCookUs: number;
+  /** Why the node loaded as a non-cooking placeholder, when it did. */
+  placeholder: string | null;
+  /** Unix milliseconds, or null for a scene saved before 0.8.1. Null means
+   * "unknown" and must render as such, never as an epoch date. */
+  createdMs: number | null;
+  modifiedMs: number | null;
 }
 
 export type RampPreset = "coldWarm" | "ember" | "ocean" | "grayscale" | "signal";
+export type LabelSize = "small" | "medium" | "large";
+export type LabelBackground = "chip" | "none";
 
 /** A screenshot request: capture resolution (physical px) + GPU overlay
  * toggles. */
@@ -208,6 +250,22 @@ export type CookStatus =
   | { state: "error"; message: string };
 
 export type CookMode = "auto" | "manual";
+
+// --- Runtime / playback ---
+
+export type LoopMode = "once" | "loop" | "pingPong";
+
+/** The persisted half of the scene clock. `playing` and the current frame are
+ * session state and deliberately absent: a saved scene always reloads
+ * stopped at its range start. */
+export interface RuntimeSettings {
+  fps: number;
+  frameStart: number;
+  frameEnd: number;
+  loopMode: LoopMode;
+  /** Only a published player acts on this; the editor stores and saves it. */
+  autoplay: boolean;
+}
 
 // --- Events (Rust -> JS) ---
 
@@ -243,6 +301,9 @@ export type EngineEvent =
       issues: ValidationIssue[];
     }
   | { type: "cookModeChanged"; mode: CookMode }
+  | { type: "playbackChanged"; playing: boolean }
+  | { type: "frameChanged"; frame: number }
+  | { type: "runtimeSettingsChanged"; settings: RuntimeSettings }
   // The node a gizmo drag will write to. Emitted on BOTH policy paths, because
   // the reuse path mints nothing and so carries no nodeAdded to read an id from.
   | { type: "transformTargetReady"; ctx: GraphContext; node: NodeId }
@@ -273,6 +334,15 @@ export type Command =
   | { type: "reorderVariadicInput"; ctx: GraphContext; node: NodeId; port: string; order: EdgeId[] }
   | { type: "setCookMode"; mode: CookMode }
   | { type: "cookNow" }
+  | { type: "play" }
+  | { type: "pause" }
+  | { type: "stop" }
+  | { type: "stepFrame"; delta: number }
+  | { type: "setFrame"; frame: number }
+  | { type: "setFrameRange"; start: number; end: number }
+  | { type: "setFps"; fps: number }
+  | { type: "setLoopMode"; mode: LoopMode }
+  | { type: "setAutoplay"; autoplay: boolean }
   | { type: "pasteNodes"; ctx: GraphContext; fragment: unknown; position: [number, number] }
   | { type: "duplicateNodes"; ctx: GraphContext; ids: NodeId[] }
   | {
@@ -372,6 +442,8 @@ export type NodeRole =
   | "analyzer"
   | "imageSource"
   | "light"
+  | "camera"
+  | "text"
   | "note";
 
 /** The network kinds of the typed-context model. The root
@@ -394,15 +466,16 @@ export interface NodeTypeSnapshot {
     | "import"
     | "export"
     | "lights"
+    | "cameras"
     | "utility"
     | "tex_generate"
     | "tex_adjust"
     | "tex_composite";
   /** Title Case label for the category; `category` stays the stable id. */
   categoryLabel: string;
-  /** The network kinds this node may be placed in. Replaces the
-   * pre-phase-17 rootContext/subflowContext booleans; the palette filters
-   * against the current canvas's kind. */
+  /** The network kinds this node may be placed in. Replaces the older
+   * rootContext/subflowContext booleans, which could only describe two
+   * kinds; the palette filters against the current canvas's kind. */
   contexts: ContextKind[];
   /** The child-network kind this node opens, for containers (`geo` opens
    * `"geo"`); null otherwise. A canvas's kind derives from its owner's

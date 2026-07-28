@@ -29,7 +29,7 @@ use crate::assets::AssetTable;
 use crate::document::{Document, Graph, GraphContext, NodeId};
 use crate::registry::coerce::{Value, coerce_value};
 use crate::previews::{Previews, effective_params};
-use crate::registry::resolve::resolve_params;
+use crate::registry::resolve::resolve_params_with;
 use crate::registry::{Arity, BypassBehavior, Registry};
 
 /// One in-flight async job, tagged with the generation it was spawned at.
@@ -86,6 +86,11 @@ pub struct CookEngine {
     warnings: BTreeMap<NodeId, Vec<String>>,
     status: BTreeMap<NodeId, CookStatus>,
     stats: BTreeMap<NodeId, NodeCookStats>,
+    /// Per-node `(cook count, total microseconds)` for this session. The
+    /// single last-cook duration cannot answer "which node is costing me
+    /// the frame"; a running total can. Cleared with everything else on
+    /// `reset`, so it never describes a document that is no longer loaded.
+    cooks: BTreeMap<NodeId, (u64, u64)>,
     /// Monotonic per-node generation, bumped on every (re)cook or
     /// (re)spawn; the async stale-drop compares against it.
     generation: BTreeMap<NodeId, u64>,
@@ -94,6 +99,10 @@ pub struct CookEngine {
     /// Whether cook bodies may offload to async jobs (true on web with an
     /// import worker; false natively, where imports parse inline).
     async_jobs: bool,
+    /// The scene clock as expressions see it. Stopped (all zero) until the
+    /// runtime lands, which is what keeps golden captures, CLI cooks and
+    /// `.slxy` reload reproducible.
+    scene_time: crate::expr::SceneTime,
     /// Optional host wall-clock, in milliseconds. A `fn` pointer (not a
     /// closure) so the driver stays wasm-safe and the struct stays
     /// `Debug`/`Default`: the web host installs `performance.now`, native
@@ -112,6 +121,16 @@ impl CookEngine {
     /// default; native cooks parse imports inline.
     pub fn set_async_jobs(&mut self, enabled: bool) {
         self.async_jobs = enabled;
+    }
+
+    /// Sets the scene clock expressions read through `$T` and `$F`.
+    ///
+    /// Distinct from [`Self::set_clock`], which is a host wall-clock used
+    /// only to report cook durations. This one is document time: it is part
+    /// of what a cook computes, so it must be zero whenever the runtime is
+    /// stopped or a saved scene would reload differently than it saved.
+    pub fn set_scene_time(&mut self, time: crate::expr::SceneTime) {
+        self.scene_time = time;
     }
 
     /// Installs a host wall-clock (milliseconds) so successful cooks report
@@ -138,6 +157,7 @@ impl CookEngine {
         self.warnings.clear();
         self.status.clear();
         self.stats.clear();
+        self.cooks.clear();
         self.generation.clear();
         self.jobs.clear();
         self.next_job = 0;
@@ -237,7 +257,16 @@ impl CookEngine {
             if !report.cooked.is_empty() && !should_continue() {
                 break;
             }
-            self.cook_one(doc, graph, registry, assets, previews, node, &mut report);
+            self.cook_one(
+                doc,
+                graph,
+                registry,
+                assets,
+                previews,
+                ctx,
+                node,
+                &mut report,
+            );
         }
 
         report.remaining_dirty = self
@@ -278,6 +307,7 @@ impl CookEngine {
         registry: &Registry,
         assets: &AssetTable,
         previews: &Previews,
+        ctx: GraphContext,
         node: NodeId,
         report: &mut CookReport,
     ) {
@@ -330,11 +360,23 @@ impl CookEngine {
             }
         };
 
-        // Resolve params (v1 refuses expressions), with any in-flight drag
-        // values laid over the stored ones: that overlay IS the preview lane,
-        // and without it a drag would not reach the viewport until release.
+        // Resolve params, with any in-flight drag values laid over the
+        // stored ones: that overlay IS the preview lane, and without it a
+        // drag would not reach the viewport until release.
+        //
+        // The evaluation context is built here because this is the only
+        // resolve site that has gathered inputs, which is what makes
+        // `npoints()` and `bbox()` answerable. Gather runs first (above),
+        // so the values are already there; the wire topology cooked them
+        // before this node.
         let params = effective_params(previews, node, &data.params);
-        let resolved = match resolve_params(&params, &desc.params) {
+        let default_port = desc.default_input().map_or("geometry", |p| p.key.as_str());
+        let geo = super::geo_queries::InputGeo::new(&inputs, default_port);
+        let refs = crate::refs::DocRefs::new(doc, registry, previews, ctx, node, self.scene_time);
+        let eval_ctx = crate::expr::EvalCtx::new(self.scene_time)
+            .with_geo(&geo)
+            .with_refs(&refs);
+        let resolved = match resolve_params_with(&params, &desc.params, &eval_ctx) {
             Ok(r) => r,
             Err(fail) => {
                 self.commit_error(node, &CookError::Params(fail.to_string()), report);
@@ -351,6 +393,10 @@ impl CookEngine {
         // consumer (previews.rs's standing warning).
         let mut cx = CookCtx::new(assets, self.async_jobs);
         cx.set_referenced(self.resolve_references(doc, registry, &params));
+        // The wrangle runs the expression language inside its own body, so
+        // it needs the context the resolver just used rather than a weaker
+        // one it could build for itself.
+        cx.set_eval(eval_ctx);
         let start = self.now();
         let outcome = (desc.cook)(&resolved, &inputs, &mut cx);
         let elapsed = self.now() - start;
@@ -471,6 +517,24 @@ impl CookEngine {
             }
         }
         None
+    }
+
+    /// The inputs a node would cook with right now, from cached upstream
+    /// outputs, or `None` when a required port is unconnected.
+    ///
+    /// Exists so the parameter panel's resolved-value readout can answer a
+    /// geometry query the same way the cook does. Without it the readout
+    /// claims `npoints()` "is only available on a node with geometry
+    /// inputs" for a node whose input is connected and cooked, which is
+    /// both false and the opposite of what the node's own badge says.
+    #[must_use]
+    pub fn gathered_inputs(
+        &self,
+        graph: &Graph,
+        desc: &crate::registry::NodeTypeDescriptor,
+        node: NodeId,
+    ) -> Option<Inputs> {
+        self.gather(graph, desc, node).ok()
     }
 
     /// Gathers every input port into an [`Inputs`], applying wire
@@ -677,6 +741,16 @@ impl CookEngine {
     /// ignored by `same_shape` so an unchanged mesh does not spam events).
     /// `elapsed_ms` records the last cook's wall-time on the stored stats
     /// for the info popover; it is `0.0` when no clock is installed.
+    /// How many times a node has cooked this session, and the total time it
+    /// spent doing so. Session-only and pull-read: deliberately NOT an
+    /// event, because these change on every cook of every time-dependent
+    /// node and pushing them would reintroduce exactly the per-frame event
+    /// storm `CookStatus::same_state` exists to prevent.
+    #[must_use]
+    pub fn cook_totals(&self, node: NodeId) -> (u64, u64) {
+        self.cooks.get(&node).copied().unwrap_or((0, 0))
+    }
+
     fn emit_stats(&mut self, node: NodeId, elapsed_ms: f64, report: &mut CookReport) {
         let mut stats = self.outputs.get(&node).map_or(
             NodeCookStats {
@@ -690,6 +764,9 @@ impl CookEngine {
             |o| stats_from_outputs(o),
         );
         stats.duration_us = (elapsed_ms * 1000.0).max(0.0).round() as u64;
+        let entry = self.cooks.entry(node).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 = entry.1.saturating_add(stats.duration_us);
         let changed = self
             .stats
             .get(&node)
@@ -700,8 +777,17 @@ impl CookEngine {
         }
     }
 
+    /// Stores a node's badge state, emitting an event only when the state
+    /// itself changed. Timing is deliberately excluded from that comparison
+    /// (see [`CookStatus::same_state`]): the stored value stays fresh for
+    /// pull queries, but a node re-cooking every frame during playback no
+    /// longer emits a status event per frame just because its milliseconds
+    /// moved.
     fn set_status(&mut self, node: NodeId, status: CookStatus, report: &mut CookReport) {
-        let changed = self.status.get(&node) != Some(&status);
+        let changed = !self
+            .status
+            .get(&node)
+            .is_some_and(|p| p.same_state(&status));
         self.status.insert(node, status.clone());
         if changed {
             report.status_changed.push((node, status));
@@ -1258,7 +1344,7 @@ mod tests {
 
     #[test]
     fn resubmitted_image_replaces_previous_commit() {
-        // The Phase-17 keep-last-good regression: an image-only node's
+        // The keep-last-good regression the texture context introduced: an image-only node's
         // SECOND commit must replace the first. Before the fix,
         // `is_renderable_empty` treated any non-geometry output as empty,
         // so keep-last-good silently discarded every re-decode (the live

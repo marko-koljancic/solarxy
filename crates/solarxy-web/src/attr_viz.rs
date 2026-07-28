@@ -7,6 +7,7 @@
 //! only mutation path (`set_attr_viz`).
 
 use serde::{Deserialize, Serialize};
+use solarxy_renderer::labels::{LabelBackground, LabelSize};
 
 /// How the vector arrows are colored.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +96,16 @@ pub struct AttrVizState {
     pub color: [f32; 3],
     /// Which curated ramp `AttrColorMode::Ramp` draws.
     pub ramp_preset: RampPreset,
+    /// Label text size: `"small"`, `"medium"` or `"large"`. Stored as the
+    /// wire key rather than the renderer enum so this struct stays a plain
+    /// serde payload the frontend can author without a shared enum.
+    pub label_size: String,
+    /// Label background: `"chip"` or `"none"`.
+    pub label_background: String,
+    /// Label opacity, 0 to 1.
+    pub label_opacity: f32,
+    /// Decimal places in a label's value text.
+    pub label_decimals: u32,
 }
 
 impl Default for AttrVizState {
@@ -110,6 +121,10 @@ impl Default for AttrVizState {
             color_mode: AttrColorMode::Uniform,
             color: Self::DEFAULT_COLOR,
             ramp_preset: RampPreset::ColdWarm,
+            label_size: LabelSize::default().key().to_string(),
+            label_background: LabelBackground::default().key().to_string(),
+            label_opacity: 1.0,
+            label_decimals: crate::attr_labels::DEFAULT_DECIMALS,
         }
     }
 }
@@ -126,6 +141,39 @@ impl AttrVizState {
     #[must_use]
     pub fn pins_wanted(&self) -> bool {
         self.labels || self.points
+    }
+
+    /// The label appearance half of this state, as the renderer's enums.
+    /// Unknown wire keys fall back to the defaults rather than failing, so
+    /// a payload written by a newer build still renders.
+    #[must_use]
+    pub fn label_size(&self) -> LabelSize {
+        LabelSize::from_key(&self.label_size)
+    }
+
+    #[must_use]
+    pub fn label_background(&self) -> LabelBackground {
+        LabelBackground::from_key(&self.label_background)
+    }
+
+    /// Applies this state's appearance choices onto a style that already
+    /// carries the theme colors and device pixel ratio, so pushing a size
+    /// change never clobbers the palette.
+    #[must_use]
+    pub fn apply_to_style(
+        &self,
+        base: solarxy_renderer::labels::LabelStyle,
+    ) -> solarxy_renderer::labels::LabelStyle {
+        solarxy_renderer::labels::LabelStyle {
+            size: self.label_size(),
+            background: self.label_background(),
+            opacity: if self.label_opacity.is_finite() {
+                self.label_opacity.clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            ..base
+        }
     }
 
     /// The pin budget against a scene of `total` displayed points: the
@@ -244,7 +292,8 @@ mod tests {
     fn an_old_payload_without_the_new_fields_deserializes_to_defaults() {
         // The TS mirror round-trips the host's own DTO, but serde(default)
         // keeps the boundary honest anyway. `rampPreset` is deliberately
-        // absent here: a pre-Stage-8 payload must keep the historical ramp.
+        // absent here: a payload stored before ramp presets existed must
+        // keep the historical ramp.
         let viz: AttrVizState = serde_json::from_str(
             r#"{"labels":true,"vectors":true,"points":false,"name":"N","cap":0}"#,
         )

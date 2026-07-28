@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solarxy scene</title>
+    <meta name="description" content="A Solarxy scene, published as a self-contained page." />
+    <style>
+      /* Inlined rather than imported: the player is one canvas and a status
+         line, and a stylesheet would be a second file in every bundle for
+         about thirty declarations. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #101014;
+        color: #d7d7db;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        overflow: hidden;
+      }
+      #player-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #player-status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        text-align: center;
+        pointer-events: none;
+      }
+      #player-status.error {
+        color: #ff8f7a;
+        text-align: left;
+      }
+      #player-status.error div {
+        max-width: 34rem;
+      }
+      #player-status.error p {
+        margin: 0 0 0.75rem;
+      }
+      #player-status code {
+        color: #ffc7b8;
+      }
+      #player-status pre {
+        margin: 0 0 0.75rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 4px;
+        color: #e8e8ec;
+        overflow-x: auto;
+      }
+      /* Only present when the bundle's config asks for it. */
+      #player-transport {
+        position: fixed;
+        left: 50%;
+        bottom: 1rem;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(20, 20, 26, 0.82);
+        backdrop-filter: blur(6px);
+      }
+      #player-transport button {
+        min-width: 4rem;
+        padding: 0.25rem 0.6rem;
+        border: 1px solid #3a3a44;
+        border-radius: 999px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      #player-transport button:hover {
+        border-color: #7a7a88;
+      }
+      #player-frame {
+        min-width: 6rem;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="player-canvas"></canvas>
+    <div id="player-status">Loading...</div>
+    <!--
+      A CLASSIC script, not a module, and deliberately before the module tag.
+
+      Everything else on this page is an ES module, and a browser refuses to
+      load one from a file:// origin. When that happens the module never
+      executes, so the friendly "serve this over HTTP" message the player
+      carries never runs: the page sits on "Loading..." while the console
+      fills with CORS errors. Double-clicking index.html is the first thing
+      most people try, so it was the one path with no explanation.
+
+      An inline classic script still runs when module loading fails. That is
+      the whole reason this is not in main.ts.
+    -->
+    <script>
+      if (location.protocol === "file:") {
+        var el = document.getElementById("player-status");
+        if (el) {
+          el.className = "error";
+          el.innerHTML =
+            "<div><p><strong>This page has to be served over HTTP.</strong></p>" +
+            "<p>Browsers refuse to load an ES module or fetch WebAssembly from a " +
+            "<code>file://</code> address, so opening this folder's index.html " +
+            "directly cannot work. That is a browser security rule, not something " +
+            "the bundle can work around.</p>" +
+            "<p>From inside this folder, run:</p>" +
+            "<pre>python3 -m http.server 8000</pre>" +
+            "<p>then open <code>http://localhost:8000</code>. " +
+            "See README.txt for how to publish it.</p></div>";
+        }
+      }
+    </script>
+    <script type="module" src="/src/player/main.ts"></script>
+  </body>
+</html>

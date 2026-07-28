@@ -36,6 +36,7 @@ impl State {
                     &scene.env.light_buffer,
                     &self.renderer.ibl_res.ibl_fallback,
                     &self.renderer.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ltc,
                 ),
                 IblMode::Diffuse => create_light_bind_group_selective(
                     &self.device,
@@ -44,6 +45,7 @@ impl State {
                     &self.renderer.ibl_res.ibl,
                     &self.renderer.ibl_res.ibl_fallback,
                     &self.renderer.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ltc,
                 ),
                 IblMode::Full => create_light_bind_group(
                     &self.device,
@@ -51,6 +53,7 @@ impl State {
                     &scene.env.light_buffer,
                     &self.renderer.ibl_res.ibl,
                     &self.renderer.ibl_res.brdf_lut,
+                    &self.renderer.ibl_res.ltc,
                 ),
             };
 
@@ -92,7 +95,7 @@ impl State {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,
@@ -125,6 +128,10 @@ impl State {
 
         std::thread::spawn(move || {
             let placeholder_brdf = BrdfLut::fallback(&device, &queue);
+            // No fallback for the LTC tables: they are a fixed 64 KB blob
+            // with nothing to degrade to, and this bind group is rebuilt
+            // against the renderer's own copy as soon as the load lands.
+            let ltc = solarxy_renderer::ltc::LtcLuts::load(&device, &queue);
             let result = ModelScene::new(
                 model_path,
                 &device,
@@ -133,6 +140,7 @@ impl State {
                 &config,
                 initial_grid_color,
                 &placeholder_brdf,
+                &ltc,
                 shadow_map_size,
             );
             // The channel carries anyhow (binary-crate convention); the
@@ -345,6 +353,7 @@ impl State {
                         &new_scene.env.light_buffer,
                         active_ibl,
                         &self.renderer.ibl_res.brdf_lut,
+                        &self.renderer.ibl_res.ltc,
                     );
                     let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
                     let bounds_size = new_scene.model.bounds.size();

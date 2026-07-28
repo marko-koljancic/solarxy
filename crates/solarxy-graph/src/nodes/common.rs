@@ -41,11 +41,15 @@ pub fn general_params(display_name: &str) -> Vec<ParamSpec> {
             ParamValue::Text(display_name.to_string()),
         )
         .doc("The node's title on the canvas."),
+        // Multi-line since 0.8.1: a description is prose, and a
+        // single-line input made anything past a few words unreadable
+        // while you typed it. Storage is unchanged (`ParamValue::Text`),
+        // so this is a widget change, not a migration.
         ParamSpec::new(
             "description",
             "Description",
             "general",
-            ParamType::Text,
+            ParamType::MultilineText,
             ParamValue::Text(String::new()),
         )
         .doc("Free-text notes shown as the node subtitle."),

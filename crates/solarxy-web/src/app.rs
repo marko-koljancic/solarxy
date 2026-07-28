@@ -1,6 +1,6 @@
 //! The `SolarxyApp` wasm-bindgen class: the browser host over the engine
-//! and the full `solarxy-renderer` pipeline (the phase-4 stopgap
-//! forward renderer is retired).
+//! and the full `solarxy-renderer` pipeline (the stopgap forward renderer
+//! it started on is retired).
 //!
 //! The React frontend holds one instance: it dispatches `Command`s (in) and
 //! receives `EventBatch`es (out), calls `frame` each rAF tick to cook under
@@ -68,10 +68,23 @@ const MSAA_SAMPLES: u32 = 4;
 const SHADOW_MAP_SIZE: u32 = 2048;
 
 /// The current host time in milliseconds (`performance.now`).
+///
+/// Monotonic and high-resolution, counting from page load. Right for
+/// measuring how long a cook took; useless as a date, which is why node
+/// timestamps use `web_epoch_ms` instead.
 fn web_now() -> f64 {
     web_sys::window()
         .and_then(|w| w.performance())
         .map_or(0.0, |p| p.now())
+}
+
+/// The current wall time in Unix milliseconds (`Date.now`).
+///
+/// The counterpart to `web_now`: coarse and not monotonic (it moves when
+/// the system clock is set), but it is an actual date, which is what a
+/// node's created / modified stamp has to be.
+fn web_epoch_ms() -> f64 {
+    js_sys::Date::now()
 }
 
 fn log(msg: &str) {
@@ -131,6 +144,7 @@ fn default_display_settings() -> DisplaySettings {
         roughness_scale: 1.0,
         metallic_scale: 1.0,
         hdri_rotation: 0.0,
+        point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
     }
 }
 
@@ -231,6 +245,12 @@ struct ScreenshotOverlaysDto {
 /// the multi-object scene, the scene environment, per-pane cameras, and
 /// the headless engine.
 #[wasm_bindgen]
+// Four bools, and clippy is right to ask. They stay separate because they
+// share nothing: `uv_use_preview` is a UV-pane source choice, `player_mode`
+// is a session mode, and the two `*_dirty` flags are per-frame recompute
+// latches. A sub-struct would put one name over four unrelated things and
+// make every read longer without making any of them clearer.
+#[allow(clippy::struct_excessive_bools)]
 pub struct SolarxyApp {
     /// Kept for the asset-preview pane: a second surface (its own canvas)
     /// must come from the same instance as the device.
@@ -295,6 +315,16 @@ pub struct SolarxyApp {
     /// original name), for the `.slxy` environment section. `None` when the
     /// procedural sky is active.
     hdri: Option<HdriMeta>,
+    /// Player mode: the host runs a published scene rather than an editing
+    /// session. Suppresses the manipulator, picking and review markers, and
+    /// locks the layout to one pane.
+    ///
+    /// A flag on the editor host rather than a second wasm target: a lean
+    /// player crate would mean a second boot path and a second
+    /// payload gate that could drift from this one, for a saving nobody has
+    /// measured. The follow-up is recorded with an instruction to measure
+    /// first.
+    player_mode: bool,
     /// A screenshot request captured this frame (rendered at frame end).
     screenshot_request: Option<ScreenshotOptsDto>,
     /// A turntable-export frame request: (pane, absolute azimuth in degrees,
@@ -311,6 +341,11 @@ pub struct SolarxyApp {
     /// saved into `.slxy`, never in undo). The strip's toggles and the
     /// picked lane name.
     attr_viz: AttrVizState,
+    /// Theme label colors (text, chip, dot) as last pushed by the frontend.
+    /// Cached because the style is assembled from two independent halves
+    /// (see `push_label_style`), and a size change must not blank the
+    /// palette any more than a theme change must reset the size.
+    label_colors: [[f32; 3]; 3],
     /// Whether the attribute-vector line buffer is stale (mirrors the
     /// `viz_dirty` sites, plus any `set_attr_viz`).
     attr_dirty: bool,
@@ -398,7 +433,7 @@ impl SolarxyApp {
 
         // Chrome exposes only non-sRGB surface formats; render into an
         // sRGB view of the surface texture so the tone-mapped composite
-        // output is gamma-encoded correctly (the phase-0 finding).
+        // output is gamma-encoded correctly.
         let caps = surface.get_capabilities(&adapter);
         let base_format = caps
             .formats
@@ -473,6 +508,7 @@ impl SolarxyApp {
             &bounds,
             width as f32 / height.max(1) as f32,
             &renderer.ibl_res.brdf_lut,
+            &renderer.ibl_res.ltc,
             SHADOW_MAP_SIZE,
             vis,
         );
@@ -482,10 +518,12 @@ impl SolarxyApp {
             &env.light_buffer,
             &renderer.ibl_res.ibl,
             &renderer.ibl_res.brdf_lut,
+            &renderer.ibl_res.ltc,
         );
 
         let mut engine = Engine::new().map_err(|e| JsError::new(&format!("engine: {e}")))?;
         engine.set_clock(web_now);
+        engine.set_epoch_clock(web_epoch_ms);
         // Imports run off the main thread: cooks yield a ParseModel job the
         // frontend pumps to the import worker (`take_import_jobs` ->
         // `submit_parsed_model`), rather than parsing inline.
@@ -520,6 +558,7 @@ impl SolarxyApp {
             },
             engine,
             host_events: Vec::new(),
+            player_mode: false,
             last_pane_rects: Vec::new(),
             dpr: dpr as f32,
             pointer_buttons_down: 0,
@@ -538,6 +577,10 @@ impl SolarxyApp {
             pending_screenshot: None,
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
+            label_colors: {
+                let d = solarxy_renderer::labels::LabelStyle::new_default();
+                [d.text, d.chip, d.dot]
+            },
             attr_dirty: false,
             display_defaults: DisplayDefaults::default(),
             gizmo: GizmoState::default(),
@@ -582,9 +625,15 @@ impl SolarxyApp {
     /// Cooks under a frame budget, applies the scene delta, renders every
     /// pane, and returns the cook `EventBatch` (status + stats).
     pub fn frame(&mut self, dt_ms: f64) -> Result<JsValue, JsError> {
+        // The clock advances BEFORE the cook, so this frame's geometry is
+        // this frame's time. Fixed step (one tick is one frame), so a heavy
+        // scene plays slowly rather than skipping and `$T` stays exactly
+        // `frame / fps`. A stopped clock returns immediately.
+        let mut events = self.engine.tick().events;
+
         // Cook the dirty set under a wall-clock budget.
         let deadline = web_now() + COOK_BUDGET_MS;
-        let events = self.engine.cook(&mut || web_now() < deadline);
+        events.extend(self.engine.cook(&mut || web_now() < deadline));
 
         // Apply the fresh scene delta to the multi-object scene.
         let delta = self.engine.take_scene_delta();
@@ -604,13 +653,17 @@ impl SolarxyApp {
         // an undo therefore moves or removes it with no extra plumbing.
         // `view_dir` and `scale` are per-pane, so they are placeholders here:
         // `Renderer::write_manipulator` overwrites both before each pane's pass.
-        let manip = self
-            .engine
-            .gizmo_target(self.current_ctx)
-            .and_then(|target| {
-                self.gizmo
-                    .manipulator(&target, cgmath::Vector3::unit_z(), 1.0)
-            });
+        let manip = if self.player_mode {
+            // A published scene has nothing to manipulate.
+            None
+        } else {
+            self.engine
+                .gizmo_target(self.current_ctx)
+                .and_then(|target| {
+                    self.gizmo
+                        .manipulator(&target, cgmath::Vector3::unit_z(), 1.0)
+                })
+        };
         self.renderer.set_manipulator(manip);
 
         self.sync_env_bounds();
@@ -770,19 +823,69 @@ impl SolarxyApp {
         };
     }
 
+    /// Enters (or leaves) player mode.
+    ///
+    /// Locks the layout to a single pane and clears any lingering editing
+    /// affordance. The clock is NOT started here: whether a published scene
+    /// autoplays is the document's `autoplay` setting, read by the player
+    /// shell, so the same flag means the same thing whether the scene was
+    /// exported or opened in the editor.
+    pub fn set_player_mode(&mut self, on: bool) {
+        self.player_mode = on;
+        if on {
+            self.view.display.layout = ViewLayout::Single;
+            self.view.active_pane = 0;
+            self.selected_object = None;
+            self.gizmo_readout = None;
+            self.renderer.set_manipulator(None);
+            self.host_events.push(HostEvent::ViewChanged);
+        }
+    }
+
+    /// The clock's current frame, polled by the player's transport readout.
+    ///
+    /// Polled rather than pushed for the same reason the gizmo readout is:
+    /// under a playing clock a pushed value would cross the wasm boundary
+    /// once per frame to update a number nobody is reading that closely.
+    #[must_use]
+    pub fn clock_frame(&self) -> f64 {
+        self.engine.clock().frame as f64
+    }
+
+    /// Whether the clock is running right now.
+    ///
+    /// Polled beside [`SolarxyApp::clock_frame`] rather than tracked by the
+    /// caller: a `once` range CLEARS `playing` when it reaches the end, so a
+    /// shell holding its own boolean shows "Pause" over a clock that stopped
+    /// by itself.
+    #[must_use]
+    pub fn clock_playing(&self) -> bool {
+        self.engine.clock().playing
+    }
+
+    /// Whether a published scene should start playing, from the document's
+    /// own runtime settings. The player shell reads this after load rather
+    /// than the editor acting on it: autoplay in an authoring tool is a
+    /// surprise, and in a viewer it is the point.
+    #[must_use]
+    pub fn autoplay(&self) -> bool {
+        self.engine.clock().autoplay
+    }
+
     /// The display defaults, pushed from the TS prefs store (the
-    /// gizmo-settings pattern). The turntable rpm applies immediately, it is
-    /// live session state that never serializes into `.slxy`. Wireframe
-    /// weight and background are stored as the pane seed and, per `apply_*`
-    /// flag, written into every pane: the boot push sets both flags; a
-    /// mid-session preference save sets only the flags for fields that
-    /// actually changed, so per-pane Display-menu overrides survive
-    /// unrelated preference edits.
+    /// gizmo-settings pattern). The turntable rpm and the point size apply
+    /// immediately: both are live session state that never serializes into
+    /// `.slxy`. Wireframe weight and background are stored as the pane seed
+    /// and, per `apply_*` flag, written into every pane: the boot push sets
+    /// both flags; a mid-session preference save sets only the flags for
+    /// fields that actually changed, so per-pane Display-menu overrides
+    /// survive unrelated preference edits.
     pub fn set_display_defaults(
         &mut self,
         wireframe_weight: &str,
         background: &str,
         turntable_rpm: f32,
+        point_size: f32,
         apply_wireframe: bool,
         apply_background: bool,
     ) {
@@ -794,6 +897,14 @@ impl SolarxyApp {
             turntable_rpm.clamp(1.0, 60.0)
         } else {
             6.0
+        };
+        self.view.display.point_size = if point_size.is_finite() {
+            point_size.clamp(
+                solarxy_core::view_config::MIN_POINT_SIZE,
+                solarxy_core::view_config::MAX_POINT_SIZE,
+            )
+        } else {
+            solarxy_core::view_config::DEFAULT_POINT_SIZE
         };
         let mut changed = false;
         for pds in &mut self.view.pane_settings {
@@ -973,6 +1084,9 @@ impl SolarxyApp {
     /// built from the pane under the cursor with that pane's camera.
     /// Returns the node id as a number, or `undefined` on a miss.
     pub fn pick(&self, x: f32, y: f32) -> Option<f64> {
+        if self.player_mode {
+            return None;
+        }
         let p = (x * self.dpr, y * self.dpr);
         let rects = self.compute_panes();
         let pane_idx = panes::hit_test_pane(&rects, p);
@@ -1054,6 +1168,43 @@ impl SolarxyApp {
         to_js(&self.engine.cook_warnings(NodeId(node as u64)))
     }
 
+    /// Bounds, cook accounting, placeholder reason and timestamps for one
+    /// node, or `null` when the node is gone.
+    ///
+    /// Pull-read for the same reason `resolved_param` below is: every field
+    /// moves on each cook of a time-dependent node, so as events these
+    /// would be one message per node per frame under playback.
+    pub fn node_report(&self, ctx: JsValue, node: f64) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let report = self.engine.node_report(ctx, NodeId(node as u64));
+        to_js(&report)
+    }
+
+    /// One param's current value as the panel should display it, or the
+    /// message explaining why it has none.
+    ///
+    /// Pull-read per row rather than pushed: under playback a per-cook
+    /// resolved value would be one event per expression per frame across
+    /// this boundary.
+    pub fn resolved_param(&self, ctx: JsValue, node: f64, key: String) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        match self.engine.resolved_param(ctx, NodeId(node as u64), &key) {
+            Ok(value) => to_js(&ResolvedParamDto {
+                ok: true,
+                value: Some(value),
+                error: None,
+            }),
+            Err(error) => to_js(&ResolvedParamDto {
+                ok: false,
+                value: None,
+                error: Some(error),
+            }),
+        }
+    }
+
     /// One window of a node's cooked attribute values
     /// (`domain` is `"point"` or `"primitive"`). Only the requested page
     /// crosses the boundary; the geometry stays in wasm.
@@ -1082,8 +1233,13 @@ impl SolarxyApp {
         let next: AttrVizState = serde_wasm_bindgen::from_value(state)
             .map_err(|e| JsError::new(&format!("attrViz: {e}")))?;
         if next != self.attr_viz {
+            // Size, background and opacity live in the GPU uniform, not in
+            // the label set, so they need a style push as well as the
+            // rebuild. Decimals go the other way (they change the text), and
+            // `attr_dirty` covers those.
             self.attr_viz = next;
             self.attr_dirty = true;
+            self.push_label_style();
         }
         to_js(&self.view_state_dto())
     }
@@ -1096,8 +1252,13 @@ impl SolarxyApp {
     /// by the host loop and applied to the DOM imperatively; markers absent
     /// from the list are hidden. UV panes carry no markers.
     pub fn review_markers(&self) -> Result<JsValue, JsError> {
-        let markers = self.engine.review_markers_world();
         let mut out: Vec<MarkerScreenDto> = Vec::new();
+        if self.player_mode {
+            // Review notes are an authoring conversation, not part of the
+            // published scene.
+            return to_js(&out);
+        }
+        let markers = self.engine.review_markers_world();
         if markers.is_empty() {
             return to_js(&out);
         }
@@ -1500,12 +1661,27 @@ impl SolarxyApp {
         dot_g: f32,
         dot_b: f32,
     ) {
-        let style = solarxy_renderer::labels::LabelStyle {
-            text: [text_r, text_g, text_b],
-            chip: [chip_r, chip_g, chip_b],
-            dot: [dot_r, dot_g, dot_b],
+        self.label_colors = [
+            [text_r, text_g, text_b],
+            [chip_r, chip_g, chip_b],
+            [dot_r, dot_g, dot_b],
+        ];
+        self.push_label_style();
+    }
+
+    /// Rebuilds the label style from the two halves that own it: the theme
+    /// colors pushed by `set_label_colors`, and the size / background /
+    /// opacity the user picked in the attribute settings. Kept as one
+    /// chokepoint so neither half can push a style that drops the other.
+    fn push_label_style(&mut self) {
+        let base = solarxy_renderer::labels::LabelStyle {
+            text: self.label_colors[0],
+            chip: self.label_colors[1],
+            dot: self.label_colors[2],
             dpr: self.dpr,
+            ..solarxy_renderer::labels::LabelStyle::new_default()
         };
+        let style = self.attr_viz.apply_to_style(base);
         self.renderer.write_label_style(&self.queue, &style);
     }
 
@@ -2521,6 +2697,7 @@ impl SolarxyApp {
                 &self.env.light_buffer,
                 &self.renderer.ibl_res.ibl_fallback,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
             IblMode::Diffuse => solarxy_renderer::scene::create_light_bind_group_selective(
                 &self.device,
@@ -2529,6 +2706,7 @@ impl SolarxyApp {
                 &self.renderer.ibl_res.ibl,
                 &self.renderer.ibl_res.ibl_fallback,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
             IblMode::Full => create_light_bind_group(
                 &self.device,
@@ -2536,6 +2714,7 @@ impl SolarxyApp {
                 &self.env.light_buffer,
                 &self.renderer.ibl_res.ibl,
                 &self.renderer.ibl_res.brdf_lut,
+                &self.renderer.ibl_res.ltc,
             ),
         };
         self.env.lights_uniform.ibl_avg_r = ibl_avg[0];
@@ -2654,7 +2833,10 @@ impl SolarxyApp {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            // The UV pass draws no points, but this write clobbers the
+            // shared uniform, so it carries the real size for the next 3D
+            // pass rather than a zero that would make points vanish.
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,
@@ -2862,6 +3044,7 @@ impl SolarxyApp {
             &candidates,
             self.attr_viz.labels,
             self.attr_viz.points,
+            self.attr_viz.label_decimals,
         );
         self.renderer
             .set_attr_labels(&self.device, &self.queue, &instances, &words);
@@ -3055,6 +3238,16 @@ impl SolarxyApp {
         if self.engine.has_active_previews() {
             return;
         }
+        // The same reasoning one guard up, for the scene clock. An animated
+        // scene bakes new point positions every frame, so the visible bounds
+        // churn continuously and refitting here would make the grid, floor
+        // and shadow frustum breathe in time with the animation. The world is
+        // not something playback is allowed to rescale. Playback stopping
+        // needs no bookkeeping: `frame()` calls this unconditionally, so the
+        // first non-playing tick settles the environment once.
+        if self.engine.clock().playing {
+            return;
+        }
         let Some(bounds) = self.scene_objects.visible_bounds() else {
             return;
         };
@@ -3084,6 +3277,7 @@ impl SolarxyApp {
             &bounds,
             aspect,
             &self.renderer.ibl_res.brdf_lut,
+            &self.renderer.ibl_res.ltc,
             SHADOW_MAP_SIZE,
             vis,
         );
@@ -3093,6 +3287,7 @@ impl SolarxyApp {
             &env.light_buffer,
             self.active_ibl(),
             &self.renderer.ibl_res.brdf_lut,
+            &self.renderer.ibl_res.ltc,
         );
         self.env = env;
         self.env_bounds = bounds;
@@ -3596,7 +3791,7 @@ impl SolarxyApp {
             line_width: pds.line_weight.width_px(),
             screen_width: self.renderer.target_width as f32,
             screen_height: self.renderer.target_height as f32,
-            _pad: 0.0,
+            point_size: self.view.display.point_size,
         };
         self.queue.write_buffer(
             &self.renderer.wire.wireframe_params_buffer,
@@ -4303,6 +4498,17 @@ struct ImportJobDto {
 struct AssetRefDto {
     hash: String,
     name: String,
+}
+
+/// The parameter panel's per-row readout: a value, or why there is none.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedParamDto {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<solarxy_graph::params::ParamValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

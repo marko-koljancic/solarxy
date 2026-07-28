@@ -28,7 +28,7 @@ import { useUi } from "../store/ui";
 import { IconBypass, IconDisplay } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
-import { glyphPath, nodeRole, ROLE_BODY_PATHS } from "./nodeVisual";
+import { glyphPath, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
@@ -86,12 +86,16 @@ function authoredDescription(node: NodeMirror): string | null {
 }
 
 /** Shaped silhouette body as inline SVG (crisp 1px stroke, which CSS
- * clip-path cannot give). */
-function ShapedBody({ path }: { path: string }) {
+ * clip-path cannot give).
+ *
+ * The viewBox comes from the role rather than being fixed at 112x32, so a
+ * role with its own body box (light, container) renders at its authored
+ * proportions instead of being stretched into someone else's. */
+function ShapedBody({ body }: { body: RoleBody }) {
   return (
-    <svg className="node-body-svg" viewBox="0 0 112 32" aria-hidden>
-      <path d={path} className="body-fill" />
-      <path d={path} className="body-stroke" />
+    <svg className="node-body-svg" viewBox={`0 0 ${body.w} ${body.h}`} aria-hidden>
+      <path d={body.path} className="body-fill" />
+      <path d={body.path} className="body-stroke" />
     </svg>
   );
 }
@@ -103,9 +107,6 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const cookMode = useMirror((s) => s.cookMode);
   const inStale = useMirror((s) => s.stale.includes(node.id));
   const ctx = useMirror((s) => s.current);
-  // Empty-geo indicator: a container whose subflow has no nodes or no
-  // display flag produces nothing in the scene; render it hollow.
-  const subflow = useMirror((s) => s.contexts[`sub:${node.id}`]);
   // Zoom LOD: the label stack degrades with zoom. Bucketed to the
   // two thresholds so panning never re-renders nodes, only threshold
   // crossings do.
@@ -120,7 +121,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const title = nodeLabel(node, desc);
   const role = nodeRole(desc);
   const glyph = glyphPath(desc);
-  const shapedPath = ROLE_BODY_PATHS[role];
+  const shapedBody = ROLE_BODIES[role];
 
   // Inline rename: opened by double-clicking the label (the node
   // body keeps its container-dive double-click) or by F2 via the ui-store
@@ -162,8 +163,23 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const showBypassWing = hasWings && bypassable;
   const showDisplayWing = hasWings && ctx !== "root";
 
-  const emptyGeo =
-    isContainer && (!subflow || subflow.nodes.length === 0 || subflow.activeOutput === null);
+  // The single sub-row's text, by priority. Cook time is suppressed while
+  // the clock runs: a figure that changes sixty times a second is unreadable
+  // noise, and hiding it is the other half of keeping the stack still (the
+  // engine no longer emits a status event per frame either -- see
+  // `CookStatus::same_state`). Empty string keeps the reserved row blank.
+  //
+  // An empty container is deliberately NOT marked. A container you have not
+  // filled in yet is the normal state of one you just made, and both the
+  // dashed border and the word read as a fault rather than a stage.
+  const playing = useMirror((s) => s.playing);
+  const subLine =
+    status?.state === "pending"
+      ? "loading geometry..."
+      : status?.state === "ok" && status.ms > 0 && !playing
+        ? `${status.ms.toFixed(1)} ms`
+        : "";
+
   const infoLine = nodeInfoLine(desc, node, assetDisplayName);
   const description = authoredDescription(node);
   // The grey type label disambiguates a renamed node (an un-renamed node's
@@ -209,12 +225,12 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   return (
     <div
       ref={rootRef}
-      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${emptyGeo ? " empty-geo" : ""}${isDisplay ? " is-display" : ""}`}
+      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${isDisplay ? " is-display" : ""}`}
       onPointerEnter={armRadial}
       onPointerDown={cancelRadialTimer}
       onPointerLeave={cancelRadialTimer}
     >
-      {/* The display halo (D-3): the one cue readable from across the
+      {/* The display halo: the one cue readable from across the
           graph; the wing (or radial) is the click target. */}
       {isDisplay && <span className="display-halo" aria-hidden />}
 
@@ -268,7 +284,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
       ))}
 
       <div className="node-body">
-        {shapedPath ? <ShapedBody path={shapedPath} /> : null}
+        {shapedBody ? <ShapedBody body={shapedBody} /> : null}
         {role === "gather" && <span className="gather-dome" aria-hidden />}
 
         {showBypassWing && (
@@ -368,13 +384,12 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
         )}
         {infoLine && <span className="flow-node-info">{infoLine}</span>}
         {showDescription && <span className="node-desc">{description}</span>}
-        {emptyGeo && <span className="flow-node-sub">empty</span>}
-        {status?.state === "ok" && status.ms > 0 && (
-          <span className="flow-node-sub">{status.ms.toFixed(1)} ms</span>
-        )}
-        {status?.state === "pending" && (
-          <span className="flow-node-sub">loading geometry...</span>
-        )}
+        {/* ONE sub row, always present. The label stack is vertically
+            centered, so a row that comes and goes moves every other row by
+            half a line -- which is exactly what made nodes jump while the
+            clock ran. Reserving the row costs one line of height and buys a
+            stack that never shifts. */}
+        <span className="flow-node-sub">{subLine}</span>
       </div>
 
       {outputs.map((p: PortSnapshot, i: number) => (

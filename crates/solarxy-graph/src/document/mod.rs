@@ -50,7 +50,8 @@ pub struct EdgeId(pub u64);
 /// `matnet` opens `Mat`, `texnet` opens `Tex`). Node placement legality is
 /// judged against this kind via the descriptor's `ContextSet`, and adding
 /// a kind here plus a container descriptor is the whole cost of a new
-/// context (the phase-17 generalization of the old root/subflow pair).
+/// context. This generalizes the older root/subflow pair, which could only
+/// ever describe two kinds.
 #[derive(
     Debug,
     Default,
@@ -147,6 +148,18 @@ pub struct NodeData {
     /// badge, and it refuses to cook so the document is never destroyed.
     #[serde(default)]
     pub placeholder: Option<String>,
+    /// Unix milliseconds when the node was created, and when its behaviour
+    /// last changed. `None` on any node saved before 0.8.1 and on any node
+    /// created while the host had installed no wall clock (native cooks,
+    /// tests): the info card says "unknown" rather than inventing a time.
+    ///
+    /// `modified` deliberately ignores canvas position. Tidying a graph, or
+    /// running auto-layout, would otherwise restamp every node at once and
+    /// leave "last modified" answering a question nobody asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<f64>,
 }
 
 impl NodeData {
@@ -163,6 +176,8 @@ impl NodeData {
             bypassed: false,
             port_order: BTreeMap::new(),
             placeholder: None,
+            created_ms: None,
+            modified_ms: None,
         }
     }
 }

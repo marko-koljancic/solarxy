@@ -795,7 +795,7 @@ impl BuiltMesh {
         self.colors.is_some() && self.topology != MeshTopology::Points
     }
     /// The CPU mirror for picking and review hashing. Both consume the
-    /// index list as triangles, and points/lines are unpickable (M-4), so
+    /// index list as triangles, and points/lines are unpickable, so
     /// non-triangle meshes keep positions but expose no indices.
     fn cpu_mesh(&self) -> CpuMesh {
         CpuMesh {
@@ -1069,7 +1069,7 @@ mod tests {
         assert!(!same_geometry(&a, &grown));
     }
 
-    /// The W2c dedupe channels: a changed colors Arc or a changed topology
+    /// The dedupe channels: a changed colors Arc or a changed topology
     /// tag must never be swallowed as "same geometry" (the color-drag and
     /// topology-switch recook cases).
     #[test]
@@ -1114,7 +1114,7 @@ mod tests {
         assert!(!same_geometry(&a, &retopo));
     }
 
-    /// W2b: point clouds and polylines build GPU meshes with the right
+    /// Point clouds and polylines build GPU meshes with the right
     /// counts, edge semantics, and packed point colors.
     #[test]
     fn build_meshes_admits_point_clouds_and_polylines() {
@@ -1157,7 +1157,7 @@ mod tests {
         assert_eq!(red_bits >> 24, 0xFF, "alpha forced opaque");
         let black_bits = cloud_b.padded_positions[1][3].to_bits();
         assert_eq!(black_bits & 0x00FF_FFFF, 0, "black packs to zero rgb");
-        // The CPU mirror exposes no indices (unpickable per M-4).
+        // The CPU mirror exposes no indices (points are unpickable).
         assert!(cloud_b.cpu_mesh().indices.is_empty());
 
         let wire_b = &built[1];

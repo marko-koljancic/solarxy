@@ -49,8 +49,11 @@ pub mod reserved {
     /// Per-point texture coordinate, `Vec2`. The attribute-lane twin of
     /// `KernelMesh::tex_coords`.
     pub const UV: &str = "uv";
-    /// Per-point uniform scale, `Float`. Reserved: no 0.8.0 producer or
-    /// consumer; `copy_to_points` consumes it in a later release.
+    /// Per-point uniform scale, `Float`. Consumed by `copy_to_points`,
+    /// which MULTIPLIES its own Scale parameter by this lane so the
+    /// parameter stays a global dial. Authored by `attribute_wrangle`,
+    /// which is what made the lane useful: it was reserved in 0.8.0 with
+    /// nothing in the product able to write it.
     pub const PSCALE: &str = "pscale";
 }
 
@@ -568,7 +571,7 @@ mod tests {
         assert_eq!(cooked.bounds.max.x, set.bounds.max.x);
     }
 
-    /// The W2a contract: topology crosses into the renderer contract, and
+    /// The topology contract: topology crosses into the renderer contract, and
     /// the reserved `color` lane lifts into `CookedMesh::colors` by
     /// refcount when (and only when) it is a position-count Vec4.
     #[test]
@@ -704,7 +707,7 @@ mod tests {
         );
     }
 
-    /// W3b: loader colors lift into the reserved lane on `from_raw` and
+    /// Loader colors lift into the reserved lane on `from_raw` and
     /// lower back on `to_raw`; a length-mismatched array is dropped.
     #[test]
     fn raw_colors_lift_into_the_lane_and_lower_back() {

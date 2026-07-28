@@ -6,6 +6,15 @@
 // Select, deliberately not a portal (the panel scrolls and clips
 // predictably).
 //
+// TYPING IS DRAFTED, like every other text-like field: an attributeName is
+// stored as plain Text, so committing per keystroke made a five-character
+// lane name five `SetParam`s, five recooks and five undo steps. Blur or
+// Enter commits, Escape abandons.
+//
+// PICKING IS IMMEDIATE, and that asymmetry is deliberate: a pick is a
+// complete choice, not a half-typed word, so waiting for a blur would only
+// make the dropdown feel broken.
+//
 // DELIBERATE COUPLING: picking a lane from the dropdown also dispatches
 // the node's sibling `type` enum (same group, a variant matching the
 // lane's ty) so the write keeps the lane's type without a second edit.
@@ -24,6 +33,7 @@ import type {
 import { IconChevronDown } from "../../icons";
 import { descriptorFor } from "../../registry/datatypes";
 import { selectGraph, useMirror } from "../../store/mirror";
+import { useDraftCommit } from "./draftCommit";
 
 /** The enum param a lane pick should retype: key `type`, the SAME group
  * as the name param, with a variant equal to the lane's ty. Null when the
@@ -45,8 +55,12 @@ export function siblingTypeParam(
 }
 
 /** The upstream node feeding this node's default (else first) Geometry
- * input, resolved through the mirror's edges; null when unwired. */
-function upstreamSource(node: NodeMirror): number | null {
+ * input, resolved through the mirror's edges; null when unwired.
+ *
+ * Exported so the wrangle editor's completions read the SAME geometry this
+ * picker offers. Two answers to "which lanes exist here" would be one too
+ * many. */
+export function upstreamSource(node: NodeMirror): number | null {
   const s = useMirror.getState();
   const desc = descriptorFor(s.registry, node.typeId);
   const input =
@@ -74,6 +88,8 @@ export function AttributeNameField({
   const [open, setOpen] = useState(false);
   const [lanes, setLanes] = useState<AttrLane[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { draft, setDraft, commit, revert } = useDraftCommit(value, onCommit);
 
   const openList = () => {
     const source = upstreamSource(node);
@@ -101,14 +117,28 @@ export function AttributeNameField({
   return (
     <div ref={rootRef} className="select attr-name-field">
       <input
+        ref={inputRef}
         type="text"
         className="input-field text-input"
-        value={value}
-        onChange={(e) => onCommit(e.target.value)}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
         onKeyDown={(e) => {
+          // The canvas keymap must never see typing: a lane named "box"
+          // would otherwise add a box node.
+          e.stopPropagation();
           if (e.key === "ArrowDown" && !open) {
             e.preventDefault();
             openList();
+            return;
+          }
+          if (e.key === "Enter") {
+            commit();
+            inputRef.current?.blur();
+          }
+          if (e.key === "Escape") {
+            revert();
+            inputRef.current?.blur();
           }
         }}
       />
@@ -130,9 +160,14 @@ export function AttributeNameField({
               key={lane.name}
               type="button"
               role="option"
-              aria-selected={lane.name === value}
-              className={`select-option${lane.name === value ? " active" : ""}`}
+              // Against the draft, not the stored value, so the marked
+              // option matches the name the input is actually showing.
+              aria-selected={lane.name === draft}
+              className={`select-option${lane.name === draft ? " active" : ""}`}
               onClick={() => {
+                // Immediate, not drafted: a pick is a whole choice. The
+                // stored value comes back through the mirror and the hook's
+                // effect pulls the input into line with it.
                 onCommit(lane.name);
                 const typeParam = siblingTypeParam(
                   descriptorFor(useMirror.getState().registry, node.typeId),

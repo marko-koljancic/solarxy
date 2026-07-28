@@ -84,7 +84,13 @@ pub struct WireframeParams {
     pub line_width: f32,
     pub screen_width: f32,
     pub screen_height: f32,
-    pub _pad: f32,
+    /// On-screen point size in pixels, for the shader-expanded point quads.
+    ///
+    /// Rides this uniform rather than getting one of its own because the
+    /// points pipeline already binds it for the viewport size, and because
+    /// the slot was a pad: the struct is the same 32 bytes it always was and
+    /// the size assert below did not move.
+    pub point_size: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<WireframeParams>() == 32);
@@ -110,6 +116,12 @@ pub struct IblResources {
     pub ibl: IblState,
     pub ibl_fallback: IblState,
     pub brdf_lut: BrdfLut,
+    /// The rect-area light tables. Not image-based lighting, but they sit
+    /// here because this is the bundle the light bind group is built from
+    /// and both are shading lookup tables uploaded once at startup;
+    /// splitting them out would mean threading a second reference through
+    /// the same dozen call sites for no gain.
+    pub ltc: crate::ltc::LtcLuts,
     pub ibl_mode: IblMode,
     pub last_active_ibl_mode: IblMode,
 }
@@ -356,7 +368,8 @@ pub enum SelectionStyle {
     /// Constant-width jump-flood rim around the screen-space silhouette.
     #[default]
     Outline,
-    /// The pre-phase-18 translucent accent fill over the meshes.
+    /// The legacy translucent accent fill over the meshes, from before the
+    /// jump-flood outline existed.
     Tint,
     /// No viewport highlight.
     None,
@@ -437,6 +450,7 @@ impl Renderer {
         });
 
         let brdf_lut = BrdfLut::generate(device, queue);
+        let ltc = crate::ltc::LtcLuts::load(device, queue);
         let ibl = IblState::from_sky_colors(device, queue, init.sky_top, init.sky_bottom);
         let ibl_fallback = IblState::fallback(device, queue);
 
@@ -445,7 +459,7 @@ impl Renderer {
             line_width: init.wireframe_line_width,
             screen_width: width as f32,
             screen_height: height as f32,
-            _pad: 0.0,
+            point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
         };
         let wireframe_params_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -649,6 +663,7 @@ impl Renderer {
                 ibl,
                 ibl_fallback,
                 brdf_lut,
+                ltc,
                 ibl_mode: init.ibl_mode,
                 last_active_ibl_mode: match init.ibl_mode {
                     IblMode::Off => IblMode::Full,
@@ -1153,7 +1168,7 @@ impl Renderer {
         }
         self.draw_normals(&mut pass, env, objects, cam_bg, pds);
         self.draw_attr_vectors(&mut pass, env, cam_bg);
-        self.draw_attr_labels(&mut pass, cam_bg);
+        self.draw_attr_labels(&mut pass, cam_bg, pds);
         self.draw_axes(&mut pass, env, cam_bg, pds);
         self.draw_local_axes(&mut pass, env, cam_bg, pds);
         self.draw_bounds(&mut pass, env, cam_bg, pds);
@@ -1362,7 +1377,7 @@ impl Renderer {
             });
             // Triangles, then lines (same layout, different assembly),
             // then points (their own expansion pipeline): every topology
-            // silhouettes into the mask per decision M-15.
+            // silhouettes into the mask.
             pass.set_pipeline(&self.pipelines.overlay.outline_mask);
             pass.set_bind_group(0, cam_bg, &[]);
             pass.set_bind_group(1, &self.outline.white_bind_group, &[]);
@@ -1505,7 +1520,7 @@ impl Renderer {
 
     /// Applies the selection-highlight preference: the style, and the rim
     /// color/width (the legacy tint reuses the same color at a fixed
-    /// 0.35 alpha, matching its pre-phase-18 look).
+    /// 0.35 alpha, matching how it looked before the outline replaced it).
     pub fn set_selection_highlight(
         &mut self,
         queue: &wgpu::Queue,
@@ -2133,16 +2148,27 @@ impl Renderer {
     /// glyph quads decoded from `vertex_index` ranges), expanded per pane
     /// against its camera so orbiting costs no CPU work. Gated purely on
     /// the count: only the web host populates the channel.
+    ///
+    /// A shaded pane depth-tests, so a label anchored on the far side of an
+    /// object is hidden by the near side; a wireframe pane draws every
+    /// label, because there is no surface there to hide behind and every
+    /// point is genuinely visible to the user.
     fn draw_attr_labels<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         cam_bg: &'a wgpu::BindGroup,
+        pds: &PaneDisplaySettings,
     ) {
         let verts = self.labels.vertex_count();
         if verts == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipelines.overlay.attr_labels);
+        let occlude = !matches!(pds.view_mode, ViewMode::WireframeOnly);
+        pass.set_pipeline(if occlude {
+            &self.pipelines.overlay.attr_labels_occluded
+        } else {
+            &self.pipelines.overlay.attr_labels
+        });
         pass.set_bind_group(0, cam_bg, &[]);
         pass.set_bind_group(1, &self.wire.wireframe_params_bind_group, &[]);
         pass.set_bind_group(2, &self.labels.bind_group, &[]);

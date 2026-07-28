@@ -47,12 +47,16 @@ pub mod cook;
 pub mod document;
 pub mod engine;
 mod error;
+pub mod expr;
 pub mod migration;
+pub mod naming;
 pub mod nodes;
 pub mod params;
 pub mod previews;
+pub mod refs;
 pub mod registry;
 pub mod review;
+pub mod runtime;
 pub mod topology;
 
 pub use engine::{Command, Engine, EngineError, EngineEvent, EventBatch};

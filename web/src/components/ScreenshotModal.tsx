@@ -11,6 +11,8 @@ import { usePrefs, type ScreenshotResolution } from "../store/prefs";
 import { pushToast } from "../store/toasts";
 import { useUi } from "../store/ui";
 import { Modal } from "./Modal";
+import { Row, Section } from "./DialogRow";
+import { Popover, renderDoc } from "./Popover";
 import { useViewState } from "../store/viewState";
 import { Select } from "./Select";
 
@@ -151,8 +153,16 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
       title="Screenshot"
       onClose={onClose}
       className="modal-wide screenshot-modal"
+      // Fixed height with a growing preview and a pinned action row: the
+      // body has to be a flex column for `.screenshot-preview`'s `flex: 1`
+      // to mean anything.
+      bodyLayout="column"
     >
-        <div className="screenshot-controls">
+        <Section title="Capture">
+        <Row
+          label="Resolution"
+          doc="Image size, relative to the pane's current on-screen size. Captures are budgeted at about 4 megapixels: past that the browser can lose the graphics device and the whole viewport goes with it."
+        >
           <Select
             ariaLabel="Resolution"
             value={resolution}
@@ -184,26 +194,45 @@ export function ScreenshotModal({ onClose }: { onClose: () => void }) {
               />
             </>
           )}
+        </Row>
+        </Section>
+        <Section title="Include in the image">
+        <div className="screenshot-controls">
           {(
             [
-              ["grid", "Grid"],
-              ["axes", "Axes"],
-              ["validation", "Validation"],
+              [
+                "grid",
+                "Grid",
+                "Whether the ground grid appears in the image. Off for a presentation frame, on when the image is meant to convey scale.",
+              ],
+              [
+                "axes",
+                "Axes",
+                "Whether the corner axis gizmo appears in the image.",
+              ],
+              [
+                "validation",
+                "Validation",
+                "Whether validation highlights are baked in. On, a screenshot doubles as a bug report showing exactly which faces are flagged.",
+              ],
             ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="review-complete">
-              <input
-                type="checkbox"
-                checked={overlays[key]}
-                onChange={(e) => setOverlays({ ...overlays, [key]: e.target.checked })}
-              />
-              {label}
-            </label>
+          ).map(([key, label, doc]) => (
+            <Popover key={key} title={label} content={renderDoc(doc)}>
+              <label className="review-complete">
+                <input
+                  type="checkbox"
+                  checked={overlays[key]}
+                  onChange={(e) => setOverlays({ ...overlays, [key]: e.target.checked })}
+                />
+                {label}
+              </label>
+            </Popover>
           ))}
           <button className="btn primary" disabled={busy} onClick={capture}>
             {busy ? "Capturing..." : "Capture"}
           </button>
         </div>
+        </Section>
         <div className="screenshot-preview">
           {preview ? (
             <img src={preview.url} alt={`Screenshot ${preview.dims}`} />

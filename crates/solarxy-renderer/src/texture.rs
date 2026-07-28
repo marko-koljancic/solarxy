@@ -8,7 +8,7 @@ use crate::mipmap;
 
 /// How an RGBA8 texture is created and sampled.
 ///
-/// `flat` keeps the pre-Phase-13 behavior (single level, clamped) for 1x1
+/// `flat` keeps the original behavior (single level, clamped) for 1x1
 /// defaults and UI/utility textures where a mip chain is meaningless.
 /// `material` is the PBR texture-role configuration: full CPU-built mip
 /// chain and Repeat wrap (the glTF sampler default, and what `uv_project`

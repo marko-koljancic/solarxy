@@ -20,7 +20,11 @@ struct WireParams {
     width_px: f32,
     viewport_w: f32,
     viewport_h: f32,
-    _pad: f32,
+    /// The point size, read only by `points_lines.wgsl`. Declared so the
+    /// three views of this uniform agree; WGSL needs the size to match, not
+    /// the names, but a slot called `_pad` in one file and a real field in
+    /// another is exactly how a struct drifts.
+    point_size_px: f32,
 }
 @group(1) @binding(0)
 var<uniform> params: WireParams;

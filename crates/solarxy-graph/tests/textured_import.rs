@@ -1,4 +1,4 @@
-//! Regression test for the phase-6 materials-over-the-worker path: a
+//! Regression test for the materials-over-the-worker path: a
 //! textured OBJ (MTL + PNG resolved through the asset table) must carry
 //! its material, including decoded texture pixels, through parse, the
 //! transfer codec, and the cooked-geometry lowering.

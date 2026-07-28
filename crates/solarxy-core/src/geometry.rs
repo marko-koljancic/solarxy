@@ -43,7 +43,7 @@ pub struct RawMeshData {
     pub material_index: Option<usize>,
     pub topology: MeshTopology,
     /// Per-vertex RGBA colors, linear (loaders decode sRGB sources at
-    /// import per decision M-7; glTF `COLOR_0` is already linear).
+    /// import so every format agrees; glTF `COLOR_0` is already linear).
     pub colors: Option<Vec<[f32; 4]>>,
 }
 

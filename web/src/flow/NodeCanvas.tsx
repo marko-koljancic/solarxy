@@ -373,8 +373,8 @@ export function NodeCanvas() {
       )}
       {showFlowControls && <Controls showInteractive={false} />}
     </ReactFlow>
-    {/* The hover radial lives INSIDE the flow (Phase 10) so it can subscribe to
-        the viewport transform and stay glued to its node during pan and zoom.
+    {/* The hover radial lives INSIDE the flow so it can subscribe to the
+        viewport transform and stay glued to its node during pan and zoom.
         It still portals to the body, so its stacking context is unchanged. */}
     <RadialMenu />
     </div>

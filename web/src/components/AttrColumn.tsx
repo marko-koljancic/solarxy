@@ -20,6 +20,7 @@ import {
   IconChevronDown,
 } from "../icons";
 import { useMirror } from "../store/mirror";
+import { usePrefs } from "../store/prefs";
 import { useViewState } from "../store/viewState";
 import { DropdownPortal } from "./DropdownPortal";
 import { Select, type SelectOption } from "./Select";
@@ -248,6 +249,77 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
                 />
               </div>
             )}
+            {/* Label appearance. Grouped after the vector controls and
+                before the shared pin cap, because these four only affect
+                the label channel. The values ride the same session state,
+                and Preferences > Display holds the defaults they start
+                from. */}
+            <div className="attr-viz-row">
+              <span className="attr-viz-label">Label size</span>
+              <div className="attr-viz-segment" role="radiogroup" aria-label="Label size">
+                {(["small", "medium", "large"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={viz.labelSize === s ? "active" : ""}
+                    onClick={() => patch({ labelSize: s })}
+                  >
+                    {s === "small" ? "S" : s === "medium" ? "M" : "L"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="attr-viz-row">
+              <span className="attr-viz-label">Background</span>
+              <div className="attr-viz-segment" role="radiogroup" aria-label="Label background">
+                <button
+                  type="button"
+                  className={viz.labelBackground === "chip" ? "active" : ""}
+                  title="A rounded chip behind the text: legible over any scene"
+                  onClick={() => patch({ labelBackground: "chip" })}
+                >
+                  Chip
+                </button>
+                <button
+                  type="button"
+                  className={viz.labelBackground === "none" ? "active" : ""}
+                  title="Text and anchor dot only. Quieter, but contrast is no longer guaranteed"
+                  onClick={() => patch({ labelBackground: "none" })}
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            <div className="attr-viz-row">
+              <label htmlFor="attr-viz-opacity">Label opacity</label>
+              <input
+                id="attr-viz-opacity"
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={viz.labelOpacity}
+                onChange={(e) => patch({ labelOpacity: Number(e.target.value) })}
+              />
+              <span className="attr-viz-value">{Math.round(viz.labelOpacity * 100)}%</span>
+            </div>
+            <div className="attr-viz-row">
+              <label htmlFor="attr-viz-decimals">Decimals</label>
+              <input
+                id="attr-viz-decimals"
+                type="number"
+                min={0}
+                max={4}
+                step={1}
+                value={viz.labelDecimals}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) {
+                    patch({ labelDecimals: Math.max(0, Math.min(4, Math.round(n))) });
+                  }
+                }}
+              />
+            </div>
             <div className="attr-viz-row">
               <label htmlFor="attr-viz-cap" title="Default: every point, up to 16384 per scene">
                 Pin cap
@@ -269,7 +341,12 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
               <button
                 type="button"
                 className="attr-viz-reset"
-                onClick={() =>
+                onClick={() => {
+                  // Labels reset to the SAVED defaults, not to the shipped
+                  // ones: someone who set large text in Preferences means
+                  // it, and having Reset overrule their own default would
+                  // make the preference feel broken.
+                  const d = usePrefs.getState().prefs.display;
                   patch({
                     vectorScale: 1,
                     normalize: false,
@@ -277,8 +354,12 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
                     color: [1, 0.62, 0.15],
                     rampPreset: "coldWarm",
                     cap: 0,
-                  })
-                }
+                    labelSize: d.labelSize,
+                    labelBackground: d.labelBackground,
+                    labelOpacity: d.labelOpacity,
+                    labelDecimals: d.labelDecimals,
+                  });
+                }}
               >
                 Reset to defaults
               </button>

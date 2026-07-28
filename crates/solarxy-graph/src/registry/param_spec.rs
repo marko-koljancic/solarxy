@@ -36,12 +36,33 @@ pub enum ParamType {
     Int,
     Bool,
     Text,
+    /// Free text over several lines, edited in a plain auto-growing text
+    /// area rather than a single-line input. Stores plain
+    /// [`crate::params::ParamValue::Text`] exactly as [`ParamType::Text`]
+    /// does, so switching a param between the two is not a migration and
+    /// needs no `type_version` bump: the variant declares only the widget.
+    ///
+    /// Distinct from [`ParamType::Snippet`], which is also multi-line but is
+    /// a *program* -- it carries a line-number gutter, syntax highlighting
+    /// and cook-error line marking, none of which prose wants.
+    MultilineText,
     /// A free-text attribute name whose editor offers the lanes present
     /// on the node's default Geometry input as completions. Stores plain
     /// [`crate::params::ParamValue::Text`] (documents round-trip with no
     /// migration); the widget, not the storage, is what this variant
     /// declares.
     AttributeName,
+    /// A multi-line program, edited in a code editor with line numbers and
+    /// error-line highlighting. Stores plain
+    /// [`crate::params::ParamValue::Text`] exactly as `AttributeName` does,
+    /// so documents round-trip with no migration and the variant declares
+    /// only the widget.
+    ///
+    /// The stored text is *not* an expression: it is parsed by the wrangle's
+    /// statement layer ([`crate::expr::stmt`]), which is why this type does
+    /// not accept an expression source. A snippet that fails to parse is a
+    /// cook error naming line and column.
+    Snippet,
     Vec2,
     Vec3,
     Vec4,
@@ -66,6 +87,59 @@ pub enum ParamType {
     NodePath {
         accept: NodePathAccept,
     },
+}
+
+impl ParamType {
+    /// Whether this type may be driven by an expression.
+    ///
+    /// The numeric types only. There is no string type in the expression
+    /// value lattice, so there is literally nothing an expression could
+    /// produce for a Text, `MultilineText`, `AttributeName` or Enum param;
+    /// `AssetRef` and
+    /// `NodePath` are identities rather than values; an Action carries no
+    /// value at all; and a Snippet is already a program, evaluated per
+    /// element by the wrangle rather than once by the resolver. `SetParam`
+    /// refuses the rest up front rather than storing something that could
+    /// only ever badge at cook time.
+    #[must_use]
+    pub fn accepts_expression(&self) -> bool {
+        matches!(
+            self,
+            ParamType::Float
+                | ParamType::Int
+                | ParamType::Bool
+                | ParamType::Vec2
+                | ParamType::Vec3
+                | ParamType::Vec4
+                | ParamType::Color
+        )
+    }
+
+    /// How this type reads in an error message.
+    ///
+    /// Deliberately separate from the camelCase wire names in
+    /// `engine::snapshot`: those are a serialized contract under a drift
+    /// gate, these are prose.
+    #[must_use]
+    pub fn describe(&self) -> &'static str {
+        match self {
+            ParamType::Float => "float",
+            ParamType::Int => "integer",
+            ParamType::Bool => "checkbox",
+            ParamType::Text => "text",
+            ParamType::MultilineText => "multi-line text",
+            ParamType::AttributeName => "attribute name",
+            ParamType::Snippet => "code snippet",
+            ParamType::Vec2 => "vec2",
+            ParamType::Vec3 => "vec3",
+            ParamType::Vec4 => "vec4",
+            ParamType::Color => "colour",
+            ParamType::Enum { .. } => "menu",
+            ParamType::AssetRef { .. } => "file reference",
+            ParamType::Action => "action button",
+            ParamType::NodePath { .. } => "node reference",
+        }
+    }
 }
 
 /// What a [`ParamType::NodePath`] param may point at. Covers the ratified

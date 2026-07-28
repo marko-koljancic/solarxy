@@ -3,7 +3,7 @@
 //! `box` emits a solid triangulated box matching the input's AABB; `center`
 //! emits a single true point primitive at its center (the catalog's original
 //! intent, realized once point topology landed; it supersedes the 0.7.x
-//! marker-cube substitute per decision M-3).
+//! marker-cube substitute).
 //!
 //! Callers must handle the empty-input case themselves: `compute_bounds(&[])`
 //! returns a (-1,-1,-1)..(1,1,1) unit box rather than a zero box, so blindly

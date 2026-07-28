@@ -97,6 +97,9 @@ export const CATEGORY_ORDER: readonly string[] = [
   "import",
   "export",
   "lights",
+  // Beside Lights, not beside Utility: both are scene elements you place in
+  // the root graph and both shape what the render sees.
+  "cameras",
   "utility",
   "tex_generate",
   "tex_adjust",
@@ -116,7 +119,7 @@ export function compareCategories(a: string, b: string): number {
 /** The param types the parameter panel renders a widget for (a new node
  * using only these needs zero frontend changes; a new ParamType is a
  * deliberate frontend addition). `assetRef` lands with imports;
- * `nodePath` is the phase-17 cross-context reference picker. */
+ * `nodePath` is the cross-context reference picker. */
 export const SUPPORTED_PARAM_TYPES = [
   "float",
   "int",
@@ -129,6 +132,7 @@ export const SUPPORTED_PARAM_TYPES = [
   "enum",
   "nodePath",
   "attributeName",
+  "snippet",
 ] as const;
 
 export function isSupportedParamType(t: string): boolean {

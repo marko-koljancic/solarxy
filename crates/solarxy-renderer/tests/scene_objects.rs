@@ -259,6 +259,8 @@ fn set_lights_stores_and_flags_dirty_once() {
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0, 0.0],
+        rotate: [0.0; 3],
+        two_sided: false,
         ground_color: [0.0, 0.0, 0.0],
         cast_shadow: true,
         shadow_map_size: 1024,

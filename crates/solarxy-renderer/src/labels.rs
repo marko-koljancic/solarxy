@@ -60,19 +60,138 @@ pub fn glyph_index(c: char) -> Option<u32> {
     CHARSET.chars().position(|g| g == c).map(|i| i as u32)
 }
 
-/// Host-facing label style: linear-RGB theme colors plus the device pixel
-/// ratio that scales every CSS-px metric below.
+/// The text size a label draws at, in CSS px before the device pixel ratio.
+///
+/// Three rungs rather than a free number: the SDF bake is one size and the
+/// shader scales it, so any value works, but a slider here would be a knob
+/// nobody can set meaningfully. `Medium` is the 9px the retired DOM overlay
+/// used, so the default is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl LabelSize {
+    /// Text height in CSS px.
+    #[must_use]
+    pub const fn text_px(self) -> f32 {
+        match self {
+            Self::Small => 7.0,
+            Self::Medium => 9.0,
+            Self::Large => 13.0,
+        }
+    }
+
+    /// The stable wire name, for the host boundary and session state.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+        }
+    }
+
+    /// Parses a wire name, falling back to the default on anything else so
+    /// a stale or hand-edited payload cannot fail to load.
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "small" => Self::Small,
+            "large" => Self::Large,
+            _ => Self::Medium,
+        }
+    }
+}
+
+/// What a label draws behind its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelBackground {
+    /// The rounded chip plus the anchor dot: legible over anything.
+    #[default]
+    Chip,
+    /// The anchor dot only, text bare on the scene. Cheaper by six vertices
+    /// per label, and much quieter over a flat background; it gives up the
+    /// contrast the chip was there to guarantee.
+    None,
+}
+
+impl LabelBackground {
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Chip => "chip",
+            Self::None => "none",
+        }
+    }
+
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "none" => Self::None,
+            _ => Self::Chip,
+        }
+    }
+
+    #[must_use]
+    const fn draws_chip(self) -> bool {
+        matches!(self, Self::Chip)
+    }
+}
+
+/// Host-facing label style: linear-RGB theme colors, the device pixel ratio
+/// that scales every CSS-px metric below, and the user's size / background /
+/// opacity choices.
 #[derive(Debug, Clone, Copy)]
 pub struct LabelStyle {
     pub text: [f32; 3],
     pub chip: [f32; 3],
     pub dot: [f32; 3],
     pub dpr: f32,
+    pub size: LabelSize,
+    pub background: LabelBackground,
+    /// Overall label opacity, 0 to 1. Scales the text and dot alpha, and
+    /// multiplies the chip's own 82 percent.
+    pub opacity: f32,
 }
 
-/// The GPU uniform. CSS metrics mirror the retired DOM overlay: 9px text,
-/// 6px dot, 5.5px text gap, 4x1.5px chip padding, 3px chip radius, chip at
-/// 82 percent opacity.
+impl LabelStyle {
+    /// The neutral style: medium text, chip background, fully opaque. Colors
+    /// are placeholders until the host pushes the theme.
+    #[must_use]
+    pub fn new_default() -> Self {
+        Self {
+            text: [0.9, 0.9, 0.9],
+            chip: [0.1, 0.1, 0.1],
+            dot: [1.0, 0.62, 0.15],
+            dpr: 1.0,
+            size: LabelSize::default(),
+            background: LabelBackground::default(),
+            opacity: 1.0,
+        }
+    }
+}
+
+/// The chip's own alpha at full label opacity. The chip exists to guarantee
+/// contrast against an arbitrary scene; below this it stops doing that.
+const CHIP_ALPHA: f32 = 0.82;
+
+/// Every CSS-px metric other than the text height is expressed as a
+/// multiple of it, so one size choice scales the whole label coherently
+/// instead of leaving a large glyph in a chip sized for a small one. The
+/// ratios are the retired DOM overlay's numbers divided by its 9px text.
+const DOT_RATIO: f32 = 6.0 / 9.0;
+const TEXT_GAP_RATIO: f32 = 5.5 / 9.0;
+const CHIP_PAD_X_RATIO: f32 = 4.0 / 9.0;
+const CHIP_PAD_Y_RATIO: f32 = 1.5 / 9.0;
+const CHIP_RADIUS_RATIO: f32 = 3.0 / 9.0;
+
+/// The GPU uniform. Field order and padding must match `LabelParams` in
+/// `shaders/label.wgsl` exactly: a mismatch is a silent garbage read, not a
+/// compile error.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct LabelParams {
@@ -87,8 +206,23 @@ struct LabelParams {
     chip_pad_y: f32,
     chip_radius: f32,
     label_count: u32,
+    /// 1 when the chip is drawn. Shifts the dot and glyph vertex ranges as
+    /// well as gating the chip, so a chipless label costs six fewer
+    /// vertices rather than six rasterized-then-discarded ones.
+    chip_on: u32,
+    /// Pads to the 16-byte multiple a uniform struct requires (84 would
+    /// round up to 96 anyway; making it explicit keeps Rust and WGSL
+    /// agreeing on where each field starts).
+    _pad: [u32; 3],
 }
-const _: () = assert!(std::mem::size_of::<LabelParams>() == 80);
+const _: () = assert!(std::mem::size_of::<LabelParams>() == 96);
+
+/// The uniform's byte span, exported so `tests/uniform_layout.rs` can hold
+/// the WGSL declaration to the same number rather than repeating a literal.
+///
+/// The struct itself stays private: what the shader has to agree with is its
+/// SIZE, and wgpu compares exactly that.
+pub const LABEL_PARAMS_SIZE: usize = std::mem::size_of::<LabelParams>();
 
 impl LabelParams {
     fn from_style(style: &LabelStyle, label_count: u32) -> Self {
@@ -97,19 +231,26 @@ impl LabelParams {
         } else {
             1.0
         };
-        let text_px = 9.0 * d;
+        let a = if style.opacity.is_finite() {
+            style.opacity.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let text_px = style.size.text_px() * d;
         Self {
-            text_color: [style.text[0], style.text[1], style.text[2], 1.0],
-            chip_color: [style.chip[0], style.chip[1], style.chip[2], 0.82],
-            dot_color: [style.dot[0], style.dot[1], style.dot[2], 1.0],
+            text_color: [style.text[0], style.text[1], style.text[2], a],
+            chip_color: [style.chip[0], style.chip[1], style.chip[2], CHIP_ALPHA * a],
+            dot_color: [style.dot[0], style.dot[1], style.dot[2], a],
             text_px,
             advance_px: text_px * ADVANCE_RATIO,
-            dot_px: 6.0 * d,
-            text_gap_px: 5.5 * d,
-            chip_pad_x: 4.0 * d,
-            chip_pad_y: 1.5 * d,
-            chip_radius: 3.0 * d,
+            dot_px: text_px * DOT_RATIO,
+            text_gap_px: text_px * TEXT_GAP_RATIO,
+            chip_pad_x: text_px * CHIP_PAD_X_RATIO,
+            chip_pad_y: text_px * CHIP_PAD_Y_RATIO,
+            chip_radius: text_px * CHIP_RADIUS_RATIO,
             label_count,
+            chip_on: u32::from(style.background.draws_chip()),
+            _pad: [0; 3],
         }
     }
 }
@@ -176,12 +317,7 @@ impl LabelResources {
             ..Default::default()
         });
 
-        let style = LabelStyle {
-            text: [0.9, 0.9, 0.9],
-            chip: [0.1, 0.1, 0.1],
-            dot: [1.0, 0.62, 0.15],
-            dpr: 1.0,
-        };
+        let style = LabelStyle::new_default();
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Label Params"),
             contents: bytemuck::bytes_of(&LabelParams::from_style(&style, 0)),
@@ -282,11 +418,20 @@ impl LabelResources {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&params));
     }
 
-    /// The single draw's vertex count: 6 for every label's chip, 6 for its
-    /// dot, 6 per glyph.
+    /// The single draw's vertex count: 6 for every label's chip (only when
+    /// the chip is drawn), 6 for its dot, 6 per glyph.
+    ///
+    /// The shader decodes element kind from `vertex_index` against exactly
+    /// this arithmetic, so the two must agree; `chip_on` is the one term
+    /// that can differ between them.
     #[must_use]
     pub fn vertex_count(&self) -> u32 {
-        self.label_count * 12 + self.glyph_count * 6
+        let per_label = if self.style.background.draws_chip() {
+            12
+        } else {
+            6
+        };
+        self.label_count * per_label + self.glyph_count * 6
     }
 }
 
@@ -405,8 +550,10 @@ mod tests {
             chip: [0.0, 0.0, 0.0],
             dot: [1.0, 0.5, 0.0],
             dpr: 2.0,
+            ..LabelStyle::new_default()
         };
         let p = LabelParams::from_style(&style, 7);
+        // Medium is the retired DOM overlay's 9px, doubled by the dpr.
         assert!((p.text_px - 18.0).abs() < f32::EPSILON);
         assert!((p.dot_px - 12.0).abs() < f32::EPSILON);
         assert!((p.advance_px - 18.0 * ADVANCE_RATIO).abs() < 1e-5);
@@ -417,5 +564,108 @@ mod tests {
             ..style
         };
         assert!((LabelParams::from_style(&bad, 0).text_px - 9.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn every_metric_scales_with_the_size_choice() {
+        // The point of the ratios: one size choice moves the whole label
+        // coherently. A large glyph in a chip padded for a small one is
+        // the failure this prevents.
+        let base = LabelStyle::new_default();
+        let small = LabelParams::from_style(
+            &LabelStyle {
+                size: LabelSize::Small,
+                ..base
+            },
+            1,
+        );
+        let large = LabelParams::from_style(
+            &LabelStyle {
+                size: LabelSize::Large,
+                ..base
+            },
+            1,
+        );
+        for (s, l) in [
+            (small.text_px, large.text_px),
+            (small.advance_px, large.advance_px),
+            (small.dot_px, large.dot_px),
+            (small.text_gap_px, large.text_gap_px),
+            (small.chip_pad_x, large.chip_pad_x),
+            (small.chip_pad_y, large.chip_pad_y),
+            (small.chip_radius, large.chip_radius),
+        ] {
+            assert!(l > s, "every metric must grow with the size: {s} -> {l}");
+        }
+        // And in proportion, so the label keeps its shape.
+        let k = large.text_px / small.text_px;
+        assert!((large.chip_radius / small.chip_radius - k).abs() < 1e-5);
+        assert!((large.dot_px / small.dot_px - k).abs() < 1e-5);
+    }
+
+    #[test]
+    fn opacity_scales_both_the_text_and_the_chip() {
+        let half = LabelParams::from_style(
+            &LabelStyle {
+                opacity: 0.5,
+                ..LabelStyle::new_default()
+            },
+            1,
+        );
+        assert!((half.text_color[3] - 0.5).abs() < f32::EPSILON);
+        assert!((half.dot_color[3] - 0.5).abs() < f32::EPSILON);
+        // The chip keeps its own 82 percent underneath, so it stays the
+        // more transparent of the two at every setting.
+        assert!((half.chip_color[3] - CHIP_ALPHA * 0.5).abs() < f32::EPSILON);
+        assert!(half.chip_color[3] < half.text_color[3]);
+
+        // Junk opacity falls back to opaque rather than rendering nothing.
+        let bad = LabelParams::from_style(
+            &LabelStyle {
+                opacity: f32::NAN,
+                ..LabelStyle::new_default()
+            },
+            1,
+        );
+        assert!((bad.text_color[3] - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn the_chip_flag_and_the_vertex_count_agree() {
+        // The shader decodes element kind from `vertex_index` against
+        // exactly `vertex_count`'s arithmetic. If these two ever disagree,
+        // labels silently render as garbage rather than failing to build.
+        for (background, per_label) in [
+            (LabelBackground::Chip, 12u32),
+            (LabelBackground::None, 6u32),
+        ] {
+            let params = LabelParams::from_style(
+                &LabelStyle {
+                    background,
+                    ..LabelStyle::new_default()
+                },
+                5,
+            );
+            assert_eq!(
+                params.chip_on,
+                u32::from(background == LabelBackground::Chip)
+            );
+            // Reproduce `vertex_count` from the uniform the shader reads.
+            let from_uniform = 5 * (6 + 6 * params.chip_on) + 3 * 6;
+            assert_eq!(from_uniform, 5 * per_label + 18);
+        }
+    }
+
+    #[test]
+    fn size_and_background_keys_round_trip_and_fall_back() {
+        for s in [LabelSize::Small, LabelSize::Medium, LabelSize::Large] {
+            assert_eq!(LabelSize::from_key(s.key()), s);
+        }
+        for b in [LabelBackground::Chip, LabelBackground::None] {
+            assert_eq!(LabelBackground::from_key(b.key()), b);
+        }
+        // A key from a newer build must render something, not panic.
+        assert_eq!(LabelSize::from_key("enormous"), LabelSize::Medium);
+        assert_eq!(LabelBackground::from_key("frosted"), LabelBackground::Chip);
     }
 }

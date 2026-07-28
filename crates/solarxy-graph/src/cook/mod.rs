@@ -20,6 +20,7 @@
 //! node-authoring bug (debug-asserted), never silently absorbed.
 
 pub mod driver;
+pub mod geo_queries;
 pub mod state;
 
 pub use driver::{CookEngine, CookReport};
@@ -350,6 +351,16 @@ pub struct CookCtx<'a> {
     /// referenced networks first (`ordered_contexts`), so these are fresh
     /// within the pass. Empty for nodes without references.
     referenced: BTreeMap<crate::document::NodeId, Value>,
+    /// The same evaluation context the driver used to resolve this node's
+    /// params: the scene clock, cross-node `ch()` reads, and geometry
+    /// queries against the gathered inputs.
+    ///
+    /// A cook body needs it only when the body itself runs the expression
+    /// language, which today means the wrangle. Without it a wrangle's
+    /// `$T` would silently read zero and `ch()` would be unavailable, so
+    /// the driver hands over the context it already built rather than the
+    /// body constructing a weaker one.
+    pub eval: crate::expr::EvalCtx<'a>,
 }
 
 impl<'a> CookCtx<'a> {
@@ -361,12 +372,20 @@ impl<'a> CookCtx<'a> {
             warnings: Vec::new(),
             validation: None,
             referenced: BTreeMap::new(),
+            eval: crate::expr::EvalCtx::default(),
         }
     }
 
     /// Installs the pre-resolved referenced values (driver-side).
     pub fn set_referenced(&mut self, referenced: BTreeMap<crate::document::NodeId, Value>) {
         self.referenced = referenced;
+    }
+
+    /// Installs the driver's evaluation context (driver-side), so a body
+    /// that runs the expression language sees the same clock, references
+    /// and geometry queries the param resolver saw.
+    pub fn set_eval(&mut self, eval: crate::expr::EvalCtx<'a>) {
+        self.eval = eval;
     }
 
     /// The published value of a referenced network, if the reference

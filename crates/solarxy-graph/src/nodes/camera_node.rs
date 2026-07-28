@@ -243,9 +243,7 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
         type_id: "camera",
         version: 1,
         display_name: "Camera",
-        // No dedicated Camera category; Utility is the root-object home (the
-        // registry invariant gates context, not category).
-        category: Category::Utility,
+        category: Category::Cameras,
         contexts: ContextSet::OBJ,
         opens: None,
         inputs: vec![],
@@ -272,7 +270,7 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
               Projection. Up is always world Y: there is no roll.",
         search_aliases: &["camera", "view", "cam", "lens"],
         glyph: "camera",
-        role: NodeRole::Standard,
+        role: NodeRole::Camera,
         cook: passive_cook,
         migrate: None,
     }

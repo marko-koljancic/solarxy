@@ -154,7 +154,7 @@ const VIEW_LAYOUTS: ViewLayout[] = [
   "threeLeftBig",
 ];
 
-/** The pre-Phase-10 desk shape, as stored by an existing user. */
+/** The pre-dockview desk shape, as stored by an existing user. */
 interface LegacyDeskSnapshot {
   name: string;
   viewportSide?: "left" | "right";

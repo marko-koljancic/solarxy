@@ -12,6 +12,7 @@ import { immer } from "zustand/middleware/immer";
 import {
   ctxKey,
   type CookMode,
+  type RuntimeSettings,
   type CookStatus,
   type DocumentSnapshot,
   type EdgeMirror,
@@ -54,6 +55,12 @@ interface MirrorState {
   /** Per-node validation reports (the report panel's data). */
   reports: Record<number, ValidationReportData>;
   cookMode: CookMode;
+  /** Transport: whether the scene clock is running. Session state. */
+  playing: boolean;
+  /** Transport: the current frame. Session state. */
+  frame: number;
+  /** The persisted half of the clock (fps, range, loop, autoplay). */
+  runtime: RuntimeSettings;
   /** The graph the node canvas is currently showing. */
   current: GraphContext;
   /** Node ids that are stale (dirty), for manual-mode badges + header count. */
@@ -83,13 +90,32 @@ function graphFor(contexts: Record<string, GraphMirror>, ctx: GraphContext): Gra
   return contexts[key];
 }
 
+/** The session-state writers `applyEvent` needs, so it can stay free of the
+ * whole store while still reporting transport and cook-mode changes. */
+interface SessionSetters {
+  setCookMode: (m: CookMode) => void;
+  setPlaying: (p: boolean) => void;
+  setFrame: (f: number) => void;
+  setRuntime: (r: RuntimeSettings) => void;
+}
+
+/** Mirrors `solarxy_graph::runtime`'s defaults. A scene that has never
+ * touched the transport still has to show something coherent. */
+export const DEFAULT_RUNTIME: RuntimeSettings = Object.freeze({
+  fps: 24,
+  frameStart: 1,
+  frameEnd: 240,
+  loopMode: "loop",
+  autoplay: false,
+});
+
 /** Applies one event to the draft state. */
 function applyEvent(
   contexts: Record<string, GraphMirror>,
   cook: Record<number, NodeCook>,
   reports: Record<number, ValidationReportData>,
   ev: EngineEvent,
-  setCookMode: (m: CookMode) => void,
+  session: SessionSetters,
 ): void {
   switch (ev.type) {
     case "nodeAdded": {
@@ -172,7 +198,19 @@ function applyEvent(
       break;
     }
     case "cookModeChanged": {
-      setCookMode(ev.mode);
+      session.setCookMode(ev.mode);
+      break;
+    }
+    case "playbackChanged": {
+      session.setPlaying(ev.playing);
+      break;
+    }
+    case "frameChanged": {
+      session.setFrame(ev.frame);
+      break;
+    }
+    case "runtimeSettingsChanged": {
+      session.setRuntime(ev.settings);
       break;
     }
     // variadicReordered, reviewChanged, documentReplaced: handled elsewhere
@@ -190,6 +228,9 @@ export const useMirror = create<MirrorState>()(
     cook: {},
     reports: {},
     cookMode: "auto",
+    playing: false,
+    frame: DEFAULT_RUNTIME.frameStart,
+    runtime: DEFAULT_RUNTIME,
     current: "root",
     stale: [],
     dirty: false,
@@ -221,8 +262,19 @@ export const useMirror = create<MirrorState>()(
         if (batch.revision > s.revision + 1) needsResnapshot = true;
         if (!needsResnapshot) {
           for (const ev of batch.events) {
-            applyEvent(s.contexts, s.cook, s.reports, ev, (m) => {
-              s.cookMode = m;
+            applyEvent(s.contexts, s.cook, s.reports, ev, {
+              setCookMode: (m) => {
+                s.cookMode = m;
+              },
+              setPlaying: (p) => {
+                s.playing = p;
+              },
+              setFrame: (f) => {
+                s.frame = f;
+              },
+              setRuntime: (r) => {
+                s.runtime = r;
+              },
             });
           }
         }

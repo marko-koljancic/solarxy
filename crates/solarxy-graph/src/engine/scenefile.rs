@@ -88,6 +88,8 @@ fn node_to_json(n: &NodeData) -> sf::NodeJson {
         params,
         port_order,
         position: n.position,
+        created_ms: n.created_ms,
+        modified_ms: n.modified_ms,
     }
 }
 
@@ -126,6 +128,7 @@ fn context_kind_from_str(s: &str) -> Option<crate::document::ContextKind> {
 pub fn document_to_scene(
     data: &DocumentData,
     cook_mode: CookMode,
+    runtime: &crate::runtime::RuntimeSettings,
     sidecar: &SceneSidecar,
     asset_records: Vec<sf::AssetRecordJson>,
 ) -> sf::SceneJson {
@@ -169,7 +172,30 @@ pub fn document_to_scene(
             cook_mode: cook_mode_str(cook_mode).to_string(),
             canvas_viewports: sidecar.canvas_viewports.clone(),
         },
+        runtime: sf::RuntimeJson {
+            fps: runtime.fps,
+            frame_start: runtime.frame_start,
+            frame_end: runtime.frame_end,
+            loop_mode: runtime.loop_mode.key().to_string(),
+            autoplay: runtime.autoplay,
+        },
         meta: sidecar.meta.clone(),
+    }
+}
+
+/// The clock settings a scene carries.
+///
+/// An unrecognised loop mode falls back to the default rather than failing
+/// the load: a file written by a later version must still open, and a
+/// playback mode is not worth refusing a document over.
+#[must_use]
+pub fn runtime_from_scene(scene: &sf::SceneJson) -> crate::runtime::RuntimeSettings {
+    crate::runtime::RuntimeSettings {
+        fps: scene.runtime.fps,
+        frame_start: scene.runtime.frame_start,
+        frame_end: scene.runtime.frame_end,
+        loop_mode: crate::runtime::LoopMode::from_key(&scene.runtime.loop_mode).unwrap_or_default(),
+        autoplay: scene.runtime.autoplay,
     }
 }
 
@@ -220,6 +246,14 @@ fn graph_from_json(
                 (!parsed.is_empty()).then(|| (port.clone(), parsed))
             })
             .collect();
+
+        // Timestamps ride through untouched, including their absence: a
+        // document written before 0.8.1 (or by a host with no wall clock)
+        // stays "unknown" rather than being restamped with the load time,
+        // which would tell the user this node was created just now.
+        node.created_ms = nj.created_ms;
+        node.modified_ms = nj.modified_ms;
+
         out_nodes.push(node);
     }
 
@@ -384,7 +418,13 @@ impl Engine {
             });
         }
 
-        let scene = document_to_scene(&self.doc.to_data(), self.cook_mode, sidecar, records);
+        let scene = document_to_scene(
+            &self.doc.to_data(),
+            self.cook_mode,
+            &self.clock.settings(),
+            sidecar,
+            records,
+        );
         sf::write(&sf::SceneFile {
             scene,
             assets: blobs,
@@ -424,6 +464,12 @@ impl Engine {
             cook_mode: cook_mode_from(&read.file.scene.editor.cook_mode),
         };
         let batch = self.load_document(&file);
+        // The clock's persisted half restores; `playing` stays false and the
+        // frame goes to the range start, so a reloaded scene is reproducible
+        // regardless of what the author was doing when they saved.
+        self.clock
+            .apply_settings(&runtime_from_scene(&read.file.scene));
+        self.cook.set_scene_time(self.clock.scene_time());
         let sidecar = sidecar_from_scene(&read.file.scene);
 
         Ok(LoadedScene {

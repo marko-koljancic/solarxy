@@ -30,6 +30,30 @@ use crate::set::{AttributeData, GeometrySet, KernelMesh, reserved};
 /// renderable-empty).
 #[must_use]
 pub fn scatter(set: &GeometrySet, count: u32, seed: u32) -> GeometrySet {
+    scatter_weighted(set, count, seed, None)
+}
+
+/// [`scatter`] with an optional per-point density lane biasing where samples
+/// land.
+///
+/// **How a point-domain lane becomes a triangle weight.** Density is stored
+/// per vertex, but the sampler picks a triangle from an area prefix sum, so
+/// each triangle takes the MEAN of its three corners. The alternative,
+/// rejection-sampling against the barycentric-interpolated value, is smoother
+/// but needs an unbounded retry loop, and an unbounded loop on a
+/// single-threaded cook is the one thing this operator must not have.
+///
+/// A triangle whose mean density is zero or negative is never picked; density
+/// clamps at zero rather than flipping a weight negative. When every weight
+/// comes out zero the result is empty, which the node reports rather than
+/// silently falling back to uniform scattering that would hide the mistake.
+#[must_use]
+pub fn scatter_weighted(
+    set: &GeometrySet,
+    count: u32,
+    seed: u32,
+    density: Option<&str>,
+) -> GeometrySet {
     // One entry per positive-area triangle: owning mesh, triangle index,
     // and the running area total (the prefix sum the pick searches).
     struct Candidate {
@@ -47,8 +71,9 @@ pub fn scatter(set: &GeometrySet, count: u32, seed: u32) -> GeometrySet {
         for (tri, corners) in mesh.indices.chunks_exact(3).enumerate() {
             let [a, b, c] = triangle_positions(mesh, corners);
             let area = f64::from(cross_length(sub(b, a), sub(c, a))) * 0.5;
-            if area.is_finite() && area > 0.0 {
-                total += area;
+            let weight = area * triangle_density(mesh, corners, density);
+            if weight.is_finite() && weight > 0.0 {
+                total += weight;
                 candidates.push(Candidate {
                     mesh: mesh_index,
                     tri,
@@ -170,6 +195,55 @@ pub fn scatter(set: &GeometrySet, count: u32, seed: u32) -> GeometrySet {
         );
     }
     GeometrySet::from_mesh(mesh)
+}
+
+/// Whether a density lane named `name` would actually bias anything.
+///
+/// Exists so the NODE can tell "you named a lane that is not there" from "the
+/// scatter worked", which the geometry alone cannot: an unresolved lane falls
+/// back to area-only weighting and produces a perfectly ordinary even scatter,
+/// so a typo looks exactly like success.
+///
+/// Deliberately a question rather than a second return value from
+/// [`scatter_weighted`]: the operator stays a plain `GeometrySet ->
+/// GeometrySet`, and this shares `triangle_density`'s acceptance rules
+/// below, so the two cannot drift into disagreeing about what "resolves"
+/// means.
+#[must_use]
+pub fn density_lane_resolves(set: &GeometrySet, name: &str) -> bool {
+    set.meshes.iter().any(|mesh| {
+        mesh.topology == MeshTopology::Triangles
+            && matches!(
+                mesh.attributes.get(name),
+                Some(AttributeData::Float(v)) if v.len() == mesh.positions.len()
+            )
+    })
+}
+
+/// The density multiplier for one triangle: the mean of its three corners,
+/// clamped at zero.
+///
+/// Returns 1.0 when no lane is named or the named lane is absent or the wrong
+/// type, so an unweighted scatter is exactly area-weighted as before. A lane
+/// that exists but is not Float is ignored rather than refused: the node
+/// warns, and silently scattering nothing would be worse than scattering
+/// evenly.
+fn triangle_density(mesh: &KernelMesh, corners: &[u32], density: Option<&str>) -> f64 {
+    let Some(name) = density else { return 1.0 };
+    let Some(AttributeData::Float(values)) = mesh.attributes.get(name) else {
+        return 1.0;
+    };
+    if values.len() != mesh.positions.len() {
+        return 1.0;
+    }
+    let mut sum = 0.0_f64;
+    for &c in corners {
+        let Some(v) = values.get(c as usize) else {
+            return 1.0;
+        };
+        sum += f64::from(*v).max(0.0);
+    }
+    sum / 3.0
 }
 
 /// The three corner positions of one triangle.
@@ -380,5 +454,129 @@ mod tests {
         for p in out.meshes[0].positions.iter() {
             assert!(p[0] > 0.0, "sample landed on the degenerate sliver: {p:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Two unit quads side by side in X: the left spans x in [-2,-1], the
+    /// right x in [1,2]. Equal area, so an unweighted scatter splits evenly.
+    fn two_quads(density: Option<[f32; 8]>) -> GeometrySet {
+        let positions = vec![
+            [-2.0, 0.0, -0.5],
+            [-1.0, 0.0, -0.5],
+            [-1.0, 0.0, 0.5],
+            [-2.0, 0.0, 0.5],
+            [1.0, 0.0, -0.5],
+            [2.0, 0.0, -0.5],
+            [2.0, 0.0, 0.5],
+            [1.0, 0.0, 0.5],
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        let mut mesh = KernelMesh::new("quads", positions, indices);
+        if let Some(d) = density {
+            mesh.attributes.insert(
+                "density".to_string(),
+                AttributeData::Float(Arc::new(d.to_vec())),
+            );
+        }
+        GeometrySet::from_parts(vec![mesh], Vec::new())
+    }
+
+    /// How many scattered points landed on the right-hand quad.
+    fn right_share(set: &GeometrySet) -> f32 {
+        let pts = &set.meshes[0].positions;
+        let right = pts.iter().filter(|p| p[0] > 0.0).count();
+        right as f32 / pts.len() as f32
+    }
+
+    #[test]
+    fn without_a_lane_the_split_is_even_by_area() {
+        let out = scatter(&two_quads(None), 2000, 7);
+        let share = right_share(&out);
+        assert!((share - 0.5).abs() < 0.06, "expected ~0.5, got {share}");
+    }
+
+    #[test]
+    fn naming_a_lane_biases_where_the_points_land() {
+        // Right quad three times the density of the left: it should take
+        // about three quarters of the points.
+        let set = two_quads(Some([1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0]));
+        let out = scatter_weighted(&set, 4000, 7, Some("density"));
+        let share = right_share(&out);
+        assert!((share - 0.75).abs() < 0.06, "expected ~0.75, got {share}");
+    }
+
+    #[test]
+    fn a_zero_region_receives_nothing() {
+        let set = two_quads(Some([0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]));
+        let out = scatter_weighted(&set, 500, 7, Some("density"));
+        assert!(
+            out.meshes[0].positions.iter().all(|p| p[0] > 0.0),
+            "zero-density region must receive no points"
+        );
+    }
+
+    #[test]
+    fn negative_density_clamps_rather_than_flipping_the_weight() {
+        // A negative weight would subtract from the prefix sum and corrupt
+        // the search, so it clamps to zero and the region is simply skipped.
+        let set = two_quads(Some([-5.0, -5.0, -5.0, -5.0, 1.0, 1.0, 1.0, 1.0]));
+        let out = scatter_weighted(&set, 500, 7, Some("density"));
+        assert!(out.meshes[0].positions.iter().all(|p| p[0] > 0.0));
+    }
+
+    #[test]
+    fn density_zero_everywhere_scatters_nothing_rather_than_falling_back() {
+        // Falling back to an even scatter would hide the mistake; the node
+        // turns this into a warning naming the lane.
+        let set = two_quads(Some([0.0; 8]));
+        let out = scatter_weighted(&set, 500, 7, Some("density"));
+        assert!(out.is_renderable_empty());
+    }
+
+    #[test]
+    fn a_resolvable_lane_is_reported_as_such() {
+        let set = two_quads(Some([1.0; 8]));
+        assert!(density_lane_resolves(&set, "density"));
+    }
+
+    #[test]
+    fn an_absent_lane_is_reported_so_the_node_can_say_so() {
+        // The whole point: the GEOMETRY cannot tell you, because an
+        // unresolved lane produces a perfectly ordinary even scatter.
+        let set = two_quads(Some([1.0; 8]));
+        assert!(!density_lane_resolves(&set, "denstiy"));
+        assert!(!density_lane_resolves(&two_quads(None), "density"));
+    }
+
+    #[test]
+    fn resolution_agrees_with_what_the_weighting_actually_accepts() {
+        // A lane of the wrong TYPE is ignored by `triangle_density`, so it
+        // must also report as unresolved, or the node would stay silent about
+        // a scatter that is not being weighted.
+        let mut set = two_quads(None);
+        set.meshes[0].attributes.insert(
+            "density".to_string(),
+            AttributeData::Vec3(Arc::new(vec![[1.0, 1.0, 1.0]; 8])),
+        );
+        assert!(!density_lane_resolves(&set, "density"));
+        let out = scatter_weighted(&set, 1000, 7, Some("density"));
+        assert!(
+            (right_share(&out) - 0.5).abs() < 0.08,
+            "and it scattered evenly"
+        );
+    }
+
+    #[test]
+    fn an_absent_or_mistyped_lane_falls_back_to_area_alone() {
+        // Naming a lane that is not there must not blank the scatter: the
+        // node warns, and an even spread is the recoverable answer.
+        let out = scatter_weighted(&two_quads(None), 1000, 7, Some("nope"));
+        assert!(!out.is_renderable_empty());
+        assert!((right_share(&out) - 0.5).abs() < 0.08);
     }
 }

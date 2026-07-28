@@ -32,7 +32,14 @@ import type {
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
+import { ExpressionField } from "./inputs/ExpressionField";
+import {
+  acceptsExpression,
+  paramExpression,
+  seedExpression,
+} from "./inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
+import { nodePathOf } from "../flow/nodeActions";
 import {
   paramTabs,
   paramVisible,
@@ -42,11 +49,14 @@ import {
 } from "./paramVisibility";
 import { selectGraph, useMirror, type ValidationReportData } from "../store/mirror";
 import { AttributeNameField } from "./inputs/AttributeNameField";
+import { TextField } from "./inputs/TextField";
+import { MultilineField } from "./inputs/MultilineField";
 import { ColorInput } from "./inputs/ColorInput";
 import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
 import { FloatInput } from "./inputs/FloatInput";
 import { VectorInput } from "./inputs/VectorInput";
+import { SnippetField } from "./inputs/SnippetField";
 
 /** The current value for a param: the node's override, else the default. */
 function paramValue(node: NodeMirror, spec: ParamSnapshot): unknown {
@@ -62,8 +72,10 @@ function literal(paramType: string, value: unknown): ParamSource {
       ? "asset"
       : paramType === "nodePath"
         ? "nodeRef"
-        : paramType === "attributeName"
-          ? "text" // the widget variant stores plain Text
+        : paramType === "attributeName" ||
+            paramType === "snippet" ||
+            paramType === "multilineText"
+          ? "text" // every text-backed widget variant stores plain Text
           : paramType;
   return { kind: "literal", type: tag, value } as ParamSource;
 }
@@ -75,6 +87,83 @@ interface FieldProps {
 }
 
 function Field({ ctx, node, spec }: FieldProps) {
+  const expr = paramExpression(node, spec);
+  const canExpress = acceptsExpression(spec.paramType);
+  // The mirror's revision changes on every applied command, which is
+  // exactly when an expression's value can have moved (something it reads
+  // was edited, renamed, or undone).
+  const revision = useMirror((s) => s.revision);
+
+  if (expr !== null) {
+    return (
+      <div className="param-row">
+        <label className="param-label">
+          {spec.label}
+          <ExprToggle
+            active
+            onClick={() => revertToLiteral(ctx, node, spec)}
+          />
+        </label>
+        <ExpressionField
+          ctx={ctx}
+          node={node.id}
+          paramKey={spec.key}
+          expr={expr}
+          revision={revision}
+          onRevert={() => revertToLiteral(ctx, node, spec)}
+        />
+      </div>
+    );
+  }
+  return (
+    <LiteralField ctx={ctx} node={node} spec={spec} canExpress={canExpress} />
+  );
+}
+
+/** The small `=` affordance that swaps a row into its expression lane. */
+function ExprToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`param-expr-toggle${active ? " active" : ""}`}
+      title={active ? "Remove the expression" : "Drive this with an expression"}
+      aria-label={active ? "Remove the expression" : "Add an expression"}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      =
+    </button>
+  );
+}
+
+/** Drops the expression, restoring the param to a plain value.
+ *
+ * Writes the value the expression last resolved to rather than the spec
+ * default, so turning an expression off leaves the object where it was
+ * instead of snapping it back to 1. */
+function revertToLiteral(ctx: GraphContext, node: NodeMirror, spec: ParamSnapshot) {
+  let value: unknown = spec.default;
+  try {
+    const r = getClient().resolvedParam(ctx, node.id, spec.key);
+    if (r.ok) value = r.value.value;
+  } catch {
+    // No readout available: the spec default is the honest fallback.
+  }
+  dispatch({
+    type: "setParam",
+    ctx,
+    node: node.id,
+    key: spec.key,
+    value: literal(spec.paramType, value),
+  });
+}
+
+function LiteralField({
+  ctx,
+  node,
+  spec,
+  canExpress,
+}: FieldProps & { canExpress: boolean }) {
   const value = paramValue(node, spec);
   const commit = (v: unknown) => dispatch({ type: "setParam", ctx, node: node.id, key: spec.key, value: literal(spec.paramType, v) });
   const preview = (v: unknown) => previewParam(ctx, node.id, spec.key, literal(spec.paramType, v));
@@ -100,6 +189,23 @@ function Field({ ctx, node, spec }: FieldProps) {
       <label className="param-label">
         {spec.label}
         {unitSuffix && <span className="param-unit">{unitSuffix}</span>}
+        {canExpress && (
+          <ExprToggle
+            active={false}
+            onClick={() =>
+              dispatch({
+                type: "setParam",
+                ctx,
+                node: node.id,
+                key: spec.key,
+                // Seeded with the current value, so the field opens on
+                // something that already resolves rather than on a blank
+                // that immediately badges the node.
+                value: { kind: "expression", expr: seedExpression(value) },
+              })
+            }
+          />
+        )}
       </label>
     </Popover>
   );
@@ -153,11 +259,24 @@ function Field({ ctx, node, spec }: FieldProps) {
       return (
         <div className="param-row">
           {label}
-          <input
-            type="text"
-            className="input-field text-input"
+          <TextField
             value={String(value ?? "")}
-            onChange={(e) => commit(e.target.value)}
+            ariaLabel={spec.label}
+            onCommit={commit}
+          />
+        </div>
+      );
+    case "multilineText":
+      // Stacked, like the snippet row: a full-width editor under its label
+      // rather than squeezed into the value column, because prose needs the
+      // width more than the row needs its grid.
+      return (
+        <div className="param-row param-row-stacked">
+          {label}
+          <MultilineField
+            value={String(value ?? "")}
+            ariaLabel={spec.label}
+            onCommit={commit}
           />
         </div>
       );
@@ -174,6 +293,8 @@ function Field({ ctx, node, spec }: FieldProps) {
           />
         </div>
       );
+    case "snippet":
+      return <SnippetRow ctx={ctx} node={node} spec={spec} label={label} onCommit={commit} />;
     case "color":
       return (
         <div className="param-row">
@@ -219,6 +340,39 @@ function Field({ ctx, node, spec }: FieldProps) {
  * control. Selecting a file stages its bytes (content-addressed) and commits
  * the asset hash as the param, which dirties the import node so the next cook
  * yields a parse job to the worker. */
+/** A Snippet param: the multi-line program editor.
+ *
+ * The error line is read from the node's own cook status rather than from a
+ * separate diagnostics channel, so the highlight and the node badge can
+ * never disagree: a wrangle parse failure IS the cook error, formatted by
+ * the engine as "line N, column M: ...". */
+function SnippetRow({
+  ctx,
+  node,
+  spec,
+  label,
+  onCommit,
+}: FieldProps & { label: ReactNode; onCommit: (v: string) => void }) {
+  const status = useMirror((s) => s.cook[node.id]?.status);
+  const error = status?.state === "error" ? status.message : undefined;
+  const value = paramValue(node, spec);
+  return (
+    <div className="param-row param-row-stacked">
+      {label}
+      <SnippetField
+        value={String(value ?? "")}
+        ariaLabel={spec.label}
+        error={error}
+        // The window titles itself with the node path and the param key, so
+        // several open editors are tellable apart.
+        path={`${nodePathOf(ctx, node)}/${spec.key}`}
+        node={node}
+        onCommit={onCommit}
+      />
+    </div>
+  );
+}
+
 /** An Action param: a button whose press is routed by node
  * type. Export nodes run the engine's encoder and save the bytes through
  * the File System Access flow; the render node is HOST-interpreted (jump
@@ -422,17 +576,35 @@ function AssetField({ ctx, node, spec, label }: FieldProps & { label: ReactNode 
   );
 }
 
-export function ParameterPanel() {
+/** The parameter editor, hosted by both the dock panel and the floating
+ * P panel.
+ *
+ * `surface` names which of the two this instance is, which is all it needs
+ * to find its own pin. Everything else is identical, deliberately: one
+ * editor with two hosts, rather than a second editor that drifts. */
+export function ParameterPanel({
+  surface = "docked",
+}: {
+  surface?: "docked" | "floating";
+} = {}) {
   const registry = useMirror((s) => s.registry);
   const current = useMirror((s) => s.current);
   const graph = useMirror((s) => selectGraph(s, s.current));
   const cook = useMirror((s) => s.cook);
   const reports = useMirror((s) => s.reports);
+  const pinnedId = useUi((s) => s.propsPin[surface]);
 
+  // A pin wins over the selection, and survives the pinned node being in
+  // another context: `graph` is the CURRENT canvas, so a pin followed
+  // across a dive would silently show nothing. Falling back to the
+  // selection in that case would be worse (the header would name one node
+  // while the rows edited another), so an out-of-context pin renders as a
+  // clearly-labelled empty state below.
   const selectedId = graph.selection[0];
+  const targetId = pinnedId ?? selectedId;
   const node = useMemo(
-    () => graph.nodes.find((n) => n.id === selectedId),
-    [graph, selectedId],
+    () => graph.nodes.find((n) => n.id === targetId),
+    [graph, targetId],
   );
   // The active tab lives in the ui store so the Properties menu bar can
   // read it (Reset Current Tab); falls back to the first tab whenever the
@@ -443,7 +615,20 @@ export function ParameterPanel() {
   if (!node) {
     return (
       <div className="param-panel empty">
-        <span>Select a node to edit its parameters.</span>
+        {pinnedId !== null ? (
+          <span>
+            Pinned to a node in another network.{" "}
+            <button
+              className="crumb-link"
+              onClick={() => useUi.getState().setPropsPin(surface, null)}
+            >
+              Unpin
+            </button>{" "}
+            to follow the selection again.
+          </span>
+        ) : (
+          <span>Select a node to edit its parameters.</span>
+        )}
       </div>
     );
   }
@@ -467,6 +652,18 @@ export function ParameterPanel() {
     <div className="param-panel">
       <div className="param-header">
         <span className="param-title">{nodeLabel(node, desc)}</span>
+        {pinnedId !== null && (
+          // The panel must never silently lie about what it is editing: a
+          // pinned surface looks identical to an unpinned one until you
+          // click another node and nothing happens.
+          <button
+            className="param-pinned"
+            title="Pinned to this node. Click to follow the selection again."
+            onClick={() => useUi.getState().setPropsPin(surface, null)}
+          >
+            pinned
+          </button>
+        )}
         {stats?.image != null ? (
           <span className="param-stats">
             {stats.image[0]} × {stats.image[1]}

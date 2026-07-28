@@ -181,8 +181,9 @@ pub struct NodeTypeSnapshot {
     pub category_label: String,
     /// The network kinds this node may be placed in, in
     /// [`ContextKind::ALL`](crate::document::ContextKind::ALL) order. Replaces
-    /// the pre-phase-17 `rootContext`/`subflowContext` booleans; the palette
-    /// filters against the current canvas's kind.
+    /// the older `rootContext`/`subflowContext` booleans, which could only
+    /// describe two kinds; the palette filters against the current canvas's
+    /// kind.
     pub contexts: Vec<crate::document::ContextKind>,
     /// The child-network kind this node opens, for containers (`geo`
     /// opens `geo`); `null` otherwise. The frontend derives a canvas's
@@ -243,8 +244,8 @@ pub struct ParamSnapshot {
     pub enum_variants: Vec<(String, String)>,
     pub accept: Vec<String>,
     /// The picker constraint for `nodePath` params; absent otherwise
-    /// (skipped from the JSON so pre-phase-17 consumers see no new key on
-    /// old param shapes).
+    /// (skipped from the JSON so a consumer predating cross-context
+    /// references sees no new key on old param shapes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_path: Option<NodePathAcceptSnapshot>,
     /// The default value in schema-v1 plain JSON form.
@@ -331,7 +332,9 @@ impl From<&ParamSpec> for ParamSnapshot {
             ParamType::Int => ("int", vec![], vec![]),
             ParamType::Bool => ("bool", vec![], vec![]),
             ParamType::Text => ("text", vec![], vec![]),
+            ParamType::MultilineText => ("multilineText", vec![], vec![]),
             ParamType::AttributeName => ("attributeName", vec![], vec![]),
+            ParamType::Snippet => ("snippet", vec![], vec![]),
             ParamType::Vec2 => ("vec2", vec![], vec![]),
             ParamType::Vec3 => ("vec3", vec![], vec![]),
             ParamType::Vec4 => ("vec4", vec![], vec![]),

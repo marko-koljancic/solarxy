@@ -1,6 +1,6 @@
 //! UV overlap GPU readback: thin delegation to the shared state machine
-//! in `solarxy_renderer::frame::UvOverlapResources` (W4 moved the
-//! arm/poll logic there so the web host runs the identical code).
+//! in `solarxy_renderer::frame::UvOverlapResources` (the arm/poll logic
+//! moved there so the web host runs the identical code).
 
 use super::{State, UvOverlapResources};
 

@@ -292,7 +292,7 @@ pub fn upload_model(
 
         let cpu_positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
         // Picking and review hashing read the CPU mirror as triangles;
-        // points and lines are unpickable (M-4) and expose no indices.
+        // points and lines are unpickable and expose no indices.
         cpu_meshes.push(model::CpuMesh {
             positions: cpu_positions,
             indices: if is_triangles {
@@ -682,10 +682,47 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
     }
 }
 
+/// The grid quad's half-extent, in cells. Chosen to clear the shader's
+/// distance fade, which ends at `cell_size * 60` (`grid.wgsl`); the previous
+/// continuous extent worked out to about 53 cells and clipped the tail of it.
+const GRID_HALF_CELLS: f32 = 64.0;
+
+/// Snaps a raw cell size onto the 1-2-5 ladder (… 0.1, 0.2, 0.5, 1, 2, 5 …).
+///
+/// The grid is world furniture: it should describe the scene's scale, not
+/// track it continuously. Quantizing is what makes that true. Cooked bounds
+/// move constantly (an expression retiming a transform, a wrangle displacing
+/// points, a scatter reseeding), and a continuous `cell_size` turned every
+/// one of those into a visible rescale of the grid, the floor and the shadow
+/// frustum. On the ladder, bounds have to change by roughly a third before
+/// the grid admits it, and when it does the new cell is still a round number.
+#[must_use]
+fn snap_grid_cell(raw: f32) -> f32 {
+    if !raw.is_finite() || raw <= 0.0 {
+        return 1.0;
+    }
+    let decade = 10.0_f32.powf(raw.log10().floor());
+    // `raw / decade` lands in [1, 10); the thresholds are the geometric
+    // midpoints between rungs, so each raw value snaps to its nearest.
+    let mantissa = raw / decade;
+    let rung = if mantissa < 1.5 {
+        1.0
+    } else if mantissa < 3.5 {
+        2.0
+    } else if mantissa < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    rung * decade
+}
+
 pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::Mesh, f32) {
     let y = -0.001_f32;
-    let he = bounds.diagonal() * 8.0;
-    let cell_size = bounds.diagonal() * 0.15;
+    let cell_size = snap_grid_cell(bounds.diagonal() * 0.15);
+    // Derived from the snapped cell, not from the raw diagonal, so the quad
+    // is as stable as the lines drawn on it.
+    let he = cell_size * GRID_HALF_CELLS;
 
     let vertices: [[f32; 3]; 4] = [[-he, y, -he], [he, y, -he], [he, y, he], [-he, y, he]];
     let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];
@@ -1048,6 +1085,48 @@ fn composite_orm_pixels(mr: Option<&RawImageData>, occ: &RawImageData) -> RawIma
         }
     }
     RawImageData::new(pixels, w, h)
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::snap_grid_cell;
+
+    #[test]
+    fn snaps_onto_the_one_two_five_ladder() {
+        assert!((snap_grid_cell(1.0) - 1.0).abs() < 1e-6);
+        assert!((snap_grid_cell(2.2) - 2.0).abs() < 1e-6);
+        assert!((snap_grid_cell(4.0) - 5.0).abs() < 1e-6);
+        assert!((snap_grid_cell(9.0) - 10.0).abs() < 1e-6);
+        assert!((snap_grid_cell(0.42) - 0.5).abs() < 1e-6);
+        assert!((snap_grid_cell(37.0) - 50.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ordinary_bounds_churn_no_longer_moves_the_grid() {
+        // The animation case: a wrangle displacing points changes the
+        // diagonal by a fraction of a percent every frame. Before
+        // quantizing, each of those rebuilt the grid at a new cell size.
+        let base = 2.0_f32;
+        let snapped = snap_grid_cell(base * 0.15);
+        for step in 0..200 {
+            let wobble = 1.0 + (step as f32 * 0.0001);
+            assert!(
+                (snap_grid_cell(base * wobble * 0.15) - snapped).abs() < 1e-6,
+                "a {}% change must not move the grid",
+                (wobble - 1.0) * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_bounds_fall_back_rather_than_producing_nonsense() {
+        // A single-point scene has a zero diagonal; `log10(0)` is -inf and
+        // would poison the quad extent.
+        assert!((snap_grid_cell(0.0) - 1.0).abs() < 1e-6);
+        assert!((snap_grid_cell(-3.0) - 1.0).abs() < 1e-6);
+        assert!((snap_grid_cell(f32::NAN) - 1.0).abs() < 1e-6);
+        assert!((snap_grid_cell(f32::INFINITY) - 1.0).abs() < 1e-6);
+    }
 }
 
 #[cfg(test)]

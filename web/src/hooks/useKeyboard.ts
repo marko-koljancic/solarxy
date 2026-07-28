@@ -160,6 +160,15 @@ export function useKeyboard(): void {
           useRadial.getState().openInfo(selection[0], ctx, at.x, at.y);
           break;
         }
+        case "floating-props": {
+          // No selection requirement: opening it empty and then clicking a
+          // node is a perfectly ordinary way to use it, and refusing to
+          // open would look like the key was unbound.
+          e.preventDefault();
+          const ui = useUi.getState();
+          ui.setFloatingProps(!ui.floatingProps);
+          break;
+        }
         case "bypass": {
           if (!selection.length) break;
           const first = s.contexts[ctxKey]?.nodes.find((n) => n.id === selection[0]);
@@ -186,7 +195,7 @@ export function useKeyboard(): void {
           patchActivePane({ inspectionMode: "AoPreview" }, "Inspection: AO Preview");
           break;
         case "uv-pane-toggle": {
-          // The UV pane renders in W4; the toggle round-trips already.
+          // The UV pane renders already; the toggle round-trips.
           const view = useViewState.getState().view;
           if (!view) break;
           const pane = view.activePane;
@@ -326,6 +335,24 @@ export function useKeyboard(): void {
         case "review-panel": {
           // The dock owns the panel's existence; the review store mirrors it.
           setReviewPanelOpen(!useReview.getState().panelOpen);
+          break;
+        }
+        case "play-pause": {
+          // Read `playing` at press time rather than closing over it: the
+          // clock also stops itself at the end of a `once` range.
+          dispatch({ type: useMirror.getState().playing ? "pause" : "play" });
+          break;
+        }
+        case "step-back": {
+          dispatch({ type: "stepFrame", delta: -1 });
+          break;
+        }
+        case "step-forward": {
+          dispatch({ type: "stepFrame", delta: 1 });
+          break;
+        }
+        case "go-to-start": {
+          dispatch({ type: "stop" });
           break;
         }
         case "panel-maximize": {

@@ -14,6 +14,7 @@ import {
 import { pushToast } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { Modal } from "./Modal";
+import { Row } from "./DialogRow";
 import { Select } from "./Select";
 
 const IBL_MODES: [string, string][] = [
@@ -45,8 +46,10 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
   // handling); backdrop and Done still dismiss.
   return (
     <Modal id="environment" title="Environment" onClose={onClose} closeOnEsc={false}>
-        <div className="env-row">
-          <span className="env-label">HDRI</span>
+        <Row
+          label="HDRI"
+          doc="The high-dynamic-range image that lights the scene. It supplies both the ambient light and the reflections, so loading one changes the look of every material at once. Embedded in the scene file, so it travels with it."
+        >
           <span className="env-value">
             {busy ? "preparing..." : (env?.hdriName ?? (env?.hdriHash ? "embedded" : "None"))}
           </span>
@@ -60,18 +63,22 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
           >
             Clear
           </button>
-        </div>
-        <div className="env-row">
-          <span className="env-label">IBL mode</span>
+        </Row>
+        <Row
+          label="IBL mode"
+          doc="How much of the HDRI reaches the shading. **Full** uses it for both ambient light and reflections; **Diffuse only** drops the reflections, which is cheaper and calmer on rough surfaces; **Off** ignores the image entirely and lights from the scene lights alone."
+        >
           <Select
             ariaLabel="IBL mode"
             value={env?.iblMode ?? "full"}
             options={IBL_MODES.map(([v, label]) => ({ value: v, label }))}
             onChange={(v) => setIblMode(v)}
           />
-        </div>
-        <div className="env-row">
-          <span className="env-label">Rotation</span>
+        </Row>
+        <Row
+          label="Rotation"
+          doc="Spins the environment around the vertical axis, in degrees. Moves the visible sky and its lighting together, so it is how you place a highlight without moving a light."
+        >
           <input
             className="input-field"
             type="number"
@@ -84,8 +91,8 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
               setDisplaySettings({ ...view.display, hdriRotation: (deg * Math.PI) / 180 });
             }}
           />
-          <span className="env-hint">degrees; rotates the visible sky and IBL</span>
-        </div>
+          <span className="prefs-unit">degrees</span>
+        </Row>
         <p className="env-hint">
           Show the HDRI as a pane background via the pane toolbar's background select (Sky).
         </p>

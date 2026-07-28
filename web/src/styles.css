@@ -377,13 +377,18 @@ body.precision-drag-active {
   color: var(--node-text);
 }
 
-.flow-node.role-container {
-  width: 48px;
-  height: 48px;
-}
-
+/* Per-role body boxes. These must match the `w`/`h` on the matching entry
+ * in `ROLE_BODIES` (nodeVisual.ts), which is what the SVG viewBox uses:
+ * disagree and the silhouette stretches. */
 .flow-node.role-terminal {
   width: 28px;
+  height: 28px;
+}
+
+/* A light is a fixture you place, not a stage in a chain; at the full
+ * 112x32 it out-weighed the operators around it. */
+.flow-node.role-light {
+  width: 96px;
   height: 28px;
 }
 
@@ -393,12 +398,12 @@ body.precision-drag-active {
   border-radius: 6px;
 }
 
-/* Rect bodies (standard, gather, container): fill + border + the top-down
- * sheen in CSS (the segmentation seams are retired). Shaped
- * roles draw an SVG body instead and keep this layer bare. */
+/* Rect bodies (standard, gather, text): fill + border + the top-down sheen
+ * in CSS. Shaped roles draw an SVG body instead and keep this layer bare.
+ * Container left this list in 0.8.1 when it gained a folder silhouette. */
 .flow-node.role-standard .node-body,
-.flow-node.role-gather .node-body,
-.flow-node.role-container .node-body {
+.flow-node.role-text .node-body,
+.flow-node.role-gather .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
@@ -407,14 +412,10 @@ body.precision-drag-active {
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
 }
 
-.flow-node.role-container .node-body {
-  border-radius: 8px;
-}
-
 .flow-node:hover .role-hover,
 .flow-node.role-standard:hover .node-body,
-.flow-node.role-gather:hover .node-body,
-.flow-node.role-container:hover .node-body {
+.flow-node.role-text:hover .node-body,
+.flow-node.role-gather:hover .node-body {
   border-color: var(--geometry-node-border-hover);
 }
 
@@ -423,7 +424,8 @@ body.precision-drag-active {
   border-color: rgba(212, 175, 55, 0.55);
 }
 
-/* Shaped silhouettes (branch, analyzer, imageSource, light): the SVG body. */
+/* Shaped silhouettes (branch, analyzer, imageSource, light, camera,
+ * container): the SVG body. */
 .node-body-svg {
   position: absolute;
   inset: 0;
@@ -720,7 +722,7 @@ body.precision-drag-active {
   margin-right: 0.4rem;
 }
 
-/* Stage 8: the subflow display-flag toggle in the list view, occupying the
+/* The subflow display-flag toggle in the list view, occupying the
    SAME right-side slot the root rows give the visibility eye, so the blue
    dot sits in one place at every level. Same chrome as the eye; the dot is
    hollow until the flag is on (a per-context radio, not an on/off eye). */
@@ -756,7 +758,13 @@ body.precision-drag-active {
   box-shadow: none;
 }
 
+/* Always rendered, even when empty: the label stack is vertically centered,
+ * so a row that appears and disappears shifts every other row by half a
+ * line. Reserving one line's height is what keeps a node still while the
+ * scene clock runs. */
 .flow-node-sub {
+  display: block;
+  min-height: 1.25em;
   color: var(--text-secondary);
   font-size: 1rem;
   font-variant-numeric: tabular-nums;
@@ -1090,6 +1098,99 @@ body.precision-drag-active {
   background-color: var(--error-background);
 }
 
+/* Expression lane (0.8.1). A numeric row is either its normal widget or
+ * an expression; the `=` affordance swaps between them. The toggle sits
+ * inside the right-aligned label so it reads as part of the row's identity
+ * rather than as another control competing with the value. */
+.param-expr-toggle {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Invisible until the row is hovered: every numeric param carries one,
+   * and 20 always-on glyphs would read as clutter. */
+  opacity: 0;
+  transition: var(--theme-transition);
+}
+
+.param-row:hover .param-expr-toggle,
+.param-expr-toggle:focus-visible,
+.param-expr-toggle.active {
+  opacity: 1;
+}
+
+.param-expr-toggle:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border-hover);
+}
+
+.param-expr-toggle.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.param-expr {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "input clear"
+    "readout readout";
+  align-items: center;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+}
+
+.param-expr-input {
+  grid-area: input;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.param-expr-input.has-error {
+  border-color: var(--error-border);
+  background-color: var(--error-background);
+}
+
+/* The resolved value, or the parser's message. Always present so the row
+ * does not change height as an expression goes in and out of error. */
+.param-expr-readout {
+  grid-area: readout;
+  min-height: 1.4rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-expr-readout.has-error {
+  color: var(--error-text);
+}
+
+.param-expr-clear {
+  grid-area: clear;
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.param-expr-clear:hover {
+  color: var(--accent-primary);
+}
+
 .number-field {
   width: 72px;
   text-align: right;
@@ -1100,9 +1201,27 @@ body.precision-drag-active {
   font-variant-numeric: tabular-nums;
 }
 
+/* Tracks the panel rather than stopping at a fixed 220px. The old cap made
+ * Name and Description a third of the width of a docked Properties panel
+ * and a sliver of a maximized one, truncating exactly the long names that
+ * most needed reading. The remaining ceiling keeps a very wide panel from
+ * stretching one field across the whole screen. */
 .text-input {
   width: 100%;
-  max-width: 220px;
+  max-width: 48rem;
+}
+
+/* The MultilineText widget. Full width inside a `.param-row-stacked` row,
+ * grown by its own `rows` and free to be dragged taller. Horizontal resize
+ * is off: the width is the row's to decide. */
+.multiline-input {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .checkbox-input {
@@ -1170,7 +1289,100 @@ body.precision-drag-active {
   text-align: center;
 }
 
-.vector-component .number-field {
+.vector-component /* Expression lane (0.8.1). A numeric row is either its normal widget or
+ * an expression; the `=` affordance swaps between them. The toggle sits
+ * inside the right-aligned label so it reads as part of the row's identity
+ * rather than as another control competing with the value. */
+.param-expr-toggle {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Invisible until the row is hovered: every numeric param carries one,
+   * and 20 always-on glyphs would read as clutter. */
+  opacity: 0;
+  transition: var(--theme-transition);
+}
+
+.param-row:hover .param-expr-toggle,
+.param-expr-toggle:focus-visible,
+.param-expr-toggle.active {
+  opacity: 1;
+}
+
+.param-expr-toggle:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border-hover);
+}
+
+.param-expr-toggle.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.param-expr {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "input clear"
+    "readout readout";
+  align-items: center;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+}
+
+.param-expr-input {
+  grid-area: input;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.param-expr-input.has-error {
+  border-color: var(--error-border);
+  background-color: var(--error-background);
+}
+
+/* The resolved value, or the parser's message. Always present so the row
+ * does not change height as an expression goes in and out of error. */
+.param-expr-readout {
+  grid-area: readout;
+  min-height: 1.4rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param-expr-readout.has-error {
+  color: var(--error-text);
+}
+
+.param-expr-clear {
+  grid-area: clear;
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.param-expr-clear:hover {
+  color: var(--accent-primary);
+}
+
+.number-field {
   width: 100%;
   min-width: 0;
 }
@@ -1503,6 +1715,18 @@ body.precision-drag-active {
   /* Breathing room so the scrollbar does not hug the box edge. */
   margin: 0 -0.6rem;
   padding: 0 0.6rem;
+}
+
+/* Opt-in (Modal's `bodyLayout="column"`): dialogs with a fixed height that
+ * pin a footer to the bottom. Without it a child's `flex: 1` is inert inside
+ * the plain block above, and the footer floats wherever the content ends.
+ * `overflow: visible` because in this mode the scrolling child owns its own
+ * overflow; keeping `auto` here would nest two scroll containers. */
+.modal-body-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
 }
 
 .modal-resize {
@@ -2151,7 +2375,11 @@ body.row-resizing .viewport-divider {
 /* ---- Preferences modal (the tabbed pattern) ---- */
 
 .modal.modal-prefs {
-  width: 46rem;
+  /* Six tabs plus a 12rem label column do not fit in the old 46rem: flex
+   * items shrink below their content by default, so the last tab title was
+   * clipped mid-word. Widening is the honest fix; `.prefs-tabs` wrapping
+   * below is the guard for whenever a seventh tab arrives. */
+  width: 54rem;
   max-width: 92vw;
   height: 54rem;
   max-height: 84vh;
@@ -2161,17 +2389,23 @@ body.row-resizing .viewport-divider {
 
 .prefs-tabs {
   display: flex;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
   gap: 0.2rem;
   border-bottom: 1px solid var(--border-primary);
   margin-bottom: 1rem;
 }
 .prefs-tab {
+  /* Never compress a tab below its label: a half-legible tab title is worse
+   * than a second row of tabs. */
+  flex: 0 0 auto;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   font: inherit;
   padding: 0.5rem 1rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 .prefs-tab.active {
@@ -2217,8 +2451,12 @@ body.row-resizing .viewport-divider {
   font-size: 1.1rem;
   margin-top: 0.4rem;
 }
+/* Pinned to the bottom edge, not floating wherever the current tab's content
+ * happens to end. `flex: 0 0 auto` beside `.prefs-body`'s `flex: 1` inside
+ * the column body is what does it. */
 .prefs-footer {
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   align-items: center;
   padding-top: 1rem;
@@ -2440,6 +2678,12 @@ body.reduce-motion .cook-arc {
   padding: 0.25rem 0.7rem;
 }
 
+/* The capability links read as one row of peers, quieter than body prose so
+   the positioning paragraph above still leads. */
+.about-docs {
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
 .about-version {
   color: var(--text-secondary);
   font-size: 1.1rem;
@@ -2453,7 +2697,7 @@ body.reduce-motion .cook-arc {
   color: var(--accent-primary);
 }
 
-/* ---- W-C1: pastel category fills ---- */
+/* ---- Pastel category fills ---- */
 
 /* Category -> the fill custom property both body kinds consume (the CSS
  * rect bodies via background-color, the shaped SVG bodies via .body-fill). */
@@ -2467,9 +2711,10 @@ body.reduce-motion .cook-arc {
 .flow-node.cat-export { --cat-fill: var(--node-cat-export); }
 .flow-node.cat-utility { --cat-fill: var(--node-cat-utility); }
 .flow-node.cat-lights { --cat-fill: var(--node-cat-lights); }
+.flow-node.cat-cameras { --cat-fill: var(--node-cat-cameras); }
 .flow-node.cat-container { --cat-fill: var(--node-cat-container); }
 
-/* Root containers color-code by context (Stage 7): the fill token per
+/* Root containers color-code by context: the fill token per
  * opened network kind, with a border accent derived from the fill so the
  * tint carries in both themes. The glyph follows --cat-fill on its own
  * (the ink is a fill/ink color-mix). Geo keeps the neutral tile. */
@@ -2486,11 +2731,20 @@ body.reduce-motion .cook-arc {
   --cat-accent: color-mix(in srgb, var(--node-cat-container-mat) 60%, rgba(0, 0, 0, 0.45));
   --cat-accent-hover: color-mix(in srgb, var(--node-cat-container-mat) 45%, rgba(0, 0, 0, 0.6));
 }
-.flow-node.role-container .node-body {
-  border-color: var(--cat-accent, var(--geometry-node-border));
+/* The context tint now rides the SVG stroke rather than a CSS border, since
+ * the container body became a folder silhouette. */
+.flow-node.role-container .node-body-svg .body-stroke {
+  stroke: var(--cat-accent, var(--geometry-node-border));
 }
-.flow-node.role-container:hover .node-body {
-  border-color: var(--cat-accent-hover, var(--geometry-node-border-hover));
+.flow-node.role-container:hover .node-body-svg .body-stroke {
+  stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
+}
+
+/* The glyph centres on the BODY, not on the whole box: both silhouettes
+ * raise a tab over the top 8px, so a box-centred glyph reads high. */
+.flow-node.role-container .node-chip,
+.flow-node.role-camera .node-chip {
+  margin-top: 4px;
 }
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
@@ -2532,9 +2786,9 @@ body.reduce-motion .cook-arc {
   margin: -2px 0 6px;
 }
 
-/* ---- W-C4: the note sticky ---- */
+/* ---- The note sticky ---- */
 
-/* Flat (Stage 8): no border, the fill alone carries the sticky. The font
+/* Flat: no border, the fill alone carries the sticky. The font
    size is inline (the `text_size` param); this rule keeps only the fallback. */
 .note-node {
   position: relative;
@@ -2610,7 +2864,7 @@ body.reduce-motion .cook-arc {
   fill: var(--hover-bg);
 }
 
-/* Stage 8: per-action hover color, so the wedge under the cursor names its
+/* Per-action hover color, so the wedge under the cursor names its
    command. The `.hovered` class is React-paired across the SVG wedge and
    its sibling HTML icon (CSS :hover on one cannot restyle the other).
    Mixed against the overlay surface so hover stays quieter than `.active`
@@ -2724,6 +2978,16 @@ body.reduce-motion .cook-arc {
   flex-direction: column;
   gap: 0.4rem;
 }
+
+/* The connection summary: one line per wired port, monospace so the
+ * arrows line up down the column. */
+.node-info-wires {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+}
 .node-info-warning {
   color: var(--cat-warning);
 }
@@ -2764,6 +3028,10 @@ body.reduce-motion .cook-arc {
   display: block;
   font-family: var(--font-mono);
   font-size: 0.9rem;
+  /* Tabular figures for the same reason `.flow-node-sub` has them: an
+   * expression-driven param retimes every frame, and proportional digits
+   * would make the summary shimmer as the values change width. */
+  font-variant-numeric: tabular-nums;
   color: var(--node-param);
   white-space: nowrap;
 }
@@ -2782,11 +3050,6 @@ body.reduce-motion .cook-arc {
   white-space: normal;
   max-width: 20rem;
   line-height: 1.25;
-}
-
-.flow-node.empty-geo .node-body {
-  border-style: dashed;
-  background: transparent;
 }
 
 .flow-list {
@@ -2837,7 +3100,7 @@ body.reduce-motion .cook-arc {
   font-size: 12px;
 }
 /* The first cell lays out glyph and label on one centered line (the
-   display dot moved to the right actions slot in Stage 8). */
+   display dot lives in the right actions slot). */
 .flow-list td:first-child {
   white-space: nowrap;
 }
@@ -3574,7 +3837,7 @@ body.reduce-motion .cook-arc {
   cursor: default;
 }
 
-/* ---- Stage 8: the per-group maximize / restore header action ---- */
+/* ---- The per-group maximize / restore header action ---- */
 
 .dock-header-actions {
   display: flex;
@@ -3667,7 +3930,7 @@ body.reduce-motion .cook-arc {
   position: relative;
 }
 
-/* Stage 8: the pill matches the square stack's surface language (same
+/* The pill matches the square stack's surface language (same
    backdrop, same 3.2rem height) so the whole right strip reads as one
    grouped control; it stays a pill only because it carries text. */
 .attr-lane-trigger {
@@ -4163,6 +4426,17 @@ body.reduce-motion .cook-arc {
   box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.45);
 }
 
+/* Portaled: DropdownPortal wraps this in a fixed-position layer and owns
+ * placement (including the upward flip near the window bottom), so the inline
+ * absolute anchoring has to be neutralized. Same override the attr lane list
+ * uses. */
+.select-list.portaled {
+  position: static;
+  top: auto;
+  left: auto;
+  z-index: auto;
+}
+
 .select-option {
   width: 100%;
   display: flex;
@@ -4200,7 +4474,7 @@ body.reduce-motion .cook-arc {
   color: var(--text-tertiary);
   font-size: 1.1rem;
 }
-/* Stage 8: the optional leading swatch chip (a color or gradient), used by
+/* The optional leading swatch chip (a color or gradient), used by
    the attribute-ramp preset picker. */
 .select-swatch {
   flex: 0 0 2.6rem;
@@ -4357,7 +4631,7 @@ body.reduce-motion .cook-arc {
   border-left-color: var(--border-default);
 }
 
-/* ---- Stage 8: the Tree panel (searchable scene outline) ---- */
+/* ---- The Tree panel (searchable scene outline) ---- */
 
 .tree-pane {
   width: 100%;
@@ -4482,4 +4756,593 @@ body.reduce-motion .cook-arc {
   padding: 1.6rem;
   color: var(--text-secondary);
   font-size: 1.15rem;
+}
+
+/* ---- Snippet param (the wrangle's program editor) ----------------------
+ *
+ * A code surface, so it breaks the panel's two-column row: the label sits
+ * above and the editor spans the full width. Line numbers ride a separate
+ * scrolling gutter synced to the textarea, because a textarea cannot paint
+ * its own gutter and overlaying one would fight soft wrap. */
+
+.param-row-stacked {
+  display: block;
+}
+
+.param-row-stacked > label,
+.param-row-stacked > .param-label {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.snippet-field {
+  min-width: 0;
+}
+
+.snippet-body {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background-color: var(--input-background);
+  transition: var(--theme-transition);
+}
+
+.snippet-field.has-error .snippet-body {
+  border-color: var(--error-border);
+}
+
+.snippet-gutter {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.35rem 0.35rem 0.45rem;
+  border-right: 1px solid var(--input-border);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  text-align: right;
+  overflow: hidden;
+  user-select: none;
+}
+
+.snippet-lineno.error {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.snippet-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  border: none;
+  background: none;
+  color: var(--input-text);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.snippet-input:focus {
+  outline: none;
+}
+
+.snippet-field:focus-within .snippet-body {
+  border-color: var(--input-border-focus);
+}
+
+/* Always present so the row does not jump as an error comes and goes,
+ * matching the expression readout's reasoning. */
+.snippet-error,
+.snippet-hint {
+  margin: 0.2rem 0 0;
+  min-height: 1.3rem;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.snippet-error {
+  color: var(--error-text);
+}
+
+.snippet-hint {
+  color: var(--text-tertiary);
+}
+
+/* ---- Transport bar (the scene clock) ----------------------------------
+ *
+ * A single compact strip under the whole viewport region, not per pane:
+ * there is one clock, and repeating it four times in a quad layout would
+ * imply four. Sits inside `.viewport-pane` below `.viewport-canvas-host`,
+ * so the canvas host shrinks by its height and the render target follows
+ * through the existing resize path. */
+
+/* No `overflow-x` here, deliberately. Setting one axis to a non-visible
+ * value makes the OTHER axis compute to `auto` as well, which turned this
+ * 31px strip into a scroll container in both directions: an open dropdown
+ * was clipped to the strip and the resulting vertical scrollbar shoved every
+ * control out of place. The Loop picker portals out instead, and the fields
+ * shrink into the spacer rather than overflowing. */
+.transport-bar {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+  border-top: 1px solid var(--border-primary);
+  background-color: var(--background-secondary);
+  font-size: 1rem;
+}
+
+.transport-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+}
+
+/* ---- The frame scrubber ----
+ *
+ * Ticks and playhead are absolutely positioned by percentage across the
+ * track, so the whole thing reflows on resize with no JS beyond the width
+ * measurement that picks the tick density. */
+
+.transport-track {
+  position: relative;
+  flex: 0 0 auto;
+  height: 2.2rem;
+  margin: 0 0.5rem;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.transport-track:focus-visible {
+  outline: 1px solid var(--input-border-focus);
+  outline-offset: -1px;
+}
+
+.transport-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 0.5rem;
+  background: var(--border-secondary);
+  pointer-events: none;
+}
+
+/* A labelled tick is taller and darker: the scale reads at two levels, so
+ * you can count minor ticks between two numbers you can actually see. */
+.transport-tick.major {
+  height: 0.9rem;
+  background: var(--text-tertiary);
+}
+
+.transport-tick-label {
+  position: absolute;
+  bottom: 0.9rem;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+/* The playhead spans the full track height so it reads as a position in
+ * time rather than as one more tick. */
+.transport-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent-primary);
+  pointer-events: none;
+}
+
+.transport-playhead::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  transform: translateX(-50%);
+  border-radius: 0 0 50% 50%;
+  background: var(--accent-primary);
+}
+
+.transport-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.transport-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--theme-transition);
+}
+
+.transport-button:hover {
+  color: var(--accent-primary);
+  border-color: var(--input-border);
+}
+
+.transport-button:focus-visible {
+  outline: 1px solid var(--input-border-focus);
+  outline-offset: -1px;
+}
+
+/* Playing is a MODE, not a hover: it stays lit so the state is readable
+ * from across the room rather than only from the frame counter. */
+.transport-play.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.transport-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.transport-number {
+  width: 58px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tabular figures so the readout does not jitter as the clock runs. */
+.transport-seconds {
+  flex: 0 0 auto;
+  min-width: 4.5rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-spacer {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
+/* ---- The floating properties panel (P over the node canvas) ----
+ *
+ * Modeless: no backdrop, so the canvas underneath stays usable. That is
+ * what makes it worth having alongside the docked panel -- pin one node
+ * here and let the dock follow the selection, and two nodes are comparable
+ * side by side. Sits above the canvas but below the modal layer, since a
+ * real dialog must still be able to cover it. */
+.floating-props {
+  position: fixed;
+  top: 8rem;
+  right: 6rem;
+  z-index: calc(var(--z-dropdown) - 10);
+  display: flex;
+  flex-direction: column;
+  width: 34rem;
+  height: 40rem;
+  max-width: calc(100vw - 3.2rem);
+  max-height: calc(100vh - 8rem);
+  background: var(--background-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.6rem;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.floating-props-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.4rem 0.4rem 0.9rem;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.floating-props-header:active {
+  cursor: grabbing;
+}
+
+.floating-props-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.floating-props-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.floating-props-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+.floating-props-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Pinned is a MODE, not a hover: it stays lit, for the same reason the
+ * transport's play button does. */
+.floating-props-btn.active {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.floating-props-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The pinned badge in the parameter header. Deliberately a button: the way
+ * out of a pin should be where the pin is announced. */
+.param-pinned {
+  margin-left: 0.6rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--accent-primary);
+  border-radius: 999px;
+  background: none;
+  color: var(--accent-primary);
+  font: inherit;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.param-pinned:hover {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+/* ---- The wrangle code editor (CodeMirror) ----
+ *
+ * Syntax colors are theme tokens, not a second palette: the editor has to
+ * look like it belongs to the app in both themes, and a hardcoded scheme
+ * would be one more thing to keep in step with the token system. */
+:root {
+  --cm-number: #b48ead;
+  --cm-string: #a3be8c;
+  --cm-attribute: #d08770;
+  --cm-var: #ebcb8b;
+  --cm-builtin: #81a1c1;
+  --cm-query: #88c0d0;
+  --cm-type: #b48ead;
+  --cm-error-bg: color-mix(in srgb, var(--error-badge) 22%, transparent);
+}
+body.light-theme {
+  --cm-number: #8250a8;
+  --cm-string: #4a7c30;
+  --cm-attribute: #b4551d;
+  --cm-var: #9a6b06;
+  --cm-builtin: #2b6cb0;
+  --cm-query: #17708a;
+  --cm-type: #8250a8;
+}
+
+.code-editor {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  background: var(--input-background);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+}
+.code-editor:focus-within {
+  border-color: var(--input-border-focus);
+}
+.snippet-field.has-error .code-editor {
+  border-color: var(--error-badge);
+}
+
+/* Holds the editor's height while the chunk downloads, so the panel does
+ * not jump when it arrives. */
+.snippet-loading {
+  flex: 1;
+  min-height: 4.8em;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--input-background);
+}
+
+.snippet-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.snippet-expand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.snippet-expand:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.snippet-editor-modal {
+  width: 72rem;
+  height: 52rem;
+}
+.snippet-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  margin-bottom: 0.8rem;
+}
+
+/* ---- Dialog sections and documented rows (round 2) ----
+ *
+ * One idiom across every settings dialog. The section markup generalizes
+ * what the shortcuts dialog already used; before this the app had three
+ * ways of explaining a control (bare rows, a paragraph at the bottom of a
+ * tab, and inline help under a checkbox), which is two too many. */
+
+.dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.dialog-section + .dialog-section {
+  margin-top: 0.4rem;
+}
+
+.dialog-section-title {
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+/* A label carrying an explanation. The cue is deliberately quiet: a dotted
+ * underline that only firms up on hover, because on a dialog where EVERY
+ * row is documented a loud affordance twenty times over is just noise. */
+.prefs-label.has-doc {
+  cursor: help;
+  text-decoration: underline dotted var(--border-secondary) 1px;
+  text-underline-offset: 0.25em;
+}
+.prefs-label.has-doc:hover {
+  color: var(--text-primary);
+  text-decoration-color: var(--text-tertiary);
+}
+
+/* ---- The Text panel ----
+ *
+ * A dockview panel's parent is `display: block`, so `flex: 1` on a child is
+ * inert: the pane root must claim its own size. Same note as `.node-pane`
+ * and `.properties-panel`. */
+.text-pane {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.text-pane-menu {
+  margin-left: 0;
+  padding: 0 0.2rem;
+  border-bottom: 1px solid var(--border-primary);
+  flex: 0 0 auto;
+}
+.text-pane-menu .menu-item {
+  font-size: 1.15rem;
+  padding: 0.25rem 0.7rem;
+}
+
+.text-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.text-pane-list {
+  flex: 0 0 16rem;
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.text-pane-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.8rem;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.text-pane-item:hover {
+  background: var(--hover-bg);
+}
+.text-pane-item.active {
+  border-left-color: var(--accent-primary);
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.text-pane-name {
+  font-size: 1.2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.text-pane-ctx {
+  color: var(--text-tertiary);
+  font-size: 1rem;
+}
+
+.text-pane-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  padding: 0.6rem;
+}
+
+.text-pane-empty {
+  padding: 1.2rem;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* The text datablock node: quiet by size, so a script library does not read
+ * as graph structure. Uses the plain rect body. */
+.flow-node.role-text {
+  width: 76px;
+  height: 26px;
 }

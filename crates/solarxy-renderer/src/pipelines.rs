@@ -124,7 +124,7 @@ pub struct ScenePipelines {
     /// `line` with the color vertex buffer (per-vertex color).
     pub line_colored: wgpu::RenderPipeline,
     /// Points-topology scene meshes: camera-facing quads expanded in the
-    /// vertex shader from the edge-geometry storage buffer (M-6).
+    /// vertex shader from the edge-geometry storage buffer.
     pub point: wgpu::RenderPipeline,
 }
 
@@ -151,9 +151,15 @@ pub struct OverlayPipelines {
     pub manipulator_lines: wgpu::RenderPipeline,
     pub manipulator_tris: wgpu::RenderPipeline,
     /// The GPU attribute-label overlay (chips, dots, SDF glyphs expanded
-    /// from storage buffers). Depth-ignoring like the manipulator: labels
-    /// annotate, they must not be swallowed by the geometry they annotate.
+    /// from storage buffers), in its two depth flavours. Neither writes
+    /// depth -- a label annotates, and must never occlude another label.
+    ///
+    /// `attr_labels` ignores depth entirely, for wireframe panes where
+    /// there is no surface to hide behind. `attr_labels_occluded` tests
+    /// `LessEqual`, so in a shaded pane a label whose anchor sits on the
+    /// far side of the object is hidden by the near side.
     pub attr_labels: wgpu::RenderPipeline,
+    pub attr_labels_occluded: wgpu::RenderPipeline,
     pub validation_overlay: wgpu::RenderPipeline,
     pub validation_edge: wgpu::RenderPipeline,
     /// Selection outline: the silhouette mask (validation.wgsl's
@@ -161,7 +167,7 @@ pub struct OverlayPipelines {
     /// init and step passes (`Rg32Float` ping-pong), and the rim blit onto
     /// the composited swapchain view.
     pub outline_mask: wgpu::RenderPipeline,
-    /// M-15: line and point meshes silhouette into the same mask.
+    /// Line and point meshes silhouette into the same mask.
     pub outline_mask_line: wgpu::RenderPipeline,
     pub outline_mask_point: wgpu::RenderPipeline,
     pub outline_jfa_init: wgpu::RenderPipeline,
@@ -398,8 +404,8 @@ impl Pipelines {
         .no_depth()
         .build();
 
-        // Per decision M-15, line and point meshes join the selection
-        // outline like triangles: the same mask target, assembled per
+        // Line and point meshes join the selection outline like
+        // triangles: the same mask target, assembled per
         // their topology (the point variant is built later, after the
         // points/lines shader exists; see `outline_mask_point`).
         let outline_mask_line = PipelineBuilder::new(
@@ -581,7 +587,7 @@ impl Pipelines {
         .sample_count(sample_count)
         .build();
 
-        // The point half of M-15: the same quad expansion into the
+        // The point half of the selection outline: the same quad expansion into the
         // outline mask's R8 target (single-sampled, depth-ignoring, like
         // `outline_mask`).
         let outline_mask_point = PipelineBuilder::new(
@@ -796,6 +802,12 @@ impl Pipelines {
             bind_group_layouts: &[&layouts.camera, &layouts.wireframe_params, &layouts.labels],
             push_constant_ranges: &[],
         });
+        // Two label pipelines over one shader, differing only in the depth
+        // compare. A wireframe pane has no surface to hide behind, so every
+        // label shows; a shaded pane hides the ones whose anchor is behind
+        // geometry, which is what stops a point cloud reading as a jumble of
+        // near and far values at once. Neither writes depth: a label is an
+        // overlay, and one must never occlude another.
         let attr_labels =
             PipelineBuilder::new(device, "Attr Labels Pipeline", &label_layout, &label_shader)
                 .vertex_entry("vs_label")
@@ -807,6 +819,21 @@ impl Pipelines {
                 .depth_compare(wgpu::CompareFunction::Always)
                 .sample_count(sample_count)
                 .build();
+        let attr_labels_occluded = PipelineBuilder::new(
+            device,
+            "Attr Labels Occluded Pipeline",
+            &label_layout,
+            &label_shader,
+        )
+        .vertex_entry("vs_label")
+        .fragment_entry("fs_label")
+        .buffers(vec![])
+        .color_format(hdr_format)
+        .blend_alpha()
+        .depth_write(false)
+        .depth_compare(wgpu::CompareFunction::LessEqual)
+        .sample_count(sample_count)
+        .build();
 
         let uv_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UV Map Shader"),
@@ -1160,6 +1187,7 @@ impl Pipelines {
                 manipulator_lines,
                 manipulator_tris,
                 attr_labels,
+                attr_labels_occluded,
                 validation_overlay,
                 validation_edge,
                 outline_mask,

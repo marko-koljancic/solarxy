@@ -25,11 +25,13 @@ import type {
   ImportJob,
   MarkerScreen,
   NodeId,
+  NodeReport,
   PaneDisplaySettings,
   PaneRectDto,
   ParamSource,
   PickDetail,
   RegistrySnapshot,
+  ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
   SaveExtra,
@@ -99,6 +101,13 @@ export class SolarxyClient {
    * fetched when the info card opens or the cook status changes. */
   cookWarnings(node: NodeId): string[] {
     return this.app.cook_warnings(node) as string[];
+  }
+
+  /** Bounds, cook accounting, placeholder reason and timestamps for one
+   * node, or null when the node is gone. Pull-read, not mirrored: every
+   * field moves on each cook of a time-dependent node. */
+  nodeReport(ctx: GraphContext, node: NodeId): NodeReport | null {
+    return this.app.node_report(ctx, node) as NodeReport | null;
   }
 
   /** One window of a node's cooked attribute values; only the page
@@ -208,9 +217,35 @@ export class SolarxyClient {
       d.wireframeWeight,
       d.background,
       d.turntableRpm,
+      d.pointSize,
       applyWireframe,
       applyBackground,
     );
+  }
+
+  /** Enters player mode: no manipulator, no picking, no review markers, and
+   * the layout locked to a single pane. Set BEFORE loading a scene so no
+   * frame is ever drawn with editing chrome on it. */
+  setPlayerMode(on: boolean): void {
+    this.app.set_player_mode(on);
+  }
+
+  /** The clock's current frame. Polled, not pushed: see `gizmoReadout`. */
+  clockFrame(): number {
+    return this.app.clock_frame();
+  }
+
+  /** Whether the clock is running. Polled, not tracked: a `once` range stops
+   * itself at the end, so a caller's own boolean would go stale. */
+  clockPlaying(): boolean {
+    return this.app.clock_playing();
+  }
+
+  /** Whether the loaded document asks to start playing. A document setting,
+   * not an export one, so it means the same thing in the editor (which
+   * stores it and does not act on it) and in a player (which does). */
+  autoplay(): boolean {
+    return this.app.autoplay();
   }
 
   /** The displayed image of a texture network, or null when
@@ -224,6 +259,14 @@ export class SolarxyClient {
       height: number;
       pixels: Uint8ClampedArray;
     } | null;
+  }
+
+  /** One param's value as the panel displays it, or why it has none.
+   *
+   * Pulled per row rather than pushed: under playback a resolved value
+   * pushed per cook would be one event per expression per frame. */
+  resolvedParam(ctx: GraphContext, node: number, key: string): ResolvedParam {
+    return this.app.resolved_param(ctx, node, key) as ResolvedParam;
   }
 
   /** Executes an export node's Action param; the returned

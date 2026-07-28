@@ -8,6 +8,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { DEFAULT_DISPLAY_PREFS, type DisplayPrefs } from "./displayDefaults";
+
 /** 0.7.1 collapsed three themes into two. The MPW "Balanced Editorial"
  * palette (warm cream + terracotta, the koljam.com design language) used to
  * be a separate "mpw" variant layered over a neutral light theme; it IS the
@@ -34,6 +36,36 @@ export interface GizmoPrefs {
   snapScale: number;
 }
 
+/** Viewport chrome the user can hide.
+ *
+ * UI-only, unlike [`GizmoPrefs`] above: the Rust host draws none of this,
+ * so nothing here crosses the boundary. Kept as its own group rather than
+ * widened onto `GizmoPrefs` precisely so that stays true by construction.
+ */
+export interface ViewportChromePrefs {
+  /** The playbar: the scene-clock strip under the viewport. Hidden, the
+   * viewport reclaims its height; the Space / comma / period bindings still
+   * work, so hiding it gives up the readout, not the clock.
+   *
+   * The KEY stays `transportBar` deliberately. It is what every stored
+   * preference blob already carries, and renaming it would silently reset
+   * the setting for everyone who had turned it off. */
+  transportBar: boolean;
+}
+
+/** The code editor's display preferences.
+ *
+ * Kept here rather than in the editor's own menu so they persist and apply
+ * to every snippet field at once; the editor is a widget that appears in
+ * several places, not a document. */
+export interface EditorPrefs {
+  /** Wrap long lines rather than scrolling horizontally. */
+  wordWrap: boolean;
+  lineNumbers: boolean;
+  /** Font size in px, clamped 9..24. */
+  fontSize: number;
+}
+
 export interface ScreenshotPrefs {
   resolution: ScreenshotResolution;
   customWidth: number;
@@ -47,22 +79,15 @@ export interface ScreenshotPrefs {
 
 export type SelectionHighlightStyle = "outline" | "tint" | "none";
 
-export type WireframeWeight = "Light" | "Medium" | "Bold";
-/** The built-in pane backgrounds, pinned to
- * `solarxy_core::preferences::BuiltinBg`'s serde names. */
-export type BackgroundChoice = "Gradient" | "White" | "DarkGray" | "AyuMirage" | "Black" | "HdriSky";
-
-/** Viewport display defaults, pushed into the Rust host. Wireframe weight
- * and background seed every pane's settings (a scene file's saved per-pane
- * values still win on load; the pane's Display menu stays the live
- * per-pane override). The turntable speed is the live global rpm. */
-export interface DisplayPrefs {
-  wireframeWeight: WireframeWeight;
-  background: BackgroundChoice;
-  /** Turntable revolutions per minute, clamped 1..60. */
-  turntableRpm: number;
-}
-
+// Display types and their defaults live in a dependency-free module so the
+// player can read them without pulling zustand (and therefore React) into a
+// published bundle. Re-exported here because this has been their import site
+// since 0.7.x and moving that would churn every call site for nothing.
+export type {
+  BackgroundChoice,
+  DisplayPrefs,
+  WireframeWeight,
+} from "./displayDefaults";
 /** How selection presents in the 3D viewport:
  * the jump-flood rim (default), the legacy translucent tint, or nothing.
  * Pushed into the Rust host like the gizmo ergonomics. */
@@ -93,6 +118,8 @@ export interface Prefs {
   };
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
+  chrome: ViewportChromePrefs;
+  editor: EditorPrefs;
   selection: SelectionPrefs;
   display: DisplayPrefs;
   /** First-run tour state. `version` lets a materially changed tour show
@@ -104,7 +131,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  appearance: { theme: "dark", reducedMotion: "system" },
+  appearance: { theme: "system", reducedMotion: "system" },
   review: { author: "" },
   autosave: { enabled: true, debounceSec: 2 },
   screenshot: {
@@ -114,7 +141,7 @@ export const DEFAULT_PREFS: Prefs = {
     overlays: { grid: true, axes: true, validation: true },
   },
   selection: { style: "outline", color: "#ff9e21", width: 3 },
-  display: { wireframeWeight: "Light", background: "Gradient", turntableRpm: 6 },
+  display: DEFAULT_DISPLAY_PREFS,
   onboarding: { completed: false, version: 0 },
   viewport: {
     orientation: "world",
@@ -122,6 +149,8 @@ export const DEFAULT_PREFS: Prefs = {
     snapRotate: 15,
     snapScale: 0.1,
   },
+  chrome: { transportBar: true },
+  editor: { wordWrap: true, lineNumbers: true, fontSize: 12 },
 };
 
 interface PrefsStore {
@@ -166,7 +195,8 @@ function applyBodyClasses(prefs: Prefs): void {
   );
 }
 
-/** One-time import of the pre-W4 theme key when no prefs blob exists yet. */
+/** One-time import of the standalone theme key, from before preferences
+ * were a single persisted blob, when no blob exists yet. */
 function legacyTheme(): ThemeChoice | null {
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem("solarxy.ui.theme");
@@ -190,7 +220,18 @@ export function sanitizeTheme(raw: unknown): ThemeChoice {
  * new fields backfill on upgrade (the Minimystix onRehydrateStorage
  * pattern): a newly added group needs no persist version bump. Exported for
  * the backfill tests. */
-export function mergePersistedPrefs(p: Partial<Prefs> | undefined): Prefs {
+/** A persisted blob: every group optional, and every FIELD within a group
+ * optional too.
+ *
+ * `Partial<Prefs>` would be wrong here, and was: it says a stored group is
+ * complete if present, which is false for every blob written by an older
+ * version -- exactly the case this function exists to handle. A user
+ * upgrading to 0.8.1 has a `display` group with no `pointSize` in it. */
+type PersistedPrefs = {
+  [K in keyof Prefs]?: Prefs[K] extends object ? Partial<Prefs[K]> : Prefs[K];
+};
+
+export function mergePersistedPrefs(p: PersistedPrefs | undefined): Prefs {
   const prefs: Prefs = {
     appearance: { ...DEFAULT_PREFS.appearance, ...p?.appearance },
     review: { ...DEFAULT_PREFS.review, ...p?.review },
@@ -204,6 +245,8 @@ export function mergePersistedPrefs(p: Partial<Prefs> | undefined): Prefs {
       },
     },
     viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
+    chrome: { ...DEFAULT_PREFS.chrome, ...p?.chrome },
+    editor: { ...DEFAULT_PREFS.editor, ...p?.editor },
     selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
     display: { ...DEFAULT_PREFS.display, ...p?.display },
     // An existing user rehydrates with `completed: false` and is offered

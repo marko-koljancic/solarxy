@@ -92,7 +92,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
 
     NodeTypeDescriptor {
         type_id: "note",
-        // v2 (0.8.0 Stage 8): added `text_size`. Purely additive, so no
+        // v2 (0.8.0): added `text_size`. Purely additive, so no
         // migration hook: a v1 note loads with the param unset and resolves
         // to the descriptor default.
         version: 2,

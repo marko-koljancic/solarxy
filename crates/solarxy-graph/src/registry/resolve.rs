@@ -20,21 +20,63 @@ use serde_json::Value as Json;
 
 use super::param_spec::{ParamSpec, ParamType, Unit};
 use super::scalar;
+use crate::expr::{EvalCtx, ExprError, Value as ExprValue};
 use crate::params::{AssetId, ParamSource, ParamValue};
 
 /// Why a node's params could not resolve (a cook error, not a command
 /// error: the node badges and refuses to cook).
+///
+/// Every variant names the param, because a node with twenty params and a
+/// bare "syntax error" is a scavenger hunt. The parse and eval variants
+/// carry the [`ExprError`] whole so the editor can underline the offending
+/// span rather than re-parsing to find it. A bad expression is a value the
+/// user can fix by editing, so it badges rather than being refused at
+/// `SetParam`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveFailure {
-    /// Decision 26: v1 refuses to evaluate expressions and badges the node.
-    ExpressionUnsupported { key: String },
+    /// The expression could not be parsed.
+    ExpressionParse { key: String, error: ExprError },
+    /// It parsed, but evaluating it failed (an unknown function, a type
+    /// mismatch, an unresolvable `ch()` path).
+    ExpressionEval { key: String, error: ExprError },
+    /// It evaluated, but the result cannot become this param's type.
+    ExpressionType { key: String, reason: String },
+}
+
+impl ResolveFailure {
+    /// The param this failure is about.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        match self {
+            ResolveFailure::ExpressionParse { key, .. }
+            | ResolveFailure::ExpressionEval { key, .. }
+            | ResolveFailure::ExpressionType { key, .. } => key,
+        }
+    }
+
+    /// The source span to underline, when there is one.
+    #[must_use]
+    pub fn span(&self) -> Option<std::ops::Range<usize>> {
+        match self {
+            ResolveFailure::ExpressionParse { error, .. }
+            | ResolveFailure::ExpressionEval { error, .. } => Some(error.span.clone()),
+            ResolveFailure::ExpressionType { .. } => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ResolveFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ResolveFailure::ExpressionUnsupported { key } => {
-                write!(f, "param '{key}' uses an expression; not supported in v1")
+            // Parse and eval read the same to a user: the param, then what
+            // went wrong. The variants stay distinct because the editor and
+            // the tests care which stage failed.
+            ResolveFailure::ExpressionParse { key, error }
+            | ResolveFailure::ExpressionEval { key, error } => {
+                write!(f, "param '{key}': {error}")
+            }
+            ResolveFailure::ExpressionType { key, reason } => {
+                write!(f, "param '{key}': {reason}")
             }
         }
     }
@@ -194,24 +236,38 @@ impl ResolvedParams {
     }
 }
 
-/// The chokepoint. Reads each spec'd param from `stored` (default when
-/// unset), conforms it to the spec type, clamps to the hard range, and
-/// applies the unit conversion. Fails only on an expression source (v1).
+/// The chokepoint, with no evaluation context.
+///
+/// Equivalent to [`resolve_params_with`] against a stopped clock, no
+/// document and no geometry: arithmetic and the maths builtins evaluate,
+/// while `ch()` and the geometry queries report that they are unavailable
+/// here rather than quietly reading as zero. Every production call site
+/// passes a real context; this exists for the node unit tests, which build
+/// a param map directly and have no engine to borrow one from.
 pub fn resolve_params(
     stored: &BTreeMap<String, ParamSource>,
     specs: &[ParamSpec],
 ) -> Result<ResolvedParams, ResolveFailure> {
+    resolve_params_with(stored, specs, &EvalCtx::default())
+}
+
+/// The chokepoint. Reads each spec'd param from `stored` (default when
+/// unset), evaluates it if it is an expression, conforms it to the spec
+/// type, clamps to the hard range, and applies the unit conversion.
+///
+/// The ordering is the whole point: an expression result rejoins the
+/// literal path *before* conform, clamp and the degrees-to-radians
+/// conversion, so it is subject to exactly the same validity rules as a
+/// typed value and cannot smuggle an out-of-range or wrongly-typed result
+/// past the resolver.
+pub fn resolve_params_with(
+    stored: &BTreeMap<String, ParamSource>,
+    specs: &[ParamSpec],
+    ctx: &EvalCtx,
+) -> Result<ResolvedParams, ResolveFailure> {
     let mut values = BTreeMap::new();
     for spec in specs {
-        let raw = match stored.get(&spec.key) {
-            Some(ParamSource::Literal(v)) => v.clone(),
-            Some(ParamSource::Expression { .. }) => {
-                return Err(ResolveFailure::ExpressionUnsupported {
-                    key: spec.key.clone(),
-                });
-            }
-            None => spec.default.clone(),
-        };
+        let raw = raw_value_of(stored, spec, ctx)?;
         // Conform (a mistyped stored value falls back to the default; the
         // SetParam command conforms on write, so this is a backstop).
         let mut value = conform_value(&raw, &spec.ty).unwrap_or_else(|_| spec.default.clone());
@@ -228,6 +284,141 @@ pub fn resolve_params(
     Ok(ResolvedParams { values })
 }
 
+/// Lowers an evaluated expression result into the param's declared type.
+///
+/// This is where the accepting-type rule is enforced in the resolver: only
+/// the seven numeric types accept an expression. `SetParam` refuses the
+/// others up front, so reaching this arm means a hand-edited document, and
+/// naming the type beats resolving to a default.
+///
+/// The lowering deliberately produces the spec's exact type where it can,
+/// leaving `conform_value` a passthrough, except for Int, where handing
+/// back a Float lets the existing half-away-from-zero rounding apply
+/// rather than duplicating it here.
+fn value_to_param(value: ExprValue, ty: &ParamType) -> Result<ParamValue, String> {
+    let type_name = value.type_name();
+    match (value, ty) {
+        (ExprValue::Float(v), ParamType::Float | ParamType::Int) => Ok(ParamValue::Float(v)),
+        (ExprValue::Float(v), ParamType::Bool) => Ok(ParamValue::Bool(v != 0.0)),
+        (ExprValue::Bool(b), ParamType::Bool) => Ok(ParamValue::Bool(b)),
+        (ExprValue::Bool(b), ParamType::Float | ParamType::Int) => {
+            Ok(ParamValue::Float(if b { 1.0 } else { 0.0 }))
+        }
+        (ExprValue::Vec2(v), ParamType::Vec2) => Ok(ParamValue::Vec2(v)),
+        (ExprValue::Vec3(v), ParamType::Vec3) => Ok(ParamValue::Vec3(v)),
+        (ExprValue::Vec4(v), ParamType::Vec4) => Ok(ParamValue::Vec4(v)),
+        (ExprValue::Vec4(v), ParamType::Color) => Ok(ParamValue::Color([
+            v[0] as f32,
+            v[1] as f32,
+            v[2] as f32,
+            v[3] as f32,
+        ])),
+        // A three-component colour is opaque: alpha 1 is the only useful
+        // reading, and requiring set(r,g,b,1) for every tint would be noise.
+        (ExprValue::Vec3(v), ParamType::Color) => Ok(ParamValue::Color([
+            v[0] as f32,
+            v[1] as f32,
+            v[2] as f32,
+            1.0,
+        ])),
+        (_, ParamType::Float | ParamType::Int) => Err(format!(
+            "expected a number, the expression produced a {type_name}"
+        )),
+        (_, ParamType::Bool) => Err(format!(
+            "expected a condition, the expression produced a {type_name}"
+        )),
+        (_, ParamType::Vec2) => Err(format!(
+            "expected 2 components, the expression produced a {type_name}; use set(x, y)"
+        )),
+        (_, ParamType::Vec3) => Err(format!(
+            "expected 3 components, the expression produced a {type_name}; use set(x, y, z)"
+        )),
+        (_, ParamType::Vec4 | ParamType::Color) => Err(format!(
+            "expected 4 components, the expression produced a {type_name}; use set(x, y, z, w)"
+        )),
+        (_, other) => Err(format!(
+            "{other:?} params cannot be driven by an expression"
+        )),
+    }
+}
+
+/// One param's stored value, with an expression evaluated but nothing
+/// else applied yet.
+fn raw_value_of(
+    stored: &BTreeMap<String, ParamSource>,
+    spec: &ParamSpec,
+    ctx: &EvalCtx,
+) -> Result<ParamValue, ResolveFailure> {
+    match stored.get(&spec.key) {
+        Some(ParamSource::Literal(v)) => Ok(v.clone()),
+        Some(ParamSource::Expression { expr }) => {
+            // Parsed per resolve rather than cached. A parameter
+            // expression is short and this costs a couple of microseconds;
+            // the wrangle, which runs a program per element, is what
+            // parses once and reuses.
+            let parsed =
+                crate::expr::parse(expr).map_err(|error| ResolveFailure::ExpressionParse {
+                    key: spec.key.clone(),
+                    error,
+                })?;
+            let value = crate::expr::eval(&parsed.root, ctx).map_err(|error| {
+                ResolveFailure::ExpressionEval {
+                    key: spec.key.clone(),
+                    error,
+                }
+            })?;
+            value_to_param(value, &spec.ty).map_err(|reason| ResolveFailure::ExpressionType {
+                key: spec.key.clone(),
+                reason,
+            })
+        }
+        None => Ok(spec.default.clone()),
+    }
+}
+
+/// Resolves ONE param, in the space the user authored it in.
+///
+/// The parameter panel asks per row, so this is deliberately not
+/// `resolve_params_with` filtered down: that fails the whole node on the
+/// first bad expression, which would blank the readout of every other
+/// param because one of them has a typo.
+///
+/// Conformed and hard-clamped but NOT unit-converted, for the same reason
+/// [`conform_and_clamp`] is: a Degrees param is authored and displayed in
+/// degrees, and a readout showing 1.571 under a field the user typed
+/// `45 * 2` into would be worse than no readout.
+pub fn resolve_one_authored(
+    stored: &BTreeMap<String, ParamSource>,
+    spec: &ParamSpec,
+    ctx: &EvalCtx,
+) -> Result<ParamValue, ResolveFailure> {
+    let raw = raw_value_of(stored, spec, ctx)?;
+    Ok(conform_and_clamp(&raw, spec).unwrap_or_else(|_| spec.default.clone()))
+}
+
+/// A stored value as a **reference** sees it: conformed to the spec type
+/// and hard-clamped, but deliberately **not** unit-converted.
+///
+/// This is the one place the reference path diverges from the cook path,
+/// and the reason is the documented 57x trap. A `Unit::Degrees` param
+/// stores and displays degrees; the resolver converts to radians for the
+/// cook body. If `ch()` handed back radians, then
+/// `geo2.rotate = ch("../geo1/rotate")` would store radians into a field
+/// that means degrees and convert a second time, landing 57x off. Reading
+/// in the authoring space makes copying a rotation round-trip, at the cost
+/// that `sin(ch(...))` on a degrees param needs an explicit `radians(...)`
+/// -- which is already true of typing the number by hand.
+///
+/// The clamp *is* applied, so a reader can never observe a value the
+/// target's own cook does not use.
+pub fn conform_and_clamp(value: &ParamValue, spec: &ParamSpec) -> Result<ParamValue, String> {
+    let mut out = conform_value(value, &spec.ty)?;
+    if let Some(range) = &spec.range {
+        out = clamp_value(out, range.hard);
+    }
+    Ok(out)
+}
+
 /// Conforms a value to a spec type, applying the shared scalar coercions
 /// (Int accepts integral or rounded floats; Float accepts ints). Returns
 /// the reason on a hopeless mismatch.
@@ -239,9 +430,13 @@ pub fn conform_value(value: &ParamValue, ty: &ParamType) -> Result<ParamValue, S
         // Rounds half away from zero, matching the wire matrix.
         (ParamValue::Float(v), ParamType::Int) => Ok(ParamValue::Int(scalar::f64_to_i64(*v))),
         (ParamValue::Bool(v), ParamType::Bool) => Ok(ParamValue::Bool(*v)),
-        (ParamValue::Text(v), ParamType::Text | ParamType::AttributeName) => {
-            Ok(ParamValue::Text(v.clone()))
-        }
+        (
+            ParamValue::Text(v),
+            ParamType::Text
+            | ParamType::MultilineText
+            | ParamType::AttributeName
+            | ParamType::Snippet,
+        ) => Ok(ParamValue::Text(v.clone())),
         (ParamValue::Vec2(v), ParamType::Vec2) => Ok(ParamValue::Vec2(*v)),
         (ParamValue::Vec3(v), ParamType::Vec3) => Ok(ParamValue::Vec3(*v)),
         (ParamValue::Vec4(v), ParamType::Vec4) => Ok(ParamValue::Vec4(*v)),
@@ -371,7 +566,10 @@ pub fn param_source_from_json(json: &Json, ty: &ParamType) -> Result<ParamSource
             json.as_bool()
                 .ok_or_else(|| format!("expected a bool, got {json}"))?,
         ),
-        ParamType::Text | ParamType::AttributeName => ParamValue::Text(
+        ParamType::Text
+        | ParamType::MultilineText
+        | ParamType::AttributeName
+        | ParamType::Snippet => ParamValue::Text(
             json.as_str()
                 .ok_or_else(|| format!("expected a string, got {json}"))?
                 .to_string(),
@@ -528,23 +726,158 @@ mod tests {
         assert!((p.f64("angle") - 89.0_f64.to_radians()).abs() < 1e-12);
     }
 
-    #[test]
-    fn expression_source_refuses_to_resolve() {
-        let specs = [spec_float("radius")];
+    /// A single-param store holding one expression.
+    fn expr_store(key: &str, expr: &str) -> BTreeMap<String, ParamSource> {
         let mut stored = BTreeMap::new();
         stored.insert(
-            "radius".to_string(),
+            key.to_string(),
             ParamSource::Expression {
-                expr: "$F * 2".to_string(),
+                expr: expr.to_string(),
             },
         );
-        let err = resolve_params(&stored, &specs).unwrap_err();
+        stored
+    }
+
+    #[test]
+    fn an_expression_resolves_to_its_value() {
+        let specs = [spec_float("radius").hard(0.0, 100.0)];
+        let p = resolve_params(&expr_store("radius", "2 * 3 + 1"), &specs).unwrap();
+        assert_eq!(p.f64("radius"), 7.0);
+    }
+
+    #[test]
+    fn time_reads_zero_while_the_runtime_is_stopped() {
+        // Every cook is reproducible until F3 starts a clock: golden
+        // captures and CLI cooks depend on this.
+        let specs = [spec_float("radius").hard(-10.0, 100.0)];
+        let p = resolve_params(&expr_store("radius", "$F * 2 + $T"), &specs).unwrap();
+        assert_eq!(p.f64("radius"), 0.0);
+    }
+
+    #[test]
+    fn an_expression_result_is_hard_clamped_exactly_as_a_literal_is() {
+        // The whole point of rejoining the literal path before the clamp:
+        // an expression must not be able to smuggle an out-of-range value
+        // past the resolver.
+        let specs = [spec_float("radius").hard(0.0, 10.0)];
+        let p = resolve_params(&expr_store("radius", "999"), &specs).unwrap();
+        assert_eq!(p.f64("radius"), 10.0);
+        let p = resolve_params(&expr_store("radius", "0 - 999"), &specs).unwrap();
+        assert_eq!(p.f64("radius"), 0.0);
+    }
+
+    #[test]
+    fn an_expression_result_is_converted_from_degrees_like_a_literal() {
+        // And in the same order: clamp first, then convert. An expression
+        // that skipped this would reopen the documented 57x gizmo trap.
+        let specs = [ParamSpec::new(
+            "angle",
+            "angle",
+            "test",
+            ParamType::Float,
+            ParamValue::Float(0.0),
+        )
+        .hard(0.0, 89.0)
+        .unit(Unit::Degrees)];
+        let p = resolve_params(&expr_store("angle", "45 * 4"), &specs).unwrap();
+        assert!((p.f64("angle") - 89.0_f64.to_radians()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_expression_result_rounds_into_an_int_param() {
+        let specs = [ParamSpec::new(
+            "segments",
+            "segments",
+            "test",
+            ParamType::Int,
+            ParamValue::Int(3),
+        )];
+        let p = resolve_params(&expr_store("segments", "7 / 2"), &specs).unwrap();
         assert_eq!(
-            err,
-            ResolveFailure::ExpressionUnsupported {
-                key: "radius".to_string()
-            }
+            p.i64("segments"),
+            4,
+            "half away from zero, as for a literal"
         );
+    }
+
+    #[test]
+    fn a_vector_expression_fills_a_vector_param() {
+        let specs = [ParamSpec::new(
+            "size",
+            "size",
+            "test",
+            ParamType::Vec3,
+            ParamValue::Vec3([1.0; 3]),
+        )];
+        let p = resolve_params(&expr_store("size", "set(1, 2, 3) * 2"), &specs).unwrap();
+        assert_eq!(p.vec3("size"), [2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn a_three_component_expression_fills_a_colour_as_opaque() {
+        let specs = [ParamSpec::new(
+            "tint",
+            "tint",
+            "test",
+            ParamType::Color,
+            ParamValue::Color([1.0; 4]),
+        )];
+        let p = resolve_params(&expr_store("tint", "set(1, 0, 0)"), &specs).unwrap();
+        assert_eq!(p.color("tint"), [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_parse_error_names_the_param_and_keeps_its_span() {
+        let specs = [spec_float("radius")];
+        let err = resolve_params(&expr_store("radius", "1 +"), &specs).unwrap_err();
+        assert_eq!(err.key(), "radius");
+        assert!(err.to_string().contains("radius"), "{err}");
+        assert!(
+            err.span().is_some(),
+            "the editor needs somewhere to underline"
+        );
+        assert!(matches!(err, ResolveFailure::ExpressionParse { .. }));
+    }
+
+    #[test]
+    fn an_evaluation_error_names_the_param() {
+        let specs = [spec_float("radius")];
+        let err = resolve_params(&expr_store("radius", "wobble(1)"), &specs).unwrap_err();
+        assert!(matches!(err, ResolveFailure::ExpressionEval { .. }));
+        assert!(err.to_string().contains("unknown function"), "{err}");
+    }
+
+    #[test]
+    fn a_wrongly_typed_result_says_what_it_produced() {
+        let specs = [spec_float("radius")];
+        let err = resolve_params(&expr_store("radius", "set(1, 2, 3)"), &specs).unwrap_err();
+        assert!(matches!(err, ResolveFailure::ExpressionType { .. }));
+        assert!(err.to_string().contains("produced a vec3"), "{err}");
+    }
+
+    #[test]
+    fn a_reference_without_a_document_reports_that_rather_than_reading_zero() {
+        // The context-free wrapper has no document, and silently resolving
+        // to a default would be a wrong number rather than an error.
+        let specs = [spec_float("radius")];
+        let err = resolve_params(&expr_store("radius", "ch(\"../a/b\")"), &specs).unwrap_err();
+        assert!(err.to_string().contains("not available"), "{err}");
+    }
+
+    #[test]
+    fn an_expression_on_a_non_numeric_param_is_refused_by_type() {
+        // SetParam refuses these up front, so reaching here means a
+        // hand-edited document; naming the type beats silently defaulting.
+        let specs = [ParamSpec::new(
+            "label",
+            "label",
+            "test",
+            ParamType::Text,
+            ParamValue::Text("x".into()),
+        )];
+        let err = resolve_params(&expr_store("label", "1 + 1"), &specs).unwrap_err();
+        assert!(matches!(err, ResolveFailure::ExpressionType { .. }));
+        assert!(err.to_string().contains("cannot be driven"), "{err}");
     }
 
     #[test]

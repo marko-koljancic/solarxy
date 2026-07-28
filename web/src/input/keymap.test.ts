@@ -63,7 +63,7 @@ describe("keymap table", () => {
   });
 });
 
-describe("viewport tools (phase 11)", () => {
+describe("viewport tools", () => {
   it("binds Q and W over the viewport", () => {
     expect(lookupBinding("q", "viewport")?.id).toBe("tool-select");
     expect(lookupBinding("w", "viewport")?.id).toBe("tool-move");
@@ -108,6 +108,20 @@ describe("view presets (feedback wave 4)", () => {
     // action lives on Z there, while F over the node canvas fits the graph.
     expect(lookupBinding("z", "viewport")?.id).toBe("fit");
     expect(lookupBinding("f", "canvas")?.id).toBe("canvas-fit");
+  });
+
+  it("splits P between the canvas and the viewport, and says so on both", () => {
+    // The same key doing two things depending on where the cursor sits is
+    // defensible only if both bindings admit it: the shortcuts modal
+    // renders these notes, so this is what makes the split discoverable
+    // rather than a trap.
+    expect(lookupBinding("p", "canvas")?.id).toBe("floating-props");
+    expect(lookupBinding("p", "viewport")?.id).toBe("view-perspective");
+
+    for (const id of ["floating-props", "view-perspective"]) {
+      const binding = KEYMAP.find((b) => b.id === id);
+      expect(binding?.note, `${id} must name the other P`).toBeTruthy();
+    }
   });
 
   it("keeps F and L meaning different things per context", () => {

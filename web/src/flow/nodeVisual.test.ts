@@ -4,7 +4,14 @@
 
 import { describe, expect, it } from "vitest";
 import type { NodeTypeSnapshot } from "../engine/types";
-import { GLYPH_PATHS, ROLE_BODY_PATHS, glyphPath, nodeRole, roundedPolygonPath } from "./nodeVisual";
+import {
+  GLYPH_PATHS,
+  ROLE_BODIES,
+  glyphPath,
+  nodeRole,
+  roundedPolygonPath,
+  type RoleBody,
+} from "./nodeVisual";
 
 /** Every coordinate pair in a path built from M/L/Q commands. */
 function pathPoints(d: string): [number, number][] {
@@ -44,7 +51,7 @@ describe("roundedPolygonPath", () => {
   });
 });
 
-describe("category fallback totality (the 14-category taxonomy)", () => {
+describe("category fallback totality (the 15-category taxonomy)", () => {
   const CATEGORIES: NodeTypeSnapshot["category"][] = [
     "container",
     "generators",
@@ -56,6 +63,7 @@ describe("category fallback totality (the 14-category taxonomy)", () => {
     "import",
     "export",
     "lights",
+    "cameras",
     "utility",
     "tex_generate",
     "tex_adjust",
@@ -85,36 +93,68 @@ describe("category fallback totality (the 14-category taxonomy)", () => {
   });
 });
 
-describe("ROLE_BODY_PATHS (D-21)", () => {
-  const entries = Object.entries(ROLE_BODY_PATHS) as [string, string][];
+describe("ROLE_BODIES", () => {
+  const entries = Object.entries(ROLE_BODIES) as [string, RoleBody][];
 
-  it("covers the four shaped roles", () => {
+  /** Roles whose silhouette is deliberately NOT left-right symmetric,
+   * each with the meaning the asymmetry carries. Everything else is held
+   * to the symmetry rule below, so an accidental lopsided path still
+   * fails. */
+  const ASYMMETRIC: Record<string, string> = {
+    container: "carries a folder tab on the left",
+  };
+
+  it("covers the six shaped roles", () => {
     expect(entries.map(([k]) => k).sort()).toEqual([
       "analyzer",
       "branch",
+      "camera",
+      "container",
       "imageSource",
       "light",
     ]);
   });
 
-  it("stays inside the 112x32 body box", () => {
-    for (const [, d] of entries) {
-      for (const [x, y] of pathPoints(d)) {
-        expect(x).toBeGreaterThanOrEqual(0);
-        expect(x).toBeLessThanOrEqual(112);
-        expect(y).toBeGreaterThanOrEqual(0);
-        expect(y).toBeLessThanOrEqual(32);
+  it("stays inside its own declared body box", () => {
+    for (const [role, body] of entries) {
+      for (const [x, y] of pathPoints(body.path)) {
+        expect(x, `${role} x`).toBeGreaterThanOrEqual(0);
+        expect(x, `${role} x`).toBeLessThanOrEqual(body.w);
+        expect(y, `${role} y`).toBeGreaterThanOrEqual(0);
+        expect(y, `${role} y`).toBeLessThanOrEqual(body.h);
       }
     }
   });
 
-  it("is left-right symmetric: mirroring x across 56 maps the outline onto itself", () => {
-    for (const [role, d] of entries) {
-      const pts = pathPoints(d);
+  it("declares a positive body box (the SVG viewBox is built from it)", () => {
+    for (const [role, body] of entries) {
+      expect(body.w, `${role} w`).toBeGreaterThan(0);
+      expect(body.h, `${role} h`).toBeGreaterThan(0);
+    }
+  });
+
+  it("is left-right symmetric except where the asymmetry means something", () => {
+    for (const [role, body] of entries) {
+      if (role in ASYMMETRIC) continue;
+      const pts = pathPoints(body.path);
       for (const [x, y] of pts) {
-        const mirrored = pts.some(([mx, my]) => Math.abs(mx - (112 - x)) < 0.01 && Math.abs(my - y) < 0.01);
+        const mirrored = pts.some(
+          ([mx, my]) => Math.abs(mx - (body.w - x)) < 0.01 && Math.abs(my - y) < 0.01,
+        );
         expect(mirrored, `${role}: (${x}, ${y}) has no mirror twin`).toBe(true);
       }
+    }
+  });
+
+  it("the asymmetric roles really are asymmetric (the exemption is not stale)", () => {
+    for (const role of Object.keys(ASYMMETRIC)) {
+      const body = ROLE_BODIES[role as keyof typeof ROLE_BODIES];
+      expect(body, role).toBeDefined();
+      const pts = pathPoints(body!.path);
+      const symmetric = pts.every(([x, y]) =>
+        pts.some(([mx, my]) => Math.abs(mx - (body!.w - x)) < 0.01 && Math.abs(my - y) < 0.01),
+      );
+      expect(symmetric, `${role} is symmetric now, so drop its exemption`).toBe(false);
     }
   });
 });

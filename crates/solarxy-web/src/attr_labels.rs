@@ -8,13 +8,24 @@
 
 use solarxy_renderer::labels::{LabelInstance, TEXT_MAX, glyph_index, pack_glyph};
 
-/// Two-decimal component formatting, JS-parity: `Math.round(x * 100) / 100`
-/// rounds half toward positive infinity (NOT half away from zero, which is
-/// what Rust's `round` does and differs on negative halves), minus zero
-/// prints as `0`, and the shortest round-trip decimal matches JS `String`.
-/// Non-finite values spell themselves out, as the DOM did.
+/// The decimal places a label shows. Clamped to what the 63-column text
+/// budget and the reader's patience both tolerate.
+pub const MIN_DECIMALS: u32 = 0;
+pub const MAX_DECIMALS: u32 = 4;
+/// The retired DOM overlay's two places; the parity tests pin this.
+pub const DEFAULT_DECIMALS: u32 = 2;
+
+/// Component formatting at `decimals` places, JS-parity:
+/// `Math.round(x * 10^d) / 10^d` rounds half toward positive infinity (NOT
+/// half away from zero, which is what Rust's `round` does and differs on
+/// negative halves), minus zero prints as `0`, and the shortest round-trip
+/// decimal matches JS `String`. Non-finite values spell themselves out, as
+/// the DOM did.
+///
+/// `decimals` is clamped rather than trusted: it arrives from session state
+/// the host may have loaded from anywhere.
 #[must_use]
-pub fn fmt_component(component: f32) -> String {
+pub fn fmt_component_at(component: f32, decimals: u32) -> String {
     let wide = f64::from(component);
     if wide.is_nan() {
         return "NaN".to_string();
@@ -22,7 +33,10 @@ pub fn fmt_component(component: f32) -> String {
     if wide.is_infinite() {
         return if wide > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
     }
-    let rounded = (wide * 100.0 + 0.5).floor() / 100.0;
+    // The clamp lands in 0..=4, so the signed cast cannot wrap; clippy sees
+    // only the types.
+    let scale = 10f64.powi(decimals.clamp(MIN_DECIMALS, MAX_DECIMALS).cast_signed());
+    let rounded = (wide * scale + 0.5).floor() / scale;
     let rounded = if rounded == 0.0 { 0.0 } else { rounded };
     if rounded.abs() >= 1e21 {
         // The JS exponent form ("1e+21"); Rust's `{:e}` omits the plus.
@@ -37,24 +51,44 @@ pub fn fmt_component(component: f32) -> String {
     format!("{rounded}")
 }
 
-/// The joined value text: components at two decimals, comma-space
+/// [`fmt_component_at`] at the default two places. The parity contract with
+/// the retired DOM overlay is expressed against this, so it stays a named
+/// function rather than a call site passing a literal.
+#[must_use]
+pub fn fmt_component(component: f32) -> String {
+    fmt_component_at(component, DEFAULT_DECIMALS)
+}
+
+/// The joined value text: components at `decimals` places, comma-space
 /// separated.
 #[must_use]
-pub fn fmt_pin_value(value: &[f32]) -> String {
+pub fn fmt_pin_value_at(value: &[f32], decimals: u32) -> String {
     value
         .iter()
-        .map(|v| fmt_component(*v))
+        .map(|v| fmt_component_at(*v, decimals))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// [`fmt_pin_value_at`] at the default two places, the DOM-parity form.
+#[must_use]
+pub fn fmt_pin_value(value: &[f32]) -> String {
+    fmt_pin_value_at(value, DEFAULT_DECIMALS)
 }
 
 /// The text one label shows: the value in labels mode (falling back to the
 /// point number when the lane is absent or empty), the point number in
 /// points mode, both as `"num: value"` when both modes are on.
 #[must_use]
-pub fn pin_text(ptnum: u64, value: Option<&[f32]>, labels: bool, points: bool) -> String {
+pub fn pin_text(
+    ptnum: u64,
+    value: Option<&[f32]>,
+    labels: bool,
+    points: bool,
+    decimals: u32,
+) -> String {
     let value_text = match value {
-        Some(v) if labels && !v.is_empty() => Some(fmt_pin_value(v)),
+        Some(v) if labels && !v.is_empty() => Some(fmt_pin_value_at(v, decimals)),
         _ => None,
     };
     match value_text {
@@ -96,11 +130,12 @@ pub fn build_labels(
     candidates: &[LabelCandidate],
     labels: bool,
     points: bool,
+    decimals: u32,
 ) -> (Vec<LabelInstance>, Vec<u32>) {
     let mut instances = Vec::with_capacity(candidates.len());
     let mut words = Vec::with_capacity(candidates.len() * 8);
     for (i, c) in candidates.iter().enumerate() {
-        let text = pin_text(c.ptnum, c.value.as_deref(), labels, points);
+        let text = pin_text(c.ptnum, c.value.as_deref(), labels, points, decimals);
         #[allow(clippy::cast_possible_truncation)]
         let glyph_count = encode(&text, i as u32, &mut words);
         instances.push(LabelInstance {
@@ -145,11 +180,59 @@ mod tests {
 
     #[test]
     fn pin_text_modes() {
-        assert_eq!(pin_text(7, Some(&[0.5]), true, false), "0.5");
-        assert_eq!(pin_text(7, None, false, true), "7");
-        assert_eq!(pin_text(7, Some(&[0.5]), true, true), "7: 0.5");
-        assert_eq!(pin_text(7, None, true, false), "7");
-        assert_eq!(pin_text(7, Some(&[]), true, true), "7");
+        let d = DEFAULT_DECIMALS;
+        assert_eq!(pin_text(7, Some(&[0.5]), true, false, d), "0.5");
+        assert_eq!(pin_text(7, None, false, true, d), "7");
+        assert_eq!(pin_text(7, Some(&[0.5]), true, true, d), "7: 0.5");
+        assert_eq!(pin_text(7, None, true, false, d), "7");
+        assert_eq!(pin_text(7, Some(&[]), true, true, d), "7");
+    }
+
+    // The decimals setting rides on top of the parity contract above: the
+    // rounding MODEL (half toward positive infinity, negative zero
+    // normalized) must hold at every place count, not only at two.
+
+    #[test]
+    fn decimals_choose_the_place_count() {
+        assert_eq!(fmt_component_at(1.23456, 0), "1");
+        assert_eq!(fmt_component_at(1.23456, 1), "1.2");
+        assert_eq!(fmt_component_at(1.23456, 3), "1.235");
+        assert_eq!(fmt_component_at(1.23456, 4), "1.2346");
+    }
+
+    #[test]
+    fn the_js_rounding_model_holds_at_every_place_count() {
+        // Half toward +inf, not away from zero, at other place counts as
+        // well as the default 2.
+        //
+        // The inputs are binary fractions on purpose. A tie only exists
+        // when `x * 10^d` is EXACTLY n.5, which needs both x and the
+        // product to be representable: 0.5 at 0 places and 0.25 at 1 place
+        // qualify, and 0.0125 at 3 does not (its nearest f32 sits just
+        // below the tie, so it rounds down and tests nothing).
+        assert_eq!(fmt_component_at(-0.5, 0), "0", "JS Math.round(-0.5) is -0");
+        assert_eq!(fmt_component_at(0.5, 0), "1");
+        assert_eq!(fmt_component_at(-0.25, 1), "-0.2");
+        assert_eq!(fmt_component_at(0.25, 1), "0.3");
+    }
+
+    #[test]
+    fn a_decimals_value_from_anywhere_is_clamped_not_trusted() {
+        // Session state can carry anything; a huge power of ten would
+        // overflow the scale and produce nonsense rather than a number.
+        assert_eq!(
+            fmt_component_at(1.23456, 99),
+            fmt_component_at(1.23456, MAX_DECIMALS)
+        );
+        assert_eq!(fmt_component_at(1.5, 0), "2");
+    }
+
+    #[test]
+    fn non_finite_values_ignore_the_place_count() {
+        for d in [0, 1, 4, 99] {
+            assert_eq!(fmt_component_at(f32::NAN, d), "NaN");
+            assert_eq!(fmt_component_at(f32::INFINITY, d), "Infinity");
+        }
     }
 
     #[test]
@@ -192,12 +275,20 @@ mod tests {
                 value: None,
             },
         ];
-        let (instances, words) = build_labels(&candidates, true, true);
+        let (instances, words) = build_labels(&candidates, true, true, DEFAULT_DECIMALS);
         assert_eq!(instances.len(), 2);
         let total: u32 = instances.iter().map(|i| i.glyph_count).sum();
         assert_eq!(total as usize, words.len());
         // "0: 0.5, -0.25" is 13 glyphs; "1" alone (no lane) is 1.
         assert_eq!(instances[0].glyph_count, 13);
         assert_eq!(instances[1].glyph_count, 1);
+
+        // Fewer places is a shorter stream, and the two counts stay in
+        // step: the glyph budget is per-label, so a decimals change that
+        // desynced them would overrun the text field silently.
+        let (short, short_words) = build_labels(&candidates, true, true, 0);
+        let short_total: u32 = short.iter().map(|i| i.glyph_count).sum();
+        assert_eq!(short_total as usize, short_words.len());
+        assert!(short[0].glyph_count < instances[0].glyph_count);
     }
 }

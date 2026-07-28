@@ -122,6 +122,36 @@ pub enum Command {
         mode: CookMode,
     },
     CookNow,
+    /// Starts playback. Session state: never undoable, because undoing a
+    /// press of play is not a thing anyone wants.
+    Play,
+    Pause,
+    /// Stops and rewinds to the range start.
+    Stop,
+    StepFrame {
+        delta: i64,
+    },
+    SetFrame {
+        frame: i64,
+    },
+    /// Document state, so this one IS undoable: the range saves into
+    /// `.slxy`, and an accidental edit must be recoverable.
+    SetFrameRange {
+        start: i64,
+        end: i64,
+    },
+    /// Document state, undoable (see [`Command::SetFrameRange`]).
+    SetFps {
+        fps: f64,
+    },
+    /// Document state, undoable (see [`Command::SetFrameRange`]).
+    SetLoopMode {
+        mode: crate::runtime::LoopMode,
+    },
+    /// Document state, undoable. Only a player acts on it.
+    SetAutoplay {
+        autoplay: bool,
+    },
     /// Reinserts a copied fragment with fresh ids at `position` (offset
     /// from the fragment's own layout). Context-illegal nodes are skipped.
     PasteNodes {
@@ -313,6 +343,18 @@ pub enum EngineEvent {
     CookModeChanged {
         mode: CookMode,
     },
+    PlaybackChanged {
+        playing: bool,
+    },
+    FrameChanged {
+        frame: i64,
+    },
+    /// The persisted half of the clock changed. Separate from the two above
+    /// because these are document edits that ride the undo stack, and the
+    /// mirror has to follow an undo as faithfully as a direct edit.
+    RuntimeSettingsChanged {
+        settings: crate::runtime::RuntimeSettings,
+    },
     /// The node a gizmo drag will write to (see [`Command::EnsureTransformTarget`]).
     /// Emitted on BOTH policy paths, because the reuse path creates nothing and
     /// so has no `NodeAdded` to carry the id.
@@ -325,6 +367,38 @@ pub enum EngineEvent {
     ReviewChanged,
     /// Full-resnapshot signal (structural undo, scene load).
     DocumentReplaced,
+}
+
+/// The on-demand half of what the node info surfaces show: everything that
+/// changes too often to be worth an event, plus the two document fields the
+/// live mirror does not carry.
+///
+/// Pull-read (see [`Engine::node_report`]). Every field here moves on each
+/// cook of a time-dependent node.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeReport {
+    /// World-space bounds as `[minX, minY, minZ, maxX, maxY, maxZ]`, or
+    /// `None` for a node with no geometry output (a texture node, a light,
+    /// a node that has not cooked). A flat array rather than a nested pair
+    /// so the wire shape stays trivially stable.
+    pub bounds: Option<[f32; 6]>,
+    /// The last cook's wall time in microseconds. Microseconds, not the
+    /// badge's milliseconds: a fast node reads `0.0 ms` and `340 us`, and
+    /// only one of those is useful.
+    pub last_cook_us: u64,
+    /// Cooks this session, and their summed duration. Session-only: a
+    /// reload starts both at zero, because they describe what this editing
+    /// session has done rather than a property of the document.
+    pub cook_count: u64,
+    pub total_cook_us: u64,
+    /// Why this node loaded as a non-cooking placeholder, when it did.
+    pub placeholder: Option<String>,
+    /// Unix milliseconds. `None` on documents saved before 0.8.1 and
+    /// whenever the host installed no epoch clock; the UI says "unknown"
+    /// rather than showing a fabricated date.
+    pub created_ms: Option<f64>,
+    pub modified_ms: Option<f64>,
 }
 
 /// A coalesced batch of events plus the monotonic document revision.
@@ -419,7 +493,7 @@ fn push_validation_events(
 }
 
 /// A whole-document save file: the graph data plus the editor's cook mode.
-/// The Phase-4 web host serializes this to JSON for OPFS autosave and the
+/// The web host serializes this to JSON for OPFS autosave and the
 /// explicit save/load path; the `.slxy` ZIP embeds the same
 /// `DocumentData` as its `document.json`, wrapping asset payloads around it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -458,6 +532,43 @@ pub enum EngineError {
     /// at set time so the cook never has to detect one.
     #[error("setting '{key}' would create a reference cycle through node {target:?}")]
     ReferenceCycle { key: String, target: NodeId },
+    /// A `SetParam` would make an expression depend, through a chain of
+    /// `ch()` references, on the very param it is being written to.
+    /// Refused at set time so the cook never has to detect one and the
+    /// document can never hold a loop.
+    #[error("setting '{key}' would create a reference cycle through {path}")]
+    ExpressionCycle { key: String, path: String },
+}
+
+/// Whether a command can change the expression dependency graph.
+///
+/// Captured before `dispatch` consumes the command. Moves, selection and
+/// display-flag changes cannot touch a reference, and a canvas drag is a
+/// stream of `MoveNodes`, so excluding them keeps the rebuild off the one
+/// path where it would be felt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExprIndexTouch(bool);
+
+impl ExprIndexTouch {
+    fn of(cmd: &Command) -> Self {
+        Self(matches!(
+            cmd,
+            // Params carry expressions; `name` changes what a path resolves
+            // to; structure changes what exists to be referenced.
+            Command::SetParam { .. }
+                | Command::ResetParams { .. }
+                | Command::AddNode { .. }
+                | Command::RemoveNodes { .. }
+                | Command::PasteNodes { .. }
+                | Command::DuplicateNodes { .. }
+                | Command::Undo
+                | Command::Redo
+        ))
+    }
+
+    fn affects_index(self) -> bool {
+        self.0
+    }
 }
 
 /// What [`Engine::invoke_action`] produced: encoded bytes for the host to
@@ -626,6 +737,25 @@ pub struct Engine {
     /// is stable until the node recooks, so hashes recompute only for
     /// geometry that actually changed).
     review_hash_cache: BTreeMap<NodeId, (usize, u64)>,
+    /// The expression dependency graph, derived from the document.
+    ///
+    /// Rebuilt wholesale after any command that could change it rather
+    /// than patched incrementally, so it can never disagree with the
+    /// document it describes (see `ExprIndex`). Read during dirty
+    /// propagation and cycle refusal, both of which run against the index
+    /// as it stood BEFORE the command being applied, which is exactly
+    /// what those two questions are about.
+    expr_index: crate::refs::ExprIndex,
+    /// The scene clock. Its settings are document state and save into
+    /// `.slxy`; `playing` and `frame` are session state and do not.
+    clock: crate::runtime::SceneClock,
+    /// Host epoch clock (Unix ms) for node timestamps. Distinct from the
+    /// cook driver's monotonic duration clock; see `set_epoch_clock`.
+    epoch_clock: Option<fn() -> f64>,
+    /// Dirty nodes left over from the last [`Self::cook`], which is what
+    /// [`Self::tick`] refuses to advance the clock past. See the pacing
+    /// rationale on `tick`.
+    last_cook_remaining: usize,
 }
 
 impl Engine {
@@ -651,7 +781,21 @@ impl Engine {
             pending_jobs: Vec::new(),
             review_stale: BTreeMap::new(),
             review_hash_cache: BTreeMap::new(),
+            expr_index: crate::refs::ExprIndex::default(),
+            clock: crate::runtime::SceneClock::default(),
+            epoch_clock: None,
+            last_cook_remaining: 0,
         }
+    }
+
+    /// Re-derives the expression dependency graph from the document.
+    ///
+    /// Called after anything that could change a reference. Cheap enough
+    /// to be unconditional on those paths (one linear pass), and being
+    /// derived rather than maintained is what removes the stale-entry bug
+    /// class the scan never had.
+    fn rebuild_expr_index(&mut self) {
+        self.expr_index = crate::refs::ExprIndex::build(&self.doc, &self.registry);
     }
 
     /// Enables async import offloading (the web host has an import worker).
@@ -666,6 +810,28 @@ impl Engine {
     /// without one, durations stay `0` (the native/test default).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         self.cook.set_clock(clock);
+    }
+
+    /// Installs a host **epoch** clock (Unix milliseconds), used to stamp
+    /// node `created` / `modified` times.
+    ///
+    /// Deliberately a second seam rather than reusing [`Self::set_clock`].
+    /// The two measure different things and cannot be the same source: cook
+    /// durations need a monotonic high-resolution clock (`performance.now`,
+    /// which counts from page load and so says a node was created in 1970),
+    /// while a timestamp needs the wall date (`Date.now`, which has
+    /// millisecond resolution and can jump when the system clock is set).
+    /// Without this clock, timestamps stay `None` and the UI says "unknown"
+    /// rather than inventing one.
+    pub fn set_epoch_clock(&mut self, clock: fn() -> f64) {
+        self.epoch_clock = Some(clock);
+    }
+
+    /// The current wall time in Unix milliseconds, or `None` when the host
+    /// installed no epoch clock.
+    #[must_use]
+    pub fn wall_clock_ms(&self) -> Option<f64> {
+        self.epoch_clock.map(|f| f())
     }
 
     #[must_use]
@@ -756,15 +922,69 @@ impl Engine {
         }
         let mut events = Vec::new();
         let mut inv = Vec::new();
+        let cmd_kind = ExprIndexTouch::of(&cmd);
         self.dispatch(cmd, &mut events, &mut inv)?;
         // Non-cook commands can still change what an anchor sees (display
         // flag moves, node/annotation edits), so staleness refreshes on
         // every mutation, not just after cooks. Cheap: no-op without
         // 3D-anchored annotations.
         self.refresh_review_staleness(&mut events);
+        // Re-derived, not patched: the index is a view of the document, so
+        // rebuilding is what makes a stale entry impossible. Skipped for
+        // the commands that provably cannot change a reference (moves,
+        // selection, display flags), which is what keeps a canvas drag off
+        // this path.
+        if cmd_kind.affects_index() {
+            self.expr_index = crate::refs::ExprIndex::build(&self.doc, &self.registry);
+        }
+        self.stamp_modified(&events);
         self.undo.push_command("edit", inv);
         self.revision += 1;
         Ok(self.batch(events))
+    }
+
+    /// Stamps `modified_ms` on every node a command actually changed.
+    ///
+    /// Driven off the emitted events rather than off the command, for two
+    /// reasons: one command can touch several nodes (a paste, a cascade,
+    /// the exclusive-shadow-caster rule releasing another light), and a new
+    /// command is covered the moment it emits the events it already has to
+    /// emit. The set of "what changed" is therefore never a second thing to
+    /// keep in step.
+    ///
+    /// `NodesMoved` is the deliberate omission: canvas position is
+    /// presentation, and an auto-layout pass restamping the whole graph
+    /// would make the timestamp meaningless. `SelectionChanged` likewise.
+    fn stamp_modified(&mut self, events: &[EngineEvent]) {
+        let Some(now) = self.wall_clock_ms() else {
+            // No host clock (native cook, test, CLI): leave the field alone
+            // rather than writing a fabricated or zero time.
+            return;
+        };
+        for ev in events {
+            let (ctx, node) = match ev {
+                EngineEvent::NodeAdded { ctx, node } => (*ctx, node.id),
+                EngineEvent::ParamChanged { ctx, node, .. }
+                | EngineEvent::BypassChanged { ctx, node, .. }
+                | EngineEvent::VariadicReordered { ctx, node, .. } => (*ctx, *node),
+                // A connection changes both ends' behaviour.
+                EngineEvent::EdgeAdded { ctx, edge } => {
+                    self.stamp_one(*ctx, edge.from, now);
+                    (*ctx, edge.to)
+                }
+                _ => continue,
+            };
+            self.stamp_one(ctx, node, now);
+        }
+    }
+
+    fn stamp_one(&mut self, ctx: GraphContext, node: NodeId, now: f64) {
+        if let Ok(graph) = self.doc.graph_mut(ctx)
+            && let Some(data) = graph.node_mut(node)
+        {
+            data.modified_ms = Some(now);
+            data.created_ms.get_or_insert(now);
+        }
     }
 
     fn batch(&self, events: Vec<EngineEvent>) -> EventBatch {
@@ -956,6 +1176,73 @@ impl Engine {
                 self.manual_cook_requested = true;
                 Ok(())
             }
+            // Transport: session state, so no UndoOp is recorded and
+            // `push_command` no-ops on the empty inventory.
+            Command::Play => {
+                self.clock.play();
+                events.push(EngineEvent::PlaybackChanged {
+                    playing: self.clock.playing,
+                });
+                events.push(EngineEvent::FrameChanged {
+                    frame: self.clock.frame,
+                });
+                Ok(())
+            }
+            Command::Pause => {
+                self.clock.pause();
+                events.push(EngineEvent::PlaybackChanged { playing: false });
+                Ok(())
+            }
+            Command::Stop => {
+                self.clock.stop();
+                events.push(EngineEvent::PlaybackChanged { playing: false });
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::StepFrame { delta } => {
+                self.clock.step(delta);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::SetFrame { frame } => {
+                self.clock.set_frame(frame);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            // Clock SETTINGS are document state: they save into `.slxy`, so
+            // they record an inverse and ride the undo stack.
+            Command::SetFrameRange { start, end } => {
+                let prev = self.clock.settings();
+                self.clock.set_range(start, end);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                self.seek(self.clock.frame, events);
+                Ok(())
+            }
+            Command::SetFps { fps } => {
+                let prev = self.clock.settings();
+                self.clock.set_fps(fps);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                // `$T` is frame/fps, so changing the rate changes what every
+                // time expression resolves to at the SAME frame.
+                self.retime(events);
+                Ok(())
+            }
+            Command::SetLoopMode { mode } => {
+                let prev = self.clock.settings();
+                self.clock.set_loop_mode(mode);
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                Ok(())
+            }
+            Command::SetAutoplay { autoplay } => {
+                let prev = self.clock.settings();
+                self.clock.autoplay = autoplay;
+                inv.push(UndoOp::RestoreRuntimeSettings { settings: prev });
+                self.emit_runtime_settings(events);
+                Ok(())
+            }
             // The transaction/undo commands are intercepted in `apply`.
             Command::BeginTransaction { .. }
             | Command::EndTransaction
@@ -988,6 +1275,19 @@ impl Engine {
         let id = self.doc.mint_node_id();
         let mut node = NodeData::new(id, node_type, desc.version);
         node.position = position;
+        // Every node carries a stored, graph-unique name from birth. It
+        // cannot be a descriptor default (that is per TYPE, which is how
+        // every sphere came to be called "Sphere"), and expressions resolve
+        // by name: `ch("../sphere1/radius")` has nothing to bind to
+        // otherwise.
+        let minted = {
+            let graph = self.doc.graph(ctx)?;
+            crate::naming::mint_name(graph, &self.registry, node_type)
+        };
+        node.params.insert(
+            "name".to_string(),
+            ParamSource::Literal(ParamValue::Text(minted)),
+        );
         // Container nodes open their own canvas, kinded by the descriptor
         // (no type id is special-cased).
         if let Some(child_kind) = desc.opens {
@@ -1313,7 +1613,49 @@ impl Engine {
                 })?;
                 ParamSource::Literal(c)
             }
-            ParamSource::Expression { .. } => value.clone(),
+            ParamSource::Expression { .. } => {
+                // Only the numeric types accept one. This is a command
+                // error, not a badge, because it is a category mistake
+                // rather than a value the user could fix by editing the
+                // text, which is what a broken expression is.
+                if !spec.ty.accepts_expression() {
+                    return Err(EngineError::InvalidParam {
+                        key: key.to_string(),
+                        reason: format!(
+                            "a {} param cannot be driven by an expression",
+                            spec.ty.describe()
+                        ),
+                    });
+                }
+                value.clone()
+            }
+        };
+        // A rename stays graph-unique: expressions resolve by name, so two
+        // nodes called `body` in one network would make `ch("body/size")`
+        // ambiguous. A collision is suffixed rather than refused, because
+        // rejecting a rename mid-typing is hostile, and the STORED value is
+        // what the event carries so the mirror shows what was actually kept.
+        // A rename carries a second job: every expression that referenced
+        // the old name has to follow. Both names are captured here, before
+        // the write, because the rewrite has to resolve paths against the
+        // document as it still stands.
+        let mut rename: Option<(String, String)> = None;
+        let conformed = if key == "name"
+            && let ParamSource::Literal(ParamValue::Text(desired)) = &conformed
+        {
+            let graph = self.doc.graph(ctx)?;
+            let unique = crate::naming::uniquify(graph, &self.registry, desired, node);
+            let old = graph
+                .node(node)
+                .map(|n| crate::naming::node_name(n, &self.registry));
+            if let Some(old) = old
+                && old != unique
+            {
+                rename = Some((old, unique.clone()));
+            }
+            ParamSource::Literal(ParamValue::Text(unique))
+        } else {
+            conformed
         };
         // A reference is refused at SET time if it would close a cycle
         // (a network depending on its own result through any chain of
@@ -1325,6 +1667,37 @@ impl Engine {
                 key: key.to_string(),
                 target: *target,
             });
+        }
+        // The same rule for expressions, over (node, key) pairs rather
+        // than nodes: `width = ch("height")` on one node is legal and
+        // useful, so a node-level check would refuse real work. The index
+        // still describes the document as it stands, which is exactly the
+        // question being asked -- would ADDING this edge close a loop.
+        if let ParamSource::Expression { expr } = &conformed {
+            let me = (node, key.to_string());
+            for target in
+                crate::refs::ExprIndex::targets_of(&self.doc, &self.registry, ctx, node, expr)
+            {
+                if target == me || self.expr_index.reaches(&target, &me) {
+                    return Err(EngineError::ExpressionCycle {
+                        key: key.to_string(),
+                        path: target.1,
+                    });
+                }
+            }
+        }
+        // A rename rewrites every expression that referenced the old name,
+        // INSIDE this same command. `apply` pushes `inv` once, so the
+        // rename and its rewrites are one undo step: undoing a rename can
+        // never strand a path pointing at a name that no longer exists.
+        // This keeps a by-name reference as durable as the by-id `NodeRef`
+        // params already are.
+        //
+        // It runs BEFORE the write because the rewrite resolves each path
+        // segment through the document to confirm it really names this
+        // node, and after the write the old name resolves to nothing.
+        if let Some((old, new)) = rename {
+            self.rewrite_references_to(node, &old, &new, events, inv);
         }
         // The authoritative value clears any transient preview overlay.
         self.previews.remove(&(node, key.to_string()));
@@ -1438,6 +1811,47 @@ impl Engine {
         }
         if removed.is_empty() {
             return Ok(());
+        }
+        // Resetting `name` would drop the node back to its type's display
+        // name, which every node of that type shares -- precisely the state
+        // minting exists to escape, and it would silently break any
+        // expression referencing this node. Re-mint instead, so a reset
+        // still means "forget what I typed" without collapsing the name.
+        if removed.iter().any(|(key, _, _)| key == "name") {
+            let minted = {
+                let graph = self.doc.graph(ctx)?;
+                crate::naming::mint_name(graph, &self.registry, &type_id)
+            };
+            // Re-minting usually reproduces the name the node already had:
+            // removing it frees exactly the slot the mint then reclaims. An
+            // event that announces no change is noise the mirror still has
+            // to apply and undo still has to store, so drop the entry.
+            let unchanged = removed.iter().any(|(key, _, prev)| {
+                key == "name"
+                    && matches!(prev, ParamSource::Literal(ParamValue::Text(t)) if t == &minted)
+            });
+            if unchanged {
+                removed.retain(|(key, _, _)| key != "name");
+            } else {
+                for entry in &mut removed {
+                    if entry.0 == "name" {
+                        entry.1 = ParamValue::Text(minted.clone());
+                    }
+                }
+            }
+            // Re-inserted either way: the param has to stay stored, or the
+            // node falls back to the display name its whole type shares.
+            if let Ok(graph) = self.doc.graph_mut(ctx)
+                && let Some(node_data) = graph.node_mut(node)
+            {
+                node_data.params.insert(
+                    "name".to_string(),
+                    ParamSource::Literal(ParamValue::Text(minted)),
+                );
+            }
+            if removed.is_empty() {
+                return Ok(());
+            }
         }
         self.mark_dirty(ctx, node);
         for (key, default, prev) in removed {
@@ -1634,7 +2048,8 @@ impl Engine {
             let stale = match (self.anchor_hash(&anchor), anchor.geometry_hash) {
                 (None, _) => true,
                 (Some(current), Some(stored)) => current != stored,
-                // No reference hash (pre-Phase-7 annotation): nothing to
+                // No reference hash (an annotation stored before geometry
+                // hashing existed): nothing to
                 // compare against, so never flag it.
                 (Some(_), None) => false,
             };
@@ -1849,9 +2264,8 @@ impl Engine {
                     };
                 let (bytes, ext, mime) = match resolved.enum_key("format") {
                     // OBJ with materials is a multi-file export (.obj +
-                    // .mtl + textures), delivered as a Stored zip
-                    // (decision M-9); without materials it stays the
-                    // classic single file.
+                    // .mtl + textures), delivered as a Stored zip;
+                    // without materials it stays the classic single file.
                     "obj" if !materials.is_empty() => {
                         let base = filename_base(&resolved);
                         let export =
@@ -1989,11 +2403,28 @@ impl Engine {
         // Offset the pasted nodes so they do not sit exactly on the source,
         // and register + dirty them.
         for &id in &result.inserted {
+            // `insert_into` remaps ids but not names, and pasting into the
+            // network you copied from is the common case, so almost every
+            // paste collides. Uniquify one node at a time in insertion
+            // order, so each rename is visible to the next.
+            let unique = {
+                let graph = self.doc.graph(ctx)?;
+                graph.node(id).map(|n| {
+                    let current = crate::naming::node_name(n, &self.registry);
+                    crate::naming::uniquify(graph, &self.registry, &current, id)
+                })
+            };
             if let Ok(graph) = self.doc.graph_mut(ctx)
                 && let Some(node) = graph.node_mut(id)
             {
                 node.position[0] += position[0];
                 node.position[1] += position[1];
+                if let Some(unique) = unique {
+                    node.params.insert(
+                        "name".to_string(),
+                        ParamSource::Literal(ParamValue::Text(unique)),
+                    );
+                }
             }
             self.cook.insert_node(id);
             self.mark_dirty(ctx, id);
@@ -2060,6 +2491,7 @@ impl Engine {
         // Undoing a re-anchor (or any display-affecting edit) must flip the
         // stale flags in the same batch.
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2076,6 +2508,7 @@ impl Engine {
         };
         let (_discarded, mut events) = self.apply_transaction(txn)?;
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2087,6 +2520,7 @@ impl Engine {
         let (undo, mut events) = self.apply_transaction(txn)?;
         self.undo.push_undo(undo);
         self.refresh_review_staleness(&mut events);
+        self.rebuild_expr_index();
         Ok(self.batch(events))
     }
 
@@ -2122,6 +2556,13 @@ impl Engine {
         events: &mut Vec<EngineEvent>,
     ) -> Result<UndoOp, EngineError> {
         match op {
+            UndoOp::RestoreRuntimeSettings { settings } => {
+                let prev = self.clock.settings();
+                self.clock.apply_settings(&settings);
+                self.emit_runtime_settings(events);
+                self.retime(events);
+                Ok(UndoOp::RestoreRuntimeSettings { settings: prev })
+            }
             UndoOp::RestoreParam {
                 ctx,
                 node,
@@ -2296,6 +2737,70 @@ impl Engine {
         }
     }
 
+    /// One param's current value, as the parameter panel displays it.
+    ///
+    /// **Pulled, never pushed.** Under a playing runtime a per-cook
+    /// resolved value pushed as an event would emit one event per
+    /// expression per frame across the wasm boundary, which is exactly the
+    /// traffic the mirror-and-command model exists to avoid. The panel
+    /// asks for the row it is showing.
+    ///
+    /// Returns the value in the space the user authored it in (degrees,
+    /// not radians), so the readout under an expression field agrees with
+    /// the number they typed.
+    ///
+    /// # Errors
+    /// The node or param not existing, or the expression failing to parse
+    /// or evaluate. The message is what the editor shows in its error
+    /// state.
+    pub fn resolved_param(
+        &self,
+        ctx: GraphContext,
+        node: NodeId,
+        key: &str,
+    ) -> Result<ParamValue, String> {
+        let graph = self.doc.graph(ctx).map_err(|e| e.to_string())?;
+        let data = graph.node(node).ok_or_else(|| "no such node".to_string())?;
+        let desc = self
+            .registry
+            .get(&data.type_id)
+            .ok_or_else(|| "unknown node type".to_string())?;
+        let spec = desc
+            .param(key)
+            .ok_or_else(|| "no such param on this node type".to_string())?;
+        let params = crate::previews::effective_params(&self.previews, node, &data.params);
+        let refs = crate::refs::DocRefs::new(
+            &self.doc,
+            &self.registry,
+            &self.previews,
+            ctx,
+            node,
+            crate::expr::SceneTime::default(),
+        );
+        // The readout answers geometry queries off the SAME cached inputs
+        // the cook gathered, so the panel and the node's badge cannot
+        // disagree about what `npoints()` sees. Before this, the panel had
+        // no geometry capability at all and reported every geometry query
+        // as unavailable, including on a node whose input was connected
+        // and cooked.
+        //
+        // `None` here means a required port is unconnected, in which case
+        // there is genuinely nothing to read and the capability stays
+        // absent, exactly as it did before.
+        let inputs = self.cook.gathered_inputs(graph, desc, node);
+        let default_port = desc.default_input().map_or("geometry", |p| p.key.as_str());
+        let geo = inputs
+            .as_ref()
+            .map(|i| crate::cook::geo_queries::InputGeo::new(i, default_port));
+        let mut eval =
+            crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+        if let Some(geo) = geo.as_ref() {
+            eval = eval.with_geo(geo);
+        }
+        crate::registry::resolve::resolve_one_authored(&params, spec, &eval)
+            .map_err(|e| e.to_string())
+    }
+
     /// A transient preview value for a param drag: no event, no undo entry,
     /// no document write. It only dirty-marks so the next cook previews it,
     /// and the resolver path consults it until the authoritative `SetParam`
@@ -2307,6 +2812,13 @@ impl Engine {
         key: &str,
         value: ParamSource,
     ) {
+        // The drag lane scrubs a number. An expression here would be
+        // re-parsed every frame of the drag for a value the committing
+        // `SetParam` would then overwrite anyway, so it is ignored rather
+        // than parked.
+        if matches!(value, ParamSource::Expression { .. }) {
+            return;
+        }
         self.previews.insert((node, key.to_string()), value);
         self.mark_dirty(ctx, node);
     }
@@ -2518,6 +3030,9 @@ impl Engine {
         if remaining == 0 {
             self.manual_cook_requested = false;
         }
+        // Retained for `tick`'s pacing gate rather than discarded: it is the
+        // only signal that says whether the frame just cooked is complete.
+        self.last_cook_remaining = remaining;
         // Recooked outputs may no longer match anchored geometry hashes.
         self.refresh_review_staleness(&mut events);
         events
@@ -2570,6 +3085,33 @@ impl Engine {
     #[must_use]
     pub fn cook_warnings(&self, node: NodeId) -> Vec<String> {
         self.cook.warnings(node).to_vec()
+    }
+
+    /// Everything the node info surfaces show beyond the live mirror:
+    /// bounds, cook accounting, the placeholder reason, and timestamps.
+    ///
+    /// A pull query rather than event fields, deliberately. Every value
+    /// here moves on each cook of a time-dependent node, so pushing them
+    /// would put an event per node per frame back on the wire, which is
+    /// precisely what `CookStatus::same_state` was added to stop. The info
+    /// card is open for seconds at a time and reads on demand; nothing else
+    /// needs these at all.
+    #[must_use]
+    pub fn node_report(&self, ctx: GraphContext, node: NodeId) -> Option<NodeReport> {
+        let data = self.doc.graph(ctx).ok()?.node(node)?;
+        let stats = self.cook.stats(node);
+        let (cook_count, total_us) = self.cook.cook_totals(node);
+        Some(NodeReport {
+            bounds: stats
+                .and_then(|s| s.bounds)
+                .map(|b| [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z]),
+            last_cook_us: stats.map_or(0, |s| s.duration_us),
+            cook_count,
+            total_cook_us: total_us,
+            placeholder: data.placeholder.clone(),
+            created_ms: data.created_ms,
+            modified_ms: data.modified_ms,
+        })
     }
 
     /// The lane inventory of a node's cooked geometry (the attribute-name
@@ -2789,6 +3331,9 @@ impl Engine {
         self.undo = UndoStack::default();
         self.previews.clear();
         self.pending_jobs.clear();
+        // A whole new document: the index has nothing in common with the
+        // old one, so it is rebuilt from scratch rather than migrated.
+        self.rebuild_expr_index();
         self.scene = SceneDelta::default();
         // Fresh document: staleness re-derives after the first cook (until
         // then nothing is displayed, so no annotation is flagged).
@@ -2864,12 +3409,110 @@ impl Engine {
 
     // Helpers.
 
+    /// Pushes the persisted half of the clock to the mirror.
+    fn emit_runtime_settings(&self, events: &mut Vec<EngineEvent>) {
+        events.push(EngineEvent::RuntimeSettingsChanged {
+            settings: self.clock.settings(),
+        });
+    }
+
+    /// Moves to a frame: pushes the clock into the cook and dirties whatever
+    /// reads time.
+    ///
+    /// Emits `FrameChanged` unconditionally, even when nothing depends on
+    /// time, because the transport's readout has to follow the scrub whether
+    /// or not any geometry does.
+    fn seek(&mut self, frame: i64, events: &mut Vec<EngineEvent>) {
+        events.push(EngineEvent::FrameChanged { frame });
+        self.retime(events);
+    }
+
+    /// Republishes the clock to the cook engine and dirties every
+    /// time-dependent node.
+    ///
+    /// A scene with no time expression pays nothing here: the index's
+    /// time-dependent set is empty, so this is a clock write and an empty
+    /// loop. That is the whole reason the set exists.
+    fn retime(&mut self, _events: &mut [EngineEvent]) {
+        self.cook.set_scene_time(self.clock.scene_time());
+        let targets: Vec<(GraphContext, NodeId)> =
+            self.expr_index.time_dependent().iter().copied().collect();
+        for (ctx, node) in targets {
+            self.mark_dirty(ctx, node);
+        }
+    }
+
+    /// Advances the clock one frame and dirties what depends on it.
+    ///
+    /// **Fixed step** (see [`crate::runtime`]): one call is one frame, not
+    /// `dt` seconds, so `$T` is exactly `frame / fps` and cooking frame 90 is
+    /// reproducible. The host calls this once per frame before cooking.
+    ///
+    /// Returns an empty batch when the clock is stopped or the frame did not
+    /// move, so a paused editor costs one boolean per frame.
+    pub fn tick(&mut self) -> EventBatch {
+        if !self.clock.playing {
+            return self.batch(Vec::new());
+        }
+        // Pacing: never advance past a frame the cook has not finished.
+        //
+        // Without this the clock ran free while the budget cut the cook
+        // short, and `retime` re-dirtied the head of the chain before the
+        // tail was ever reached -- so on a scene whose wrangle costs more
+        // than one budget slice, the DISPLAY node never cooked at all and
+        // the mesh sat frozen while the frame counter climbed. Every
+        // frame's work was thrown away and redone at a new time.
+        //
+        // Waiting means a heavy scene plays below its nominal rate instead
+        // of skipping, which is the honest behaviour: what you watch is
+        // what you would export.
+        //
+        // This cannot deadlock. `remaining_dirty` counts only `Dirty`
+        // nodes (a `Pending` node awaiting an async import is excluded), and
+        // every path out of `cook_one` leaves a node `Clean` or `Pending` --
+        // including the error path. So the dirty set always drains given
+        // passes, and the only thing that re-fills it during playback is
+        // this very `retime`, which cannot run while the gate is closed.
+        //
+        // Manual scrubbing is deliberately NOT gated: `SetFrame` and `Stop`
+        // seek directly, because someone dragging the playhead should get
+        // the frame they asked for rather than the one the cook is ready to
+        // give.
+        if self.last_cook_remaining > 0 {
+            return self.batch(Vec::new());
+        }
+        let was_playing = self.clock.playing;
+        let moved = self.clock.advance();
+        let mut events = Vec::new();
+        // `Once` clears `playing` when it reaches the end, and the transport
+        // has to hear about that or its button lies.
+        if was_playing != self.clock.playing {
+            events.push(EngineEvent::PlaybackChanged {
+                playing: self.clock.playing,
+            });
+        }
+        if moved {
+            self.seek(self.clock.frame, &mut events);
+        }
+        if events.is_empty() {
+            return self.batch(events);
+        }
+        self.revision += 1;
+        self.batch(events)
+    }
+
+    /// The scene clock, for the host's transport UI and for saving.
+    #[must_use]
+    pub fn clock(&self) -> &crate::runtime::SceneClock {
+        &self.clock
+    }
+
     /// Marks a node dirty in its graph AND propagates across contexts
-    /// through node references: editing a
-    /// node inside a referenced network re-dirties every referrer of that
-    /// network's container, transitively, so a `/mat` edit repaints every
-    /// geo pointing at it without a manual cook. Reference cycles are
-    /// refused at set time, but the visited set also guards diamonds.
+    /// through node references: editing a node inside a referenced network
+    /// re-dirties every referrer of that network's container, transitively,
+    /// so a `/mat` edit repaints every geo pointing at it without a manual
+    /// cook. Reference cycles are refused at set time, but the visited set
+    /// also guards diamonds.
     fn mark_dirty(&mut self, ctx: GraphContext, node: NodeId) {
         let mut visited = std::collections::BTreeSet::new();
         self.mark_dirty_inner(ctx, node, &mut visited);
@@ -2892,6 +3535,31 @@ impl Engine {
         for (r_ctx, referrer) in self.referrers_of(node) {
             self.mark_dirty_inner(r_ctx, referrer, visited);
         }
+        // Every param whose expression reads ANY param on this node has to
+        // recook: `ch()` reads document state, so the reader has no wire to
+        // carry the change. Node-level rather than param-level because
+        // cooking is per node anyway, and the index is keyed finely enough
+        // that this stays a lookup rather than a scan.
+        let referrers: Vec<NodeId> = self
+            .doc
+            .graph(ctx)
+            .ok()
+            .and_then(|g| g.node(node))
+            .map(|n| {
+                n.params
+                    .keys()
+                    .flat_map(|k| {
+                        self.expr_index
+                            .transitive_referrer_nodes(&(node, k.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for r in referrers {
+            let r_ctx = self.context_of(r);
+            self.mark_dirty_inner(r_ctx, r, visited);
+        }
+
         // A dirty node inside a child network changes that network's
         // published result, so the network's CONTAINER counts as changed
         // for everyone referencing it.
@@ -2899,6 +3567,77 @@ impl Engine {
             for (r_ctx, referrer) in self.referrers_of(owner) {
                 self.mark_dirty_inner(r_ctx, referrer, visited);
             }
+        }
+    }
+
+    /// Rewrites every `ch()` path in the document that named `old`.
+    ///
+    /// Must run BEFORE the new name is stored. `rewrite_path_for_rename`
+    /// asks "does this segment resolve to THIS node", which is what makes
+    /// it positional rather than a text substitution, and that lookup goes
+    /// by name: once the rename lands, the old name resolves to nothing and
+    /// every path would silently fail to match.
+    ///
+    /// Collected before mutating, because the scan borrows the document
+    /// that the writes then need mutably.
+    fn rewrite_references_to(
+        &mut self,
+        renamed: NodeId,
+        old: &str,
+        new: &str,
+        events: &mut Vec<EngineEvent>,
+        inv: &mut Vec<UndoOp>,
+    ) {
+        if old == new {
+            return;
+        }
+        let mut edits: Vec<(GraphContext, NodeId, String, String)> = Vec::new();
+        let mut contexts = vec![GraphContext::Root];
+        contexts.extend(self.doc.subflow_owners().map(GraphContext::Subflow));
+        for ctx in contexts {
+            let Ok(graph) = self.doc.graph(ctx) else {
+                continue;
+            };
+            for n in graph.nodes() {
+                for (key, src) in &n.params {
+                    let ParamSource::Expression { expr } = src else {
+                        continue;
+                    };
+                    if let Some(rewritten) = crate::refs::rewrite_expression_for_rename(
+                        expr,
+                        &self.doc,
+                        &self.registry,
+                        ctx,
+                        renamed,
+                        new,
+                    ) {
+                        edits.push((ctx, n.id, key.clone(), rewritten));
+                    }
+                }
+            }
+        }
+        for (ctx, n, key, rewritten) in edits {
+            let value = ParamSource::Expression { expr: rewritten };
+            let Ok(graph) = self.doc.graph_mut(ctx) else {
+                continue;
+            };
+            let Some(data) = graph.node_mut(n) else {
+                continue;
+            };
+            let prev = data.params.insert(key.clone(), value.clone());
+            self.mark_dirty(ctx, n);
+            events.push(EngineEvent::ParamChanged {
+                ctx,
+                node: n,
+                key: key.clone(),
+                value,
+            });
+            inv.push(UndoOp::RestoreParam {
+                ctx,
+                node: n,
+                key,
+                prev,
+            });
         }
     }
 

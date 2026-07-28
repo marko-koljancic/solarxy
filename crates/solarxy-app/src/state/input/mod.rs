@@ -424,7 +424,7 @@ impl State {
             KeyCode::F4 => self.set_view_layout(ViewLayout::Quad),
             KeyCode::F5 => self.set_view_layout(ViewLayout::ThreeLeftBig),
             // Debug-build-only: toggle the two multi-object dev cubes
-            // (phase-2 exit criterion harness; see state/dev.rs).
+            // (the multi-object render harness; see state/dev.rs).
             #[cfg(debug_assertions)]
             KeyCode::F9 => self.toggle_dev_objects(),
             _ => {
@@ -1102,5 +1102,5 @@ impl State {
 }
 
 // `resolve_issue_aabb` / `material_meshes_aabb` moved to
-// `solarxy_renderer::validation` (W3) so the web report panel's
+// `solarxy_renderer::validation` so the web report panel's
 // fly-to shares the exact desktop resolution logic.

@@ -140,6 +140,7 @@ impl State {
                     [pds; 4]
                 },
                 display: DisplaySettings {
+                    point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
                     turntable_active: preferences.display.turntable_active,
                     turntable_rpm: preferences.display.turntable_rpm,
                     lights_locked: preferences.lighting.lock,

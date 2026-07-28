@@ -3,6 +3,7 @@
 // the pane owns its own chrome. The graph/list switch moved out to the
 // toolbar's right-side icon command.
 
+import { toggleMaximize } from "../../dock/api";
 import { runLayout } from "../../flow/layout";
 import { selectGraph, useMirror } from "../../store/mirror";
 import { useRadial } from "../../store/radial";
@@ -72,6 +73,23 @@ export function NodePaneViewMenu() {
           : { x: (host?.left ?? 0) + 40, y: (host?.top ?? 0) + 80 };
         useRadial.getState().openInfo(id, current, at.x, at.y);
       },
+    },
+    { divider: true },
+    // The same trailing block every panel menu bar carries. Maximize was
+    // reachable from the Viewport's menu, the `[]` header button and the
+    // backtick key, but only ever NAMED in the Viewport menu -- so on every
+    // other panel it was an unlabelled icon and an undocumented key.
+    {
+      // The same event the F key and the auto-layout completion fire, so
+      // all three routes are literally one behavior.
+      label: "Fit Graph",
+      shortcut: "F",
+      onClick: () => window.dispatchEvent(new Event("solarxy:fitView")),
+    },
+    {
+      label: "Maximize Panel",
+      shortcut: "Esc to restore",
+      onClick: () => toggleMaximize("nodes"),
     },
   ];
 

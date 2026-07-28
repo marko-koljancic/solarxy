@@ -54,6 +54,7 @@ impl SceneEnvironment {
         bounds: &AABB,
         aspect: f32,
         brdf_lut: &BrdfLut,
+        ltc: &crate::ltc::LtcLuts,
         shadow_map_size: u32,
         vis: VisualizationState,
     ) -> Self {
@@ -81,8 +82,14 @@ impl SceneEnvironment {
             contents: bytemuck::cast_slice(&[lights_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let light_bind_group =
-            create_light_bind_group(device, layouts, &light_buffer, &placeholder_ibl, brdf_lut);
+        let light_bind_group = create_light_bind_group(
+            device,
+            layouts,
+            &light_buffer,
+            &placeholder_ibl,
+            brdf_lut,
+            ltc,
+        );
 
         let shadow = ShadowState::new(device, layouts, &lights_uniform, bounds, shadow_map_size);
 

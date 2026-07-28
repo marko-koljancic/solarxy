@@ -83,6 +83,15 @@ impl BindGroupLayouts {
                 bgl_sampler_entry(4),
                 bgl_texture_entry(5),
                 bgl_sampler_entry(6),
+                // The LTC tables, and the one sampler both are read with.
+                // They live on the light layout rather than a group of
+                // their own because they are only ever read by the
+                // rect-area arm of the light loop, and adding a bind group
+                // would touch every pipeline that has nothing to do with
+                // area lights.
+                bgl_texture_entry(7),
+                bgl_texture_entry(8),
+                bgl_sampler_entry(9),
             ],
         });
         let shadow_pass = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

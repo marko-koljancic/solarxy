@@ -26,6 +26,11 @@ export const GLYPH_PATHS: Record<string, string> = {
   attribute_create: "M2.5 5h6l4.5 3-4.5 3h-6z M5 8h3 M6.5 6.5v3",
   attribute_randomize:
     "M3 3h10v10h-10z M6.4 5.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M8.9 8a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0 M11.4 10.5a0.9 0.9 0 1 1-1.8 0 0.9 0.9 0 1 1 1.8 0",
+  // Wrangle: a code window. The chevron and the caret read as "a program
+  // runs here", which is the one thing that distinguishes this node from
+  // every other attribute node at a glance.
+  attribute_wrangle:
+    "M2.5 3h11v10h-11z M2.5 5.4h11 M5.2 8l1.6 1.6-1.6 1.6 M8.4 11.2h2.6",
   // Promote: points rising into a primitive; Copy: the echoed-rect motif;
   // From Image: the image frame pouring down into geometry.
   attribute_promote:
@@ -65,6 +70,10 @@ export const GLYPH_PATHS: Record<string, string> = {
     "M3 4h10v8h-10z m2.5 4.3a1.1 1.1 0 1 0 0-2.2m-2 5.4l3-3 2.3 2.3 2.2-2.3 2 2",
   geo: "M4.5 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z m1 5.5h5",
   note: "M3 3h10v6.5l-3.5 3.5h-6.5z m6.5 10v-3.5h3.5",
+  // Text: a full page with lines of writing on it. Deliberately close to
+  // the note glyph, because both hold prose; the folded corner is what
+  // says "note" and its absence is what says "document".
+  text: "M3.5 2.5h9v11h-9z M5.5 5.5h5 M5.5 8h5 M5.5 10.5h3",
   ambient: "M11 8a3 3 0 1 1-6 0 3 3 0 1 1 6 0m-7.8-4.8l1 1m8.6-1l-1 1m-8.6 8.6l1-1m8.6 1l-1-1",
   directional:
     "M5 3v5m0 0l-1.6-1.6m1.6 1.6l1.6-1.6m2.9-3.4v5m0 0l-1.6-1.6m1.6 1.6l1.6-1.6m-8.6 5.6c2.2-1.6 8.8-1.6 11 0",
@@ -143,6 +152,7 @@ const CATEGORY_GLYPH: Record<NodeTypeSnapshot["category"], string> = {
   import: "import_obj",
   export: "geo_export",
   lights: "point",
+  cameras: "camera",
   utility: "null",
   tex_generate: "checker",
   tex_adjust: "levels",
@@ -162,6 +172,7 @@ const CATEGORY_ROLE: Record<NodeTypeSnapshot["category"], NodeRole> = {
   import: "standard",
   export: "terminal",
   lights: "light",
+  cameras: "camera",
   utility: "standard",
   tex_generate: "imageSource",
   tex_adjust: "standard",
@@ -186,6 +197,8 @@ const KNOWN_ROLES: ReadonlySet<string> = new Set([
   "analyzer",
   "imageSource",
   "light",
+  "camera",
+  "text",
   "note",
 ]);
 
@@ -228,41 +241,118 @@ export function roundedPolygonPath(points: RoundedVertex[]): string {
   return parts.join(" ");
 }
 
-/** Shaped 112x32 body outlines: every silhouette left-right
- * symmetric with rounded corners. Roles absent here render as plain CSS
- * rectangles. */
-export const ROLE_BODY_PATHS: Partial<Record<NodeRole, string>> = {
+/** A shaped role body: the outline plus the box it is authored in.
+ *
+ * The box is also the node's CSS size, so a role that wants to be smaller
+ * than the 112x32 default says so here and `ShapedBody` emits a matching
+ * `viewBox`. Scaling one path into a different box instead would stretch
+ * the 1px stroke along with it. */
+export interface RoleBody {
+  path: string;
+  w: number;
+  h: number;
+}
+
+/** The default body box every role uses unless it declares otherwise. */
+const BODY_W = 112;
+const BODY_H = 32;
+
+/** Shaped body outlines. Roles absent here render as plain CSS rectangles.
+ *
+ * Most silhouettes are left-right symmetric, and `nodeVisual.test.ts` holds
+ * them to it. Two are deliberately not: `camera` points the way it aims,
+ * and `container` carries a folder tab. Both asymmetries carry meaning, so
+ * the test names them rather than the rule being dropped. */
+export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
   // The two-way junction: a symmetric hexagon.
-  branch: roundedPolygonPath([
-    [0, 16, 5],
-    [18, 0, 4],
-    [94, 0, 4],
-    [112, 16, 5],
-    [94, 32, 4],
-    [18, 32, 4],
-  ]),
+  branch: {
+    path: roundedPolygonPath([
+      [0, 16, 5],
+      [18, 0, 4],
+      [94, 0, 4],
+      [112, 16, 5],
+      [94, 32, 4],
+      [18, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
   // Wide intake, narrowed readout: a symmetric trapezoid.
-  analyzer: roundedPolygonPath([
-    [0, 0, 4],
-    [112, 0, 4],
-    [102, 32, 4],
-    [10, 32, 4],
-  ]),
+  analyzer: {
+    path: roundedPolygonPath([
+      [0, 0, 4],
+      [112, 0, 4],
+      [102, 32, 4],
+      [10, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
   // A file ticket with both top corners chamfered (the old single-fold
   // motif was asymmetric).
-  imageSource: roundedPolygonPath([
-    [14, 0, 3],
-    [98, 0, 3],
-    [112, 14, 3],
-    [112, 32, 4],
-    [0, 32, 4],
-    [0, 14, 3],
-  ]),
-  // A lamp dome (the old lampshade was asymmetric): heavy top rounding.
-  light: roundedPolygonPath([
-    [0, 0, 14],
-    [112, 0, 14],
-    [112, 32, 4],
-    [0, 32, 4],
-  ]),
+  imageSource: {
+    path: roundedPolygonPath([
+      [14, 0, 3],
+      [98, 0, 3],
+      [112, 14, 3],
+      [112, 32, 4],
+      [0, 32, 4],
+      [0, 14, 3],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
+  // A lamp dome: heavy top rounding, and softened at the bottom too. Sized
+  // down from the standard body because a light is a fixture you place, not
+  // a stage in a chain, and at full width it dominated the graph around it.
+  light: {
+    path: roundedPolygonPath([
+      [0, 0, 12],
+      [96, 0, 12],
+      [96, 28, 10],
+      [0, 28, 10],
+    ]),
+    w: 96,
+    h: 28,
+  },
+  // A camera: a body with a CENTRED bump, reading as a viewfinder.
+  //
+  // Shares the raised-tab motif with `container` below, and is told apart
+  // from it by position alone -- centred here, left there. That pairing is
+  // deliberate: both are things you place in the root graph rather than
+  // stages in a chain, so they should look related without looking alike.
+  // Symmetric, unlike the container, and held to the symmetry rule.
+  camera: {
+    path: roundedPolygonPath([
+      [0, 8, 4],
+      [38, 8, 3],
+      [45, 0, 3],
+      [67, 0, 3],
+      [74, 8, 3],
+      [112, 8, 4],
+      [112, 32, 4],
+      [0, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
+  // A folder: the one silhouette that has to say "there is more inside".
+  // The tab is the universal motif for it, and it survives zooming out in a
+  // way an inset second border does not.
+  //
+  // Same 112x32 box as every other root-graph node, so a container no
+  // longer stands out by SIZE among the lights and cameras it sits beside;
+  // the tab is what carries the meaning.
+  container: {
+    path: roundedPolygonPath([
+      [0, 0, 4],
+      [20, 0, 3],
+      [27, 8, 2],
+      [112, 8, 4],
+      [112, 32, 4],
+      [0, 32, 4],
+    ]),
+    w: BODY_W,
+    h: BODY_H,
+  },
 };

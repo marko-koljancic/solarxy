@@ -46,11 +46,16 @@ export default defineConfig({
     // fetched separately, so the default 500 kB warning only adds noise.
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
-      // Two-page build: the MPW landing owns index.html at the
-      // domain root; the app moved to app.html (served at /app by nginx).
+      // Three-page build: the MPW landing owns index.html at the domain
+      // root, the app is app.html (served at /app by nginx), and the player
+      // is player.html (served at /player).
       input: {
         landing: resolve(import.meta.dirname, "index.html"),
         app: resolve(import.meta.dirname, "app.html"),
+        // The player is a real built page, not a template the exporter
+        // stitches at runtime: it is typechecked, bundled and dev-servable
+        // like the other two, and the export copies what the build produced.
+        player: resolve(import.meta.dirname, "player.html"),
       },
       output: {
         // Split the heavy vendors so a change to app code does not invalidate

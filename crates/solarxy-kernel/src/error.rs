@@ -14,4 +14,11 @@ pub enum KernelError {
     /// caller-supplied matrix.
     #[error("transform matrix is singular; cannot derive the normal matrix")]
     SingularTransform,
+    /// A wrangle program failed on an element, or assigned a lane a width
+    /// that disagrees with the lane's established type. Carries the message
+    /// already located to a mesh and element by
+    /// [`crate::wrangle::wrangle`], because a per-element failure is
+    /// unfindable without one.
+    #[error("{0}")]
+    Wrangle(String),
 }

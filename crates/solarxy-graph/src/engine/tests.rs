@@ -2351,7 +2351,7 @@ fn stale_job_result_is_dropped_by_the_generation_guard() {
     assert_eq!(e.node_geometry_points(node), 3);
 }
 
-// Phase-4 additions: picking, document save/load, host-clocked durations.
+// Picking, document save/load, host-clocked durations.
 
 #[test]
 fn pick_returns_the_geo_container_under_the_ray() {
@@ -2492,7 +2492,60 @@ fn spot_light_angle_resolves_to_radians_in_the_scene() {
     assert!((lights[0].outer_cone - 45.0_f32.to_radians()).abs() < 1e-4);
 }
 
-// Phase-5 .slxy round-trip fidelity (graph, params, positions, view/camera,
+#[test]
+fn rect_area_light_reaches_the_scene_with_its_extent_and_orientation() {
+    // `light_from_node` fails SILENTLY: a resolve error drops the light out
+    // of the delta entirely, and the symptom is a scene that renders
+    // exactly as if the light had never been added. That is very hard to
+    // tell from "the shading is wrong", so this pins the lowering itself.
+    use solarxy_core::scene::{LightKind, SceneOp};
+    let mut e = engine();
+    let id = add(&mut e, GraphContext::Root, "rect_area_light");
+    for (key, value) in [
+        ("width", ParamValue::Float(6.0)),
+        ("height", ParamValue::Float(2.0)),
+        // Degrees in, radians out: the resolver owns the conversion.
+        ("rotate", ParamValue::Vec3([90.0, 0.0, 0.0])),
+        ("two_sided", ParamValue::Bool(true)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: id,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    e.cook(&mut || true);
+    let delta = e.take_scene_delta();
+    let lights = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("SetLights op present");
+    assert_eq!(lights.len(), 1, "the rect-area light vanished: {lights:?}");
+    let light = &lights[0];
+    assert_eq!(light.kind, LightKind::RectArea);
+    assert!((light.area_extent[0] - 6.0).abs() < 1e-5);
+    assert!((light.area_extent[1] - 2.0).abs() < 1e-5);
+    assert!((light.rotate[0] - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+    assert!(light.two_sided);
+
+    // A quarter turn about x tips the emitting face from -y to -z, and the
+    // helper draws its arrow along `direction`, so that has to follow.
+    let basis = light.rect_basis();
+    assert!((basis.normal[2] + 1.0).abs() < 1e-4, "{:?}", basis.normal);
+    assert!(
+        (light.direction[2] + 1.0).abs() < 1e-4,
+        "{:?}",
+        light.direction
+    );
+}
+
+// .slxy round-trip fidelity (graph, params, positions, view/camera,
 // assets, bypass, type_version, variadic port_order, cook_mode).
 
 #[test]
@@ -2643,7 +2696,7 @@ fn slxy_round_trip_preserves_full_document_and_assets() {
     assert!((cam.target[1] - 2.0).abs() < 1e-6);
 }
 
-// Validation systems (W3): implicit import validation, the
+// Validation systems: implicit import validation, the
 // validate node's cache + boundary events, the effective-validation
 // lowering, and the async validate-job protocol.
 
@@ -4667,7 +4720,7 @@ fn geo_export_action_round_trips_through_the_loaders() {
 }
 
 /// An OBJ export of a set that carries materials is the multi-file form:
-/// a Stored zip of `.obj` + `.mtl` (decision M-9). GLB stays a single
+/// a Stored zip of `.obj` + `.mtl`. GLB stays a single
 /// file, and a material-less OBJ stays the classic single `.obj`.
 #[test]
 fn geo_export_obj_with_materials_delivers_a_zip() {
@@ -4828,4 +4881,1818 @@ fn cook_warnings_read_back_after_a_cook_and_clear_when_fixed() {
     e.cook(&mut || true);
     assert!(e.cook_warnings(rand).is_empty());
     assert!(e.cook_warnings(box_id).is_empty(), "quiet nodes stay empty");
+}
+
+// Node naming: expressions resolve by name, so a name has to be
+// stored, graph-unique, and stable across paste, rename and reset.
+
+/// The name a node answers to, through the same rule the resolver uses.
+fn name_of(e: &Engine, ctx: GraphContext, id: NodeId) -> String {
+    let node = e.document().graph(ctx).unwrap().node(id).unwrap();
+    crate::naming::node_name(node, e.registry())
+}
+
+#[test]
+fn every_added_node_stores_a_unique_auto_numbered_name() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let c = add(&mut e, ctx, "sphere");
+    assert_eq!(name_of(&e, ctx, a), "box1");
+    assert_eq!(name_of(&e, ctx, b), "box2");
+    // Numbering is per type, not a global counter.
+    assert_eq!(name_of(&e, ctx, c), "sphere1");
+    // Stored, not merely derived: a per-instance name cannot be a
+    // descriptor default, and the .slxy round trip carries the stored one.
+    let node = e.document().graph(ctx).unwrap().node(a).unwrap();
+    assert!(matches!(
+        node.params.get("name"),
+        Some(ParamSource::Literal(ParamValue::Text(t))) if t == "box1"
+    ));
+}
+
+#[test]
+fn the_added_name_rides_the_node_added_mirror() {
+    let (mut e, ctx) = subflow_engine();
+    let batch = e
+        .apply(Command::AddNode {
+            ctx,
+            node_type: "box".into(),
+            position: [0.0, 0.0],
+        })
+        .unwrap();
+    // The frontend renders from the mirror, so a name minted after the
+    // mirror was taken would show the display name until the next snapshot.
+    let mirrored = batch.events.iter().find_map(|ev| match ev {
+        EngineEvent::NodeAdded { node, .. } => node.params.get("name").cloned(),
+        _ => None,
+    });
+    assert!(matches!(
+        mirrored,
+        Some(ParamSource::Literal(ParamValue::Text(t))) if t == "box1"
+    ));
+}
+
+#[test]
+fn a_rename_to_a_taken_name_is_suffixed_not_refused() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("body".into())),
+    })
+    .unwrap();
+    let batch = e
+        .apply(Command::SetParam {
+            ctx,
+            node: b,
+            key: "name".into(),
+            value: ParamSource::Literal(ParamValue::Text("body".into())),
+        })
+        .unwrap();
+    assert_eq!(name_of(&e, ctx, a), "body");
+    assert_eq!(name_of(&e, ctx, b), "body2");
+    // The event must carry what was STORED, not what was requested, or the
+    // mirror and the document disagree about a name expressions resolve by.
+    let announced = batch.events.iter().find_map(|ev| match ev {
+        EngineEvent::ParamChanged { key, value, .. } if key == "name" => Some(value.clone()),
+        _ => None,
+    });
+    assert!(matches!(
+        announced,
+        Some(ParamSource::Literal(ParamValue::Text(t))) if t == "body2"
+    ));
+}
+
+#[test]
+fn a_node_may_be_renamed_to_the_name_it_already_has() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("box1".into())),
+    })
+    .unwrap();
+    assert_eq!(name_of(&e, ctx, a), "box1", "no self-collision");
+}
+
+#[test]
+fn pasting_into_the_source_graph_renames_the_copies() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("body".into())),
+    })
+    .unwrap();
+    let fragment = e.copy_nodes(ctx, &[a]);
+    e.apply(Command::PasteNodes {
+        ctx,
+        fragment: fragment.clone(),
+        position: [10.0, 10.0],
+    })
+    .unwrap();
+    e.apply(Command::PasteNodes {
+        ctx,
+        fragment,
+        position: [20.0, 20.0],
+    })
+    .unwrap();
+    let names: Vec<String> = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .nodes()
+        .map(|n| crate::naming::node_name(n, e.registry()))
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len(), "names collided: {names:?}");
+    assert!(names.contains(&"body".to_string()));
+    assert!(names.contains(&"body2".to_string()));
+    assert!(names.contains(&"body3".to_string()));
+}
+
+#[test]
+fn duplicating_renames_the_copy() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::DuplicateNodes { ctx, ids: vec![a] })
+        .unwrap();
+    let names: Vec<String> = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .nodes()
+        .map(|n| crate::naming::node_name(n, e.registry()))
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert_ne!(names[0], names[1], "a duplicate must not share the name");
+}
+
+#[test]
+fn undoing_a_rename_restores_the_previous_name() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("body".into())),
+    })
+    .unwrap();
+    assert_eq!(name_of(&e, ctx, a), "body");
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(name_of(&e, ctx, a), "box1");
+    e.apply(Command::Redo).unwrap();
+    assert_eq!(name_of(&e, ctx, a), "body");
+}
+
+#[test]
+fn two_graphs_may_each_hold_the_same_name() {
+    let mut e = engine();
+    let geo_a = e.doc.mint_node_id();
+    e.doc.create_subflow(geo_a, ContextKind::Geo);
+    let geo_b = e.doc.mint_node_id();
+    e.doc.create_subflow(geo_b, ContextKind::Geo);
+    let a = add(&mut e, GraphContext::Subflow(geo_a), "box");
+    let b = add(&mut e, GraphContext::Subflow(geo_b), "box");
+    // Uniqueness is per network, exactly as two directories may each hold
+    // a `readme`; paths resolve relative to a context.
+    assert_eq!(name_of(&e, GraphContext::Subflow(geo_a), a), "box1");
+    assert_eq!(name_of(&e, GraphContext::Subflow(geo_b), b), "box1");
+}
+
+#[test]
+fn resetting_the_name_re_mints_rather_than_collapsing_to_the_display_name() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text("body".into())),
+    })
+    .unwrap();
+    e.apply(Command::ResetParams {
+        ctx,
+        node: a,
+        keys: Some(vec!["name".into()]),
+    })
+    .unwrap();
+    // Not "Box": that is shared by every box, which is the state minting
+    // exists to escape.
+    assert_eq!(name_of(&e, ctx, a), "box1");
+}
+
+// Expressions: the seam is only real if a stored expression
+// actually changes what a cook produces.
+
+#[test]
+fn an_expression_drives_a_cooked_parameter_end_to_end() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "2 * 3".into(),
+        },
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let set = e.geometry_output(box_id).expect("box cooked");
+    let width = set.bounds.max.x - set.bounds.min.x;
+    assert!((width - 6.0).abs() < 1e-5, "width was {width}");
+}
+
+#[test]
+fn a_bad_expression_badges_the_node_instead_of_cooking() {
+    // A broken expression is a value the user can fix by
+    // editing, so it is a COOK error (the node badges), not a command
+    // error that would refuse the keystroke.
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression { expr: "1 +".into() },
+    })
+    .unwrap();
+    let events = e.cook(&mut || true);
+    let errored = events.iter().any(|ev| {
+        matches!(ev, EngineEvent::CookStatus { node, status }
+            if *node == box_id && matches!(status, crate::cook::state::CookStatus::Error { .. }))
+    });
+    assert!(errored, "a parse error must badge the node: {events:?}");
+}
+
+#[test]
+fn an_expression_error_names_the_param_it_is_on() {
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "wobble(1)".into(),
+        },
+    })
+    .unwrap();
+    let events = e.cook(&mut || true);
+    let message = events.iter().find_map(|ev| match ev {
+        EngineEvent::CookStatus {
+            node,
+            status: crate::cook::state::CookStatus::Error { message },
+        } if *node == box_id => Some(message.clone()),
+        _ => None,
+    });
+    let message = message.expect("an error status");
+    assert!(message.contains("width"), "{message}");
+    assert!(message.contains("unknown function"), "{message}");
+}
+
+#[test]
+fn a_geometry_query_reads_the_nodes_own_gathered_input() {
+    // npoints() reads cook OUTPUT, unlike ch(); it works because gather
+    // runs before resolve, and the wire topology already cooked upstream.
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    let xform = add(&mut e, ctx, "transform");
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(xform),
+    })
+    .unwrap();
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: box_id,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: xform,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: xform,
+        key: "translate".into(),
+        value: ParamSource::Expression {
+            expr: "set(npoints(), 0, 0)".into(),
+        },
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let set = e.geometry_output(xform).expect("transform cooked");
+    // A default box is 24 points, so the whole thing shifts to x = 24.
+    let cx = f64::midpoint(f64::from(set.bounds.min.x), f64::from(set.bounds.max.x));
+    assert!((cx - 24.0).abs() < 1e-4, "centre x was {cx}");
+
+    // The parameter panel must agree with the cook. It resolves off the
+    // same cached inputs, so a geometry query that cooks is a geometry
+    // query the readout can show; reporting it as unavailable here while
+    // the node badges green is the disagreement this asserts against.
+    let shown = e
+        .resolved_param(ctx, xform, "translate")
+        .expect("the readout resolves what the cook resolved");
+    assert_eq!(shown, ParamValue::Vec3([24.0, 0.0, 0.0]), "{shown:?}");
+}
+
+#[test]
+fn the_readout_and_the_cook_agree_when_a_geometry_query_cannot_answer() {
+    // The other half of the contract: with nothing connected, BOTH refuse.
+    // A silent 0 in either one is how a box ends up cooking at the hard
+    // clamp floor with nothing on screen saying why.
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "npoints()".into(),
+        },
+    })
+    .unwrap();
+    assert!(e.resolved_param(ctx, box_id, "width").is_err());
+    let events = e.cook(&mut || true);
+    assert!(
+        events.iter().any(|ev| matches!(
+            ev,
+            EngineEvent::CookStatus {
+                node,
+                status: crate::cook::state::CookStatus::Error { .. }
+            } if *node == box_id
+        )),
+        "the cook must refuse it too"
+    );
+}
+
+#[test]
+fn a_geometry_query_on_a_node_without_inputs_says_so_rather_than_reading_zero() {
+    // A box has no geometry input. Answering 0 would be a plausible wrong
+    // number; naming the problem is the only useful answer.
+    //
+    // Every query, not just `bbox`. An earlier version of this test checked
+    // `bbox` alone while the counting queries answered 0, so `npoints()`
+    // clamped to the hard floor and cooked green while the parameter
+    // panel showed red for the same expression.
+    for expr in [
+        "bbox(\"size\").x",
+        "npoints()",
+        "nprims()",
+        "nmeshes()",
+        "centroid().x",
+    ] {
+        let (mut e, ctx) = subflow_engine();
+        let box_id = add(&mut e, ctx, "box");
+        e.apply(Command::SetParam {
+            ctx,
+            node: box_id,
+            key: "width".into(),
+            value: ParamSource::Expression {
+                expr: expr.to_string(),
+            },
+        })
+        .unwrap();
+        let events = e.cook(&mut || true);
+        let message = events.iter().find_map(|ev| match ev {
+            EngineEvent::CookStatus {
+                node,
+                status: crate::cook::state::CookStatus::Error { message },
+            } if *node == box_id => Some(message.clone()),
+            _ => None,
+        });
+        assert!(
+            message.is_some_and(|m| m.contains("not connected")),
+            "`{expr}` should have produced a 'not connected' cook error"
+        );
+    }
+}
+
+#[test]
+fn time_is_stopped_so_a_cook_is_reproducible() {
+    // Until the runtime lands, $T and $F are zero everywhere. Golden
+    // captures and CLI cooks depend on it.
+    let (mut e, ctx) = subflow_engine();
+    let box_id = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: box_id,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "2 + $T * 100 + $F * 100".into(),
+        },
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let set = e.geometry_output(box_id).expect("box cooked");
+    let width = set.bounds.max.x - set.bounds.min.x;
+    assert!((width - 2.0).abs() < 1e-5, "width was {width}");
+}
+
+#[test]
+fn an_expression_driven_transform_keeps_its_gizmo() {
+    // `node_transform` (the gizmo read path) is one of the four resolve
+    // sites that fail SILENTLY to a fallback. Before the resolver took an
+    // evaluation context, any expression on
+    // a transform param made it return None and the gizmo just vanished;
+    // it now resolves like any other value.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let geo = add(&mut e, ctx, "geo");
+    e.apply(Command::SetParam {
+        ctx,
+        node: geo,
+        key: "translate".into(),
+        value: ParamSource::Expression {
+            expr: "set(5, 0, 0)".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetSelection {
+        ctx,
+        ids: vec![geo],
+    })
+    .unwrap();
+    let target = e
+        .gizmo_target(ctx)
+        .expect("the gizmo must survive an expression");
+    assert!(
+        (target.translate[0] - 5.0).abs() < 1e-6,
+        "the gizmo must read the EVALUATED value, not the default: {:?}",
+        target.translate
+    );
+}
+
+#[test]
+fn an_expression_drives_the_geo_container_world_matrix() {
+    // `geo_world_matrix` is another of the silent-fallback sites: it
+    // returned the identity on any expression, so an expression-driven
+    // object would render at the origin while the node badged elsewhere.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let geo = add(&mut e, ctx, "geo");
+    e.apply(Command::SetParam {
+        ctx,
+        node: geo,
+        key: "translate".into(),
+        value: ParamSource::Expression {
+            expr: "set(0, 3, 0)".into(),
+        },
+    })
+    .unwrap();
+    let m = e.geo_world_matrix(geo).expect("a geo has a world matrix");
+    // Column-major: the translation is the fourth column.
+    assert!((m[3][1] - 3.0).abs() < 1e-6, "matrix was {m:?}");
+}
+
+// ch() cross-node references.
+
+/// Renames a node, returning the name actually stored.
+fn rename(e: &mut Engine, ctx: GraphContext, node: NodeId, to: &str) -> String {
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: "name".into(),
+        value: ParamSource::Literal(ParamValue::Text(to.into())),
+    })
+    .unwrap();
+    name_of(e, ctx, node)
+}
+
+fn set_expr(e: &mut Engine, ctx: GraphContext, node: NodeId, key: &str, expr: &str) {
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: key.into(),
+        value: ParamSource::Expression { expr: expr.into() },
+    })
+    .unwrap();
+}
+
+/// Makes `node` the subflow's display node. Only the display node's
+/// predecessor cone cooks, so a test asserting on an unconnected node has
+/// to claim the flag first.
+fn set_display(e: &mut Engine, ctx: GraphContext, node: NodeId) {
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(node),
+    })
+    .unwrap();
+}
+
+fn cooked_width(e: &Engine, node: NodeId) -> f32 {
+    let set = e.geometry_output(node).expect("cooked");
+    set.bounds.max.x - set.bounds.min.x
+}
+
+#[test]
+fn ch_reads_a_sibling_in_the_same_network() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    rename(&mut e, ctx, a, "source");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(4.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", "ch(\"source/width\") * 2");
+    set_display(&mut e, ctx, b);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, b) - 8.0).abs() < 1e-4);
+}
+
+#[test]
+fn ch_reads_a_param_on_its_own_node_with_a_single_segment() {
+    // One segment is always a param on self, never a node name: that is
+    // what makes `ch("height")` unambiguous.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "height".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, a, "width", "ch(\"height\") * 2");
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, a) - 6.0).abs() < 1e-4);
+}
+
+#[test]
+fn ch_climbs_to_the_container_and_to_its_siblings() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let ctx = GraphContext::Subflow(geo);
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: geo,
+        key: "uniform_scale".into(),
+        value: ParamSource::Literal(ParamValue::Float(5.0)),
+    })
+    .unwrap();
+    let b = add(&mut e, ctx, "box");
+    // `../param` is the container's own param.
+    set_expr(&mut e, ctx, b, "width", "ch(\"../uniform_scale\")");
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, b) - 5.0).abs() < 1e-4);
+}
+
+#[test]
+fn ch_resolves_an_absolute_path_from_anywhere() {
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let name = name_of(&e, GraphContext::Root, geo);
+    let ctx = GraphContext::Subflow(geo);
+    let b = add(&mut e, ctx, "box");
+    let b_name = name_of(&e, ctx, b);
+    let c = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: b,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(7.0)),
+    })
+    .unwrap();
+    set_expr(
+        &mut e,
+        ctx,
+        c,
+        "width",
+        &format!("ch(\"/{name}/{b_name}/width\")"),
+    );
+    set_display(&mut e, ctx, c);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, c) - 7.0).abs() < 1e-4);
+}
+
+#[test]
+fn a_reference_reads_the_authoring_space_not_radians() {
+    // The 57x trap. A Degrees param stores degrees and resolves to
+    // radians; ch() must hand back degrees so copying a rotation into
+    // another rotation round-trips instead of converting twice.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let a = add(&mut e, ctx, "geo");
+    let b = add(&mut e, ctx, "geo");
+    let a_name = rename(&mut e, ctx, a, "source");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "rotate".into(),
+        value: ParamSource::Literal(ParamValue::Vec3([90.0, 0.0, 0.0])),
+    })
+    .unwrap();
+    set_expr(
+        &mut e,
+        ctx,
+        b,
+        "rotate",
+        &format!("ch(\"{a_name}/rotate\")"),
+    );
+    // Both containers must end up at the same world rotation.
+    let ma = e.geo_world_matrix(a).expect("a");
+    let mb = e.geo_world_matrix(b).expect("b");
+    for (ca, cb) in ma.iter().zip(mb.iter()) {
+        for (va, vb) in ca.iter().zip(cb.iter()) {
+            assert!((va - vb).abs() < 1e-5, "{ma:?} vs {mb:?}");
+        }
+    }
+}
+
+#[test]
+fn a_reference_sees_the_hard_clamp_the_target_itself_obeys() {
+    // A reader must never observe a value the target's own cook does not
+    // use, or the same param means two different things.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let a_name = rename(&mut e, ctx, a, "source");
+    // width's hard range tops out well below this.
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(1.0e9)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{a_name}/width\")"));
+    set_display(&mut e, ctx, a);
+    e.cook(&mut || true);
+    let clamped = cooked_width(&e, a);
+    set_display(&mut e, ctx, b);
+    e.cook(&mut || true);
+    assert!(
+        (cooked_width(&e, b) - clamped).abs() < 1e-3,
+        "reader saw {} but the target uses {clamped}",
+        cooked_width(&e, b)
+    );
+}
+
+#[test]
+fn a_reference_chain_evaluates_without_any_cook_ordering() {
+    // b reads a, c reads b. Cook order is irrelevant because ch() reads
+    // document state and recurses on demand.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let c = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "aa");
+    let bn = rename(&mut e, ctx, b, "bb");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(2.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\") * 2"));
+    set_expr(&mut e, ctx, c, "width", &format!("ch(\"{bn}/width\") + 1"));
+    set_display(&mut e, ctx, c);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, c) - 5.0).abs() < 1e-4, "2*2+1");
+}
+
+#[test]
+fn a_reference_follows_a_rename_of_its_target() {
+    // The promise `NodeRef` already makes by storing an id, kept for a
+    // reference form that is inherently by name.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "source");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\") * 2"));
+    set_display(&mut e, ctx, b);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, b) - 6.0).abs() < 1e-4);
+
+    rename(&mut e, ctx, a, "renamed");
+    e.cook(&mut || true);
+    assert!(
+        (cooked_width(&e, b) - 6.0).abs() < 1e-4,
+        "the expression must follow the rename, not break: got {}",
+        cooked_width(&e, b)
+    );
+    // And the stored text names the new node, not the old one.
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(b)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert!(expr.contains("renamed/width"), "{expr}");
+}
+
+#[test]
+fn a_rename_and_its_rewrites_are_one_undo_step() {
+    // Two commands would let a user undo the rename and strand the
+    // rewritten paths pointing at a name that no longer exists.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "source");
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\")"));
+    rename(&mut e, ctx, a, "renamed");
+
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(name_of(&e, ctx, a), "source", "the name came back");
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(b)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert!(
+        expr.contains("source/width"),
+        "one undo must restore BOTH the name and the paths: {expr}"
+    );
+}
+
+#[test]
+fn a_rename_rewrites_only_node_segments_not_identically_named_params() {
+    // `ch("width")` is a param on this node. Renaming a node to `width`
+    // must not rewrite it, which is why the rewrite is positional rather
+    // than a text substitution.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    set_expr(&mut e, ctx, b, "width", "ch(\"height\") * 2");
+    rename(&mut e, ctx, a, "height");
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(b)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert_eq!(
+        expr, "ch(\"height\") * 2",
+        "a param segment must survive a same-named node rename"
+    );
+}
+
+#[test]
+fn a_rename_preserves_the_rest_of_the_expression_byte_for_byte() {
+    // The rewrite edits user text, so it must touch only the quoted path.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "src");
+    let original = format!("  ch(\"{an}/width\")*2 + bbox(\"xmin\") // note\n");
+    set_expr(&mut e, ctx, b, "width", &original);
+    rename(&mut e, ctx, a, "dest");
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(b)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert_eq!(expr, original.replace("src/width", "dest/width"), "{expr}");
+}
+
+#[test]
+fn a_rename_rewrites_across_contexts() {
+    // An absolute path from inside one network naming a node in another.
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let geo_name = rename(&mut e, GraphContext::Root, geo, "obj");
+    let ctx = GraphContext::Subflow(geo);
+    let inner = add(&mut e, ctx, "box");
+    let inner_name = name_of(&e, ctx, inner);
+    let other = add(&mut e, GraphContext::Root, "geo");
+    set_expr(
+        &mut e,
+        GraphContext::Root,
+        other,
+        "uniform_scale",
+        &format!("ch(\"/{geo_name}/{inner_name}/width\")"),
+    );
+    // Renaming the CONTAINER must rewrite the first segment.
+    rename(&mut e, GraphContext::Root, geo, "renamed");
+    let stored = e
+        .document()
+        .graph(GraphContext::Root)
+        .unwrap()
+        .node(other)
+        .unwrap()
+        .params
+        .get("uniform_scale")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert!(
+        expr.contains(&format!("/renamed/{inner_name}/width")),
+        "{expr}"
+    );
+}
+
+#[test]
+fn a_rename_that_auto_suffixes_rewrites_to_the_stored_name() {
+    // uniquify may not give the requested name. Rewriting to the REQUESTED
+    // one would point every reference at a node that does not exist.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let taken = rename(&mut e, ctx, b, "taken");
+    let an = rename(&mut e, ctx, a, "source");
+    let c = add(&mut e, ctx, "box");
+    set_expr(&mut e, ctx, c, "width", &format!("ch(\"{an}/width\")"));
+
+    let stored_name = rename(&mut e, ctx, a, &taken);
+    assert_ne!(stored_name, taken, "the name collided and was suffixed");
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(c)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    let ParamSource::Expression { expr } = stored.unwrap() else {
+        panic!("still an expression");
+    };
+    assert!(
+        expr.contains(&format!("{stored_name}/width")),
+        "must follow the STORED name `{stored_name}`: {expr}"
+    );
+}
+
+#[test]
+fn a_dangling_reference_badges_with_a_message_naming_the_path() {
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    set_expr(&mut e, ctx, b, "width", "ch(\"nope/width\")");
+    set_display(&mut e, ctx, b);
+    let events = e.cook(&mut || true);
+    let message = events.iter().find_map(|ev| match ev {
+        EngineEvent::CookStatus {
+            node,
+            status: crate::cook::state::CookStatus::Error { message },
+        } if *node == b => Some(message.clone()),
+        _ => None,
+    });
+    let message = message.expect("an error status");
+    assert!(message.contains("no node named `nope`"), "{message}");
+}
+
+#[test]
+fn an_unknown_param_on_a_real_node_names_both() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "source");
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/nosuch\")"));
+    set_display(&mut e, ctx, b);
+    let events = e.cook(&mut || true);
+    let message = events.iter().find_map(|ev| match ev {
+        EngineEvent::CookStatus {
+            node,
+            status: crate::cook::state::CookStatus::Error { message },
+        } if *node == b => Some(message.clone()),
+        _ => None,
+    });
+    let message = message.expect("an error status");
+    assert!(message.contains("nosuch"), "{message}");
+    assert!(message.contains("source"), "{message}");
+}
+
+#[test]
+fn a_reference_cycle_is_refused_at_set_time() {
+    // The cook never has to detect a loop, because one can never be
+    // written. Refusing at SetParam is what keeps the document always
+    // evaluable.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "aa");
+    let bn = rename(&mut e, ctx, b, "bb");
+    set_expr(&mut e, ctx, a, "width", &format!("ch(\"{bn}/width\")"));
+    let err = e
+        .apply(Command::SetParam {
+            ctx,
+            node: b,
+            key: "width".into(),
+            value: ParamSource::Expression {
+                expr: format!("ch(\"{an}/width\")"),
+            },
+        })
+        .unwrap_err();
+    assert!(
+        matches!(err, EngineError::ExpressionCycle { .. }),
+        "expected a cycle refusal, got {err:?}"
+    );
+}
+
+#[test]
+fn a_param_referencing_itself_is_refused() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let err = e
+        .apply(Command::SetParam {
+            ctx,
+            node: a,
+            key: "width".into(),
+            value: ParamSource::Expression {
+                expr: "ch(\"width\") + 1".into(),
+            },
+        })
+        .unwrap_err();
+    assert!(
+        matches!(err, EngineError::ExpressionCycle { .. }),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn one_param_referencing_another_on_the_same_node_is_legal() {
+    // The cycle check is over (node, key) pairs, not nodes. A node-level
+    // check would refuse this, and it is real, useful work.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "height".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Expression {
+            expr: "ch(\"height\") * 2".into(),
+        },
+    })
+    .expect("cross-param self reference must be allowed");
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, a) - 6.0).abs() < 1e-4);
+}
+
+#[test]
+fn a_cycle_smuggled_past_set_param_badges_rather_than_overflowing() {
+    // A hand-edited document (or a crafted paste) can hold a loop that
+    // SetParam would have refused. The depth backstop is what turns that
+    // into a message instead of a stack overflow.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "aa");
+    let bn = rename(&mut e, ctx, b, "bb");
+    // Written straight into the document, bypassing every command check.
+    for (node, expr) in [
+        (a, format!("ch(\"{bn}/width\")")),
+        (b, format!("ch(\"{an}/width\")")),
+    ] {
+        e.doc
+            .graph_mut(ctx)
+            .unwrap()
+            .node_mut(node)
+            .unwrap()
+            .params
+            .insert("width".into(), ParamSource::Expression { expr });
+    }
+    set_display(&mut e, ctx, b);
+    e.apply(Command::CookNow).unwrap();
+    let events = e.cook(&mut || true);
+    let errored = events.iter().any(|ev| {
+        matches!(ev, EngineEvent::CookStatus { status, .. }
+            if matches!(status, crate::cook::state::CookStatus::Error { .. }))
+    });
+    assert!(errored, "a smuggled cycle must badge, not recurse forever");
+}
+
+#[test]
+fn editing_a_referenced_param_recooks_the_referrer() {
+    // The whole point of the index: ch() reads document state, so there is
+    // no wire to carry the change and the reader would otherwise keep a
+    // stale value forever.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "source");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(2.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\") * 2"));
+    set_display(&mut e, ctx, b);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, b) - 4.0).abs() < 1e-4, "before the edit");
+
+    // Edit the SOURCE only. Nothing wires a to b.
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(5.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(
+        (cooked_width(&e, b) - 10.0).abs() < 1e-4,
+        "the referrer must recook: got {}",
+        cooked_width(&e, b)
+    );
+}
+
+#[test]
+fn propagation_is_transitive_through_a_reference_chain() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let c = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "aa");
+    let bn = rename(&mut e, ctx, b, "bb");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(1.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\") * 2"));
+    set_expr(&mut e, ctx, c, "width", &format!("ch(\"{bn}/width\") * 3"));
+    set_display(&mut e, ctx, c);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, c) - 6.0).abs() < 1e-4);
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(2.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(
+        (cooked_width(&e, c) - 12.0).abs() < 1e-4,
+        "two hops must propagate: got {}",
+        cooked_width(&e, c)
+    );
+}
+
+#[test]
+fn undo_restores_the_dependency_graph_not_just_the_text() {
+    // The index is rebuilt from the document on undo, so an undone
+    // reference stops propagating. A maintained index is exactly where
+    // this would rot.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "box");
+    let an = rename(&mut e, ctx, a, "source");
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(2.0)),
+    })
+    .unwrap();
+    set_expr(&mut e, ctx, b, "width", &format!("ch(\"{an}/width\") * 2"));
+    set_display(&mut e, ctx, b);
+    e.cook(&mut || true);
+    assert!((cooked_width(&e, b) - 4.0).abs() < 1e-4);
+
+    // Undo the expression: b returns to its literal default.
+    e.apply(Command::Undo).unwrap();
+    e.cook(&mut || true);
+    let after_undo = cooked_width(&e, b);
+
+    // Editing the old source must no longer move b.
+    e.apply(Command::SetParam {
+        ctx,
+        node: a,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(9.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(
+        (cooked_width(&e, b) - after_undo).abs() < 1e-4,
+        "an undone reference must stop propagating"
+    );
+}
+
+#[test]
+fn climbing_above_the_root_is_refused_by_name() {
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let geo = add(&mut e, ctx, "geo");
+    set_expr(&mut e, ctx, geo, "uniform_scale", "ch(\"../nope\")");
+    // Root has no parent; the geo world matrix falls back rather than
+    // resolving, and the message is what the cook badge would carry.
+    let previews = crate::previews::Previews::new();
+    let refs = crate::refs::DocRefs::new(
+        e.document(),
+        e.registry(),
+        &previews,
+        ctx,
+        geo,
+        crate::expr::SceneTime::default(),
+    );
+    let err = crate::expr::ParamRefs::read(&refs, "../nope").unwrap_err();
+    assert!(err.contains("no parent"), "{err}");
+}
+
+// Param-type gating: only the numeric types accept an expression.
+
+#[test]
+fn expressions_are_accepted_on_every_numeric_param_type() {
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    // Float and Int.
+    for (key, expr) in [("width", "1 + 1"), ("width_segments", "2 * 2")] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: b,
+            key: key.into(),
+            value: ParamSource::Expression { expr: expr.into() },
+        })
+        .unwrap_or_else(|err| panic!("`{key}` should accept an expression: {err}"));
+    }
+    // Vec3 and Bool, on a geo container.
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    for (key, expr) in [("translate", "set(1, 2, 3)"), ("visible", "1 > 0")] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: key.into(),
+            value: ParamSource::Expression { expr: expr.into() },
+        })
+        .unwrap_or_else(|err| panic!("`{key}` should accept an expression: {err}"));
+    }
+    // Colour, on a light.
+    let light = add(&mut e, GraphContext::Root, "point_light");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: light,
+        key: "color".into(),
+        value: ParamSource::Expression {
+            expr: "set(1, 0, 0, 1)".into(),
+        },
+    })
+    .expect("a colour accepts an expression");
+}
+
+#[test]
+fn expressions_are_refused_on_text_and_menu_params() {
+    // There is no string type in the value lattice, so an expression could
+    // never produce anything these params could hold.
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    let err = e
+        .apply(Command::SetParam {
+            ctx,
+            node: b,
+            key: "name".into(),
+            value: ParamSource::Expression {
+                expr: "1 + 1".into(),
+            },
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&err, EngineError::InvalidParam { reason, .. } if reason.contains("text")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_refused_expression_leaves_the_param_untouched() {
+    // A command error must not half-apply: the old value stands.
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    let before = name_of(&e, ctx, b);
+    let _ = e.apply(Command::SetParam {
+        ctx,
+        node: b,
+        key: "name".into(),
+        value: ParamSource::Expression {
+            expr: "1 + 1".into(),
+        },
+    });
+    assert_eq!(name_of(&e, ctx, b), before);
+}
+
+#[test]
+fn a_parse_error_is_stored_rather_than_refused() {
+    // A half-typed expression is a value the user is in the
+    // middle of fixing. Refusing the keystroke would make the field
+    // unusable; the node badges instead.
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node: b,
+        key: "width".into(),
+        value: ParamSource::Expression { expr: "1 +".into() },
+    })
+    .expect("a syntax error must still be storable");
+    let stored = e
+        .document()
+        .graph(ctx)
+        .unwrap()
+        .node(b)
+        .unwrap()
+        .params
+        .get("width")
+        .cloned();
+    assert!(matches!(stored, Some(ParamSource::Expression { .. })));
+}
+
+#[test]
+fn the_drag_lane_never_carries_an_expression() {
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    e.preview_param(
+        ctx,
+        b,
+        "width",
+        ParamSource::Expression {
+            expr: "1 + 1".into(),
+        },
+    );
+    assert!(
+        !e.has_active_previews(),
+        "an expression must not enter the preview overlay"
+    );
+    // A literal still does.
+    e.preview_param(
+        ctx,
+        b,
+        "width",
+        ParamSource::Literal(ParamValue::Float(2.0)),
+    );
+    assert!(e.has_active_previews());
+}
+
+// ---- F3: the runtime foundation ----------------------------------------
+
+use crate::runtime::LoopMode;
+
+/// A subflow holding one box whose `width` is driven by a time expression.
+fn time_driven_engine() -> (Engine, GraphContext, NodeId) {
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "box");
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: "width".to_string(),
+        value: ParamSource::Expression {
+            expr: "1 + sin($T)".to_string(),
+        },
+    })
+    .unwrap();
+    (e, ctx, node)
+}
+
+#[test]
+fn a_tick_on_a_stopped_clock_does_nothing() {
+    let (mut e, _, _) = time_driven_engine();
+    let before = e.revision();
+    let batch = e.tick();
+    assert!(batch.events.is_empty());
+    assert_eq!(e.revision(), before, "a paused editor costs nothing");
+}
+
+#[test]
+fn playing_advances_the_frame_one_step_per_tick() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    assert_eq!(e.clock().frame, 1);
+    e.tick();
+    assert_eq!(e.clock().frame, 2, "fixed step: one tick is one frame");
+    e.tick();
+    assert_eq!(e.clock().frame, 3);
+}
+
+#[test]
+fn a_tick_emits_the_new_frame() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    let batch = e.tick();
+    let frames: Vec<i64> = batch
+        .events
+        .iter()
+        .filter_map(|ev| match ev {
+            EngineEvent::FrameChanged { frame } => Some(*frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames, vec![2]);
+}
+
+#[test]
+fn a_scene_with_no_time_expression_dirties_nothing_on_a_tick() {
+    // The whole reason the index tracks time-dependence: a static scene
+    // must pay nothing per frame.
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "box");
+    e.cook(&mut || true);
+    assert_eq!(e.cook_state(node), CookState::Clean, "cooked to start with");
+    assert!(!e.expr_index.has_time_dependency());
+
+    e.apply(Command::Play).unwrap();
+    e.tick();
+    // Still clean: nothing time-dependent existed to dirty.
+    assert_eq!(
+        e.cook_state(node),
+        CookState::Clean,
+        "a static node must not re-cook because the clock moved"
+    );
+}
+
+#[test]
+fn a_time_expression_registers_as_time_dependent() {
+    let (e, ctx, node) = time_driven_engine();
+    assert!(e.expr_index.has_time_dependency());
+    assert!(e.expr_index.time_dependent().contains(&(ctx, node)));
+}
+
+#[test]
+fn a_wrangle_program_reading_time_is_time_dependent_too() {
+    // The easy one to miss: a Snippet is stored as plain Text, so nothing
+    // about its ParamSource says "expression".
+    let (mut e, ctx) = subflow_engine();
+    let node = add(&mut e, ctx, "attribute_wrangle");
+    assert!(
+        !e.expr_index.has_time_dependency(),
+        "the default program does not read the clock"
+    );
+    e.apply(Command::SetParam {
+        ctx,
+        node,
+        key: "program".to_string(),
+        value: ParamSource::Literal(ParamValue::Text(
+            "@P = set(@P.x, @P.y + sin($T), @P.z);".to_string(),
+        )),
+    })
+    .unwrap();
+    assert!(e.expr_index.time_dependent().contains(&(ctx, node)));
+}
+
+#[test]
+fn stop_rewinds_and_reports_both_facts() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::Play).unwrap();
+    e.tick();
+    e.tick();
+    let batch = e.apply(Command::Stop).unwrap();
+    assert_eq!(e.clock().frame, 1);
+    assert!(!e.clock().playing);
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::PlaybackChanged { playing } if !*playing))
+    );
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::FrameChanged { frame } if *frame == 1))
+    );
+}
+
+#[test]
+fn transport_is_not_undoable_but_settings_are() {
+    let (mut e, _, _) = time_driven_engine();
+    let before = e.clock().effective_range();
+
+    // Transport: no undo entry, so undo must reach past it.
+    e.apply(Command::Play).unwrap();
+    e.apply(Command::SetFrame { frame: 5 }).unwrap();
+
+    // Settings: document state, so this IS undoable.
+    e.apply(Command::SetFrameRange { start: 10, end: 20 })
+        .unwrap();
+    assert_eq!(e.clock().effective_range(), (10, 20));
+    e.apply(Command::Undo).unwrap();
+    assert_eq!(
+        e.clock().effective_range(),
+        before,
+        "the range came back, so the transport commands left no undo steps in the way"
+    );
+}
+
+#[test]
+fn changing_fps_retimes_because_seconds_are_derived_from_the_frame() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::SetFrame { frame: 24 }).unwrap();
+    assert!((e.clock().scene_time().seconds - 1.0).abs() < 1e-12);
+    e.apply(Command::SetFps { fps: 48.0 }).unwrap();
+    assert!(
+        (e.clock().scene_time().seconds - 0.5).abs() < 1e-12,
+        "the same frame is half the time at twice the rate"
+    );
+}
+
+#[test]
+fn the_runtime_section_round_trips_and_never_carries_session_state() {
+    let (mut e, _, _) = time_driven_engine();
+    e.apply(Command::SetFps { fps: 30.0 }).unwrap();
+    e.apply(Command::SetFrameRange { start: 5, end: 60 })
+        .unwrap();
+    e.apply(Command::SetLoopMode {
+        mode: LoopMode::PingPong,
+    })
+    .unwrap();
+    e.apply(Command::SetAutoplay { autoplay: true }).unwrap();
+    e.apply(Command::Play).unwrap();
+    e.apply(Command::SetFrame { frame: 42 }).unwrap();
+
+    let sidecar = crate::engine::scenefile::SceneSidecar::default();
+    let bytes = e.save_slxy(&sidecar).expect("saves");
+
+    let mut loaded = engine();
+    loaded.load_slxy(&bytes).expect("loads");
+
+    assert!((loaded.clock().fps - 30.0).abs() < 1e-12);
+    assert_eq!(loaded.clock().effective_range(), (5, 60));
+    assert_eq!(loaded.clock().loop_mode, LoopMode::PingPong);
+    assert!(loaded.clock().autoplay);
+    // The reproducibility contract.
+    assert!(!loaded.clock().playing, "a loaded scene is never playing");
+    assert_eq!(loaded.clock().frame, 5, "and sits at the range start");
+}
+
+#[test]
+fn a_scene_written_before_the_runtime_existed_reads_a_default_clock() {
+    // schema_version stays 1 and the section is serde-defaulted, so a
+    // pre-0.8.1 file is not a migration: it is a file without the section.
+    // Built by DELETING the key rather than by saving, because a save can
+    // only ever produce the current shape and would test nothing.
+    let (e, _, _) = time_driven_engine();
+    let sidecar = crate::engine::scenefile::SceneSidecar::default();
+    let scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &e.clock.settings(),
+        &sidecar,
+        Vec::new(),
+    );
+
+    let mut raw: serde_json::Value = serde_json::to_value(&scene).expect("serializes");
+    assert!(raw.get("runtime").is_some(), "the current shape has it");
+    raw.as_object_mut().expect("object").remove("runtime");
+
+    let old: solarxy_scenefile::SceneJson =
+        serde_json::from_value(raw).expect("a file without the section still parses");
+    let settings = crate::engine::scenefile::runtime_from_scene(&old);
+    assert!((settings.fps - 24.0).abs() < 1e-12);
+    assert_eq!((settings.frame_start, settings.frame_end), (1, 240));
+    assert_eq!(settings.loop_mode, LoopMode::Loop);
+    assert!(!settings.autoplay);
+}
+
+#[test]
+fn an_unknown_loop_mode_falls_back_instead_of_failing_the_load() {
+    // A file written by a later version must still open; a playback mode is
+    // not worth refusing a document over.
+    let json = serde_json::json!({
+        "fps": 30.0,
+        "frameStart": 2,
+        "frameEnd": 50,
+        "loopMode": "someFutureMode",
+        "autoplay": true,
+    });
+    let runtime: solarxy_scenefile::RuntimeJson = serde_json::from_value(json).expect("parses");
+    let scene = solarxy_scenefile::SceneJson {
+        runtime,
+        ..serde_json::from_str::<solarxy_scenefile::SceneJson>(
+            r#"{"schema_version":1,"min_reader":1,"generator":"t","graph":{}}"#,
+        )
+        .expect("minimal scene")
+    };
+    let settings = crate::engine::scenefile::runtime_from_scene(&scene);
+    assert_eq!(
+        settings.loop_mode,
+        LoopMode::Loop,
+        "the default, not a panic"
+    );
+    assert!(
+        (settings.fps - 30.0).abs() < 1e-12,
+        "the rest still survives"
+    );
+}
+
+/// A fixed, obviously-not-1970 epoch stamp: 2026-07-28T12:00:00Z.
+fn fixed_epoch_ms() -> f64 {
+    1_785_240_000_000.0
+}
+
+#[test]
+fn node_timestamps_stay_unknown_without_a_host_epoch_clock() {
+    // Native cooks, the CLI and every test run with no epoch clock. They
+    // must leave the fields alone rather than write a zero that renders as
+    // "1 Jan 1970".
+    let (mut e, ctx) = subflow_engine();
+    let id = add(&mut e, ctx, "box");
+    let report = e.node_report(ctx, id).expect("node exists");
+    assert_eq!(report.created_ms, None);
+    assert_eq!(report.modified_ms, None);
+}
+
+#[test]
+fn creating_and_editing_a_node_stamps_it() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let id = add(&mut e, ctx, "box");
+    let created = e.node_report(ctx, id).unwrap().created_ms;
+    assert_eq!(created, Some(fixed_epoch_ms()));
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    let after = e.node_report(ctx, id).unwrap();
+    assert_eq!(after.modified_ms, Some(fixed_epoch_ms()));
+    assert_eq!(after.created_ms, created, "creation time never moves");
+}
+
+#[test]
+fn moving_a_node_on_the_canvas_is_not_a_modification() {
+    // The rule that makes the timestamp mean something: auto-layout, or
+    // tidying a graph by hand, must not restamp every node in the scene.
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let id = add(&mut e, ctx, "box");
+    // Clear the creation stamp so a move is the only thing that could set it.
+    e.doc
+        .graph_mut(ctx)
+        .unwrap()
+        .node_mut(id)
+        .unwrap()
+        .modified_ms = None;
+
+    e.apply(Command::MoveNodes {
+        ctx,
+        moves: vec![(id, [42.0, 17.0])],
+    })
+    .unwrap();
+    assert_eq!(
+        e.node_report(ctx, id).unwrap().modified_ms,
+        None,
+        "a canvas move must leave `modified` alone"
+    );
+}
+
+#[test]
+fn connecting_stamps_both_ends() {
+    // A wire changes what BOTH nodes do, so both are modified.
+    let (mut e, ctx) = subflow_engine();
+    e.set_epoch_clock(fixed_epoch_ms);
+    let src = add(&mut e, ctx, "box");
+    let dst = add(&mut e, ctx, "transform");
+    for id in [src, dst] {
+        e.doc
+            .graph_mut(ctx)
+            .unwrap()
+            .node_mut(id)
+            .unwrap()
+            .modified_ms = None;
+    }
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: src,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: dst,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    assert_eq!(
+        e.node_report(ctx, src).unwrap().modified_ms,
+        Some(fixed_epoch_ms())
+    );
+    assert_eq!(
+        e.node_report(ctx, dst).unwrap().modified_ms,
+        Some(fixed_epoch_ms())
+    );
+}
+
+#[test]
+fn cook_totals_accumulate_across_cooks() {
+    let (mut e, ctx) = subflow_engine();
+    e.set_clock(tick_now);
+    let id = add(&mut e, ctx, "box");
+    e.cook(&mut || true);
+    let first = e.node_report(ctx, id).unwrap();
+    assert_eq!(first.cook_count, 1);
+
+    e.apply(Command::SetParam {
+        ctx,
+        node: id,
+        key: "width".into(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let second = e.node_report(ctx, id).unwrap();
+    assert_eq!(second.cook_count, 2, "a recook counts");
+    assert!(
+        second.total_cook_us >= first.total_cook_us,
+        "the total only grows"
+    );
+}
+
+// ---- playback pacing (round 2) ----
+//
+// The bug these pin: the clock used to advance every tick regardless of
+// whether the cook had finished, so on a scene whose cook exceeds one budget
+// slice the retime re-dirtied the head of the chain before the tail was
+// reached and the display node never cooked at all.
+
+/// A cook budget that permits `n` budget CHECKS, then refuses.
+///
+/// Not the same as "n nodes": `cook_until` always cooks the first eligible
+/// node without asking (the forward-progress rule at `driver.rs`), so
+/// `budget_of(0)` still cooks exactly one node and stops.
+fn budget_of(n: usize) -> impl FnMut() -> bool {
+    let mut left = n;
+    move || {
+        let ok = left > 0;
+        left = left.saturating_sub(1);
+        ok
+    }
+}
+
+#[test]
+fn the_clock_waits_for_an_unfinished_cook() {
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    let b = add(&mut e, ctx, "transform");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: a,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: b,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput { ctx, node: Some(b) })
+        .unwrap();
+
+    // Drain, then start the clock from a clean slate.
+    e.cook(&mut || true);
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+
+    // Dirty the chain and cook it only PARTWAY: one node cooks, the rest
+    // is left over. That is exactly the budget-exhausted state.
+    // One node cooks (forward progress), the second is left Dirty. That is
+    // exactly the state a budget-exhausted frame is in.
+    e.mark_dirty(ctx, a);
+    e.cook(&mut budget_of(0));
+
+    e.tick();
+    assert_eq!(
+        e.clock().frame,
+        start,
+        "the clock must not advance while a cook is still outstanding"
+    );
+
+    // Once the cook drains, it moves again.
+    e.cook(&mut || true);
+    e.tick();
+    assert_eq!(
+        e.clock().frame,
+        start + 1,
+        "a drained cook releases the clock"
+    );
+}
+
+#[test]
+fn pacing_cannot_deadlock_the_clock() {
+    // The property that makes the gate safe: a cook always drains given
+    // passes, because every exit from `cook_one` leaves a node Clean or
+    // Pending and only `retime` re-dirties -- which cannot run while the
+    // gate is closed. A node that ERRORS must not be an exception.
+    let (mut e, ctx) = subflow_engine();
+    let p = add(&mut e, ctx, "transform"); // required input, unconnected -> errors
+    e.apply(Command::SetActiveOutput { ctx, node: Some(p) })
+        .unwrap();
+
+    e.cook(&mut || true);
+    assert!(
+        matches!(e.cook.status(p), Some(CookStatus::Error { .. })),
+        "the fixture needs an erroring node to be meaningful"
+    );
+
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+    // Several frames of the real host loop: tick, then cook.
+    for _ in 0..3 {
+        e.tick();
+        e.cook(&mut || true);
+    }
+    assert!(
+        e.clock().frame > start,
+        "an erroring node must not freeze the clock: a failed cook is a \
+         FINISHED cook, so the dirty set still drains"
+    );
+}
+
+#[test]
+fn a_static_scene_still_plays_at_full_rate() {
+    // Nothing time-dependent: retime dirties nothing, every cook drains
+    // trivially, and the gate must never close.
+    let (mut e, ctx) = subflow_engine();
+    let b = add(&mut e, ctx, "box");
+    e.apply(Command::SetActiveOutput { ctx, node: Some(b) })
+        .unwrap();
+    e.cook(&mut || true);
+
+    e.apply(Command::Play).unwrap();
+    let start = e.clock().frame;
+    for _ in 0..5 {
+        e.tick();
+        e.cook(&mut || true);
+    }
+    assert_eq!(
+        e.clock().frame,
+        start + 5,
+        "a scene with nothing to recook must advance one frame per tick"
+    );
+}
+
+#[test]
+fn scrubbing_is_not_gated_by_an_unfinished_cook() {
+    // Pacing governs PLAYBACK. Someone dragging the playhead should land on
+    // the frame they asked for, not the one the cook is ready to give.
+    let (mut e, ctx) = subflow_engine();
+    let a = add(&mut e, ctx, "box");
+    e.apply(Command::SetActiveOutput { ctx, node: Some(a) })
+        .unwrap();
+    e.cook(&mut || true);
+
+    e.mark_dirty(ctx, a);
+    e.cook(&mut budget_of(0));
+
+    e.apply(Command::SetFrame { frame: 42 }).unwrap();
+    assert_eq!(e.clock().frame, 42, "an explicit seek is never gated");
 }

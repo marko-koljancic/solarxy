@@ -6,6 +6,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useDragResize } from "../hooks/useDragResize";
+import { isEscapeClaimed } from "./escapeClaim";
 
 export function Modal({
   id,
@@ -16,6 +17,7 @@ export function Modal({
   closeOnEsc = true,
   closeOnBackdrop = true,
   resizable = true,
+  bodyLayout = "block",
   minWidth,
   minHeight,
 }: {
@@ -31,6 +33,16 @@ export function Modal({
   closeOnEsc?: boolean;
   closeOnBackdrop?: boolean;
   resizable?: boolean;
+  /** `"column"` makes the body a flex column, so a dialog with a fixed
+   * height can give one child `flex: 1` and pin a footer to the bottom.
+   *
+   * Opt-in rather than the default because the body is a plain block for
+   * good reason: ordinary prose dialogs size to their content. But a dialog
+   * that sets its own `height` and expects `flex: 1` to work inside gets an
+   * inert declaration and a footer stranded mid-box, which is exactly what
+   * happened to Preferences, Screenshot and Turntable when they migrated
+   * onto this shell. */
+  bodyLayout?: "block" | "column";
   minWidth?: number;
   minHeight?: number;
 }) {
@@ -40,6 +52,10 @@ export function Modal({
     if (!onClose || !closeOnEsc) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // A tooltip or dropdown open above this dialog owns Escape:
+        // dismissing one must not also throw away the edits you opened it
+        // to make. See `escapeClaim` for why the DOM will not do this.
+        if (isEscapeClaimed()) return;
         e.stopPropagation();
         onClose();
       }
@@ -82,7 +98,9 @@ export function Modal({
             </button>
           )}
         </div>
-        <div className="modal-body">{children}</div>
+        <div className={`modal-body${bodyLayout === "column" ? " modal-body-column" : ""}`}>
+          {children}
+        </div>
         {resizable && <div className="modal-resize" {...resizeProps} aria-hidden />}
       </div>
     </div>

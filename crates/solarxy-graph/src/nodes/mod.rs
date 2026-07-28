@@ -30,6 +30,7 @@ mod attribute_create_node;
 mod attribute_from_image_node;
 mod attribute_promote_node;
 mod attribute_randomize_node;
+mod attribute_wrangle_node;
 mod compute_normals_node;
 mod copy_to_points_node;
 mod delete_node;
@@ -70,6 +71,7 @@ mod import_image;
 mod imports;
 mod lights;
 mod note_node;
+mod text_node;
 
 pub use imports::{parse_bytes, parse_model, parse_model_validated};
 
@@ -100,6 +102,7 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         // Attribute (Geo).
         attribute_create_node::descriptor(),
         attribute_randomize_node::descriptor(),
+        attribute_wrangle_node::descriptor(),
         attribute_promote_node::descriptor(),
         attribute_copy_node::descriptor(),
         attribute_from_image_node::descriptor(),
@@ -151,6 +154,7 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         validate_node::descriptor(),
         camera_node::camera_descriptor(),
         note_node::descriptor(),
+        text_node::descriptor(),
         // Texture: Generate.
         image_generate::constant_descriptor(),
         image_generate::ramp_descriptor(),
@@ -224,7 +228,7 @@ mod tests {
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 74);
+        assert_eq!(registry.len(), 76);
 
         let in_context = |kind: ContextKind| {
             builtin_descriptors()
@@ -254,7 +258,7 @@ mod tests {
         let expected = [
             (Category::Container, 3),
             (Category::Generators, 9),
-            (Category::Attribute, 7),
+            (Category::Attribute, 8),
             (Category::Transform, 2),
             (Category::Copy, 4),
             (Category::Topology, 5),
@@ -262,6 +266,9 @@ mod tests {
             (Category::Import, 6),
             (Category::Export, 3),
             (Category::Lights, 6),
+            // 0.8.1: `camera` moved out of Utility into its own section.
+            (Category::Cameras, 1),
+            // +1: the `text` datablock joined in round 2.
             (Category::Utility, 6),
             (Category::TexGenerate, 7),
             (Category::TexAdjust, 5),
@@ -270,6 +277,6 @@ mod tests {
         for (cat, n) in expected {
             assert_eq!(count(cat), n, "{}", cat.display_name());
         }
-        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 74);
+        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 76);
     }
 }

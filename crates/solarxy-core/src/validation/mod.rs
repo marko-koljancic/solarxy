@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(result.report.warning_count(), 0);
     }
 
-    /// The W1d acceptance line: a point cloud has an empty index buffer by
+    /// The topology-gate acceptance line: a point cloud has an empty index buffer by
     /// definition and a polyline's pair count is not divisible by three,
     /// so without the topology gate both would fire false Errors
     /// (EmptyIndices / NonTriangulated) plus manifold and normals noise.

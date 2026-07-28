@@ -123,6 +123,11 @@ pub enum Category {
     Import,
     Export,
     Lights,
+    /// Cameras get their own section rather than sharing Utility with the
+    /// note node. A camera is a scene element you author and look through,
+    /// not a helper, and the section has room to grow (physical, orthographic
+    /// and stereo cameras are all plausible neighbours).
+    Cameras,
     Utility,
     TexGenerate,
     TexAdjust,
@@ -146,6 +151,7 @@ impl Category {
             Self::Import => "Import",
             Self::Export => "Export",
             Self::Lights => "Lights",
+            Self::Cameras => "Cameras",
             Self::Utility => "Utility",
             Self::TexGenerate => "Generate",
             Self::TexAdjust => "Adjust",
@@ -168,11 +174,19 @@ pub enum NodeRole {
     Analyzer,
     ImageSource,
     Light,
+    /// A body that points the way it aims. Distinct from `Light` because
+    /// the two sit side by side in the root graph and are the two things
+    /// there that are not geometry.
+    Camera,
+    /// A stored datablock rather than an operation: a small, plain body.
+    /// Quiet by SIZE rather than by silhouette, because the point is that
+    /// it recedes -- a script library should not read as graph structure.
+    Text,
     Note,
 }
 
 /// Which network kinds a node type may be placed in: a small bitset over
-/// [`ContextKind`]. The phase-17 generalization of the old two-bool
+/// [`ContextKind`]. This generalizes the older two-bool
 /// root/subflow mask; legality is judged against the target graph's
 /// `kind`, never against its address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

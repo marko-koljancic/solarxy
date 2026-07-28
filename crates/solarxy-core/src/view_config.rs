@@ -36,6 +36,17 @@ impl ViewLayout {
     }
 }
 
+/// On-screen size of a rendered point, in pixels.
+///
+/// The renderer expands point primitives into camera-facing quads (WebGPU
+/// rasterizes a point-list at exactly one pixel with no size control), so
+/// this is a real screen-space size rather than a hint.
+pub const DEFAULT_POINT_SIZE: f32 = 6.0;
+/// The usable range. Below 1 a point stops being visible at all; above 32 it
+/// stops reading as a point and starts occluding the geometry it annotates.
+pub const MIN_POINT_SIZE: f32 = 1.0;
+pub const MAX_POINT_SIZE: f32 = 32.0;
+
 /// Height of the per-pane viewport toolbar strip, in logical pixels.
 /// Each pane's 3D content is the pane rect minus this strip at the top.
 pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
@@ -53,6 +64,17 @@ pub struct DisplaySettings {
     /// Scene-global HDRI yaw, in radians. Rotates the visible HDRI sky
     /// and the IBL it derives together. `0.0` when no HDRI is loaded.
     pub hdri_rotation: f32,
+    /// On-screen point size in pixels.
+    ///
+    /// Global rather than per pane, unlike `line_weight`: there is no
+    /// comparison worth two point sizes side by side, and a global keeps it
+    /// to one field instead of a per-pane Display-menu entry.
+    #[serde(default = "default_point_size")]
+    pub point_size: f32,
+}
+
+fn default_point_size() -> f32 {
+    DEFAULT_POINT_SIZE
 }
 
 impl DisplaySettings {

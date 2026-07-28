@@ -175,7 +175,10 @@ const OBJ: Format = Format {
     type_id: "import_obj",
     // v3: gains `preserve_materials`; the strip migration's
     // v2 step is a no-op and the new param default-fills on load.
-    version: 3,
+    // v4: gains `vertex_colors`, now that the loader reads the unofficial
+    // `v x y z r g b` form. Additive, so the registry default fill supplies
+    // `true` and no hook logic is needed for the step.
+    version: 4,
     display_name: "Import OBJ",
     accept: &[".obj"],
     doc: "Loads a Wavefront OBJ, triangulating as it parses. Materials come \
@@ -192,11 +195,26 @@ const OBJ: Format = Format {
           picker is multi-select, and dropping the containing folder \
           traverses it) or the model arrives with geometry and no materials, \
           no error raised. On the web the parse runs in an import worker off \
-          the main thread, so a heavy file does not freeze the canvas.",
-    aliases: &["obj", "wavefront", "import"],
-    extra: preserve_materials_extra,
+          the main thread, so a heavy file does not freeze the canvas.\n\n\
+          Per-vertex colours ride the unofficial extended-position form \
+          (`v x y z r g b`), which scanners and MeshLab both write. They \
+          survive as the per-point colour attribute and display directly; \
+          the Vertex Colors toggle drops them at the door. Colours are read \
+          as sRGB, matching PLY, so the same scan exported to either format \
+          imports the same.",
+    aliases: &["obj", "wavefront", "import", "colors"],
+    extra: obj_extra,
     migrate: migrate_strip_rendering_group,
 };
+
+/// OBJ carries both materials (via MTL) and, in the unofficial extended
+/// form, per-vertex colours, so it is the one format that declares both
+/// toggles.
+fn obj_extra() -> Vec<ParamSpec> {
+    let mut params = preserve_materials_extra();
+    params.extend(vertex_colors_extra());
+    params
+}
 const GLTF: Format = Format {
     type_id: "import_gltf",
     version: 2,
@@ -376,7 +394,7 @@ fn import_options(p: &ResolvedParams, format: &str) -> ImportOptions {
         recompute_normals: (format == "stl").then(|| p.bool("recompute_normals")),
         preserve_materials: matches!(format, "gltf" | "glb" | "obj")
             .then(|| p.bool("preserve_materials")),
-        vertex_colors: (format == "ply").then(|| p.bool("vertex_colors")),
+        vertex_colors: matches!(format, "ply" | "obj").then(|| p.bool("vertex_colors")),
     }
 }
 
@@ -688,13 +706,20 @@ mod tests {
         let ply = import_options(&resolved_defaults(ply_descriptor), "ply");
         assert_eq!(ply.preserve_materials, None, "ply has no materials");
 
-        // W3b: vertex_colors is PLY-only, default true.
+        // vertex_colors: PLY since 0.8.0, and OBJ since 0.8.1 taught the
+        // loader the unofficial `v x y z r g b` form. Both default on.
+        // STL has no colour channel at all and declares no toggle.
         assert_eq!(ply.vertex_colors, Some(true), "ply declares it, on");
-        assert_eq!(stl.vertex_colors, None);
-        assert_eq!(obj.vertex_colors, None);
+        assert_eq!(obj.vertex_colors, Some(true), "obj declares it, on");
+        assert_eq!(stl.vertex_colors, None, "stl carries no colours");
+        let gltf_colors = import_options(&resolved_defaults(gltf_descriptor), "gltf");
+        assert_eq!(
+            gltf_colors.vertex_colors, None,
+            "glTF colours ride its own accessor, not this toggle"
+        );
     }
 
-    /// W3b: the toggle off strips the loader-lifted color lane before
+    /// The toggle off strips the loader-lifted color lane before
     /// anything downstream sees it; on (the default) keeps it.
     #[test]
     fn vertex_colors_toggle_strips_the_color_lane() {

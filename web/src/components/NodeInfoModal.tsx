@@ -7,9 +7,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { dispatch, getClient } from "../engine/session";
-import { ctxKey, type PortSnapshot } from "../engine/types";
+import { ctxKey, type NodeReport, type PortSnapshot } from "../engine/types";
+import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
-import { useMirror } from "../store/mirror";
+import { selectGraph, useMirror } from "../store/mirror";
+import {
+  connectionSummary,
+  formatBounds,
+  formatDuration,
+  formatTimestamp,
+} from "./nodeReport";
 import { useRadial } from "../store/radial";
 import { renderDoc } from "./Popover";
 
@@ -23,6 +30,7 @@ export function NodeInfoModal() {
   const cook = useMirror((s) => (info ? s.cook[info.nodeId] : undefined));
   const report = useMirror((s) => (info ? s.reports[info.nodeId] : undefined));
   const stale = useMirror((s) => (info ? s.stale.includes(info.nodeId) : false));
+  const graph = useMirror((s) => (info ? selectGraph(s, info.ctx) : undefined));
 
   // Cook warnings are a pull query (they ride no event); refetched when
   // the card retargets or the node's cook status changes.
@@ -30,6 +38,23 @@ export function NodeInfoModal() {
   useEffect(() => {
     setWarnings(info ? getClient().cookWarnings(info.nodeId) : []);
   }, [info, cook?.status]);
+
+  // Bounds, cook accounting and timestamps are the same shape of pull
+  // query, and for the same reason: as events they would be one message
+  // per node per frame during playback. Refetched on the same triggers,
+  // plus the document revision so an edit elsewhere updates "modified".
+  const revision = useMirror((s) => s.revision);
+  const [nodeReport, setNodeReport] = useState<NodeReport | null>(null);
+  useEffect(() => {
+    setNodeReport(info ? getClient().nodeReport(info.ctx, info.nodeId) : null);
+  }, [info, cook?.status, revision]);
+  // Captured per fetch rather than read at render: a `Date.now()` in the
+  // render body makes "5 minutes ago" depend on when React last chose to
+  // re-run, which is not a thing the user can reason about.
+  const [asOf, setAsOf] = useState(() => Date.now());
+  useEffect(() => {
+    setAsOf(Date.now());
+  }, [info, revision]);
 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -123,6 +148,13 @@ export function NodeInfoModal() {
     dispatch({ type: "setSelection", ctx: info.ctx, ids: [info.nodeId] });
   };
 
+  const bounds = formatBounds(nodeReport?.bounds ?? null);
+  const connections = graph
+    ? connectionSummary(graph, node, (n) =>
+        nodeLabel(n, registry ? descriptorFor(registry, n.typeId) : undefined),
+      )
+    : null;
+
   const statusText =
     status?.state === "ok"
       ? `cooked in ${status.ms.toFixed(1)} ms`
@@ -180,6 +212,56 @@ export function NodeInfoModal() {
             <span className="node-info-key">Geometry</span>
             <span>
               {cook.points ?? 0} points, {cook.prims ?? 0} prims, {cook.meshes ?? 0} mesh(es)
+            </span>
+          </div>
+        )}
+        {bounds && (
+          <div className="node-info-row">
+            <span className="node-info-key">Bounds</span>
+            <span title="Size, then centre, in world units">{bounds}</span>
+          </div>
+        )}
+        {nodeReport && nodeReport.cookCount > 0 && (
+          <div className="node-info-row">
+            <span className="node-info-key">Cooks</span>
+            <span>
+              {nodeReport.cookCount} this session, {formatDuration(nodeReport.totalCookUs)} total
+              {nodeReport.cookCount > 1 && (
+                <> · {formatDuration(nodeReport.totalCookUs / nodeReport.cookCount)} average</>
+              )}
+              {" · "}
+              {formatDuration(nodeReport.lastCookUs)} last
+            </span>
+          </div>
+        )}
+        {connections && (connections.inputs.length > 0 || connections.outputs.length > 0) && (
+          <div className="node-info-row">
+            <span className="node-info-key">Wired</span>
+            <span className="node-info-wires">
+              {connections.inputs.map((i) => (
+                <span key={`in-${i.port}`}>
+                  {i.port} &lt;- {i.from.join(", ")}
+                </span>
+              ))}
+              {connections.outputs.map((o) => (
+                <span key={`out-${o.port}`}>
+                  {o.port} -&gt; {o.to.join(", ")}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+        {nodeReport && (
+          <div className="node-info-row">
+            <span className="node-info-key">Created</span>
+            <span>{formatTimestamp(nodeReport.createdMs, asOf)}</span>
+          </div>
+        )}
+        {nodeReport && (
+          <div className="node-info-row">
+            <span className="node-info-key">Modified</span>
+            <span title="Parameter, connection and bypass changes. Moving a node on the canvas does not count.">
+              {formatTimestamp(nodeReport.modifiedMs, asOf)}
             </span>
           </div>
         )}

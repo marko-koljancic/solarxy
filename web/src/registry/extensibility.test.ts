@@ -140,7 +140,7 @@ describe("extensibility: a novel node renders from the snapshot alone", () => {
     expect([...groups]).toEqual(["geometry", "shape"]);
   });
 
-  it("always resolves drawable node art (revamp D-18: glyph + role hints)", () => {
+  it("always resolves drawable node art from glyph + role hints", () => {
     const probe = descriptorFor(SNAP, "probe")!;
     // "probe" is a glyph key with no frontend art: the category fallback
     // (generators -> box) must produce a real path, never a broken icon.

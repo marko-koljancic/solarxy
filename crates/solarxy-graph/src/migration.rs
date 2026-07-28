@@ -138,6 +138,8 @@ pub fn load_node(
         bypassed,
         port_order: BTreeMap::new(),
         placeholder: None,
+        created_ms: None,
+        modified_ms: None,
     };
     LoadedNode { node, warnings }
 }
@@ -164,6 +166,8 @@ fn placeholder(
         bypassed,
         port_order: BTreeMap::new(),
         placeholder: Some(reason.clone()),
+        created_ms: None,
+        modified_ms: None,
     };
     LoadedNode {
         node,
@@ -411,9 +415,14 @@ mod tests {
             Some(&ParamSource::Literal(ParamValue::Float(2.0)))
         );
 
-        // rect_area_light drops its unread transform params, keeps the rest
-        // (`rotate` is stripped before typing, so its stored shape never
-        // matters).
+        // rect_area_light drops its unread transform params, keeps the rest.
+        //
+        // This one matters more since v3, which restored a `rotate` param.
+        // A v1 document's `rotate` was authored against a renderer that
+        // ignored it entirely, so it is not a value anyone chose to see;
+        // carrying it forward would silently re-aim panels in old scenes
+        // the first time they are opened. It must still be stripped, and
+        // the light must come back face-down.
         let loaded = load_node(
             &reg,
             NodeId(3),
@@ -429,9 +438,13 @@ mod tests {
             false,
         );
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.node.type_version, 2);
+        assert_eq!(loaded.node.type_version, 3);
         for key in ["rotate", "scale", "uniform_scale"] {
-            assert!(!loaded.node.params.contains_key(key));
+            assert!(
+                !loaded.node.params.contains_key(key),
+                "`{key}` survived the v1 strip; a v3 rect-area light would \
+                 open pointing somewhere the author never chose"
+            );
         }
         assert_eq!(
             loaded.node.params.get("width"),

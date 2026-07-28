@@ -12,12 +12,22 @@
 // control needs beyond a menu -- typeahead, Home/End, and arrow keys that move
 // a highlight without committing until Enter.
 //
-// Deliberately NOT a portal (unlike Popover): these sit inside modals and the
-// parameter panel, both of which scroll and clip predictably, and an absolute
-// child avoids the reposition-on-scroll problem a portal would introduce.
+// Inline by default, NOT a portal (unlike Popover): these sit inside modals
+// and the parameter panel, both of which scroll and clip predictably, and an
+// absolute child avoids the reposition-on-scroll problem a portal would
+// introduce.
+//
+// `portal` opts into the escape hatch for the hosts where that reasoning does
+// not hold: a bar that is itself a scroll container, or one flush against the
+// bottom of the window. Both describe the transport bar, where an inline list
+// was clipped to a 31px strip and forced a scrollbar that shoved every other
+// control sideways. DropdownPortal owns positioning (including the upward
+// flip), the dropdown z-layer, and the whole dismiss contract.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "../icons";
+import { DropdownPortal } from "./DropdownPortal";
+import { claimEscape, releaseEscape } from "./escapeClaim";
 
 export interface SelectOption<T extends string> {
   value: T;
@@ -42,6 +52,9 @@ interface SelectProps<T extends string> {
   width?: number | string;
   disabled?: boolean;
   id?: string;
+  /** Render the list into the shared dropdown layer instead of inline.
+   * For hosts that clip (a scroll container) or sit at the window edge. */
+  portal?: boolean;
 }
 
 export function Select<T extends string>({
@@ -52,6 +65,7 @@ export function Select<T extends string>({
   width,
   disabled,
   id,
+  portal = false,
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -70,14 +84,26 @@ export function Select<T extends string>({
     if (open) setActive(selectedIndex);
   }, [open, selectedIndex]);
 
+  // An open list owns Escape, so closing it never closes the dialog around
+  // it. The handler below is `onKeyDown` on the trigger -- the target phase,
+  // which a modal's capture-phase listener beats outright. See `escapeClaim`.
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
+    claimEscape();
+    return releaseEscape;
+  }, [open]);
+
+  // Inline only: a portaled list lives outside `rootRef`, so this would read
+  // every option click as an outside click. DropdownPortal owns dismissal
+  // (outside pointerdown, Escape, resize) in that mode.
+  useEffect(() => {
+    if (!open || portal) return;
     const onDown = (e: PointerEvent) => {
       if (!(e.target instanceof Element) || !rootRef.current?.contains(e.target)) setOpen(false);
     };
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [open]);
+  }, [open, portal]);
 
   // Keep the highlighted row in view when arrowing through a long list.
   useEffect(() => {
@@ -170,6 +196,40 @@ export function Select<T extends string>({
     }
   };
 
+  const list = (
+    <div
+      ref={listRef}
+      id={listId}
+      className={`select-list${portal ? " portaled" : ""}`}
+      role="listbox"
+      tabIndex={-1}
+    >
+      {options.map((o, i) => (
+        <button
+          key={o.value}
+          type="button"
+          data-i={i}
+          role="option"
+          aria-selected={o.value === value}
+          disabled={o.disabled}
+          className={`select-option${i === active ? " active" : ""}`}
+          // pointerdown, not click: the outside-pointerdown listener runs
+          // in the capture phase and would close the list first.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            commit(i);
+          }}
+          onPointerEnter={() => setActive(i)}
+        >
+          <span className="select-check">{o.value === value && <IconCheck size={11} />}</span>
+          {o.swatch && <span className="select-swatch" style={{ background: o.swatch }} />}
+          <span className="select-option-label">{o.label}</span>
+          {o.hint && <span className="select-option-hint">{o.hint}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div ref={rootRef} className="select" style={width ? { width } : undefined}>
       <button
@@ -188,35 +248,14 @@ export function Select<T extends string>({
         <span className="select-value">{current?.label ?? value}</span>
         <IconChevronDown size={12} />
       </button>
-      {open && (
-        <div ref={listRef} id={listId} className="select-list" role="listbox" tabIndex={-1}>
-          {options.map((o, i) => (
-            <button
-              key={o.value}
-              type="button"
-              data-i={i}
-              role="option"
-              aria-selected={o.value === value}
-              disabled={o.disabled}
-              className={`select-option${i === active ? " active" : ""}`}
-              // pointerdown, not click: the outside-pointerdown listener runs
-              // in the capture phase and would close the list first.
-              onPointerDown={(e) => {
-                e.preventDefault();
-                commit(i);
-              }}
-              onPointerEnter={() => setActive(i)}
-            >
-              <span className="select-check">
-                {o.value === value && <IconCheck size={11} />}
-              </span>
-              {o.swatch && <span className="select-swatch" style={{ background: o.swatch }} />}
-              <span className="select-option-label">{o.label}</span>
-              {o.hint && <span className="select-option-hint">{o.hint}</span>}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        (portal ? (
+          <DropdownPortal anchorRef={rootRef} onClose={() => setOpen(false)}>
+            {list}
+          </DropdownPortal>
+        ) : (
+          list
+        ))}
     </div>
   );
 }
