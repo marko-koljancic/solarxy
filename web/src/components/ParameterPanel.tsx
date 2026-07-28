@@ -366,6 +366,7 @@ function SnippetRow({
         // The window titles itself with the node path and the param key, so
         // several open editors are tellable apart.
         path={`${nodePathOf(ctx, node)}/${spec.key}`}
+        node={node}
         onCommit={onCommit}
       />
     </div>

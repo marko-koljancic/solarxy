@@ -45,8 +45,12 @@ export function siblingTypeParam(
 }
 
 /** The upstream node feeding this node's default (else first) Geometry
- * input, resolved through the mirror's edges; null when unwired. */
-function upstreamSource(node: NodeMirror): number | null {
+ * input, resolved through the mirror's edges; null when unwired.
+ *
+ * Exported so the wrangle editor's completions read the SAME geometry this
+ * picker offers. Two answers to "which lanes exist here" would be one too
+ * many. */
+export function upstreamSource(node: NodeMirror): number | null {
   const s = useMirror.getState();
   const desc = descriptorFor(s.registry, node.typeId);
   const input =

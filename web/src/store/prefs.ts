@@ -53,6 +53,19 @@ export interface ViewportChromePrefs {
   transportBar: boolean;
 }
 
+/** The code editor's display preferences.
+ *
+ * Kept here rather than in the editor's own menu so they persist and apply
+ * to every snippet field at once; the editor is a widget that appears in
+ * several places, not a document. */
+export interface EditorPrefs {
+  /** Wrap long lines rather than scrolling horizontally. */
+  wordWrap: boolean;
+  lineNumbers: boolean;
+  /** Font size in px, clamped 9..24. */
+  fontSize: number;
+}
+
 export interface ScreenshotPrefs {
   resolution: ScreenshotResolution;
   customWidth: number;
@@ -106,6 +119,7 @@ export interface Prefs {
   screenshot: ScreenshotPrefs;
   viewport: GizmoPrefs;
   chrome: ViewportChromePrefs;
+  editor: EditorPrefs;
   selection: SelectionPrefs;
   display: DisplayPrefs;
   /** First-run tour state. `version` lets a materially changed tour show
@@ -136,6 +150,7 @@ export const DEFAULT_PREFS: Prefs = {
     snapScale: 0.1,
   },
   chrome: { transportBar: true },
+  editor: { wordWrap: true, lineNumbers: true, fontSize: 12 },
 };
 
 interface PrefsStore {
@@ -230,6 +245,7 @@ export function mergePersistedPrefs(p: PersistedPrefs | undefined): Prefs {
     },
     viewport: { ...DEFAULT_PREFS.viewport, ...p?.viewport },
     chrome: { ...DEFAULT_PREFS.chrome, ...p?.chrome },
+    editor: { ...DEFAULT_PREFS.editor, ...p?.editor },
     selection: { ...DEFAULT_PREFS.selection, ...p?.selection },
     display: { ...DEFAULT_PREFS.display, ...p?.display },
     // An existing user rehydrates with `completed: false` and is offered

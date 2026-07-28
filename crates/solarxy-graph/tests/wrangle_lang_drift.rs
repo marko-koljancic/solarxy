@@ -11,6 +11,12 @@
 //! A source-level rule, like the player-import guard in
 //! `solarxy-core/tests/tokens_drift.rs`: it runs on every `cargo test`, needs
 //! no frontend build, and names the missing word rather than a count.
+//!
+//! The lists live in `wrangleNames.ts` rather than beside the syntax
+//! highlighter, because the completion source needs them and is reached from
+//! the eagerly-loaded parameter panel, while the highlighter pulls CodeMirror
+//! and must stay in its own lazy chunk. That split is enforced by the
+//! boot-JS budget in `web-release.yml`, not here.
 
 use std::path::PathBuf;
 
@@ -23,10 +29,10 @@ fn lang_source() -> String {
         .parent()
         .and_then(|p| p.parent())
         .expect("workspace root")
-        .join("web/src/components/inputs/wrangleLang.ts");
+        .join("web/src/components/inputs/wrangleNames.ts");
     std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
-            "read {}: {e}. The wrangle highlighter must exist beside the grammar it mirrors.",
+            "read {}: {e}. The wrangle name lists must exist beside the grammar they mirror.",
             path.display()
         )
     })
@@ -36,7 +42,7 @@ fn lang_source() -> String {
 fn ts_array(src: &str, name: &str) -> Vec<String> {
     let at = src
         .find(&format!("export const {name} = ["))
-        .unwrap_or_else(|| panic!("wrangleLang.ts must export a `{name}` array"));
+        .unwrap_or_else(|| panic!("wrangleNames.ts must export a `{name}` array"));
     let rest = &src[at..];
     let end = rest.find(']').expect("the array must be closed");
     rest[..end]
@@ -58,7 +64,7 @@ fn assert_same(kind: &str, rust: &[&str], ts: &[String], export: &str) {
     assert!(
         missing.is_empty(),
         "{kind} the editor does not highlight: {missing:?}\n\
-         Add them to `{export}` in web/src/components/inputs/wrangleLang.ts. \
+         Add them to `{export}` in web/src/components/inputs/wrangleNames.ts. \
          Until then they render like undefined names to anyone writing a wrangle."
     );
 

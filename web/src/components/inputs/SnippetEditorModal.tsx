@@ -13,6 +13,8 @@
 import { lazy, Suspense, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Modal } from "../Modal";
+import type { CompletionSource } from "@codemirror/autocomplete";
+import type { EditorPrefs, ErrorMark } from "./CodeEditor";
 
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
@@ -20,16 +22,22 @@ export function SnippetEditorModal({
   value,
   ariaLabel,
   error,
-  errorLine,
+  errorText,
   path,
+  completions,
+  prefs,
   onCommit,
   onClose,
 }: {
   value: string;
   ariaLabel: string;
-  error?: string;
-  errorLine?: number;
+  /** The marked position, for the squiggle. */
+  error?: ErrorMark;
+  /** The message itself, shown under the editor. */
+  errorText?: string;
   path?: string;
+  completions?: CompletionSource;
+  prefs?: EditorPrefs;
   onCommit: (v: string) => void;
   onClose: () => void;
 }) {
@@ -72,17 +80,19 @@ export function SnippetEditorModal({
           <CodeEditor
             value={draft}
             ariaLabel={ariaLabel}
-            errorLine={dirty ? undefined : errorLine}
+            error={dirty ? undefined : error}
             minLines={16}
+            completions={completions}
+            prefs={prefs}
             // The window's editor writes to the local draft; only the
             // buttons below turn that into a command.
             onCommit={setDraft}
           />
         </Suspense>
       </div>
-      {error && !dirty && (
+      {errorText && !dirty && (
         <p className="snippet-error" role="status">
-          {error}
+          {errorText}
         </p>
       )}
       <div className="modal-actions">

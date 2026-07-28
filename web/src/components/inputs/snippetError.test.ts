@@ -1,35 +1,57 @@
-import { describe, expect, it } from "vitest";
-import { errorLine } from "./SnippetField";
+// Decoding the engine's cook error back into a position.
+//
+// The line half shipped in 0.8.1; the column half is new, and it is what
+// lets the editor underline the token rather than washing the whole row.
 
-// The wrangle's parse errors arrive as ordinary cook errors, formatted by
-// the engine as "line N, column M: ...". The gutter highlight is driven by
-// parsing that back, so this is the seam where the two sides agree.
+import { describe, expect, it } from "vitest";
+import { errorLine, errorPosition } from "./snippetError";
+
+describe("errorPosition", () => {
+  it("reads both halves of the engine's format", () => {
+    // The exact shape `ExprError::line_col` produces.
+    expect(errorPosition("line 3, column 12: unknown function `noize`")).toEqual({
+      line: 3,
+      column: 12,
+      message: "line 3, column 12: unknown function `noize`",
+    });
+  });
+
+  it("falls back to column 1 when only a line is named", () => {
+    // Not every engine error goes through the expression formatter; those
+    // should still tint their line rather than being dropped.
+    expect(errorPosition("line 7: something went wrong")).toEqual({
+      line: 7,
+      column: 1,
+      message: "line 7: something went wrong",
+    });
+  });
+
+  it("returns null for a message with no position", () => {
+    expect(errorPosition("this program assigns nothing")).toBeNull();
+    expect(errorPosition(undefined)).toBeNull();
+    expect(errorPosition("")).toBeNull();
+  });
+
+  it("rejects a zero or negative line rather than marking one", () => {
+    // Lines are 1-based; a 0 would index before the document.
+    expect(errorPosition("line 0, column 4: x")).toBeNull();
+  });
+
+  it("rejects a zero column rather than trusting it", () => {
+    expect(errorPosition("line 2, column 0: x")?.column).toBe(1);
+  });
+
+  it("keeps the whole message, not just the tail", () => {
+    // The message is what the squiggle's hover shows, so truncating it to
+    // the part after the colon would lose the position the user can read.
+    const m = "line 1, column 5: `@Cd` cannot be assigned a float";
+    expect(errorPosition(m)?.message).toBe(m);
+  });
+});
 
 describe("errorLine", () => {
-  it("reads the line out of an engine cook error", () => {
-    expect(errorLine("line 2, column 6: the assignment has no value")).toBe(2);
-  });
-
-  it("reads a multi-digit line", () => {
-    expect(errorLine("line 137, column 1: something")).toBe(137);
-  });
-
-  it("is null when there is no error at all", () => {
-    expect(errorLine(undefined)).toBeNull();
-  });
-
-  it("is null for a cook error that names no line", () => {
-    // Not every cook failure comes from the parser: a kernel-side element
-    // failure names a mesh and an element instead, and the gutter must not
-    // guess a line from it.
-    expect(errorLine("`@Cd` is assigned a 1-component value at element 3")).toBeNull();
-  });
-
-  it("does not mistake the word line inside a message for a location", () => {
-    expect(errorLine("the polyline input is empty")).toBeNull();
-  });
-
-  it("ignores a zero line, which is never valid in 1-based coordinates", () => {
-    expect(errorLine("line 0, column 1: impossible")).toBeNull();
+  it("is the line half of errorPosition", () => {
+    expect(errorLine("line 4, column 2: x")).toBe(4);
+    expect(errorLine("no position here")).toBeNull();
   });
 });

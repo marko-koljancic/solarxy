@@ -230,6 +230,48 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
       </Row>
       </Section>
+      <Section title="Code editor">
+        <Row
+          label="Word wrap"
+          doc="Whether long lines wrap rather than scrolling sideways. A wrangle is usually short enough that wrapping costs nothing and horizontal scrolling costs a lot."
+        >
+          <input
+            type="checkbox"
+            checked={draft.editor.wordWrap}
+            onChange={(e) => patch({ editor: { ...draft.editor, wordWrap: e.target.checked } })}
+          />
+        </Row>
+        <Row
+          label="Line numbers"
+          doc="Whether the editor shows a line-number gutter. Cook errors name a line, so the gutter is how you find the one they mean."
+        >
+          <input
+            type="checkbox"
+            checked={draft.editor.lineNumbers}
+            onChange={(e) => patch({ editor: { ...draft.editor, lineNumbers: e.target.checked } })}
+          />
+        </Row>
+        <Row
+          label="Editor font size"
+          doc="Text size inside code editors, in pixels. Independent of the rest of the interface, because code and prose are comfortable at different sizes."
+        >
+          <input
+            className="input-field prefs-dim"
+            type="number"
+            min={9}
+            max={24}
+            step={1}
+            value={draft.editor.fontSize}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) {
+                patch({ editor: { ...draft.editor, fontSize: Math.min(24, Math.max(9, v)) } });
+              }
+            }}
+          />
+          <span className="prefs-unit">px</span>
+        </Row>
+      </Section>
       <div className="prefs-info">
         Wireframe and background are the defaults for new scenes and panes; a scene file keeps the
         per-pane settings it was saved with, and the pane&apos;s Display menu overrides the current

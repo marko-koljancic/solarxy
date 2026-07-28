@@ -20,7 +20,13 @@
 // editor; the Suspense fallback is a plain box of the right height, so the
 // panel does not jump when it arrives.
 
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { getClient } from "../../engine/session";
+import type { AttrLane, NodeMirror } from "../../engine/types";
+import { usePrefs } from "../../store/prefs";
+import { upstreamSource } from "./AttributeNameField";
+import { wrangleCompletions } from "./wrangleComplete";
+import { errorPosition } from "./snippetError";
 import { SnippetEditorModal } from "./SnippetEditorModal";
 
 const CodeEditor = lazy(() => import("./CodeEditor"));
@@ -32,36 +38,51 @@ interface Props {
   error?: string;
   /** The node path shown in the window title, e.g. `/obj/geo1/wrangle1`. */
   path?: string;
+  /** The node this program belongs to, for attribute completions. */
+  node?: NodeMirror;
   onCommit: (v: string) => void;
 }
 
-/** The 1-based line an engine error points at, if it names one. */
-export function errorLine(message: string | undefined): number | null {
-  if (!message) return null;
-  const m = /\bline (\d+)/.exec(message);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
+export function SnippetField({ value, ariaLabel, error, path, node, onCommit }: Props) {
+  const editorPrefs = usePrefs((s) => s.prefs.editor);
 
-export function SnippetField({ value, ariaLabel, error, path, onCommit }: Props) {
+  // The lane inventory is pulled on demand rather than mirrored: it changes
+  // whenever the graph upstream is edited, and a list captured when the
+  // editor was built would be stale the moment somebody wired something up.
+  // Cached per completion session so one keystroke does not cost a boundary
+  // crossing per candidate.
+  const lanesRef = useRef<AttrLane[]>([]);
+  const completions = useMemo(
+    () =>
+      wrangleCompletions(() => {
+        if (!node) return lanesRef.current;
+        const source = upstreamSource(node);
+        const summary = source === null ? undefined : getClient().attributeSummary(source);
+        lanesRef.current = summary?.point ?? [];
+        return lanesRef.current;
+      }),
+    [node],
+  );
+
   // The error belongs to the COMMITTED program. While an edit is in flight
   // the highlight would point at a line the engine never saw, so the editor
   // reports its dirty state and the mark hides until the two agree again.
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const badLine = dirty ? null : errorLine(error);
+  const badAt = dirty ? null : errorPosition(error);
 
   return (
-    <div className={`snippet-field${badLine ? " has-error" : ""}`}>
+    <div className={`snippet-field${badAt ? " has-error" : ""}`}>
       <div className="snippet-body">
         <Suspense fallback={<div className="snippet-loading" aria-busy="true" />}>
           <CodeEditor
             value={value}
             ariaLabel={ariaLabel}
-            errorLine={badLine ?? undefined}
+            error={badAt ?? undefined}
             onCommit={onCommit}
             onDirty={setDirty}
+            completions={completions}
+            prefs={editorPrefs}
           />
         </Suspense>
         <button
@@ -74,7 +95,7 @@ export function SnippetField({ value, ariaLabel, error, path, onCommit }: Props)
           <ExpandGlyph />
         </button>
       </div>
-      {badLine && error ? (
+      {badAt && error ? (
         <p className="snippet-error" role="status">
           {error}
         </p>
@@ -87,8 +108,8 @@ export function SnippetField({ value, ariaLabel, error, path, onCommit }: Props)
         <SnippetEditorModal
           value={value}
           ariaLabel={ariaLabel}
-          error={badLine && error ? error : undefined}
-          errorLine={badLine ?? undefined}
+          error={badAt ?? undefined}
+          errorText={badAt ? error : undefined}
           path={path}
           onCommit={onCommit}
           onClose={() => setExpanded(false)}
