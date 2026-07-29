@@ -258,13 +258,44 @@ Version is single-sourced in `[workspace.package]` in the root `Cargo.toml`. Bum
 ## Working Agreement
 
 - **Implementation according to best practices**, as a senior software engineer and computer graphics domain expert in Rust. For UI work, also as a UX/UI expert.
-- **Ask for clarifications until at least 90% sure** of intent before implementing. The user can clarify or provide decision guidance. Craft a detailed, objective plan before writing code.
+- **Clarify before planning, tiered by stakes.** Before proposing a plan, identify the ambiguities, missing context, and unstated assumptions in the request. Ask clarifying questions in a **single batch**, not drip-fed, covering scope, success criteria, constraints, dependencies, personas, and acceptance criteria. Continue rounds until at least 90% confident in **what** and **how**. State remaining assumptions explicitly, and name context that only the maintainer holds rather than inventing it. Then produce a plan with objectives and scope (in and out), approach and key decisions, work breakdown and sequencing, risks/assumptions/dependencies, acceptance criteria, and an objective confidence percentage. Do not begin execution until the maintainer explicitly confirms; on pushback, revise and re-request rather than partially executing. **Run this in full** when the work changes scope, touches a public surface, reopens a ratified decision, spans more than a couple of files, or is hard to reverse. **Skip it** for a narrow unambiguous ask (a named bug, a single file, a direct question), where the right move is to state assumptions inline and proceed. Resolve what is knowable yourself first: read the code, check the amendment history, run the search. Asking three questions about a one-line fix is its own failure.
+- **Ask before adding anything to the repository.** This repo is public and its dependencies are a supply chain, not a convenience. **Gated, ask first:** any new Cargo or npm dependency (including dev-dependencies, and including a version bump that pulls a new transitive tree); any new top-level directory; any new workspace crate; any committed binary asset. **Not gated:** source files inside an existing crate or module, tests, fixtures, and documents under `Docs/`. When a design or plan implies a gated addition, surface it at plan time with the reason and the alternative you considered, not at implementation time. A stray runbook was committed to the repo root during 0.8.1 and had to be deleted before merge; the root carries `CLAUDE.md` and `README.md` only.
 - **No `unwrap` / `expect` outside of tests.** Use `?` with `anyhow` (app/CLI) or `thiserror` (library crates) and add context via `.context(...)` where it helps debugging.
 - **Library crates use `thiserror`; binary crates use `anyhow`.** Do not pull `anyhow` into `solarxy-core` (except behind the `serialization` feature), `solarxy-formats`, or `solarxy-renderer` as a public dependency.
 - **Distinguish current state from planned refactors.** The 0.6.0 milestone plan describes future work (pipeline sub-struct grouping, `GuiSnapshot::apply_to_state` consolidation, doc-comment coverage). Do not refactor toward planned-but-unscheduled work without surfacing it first.
 - **Surface findings before unilaterally refactoring.** Multi-file refactors get a plan first.
 - **No milestone planning codes in comments, test names, or log output.** Work-item codes (`W0a`, `W-C1`), numbered stages and phases (`Stage 8`, `pre-Phase-10`, `phase-17`) and decision codes (`M-3`, `D-24`, `R-5`, `C-4`, `P-9`) are ephemeral artifacts of a planning document. A comment carrying one is unreadable without that document open beside the file, and the decision codes are per-milestone, so `decision M-3` names a different decision in `expr/mod.rs` than it does in `bounds_node.rs`. Say what the code stood for instead: `pre-Phase-10 desk shape` becomes `the pre-dockview desk shape`, `(decision M-11)` becomes the decision's substance. **Version references are fine and often load-bearing** - "a blob persisted before 0.8.1" is *why* a migration fallback exists. Enforced by `no_planning_codes_in_comments` in `crates/solarxy-core/tests/tokens_drift.rs`, which also covers `describe`/`it`/`test` titles because those are read in CI output. Planning codes stay correct and expected in `Docs/`, which the rule does not scan.
 
-## Audit
+## Agents and skills
 
-Run `/solarxy-audit` for a full code-quality sweep covering Rust idioms, wgpu + WGSL correctness, egui patterns, ratatui (analyze TUI only), architecture, performance & safety, workspace hygiene, and (when relevant) cross-platform readiness. The audit runs in an isolated subagent so the report does not pollute the main session. See `.claude/skills/solarxy-audit/SKILL.md`.
+All agents and skills live in `.claude/` **in this repo** and are versioned with it. They are loaded only when a session starts here, which is why nothing lives at the workspace root any more. Because this repo is public, every file under `.claude/` is a public artifact: it carries no secrets or host detail, and it obeys the redaction rule.
+
+**Design sources live in `design/`**, one Pencil file per shell (`web/`, `desktop/`, `tui/`). They are encrypted: open them only through the Pencil MCP tools, never with `Read` or `Grep`. Colour is owned by `solarxy_core::theme::Palette` and drift-tested, not by the design file; the design file owns composition. See `design/README.md` before any visual work.
+
+**Every agent reads `.claude/skills/solarxy-domain/SKILL.md` first.** That briefing carries the architecture invariants, the shared vocabulary, the five surfaces of record, the engagement protocol above, the public-surface rules, and the canonical reading list. Change a shared rule there, not in eleven agent files.
+
+| Agent | Reach for it when |
+|---|---|
+| `architect` | Design before code: crate boundaries, the engine-renderer contract, the wasm boundary, data-model and migration decisions, anything spanning surfaces. |
+| `rust-engineer` | Implementing in the Rust workspace outside the renderer: engine, kernel, scenefile, formats, imaging, validate, CLI, desktop shell. |
+| `frontend-engineer` | Implementing under `web/`: React and zustand, the node canvas, the boundary mirrors, workers and persistence, the public pages. |
+| `graphics-engineer` | Implementing in `solarxy-renderer` and WGSL: passes, pipelines, uniforms, IBL and shadows, capture, goldens. |
+| `product-manager` | Strategy and lifecycle: vision, positioning, release themes, the program to 1.0, go-to-market, milestone-level board ownership. |
+| `product-owner` | SDLC: decomposing a milestone into epics, tasks and sub-tasks, writing acceptance criteria, exit gates, scope-pressure calls. |
+| `product-designer` | Interaction model, UX-spec guardianship, keymap policy, and the design of the public surfaces. |
+| `technical-writer` | Any authored prose and its consistency: amendments, the log, the wiki, release notes, reference docs, public item text. |
+| `qa-engineer` | Test strategy, coverage audits, exit-criteria verification, regression gates, and cross-surface release verification. |
+| `devops-engineer` | Build and release pipeline, size budgets, the release train and its fan-out, edge routes and deploy. |
+| `security-engineer` | Headers and CSP, supply chain, untrusted-input review at the wasm and parser boundaries, public-surface disclosure. |
+| `milestone-planner` | Researching and drafting a code-grounded milestone specification. Driven by the skill of the same name. |
+
+| Skill | What it is for |
+|---|---|
+| `solarxy-domain` | The shared briefing every agent reads first. |
+| `solarxy-sdlc` | The nine delivery stages from idea to verified release, who owns each, and which file is authoritative. Use to answer where a piece of work sits and what comes next. |
+| `solarxy-git` | Commit message and branch naming conventions: Conventional Commits with a closed type and scope set, the branch model, pull request titles, and the golden-accept footer. |
+| `solarxy-tracker` | Operating the public GitHub board: the four-level hierarchy, the golden item shapes, the pastel label taxonomy, the cleanup policy. |
+| `solarxy-sync` | Keeping the five surfaces in step. Run before declaring any task, milestone, or release done. |
+| `solarxy-brand` | The design language and voice for the public pages, plus the three platform constraints a new page must satisfy. |
+| `milestone-planner` | Planning or revising a release milestone, and fanning it out to the board. |
+| `solarxy-audit` | `/solarxy-audit` runs a full code-quality sweep in an isolated subagent so the report does not pollute the main session. |
