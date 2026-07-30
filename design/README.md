@@ -9,7 +9,7 @@ Paths below are relative to the repository root, matching the convention used th
 | Surface | File | State |
 |---|---|---|
 | Web app and public pages | `design/web/solarxy-web.pen` | Populated. Fifteen design bands and a numbered decision series. |
-| Desktop GUI (egui) | `design/desktop/solarxy-desktop.pen` | Reserved. Created and intentionally empty. |
+| Desktop GUI (egui) | `design/desktop/solarxy-desktop.pen` | Populated. Fourteen bands and a decision series, split into two regions. **AS-IS** captures the shipped shell: tokens in both themes, typography, the widget state matrix, source-read metrics, the menu bar, status bar, pane toolbar, shell composition and the five viewport layouts, all seven dock panels, the modals, and the overlay and review surfaces. **PROPOSED** holds forward-looking work, currently the three panel changes the 0.8.2 desktop engine surface introduces. |
 | Analyze TUI (ratatui) | `design/tui/solarxy-tui.pen` | Reserved. Created and intentionally empty. |
 
 ## Opening these files
