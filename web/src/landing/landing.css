@@ -159,6 +159,13 @@ a {
 .nav-link:hover {
   color: var(--accent-ink);
 }
+/* Four text links plus the CTA overflow a phone-width nav; every link stays
+   reachable in the footer, so no hamburger. */
+@media (max-width: 720px) {
+  .nav-link {
+    display: none;
+  }
+}
 
 /* ---- buttons (MPW pills) ---- */
 
@@ -446,6 +453,10 @@ a {
   max-width: 22ch;
   margin: 0 auto 2.5rem;
   text-wrap: balance;
+}
+.closing .cta-row {
+  justify-content: center;
+  margin-bottom: 0;
 }
 
 /* ---- footer ---- */

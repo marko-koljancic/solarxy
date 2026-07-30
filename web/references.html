@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solarxy References</title>
+    <meta
+      name="description"
+      content="Node, feature, workflow, and scripting reference documentation for Solarxy, generated from the same registry that drives the app. Coming soon."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/icon-256.png" sizes="256x256" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Fonts are self-hosted: the production CSP allows same-origin fonts
+         only, so a third-party font link would be silently blocked. -->
+    <link
+      rel="preload"
+      href="/fonts/space-grotesk-var.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/src/public/fonts.css" />
+    <link rel="stylesheet" href="/src/public/base.css" />
+    <link rel="stylesheet" href="/src/references/references.css" />
+  </head>
+  <body class="public refs">
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="/">Solarxy<span class="dot">.</span></a>
+        <div class="nav-links">
+          <a href="/">Home</a>
+          <a href="/roadmap">Roadmap</a>
+          <a href="/app">App</a>
+        </div>
+        <button class="theme-btn" id="themeBtn" aria-label="Toggle color theme" title="Toggle theme">
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <main>
+      <section class="ref-hero wrap">
+        <span class="eyebrow">References</span>
+        <span class="soon-pill">Coming soon</span>
+        <h1>Documentation that cannot <span class="serif-accent">drift</span>.</h1>
+        <p class="sub">
+          Node, feature, workflow, and scripting reference documentation will live here,
+          generated from the same registry that drives the app, so the reference and the
+          running product cannot disagree. Until it lands, the wiki carries the current
+          Node Reference and guides.
+        </p>
+        <div class="cta-row">
+          <a class="btn-ink" href="/roadmap">See the roadmap</a>
+          <a class="btn-outline" href="https://github.com/marko-koljancic/solarxy/wiki"
+            >Read the wiki</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <span class="brand">Solarxy<span class="dot">.</span></span>
+        <nav class="footer-links">
+          <a href="/">Home</a>
+          <a href="/app">App</a>
+          <a href="/roadmap">Roadmap</a>
+          <a href="https://github.com/marko-koljancic/solarxy">GitHub</a>
+          <a href="https://github.com/marko-koljancic/solarxy/wiki">Wiki</a>
+          <a href="https://koljam.com">koljam.com</a>
+        </nav>
+        <span class="footer-note">&copy; <span id="year"></span> Marko Koljancic</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/references/main.ts"></script>
+  </body>
+</html>

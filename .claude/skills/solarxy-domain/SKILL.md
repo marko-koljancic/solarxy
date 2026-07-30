@@ -89,7 +89,7 @@ honest is part of every role's job, not an afterthought.
 | Surface | Where | Primary owner |
 |---|---|---|
 | The code | this repo, `crates/` and `web/` | the three implementer roles |
-| Planning docs and the roadmap artifact | `../../Docs/`, `../../Artifacts/solarxy-roadmap.html` | technical writer, with the product manager on intent |
+| Planning docs and the roadmap data module | `../../Docs/`, `web/src/roadmap/data.ts` | technical writer, with the product manager on intent |
 | GitHub project, issues, milestones, labels | the public board and repo | product manager at milestone level, product owner below it |
 | The public site | `web/` pages, edge and deploy in the separate mpw repo | product designer and frontend engineer, devops for edge and deploy |
 | The wiki | `Sources/solarxy.wiki`, `develop` merged to `master` | technical writer |
@@ -115,7 +115,7 @@ Paths are relative to this repository's root. The workspace root is one level ab
 | `../../Docs/Archive/SOLARXY-UX-SPEC.md` | Personas, journeys, interaction model, keymap policy, the realtime UX contract. |
 | `../../Docs/Archive/SOLARXY-WEB-INTEGRATION-PLAN.md` | Milestone architecture, the decision log, the wasm boundary, the scene format. |
 | `../../Docs/Archive/SOLARXY-WEB-INTEGRATION-IMPLEMENTATION-LOG.md` | What actually happened per phase: deviations, measurements, continuation notes. |
-| `../../Artifacts/solarxy-roadmap.html` | The hand-authored twin of the roadmap. Nothing generates or validates it, so it drifts unless updated deliberately. |
+| `web/src/roadmap/data.ts` | The hand-authored twin of the roadmap, rendered publicly at solarxy.koljam.com/roadmap. Nothing generates or validates its content, so it drifts unless updated deliberately, and because it ships, the redaction rule applies to every string in it. |
 
 Read the section you need, not the whole document. `CLAUDE.md` is 270 lines and costs real
 context; only the architect and the implementer roles routinely need it whole.
