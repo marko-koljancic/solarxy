@@ -140,6 +140,129 @@ fn landing_light_values_match_the_palette() {
     }
 }
 
+/// The public pages' shared stylesheet is deliberately PARALLEL to the
+/// landing's self-contained `landing.css` rather than extracted from it: the
+/// landing shipped first and its bytes are the ones already published. Two
+/// hand-maintained copies of one editorial vocabulary are a real drift risk,
+/// closed here mechanically. `base.css`'s light values are pinned to the same
+/// palette primitives `landing.css` is pinned to above, its two dark blocks
+/// (the system preference and the explicit toggle) must stay identical to
+/// each other, and every token both files define must resolve to the same
+/// value in each theme. Change a colour in one and this names the other.
+#[test]
+fn landing_and_base_css_agree() {
+    use std::collections::BTreeMap;
+
+    fn decls(chunk: &str) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for line in strip_comments(chunk).lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("--") else {
+                continue;
+            };
+            let Some((name, value)) = rest.split_once(':') else {
+                continue;
+            };
+            let value = value
+                .trim()
+                .trim_end_matches(';')
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.insert(format!("--{}", name.trim()), value);
+        }
+        out
+    }
+
+    /// The body of the first `{ ... }` block following `marker`.
+    fn block_after<'a>(css: &'a str, marker: &str) -> &'a str {
+        let start = css
+            .find(marker)
+            .unwrap_or_else(|| panic!("`{marker}` not found"));
+        let open = css[start..].find('{').expect("an opening brace") + start;
+        let mut depth = 0usize;
+        for (i, c) in css[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &css[open + 1..open + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unclosed block after `{marker}`");
+    }
+
+    const DARK: &str = "@media (prefers-color-scheme: dark)";
+    let root = workspace_root();
+    let landing = std::fs::read_to_string(root.join("web/src/landing/landing.css"))
+        .expect("web/src/landing/landing.css must exist");
+    let base = std::fs::read_to_string(root.join("web/src/public/base.css"))
+        .expect("web/src/public/base.css must exist");
+
+    let landing_light = decls(landing.split(DARK).next().expect("a light block"));
+    let base_light = decls(base.split(DARK).next().expect("a light block"));
+
+    // The same palette cream the landing is pinned to above.
+    for (var, primitive) in [
+        ("--paper", prim::W_050),
+        ("--paper-raised", prim::W_000),
+        ("--paper-sunken", prim::W_150),
+        ("--ink", prim::W_900),
+        ("--ink-secondary", prim::W_700),
+        ("--hairline", prim::W_200),
+        ("--accent-ink", prim::CLAY_600),
+    ] {
+        let want = primitive.css();
+        assert_eq!(
+            base_light.get(var),
+            Some(&want),
+            "base.css and the shared palette have drifted apart on `{var}`; the public pages \
+             and the app's light theme must stay the same cream"
+        );
+    }
+
+    // The two dark blocks exist so an explicit light choice can opt out of
+    // the system preference; they must carry identical values.
+    let base_dark_media = decls(block_after(&base, ":root:not([data-theme=\"light\"])"));
+    let base_dark_explicit = decls(block_after(&base, ":root[data-theme=\"dark\"]"));
+    assert_eq!(
+        base_dark_media, base_dark_explicit,
+        "base.css's system-preference dark block and its explicit dark block have diverged; \
+         the theme toggle now produces different colours than the OS preference"
+    );
+
+    // Every token the two files share must agree, in both themes.
+    let landing_dark = decls(block_after(&landing, DARK));
+    for (theme, ours, theirs) in [
+        ("light", &landing_light, &base_light),
+        ("dark", &landing_dark, &base_dark_media),
+    ] {
+        let disagreements: Vec<String> = ours
+            .iter()
+            .filter_map(|(name, landing_value)| {
+                theirs
+                    .get(name)
+                    .filter(|base_value| *base_value != landing_value)
+                    .map(|base_value| {
+                        format!(
+                            "{name} ({theme}): landing `{landing_value}` vs base `{base_value}`"
+                        )
+                    })
+            })
+            .collect();
+        assert!(
+            disagreements.is_empty(),
+            "landing.css and base.css disagree on shared tokens; the landing and the public \
+             pages must read as one site:\n  {}",
+            disagreements.join("\n  ")
+        );
+    }
+}
+
 /// Strip block comments: prose naming a token must not read as a use.
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());

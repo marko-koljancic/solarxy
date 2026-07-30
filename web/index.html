@@ -15,12 +15,16 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/icon-256.png" sizes="256x256" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Fonts are self-hosted: the production CSP allows same-origin fonts
+         only, so a third-party font link would be silently blocked. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@1&family=Space+Mono:wght@400;700&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      href="/fonts/space-grotesk-var.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
+    <link rel="stylesheet" href="/src/public/fonts.css" />
     <link rel="stylesheet" href="/src/landing/landing.css" />
   </head>
   <body class="landing">
@@ -29,6 +33,8 @@
     <header class="nav">
       <a class="wordmark" href="/">Solarxy<span class="wordmark-dot">.</span></a>
       <nav class="nav-links">
+        <a class="nav-link" href="/roadmap">Roadmap</a>
+        <a class="nav-link" href="/references">References</a>
         <a class="nav-link" href="https://github.com/marko-koljancic/solarxy">GitHub</a>
         <a class="btn-ink" href="/app">Launch app</a>
       </nav>
@@ -132,7 +138,10 @@
         <h2 class="closing-line reveal">
           From first node to <em class="serif">reviewed model</em>, in one tab.
         </h2>
-        <a class="btn-ink btn-lg reveal" style="--d: 0.15s" href="/app">Launch Solarxy</a>
+        <div class="cta-row reveal" style="--d: 0.15s">
+          <a class="btn-ink btn-lg" href="/app">Launch Solarxy</a>
+          <a class="btn-outline btn-lg" href="/roadmap">See the roadmap</a>
+        </div>
       </section>
     </main>
 
@@ -141,6 +150,8 @@
         <span class="wordmark">Solarxy<span class="wordmark-dot">.</span></span>
         <nav class="footer-links">
           <a href="/app">App</a>
+          <a href="/roadmap">Roadmap</a>
+          <a href="/references">References</a>
           <a href="https://github.com/marko-koljancic/solarxy">GitHub</a>
           <a href="https://github.com/marko-koljancic/solarxy/wiki">Docs</a>
           <a href="https://koljam.com">koljam.com</a>

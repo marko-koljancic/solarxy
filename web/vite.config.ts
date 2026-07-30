@@ -3,16 +3,27 @@ import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import pkg from "./package.json" with { type: "json" };
 
-// In production nginx serves app.html at /app (the landing owns /). This
-// mirrors that in `vite dev` and `vite preview`, so the landing's Launch CTA
-// works identically in every environment.
-function appRewrite(): Plugin {
+// In production nginx serves each extensionless route from its HTML entry
+// (the landing owns /). This mirrors that in `vite dev` and `vite preview`,
+// so the landing's links work identically in every environment. A new public
+// page needs its route here AND an exact-match location in the edge config.
+function publicRoutesRewrite(): Plugin {
+  const routes: Record<string, string> = {
+    "/app": "/app.html",
+    "/player": "/player.html",
+    "/roadmap": "/roadmap.html",
+    "/references": "/references.html",
+  };
   const handler = (req: { url?: string }, _res: unknown, next: () => void) => {
-    if (req.url === "/app" || req.url?.startsWith("/app?")) req.url = "/app.html";
+    if (req.url) {
+      const path = req.url.split("?")[0];
+      const target = routes[path];
+      if (target) req.url = target + req.url.slice(path.length);
+    }
     next();
   };
   return {
-    name: "solarxy-app-rewrite",
+    name: "solarxy-public-routes-rewrite",
     configureServer(server) {
       server.middlewares.use(handler);
     },
@@ -25,7 +36,7 @@ function appRewrite(): Plugin {
 // The wasm-bindgen `--target web` output is imported as an ES module; the
 // .wasm is loaded by URL (see src/engine/client.ts). No wasm plugin needed.
 export default defineConfig({
-  plugins: [react(), appRewrite()],
+  plugins: [react(), publicRoutesRewrite()],
   server: { port: 5175 },
   define: {
     // The app version, single-sourced from package.json. It is stamped into the
@@ -46,9 +57,10 @@ export default defineConfig({
     // fetched separately, so the default 500 kB warning only adds noise.
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
-      // Three-page build: the MPW landing owns index.html at the domain
-      // root, the app is app.html (served at /app by nginx), and the player
-      // is player.html (served at /player).
+      // Multi-page build: the MPW landing owns index.html at the domain
+      // root, the app is app.html (served at /app by nginx), the player is
+      // player.html (served at /player), and the public roadmap and
+      // references pages are served at /roadmap and /references.
       input: {
         landing: resolve(import.meta.dirname, "index.html"),
         app: resolve(import.meta.dirname, "app.html"),
@@ -56,6 +68,8 @@ export default defineConfig({
         // stitches at runtime: it is typechecked, bundled and dev-servable
         // like the other two, and the export copies what the build produced.
         player: resolve(import.meta.dirname, "player.html"),
+        roadmap: resolve(import.meta.dirname, "roadmap.html"),
+        references: resolve(import.meta.dirname, "references.html"),
       },
       output: {
         // Split the heavy vendors so a change to app code does not invalidate

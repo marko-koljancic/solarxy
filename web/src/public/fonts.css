@@ -1,0 +1,35 @@
+/* Self-hosted brand fonts for the public pages. The production CSP allows
+   same-origin fonts only (font-src 'self'), so these sources must never be
+   replaced with a third-party link or a data: URI. */
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url(/fonts/space-grotesk-var.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/instrument-serif-italic.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Space Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/space-mono-400.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Space Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/space-mono-700.woff2) format("woff2");
+}

@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solarxy Roadmap</title>
+    <meta
+      name="description"
+      content="The public Solarxy roadmap: what shipped, how the product is built, the release program to 1.0, and every roadmap card with its disposition."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/icon-256.png" sizes="256x256" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Fonts are self-hosted: the production CSP allows same-origin fonts
+         only, so a third-party font link would be silently blocked. -->
+    <link
+      rel="preload"
+      href="/fonts/space-grotesk-var.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/src/public/fonts.css" />
+    <link rel="stylesheet" href="/src/public/base.css" />
+    <link rel="stylesheet" href="/src/roadmap/roadmap.css" />
+  </head>
+  <body class="public">
+    <div id="rail" aria-hidden="true"></div>
+
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="/">Solarxy<span class="dot">.</span></a>
+        <div class="nav-links" id="navlinks"></div>
+        <button class="theme-btn" id="themeBtn" aria-label="Toggle color theme" title="Toggle theme">
+          <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <main>
+      <header class="hero">
+        <div class="wrap">
+          <span class="eyebrow reveal">The Solarxy roadmap</span>
+          <h1 class="reveal" style="--d: 0.1s">
+            What shipped, and what comes <span class="serif-accent">next</span>.
+          </h1>
+          <p class="sub reveal" style="--d: 0.2s">
+            Solarxy is a node-based parametric modeler and an inspection, validation, and review
+            tool on one Rust core across desktop, CLI, and the web. This page is the map: the
+            architecture, every shipped release, the release program to 1.0, and every roadmap
+            card with the release it ships in or the reason it does not have one yet.
+          </p>
+          <div class="hero-chips reveal" id="heroChips" style="--d: 0.3s"></div>
+        </div>
+      </header>
+
+      <section class="section section--sunken" id="overview">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">01 / The state of play</span>
+            <h2>
+              <a class="anchor" href="#overview"
+                >Where the product <span class="serif-accent">stands</span>.</a
+              >
+            </h2>
+            <p>
+              The direction is set: grow toward the breadth of a mature web creative engine, in
+              procedural modeling, visual programming, interactivity, animation, and rendering,
+              sequenced realistically. The distance is a heading, not a promise, and this page
+              says per item what is shipped, what is committed, and what is exploratory.
+            </p>
+          </div>
+          <div class="stats reveal" id="statsBand"></div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">02 / Architecture</span>
+            <h2>
+              <a class="anchor" href="#architecture"
+                >One core, two shells, one wasm <span class="serif-accent">instance</span>.</a
+              >
+            </h2>
+            <p>
+              Architecture is a planning dimension in its own right. These are the seams the
+              whole roadmap extends along, and the commitments that hold everywhere.
+            </p>
+          </div>
+          <div class="arch-layers reveal" id="archLayers"></div>
+          <div class="contract-strip reveal" id="contractStrip"></div>
+          <h3 class="sub-head reveal">Load-bearing commitments</h3>
+          <div class="commit-grid reveal" id="commitGrid"></div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="shipped">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">03 / What shipped</span>
+            <h2>
+              <a class="anchor" href="#shipped"
+                >From a desktop viewer to a browser <span class="serif-accent">engine</span>.</a
+              >
+            </h2>
+            <p>
+              The desktop viewer, validator, and reviewer grew first. Then the web pivot put the
+              same Rust core in the browser and node-based modeling on top of it, and the point
+              releases since have each grown the registry. Expand any entry for what landed.
+            </p>
+          </div>
+          <div class="two-col">
+            <div class="timeline reveal" id="timeline"></div>
+            <div>
+              <div class="panel releases-panel reveal">
+                <h3>Releases</h3>
+                <div id="releases"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="changelog">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">04 / Changelogs</span>
+            <h2>
+              <a class="anchor" href="#changelog"
+                >What landed, release by <span class="serif-accent">release</span>.</a
+              >
+            </h2>
+            <p>
+              The most recent releases in full, sourced from the release notes. Expand any
+              release for what it changed and what it deliberately left out.
+            </p>
+          </div>
+          <div class="changelog reveal" id="changelogOut"></div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="releaseplan">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">05 / The road to 1.0</span>
+            <h2>
+              <a class="anchor" href="#releaseplan"
+                >Five rungs to the <span class="serif-accent">Horizon</span>.</a
+              >
+            </h2>
+            <p>
+              The near-term view: what ships between here and 1.0. 1.0 is a maturity bar, not a
+              feature bar: stable, documented, embeddable, and publishable, explicitly not
+              complete. Capability keeps shipping as 1.x, and the full numbered program is the
+              next section.
+            </p>
+          </div>
+          <div class="release-ladder reveal" id="releasePlan"></div>
+        </div>
+      </section>
+
+      <section class="section" id="program">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">06 / The milestone program</span>
+            <h2>
+              <a class="anchor" href="#program"
+                >Thirteen releases, and every card has a
+                <span class="serif-accent">home</span>.</a
+              >
+            </h2>
+            <p>
+              Every roadmap card carries exactly one disposition: shipped, scheduled to a named
+              release, backlog with the trigger that would schedule it, deferred with a
+              rationale, or won't-do with a reason. Shipped, committed, and exploratory work are
+              labeled as what they are, and the labels never blur. Horizon is stated in
+              releases, not dates.
+            </p>
+          </div>
+          <div class="stats reveal" id="programStats"></div>
+          <div class="spine reveal" id="spine"></div>
+          <p class="group-blurb reveal">
+            Click any card id to open that card in the explorer further down the page.
+          </p>
+          <h3 class="sub-head reveal">Where every card lives</h3>
+          <p class="sub-lede reveal">
+            A card cannot drift: if it is not scheduled, something specific has to become true
+            first, and that thing is written down. Click a disposition to filter the explorer.
+          </p>
+          <div class="disp reveal" id="dispBand"></div>
+          <h3 class="sub-head reveal">Backlog triggers</h3>
+          <p class="sub-lede reveal">
+            The backlog is grouped into waves, each waiting on something specific.
+          </p>
+          <div class="list-cards reveal" id="backlogWaves"></div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="personas">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">07 / Who it is for</span>
+            <h2>
+              <a class="anchor" href="#personas"
+                >Five primary <span class="serif-accent">personas</span>.</a
+              >
+            </h2>
+            <p>
+              All five are first-class, and each grounds a set of the journeys below. Priya
+              joins with the CLI render in v0.9.0, giving an owner to the pipeline features
+              that already shipped without one.
+            </p>
+          </div>
+          <div class="persona-grid reveal" id="personaGrid"></div>
+        </div>
+      </section>
+
+      <section class="section" id="workflows">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">08 / Workflows</span>
+            <h2>
+              <a class="anchor" href="#workflows"
+                >Sixteen user <span class="serif-accent">journeys</span>.</a
+              >
+            </h2>
+            <p>
+              The concrete flows the product is designed around. Expand any row for the step by
+              step; which release advances which journey is the matrix in the next section, so
+              coverage is checkable rather than asserted.
+            </p>
+          </div>
+          <div class="journeys reveal" id="journeys"></div>
+          <div class="contract-note reveal">
+            <h3>The five-point realtime UX contract</h3>
+            <ol id="uxContract"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="coverage">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">09 / Workflow coverage</span>
+            <h2>
+              <a class="anchor" href="#coverage"
+                >Journeys against <span class="serif-accent">releases</span>.</a
+              >
+            </h2>
+            <p>
+              Feature coverage is easy to assert and hard to check. This is the check: a filled
+              dot means the release completes or substantially advances that journey.
+            </p>
+          </div>
+          <div class="table-scroll reveal" id="coverageMatrix"></div>
+        </div>
+      </section>
+
+      <section class="section" id="explorer">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">10 / The card explorer</span>
+            <h2>
+              <a class="anchor" href="#explorer"
+                >Seventy-two cards, one <span class="serif-accent">explorer</span>.</a
+              >
+            </h2>
+            <p>
+              Every roadmap card, graded by impact, effort, architectural fit, and priority
+              tier, and carrying the release it ships in or its disposition. Filter, regroup,
+              and search; click a card for the full rationale. Three foundational enablers
+              anchor the set, and all three have shipped.
+            </p>
+          </div>
+          <div class="enablers reveal" id="enablers"></div>
+          <div class="two-col reveal">
+            <div class="panel">
+              <h3>If we do five things next</h3>
+              <ol class="ol-num" id="shortlist"></ol>
+            </div>
+            <div class="panel">
+              <h3>Recommended ordering</h3>
+              <ul class="path-list" id="ordering"></ul>
+            </div>
+          </div>
+          <div class="controls" id="controls"></div>
+          <div id="explorerOut"></div>
+        </div>
+      </section>
+
+      <section class="section section--sunken" id="documents">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <span class="eyebrow">11 / The paper trail</span>
+            <h2>
+              <a class="anchor" href="#documents"
+                >Specified before <span class="serif-accent">built</span>.</a
+              >
+            </h2>
+            <p>
+              Every release is specified before it is built. The specifications themselves are
+              internal working papers; their titles and statuses are the public record of that
+              discipline.
+            </p>
+          </div>
+          <div class="doc-list reveal" id="docList"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <div>
+          <span class="brand">Solarxy<span class="dot">.</span></span>
+          <div class="footer-note" id="footerMeta"></div>
+        </div>
+        <nav class="footer-links">
+          <a href="/">Home</a>
+          <a href="/app">App</a>
+          <a href="/references">References</a>
+          <a href="https://github.com/marko-koljancic/solarxy">GitHub</a>
+          <a href="https://github.com/marko-koljancic/solarxy/wiki">Wiki</a>
+          <a href="https://koljam.com">koljam.com</a>
+        </nav>
+        <span class="footer-note">&copy; <span id="year"></span> Marko Koljancic</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/roadmap/main.ts"></script>
+  </body>
+</html>

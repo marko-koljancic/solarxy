@@ -1,6 +1,6 @@
 ---
 name: solarxy-sync
-description: "Keep the five Solarxy surfaces in step: the code, the planning docs and roadmap artifact, the public GitHub board, the public site, and the wiki. Use after any change that could be visible on more than one of them, and always before declaring a task, epic, milestone, or release done. Answers the question 'what else does this change imply' with the exact files and commands."
+description: "Keep the five Solarxy surfaces in step: the code, the planning docs and the public roadmap page's data module, the public GitHub board, the public site, and the wiki. Use after any change that could be visible on more than one of them, and always before declaring a task, epic, milestone, or release done. Answers the question 'what else does this change imply' with the exact files and commands."
 ---
 
 # Solarxy cross-surface sync
@@ -8,18 +8,25 @@ description: "Keep the five Solarxy surfaces in step: the code, the planning doc
 Solarxy spans five surfaces that live in four separate repositories. **They cannot be updated
 atomically.** No commit, no pull request, and no release can move them together, so the only
 thing keeping them honest is running this deliberately. Silent drift is the failure mode: the
-roadmap artifact has drifted badly more than once, and a shipped release once had no
-representation on the board at all.
+roadmap's interactive twin has drifted badly more than once, and a shipped release once had
+no representation on the board at all.
 
 The five surfaces, and where they live:
 
 | Surface | Location |
 |---|---|
 | Code | this repo, `crates/` and `web/` |
-| Planning docs and artifact | `../../Docs/`, `../../Artifacts/solarxy-roadmap.html` |
+| Planning docs and the roadmap data module | `../../Docs/`, `web/src/roadmap/data.ts` |
 | GitHub board, issues, milestones | the public project and repo |
 | Public site | `web/` pages here; edge and deploy in the separate site repo |
 | Wiki | `Sources/solarxy.wiki`, published from `master` only |
+
+The roadmap data module is the interactive twin of `../../Docs/SOLARXY-ROADMAP.md` and
+renders publicly at solarxy.koljam.com/roadmap. It replaced the retired internal artifact
+(now archived at `../../Docs/Archive/solarxy-roadmap.html`). Because it ships on a public
+page, every edit to it is a public statement and the redaction rule applies in full: the
+module and the page it feeds never name a reference checkout, an internal doc path, or a
+planning code.
 
 ## By change type
 
@@ -52,8 +59,9 @@ part you are deferring and why.
 - Code: registry count assert, registry snapshot regenerated with the diff reviewed rather
   than blind, `type_version` bumped with a migration decision when the descriptor changed.
 - Docs: amend the node catalog. Update every place a node-type count appears.
-- Artifact: the node-type count appears in more than one place and those places have
-  disagreed with each other before. Update all of them.
+- Roadmap page: the node-type count appears in more than one place in `data.ts` and those
+  places have disagreed with each other before. Update all of them, and the landing page's
+  stats band, which carries the same count.
 - Wiki: regenerate the node reference.
 - GitHub: nothing beyond the task itself.
 
@@ -62,8 +70,8 @@ part you are deferring and why.
 - Docs: a dated amendment in the milestone spec, newest first, plus the roadmap if the
   release program moved. Node-spec changes also amend the catalog; interaction changes also
   amend the UX spec.
-- Artifact: if a card was regraded, rescoped, deferred, or dropped, the corresponding data
-  array changes. See the artifact table below.
+- Roadmap page: if a card was regraded, rescoped, deferred, or dropped, the corresponding
+  data array in `web/src/roadmap/data.ts` changes. See the data-module table below.
 - GitHub: reflect the new scope in the affected items. An item deleted from scope is closed
   as not planned with a comment saying where the work went, never silently deleted.
 
@@ -76,7 +84,8 @@ is authoritative for the train itself; this row covers what the train does not d
   for the release.
 - Docs: update the roadmap's shipped history and release program, add the dated amendment,
   and record the release in the milestone spec's amendments.
-- Artifact: update every count, the release entries, and the changelog array.
+- Roadmap page: update every count, the release entries, and the changelog array in
+  `data.ts`, plus the landing stats band if a count it shows moved.
 - Wiki: release notes on `develop`, then merged to `master`. A page that exists only on
   `develop` is not published.
 - Site: if the release changed or added a route, the edge config in the separate repo changes
@@ -96,13 +105,14 @@ is authoritative for the train itself; this row covers what the train does not d
   set. Without the location, the URL silently serves the landing page with a 200.
 - Docs and GitHub: a new public surface is worth a roadmap mention and a board item.
 
-## The artifact table
+## The data-module table
 
-`../../Artifacts/solarxy-roadmap.html` is hand-authored. Nothing generates it and nothing
-validates it, so a doc change desynchronizes it silently. When you change the left column,
-change the right one in the same pass.
+`web/src/roadmap/data.ts` is hand-authored. Nothing generates it and nothing validates its
+content against the docs, so a doc change desynchronizes it silently, and since it renders
+on the public /roadmap page the drift is now visible to everyone. When you change the left
+column, change the right one in the same pass.
 
-| Doc change | Artifact array |
+| Doc change | `data.ts` array |
 |---|---|
 | The release ladder or program | `PROGRAM`, and `RELEASE_PLAN` for the road to 1.0 subset |
 | A card regraded or rescoped | `CARDS` |
@@ -111,15 +121,15 @@ change the right one in the same pass.
 | A journey added or changed | `JOURNEYS` and `COVERAGE` |
 | A load-bearing commitment | `COMMITMENTS` |
 | A new milestone spec written | `DOCS` |
-| Node-type, crate, or release counts | `STATS`, the hero chips, and the footer, which have disagreed with each other before |
+| Node-type, crate, or release counts | `STATS`, the hero chips, and the footer, which have disagreed with each other before; also the landing stats band in `web/index.html` |
 
 ## Before declaring anything done
 
 - [ ] Code: tests green, drift tests clean, goldens current, desktop unaffected or verified.
 - [ ] Docs: every claim that changed is amended, dated, newest first. No unamended
       divergence between a spec and the code.
-- [ ] Artifact: every count and array touched by the change is updated, and the counts agree
-      with each other.
+- [ ] Roadmap page: every count and array touched by the change is updated in `data.ts`,
+      and the counts agree with each other and with the landing stats band.
 - [ ] GitHub: items reflect reality. Nothing shipped is still open; nothing open is already
       shipped. Parents and checklists are consistent.
 - [ ] Wiki: published from `master`, not sitting on `develop`.

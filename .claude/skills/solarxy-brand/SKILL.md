@@ -1,6 +1,6 @@
 ---
 name: solarxy-brand
-description: "The design language and voice for Solarxy's public surfaces: the landing page and the planned roadmap and references pages. Carries the editorial token set, the type scale, layout and section patterns, the deep-link pattern, the tone guide, and the three platform constraints that make a new page work in production. Use before designing, writing, or building anything publicly visible on the site."
+description: "The design language and voice for Solarxy's public surfaces: the landing page, the roadmap page, and the references page. Carries the editorial token set, the type scale, layout and section patterns, the deep-link pattern, the tone guide, and the three platform constraints that make a new page work in production. Use before designing, writing, or building anything publicly visible on the site."
 ---
 
 # Solarxy public surfaces
@@ -27,13 +27,17 @@ They are the first thing to check, not the last.
    unmatched path, with status 200. A page whose route was never registered therefore looks
    like it works. **Verify by body or content length, never by status code.** This once hid a
    missing route for a whole release.
-3. **The content security policy is self-only for styles and fonts.** Fonts must be
-   self-hosted or inlined; a third-party font link is blocked in production and silently fine
-   locally. The existing landing page loads fonts from a third party and is only unbroken
-   because of how the policy is currently scoped, so do not copy that pattern into a new page.
+3. **The content security policy is self-only for scripts, styles, and fonts.** Fonts are
+   self-hosted woff2 under `web/public/fonts/`, declared in `web/src/public/fonts.css`; a
+   third-party font link or a data: URI is blocked in production and silently fine locally.
+   Scripts have no unsafe-inline either, so a page carries zero inline script blocks and
+   zero inline event handlers; all behavior lives in an external module entry.
 
-A drift test pins the landing page's light values to the Rust palette, so changing them
-breaks the build rather than just the design.
+The three public pages share `web/src/public/base.css` (tokens, shell, nav and footer
+chrome, buttons, reveal) except the landing, which keeps its self-contained
+`web/src/landing/landing.css`. A drift test pins both files' light values to the Rust
+palette and asserts their dark values agree with each other, so changing them breaks the
+build rather than just the design.
 
 ## Tokens
 
@@ -115,8 +119,8 @@ Every section is addressable. The pattern, which the roadmap page in particular 
   underline, so it reads as a plain heading but is a permalink.
 - `html { scroll-behavior: smooth; scroll-padding-top: var(--nav-h); }` plus
   `scroll-margin-top: calc(var(--nav-h) + 1rem)` on headings, so an anchor jump does not land
-  under the fixed nav. The existing roadmap artifact has section ids but no scroll margin,
-  which is exactly the gap to close.
+  under the fixed nav. The roadmap page implements this pattern in full; treat it as the
+  reference implementation for any future page.
 - A sticky contents rail with an IntersectionObserver scroll-spy marking the active section,
   shown only when there are enough sections to warrant it.
 - If a page has more than one view, prefix the view hash so it cannot collide with a section
@@ -150,6 +154,7 @@ using the focus token.
 
 The token values above are copied so this file works when the upstream repository is not
 present. Upstream is the main site repo's global stylesheet, plus
-`web/src/landing/landing.css` for the Solarxy-specific additions. Both are authoritative over
-this file. Re-check them before any significant page work, and if they have moved, update this
-file in the same pass rather than leaving two versions of the truth.
+`web/src/landing/landing.css` and `web/src/public/base.css` for the Solarxy-specific
+additions. All are authoritative over this file. Re-check them before any significant page
+work, and if they have moved, update this file in the same pass rather than leaving two
+versions of the truth.

@@ -1,0 +1,59 @@
+/* The references page is a single centered hero while the generated
+ * documentation is built out. Tokens, chrome, and buttons come from
+ * src/public/base.css; this file adds only the centered treatment. */
+
+body.refs {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+body.refs main {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+
+.ref-hero {
+  text-align: center;
+  padding-top: clamp(3rem, 8vw, 6rem);
+  padding-bottom: clamp(3rem, 8vw, 6rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.3rem;
+}
+
+.soon-pill {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-ink);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--pill);
+  padding: 0.35rem 0.8rem;
+}
+
+.ref-hero h1 {
+  font-size: clamp(2.4rem, 7vw, 5rem);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  max-width: 16ch;
+}
+
+.ref-hero .sub {
+  max-width: 56ch;
+  color: var(--ink-secondary);
+  font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+  line-height: 1.55;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.7rem;
+  margin-top: 0.5rem;
+}
