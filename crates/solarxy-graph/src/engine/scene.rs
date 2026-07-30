@@ -15,6 +15,8 @@
 //! land (N2): it keys on `type_id`, so an empty or primitive-only root
 //! yields an empty delta.
 
+use std::collections::BTreeSet;
+
 use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
@@ -54,20 +56,28 @@ fn root_refs<'a>(
     )
 }
 
-/// Builds a full scene delta from scratch each frame. The renderer diffs
-/// against its own state, so a full rebuild is safe (and light lists are
-/// tiny). `Clear`-then-rebuild is deliberately avoided: object ids are
-/// stable per geo node, so the renderer keeps unchanged uploads.
+/// Builds a full scene delta from scratch each frame, and reports which
+/// object ids the scene now contains. The renderer diffs against its own
+/// state, so a full rebuild is safe (and light lists are tiny).
+/// `Clear`-then-rebuild is deliberately avoided: object ids are stable per
+/// geo node, so the renderer keeps unchanged uploads.
+///
+/// The returned set is what the renderer should be holding afterwards.
+/// Rebuilding says nothing about objects that *stopped* existing, so the
+/// caller diffs this against the previous set and emits [`SceneOp::Remove`]
+/// for the difference. Without that, deleting a geo node leaves its GPU
+/// object resident and drawn forever.
 #[must_use]
 pub fn build_scene_delta(
     doc: &Document,
     registry: &Registry,
     cook: &CookEngine,
     previews: &Previews,
-) -> SceneDelta {
+) -> (SceneDelta, BTreeSet<SceneObjectId>) {
     let mut delta = SceneDelta::default();
+    let mut present = BTreeSet::new();
     let Ok(root) = doc.graph(GraphContext::Root) else {
-        return delta;
+        return (delta, present);
     };
 
     let mut lights: Vec<LightDef> = Vec::new();
@@ -75,7 +85,11 @@ pub fn build_scene_delta(
 
     for node in root.nodes() {
         match node.type_id.as_str() {
-            "geo" => emit_geo(doc, registry, cook, previews, node.id, &mut delta),
+            "geo" => {
+                if emit_geo(doc, registry, cook, previews, node.id, &mut delta) {
+                    present.insert(SceneObjectId(node.id.0));
+                }
+            }
             "camera" => {
                 if let Some(cam) = camera_from_node(doc, registry, previews, node) {
                     cameras.push(cam);
@@ -92,7 +106,7 @@ pub fn build_scene_delta(
 
     delta.push(SceneOp::SetLights { lights });
     delta.push(SceneOp::SetCameras { cameras });
-    delta
+    (delta, present)
 }
 
 /// Whether a type id is one of the six light nodes.
@@ -182,6 +196,14 @@ pub(crate) fn geo_visible(
 /// still upsert (hidden-but-cooked: the geometry stays GPU-resident so
 /// re-show is instant); `SetVisible` is the render gate, never a cook
 /// gate.
+/// Emits one geo container's ops. Returns whether the object is present in
+/// the scene at all: `false` means it has no subflow or nothing flagged for
+/// display, which is indistinguishable to the renderer from the node having
+/// been deleted, and in both cases the object should stop being drawn.
+///
+/// Presence is deliberately *not* the same as having cooked geometry. An
+/// object mid-cook has no `display_output` yet but must stay resident, or it
+/// would be torn down and re-uploaded on every frame of a long cook.
 fn emit_geo(
     doc: &Document,
     registry: &Registry,
@@ -189,13 +211,13 @@ fn emit_geo(
     previews: &Previews,
     geo: NodeId,
     delta: &mut SceneDelta,
-) {
+) -> bool {
     let object_id = SceneObjectId(geo.0);
     let Ok(subflow) = doc.graph(GraphContext::Subflow(geo)) else {
-        return;
+        return false;
     };
     let Some(display) = subflow.active_output else {
-        return;
+        return false;
     };
     // The displayed node's cooked geometry.
     if let Some(set) = display_output(doc, cook, geo) {
@@ -232,6 +254,7 @@ fn emit_geo(
         id: object_id,
         transform: geo_world_matrix(doc, registry, previews, geo).into(),
     });
+    true
 }
 
 /// The nearest cached validation result at or upstream of `display`,

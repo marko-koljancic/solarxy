@@ -12,11 +12,11 @@
 pub mod attr_table;
 pub mod snapshot;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::{Matrix3, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use serde::{Deserialize, Serialize};
-use solarxy_core::scene::SceneDelta;
+use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
 
 use crate::GraphError;
@@ -722,6 +722,15 @@ pub struct Engine {
     /// path, never written to the document or the undo stack.
     previews: BTreeMap<(NodeId, String), ParamSource>,
     scene: SceneDelta,
+    /// The object ids the renderer is holding, as of the last
+    /// `take_scene_delta`. Diffed against each rebuild so ids that stopped
+    /// existing become `SceneOp::Remove`; without it a deleted geo node's
+    /// GPU object stays resident and drawn.
+    scene_objects: BTreeSet<SceneObjectId>,
+    /// Set when the whole document is replaced. The renderer's objects all
+    /// belong to a document that no longer exists, so the next delta opens
+    /// with `SceneOp::Clear` rather than a removal per id.
+    scene_clear_pending: bool,
     undo: UndoStack,
     /// Async jobs spawned by the last cook, awaiting dispatch by the host
     /// (each tagged with the context it was spawned in, for `submit`).
@@ -777,6 +786,8 @@ impl Engine {
             revision: 0,
             previews: BTreeMap::new(),
             scene: SceneDelta::default(),
+            scene_objects: BTreeSet::new(),
+            scene_clear_pending: false,
             undo: UndoStack::default(),
             pending_jobs: Vec::new(),
             review_stale: BTreeMap::new(),
@@ -3252,10 +3263,34 @@ impl Engine {
     }
 
     /// Drains the accumulated scene delta for the renderer, rebuilding it
-    /// from the current committed display outputs and light nodes.
+    /// from the current committed display outputs and light nodes, and
+    /// closing it with the removals the rebuild cannot express.
+    ///
+    /// A rebuild only ever says what exists. Objects that stopped existing,
+    /// because their geo node was deleted or its display flag cleared, are
+    /// invisible to it, so their ids are diffed out of the previous set and
+    /// emitted as `SceneOp::Remove`. A replaced document skips the diff and
+    /// opens with `SceneOp::Clear` instead, since nothing the renderer holds
+    /// belongs to the new document.
     pub fn take_scene_delta(&mut self) -> SceneDelta {
-        self.scene =
+        let (mut delta, present) =
             scene::build_scene_delta(&self.doc, &self.registry, &self.cook, &self.previews);
+
+        if self.scene_clear_pending {
+            self.scene_clear_pending = false;
+            self.scene_objects.clear();
+            let mut cleared = SceneDelta::default();
+            cleared.push(SceneOp::Clear);
+            cleared.ops.append(&mut delta.ops);
+            delta = cleared;
+        } else {
+            for id in self.scene_objects.difference(&present) {
+                delta.push(SceneOp::Remove { id: *id });
+            }
+        }
+
+        self.scene_objects = present;
+        self.scene = delta;
         std::mem::take(&mut self.scene)
     }
 
@@ -3335,6 +3370,10 @@ impl Engine {
         // old one, so it is rebuilt from scratch rather than migrated.
         self.rebuild_expr_index();
         self.scene = SceneDelta::default();
+        // Every object the renderer holds belongs to the document just
+        // discarded, so the next delta opens by clearing them rather than
+        // naming each one.
+        self.scene_clear_pending = true;
         // Fresh document: staleness re-derives after the first cook (until
         // then nothing is displayed, so no annotation is flagged).
         self.review_stale.clear();

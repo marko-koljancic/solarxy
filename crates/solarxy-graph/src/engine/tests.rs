@@ -2075,6 +2075,98 @@ fn physical_camera_derives_fov_from_focal_and_sensor() {
     );
 }
 
+/// Deleting a geo node must remove its object, not merely stop mentioning
+/// it. A rebuilt delta only ever says what exists, so before removals were
+/// emitted the renderer kept the GPU object resident and drew it forever.
+#[test]
+fn deleting_a_geo_node_emits_a_scene_remove() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let _box_id = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+
+    // Baseline: the object exists and nothing is being removed.
+    let first = e.take_scene_delta();
+    let object_id = SceneObjectId(geo.0);
+    assert!(
+        first
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::UpsertGeometry { id, .. } if *id == object_id)),
+        "the geo should upsert before it is deleted"
+    );
+    assert!(
+        !first
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { .. })),
+        "nothing has disappeared yet"
+    );
+
+    e.apply(Command::RemoveNodes {
+        ctx: GraphContext::Root,
+        ids: vec![geo],
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let after = e.take_scene_delta();
+    assert!(
+        after
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { id } if *id == object_id)),
+        "deleting the geo must emit Remove for its object, got {:?}",
+        after.ops
+    );
+
+    // The removal is emitted once. A later pass has nothing left to remove,
+    // so a deleted object cannot keep generating ops for the rest of the
+    // session.
+    let third = e.take_scene_delta();
+    assert!(
+        !third
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { .. })),
+        "Remove should not repeat once the renderer has been told"
+    );
+}
+
+/// Clearing a geo's display flag is indistinguishable from deleting it, as
+/// far as the renderer is concerned: in both cases the object must stop
+/// being drawn.
+#[test]
+fn clearing_the_display_flag_emits_a_scene_remove() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_id = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+    let _ = e.take_scene_delta();
+
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: None,
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let after = e.take_scene_delta();
+    assert!(
+        after
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { id } if *id == SceneObjectId(geo.0))),
+        "clearing display must remove the object, got {:?}",
+        after.ops
+    );
+    let _ = box_id;
+}
+
 #[test]
 fn scene_delta_maps_a_geo_container_and_lights() {
     use solarxy_core::scene::{LightKind, SceneObjectId, SceneOp};
