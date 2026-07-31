@@ -25,7 +25,6 @@ wgpu        = "27.0.1"
 cgmath      = { workspace = true }
 bytemuck    = { version = "1.24", features = ["derive"] }
 half        = "2.0"
-exr         = "1.0"
 tracing     = "0.1"
 thiserror   = { workspace = true }
 
@@ -37,7 +36,9 @@ anyhow = { workspace = true }
 # examples never compile into the wasm cdylib, so no runtime font dep.
 ab_glyph = "0.2.31"
 
+# LDR texture decode only. Radiance `hdr` and the `exr` crate moved to
+# solarxy-formats with the HDRI decoders; nothing here reads them now.
 [dependencies.image]
 version          = "0.25.9"
 default-features = false
-features         = ["png", "jpeg", "webp", "hdr"]
+features         = ["png", "jpeg", "webp"]

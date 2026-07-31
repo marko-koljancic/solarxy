@@ -34,11 +34,12 @@
 
 pub mod export;
 pub mod gltf;
+pub mod hdr;
 pub mod obj;
 pub mod ply;
 pub mod stl;
 
-pub use solarxy_core::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+pub use solarxy_core::{RawImageData, RawImageHdr, RawMaterialData, RawMeshData, RawModelData};
 
 /// Errors produced by the format loaders.
 #[derive(Debug, thiserror::Error)]

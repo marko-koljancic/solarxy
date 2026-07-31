@@ -123,19 +123,109 @@ impl RawImageData {
     /// texture-identity key.
     #[must_use]
     pub fn content_hash(pixels: &[u8], width: u32, height: u32) -> u64 {
-        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = OFFSET;
-        let mut eat = |bytes: &[u8]| {
-            for &b in bytes {
-                h ^= u64::from(b);
-                h = h.wrapping_mul(PRIME);
-            }
-        };
-        eat(&width.to_le_bytes());
-        eat(&height.to_le_bytes());
-        eat(pixels);
+        let mut h = Fnv1a::over_dimensions(width, height);
+        h.eat(pixels);
+        h.finish()
+    }
+}
+
+/// FNV-1a 64, the content-hash primitive shared by [`RawImageData`] and
+/// [`RawImageHdr`]. Stable across platforms and runs (unlike
+/// `DefaultHasher`), which is what makes it usable as a texture-identity
+/// and dedup key rather than only as a within-process hash.
+struct Fnv1a(u64);
+
+impl Fnv1a {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    /// Seed with the image dimensions, so two buffers with identical bytes
+    /// but different shapes do not collide.
+    fn over_dimensions(width: u32, height: u32) -> Self {
+        let mut h = Self(Self::OFFSET);
+        h.eat(&width.to_le_bytes());
+        h.eat(&height.to_le_bytes());
         h
+    }
+
+    fn eat(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    fn finish(self) -> u64 {
+        self.0
+    }
+}
+
+/// Decoded high-dynamic-range image pixels plus dimensions.
+///
+/// **Three `f32` per pixel, row-major, linear RGB, no alpha**, so a pixel
+/// at `(x, y)` occupies `pixels[(y * width + x) * 3 ..][..3]` and
+/// `pixels.len() == width * height * 3`. The flat layout is what the
+/// decoders produce natively and what GPU upload and the CPU-side
+/// convolutions read through a cast, so nothing on the path copies to
+/// reshape it.
+///
+/// The float sibling of [`RawImageData`], carrying the same content hash
+/// stamped once at construction and the same immutability expectation:
+/// instances are shared behind `Arc`, and a mutated pixel buffer would
+/// silently invalidate the hash. `f32` rather than `f16` because CPU-side
+/// consumers want the precision and the GPU upload converts once.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawImageHdr {
+    pub pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+    /// FNV-1a over dimensions and pixel bits; see [`Self::new`].
+    pub hash: u64,
+}
+
+impl RawImageHdr {
+    /// Build an image and stamp its content hash.
+    #[must_use]
+    pub fn new(pixels: Vec<f32>, width: u32, height: u32) -> Self {
+        debug_assert_eq!(
+            pixels.len() as u64,
+            u64::from(width) * u64::from(height) * 3,
+            "RawImageHdr is three floats per pixel"
+        );
+        let hash = Self::content_hash(&pixels, width, height);
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// Rebuild an image whose hash was computed earlier and traveled with
+    /// the samples; callers must pass the hash exactly as [`Self::new`]
+    /// produced it.
+    #[must_use]
+    pub fn from_parts(pixels: Vec<f32>, width: u32, height: u32, hash: u64) -> Self {
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// FNV-1a 64 over `width`, `height`, then each sample's IEEE-754 bit
+    /// pattern little-endian. Hashing the bits rather than the bytes of the
+    /// backing allocation keeps the result identical on a big-endian target,
+    /// which matters because this hash is a cache key that outlives the
+    /// process that produced it.
+    #[must_use]
+    pub fn content_hash(pixels: &[f32], width: u32, height: u32) -> u64 {
+        let mut h = Fnv1a::over_dimensions(width, height);
+        for sample in pixels {
+            h.eat(&sample.to_bits().to_le_bytes());
+        }
+        h.finish()
     }
 }
 
@@ -713,5 +803,53 @@ mod tests {
             compute_tangent_basis(&positions, &normals, &tex_coords, &indices);
         assert_eq!(tangents.len(), 3);
         assert_eq!(bitangents.len(), 3);
+    }
+
+    fn hdr_2x1() -> Vec<f32> {
+        vec![1.0, 0.5, 0.25, 8.0, 4.0, 2.0]
+    }
+
+    #[test]
+    fn raw_image_hdr_stamps_its_content_hash() {
+        let img = RawImageHdr::new(hdr_2x1(), 2, 1);
+        assert_eq!(img.hash, RawImageHdr::content_hash(&hdr_2x1(), 2, 1));
+        assert_eq!(img.pixels.len(), 6);
+    }
+
+    #[test]
+    fn raw_image_hdr_from_parts_keeps_the_hash_it_was_given() {
+        // The transfer path recomputes nothing: a hash that traveled with
+        // the samples is taken on trust, exactly as the 8-bit type does.
+        let img = RawImageHdr::from_parts(hdr_2x1(), 2, 1, 0xdead_beef);
+        assert_eq!(img.hash, 0xdead_beef);
+    }
+
+    #[test]
+    fn raw_image_hdr_hash_separates_shape_from_samples() {
+        // Same six samples, transposed dimensions. Seeding the accumulator
+        // with the dimensions is what keeps these apart.
+        let wide = RawImageHdr::content_hash(&hdr_2x1(), 2, 1);
+        let tall = RawImageHdr::content_hash(&hdr_2x1(), 1, 2);
+        assert_ne!(wide, tall);
+
+        let mut altered = hdr_2x1();
+        altered[4] = 4.5;
+        assert_ne!(wide, RawImageHdr::content_hash(&altered, 2, 1));
+    }
+
+    #[test]
+    fn raw_image_hashes_stay_pinned_to_their_published_values() {
+        // Both hashes are cache keys that outlive the process that made
+        // them, so a refactor of the shared accumulator must not move
+        // them. These literals are the values produced before the two
+        // types began sharing one FNV-1a implementation.
+        assert_eq!(
+            RawImageData::content_hash(&[1u8, 2, 3, 4], 1, 1),
+            0xef73_dc3a_80c8_da6d
+        );
+        assert_eq!(
+            RawImageHdr::content_hash(&[1.0f32, 0.5, 0.25], 1, 1),
+            0xc739_37a6_695b_27eb
+        );
     }
 }

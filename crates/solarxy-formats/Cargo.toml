@@ -33,9 +33,14 @@ urlencoding = "2"
 # same shared image path as external files; already in the tree.
 base64 = "0.22"
 tracing = "0.1"
+# OpenEXR decode for the HDRI loaders. Moved here from solarxy-renderer,
+# which no longer decodes anything itself, so the workspace dependency
+# graph is unchanged and the wasm build gains no weight.
+exr = "1.0"
 # Texture decode for the byte-first loaders (MTL map_Kd etc.); the same
 # crate/features the renderer uses, so the wasm build gains no new weight.
+# `hdr` (Radiance RGBE) moved here from the renderer alongside `exr`.
 [dependencies.image]
 version = "0.25"
 default-features = false
-features = ["png", "jpeg", "webp", "tga", "tiff", "bmp"]
+features = ["png", "jpeg", "webp", "tga", "tiff", "bmp", "hdr"]

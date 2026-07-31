@@ -4117,6 +4117,7 @@ version = "0.8.1"
 dependencies = [
  "base64 0.22.1",
  "cgmath",
+ "exr",
  "gltf",
  "image",
  "ply-rs-bw",
@@ -4173,7 +4174,6 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "cgmath",
- "exr",
  "half",
  "image",
  "pollster",
