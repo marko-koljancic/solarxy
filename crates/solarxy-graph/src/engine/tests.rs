@@ -4205,6 +4205,110 @@ fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
     );
 }
 
+/// The geo container's rotate-order migration, proved on a whole document
+/// by the orientation it produces rather than by the value it stores.
+///
+/// A container saved before the rotate-order unification composed its
+/// rotation as ZYX. The current default is XYZ, so a document reopened
+/// without the explicit stamp silently re-orients: nothing errors, nothing
+/// warns, and an object is simply facing somewhere its author never chose.
+///
+/// The unit tests around the hook check the stamp. This checks the thing the
+/// stamp exists for, which is the matrix.
+#[test]
+fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
+    /// The world matrix of the one geo in a document whose stored geo node
+    /// has been aged to `version`, with `rotate_order` stripped.
+    fn reopened_at(version: u32, rotate: [f64; 3]) -> [[f32; 4]; 4] {
+        let mut e = engine();
+        let geo = add(&mut e, GraphContext::Root, "geo");
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: "rotate".into(),
+            value: ParamSource::Literal(ParamValue::Vec3(rotate)),
+        })
+        .unwrap();
+
+        let mut scene = crate::engine::scenefile::document_to_scene(
+            &e.doc.to_data(),
+            e.cook_mode,
+            &crate::runtime::RuntimeSettings::default(),
+            &SceneSidecar::default(),
+            Vec::new(),
+        );
+        let mut aged = 0;
+        for node in &mut scene.graph.nodes {
+            if node.type_id == "geo" {
+                node.type_version = version;
+                node.params.remove("rotate_order");
+                aged += 1;
+            }
+        }
+        assert_eq!(aged, 1, "the geo node was found and aged");
+
+        let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+        assert!(warnings.is_empty(), "clean migration: {warnings:?}");
+        let mut reopened = engine();
+        reopened.load_document(&DocumentFile {
+            format_version: 1,
+            document,
+            cook_mode: e.cook_mode,
+        });
+        crate::engine::scene::geo_world_matrix(
+            &reopened.doc,
+            &reopened.registry,
+            &reopened.previews,
+            geo,
+        )
+        .into()
+    }
+
+    // Two nonzero axes: the only case where the composition order is
+    // observable at all, so the old order has to be preserved explicitly.
+    let observable = [30.0, 40.0, 0.0];
+    let aged = reopened_at(2, observable);
+    let current = reopened_at(3, observable);
+    let differs = aged
+        .iter()
+        .zip(&current)
+        .any(|(a, b)| a.iter().zip(b).any(|(x, y)| (x - y).abs() > 1e-4));
+    assert!(
+        differs,
+        "the fixture has to be a rotation whose order is observable, or this \
+         test would pass with the migration deleted"
+    );
+
+    // What the aged document must produce: the ZYX composition it was
+    // authored against, which is what an explicit stamp gives.
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    for (key, value) in [
+        ("rotate", ParamValue::Vec3(observable)),
+        ("rotate_order", ParamValue::Enum("zyx".into())),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    let want: [[f32; 4]; 4] =
+        crate::engine::scene::geo_world_matrix(&e.doc, &e.registry, &e.previews, geo).into();
+
+    for (row, (a, b)) in aged.iter().zip(&want).enumerate() {
+        for (col, (x, y)) in a.iter().zip(b).enumerate() {
+            assert!(
+                (x - y).abs() < 1e-4,
+                "a reopened pre-split geo faces somewhere its author never \
+                 chose: [{row}][{col}] {x} vs {y}"
+            );
+        }
+    }
+}
+
 /// The downstream contract for instanced geometry, node by node.
 ///
 /// Instancing is a representation choice, not a different result, so the

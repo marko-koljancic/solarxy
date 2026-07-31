@@ -8,7 +8,7 @@ use solarxy_kernel::copy::CopyMode;
 use solarxy_kernel::transform::RotateOrder;
 
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
-use crate::params::{ParamSource, ParamValue};
+use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType};
 use crate::registry::resolve::ResolvedParams;
@@ -176,6 +176,7 @@ pub fn rotate_order_from_key(key: &str) -> RotateOrder {
 /// preserving its appearance exactly. A geo with one or zero nonzero lanes
 /// rotates identically under either order, so it keeps the new default and the
 /// document stays clean.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
 pub fn migrate_geo(
     from: u32,
     params: &mut serde_json::Map<String, serde_json::Value>,
@@ -184,32 +185,38 @@ pub fn migrate_geo(
         strip_keys(params, &["receive_shadow"]);
     }
     if from == 2 && !params.contains_key("rotate_order") && geo_rotate_order_is_observable(params) {
-        let value = serde_json::to_value(ParamSource::Literal(ParamValue::Enum("zyx".to_string())))
-            .map_err(|e| MigrateError {
-                from,
-                reason: format!("could not encode rotate_order: {e}"),
-            })?;
-        params.insert("rotate_order".to_string(), value);
+        // The bare enum key, matching the raw stored shape. The wrapped
+        // `ParamSource` form does not type on the way back in.
+        params.insert(
+            "rotate_order".to_string(),
+            serde_json::Value::String("zyx".to_string()),
+        );
     }
     Ok(())
 }
 
 /// Whether a stored `rotate` has two or more nonzero lanes, which is exactly
-/// when the composition order changes the resulting orientation. Deserialized
-/// through the real `ParamSource` rather than by hand, so it cannot rot against
-/// the serde shape.
+/// when the composition order changes the resulting orientation.
+///
+/// Reads the RAW stored shape: a migration runs before schema typing, so a
+/// `Vec3` arrives as a bare three-element array and an expression as the
+/// `$expr` object. Deserializing the typed `ParamSource` here instead never
+/// matched anything a document actually holds, so this always answered no
+/// and the migration above never ran once in production.
 fn geo_rotate_order_is_observable(params: &serde_json::Map<String, serde_json::Value>) -> bool {
     let Some(raw) = params.get("rotate") else {
         return false;
     };
-    let Ok(ParamSource::Literal(ParamValue::Vec3(rotate))) =
-        serde_json::from_value::<ParamSource>(raw.clone())
-    else {
+    let Some(lanes) = raw.as_array() else {
         // An expression, or something unreadable: leave it at the default
-        // rather than guess. An expression cannot be evaluated in v1 anyway.
+        // rather than guess. An expression cannot be evaluated here anyway.
         return false;
     };
-    rotate.iter().filter(|a| **a != 0.0).count() >= 2
+    lanes
+        .iter()
+        .filter(|lane| lane.as_f64().is_some_and(|angle| angle != 0.0))
+        .count()
+        >= 2
 }
 
 /// Resolves an instanced input into real geometry, for the operations that

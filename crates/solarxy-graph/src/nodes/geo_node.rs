@@ -139,22 +139,21 @@ pub fn descriptor() -> NodeTypeDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ParamSource;
 
+    /// A stored param map in the shape a migration actually receives: raw
+    /// JSON, one plain value per key, before schema typing.
+    ///
+    /// These fixtures used to build the typed `ParamSource` shape instead,
+    /// which is why they agreed with a guard that read the same wrong shape
+    /// and passed while the migration never fired on a real document.
     fn params_with_rotate(rotate: [f64; 3]) -> serde_json::Map<String, serde_json::Value> {
         let mut map = serde_json::Map::new();
-        map.insert(
-            "rotate".to_string(),
-            serde_json::to_value(ParamSource::Literal(ParamValue::Vec3(rotate))).unwrap(),
-        );
+        map.insert("rotate".to_string(), serde_json::json!(rotate));
         map
     }
 
     fn stamped_order(map: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-        match serde_json::from_value::<ParamSource>(map.get("rotate_order")?.clone()) {
-            Ok(ParamSource::Literal(ParamValue::Enum(key))) => Some(key),
-            _ => None,
-        }
+        Some(map.get("rotate_order")?.as_str()?.to_string())
     }
 
     /// The whole point of the v3 migration: a geo whose rotation ACTUALLY
@@ -186,11 +185,7 @@ mod tests {
     #[test]
     fn an_existing_rotate_order_survives_the_migration() {
         let mut params = params_with_rotate([30.0, 40.0, 50.0]);
-        params.insert(
-            "rotate_order".to_string(),
-            serde_json::to_value(ParamSource::Literal(ParamValue::Enum("yxz".to_string())))
-                .unwrap(),
-        );
+        params.insert("rotate_order".to_string(), serde_json::json!("yxz"));
         migrate_geo(2, &mut params).unwrap();
         assert_eq!(stamped_order(&params).as_deref(), Some("yxz"));
     }
