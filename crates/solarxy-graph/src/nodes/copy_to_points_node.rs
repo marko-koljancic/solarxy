@@ -159,6 +159,10 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         p.f32("scale"),
         p.f32("scale_variance"),
         p.u32("seed"),
+        // The mode becomes a parameter when the node bumps to version 2;
+        // until then every existing document keeps producing exactly what
+        // it produced before, which is baked copies.
+        solarxy_kernel::copy::CopyMode::Bake,
     ) {
         Ok(set) => {
             if set.is_renderable_empty() {

@@ -11,6 +11,10 @@
 
 use std::sync::Arc;
 
+use solarxy_core::scene::InstanceXform;
+
+use crate::copy::CopyMode;
+
 use crate::error::KernelError;
 use crate::merge::merge;
 use crate::set::{GeometrySet, KernelMesh};
@@ -92,17 +96,37 @@ pub enum ArrayMode {
 /// Returns a user-facing message when the output would exceed the ceiling, and
 /// [`KernelError::SingularTransform`] can surface from the bake (it cannot in
 /// practice here: every placement matrix is a rigid motion).
-pub fn array(set: &GeometrySet, count: u32, mode: ArrayMode) -> Result<GeometrySet, String> {
+pub fn array(
+    set: &GeometrySet,
+    count: u32,
+    mode: ArrayMode,
+    copy_mode: CopyMode,
+) -> Result<GeometrySet, String> {
     if count <= 1 {
         return Ok(set.clone());
     }
 
     let input_prims: usize = set.meshes.iter().map(KernelMesh::primitive_count).sum();
-    let projected = input_prims.saturating_mul(count as usize);
+    // The ceiling counts what the mode allocates: every baked copy in
+    // Bake, the input once in Instance.
+    let projected = match copy_mode {
+        CopyMode::Bake => input_prims.saturating_mul(count as usize),
+        CopyMode::Instance => input_prims,
+    };
     if projected > MAX_OUTPUT_PRIMITIVES {
-        return Err(format!(
-            "array would produce {projected} primitives (over the {MAX_OUTPUT_PRIMITIVES} \
-             ceiling); lower the count"
+        return Err(crate::copy::ceiling_message("array", projected, copy_mode));
+    }
+
+    if copy_mode == CopyMode::Instance {
+        // The placements the bake path would have applied, kept as
+        // matrices. No copy is allocated at all.
+        let instances = (0..count)
+            .map(|i| InstanceXform(placement(i, count, mode).into()))
+            .collect();
+        return Ok(GeometrySet::from_parts_instanced(
+            set.meshes.clone(),
+            set.materials.clone(),
+            instances,
         ));
     }
 
@@ -168,7 +192,13 @@ mod tests {
     #[test]
     fn count_one_is_an_identity_copy() {
         let set = unit_box();
-        let out = array(&set, 1, ArrayMode::Linear { offset: [5.0; 3] }).unwrap();
+        let out = array(
+            &set,
+            1,
+            ArrayMode::Linear { offset: [5.0; 3] },
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_eq!(out.mesh_count(), 1);
         assert!((out.bounds.min.x - set.bounds.min.x).abs() < 1e-5);
     }
@@ -182,6 +212,7 @@ mod tests {
             ArrayMode::Linear {
                 offset: [2.0, 0.0, 0.0],
             },
+            CopyMode::Bake,
         )
         .unwrap();
         assert_eq!(out.mesh_count(), 3, "one mesh per copy");
@@ -202,6 +233,7 @@ mod tests {
                 radius: 2.0,
                 sweep_rad: std::f32::consts::TAU,
             },
+            CopyMode::Bake,
         )
         .unwrap();
         assert_eq!(out.mesh_count(), 4);
@@ -233,6 +265,7 @@ mod tests {
                 radius: 3.0,
                 sweep_rad: std::f32::consts::PI, // 2 copies over 180 => step 90
             },
+            CopyMode::Bake,
         )
         .unwrap();
         let c0 = centroid(&out.meshes[0]);
@@ -246,7 +279,13 @@ mod tests {
     #[test]
     fn the_primitive_ceiling_errors_before_allocating() {
         let set = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 200, 200, 200));
-        let err = array(&set, 100_000, ArrayMode::Linear { offset: [1.0; 3] }).unwrap_err();
+        let err = array(
+            &set,
+            100_000,
+            ArrayMode::Linear { offset: [1.0; 3] },
+            CopyMode::Bake,
+        )
+        .unwrap_err();
         assert!(err.contains("ceiling"), "got: {err}");
     }
 
@@ -259,6 +298,7 @@ mod tests {
             ArrayMode::Linear {
                 offset: [2.0, 0.0, 0.0],
             },
+            CopyMode::Bake,
         )
         .unwrap();
         assert_eq!(out.mesh_count(), 3);
@@ -274,7 +314,13 @@ mod tests {
         // The ceiling counts point primitives: a cloud big enough to
         // project past 8M errors before allocating.
         let big = GeometrySet::from_mesh(KernelMesh::points("big", vec![[0.0; 3]; 100_000]));
-        let err = array(&big, 100, ArrayMode::Linear { offset: [1.0; 3] }).unwrap_err();
+        let err = array(
+            &big,
+            100,
+            ArrayMode::Linear { offset: [1.0; 3] },
+            CopyMode::Bake,
+        )
+        .unwrap_err();
         assert!(err.contains("ceiling"), "got: {err}");
     }
 
@@ -293,6 +339,7 @@ mod tests {
             ArrayMode::Linear {
                 offset: [2.0, 0.0, 0.0],
             },
+            CopyMode::Bake,
         )
         .unwrap();
         assert_eq!(out.mesh_count(), 4);
@@ -319,5 +366,111 @@ mod tests {
 
     fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
         ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    use crate::set::KernelMesh;
+
+    fn unit_tri() -> GeometrySet {
+        GeometrySet::from_mesh(KernelMesh::new(
+            "t",
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        ))
+    }
+
+    fn positions(set: &GeometrySet) -> Vec<[f32; 3]> {
+        set.meshes
+            .iter()
+            .flat_map(|m| m.positions.to_vec())
+            .collect()
+    }
+
+    /// Applying the instance matrices to the prototype must reproduce the
+    /// baked output, for both array layouts.
+    fn assert_parity(mode: ArrayMode, count: u32) {
+        let baked = array(&unit_tri(), count, mode, CopyMode::Bake).expect("bake");
+        let instanced = array(&unit_tri(), count, mode, CopyMode::Instance).expect("instance");
+
+        let placements = instanced.instances.as_ref().expect("instances");
+        assert_eq!(placements.len(), count as usize, "{mode:?}");
+        assert_eq!(
+            instanced.meshes[0].positions.len(),
+            3,
+            "prototype untouched"
+        );
+
+        let proto = &instanced.meshes[0].positions;
+        let want = positions(&baked);
+        let mut got = Vec::new();
+        for placement in placements.iter() {
+            for p in proto.iter() {
+                got.push(placement.apply(*p));
+            }
+        }
+        assert_eq!(got.len(), want.len(), "{mode:?}");
+        for (g, w) in got.iter().zip(want.iter()) {
+            for axis in 0..3 {
+                assert!((g[axis] - w[axis]).abs() < 1e-4, "{mode:?}: {g:?} vs {w:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn linear_instances_land_where_bake_would_have_put_them() {
+        assert_parity(
+            ArrayMode::Linear {
+                offset: [2.0, 0.5, -1.0],
+            },
+            4,
+        );
+    }
+
+    #[test]
+    fn radial_instances_land_where_bake_would_have_put_them() {
+        // Radial placements rotate, so this is the case where a matrix
+        // built wrong would still translate correctly and shear the copy.
+        assert_parity(
+            ArrayMode::Radial {
+                axis: Axis::Y,
+                radius: 3.0,
+                sweep_rad: std::f32::consts::PI * 1.5,
+            },
+            5,
+        );
+    }
+
+    #[test]
+    fn a_count_of_one_is_the_identity_in_both_modes() {
+        for copy_mode in [CopyMode::Bake, CopyMode::Instance] {
+            let out = array(
+                &unit_tri(),
+                1,
+                ArrayMode::Linear { offset: [5.0; 3] },
+                copy_mode,
+            )
+            .expect("identity");
+            assert_eq!(positions(&out), positions(&unit_tri()), "{copy_mode:?}");
+            assert!(out.instances.is_none(), "{copy_mode:?}");
+        }
+    }
+
+    #[test]
+    fn instance_mode_clears_a_ceiling_that_bake_cannot() {
+        let mut heavy = unit_tri();
+        heavy.meshes[0] = KernelMesh::new(
+            "heavy",
+            vec![[0.0, 0.0, 0.0]; 300_000],
+            (0..300_000u32).collect(),
+        );
+        let layout = ArrayMode::Linear { offset: [1.0; 3] };
+
+        let err = array(&heavy, 100, layout, CopyMode::Bake).expect_err("over the ceiling");
+        assert!(err.contains("Bake mode"), "{err}");
+        assert!(err.contains("Instance mode"), "{err}");
+        assert!(array(&heavy, 100, layout, CopyMode::Instance).is_ok());
     }
 }

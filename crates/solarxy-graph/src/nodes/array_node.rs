@@ -163,7 +163,9 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
         },
     };
 
-    match array(input, count, mode) {
+    // The mode becomes a parameter when the node bumps to version 2;
+    // until then every existing document keeps producing baked copies.
+    match array(input, count, mode, solarxy_kernel::copy::CopyMode::Bake) {
         Ok(set) => Ok(CookOutcome::Done(Outputs::geometry(set))),
         Err(message) => Err(CookError::Failed { message }),
     }
