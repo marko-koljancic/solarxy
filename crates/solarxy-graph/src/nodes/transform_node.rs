@@ -142,7 +142,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
     }
 }
 
-fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     // The required-input guard already ran in the driver; a connected but
     // empty upstream flows here as None and yields empty (keep-last-good).
     let Some(input) = inputs.geometry("geometry") else {
@@ -150,6 +150,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+    let input = &super::common::baked_input(input, cx)?;
 
     let translate = p.vec3_f32("translate");
     let rotate = p.vec3_f32("rotate"); // already radians (Unit::Degrees)

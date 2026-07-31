@@ -151,12 +151,18 @@ pub fn descriptor() -> NodeTypeDescriptor {
     }
 }
 
-fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+
+    // An already-instanced input bakes first. Both branches of the kernel
+    // op replace each mesh's placement list (Instance writes the new one,
+    // Bake transforms the prototype), so an array of a scatter would
+    // otherwise keep the array's copies and silently drop the scatter's.
+    let input = &super::common::baked_input(input, cx)?;
 
     let count = p.u32("count");
     let mode = match p.enum_key("mode") {

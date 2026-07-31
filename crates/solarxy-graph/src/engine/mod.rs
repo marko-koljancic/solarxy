@@ -2237,6 +2237,14 @@ impl Engine {
                         key: key.to_string(),
                         reason: "nothing cooked to export yet".to_string(),
                     })?;
+                // A file has no notion of a placement list, so instanced
+                // geometry bakes on the way out. Skipping this would write
+                // one copy of a ten-thousand-copy scatter and call it a
+                // successful export.
+                let set = set.baked().map_err(|reason| EngineError::InvalidParam {
+                    key: key.to_string(),
+                    reason,
+                })?;
                 let meshes: Vec<solarxy_formats::export::ExportMesh<'_>> = set
                     .meshes
                     .iter()

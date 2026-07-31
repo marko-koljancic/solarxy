@@ -212,6 +212,44 @@ fn geo_rotate_order_is_observable(params: &serde_json::Map<String, serde_json::V
     rotate.iter().filter(|a| **a != 0.0).count() >= 2
 }
 
+/// Resolves an instanced input into real geometry, for the operations that
+/// cannot carry placements through.
+///
+/// `GeometrySet::instances` states the rule this enforces: an operation that
+/// cannot carry placements must bake first rather than drop them, because
+/// silently losing the list deletes every copy but one with no error
+/// anywhere. Most operations are in that position, either because they need
+/// the copies to exist (scatter, bounds, validate, the exports) or because
+/// their meaning is per copy (a wrangle over `@ptnum`, a delete by angle, a
+/// mirror across a plane the copies straddle).
+///
+/// The bake is announced. It can turn a scene that ran on one prototype into
+/// one carrying ten thousand real copies, and a cliff that steep should not
+/// arrive without a word: the warning names the count so the reader can see
+/// which node did it and how much it cost. Uninstanced input, which is
+/// almost all input, borrows straight through and warns about nothing.
+///
+/// # Errors
+/// Propagates the bake's ceiling error, whose message already names the way
+/// out.
+pub(super) fn baked_input<'a>(
+    set: &'a solarxy_kernel::GeometrySet,
+    cx: &mut CookCtx,
+) -> Result<std::borrow::Cow<'a, solarxy_kernel::GeometrySet>, CookError> {
+    if !set.is_instanced() {
+        return Ok(std::borrow::Cow::Borrowed(set));
+    }
+    let count = set.instance_count();
+    let baked = set
+        .baked()
+        .map_err(|message| CookError::Failed { message })?;
+    cx.warn(format!(
+        "this node cannot work on instanced geometry, so the {count} \
+         placements from upstream were baked into real copies here"
+    ));
+    Ok(baked)
+}
+
 /// The `copy_mode` param, identical on both copy operations.
 ///
 /// Documented here rather than at each call site for the same reason

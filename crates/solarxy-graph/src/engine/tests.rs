@@ -4205,6 +4205,207 @@ fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
     );
 }
 
+/// The downstream contract for instanced geometry, node by node.
+///
+/// Instancing is a representation choice, not a different result, so the
+/// same graph must produce the same geometry whether the copy operation
+/// placed its copies or baked them. A node that cannot carry placements has
+/// to bake them; the failure this guards is the one where it neither
+/// carries nor bakes and quietly returns one copy where the user placed
+/// four.
+///
+/// Each case cooks `box -> array -> <node>` twice, once with the array on
+/// Instance and once on Bake, and compares the two outputs after baking
+/// whatever survives. `carries` records which side of the contract the node
+/// is on, so a node silently changing sides fails here rather than in
+/// someone's scene.
+#[test]
+fn every_downstream_node_agrees_with_its_baked_equivalent() {
+    // (node type, params, whether it carries placements through)
+    let cases: &[(&str, &[(&str, ParamValue)], bool)] = &[
+        // Carry: each works in the prototype's own space with a result
+        // identical for every copy.
+        ("subdivide", &[("iterations", ParamValue::Int(1))], true),
+        ("uv_project", &[], true),
+        ("compute_normals", &[], true),
+        ("material", &[], true),
+        // Bake: the meaning is per copy, or real geometry is needed.
+        (
+            "transform",
+            &[("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
+            false,
+        ),
+        ("delete", &[], false),
+        ("mirror", &[], false),
+        ("bounds", &[], false),
+        ("attribute_create", &[], false),
+        ("points_from_geo", &[], false),
+        ("scatter", &[("count", ParamValue::Int(8))], false),
+    ];
+
+    for (node_type, params, carries) in cases {
+        let mut shapes = Vec::new();
+        for mode in ["instance", "bake"] {
+            let (mut e, ctx) = subflow_engine();
+            let prim = add(&mut e, ctx, "box");
+            let arr = add(&mut e, ctx, "array");
+            let sink = add(&mut e, ctx, node_type);
+            for (from, to) in [(prim, arr), (arr, sink)] {
+                e.apply(Command::Connect {
+                    ctx,
+                    from: PortRefDto {
+                        node: from,
+                        port: "geometry".into(),
+                    },
+                    to: PortRefDto {
+                        node: to,
+                        port: "geometry".into(),
+                    },
+                })
+                .unwrap();
+            }
+            e.apply(Command::SetParam {
+                ctx,
+                node: arr,
+                key: "copy_mode".into(),
+                value: ParamSource::Literal(ParamValue::Enum(mode.into())),
+            })
+            .unwrap();
+            e.apply(Command::SetParam {
+                ctx,
+                node: arr,
+                key: "count".into(),
+                value: ParamSource::Literal(ParamValue::Int(4)),
+            })
+            .unwrap();
+            for (key, value) in *params {
+                e.apply(Command::SetParam {
+                    ctx,
+                    node: sink,
+                    key: (*key).into(),
+                    value: ParamSource::Literal(value.clone()),
+                })
+                .unwrap();
+            }
+            e.apply(Command::SetActiveOutput {
+                ctx,
+                node: Some(sink),
+            })
+            .unwrap();
+            e.cook(&mut || true);
+
+            let set = e
+                .cook
+                .outputs(sink)
+                .unwrap_or_else(|| panic!("{node_type} ({mode}) cooked"))
+                .get("geometry")
+                .and_then(crate::registry::coerce::Value::as_geometry)
+                .unwrap_or_else(|| panic!("{node_type} ({mode}) output geometry"));
+
+            if mode == "instance" {
+                assert_eq!(
+                    set.is_instanced(),
+                    *carries,
+                    "{node_type} changed which side of the carry-or-bake \
+                     contract it is on"
+                );
+            }
+            // Compare after baking, so a carried list and a baked one are
+            // held to the same standard: the geometry the user sees.
+            let baked = set.baked().unwrap_or_else(|e| panic!("{node_type}: {e}"));
+            let mut points: Vec<[f32; 3]> = baked
+                .meshes
+                .iter()
+                .flat_map(|m| m.positions.iter().copied())
+                .collect();
+            points.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            shapes.push(points);
+        }
+        assert_eq!(
+            shapes[0].len(),
+            shapes[1].len(),
+            "{node_type}: instanced input produced a different amount of \
+             geometry than the baked equivalent"
+        );
+        for (i, (a, b)) in shapes[0].iter().zip(&shapes[1]).enumerate() {
+            for lane in 0..3 {
+                assert!(
+                    (a[lane] - b[lane]).abs() < 1e-4,
+                    "{node_type}: point {i} differs between modes: {a:?} vs {b:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Merge is the node the placement level was moved for, so it gets its own
+/// case: it is variadic, and its whole point is combining an instanced
+/// input with a plain one.
+#[test]
+fn merging_a_scatter_with_its_surface_keeps_the_copies_instanced() {
+    let (mut e, ctx) = subflow_engine();
+    let surface = add(&mut e, ctx, "sphere");
+    let template = add(&mut e, ctx, "box");
+    let scatter = add(&mut e, ctx, "scatter");
+    let copy = add(&mut e, ctx, "copy_to_points");
+    let merge = add(&mut e, ctx, "merge");
+
+    for (from, to, port) in [
+        (surface, scatter, "geometry"),
+        (scatter, copy, "points"),
+        (template, copy, "template"),
+        (copy, merge, "inputs"),
+        (surface, merge, "inputs"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(40)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(merge),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let set = e
+        .cook
+        .outputs(merge)
+        .expect("merge cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("geometry out");
+
+    // One instanced prototype plus one plain surface, not one of each
+    // baked and not a surface replicated forty times.
+    assert!(set.is_instanced(), "the copies survived the merge");
+    let placed: Vec<usize> = set.meshes.iter().map(|m| m.instance_count()).collect();
+    assert!(
+        placed.contains(&40),
+        "the prototype keeps its forty placements: {placed:?}"
+    );
+    assert!(
+        placed.contains(&1),
+        "the surface is still placed once: {placed:?}"
+    );
+}
+
 /// The typed-context model generalizes: a fabricated container
 /// opens a Mat network, a Mat-placed container opens a Tex network three
 /// levels deep, placement is judged by the target graph's KIND (never its

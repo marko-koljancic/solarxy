@@ -111,6 +111,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+    let input = &super::common::baked_input(input, cx)?;
 
     // An empty set's AABB is the (-1,-1,-1)..(1,1,1) fallback, not a zero box,
     // so boxing it would emit a confident-looking unit cube around nothing.

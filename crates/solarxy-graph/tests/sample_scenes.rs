@@ -151,3 +151,43 @@ fn the_animated_sample_saves_its_runtime_settings() {
     // autoplay flag says.
     assert!(!clock.playing, "loading must never start the clock");
 }
+
+/// The instancing sample must actually instance.
+///
+/// The sweep above proves every scene loads and cooks, and a scatter
+/// collapsed to a single copy would pass it: the geometry is still there,
+/// the nodes still cook clean, and only the count is wrong. That is exactly
+/// the failure the placement list can have, and this scene is the one that
+/// exercises it, because it feeds its copies through a merge.
+#[test]
+fn the_instancing_sample_keeps_its_copies_as_placements() {
+    let path = samples_dir().join("copy-and-scatter.slxy");
+    if !path.is_file() {
+        eprintln!("skipping: no copy-and-scatter.slxy at {}", path.display());
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("copy-and-scatter loads");
+    for _ in 0..8 {
+        if engine.cook(&mut || true).is_empty() {
+            break;
+        }
+    }
+
+    let displayed = engine.display_geometries();
+    assert!(!displayed.is_empty(), "the sample displays geometry");
+    let placements: Vec<usize> = displayed
+        .iter()
+        .flat_map(|(_, set, _)| {
+            set.meshes
+                .iter()
+                .map(solarxy_kernel::KernelMesh::instance_count)
+        })
+        .collect();
+    assert!(
+        placements.iter().any(|n| *n > 100),
+        "the scattered copies reach the display as placements, not as one \
+         collapsed copy: {placements:?}"
+    );
+}
