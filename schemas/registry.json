@@ -147,7 +147,7 @@
     },
     {
       "typeId": "array",
-      "version": 1,
+      "version": 2,
       "displayName": "Array",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
@@ -232,7 +232,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "How the copies are placed. Linear steps each one along a fixed offset, for fence posts and stair treads. Radial revolves them about an axis, for spokes and bolt circles, and turns each copy to follow the revolution. The mode decides which of the parameters below apply; the rest hide."
+          "doc": "How the copies are placed. Linear steps each one along a fixed offset, for fence posts and stair treads. Radial revolves them about an axis, for spokes and bolt circles, and turns each copy to follow the revolution. The mode decides which of the placement parameters below apply; the rest hide."
         },
         {
           "key": "count",
@@ -376,19 +376,44 @@
             }
           ],
           "doc": "The total angle the copies span. Each copy steps by sweep/count, so a full 360 tiles evenly without doubling up at the seam."
+        },
+        {
+          "key": "copy_mode",
+          "label": "Copy Mode",
+          "group": "array",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "instance",
+              "Instance"
+            ],
+            [
+              "bake",
+              "Bake"
+            ]
+          ],
+          "accept": [],
+          "default": "instance",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the copies are real geometry or placements of one prototype.\n\nInstance keeps the input once and carries a transform per copy. Ten thousand copies of a five-thousand-triangle rock cost five thousand triangles rather than fifty million, so the copy count stops being the number you budget against.\n\nWhat it costs is what the rest of the graph can see. Downstream nodes are handed the prototype and the placements, never the individual copies, so there is no per-copy attribute edit, no boolean against one copy, and no deleting the third one from the left: those copies do not exist as geometry. This is the difference between copying and instancing rather than a fast path and a slow one.\n\nBake makes every copy real, which is what you choose when the copies have to be edited afterwards. It is no harder to author, and it answers a different question rather than an outdated one."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Duplicates the input Count times, counting the original, either stepping each copy linearly along an offset or revolving it about an axis. Every copy is a real baked transform of the input concatenated as though you had merged them yourself, and identical materials collapse to one table entry rather than one per copy.\n\nIt replaces the branch you would otherwise wire by hand: a `transform` and a `merge` for every copy. Put it after whatever makes the single unit, a primitive or a small assembly you have already merged, and then change one number instead of rewiring.\n\nCount includes the original, so 1 is a no-op rather than one extra copy. The radial step is Sweep divided by Count rather than by Count minus 1, which is what lets a full 360 tile evenly instead of stacking a copy on the original at the seam. And Radius defaults to 0, which leaves every radial copy sitting on the axis spinning in place: give it a radius to get a ring.",
+      "doc": "Duplicates the input Count times, counting the original, either stepping each copy linearly along an offset or revolving it about an axis.\n\nCopy Mode decides what a copy is. Instance, the default, keeps the input once and carries a placement matrix per copy, so a long fence costs one post. Bake makes every copy a real baked transform of the input, concatenated as though you had merged them yourself, with identical materials collapsing to one table entry rather than one per copy.\n\nIt replaces the branch you would otherwise wire by hand: a `transform` and a `merge` for every copy. Put it after whatever makes the single unit, a primitive or a small assembly you have already merged, and then change one number instead of rewiring.\n\nCount includes the original, so 1 is a no-op rather than one extra copy. The radial step is Sweep divided by Count rather than by Count minus 1, which is what lets a full 360 tile evenly instead of stacking a copy on the original at the seam. And Radius defaults to 0, which leaves every radial copy sitting on the axis spinning in place: give it a radius to get a ring.",
       "searchAliases": [
         "duplicate",
         "repeat",
         "clone",
         "radial",
-        "grid"
+        "grid",
+        "instance"
       ],
       "glyph": "array",
       "role": "standard"
@@ -3414,7 +3439,7 @@
     },
     {
       "typeId": "copy_to_points",
-      "version": 1,
+      "version": 2,
       "displayName": "Copy to Points",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
@@ -3573,13 +3598,37 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "Selects which per-copy size jitter you get when Scale Variance is above zero. The same seed always cooks the same sizes."
+        },
+        {
+          "key": "copy_mode",
+          "label": "Copy Mode",
+          "group": "copy",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "instance",
+              "Instance"
+            ],
+            [
+              "bake",
+              "Bake"
+            ]
+          ],
+          "accept": [],
+          "default": "instance",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the copies are real geometry or placements of one prototype.\n\nInstance keeps the input once and carries a transform per copy. Ten thousand copies of a five-thousand-triangle rock cost five thousand triangles rather than fifty million, so the copy count stops being the number you budget against.\n\nWhat it costs is what the rest of the graph can see. Downstream nodes are handed the prototype and the placements, never the individual copies, so there is no per-copy attribute edit, no boolean against one copy, and no deleting the third one from the left: those copies do not exist as geometry. This is the difference between copying and instancing rather than a fast path and a slow one.\n\nBake makes every copy real, which is what you choose when the copies have to be edited afterwards. It is no harder to author, and it answers a different question rather than an outdated one."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "points"
       },
-      "doc": "Stamps the Template input onto every point of the Points input: scatter a surface, wire the cloud in here, and a forest, a crowd, or a debris field is one node instead of a hand-wired branch per copy. Every vertex of the points input is a target whatever its topology, so mesh vertices work as well as scattered clouds.\n\nOrient turns each copy's up axis onto its point's normal (what scatter writes), so copies stand on the surface rather than all facing the same way; Scale sizes every copy and Scale Variance adds seeded per-copy jitter for a natural, unrepeated look.\n\nThe copies of each template mesh flatten into one concatenated mesh, keeping the viewport responsive at thousands of copies, and the template's materials ride along shared, not duplicated. A copy count whose output would exceed the eight-million primitive ceiling fails the cook with a clear message before anything is allocated.",
+      "doc": "Stamps the Template input onto every point of the Points input: scatter a surface, wire the cloud in here, and a forest, a crowd, or a debris field is one node instead of a hand-wired branch per copy. Every vertex of the points input is a target whatever its topology, so mesh vertices work as well as scattered clouds.\n\nOrient turns each copy's up axis onto its point's normal (what scatter writes), so copies stand on the surface rather than all facing the same way; Scale sizes every copy and Scale Variance adds seeded per-copy jitter for a natural, unrepeated look.\n\nCopy Mode decides what a copy is. Instance, the default, keeps the template once and carries a transform per point, so ten thousand cones cost one cone. Bake makes every copy real geometry you can edit downstream, flattening the copies of each template mesh into one concatenated mesh so even thousands of them stay a handful of draw objects. Either way the template's materials ride along shared rather than duplicated, and a copy count whose output would exceed the eight-million primitive ceiling fails the cook before anything is allocated, with a message naming the running mode and the way out.",
       "searchAliases": [
         "instance",
         "stamp",

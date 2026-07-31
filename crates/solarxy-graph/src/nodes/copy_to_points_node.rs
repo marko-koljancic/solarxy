@@ -1,13 +1,17 @@
 //! The `copy_to_points` modifier. Stamps a template onto every point of a
 //! points input (scatter output being the canonical source), optionally
 //! orienting each copy to the point's normal and varying its size with a
-//! seeded jitter. The copies of each template mesh flatten into one
-//! concatenated mesh, so a ten-thousand-point copy stays a handful of draw
-//! objects rather than ten thousand.
+//! seeded jitter.
+//!
+//! Copy Mode decides what a copy is. Instance, the default, keeps the
+//! template once and carries a transform per point. Bake flattens the copies
+//! of each template mesh into one concatenated mesh, so even there a
+//! ten-thousand-point copy stays a handful of draw objects rather than ten
+//! thousand.
 
 use solarxy_kernel::copy::{CopyOrient, copy_to_points};
 
-use super::common::{geometry_output, params_with};
+use super::common::{copy_mode_from_key, copy_mode_param, geometry_output, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -19,7 +23,7 @@ use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDe
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "copy_to_points",
-        version: 1,
+        version: 2,
         display_name: "Copy to Points",
         category: Category::Copy,
         contexts: ContextSet::GEO,
@@ -104,6 +108,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
                      Variance is above zero. The same seed always cooks the \
                      same sizes.",
                     ),
+                copy_mode_param("copy"),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
@@ -119,12 +124,16 @@ pub fn descriptor() -> NodeTypeDescriptor {
               scatter writes), so copies stand on the surface rather than all \
               facing the same way; Scale sizes every copy and Scale Variance \
               adds seeded per-copy jitter for a natural, unrepeated look.\n\n\
-              The copies of each template mesh flatten into one concatenated \
-              mesh, keeping the viewport responsive at thousands of copies, \
-              and the template's materials ride along shared, not duplicated. \
-              A copy count whose output would exceed the eight-million \
-              primitive ceiling fails the cook with a clear message before \
-              anything is allocated.",
+              Copy Mode decides what a copy is. Instance, the default, keeps \
+              the template once and carries a transform per point, so ten \
+              thousand cones cost one cone. Bake makes every copy real \
+              geometry you can edit downstream, flattening the copies of each \
+              template mesh into one concatenated mesh so even thousands of \
+              them stay a handful of draw objects. Either way the template's \
+              materials ride along shared rather than duplicated, and a copy \
+              count whose output would exceed the eight-million primitive \
+              ceiling fails the cook before anything is allocated, with a \
+              message naming the running mode and the way out.",
         search_aliases: &[
             "instance",
             "stamp",
@@ -136,7 +145,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         glyph: "copy_to_points",
         role: NodeRole::Standard,
         cook,
-        migrate: None,
+        migrate: Some(super::common::migrate_pin_copy_mode_to_bake),
     }
 }
 
@@ -159,10 +168,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         p.f32("scale"),
         p.f32("scale_variance"),
         p.u32("seed"),
-        // The mode becomes a parameter when the node bumps to version 2;
-        // until then every existing document keeps producing exactly what
-        // it produced before, which is baked copies.
-        solarxy_kernel::copy::CopyMode::Bake,
+        copy_mode_from_key(p.enum_key("copy_mode")),
     ) {
         Ok(set) => {
             if set.is_renderable_empty() {
@@ -215,19 +221,85 @@ mod tests {
         set
     }
 
+    /// Stored params pinned to Bake. Instance became the descriptor default
+    /// in 0.8.2, so a test whose subject is real stamped geometry has to say
+    /// which mode it means rather than inherit one.
+    fn bake() -> BTreeMap<String, ParamSource> {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "copy_mode".to_string(),
+            ParamSource::Literal(ParamValue::Enum("bake".into())),
+        );
+        stored
+    }
+
+    fn three_points() -> GeometrySet {
+        GeometrySet::from_mesh(KernelMesh::points(
+            "p",
+            vec![[0.0; 3], [3.0, 0.0, 0.0], [0.0, 0.0, 3.0]],
+        ))
+    }
+
     #[test]
     fn cooks_copies_at_defaults() {
         let template = GeometrySet::from_mesh(generate_box(0.2, 0.2, 0.2, 1, 1, 1));
-        let points = GeometrySet::from_mesh(KernelMesh::points(
-            "p",
-            vec![[0.0; 3], [3.0, 0.0, 0.0], [0.0, 0.0, 3.0]],
-        ));
-        let (result, warnings) = run(BTreeMap::new(), template, points);
+        let (result, warnings) = run(BTreeMap::new(), template, three_points());
         let CookOutcome::Done(out) = result.unwrap() else {
             panic!("cooks synchronously");
         };
-        assert_eq!(set_of(&out).meshes[0].primitive_count(), 12 * 3);
+        let set = set_of(&out);
+        // The default is Instance: the template travels once, with a
+        // placement per point. No vertex is allocated per copy at all.
+        assert_eq!(set.meshes[0].primitive_count(), 12);
+        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(3));
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn bake_mode_still_stamps_real_geometry() {
+        let template = GeometrySet::from_mesh(generate_box(0.2, 0.2, 0.2, 1, 1, 1));
+        let (result, warnings) = run(bake(), template, three_points());
+        let CookOutcome::Done(out) = result.unwrap() else {
+            panic!("cooks synchronously");
+        };
+        let set = set_of(&out);
+        assert_eq!(set.meshes[0].primitive_count(), 12 * 3);
+        assert!(
+            set.instances.is_none(),
+            "baked output carries no placement list; the copies ARE the geometry"
+        );
+        assert!(warnings.is_empty());
+    }
+
+    /// The two modes describe the same arrangement, which is what makes
+    /// Instance a representation choice rather than a different result.
+    #[test]
+    fn instance_and_bake_agree_on_where_the_copies_are() {
+        let template = GeometrySet::from_mesh(generate_box(0.2, 0.2, 0.2, 1, 1, 1));
+        let (baked, _) = run(bake(), template.clone(), three_points());
+        let (instanced, _) = run(BTreeMap::new(), template, three_points());
+        let (CookOutcome::Done(baked), CookOutcome::Done(instanced)) =
+            (baked.unwrap(), instanced.unwrap())
+        else {
+            panic!("cooks synchronously");
+        };
+        // `AABB` carries no `PartialEq`, and the two modes reach the same box
+        // by different arithmetic (transformed corners against transformed
+        // points), so the comparison is per-component and tolerant.
+        let (a, b) = (set_of(&baked).bounds, set_of(&instanced).bounds);
+        for (x, y) in [
+            (a.min.x, b.min.x),
+            (a.min.y, b.min.y),
+            (a.min.z, b.min.z),
+            (a.max.x, b.max.x),
+            (a.max.y, b.max.y),
+            (a.max.z, b.max.z),
+        ] {
+            assert!(
+                (x - y).abs() < 1e-4,
+                "the modes disagree on where the copies are: {x} vs {y}"
+            );
+        }
     }
 
     #[test]
@@ -244,12 +316,29 @@ mod tests {
 
     #[test]
     fn an_over_ceiling_projection_is_a_cook_error() {
+        // Bake is the mode that allocates per point, so it is the mode with a
+        // point-count-driven ceiling at all.
         let template = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 1, 1, 1));
         let cloud = GeometrySet::from_mesh(KernelMesh::points("big", vec![[0.0; 3]; 1_000_000]));
-        let (result, _) = run(BTreeMap::new(), template, cloud);
+        let (result, _) = run(bake(), template, cloud);
         let CookError::Failed { message } = result.unwrap_err() else {
             panic!("expected a Failed cook error");
         };
         assert!(message.contains("ceiling"), "got: {message}");
+    }
+
+    /// The same scatter that cannot bake places without complaint, which is
+    /// what the ceiling message tells the user to try.
+    #[test]
+    fn the_scatter_that_cannot_bake_still_instances() {
+        let template = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 1, 1, 1));
+        let cloud = GeometrySet::from_mesh(KernelMesh::points("big", vec![[0.0; 3]; 1_000_000]));
+        let (result, _) = run(BTreeMap::new(), template, cloud);
+        let CookOutcome::Done(out) = result.unwrap() else {
+            panic!("cooks synchronously");
+        };
+        let set = set_of(&out);
+        assert_eq!(set.meshes[0].primitive_count(), 12);
+        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(1_000_000));
     }
 }

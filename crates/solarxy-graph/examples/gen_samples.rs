@@ -252,6 +252,12 @@ fn copy_and_scatter() -> Builder {
     let copy = b.add(g, "copy_to_points", [130.0, 120.0]);
     b.set(g, copy, "scale_variance", ParamValue::Float(0.35));
     b.set(g, copy, "seed", ParamValue::Int(3));
+    // Pinned to Bake rather than left on the Instance default, because this
+    // scene feeds the copy into a merge and no node downstream of the copy
+    // operations carries an instance list through yet: the placements would
+    // be dropped and the lesson would render one cone. The pin comes off
+    // when they do.
+    b.set(g, copy, "copy_mode", ParamValue::Enum("bake".into()));
     let merge = b.add(g, "merge", [130.0, 240.0]);
     b.connect(g, (sphere, "geometry"), (scatter, "geometry"));
     b.connect(g, (scatter, "geometry"), (copy, "points"));

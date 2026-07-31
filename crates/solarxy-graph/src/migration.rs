@@ -474,6 +474,80 @@ mod tests {
         assert!(!loaded.node.params.contains_key("include_materials"));
     }
 
+    /// The copy operations' v1 to v2 step, which is the migration in 0.8.2
+    /// that changes what a document MEANS if it gets this wrong.
+    ///
+    /// Both node types gained `copy_mode`, whose default is Instance. Every
+    /// v1 node was authored against an engine that could only bake, so a v1
+    /// document loaded without the pin would open with its copies collapsed
+    /// into one prototype and every downstream node reading something
+    /// different, with nothing on screen to say why.
+    #[test]
+    fn v1_copy_nodes_are_pinned_to_bake() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+
+        for (type_id, live_key, live_json, live_value) in [
+            (
+                "copy_to_points",
+                "scale",
+                serde_json::json!(2.5),
+                ParamValue::Float(2.5),
+            ),
+            ("array", "count", serde_json::json!(7), ParamValue::Int(7)),
+        ] {
+            let loaded = load_node(
+                &reg,
+                NodeId(1),
+                type_id,
+                1,
+                raw(&[(live_key, live_json)]),
+                [0.0; 2],
+                false,
+            );
+            assert!(
+                loaded.warnings.is_empty(),
+                "{type_id}: {:?}",
+                loaded.warnings
+            );
+            assert!(loaded.node.placeholder.is_none(), "{type_id}");
+            assert_eq!(loaded.node.type_version, 2, "{type_id}");
+            assert_eq!(
+                loaded.node.params.get("copy_mode"),
+                Some(&ParamSource::Literal(ParamValue::Enum("bake".to_string()))),
+                "{type_id}: a v1 node must open baked, not inherit the new \
+                 Instance default"
+            );
+            assert_eq!(
+                loaded.node.params.get(live_key),
+                Some(&ParamSource::Literal(live_value)),
+                "{type_id}: the live param survives the migration"
+            );
+        }
+    }
+
+    /// A node that already carries the key keeps its own value. The step is
+    /// guarded on absence, so re-running it is a no-op rather than an
+    /// overwrite: a v2 node deliberately set to Instance must not be pinned.
+    #[test]
+    fn the_copy_mode_pin_never_overwrites_a_stored_choice() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        let loaded = load_node(
+            &reg,
+            NodeId(1),
+            "array",
+            1,
+            raw(&[("copy_mode", serde_json::json!("instance"))]),
+            [0.0; 2],
+            false,
+        );
+        assert_eq!(
+            loaded.node.params.get("copy_mode"),
+            Some(&ParamSource::Literal(ParamValue::Enum(
+                "instance".to_string()
+            )))
+        );
+    }
+
     #[test]
     fn unknown_params_are_dropped_with_a_warning() {
         let reg = v2_registry();

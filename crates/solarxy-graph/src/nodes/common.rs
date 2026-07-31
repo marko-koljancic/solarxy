@@ -4,6 +4,7 @@
 //! catalog conventions so each node file declares
 //! only what is specific to it.
 
+use solarxy_kernel::copy::CopyMode;
 use solarxy_kernel::transform::RotateOrder;
 
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
@@ -209,6 +210,92 @@ fn geo_rotate_order_is_observable(params: &serde_json::Map<String, serde_json::V
         return false;
     };
     rotate.iter().filter(|a| **a != 0.0).count() >= 2
+}
+
+/// The `copy_mode` param, identical on both copy operations.
+///
+/// Documented here rather than at each call site for the same reason
+/// [`rotate_order_param`] is: `copy_to_points` and `array` offer the same
+/// choice, and two copies of the explanation would drift into describing one
+/// control two ways. Only the presentation group differs, so it is passed in.
+///
+/// The key is `copy_mode` rather than `mode` because `array` already carries a
+/// `mode` holding Linear and Radial, and because it is what the kernel calls
+/// the argument.
+#[must_use]
+pub fn copy_mode_param(group: &str) -> ParamSpec {
+    ParamSpec::new(
+        "copy_mode",
+        "Copy Mode",
+        group,
+        ParamType::Enum {
+            variants: vec![
+                EnumVariant::new("instance", "Instance"),
+                EnumVariant::new("bake", "Bake"),
+            ],
+        },
+        ParamValue::Enum("instance".to_string()),
+    )
+    .doc(
+        "Whether the copies are real geometry or placements of one \
+         prototype.\n\n\
+         Instance keeps the input once and carries a transform per copy. Ten \
+         thousand copies of a five-thousand-triangle rock cost five thousand \
+         triangles rather than fifty million, so the copy count stops being \
+         the number you budget against.\n\n\
+         What it costs is what the rest of the graph can see. Downstream \
+         nodes are handed the prototype and the placements, never the \
+         individual copies, so there is no per-copy attribute edit, no \
+         boolean against one copy, and no deleting the third one from the \
+         left: those copies do not exist as geometry. This is the difference \
+         between copying and instancing rather than a fast path and a slow \
+         one.\n\n\
+         Bake makes every copy real, which is what you choose when the \
+         copies have to be edited afterwards. It is no harder to author, and \
+         it answers a different question rather than an outdated one.",
+    )
+}
+
+/// Maps the stored variant key onto the kernel's mode. An unknown key falls
+/// back to the default rather than failing a cook, matching
+/// [`rotate_order_from_key`].
+#[must_use]
+pub fn copy_mode_from_key(key: &str) -> CopyMode {
+    match key {
+        "bake" => CopyMode::Bake,
+        _ => CopyMode::Instance,
+    }
+}
+
+/// v1 -> v2 for the two copy operations (`copy_to_points` and `array`): both
+/// gain [`copy_mode_param`], whose default is Instance.
+///
+/// Every v1 node was authored against an engine that could only bake, so Bake
+/// is not a preference those nodes expressed; it is the behavior their authors
+/// saw and built the rest of the graph around. Left to inherit the new
+/// default, a saved scene would open with its copies collapsed into one
+/// prototype and every downstream node reading something different, with
+/// nothing on screen to say why. So the value is written in explicitly.
+///
+/// A node that somehow already carries the key keeps it, so re-running the
+/// step is a no-op rather than an overwrite.
+///
+/// The value written is the BARE enum key, because migrations run on the raw
+/// stored JSON, which holds a plain value per param (the one object form is
+/// `{"$expr": ...}`) rather than a serialized `ParamSource`. Writing the
+/// wrapped form instead fails to type on the way back in.
+#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+pub fn migrate_pin_copy_mode_to_bake(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 && !params.contains_key("copy_mode") {
+        params.insert(
+            "copy_mode".to_string(),
+            serde_json::Value::String("bake".to_string()),
+        );
+    }
+    Ok(())
 }
 
 /// v1 -> v2 for `rect_area_light`: the v1 soft point-light approximation

@@ -4017,7 +4017,16 @@ fn materials_survive_array_and_mirror() {
         value: ParamSource::Literal(ParamValue::Text("textured".into())),
     })
     .unwrap();
-    // 4 copies, stepped clear of each other on X.
+    // 4 copies, stepped clear of each other on X. Pinned to Bake because
+    // this test's subject is material dedup through a real bake and merge;
+    // Instance never duplicates a material because it never duplicates a mesh.
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "copy_mode".into(),
+        value: ParamSource::Literal(ParamValue::Enum("bake".into())),
+    })
+    .unwrap();
     e.apply(Command::SetParam {
         ctx,
         node: arr,
@@ -4079,6 +4088,120 @@ fn materials_survive_array_and_mirror() {
         set.bounds.min.x < -3.0 && set.bounds.max.x > 3.0,
         "both halves present: {:?}",
         set.bounds
+    );
+}
+
+/// The copy-mode migration proved on a whole document rather than on one
+/// node's param map.
+///
+/// A scene saved before 0.8.2 stores `array` at version 1 with no
+/// `copy_mode`, written by an engine that could only bake. Version 2 defaults
+/// to Instance, so the migration has to write Bake back in. Get it wrong and
+/// the document opens looking entirely plausible: geometry is still there,
+/// the node still cooks clean, and every count downstream is quietly
+/// different. That is why this goes through the real save and load seam
+/// instead of asserting on the hook.
+#[test]
+fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
+    let (mut e, ctx) = subflow_engine();
+    let prim = add(&mut e, ctx, "box");
+    let arr = add(&mut e, ctx, "array");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: prim,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: arr,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    for (key, value) in [
+        ("count", ParamValue::Int(4)),
+        ("offset", ParamValue::Vec3([3.0, 0.0, 0.0])),
+        // What a pre-0.8.2 document effectively said, and the only thing it
+        // could have said.
+        ("copy_mode", ParamValue::Enum("bake".into())),
+    ] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: arr,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(arr),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    /// Everything about the output a wrong migration would move: how the
+    /// copies are partitioned, whether they are placements or geometry, and
+    /// where the points actually are.
+    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
+        let set = e
+            .cook
+            .outputs(node)
+            .expect("cooked")
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .expect("geometry out");
+        (
+            set.mesh_count(),
+            set.instances.as_ref().map(|i| i.len()),
+            set.meshes[0].positions.to_vec(),
+        )
+    }
+    let want = shape(&e, arr);
+    assert_eq!(want.0, 4, "the reference cook baked four copies");
+    assert_eq!(want.1, None, "baked output carries no placement list");
+
+    // Save, then age the file: strip `copy_mode` and stamp the array node
+    // back to version 1, which is what a scene written before this release
+    // holds on disk.
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let mut aged = 0;
+    for graph in scene.graph.subflows.values_mut() {
+        for node in &mut graph.nodes {
+            if node.type_id == "array" {
+                node.type_version = 1;
+                node.params.remove("copy_mode");
+                aged += 1;
+            }
+        }
+    }
+    assert_eq!(aged, 1, "the array node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a clean migration must not toast: {warnings:?}"
+    );
+
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    assert_eq!(
+        shape(&reopened, arr),
+        want,
+        "the reopened document must cook to exactly what it cooked before, \
+         down to the vertex positions"
     );
 }
 
@@ -4567,6 +4690,16 @@ fn scatter_copy_chain_recooks_on_reseed() {
         node: scatter,
         key: "count".into(),
         value: ParamSource::Literal(ParamValue::Int(25)),
+    })
+    .unwrap();
+    // Pinned to Bake so the assertion below reads the tiled positions
+    // directly. The subject here is recook propagation through a downstream
+    // copy, not which representation the copy chose.
+    e.apply(Command::SetParam {
+        ctx,
+        node: copy,
+        key: "copy_mode".into(),
+        value: ParamSource::Literal(ParamValue::Enum("bake".into())),
     })
     .unwrap();
     e.apply(Command::SetActiveOutput {
