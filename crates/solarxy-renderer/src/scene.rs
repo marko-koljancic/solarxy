@@ -111,10 +111,6 @@ impl ModelScene {
             validation: Some(&self.validation_gpu),
             selected: false,
             cast_shadow: true,
-            // A file-loaded model is one placement. Instancing arrives
-            // through the node engine's cooked geometry, which this path
-            // does not have.
-            instances: 1,
         }
     }
 

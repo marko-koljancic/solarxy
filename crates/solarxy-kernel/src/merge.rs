@@ -57,6 +57,12 @@ pub fn merge(inputs: &[Arc<GeometrySet>]) -> GeometrySet {
                 topology: mesh.topology,
                 attributes: mesh.attributes.clone(),
                 primitive_attributes: mesh.primitive_attributes.clone(),
+                // Placements ride along per mesh, which is the whole reason
+                // they live there: merging a scatter's prototype with the
+                // surface it was scattered over keeps the prototype
+                // instanced and leaves the surface alone. A single list for
+                // the set could not say that, and merge would have to bake.
+                instances: mesh.instances.clone(),
             });
         }
     }
@@ -149,6 +155,7 @@ fn hash_opt_image<H: Hasher>(v: Option<&RawImageData>, h: &mut H) {
 mod tests {
     use super::*;
     use crate::primitives::{generate_box, generate_plane};
+    use solarxy_core::scene::InstanceXform;
 
     fn material(name: &str, roughness: f32) -> RawMaterialData {
         RawMaterialData {
@@ -298,5 +305,96 @@ mod tests {
         let out = merge(&[near, Arc::new(far_mesh)]);
         assert!((out.bounds.min.x + 0.5).abs() < 1e-5);
         assert!((out.bounds.max.x - 100.5).abs() < 1e-5);
+    }
+
+    /// The reason placements live on the mesh rather than on the set.
+    ///
+    /// Merging a scatter's instanced prototype with the surface it was
+    /// scattered over is the commonest graph there is, and a single list
+    /// for the whole set could not express the result: it would replicate
+    /// the surface too. So merge would have had to bake, and the most
+    /// reached-for downstream node would be the one place instancing
+    /// could never survive.
+    #[test]
+    fn merging_an_instanced_set_with_a_plain_one_keeps_both_as_they_were() {
+        let mut prototype = generate_box(1.0, 1.0, 1.0, 1, 1, 1);
+        prototype.name = "prototype".to_string();
+        let places = vec![
+            InstanceXform::IDENTITY,
+            InstanceXform([
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [9.0, 0.0, 0.0, 1.0],
+            ]),
+        ];
+        let scattered = Arc::new(GeometrySet::from_parts_instanced(
+            vec![prototype],
+            Vec::new(),
+            places.clone(),
+        ));
+        let mut ground = generate_plane(1.0, 1.0, 1, 1);
+        ground.name = "ground".to_string();
+        let surface = Arc::new(GeometrySet::from_mesh(ground));
+
+        let out = merge(&[Arc::clone(&scattered), Arc::clone(&surface)]);
+        assert_eq!(out.mesh_count(), 2);
+
+        let proto = out.meshes.iter().find(|m| m.name == "prototype").unwrap();
+        let plain = out.meshes.iter().find(|m| m.name == "ground").unwrap();
+        assert_eq!(
+            proto.instances.as_ref().map(|i| i.to_vec()),
+            Some(places),
+            "the prototype keeps its placements through the merge"
+        );
+        assert!(
+            plain.instances.is_none(),
+            "the surface is placed once and must not inherit the scatter"
+        );
+        // And the bounds see the far copy, so a camera frames the scatter
+        // rather than the prototype sitting at the origin.
+        assert!(out.bounds.max.x > 9.0, "{:?}", out.bounds);
+    }
+
+    /// Merge is the operation that would otherwise have to bake, so its
+    /// output must equal what baking first would have produced.
+    #[test]
+    fn a_merged_instanced_set_bakes_to_the_same_geometry() {
+        let places = vec![
+            InstanceXform::IDENTITY,
+            InstanceXform([
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [9.0, 0.0, 0.0, 1.0],
+            ]),
+        ];
+        let scattered = Arc::new(GeometrySet::from_parts_instanced(
+            vec![generate_box(1.0, 1.0, 1.0, 1, 1, 1)],
+            Vec::new(),
+            places,
+        ));
+        let surface = Arc::new(GeometrySet::from_mesh(generate_plane(1.0, 1.0, 1, 1)));
+
+        // Bake first, then merge; against merge first, then bake.
+        let baked_first = merge(&[
+            Arc::new(scattered.baked().expect("bake").into_owned()),
+            Arc::clone(&surface),
+        ]);
+        let merged_first = merge(&[scattered, surface])
+            .baked()
+            .expect("bake")
+            .into_owned();
+
+        let positions = |set: &GeometrySet| -> Vec<[f32; 3]> {
+            let mut all: Vec<[f32; 3]> = set
+                .meshes
+                .iter()
+                .flat_map(|m| m.positions.iter().copied())
+                .collect();
+            all.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            all
+        };
+        assert_eq!(positions(&baked_first), positions(&merged_first));
     }
 }

@@ -204,6 +204,9 @@ pub fn unpack(bytes: &[u8]) -> Result<GeometrySet, TransferError> {
             topology: topology_from_wire((flags >> TOPOLOGY_SHIFT) & TOPOLOGY_MASK),
             attributes,
             primitive_attributes,
+            // The import worker never produces placements, so the
+            // transfer blob carries none and its format is unchanged.
+            instances: None,
         });
     }
 
@@ -370,6 +373,7 @@ mod tests {
             topology: solarxy_core::geometry::MeshTopology::Triangles,
             attributes: AttributeMap::new(),
             primitive_attributes: AttributeMap::new(),
+            instances: None,
         };
         let set = GeometrySet::from_parts(vec![mesh], Vec::new());
 

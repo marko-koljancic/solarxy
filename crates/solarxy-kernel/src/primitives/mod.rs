@@ -63,6 +63,7 @@ pub(crate) fn assemble(
         topology: solarxy_core::geometry::MeshTopology::Triangles,
         attributes: AttributeMap::new(),
         primitive_attributes: AttributeMap::new(),
+        instances: None,
     }
 }
 

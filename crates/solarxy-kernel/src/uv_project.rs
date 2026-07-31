@@ -233,6 +233,7 @@ fn box_project_mesh(
         topology: mesh.topology,
         attributes,
         primitive_attributes: mesh.primitive_attributes.clone(),
+        instances: None,
     }
 }
 

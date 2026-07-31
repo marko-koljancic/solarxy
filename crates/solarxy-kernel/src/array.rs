@@ -395,7 +395,7 @@ mod mode_tests {
         let baked = array(&unit_tri(), count, mode, CopyMode::Bake).expect("bake");
         let instanced = array(&unit_tri(), count, mode, CopyMode::Instance).expect("instance");
 
-        let placements = instanced.instances.as_ref().expect("instances");
+        let placements = instanced.meshes[0].instances.as_ref().expect("placements");
         assert_eq!(placements.len(), count as usize, "{mode:?}");
         assert_eq!(
             instanced.meshes[0].positions.len(),
@@ -454,7 +454,7 @@ mod mode_tests {
             )
             .expect("identity");
             assert_eq!(positions(&out), positions(&unit_tri()), "{copy_mode:?}");
-            assert!(out.instances.is_none(), "{copy_mode:?}");
+            assert!(!out.is_instanced(), "{copy_mode:?}");
         }
     }
 

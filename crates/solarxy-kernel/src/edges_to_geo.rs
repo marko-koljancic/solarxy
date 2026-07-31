@@ -67,6 +67,7 @@ fn edges_of(mesh: &KernelMesh) -> KernelMesh {
         topology: MeshTopology::Lines,
         attributes: mesh.attributes.clone(),
         primitive_attributes: AttributeMap::new(),
+        instances: None,
     }
 }
 

@@ -460,6 +460,10 @@ pub fn upload_model(
             color_buffer,
             material: material_index,
             visible: true,
+            // A file-loaded model is one placement; instancing arrives
+            // through the node engine's cooked geometry, not this path.
+            instance_offset: 0,
+            instance_count: 1,
             edge_data: Some(model::EdgeData {
                 positions_buffer: edge_positions_buffer,
                 index_buffer: edge_index_buffer,
@@ -675,6 +679,8 @@ pub fn create_floor_quad(device: &wgpu::Device, bounds: &model::AABB) -> model::
         color_buffer: None,
         material: 0,
         visible: true,
+        instance_offset: 0,
+        instance_count: 1,
         edge_data: None,
         uv_edge_data: None,
         degen_index_buffer: None,
@@ -749,6 +755,8 @@ pub fn create_grid_quad(device: &wgpu::Device, bounds: &model::AABB) -> (model::
             color_buffer: None,
             material: 0,
             visible: true,
+            instance_offset: 0,
+            instance_count: 1,
             edge_data: None,
             uv_edge_data: None,
             degen_index_buffer: None,

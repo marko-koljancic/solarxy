@@ -41,6 +41,36 @@ pub struct CookedMesh {
     /// Per-vertex linear RGBA colors (the kernel's reserved `color` lane);
     /// `None` renders as white. Always position-count length when present.
     pub colors: Option<Arc<Vec<[f32; 4]>>>,
+    /// Per-instance placements for this mesh, or `None` for the ordinary
+    /// single-placement case.
+    ///
+    /// **`None` preserves the pre-instancing meaning exactly**: one implicit
+    /// identity placement. Every producer and consumer that predates
+    /// instancing is unaffected, which is what makes this additive rather
+    /// than breaking.
+    ///
+    /// On the mesh rather than on [`CookedGeometry`] because a set can hold
+    /// meshes with different placements: merging a scatter's prototype with
+    /// the surface it was scattered over is one set holding one instanced
+    /// mesh and one plain one, and a single list for the whole set cannot
+    /// say that. The copy operations keep a multi-mesh prototype rigid
+    /// within each copy by handing every one of its meshes the same shared
+    /// list, so the level costs nothing there.
+    pub instances: Option<Arc<Vec<InstanceXform>>>,
+}
+
+impl CookedMesh {
+    /// How many placements this mesh draws: the placement count, or 1 for
+    /// the implicit identity.
+    ///
+    /// The single place that turns "no list" into "one draw", so no caller
+    /// has to remember which absence means what.
+    #[must_use]
+    pub fn instance_count(&self) -> u32 {
+        self.instances
+            .as_ref()
+            .map_or(1, |i| u32::try_from(i.len()).unwrap_or(u32::MAX))
+    }
 }
 
 /// The cooked output of one displayed node: an ordered list of meshes plus
@@ -49,24 +79,10 @@ pub struct CookedMesh {
 pub struct CookedGeometry {
     pub meshes: Vec<CookedMesh>,
     pub materials: Vec<Arc<RawMaterialData>>,
-    /// Union bounds over all meshes, **including every instance** (object
+    /// Union bounds over all meshes, **including every placement** (object
     /// space), so camera framing and culling see the scatter rather than
     /// the prototype sitting at the origin.
     pub bounds: AABB,
-    /// Per-instance placements for the whole set, or `None` for the
-    /// ordinary single-placement case.
-    ///
-    /// **`None` preserves today's meaning exactly**: one implicit identity
-    /// instance. Every existing producer and consumer is unaffected, which
-    /// is what makes this an additive change rather than a breaking one.
-    ///
-    /// On the set rather than on [`CookedMesh`] because instancing is a
-    /// property of the placement, not of one mesh in the prototype: a
-    /// multi-mesh prototype stays rigid within each copy, which is what
-    /// the kernel's copy operations already guarantee by sharing one
-    /// placement across every mesh. It also means one GPU instance buffer
-    /// per object instead of one per mesh.
-    pub instances: Option<Arc<Vec<InstanceXform>>>,
 }
 
 /// One instance placement: a column-major 4x4 model matrix, the same
@@ -96,16 +112,10 @@ impl InstanceXform {
 }
 
 impl CookedGeometry {
-    /// How many instances this geometry draws: the instance count, or 1
-    /// for the implicit identity placement.
-    ///
-    /// The single place that turns "no list" into "one draw", so no caller
-    /// has to remember which absence means what.
+    /// Whether any mesh carries placements.
     #[must_use]
-    pub fn instance_count(&self) -> u32 {
-        self.instances
-            .as_ref()
-            .map_or(1, |i| u32::try_from(i.len()).unwrap_or(u32::MAX))
+    pub fn is_instanced(&self) -> bool {
+        self.meshes.iter().any(|m| m.instances.is_some())
     }
 }
 

@@ -306,14 +306,10 @@ pub struct DrawObject<'a> {
     /// participation; which light owns the map is the light-side
     /// exclusive-caster rule). Desktop passes `true`.
     pub cast_shadow: bool,
-    /// How many instances of this object to draw. `1` for the ordinary
-    /// single-placement case, which is what a scene with no instanced
-    /// geometry has everywhere.
-    pub instances: u32,
 }
 
 impl<'a> DrawObject<'a> {
-    /// Draw one of this object's meshes across every instance.
+    /// Draw one of this object's meshes across every placement it carries.
     ///
     /// **Every per-object indexed draw in every pass goes through here.**
     /// The instance range used to be a literal `0..1` written out ten
@@ -323,12 +319,18 @@ impl<'a> DrawObject<'a> {
     /// the validation overlay cannot see, is one forgotten edit away.
     /// Here it is one edit, or none.
     ///
+    /// Placements are per mesh, so this binds instance buffer slot 1 from
+    /// the mesh's own offset. The passes that deliberately draw a single
+    /// copy (UV layout, overlap counting, the ghosted fill) bind the whole
+    /// buffer themselves and draw `0..1` from row zero.
+    ///
     /// The caller still binds vertex buffer 0 and its own bind groups:
     /// those genuinely differ per pass. The index buffer and the draw do
     /// not, so they live here.
     pub fn draw_mesh(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
         pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.num_elements, 0, 0..self.instances);
+        pass.draw_indexed(0..mesh.num_elements, 0, 0..mesh.instance_count);
     }
 
     /// Draw one of this object's point meshes across every instance.
@@ -337,7 +339,8 @@ impl<'a> DrawObject<'a> {
     /// than being indexed, so they take their own call; the instance
     /// range is the same question and gets the same answer.
     pub fn draw_points(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
-        pass.draw(0..mesh.num_vertices * 6, 0..self.instances);
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
+        pass.draw(0..mesh.num_vertices * 6, 0..mesh.instance_count);
     }
 }
 

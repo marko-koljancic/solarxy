@@ -251,7 +251,7 @@ mod tests {
         // The default is Instance: the template travels once, with a
         // placement per point. No vertex is allocated per copy at all.
         assert_eq!(set.meshes[0].primitive_count(), 12);
-        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(3));
+        assert_eq!(set.meshes[0].instances.as_ref().map(|i| i.len()), Some(3));
         assert!(warnings.is_empty());
     }
 
@@ -265,7 +265,7 @@ mod tests {
         let set = set_of(&out);
         assert_eq!(set.meshes[0].primitive_count(), 12 * 3);
         assert!(
-            set.instances.is_none(),
+            !set.is_instanced(),
             "baked output carries no placement list; the copies ARE the geometry"
         );
         assert!(warnings.is_empty());
@@ -339,6 +339,9 @@ mod tests {
         };
         let set = set_of(&out);
         assert_eq!(set.meshes[0].primitive_count(), 12);
-        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(1_000_000));
+        assert_eq!(
+            set.meshes[0].instances.as_ref().map(|i| i.len()),
+            Some(1_000_000)
+        );
     }
 }

@@ -276,6 +276,8 @@ fn flatten_copies(mesh: &KernelMesh, placements: &[Placement]) -> KernelMesh {
         topology: mesh.topology,
         attributes: tile_lanes(&mesh.attributes, n),
         primitive_attributes: tile_lanes(&mesh.primitive_attributes, n),
+        // Baked output IS the copies, so it carries no placements.
+        instances: None,
     }
 }
 
@@ -780,7 +782,7 @@ mod mode_tests {
         )
         .expect("instance");
 
-        let placements = instanced.instances.as_ref().expect("instances");
+        let placements = instanced.meshes[0].instances.as_ref().expect("placements");
         assert_eq!(placements.len(), targets.len());
         // The prototype is untouched: one triangle, not three copies of one.
         assert_eq!(instanced.meshes[0].positions.len(), 3);
@@ -834,7 +836,7 @@ mod mode_tests {
         )
         .expect("instance");
 
-        let placements = instanced.instances.as_ref().expect("instances");
+        let placements = instanced.meshes[0].instances.as_ref().expect("placements");
         let proto = &instanced.meshes[0].positions;
         let want = baked_positions(&baked);
         let mut got = Vec::new();
@@ -918,7 +920,7 @@ mod mode_tests {
             )
             .expect("empty");
             assert!(out.meshes.is_empty(), "{mode:?}");
-            assert!(out.instances.is_none(), "{mode:?}");
+            assert!(!out.is_instanced(), "{mode:?}");
         }
     }
 }

@@ -410,6 +410,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             material_index: None,
             topology: MeshTopology::Points,
             colors: Some(Arc::new(grid_col)),
+            instances: None,
         };
 
         // A colored zigzag polyline.
@@ -435,6 +436,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             material_index: None,
             topology: MeshTopology::Lines,
             colors: Some(Arc::new(wire_col)),
+            instances: None,
         };
 
         // A vertex-colored quad through the colored PBR pipeline.
@@ -458,6 +460,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
                 [0.0, 0.0, 1.0, 1.0],
                 [1.0, 1.0, 1.0, 1.0],
             ])),
+            instances: None,
         };
 
         let all_positions: Vec<[f32; 3]> = cloud
@@ -468,7 +471,6 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             .copied()
             .collect();
         let geometry = CookedGeometry {
-            instances: None,
             bounds: compute_bounds(&all_positions),
             meshes: vec![cloud, wire, quad],
             materials: Vec::new(),

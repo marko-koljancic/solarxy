@@ -228,9 +228,9 @@ fn dev_cube(name: &str) -> CookedGeometry {
             material_index: None,
             topology: MeshTopology::Triangles,
             colors: None,
+            instances: None,
         }],
         materials: Vec::new(),
         bounds,
-        instances: None,
     }
 }

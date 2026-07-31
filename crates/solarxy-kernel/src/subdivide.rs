@@ -112,6 +112,7 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
         topology: mesh.topology,
         attributes,
         primitive_attributes: mesh.primitive_attributes.clone(),
+        instances: None,
     }
 }
 

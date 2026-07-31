@@ -4153,7 +4153,7 @@ fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
             .expect("geometry out");
         (
             set.mesh_count(),
-            set.instances.as_ref().map(|i| i.len()),
+            set.meshes[0].instances.as_ref().map(|i| i.len()),
             set.meshes[0].positions.to_vec(),
         )
     }

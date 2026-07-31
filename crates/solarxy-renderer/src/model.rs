@@ -185,6 +185,16 @@ pub struct Mesh {
     /// Outliner visibility. `false` skips the mesh in every draw pass
     /// (main / shadow / g-buffer / overlays / UV) — see `frame.rs`.
     pub visible: bool,
+    /// Byte offset of this mesh's first placement in the owning object's
+    /// instance buffer, and how many placements follow.
+    ///
+    /// The buffer holds every mesh's placements concatenated, so a mesh
+    /// binds it from its own offset and draws its own count. `(0, 1)` is
+    /// the uninstanced case and the default: one identity row that every
+    /// mesh reads, which is exactly the single row this path has always
+    /// uploaded and drawn.
+    pub instance_offset: u64,
+    pub instance_count: u32,
     pub edge_data: Option<EdgeData>,
     pub uv_edge_data: Option<UvEdgeData>,
     pub degen_index_buffer: Option<wgpu::Buffer>,

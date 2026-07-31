@@ -245,7 +245,7 @@ mod tests {
         // Default: linear, count 3, offset (1,0,0), Instance. One prototype
         // and three placements, not three meshes.
         assert_eq!(set.mesh_count(), 1);
-        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(3));
+        assert_eq!(set.meshes[0].instances.as_ref().map(|i| i.len()), Some(3));
     }
 
     #[test]
@@ -254,7 +254,7 @@ mod tests {
         let set = set_of(&out);
         assert_eq!(set.mesh_count(), 3);
         assert!(
-            set.instances.is_none(),
+            !set.is_instanced(),
             "baked output carries no placement list; the copies ARE the geometry"
         );
     }
@@ -397,7 +397,7 @@ mod tests {
         };
         let set = set_of(&out);
         assert_eq!(set.mesh_count(), 1);
-        assert_eq!(set.instances.as_ref().map(|i| i.len()), Some(512));
+        assert_eq!(set.meshes[0].instances.as_ref().map(|i| i.len()), Some(512));
     }
 
     #[test]

@@ -323,7 +323,7 @@ fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
         vec![0, 1, 2],
         None,
     );
-    cooked.instances = Some(std::sync::Arc::new(vec![
+    cooked.meshes[0].instances = Some(std::sync::Arc::new(vec![
         InstanceXform::IDENTITY,
         InstanceXform([
             [1.0, 0.0, 0.0, 0.0],
@@ -355,7 +355,10 @@ fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
         .expect("apply");
 
     let draw = objects.draw_object(id).expect("visible");
-    assert_eq!(draw.instances, 3);
+    // The count is per mesh now, and so is the buffer offset: the prototype
+    // mesh draws its three placements starting at row zero.
+    assert_eq!(draw.model.meshes[0].instance_count, 3);
+    assert_eq!(draw.model.meshes[0].instance_offset, 0);
 
     // And a plain object still reports one, so nothing that existed
     // before this feature changed its draw count.
@@ -378,5 +381,7 @@ fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
             },
         )
         .expect("apply");
-    assert_eq!(objects.draw_object(plain).expect("visible").instances, 1);
+    let plain_draw = objects.draw_object(plain).expect("visible");
+    assert_eq!(plain_draw.model.meshes[0].instance_count, 1);
+    assert_eq!(plain_draw.model.meshes[0].instance_offset, 0);
 }

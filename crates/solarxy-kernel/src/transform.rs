@@ -193,6 +193,7 @@ pub fn bake_transform(
                 topology: mesh.topology,
                 attributes: mesh.attributes.clone(),
                 primitive_attributes: mesh.primitive_attributes.clone(),
+                instances: None,
             }
         })
         .collect();
