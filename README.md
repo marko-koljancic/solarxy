@@ -26,7 +26,7 @@ As of v0.7.0 the same Rust core powers three surfaces:
 
 Solarxy Web runs entirely in your browser at **[solarxy.koljam.com](https://solarxy.koljam.com)**. It renders with WebGPU and adds a node graph for building and modifying geometry non-destructively, on the same Rust engine and wgpu renderer as the desktop app.
 
-- **Parametric node graph** - primitives, transforms, arrays, mirrors, materials, UV projection, and more flow through a typed node graph (76 node types across 15 categories). Change a parameter upstream and everything downstream recooks.
+- **Parametric node graph** - primitives, transforms, arrays, mirrors, materials, UV projection, and more flow through a typed node graph (77 node types across 15 categories). Change a parameter upstream and everything downstream recooks.
 - **Typed connections** - ports are typed and color-coded; illegal connections are rejected with feedback and lossy ones are flagged.
 - **Imports as nodes** - OBJ, STL, PLY, and glTF/GLB load through import nodes (off the main thread) and flow into the graph like any other geometry; textures and materials come along.
 - **Full desktop toolset** - PBR rendering, the inspection modes, UV overlap, validation overlays, HDRI/IBL, split viewports, transform gizmos, dockable panes, and the review system, all in the browser.
@@ -52,7 +52,7 @@ Full user documentation lives in the [Solarxy Wiki](https://github.com/marko-kol
 
 ### Modeling and geometry (Solarxy Web)
 
-- **Node-based parametric modeling** - a non-destructive node graph with 76 node types across four typed contexts: object-level containers, cameras and lights; geometry primitives (box, sphere, cylinder, cone, plane, torus, torus knot, line, circle) and modifiers (transform, displace, array, scatter, copy to points, mirror, merge, subdivide, delete, compute normals, UV project, points from geo, edges to geo, attribute create, attribute randomize, attribute wrangle, attribute promote, attribute copy, attribute from image); texture networks (constant, ramp, noise, voronoi, gradient, checker, brick, levels, blur, pack ORM, height-to-normal, and more); material networks (principled, matcap, toon, unlit, mix); plus imports, utility nodes and export taps.
+- **Node-based parametric modeling** - a non-destructive node graph with 77 node types across four typed contexts: object-level containers, cameras, lights and the scene environment; geometry primitives (box, sphere, cylinder, cone, plane, torus, torus knot, line, circle) and modifiers (transform, displace, array, scatter, copy to points, mirror, merge, subdivide, delete, compute normals, UV project, points from geo, edges to geo, attribute create, attribute randomize, attribute wrangle, attribute promote, attribute copy, attribute from image); texture networks (constant, ramp, noise, voronoi, gradient, checker, brick, levels, blur, pack ORM, height-to-normal, and more); material networks (principled, matcap, toon, unlit, mix); plus imports, utility nodes and export taps.
 - **Materials and textures** - an inline material node with optional image map ports, planar/box/cylindrical/spherical UV projection, and a content-addressed texture cache; the `Image` data type carries decoded bitmaps through the graph.
 - **Transform gizmos** - interactive translate, rotate, and scale gizmos with Ctrl snapping, world/local orientation, and a live delta readout.
 - **Subflows** - a `geo` container opens its own canvas, so a complex object collapses to one tidy node in the scene.
@@ -162,7 +162,7 @@ Solarxy is a Rust workspace of 12 members: the root GUI binary plus 11 crates sp
 | [`solarxy-formats`](crates/solarxy-formats/) | OBJ / STL / PLY / glTF loaders to `RawModelData`. Byte-first API (wasm-clean); path wrappers behind `std-fs`. |
 | [`solarxy-imaging`](crates/solarxy-imaging/) | Pure-CPU image operators for the texture context: adjust, composite, generate, filter, and ORM packing over `RawImageData`. Deterministic, single-threaded, wasm-clean. |
 | [`solarxy-kernel`](crates/solarxy-kernel/) | Pure-CPU parametric geometry: `GeometrySet`, the primitive generators, transform bake, and merge. wasm-clean, no wgpu/fs. |
-| [`solarxy-graph`](crates/solarxy-graph/) | The headless studio core: node-graph document, topology, cook engine, node registry (76 node types + typed-port coercion), undo, review, and the `Engine` facade (Command in, EventBatch out). No wgpu, no winit. |
+| [`solarxy-graph`](crates/solarxy-graph/) | The headless studio core: node-graph document, topology, cook engine, node registry (77 node types + typed-port coercion), undo, review, and the `Engine` facade (Command in, EventBatch out). No wgpu, no winit. |
 | [`solarxy-scenefile`](crates/solarxy-scenefile/) | The `.slxy` self-contained scene file: schema-owned scene/manifest types, the ZIP container with content-addressed asset blobs, SHA-256 integrity, and the schema-version migration gate. |
 | [`solarxy-renderer`](crates/solarxy-renderer/) | All wgpu state: pipelines, shaders, IBL / SSAO / bloom / shadow / composite, and the multi-object `SceneObjects` path. winit/egui-decoupled; compiles to wasm32. |
 | [`solarxy-app`](crates/solarxy-app/) | winit `ApplicationHandler` + egui: the desktop shell (sidebar, menu, console, dialogs, dock, review UI). |

@@ -546,11 +546,25 @@ export interface ImageJob {
   name: string;
 }
 
+/** A drained HDRI-decode job. Same shape as an ImageJob; it routes to the
+ * worker's HDRI entry point instead, because no browser codec reads
+ * Radiance or OpenEXR. */
+export interface HdriJob {
+  ctx: GraphContext;
+  jobId: number;
+  hash: string;
+  name: string;
+}
+
 /** The host's environment state (the Environment panel's mirror). */
 export interface EnvironmentState {
   iblMode: string;
   hdriHash: string | null;
   hdriName: string | null;
+  /** Whether the document holds an environment node. When it does, the
+   * node is authoritative and the scene file's own environment section is
+   * not restored: the section is the fallback for pre-node documents. */
+  fromNode: boolean;
 }
 
 /** One stashed geometry-validation job for the worker (the validate node

@@ -201,6 +201,18 @@ impl EnvironmentTracker {
         }
     }
 
+    /// Record that `hash` is already live on the GPU, installed by a route
+    /// other than [`Self::apply`].
+    ///
+    /// The web host needs this: its worker returns an HDRI already
+    /// convolved, so it installs the IBL directly and would otherwise see
+    /// the very next scene delta carry the same image and convolve it
+    /// again, on the main thread, which is exactly the cost the worker
+    /// exists to avoid.
+    pub fn note_installed(&mut self, hash: u64) {
+        self.installed = Some(EnvironmentIdentity { hdri: Some(hash) });
+    }
+
     /// Forget what is installed, so the next [`Self::apply`] rebuilds even
     /// if the hash matches. The shells call this when something outside the
     /// scene contract replaces the IBL: the HDRI drop, the sidebar picker,

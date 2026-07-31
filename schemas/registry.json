@@ -4541,6 +4541,136 @@
       "role": "standard"
     },
     {
+      "typeId": "environment",
+      "version": 1,
+      "displayName": "Environment",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "contexts": [
+        "obj"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Environment",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "multilineText",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "hdri",
+          "label": "HDRI",
+          "group": "environment",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".hdr",
+            ".exr"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The high-dynamic-range image that lights the scene: a Radiance `.hdr` or an `OpenEXR` `.exr`. It supplies both the ambient light and the reflections, so loading one changes the look of every material at once. Identity is the bytes' SHA-256 rather than the path, so a saved scene embeds a copy and still opens once the original file is gone. With no file staged the node asserts no environment at all, which leaves whatever background and procedural sky the viewport already had rather than going black."
+        },
+        {
+          "key": "rotation",
+          "label": "Rotation",
+          "group": "environment",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Spins the environment around the vertical axis, in degrees. Moves the visible sky and the lighting it casts together, so it is how you place a highlight without moving a light."
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "environment",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Scales how much light the environment casts, leaving the visible sky alone. Use it to keep a backdrop readable while dialling the key it throws up or down. 1 is the image as it was authored."
+        },
+        {
+          "key": "background",
+          "label": "Background",
+          "group": "environment",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "keep",
+              "Keep"
+            ],
+            [
+              "hdri_sky",
+              "HDRI Sky"
+            ]
+          ],
+          "accept": [],
+          "default": "keep",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the environment also claims the backdrop. **Keep** lights from the HDRI but leaves each viewport's own background alone, which is what you want for a product shot on white. **HDRI Sky** draws the image itself behind the scene. Solid and gradient backdrops stay per-viewport, so this never fights the background control on the pane toolbar."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Makes the lighting environment part of the scene rather than part of the application, so the HDRI you light with is saved in the file and comes back when you reopen it.\n\nDrop it in the root graph beside your `geo` containers. It takes no wires: the scene builder reads it straight off the node, the same way it reads the light and camera nodes. Point it at a `.hdr` or `.exr`, then use Rotation to place the highlights and Intensity to balance the environment against your lights.\n\nThere is exactly one environment, so if a graph holds more than one of these the first in document order wins and the rest are ignored. An environment set here also takes precedence over one loaded through the viewport's own HDRI control, which stays available for scenes that have no environment node.",
+      "searchAliases": [
+        "hdri",
+        "ibl",
+        "sky",
+        "lighting",
+        "environment"
+      ],
+      "glyph": "hemisphere",
+      "role": "light"
+    },
+    {
       "typeId": "gamma",
       "version": 1,
       "displayName": "Gamma",

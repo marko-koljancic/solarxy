@@ -80,6 +80,10 @@ pub struct CookEngine {
     /// produced (validate node, import load validation). Read by the scene
     /// lowering to attach the effective result to each object.
     validation: BTreeMap<NodeId, Arc<ValidationResult>>,
+    /// Per-node decoded environment image (the environment node's cook).
+    /// Same lifecycle as `validation`: replaced on recook, removed when a
+    /// cook stops producing one, so deleting the node's asset clears it.
+    environment: BTreeMap<NodeId, Arc<solarxy_core::RawImageHdr>>,
     /// Per-node cook warnings from the last completed cook (reserved-lane
     /// mismatches, lane type replacements, empty-input fallbacks). Absent
     /// when the last cook warned nothing; read back by the node info UI.
@@ -154,6 +158,7 @@ impl CookEngine {
         self.state.clear();
         self.outputs.clear();
         self.validation.clear();
+        self.environment.clear();
         self.warnings.clear();
         self.status.clear();
         self.stats.clear();
@@ -174,6 +179,7 @@ impl CookEngine {
         self.state.remove(&node);
         self.outputs.remove(&node);
         self.validation.remove(&node);
+        self.environment.remove(&node);
         self.status.remove(&node);
         self.stats.remove(&node);
         self.generation.remove(&node);
@@ -203,6 +209,15 @@ impl CookEngine {
     #[must_use]
     pub fn validation(&self, node: NodeId) -> Option<&Arc<ValidationResult>> {
         self.validation.get(&node)
+    }
+
+    /// The node's cached environment image, if its last cook decoded one.
+    /// The `Arc` is stable until the node recooks, so the scene lowering
+    /// can hand it straight to `SceneOp::SetEnvironment` and the host can
+    /// dedupe on its content hash.
+    #[must_use]
+    pub fn environment(&self, node: NodeId) -> Option<&Arc<solarxy_core::RawImageHdr>> {
+        self.environment.get(&node)
     }
 
     #[must_use]
@@ -408,6 +423,7 @@ impl CookEngine {
             Ok(CookOutcome::Done(outputs)) => {
                 self.commit_outputs(node, outputs, elapsed, report);
                 self.commit_validation(node, cx.take_validation(), report);
+                self.commit_environment(node, cx.take_environment());
                 self.state.insert(node, CookState::Clean);
             }
             Ok(CookOutcome::Pending(request)) => {
@@ -416,7 +432,9 @@ impl CookEngine {
                 // output can commit when the result arrives.
                 let passthrough = match &request {
                     JobRequest::ValidateGeometry { geometry, .. } => Some(Arc::clone(geometry)),
-                    JobRequest::ParseModel { .. } | JobRequest::DecodeImage { .. } => None,
+                    JobRequest::ParseModel { .. }
+                    | JobRequest::DecodeImage { .. }
+                    | JobRequest::DecodeHdrImage { .. } => None,
                 };
                 let job = JobId(self.next_job);
                 self.next_job += 1;
@@ -655,6 +673,21 @@ impl CookEngine {
         }
     }
 
+    /// Caches the environment image a cook produced, or clears the entry
+    /// when it produced none. Unlike validation this needs no report
+    /// channel: the scene lowering reads it during the next delta build
+    /// rather than reacting to a change event.
+    fn commit_environment(&mut self, node: NodeId, image: Option<Arc<solarxy_core::RawImageHdr>>) {
+        match image {
+            Some(image) => {
+                self.environment.insert(node, image);
+            }
+            None => {
+                self.environment.remove(&node);
+            }
+        }
+    }
+
     /// Replaces a node's warning set: non-empty stores, empty clears.
     fn set_warnings(&mut self, node: NodeId, warnings: Vec<String>) {
         if warnings.is_empty() {
@@ -722,9 +755,17 @@ impl CookEngine {
                     &mut report,
                 );
             }
+            super::JobResult::HdrImage(Ok(image)) => {
+                // The environment node has no output port: the image goes
+                // to the per-node side cache the scene lowering reads,
+                // and the node itself commits empty outputs.
+                self.commit_environment(node, Some(image));
+                self.commit_outputs(node, Outputs::empty(), 0.0, &mut report);
+            }
             super::JobResult::Model(Err(message))
             | super::JobResult::Report(Err(message))
-            | super::JobResult::Image(Err(message)) => {
+            | super::JobResult::Image(Err(message))
+            | super::JobResult::HdrImage(Err(message)) => {
                 self.commit_error(node, &CookError::Failed { message }, &mut report);
             }
         }

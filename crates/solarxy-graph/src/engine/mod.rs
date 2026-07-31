@@ -3226,6 +3226,24 @@ impl Engine {
                         .map_err(|e| e.to_string()),
                 )
             }
+            JobRequest::DecodeHdrImage { asset } => {
+                let Some(entry) = self.assets.get(asset) else {
+                    return JobResult::HdrImage(Err("asset not staged".to_string()));
+                };
+                // The extension is empty for a scene-file reload, which
+                // keeps only content-addressed bytes; the decoder sniffs
+                // the container magic in that case.
+                let ext = std::path::Path::new(&entry.name)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                JobResult::HdrImage(
+                    solarxy_formats::hdr::decode_hdr_image_bytes(&entry.bytes, &ext)
+                        .map(std::sync::Arc::new)
+                        .map_err(|e| e.to_string()),
+                )
+            }
         }
     }
 
@@ -3403,6 +3421,20 @@ impl Engine {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Whether the root graph holds an `environment` node.
+    ///
+    /// The host asks on load to settle which environment wins: a node
+    /// authored one supersedes the scene file's own environment section,
+    /// which remains the fallback for documents written before the node
+    /// existed. Without this the two would race on every open of a
+    /// node-authored scene.
+    #[must_use]
+    pub fn has_environment_node(&self) -> bool {
+        self.doc
+            .graph(GraphContext::Root)
+            .is_ok_and(|g| g.nodes().any(|n| n.type_id == "environment"))
     }
 
     /// The cook state of a node (test/inspection helper).

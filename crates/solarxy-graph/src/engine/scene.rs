@@ -82,6 +82,9 @@ pub fn build_scene_delta(
 
     let mut lights: Vec<LightDef> = Vec::new();
     let mut cameras: Vec<CameraDef> = Vec::new();
+    // There is exactly one environment, so the first in document order
+    // wins and later ones are ignored. The node's own help says so.
+    let mut environment: Option<SceneOp> = None;
 
     for node in root.nodes() {
         match node.type_id.as_str() {
@@ -95,6 +98,11 @@ pub fn build_scene_delta(
                     cameras.push(cam);
                 }
             }
+            "environment" => {
+                if environment.is_none() {
+                    environment = environment_from_node(doc, registry, previews, cook, node);
+                }
+            }
             id if is_light(id) => {
                 if let Some(light) = light_from_node(doc, registry, previews, node) {
                     lights.push(light);
@@ -106,6 +114,15 @@ pub fn build_scene_delta(
 
     delta.push(SceneOp::SetLights { lights });
     delta.push(SceneOp::SetCameras { cameras });
+    // Pushed unconditionally, like the lists above: deleting the node has
+    // to clear the environment, and the host's tracker makes the repeat
+    // free when nothing moved.
+    delta.push(environment.unwrap_or(SceneOp::SetEnvironment {
+        hdri: None,
+        rotation: 0.0,
+        intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
+        background: solarxy_core::scene::BackgroundKind::Keep,
+    }));
     (delta, present)
 }
 
@@ -524,6 +541,57 @@ fn camera_from_node(
         aspect: if aspect > 1e-3 { aspect } else { 16.0 / 9.0 },
         show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
         gizmo_size: f32p("gizmo_size"),
+    })
+}
+
+/// Build the environment op from an `environment` node.
+///
+/// The decoded image comes from the cook's per-node side cache rather than
+/// from an output value: `Value` has no float-image variant, and adding one
+/// would mean a new `DataType`, which is a deliberate frontend change. A
+/// node whose HDRI has not finished decoding yet (the web path parks on a
+/// worker job) simply reports no image, and the next delta carries it.
+fn environment_from_node(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    cook: &CookEngine,
+    node: &crate::document::NodeData,
+) -> Option<SceneOp> {
+    use solarxy_core::scene::BackgroundKind;
+
+    let desc = registry.get(&node.type_id)?;
+    let params = effective_params(previews, node.id, &node.params);
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let p = resolve_params_with(&params, &desc.params, &eval).ok()?;
+
+    let f32p = |key: &str| -> f32 {
+        match p.get(key) {
+            Some(ParamValue::Float(v)) => *v as f32,
+            _ => 0.0,
+        }
+    };
+    let background = match p.get("background") {
+        Some(ParamValue::Enum(k)) if k == crate::nodes::environment_node::BACKGROUND_HDRI_SKY => {
+            BackgroundKind::HdriSky
+        }
+        _ => BackgroundKind::Keep,
+    };
+    // The param is degrees, because that is what a user dials; the
+    // contract is radians, because that is what the shader rotates by.
+    let rotation = f32p("rotation").to_radians();
+    let intensity = match p.get("intensity") {
+        Some(ParamValue::Float(v)) => *v as f32,
+        // Absent means as-authored, never unlit.
+        _ => solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
+    };
+
+    Some(SceneOp::SetEnvironment {
+        hdri: cook.environment(node.id).map(std::sync::Arc::clone),
+        rotation,
+        intensity,
+        background,
     })
 }
 

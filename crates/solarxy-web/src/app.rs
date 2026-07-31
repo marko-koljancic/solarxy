@@ -299,6 +299,7 @@ pub struct SolarxyApp {
     /// `take_validate_jobs` moves plain bytes.
     pending_validate: Vec<PendingValidateJob>,
     pending_image: Vec<PendingImageJob>,
+    pending_hdri: Vec<PendingHdriJob>,
     /// The graph context the node canvas currently shows (React mirrors it
     /// via `set_current_context`); the UV pane's selected-node source
     /// resolves against it.
@@ -386,6 +387,17 @@ struct PendingValidateJob {
 /// the frontend pulls the encoded bytes by hash (like the parse pump) and
 /// decodes them in the import worker via `createImageBitmap`.
 struct PendingImageJob {
+    ctx: GraphContext,
+    job_id: u64,
+    hash: String,
+    name: String,
+}
+
+/// A drained `DecodeHdrImage` job awaiting [`SolarxyApp::take_hdri_jobs`].
+/// Same shape as an image job; it exists separately because the frontend
+/// routes it to a different worker entry point (no browser codec reads
+/// Radiance or `OpenEXR`, so the Rust decoder runs in the worker).
+struct PendingHdriJob {
     ctx: GraphContext,
     job_id: u64,
     hash: String,
@@ -573,6 +585,7 @@ impl SolarxyApp {
             selected_object: None,
             pending_validate: Vec::new(),
             pending_image: Vec::new(),
+            pending_hdri: Vec::new(),
             current_ctx: GraphContext::Root,
             uv_scene: SceneObjects::new(),
             uv_use_preview: false,
@@ -2044,6 +2057,19 @@ impl SolarxyApp {
                     });
                     continue;
                 }
+                JobRequest::DecodeHdrImage { asset } => {
+                    let name = manifest
+                        .iter()
+                        .find(|(h, _)| *h == asset.0)
+                        .map_or_else(String::new, |(_, n)| n.clone());
+                    self.pending_hdri.push(PendingHdriJob {
+                        ctx,
+                        job_id: job.0,
+                        hash: asset.0,
+                        name,
+                    });
+                    continue;
+                }
             };
             let name = manifest
                 .iter()
@@ -2129,6 +2155,99 @@ impl SolarxyApp {
             out.push(&o);
         }
         Ok(out.into())
+    }
+
+    /// Drains the stashed HDRI-decode jobs into a JS array of
+    /// `{ ctx, jobId, hash, name }`. The frontend pulls the encoded bytes
+    /// by hash and posts them to the worker's HDRI path, returning the
+    /// prepared result through `submit_decoded_hdri` / `submit_hdri_error`.
+    /// Call after `take_import_jobs` (which performs the drain from the
+    /// engine).
+    pub fn take_hdri_jobs(&mut self) -> Result<JsValue, JsError> {
+        let out = js_sys::Array::new();
+        for job in self.pending_hdri.drain(..) {
+            let o = js_sys::Object::new();
+            let set = |key: &str, value: &JsValue| {
+                js_sys::Reflect::set(&o, &JsValue::from_str(key), value)
+                    .map_err(|_| JsError::new("take_hdri_jobs: reflect set failed"))
+                    .map(|_| ())
+            };
+            set("ctx", &to_js(&job.ctx)?)?;
+            set("jobId", &JsValue::from_f64(job.job_id as f64))?;
+            set("hash", &JsValue::from_str(&job.hash))?;
+            set("name", &JsValue::from_str(&job.name))?;
+            out.push(&o);
+        }
+        Ok(out.into())
+    }
+
+    /// Commits a worker-decoded HDRI under the per-node generation guard.
+    ///
+    /// Takes the packed `PreparedHdri` the worker already produces, which
+    /// carries the CPU lighting stages alongside the pixels. That is why
+    /// the environment node reuses the existing worker entry point rather
+    /// than a lean decode: the irradiance convolution stays off the main
+    /// thread, and this call installs the result directly instead of
+    /// making the tracker convolve it again on the next delta.
+    pub fn submit_decoded_hdri(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        prepared: Vec<u8>,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let prepared = solarxy_renderer::ibl::PreparedHdri::unpack(&prepared)
+            .map_err(|e| JsError::new(&format!("bad prepared HDRI: {e}")))?;
+
+        // Install on the GPU now, while the convolved faces are in hand.
+        self.renderer.ibl_res.ibl =
+            solarxy_renderer::ibl::IblState::from_prepared(&self.device, &self.queue, &prepared);
+
+        // Hand the engine the image itself, so the scene delta can carry
+        // it and a save can embed it. The hash is stamped here, Rust-side,
+        // by the same constructor the native path uses.
+        let image = std::sync::Arc::new(solarxy_core::RawImageHdr::new(
+            prepared.pixels,
+            prepared.width,
+            prepared.height,
+        ));
+        // Tell the tracker this hash is already live, so the delta that
+        // follows sees `Unchanged` rather than convolving it a second time
+        // on the main thread.
+        self.environment.note_installed(image.hash);
+        self.rebuild_light_bind_group();
+
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::HdrImage(Ok(image)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
+    }
+
+    /// Reports a worker HDRI-decode failure: the `environment` node badges
+    /// the error and the viewport keeps the environment it had.
+    pub fn submit_hdri_error(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        message: String,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::HdrImage(Err(message)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
     }
 
     /// Commits a worker-decoded image (raw RGBA8 plus dimensions) under
@@ -2347,6 +2466,7 @@ impl SolarxyApp {
             .to_string(),
             hdri_hash: self.hdri.as_ref().map(|h| h.hash.clone()),
             hdri_name: self.hdri.as_ref().map(|h| h.name.clone()),
+            from_node: self.engine.has_environment_node(),
         })
     }
 
@@ -2398,10 +2518,18 @@ impl SolarxyApp {
             self.view.display.hdri_rotation = rotation as f32;
         }
         self.hdri = None;
+        let from_node = self.engine.has_environment_node();
+        // A node-authored environment supersedes the sidecar, so forget
+        // whatever the tracker holds and let the node's first delta
+        // install afresh.
+        if from_node {
+            self.environment.invalidate();
+        }
         let environment = EnvironmentDto {
             ibl_mode: env.ibl_mode.clone(),
             hdri_hash: env.hdri_asset.clone(),
             hdri_name: None,
+            from_node,
         };
         let result = LoadResultDto {
             batch: loaded.batch,
@@ -4611,6 +4739,15 @@ struct EnvironmentDto {
     ibl_mode: String,
     hdri_hash: Option<String>,
     hdri_name: Option<String>,
+    /// Whether the loaded document holds an `environment` node.
+    ///
+    /// When it does, the node wins and the frontend must not restore the
+    /// scene file's own environment section: the node's cook emits
+    /// `SceneOp::SetEnvironment` and installing the sidecar's HDRI too
+    /// would race it, with whichever finished last taking the viewport.
+    /// The section stays the fallback for documents authored before the
+    /// node existed, which is the whole point of keeping it.
+    from_node: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]

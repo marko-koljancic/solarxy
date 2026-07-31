@@ -2000,12 +2000,14 @@ fn granting_cast_shadow_releases_every_other_root_light_in_one_step() {
 
 #[test]
 fn take_scene_delta_is_empty_without_geo_or_lights() {
-    // Root holds no geo/light/camera nodes yet, so only the two list ops
-    // (empty light list, empty camera list) are emitted.
+    // Root holds no geo/light/camera/environment nodes yet, so only the
+    // three whole-value ops are emitted: an empty light list, an empty
+    // camera list, and an environment asserting nothing. All three are
+    // unconditional, because absence has to be communicated too.
     use solarxy_core::scene::SceneOp;
     let mut e = engine();
     let delta = e.take_scene_delta();
-    assert_eq!(delta.ops.len(), 2);
+    assert_eq!(delta.ops.len(), 3);
     assert!(matches!(
         delta.ops[0],
         SceneOp::SetLights { ref lights } if lights.is_empty()
@@ -6787,4 +6789,190 @@ fn scrubbing_is_not_gated_by_an_unfinished_cook() {
 
     e.apply(Command::SetFrame { frame: 42 }).unwrap();
     assert_eq!(e.clock().frame, 42, "an explicit seek is never gated");
+}
+
+/// A tiny synthetic 4x2 Radiance HDR file, the fixture shape the formats
+/// decoder tests use.
+fn tiny_hdr_bytes() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n");
+    out.extend_from_slice(b"-Y 2 +X 4\n");
+    for _ in 0..8 {
+        out.extend_from_slice(&[128, 64, 32, 128]);
+    }
+    out
+}
+
+#[test]
+fn an_environment_node_lowers_its_hdri_into_the_scene_delta() {
+    // The headline of this feature: an HDRI chosen in the graph reaches
+    // the renderer through the scene contract rather than through host
+    // state, which is what makes it survive a reload at all.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "rotation".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(90.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let delta = e.take_scene_delta();
+    let op = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            solarxy_core::scene::SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } => Some((hdri, rotation, intensity, background)),
+            _ => None,
+        })
+        .expect("the delta carries an environment op");
+    let image = op.0.as_ref().expect("the decoded HDRI rides the op");
+    assert_eq!((image.width, image.height), (4, 2));
+    // Degrees in the param, radians on the contract.
+    assert!(
+        (op.1 - std::f32::consts::FRAC_PI_2).abs() < 1e-5,
+        "{}",
+        op.1
+    );
+    assert!((op.2 - 1.0).abs() < 1e-6);
+    assert_eq!(*op.3, solarxy_core::scene::BackgroundKind::Keep);
+}
+
+#[test]
+fn an_environment_survives_a_scene_file_round_trip() {
+    // Journey J3-a's last step: close the tab, reopen the file, and the
+    // lighting is exactly as you left it. Before the node existed the
+    // HDRI was host state and this was impossible.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(2.5)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let before = e.take_scene_delta();
+    let hash_before = environment_hash(&before).expect("an environment before saving");
+
+    let bytes = e.save_slxy(&SceneSidecar::default()).expect("save .slxy");
+
+    let mut e2 = engine();
+    let loaded = e2.load_slxy(&bytes).expect("load .slxy");
+    assert!(
+        loaded.warnings.is_empty(),
+        "clean round-trip has no warnings: {:?}",
+        loaded.warnings
+    );
+    assert!(
+        e2.has_environment_node(),
+        "the reloaded document still holds the node, which is what makes it win over the sidecar"
+    );
+    e2.cook(&mut || true);
+    let after = e2.take_scene_delta();
+
+    // The same bytes decode to the same content hash, so the reloaded
+    // scene lights identically rather than merely similarly.
+    assert_eq!(environment_hash(&after), Some(hash_before));
+    let intensity = after.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { intensity, .. } => Some(*intensity),
+        _ => None,
+    });
+    assert_eq!(intensity, Some(2.5));
+}
+
+/// The content hash of the HDRI a delta's environment op carries, if any.
+fn environment_hash(delta: &solarxy_core::scene::SceneDelta) -> Option<u64> {
+    delta.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { hdri, .. } => hdri.as_ref().map(|h| h.hash),
+        _ => None,
+    })
+}
+
+#[test]
+fn deleting_the_environment_node_clears_the_environment() {
+    // The op is emitted unconditionally for exactly this: absence has to
+    // be communicated, or a deleted node's HDRI lights the scene forever.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(environment_hash(&e.take_scene_delta()).is_some());
+
+    e.apply(Command::RemoveNodes {
+        ctx,
+        ids: vec![env],
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert_eq!(environment_hash(&e.take_scene_delta()), None);
+}
+
+#[test]
+fn only_the_first_environment_node_wins() {
+    // There is exactly one environment. The node's own help promises
+    // document order decides, so a second node must change nothing.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let first = add(&mut e, ctx, "environment");
+    let second = add(&mut e, ctx, "environment");
+    e.apply(Command::SetParam {
+        ctx,
+        node: first,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: second,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(9.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let delta = e.take_scene_delta();
+    let intensity = delta.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { intensity, .. } => Some(*intensity),
+        _ => None,
+    });
+    assert_eq!(
+        intensity,
+        Some(3.0),
+        "the first node in document order wins"
+    );
 }
