@@ -83,7 +83,16 @@ pub struct LightsUniform {
     pub hemi_ground_r: f32,
     pub hemi_ground_g: f32,
     pub hemi_ground_b: f32,
-    pub _pad_tail: f32,
+    /// Multiplier on the image-based lighting contribution; `1.0` is the
+    /// HDRI as authored, and is what every constructor here seeds, so a
+    /// caller that never sets it renders exactly as it did before this
+    /// field existed. Set it through
+    /// [`LightsUniform::set_ibl_intensity`].
+    ///
+    /// This slot was `_pad_tail` alignment padding, so putting a real
+    /// field in it changes no offset and no size: the asserts below and
+    /// the WGSL pair are unchanged in shape.
+    pub ibl_intensity: f32,
 }
 
 // 0.8.1 grew the entry from 64 bytes for the rect-area frame. Six vec4-sized
@@ -104,6 +113,18 @@ const _: () = assert!(std::mem::size_of::<LightEntry>() == 96);
 const _: () = assert!(std::mem::size_of::<LightsUniform>() == 816);
 
 impl LightsUniform {
+    /// Scale the image-based lighting contribution, clamped to the usable
+    /// range. Separate from [`Self::from_defs`] rather than a parameter on
+    /// it because the constructor seeds the as-authored `1.0`: a host that
+    /// never calls this lights the scene exactly as it did before the
+    /// control existed, which is the failure mode worth having.
+    pub fn set_ibl_intensity(&mut self, intensity: f32) {
+        self.ibl_intensity = intensity.clamp(
+            solarxy_core::view_config::MIN_HDRI_INTENSITY,
+            solarxy_core::view_config::MAX_HDRI_INTENSITY,
+        );
+    }
+
     /// Build the uniform from resolved light definitions (document order).
     /// Slot-consuming lights beyond [`MAX_LIGHTS`] are dropped here; the
     /// engine is responsible for surfacing the "light limit reached"
@@ -123,7 +144,7 @@ impl LightsUniform {
             hemi_ground_r: 0.0,
             hemi_ground_g: 0.0,
             hemi_ground_b: 0.0,
-            _pad_tail: 0.0,
+            ibl_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
         };
 
         for def in defs.iter().filter(|d| d.visible) {

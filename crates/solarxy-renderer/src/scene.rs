@@ -328,6 +328,6 @@ pub fn lights_from_camera(
         hemi_ground_r: 0.0,
         hemi_ground_g: 0.0,
         hemi_ground_b: 0.0,
-        _pad_tail: 0.0,
+        ibl_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
     }
 }

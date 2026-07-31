@@ -67,6 +67,7 @@ impl State {
                 ) {
                     tracing::error!("Scene delta apply failed: {e}");
                 }
+                self.apply_scene_environment(&delta);
             }
         }
 

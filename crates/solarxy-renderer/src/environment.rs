@@ -103,3 +103,173 @@ impl SceneEnvironment {
         }
     }
 }
+
+/// The host-side memory that makes
+/// [`solarxy_core::scene::SceneOp::SetEnvironment`] idempotent.
+///
+/// The engine re-emits the whole environment on every scene rebuild, the
+/// same way it re-emits the whole light and camera lists, because there is
+/// exactly one and diffing it would cost a reconciliation bug surface. But
+/// an environment is not a light list: installing one decodes nothing yet
+/// convolves an irradiance cubemap and runs a GPU prefilter, so applying it
+/// afresh each frame would be ruinous.
+///
+/// This holds the content hash of what is installed and skips the rebuild
+/// when it has not moved. [`solarxy_core::RawImageHdr`] stamps that hash at
+/// construction precisely so identity is cheap here.
+///
+/// Both shells own one. It lives beside [`SceneEnvironment`] rather than
+/// inside it because the desktop's `ModelScene` and the web host reach the
+/// IBL through different owners, and the tracker only needs the two.
+#[derive(Debug, Default)]
+pub struct EnvironmentTracker {
+    installed: Option<EnvironmentIdentity>,
+}
+
+/// What is currently on the GPU. `None` for the hash means "no HDRI",
+/// which is distinct from any real hash and so compares correctly against
+/// a scene that never had one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EnvironmentIdentity {
+    hdri: Option<u64>,
+}
+
+/// What [`EnvironmentTracker::apply`] did, so the caller knows which of its
+/// own follow-ups to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentOutcome {
+    /// The environment was already installed. The caller should do nothing:
+    /// no bind-group rebuild, no skybox repoint.
+    Unchanged,
+    /// A new HDRI was installed. The caller must rebuild its light bind
+    /// group (the IBL chokepoint) and repoint the skybox.
+    HdriInstalled,
+    /// The environment was cleared. The caller must fall back to its own
+    /// procedural sky and rebuild the light bind group.
+    Cleared,
+}
+
+impl EnvironmentTracker {
+    /// Install `hdri` as the scene environment if it differs from what is
+    /// already there, convolving and uploading it. Returns [`Unchanged`]
+    /// when the hash matches, which is the common case: the engine emits
+    /// this op on every rebuild.
+    ///
+    /// Clearing (`hdri: None`) leaves `ibl.ibl` alone rather than writing a
+    /// black environment; the caller substitutes its own procedural sky,
+    /// because "no environment" is a host-background question and the two
+    /// shells answer it differently.
+    ///
+    /// [`Unchanged`]: EnvironmentOutcome::Unchanged
+    pub fn apply(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        ibl: &mut crate::frame::IblResources,
+        hdri: Option<&std::sync::Arc<solarxy_core::RawImageHdr>>,
+    ) -> EnvironmentOutcome {
+        match self.decide(hdri.map(|h| h.hash)) {
+            EnvironmentOutcome::HdriInstalled => {
+                // `decide` only says an HDRI is wanted when one was passed.
+                if let Some(image) = hdri {
+                    ibl.ibl = IblState::from_hdr_image(device, queue, image);
+                }
+                EnvironmentOutcome::HdriInstalled
+            }
+            other => other,
+        }
+    }
+
+    /// The dedupe decision on its own, with no GPU work.
+    ///
+    /// Split out so the idempotence that makes this type worth having is
+    /// testable on a machine with no adapter. The GPU suite skips itself
+    /// without one, and a rule that only runs where there is a GPU is a
+    /// rule that does not run.
+    fn decide(&mut self, incoming_hash: Option<u64>) -> EnvironmentOutcome {
+        let incoming = EnvironmentIdentity {
+            hdri: incoming_hash,
+        };
+        if self.installed == Some(incoming) {
+            return EnvironmentOutcome::Unchanged;
+        }
+        self.installed = Some(incoming);
+        if incoming_hash.is_some() {
+            EnvironmentOutcome::HdriInstalled
+        } else {
+            EnvironmentOutcome::Cleared
+        }
+    }
+
+    /// Forget what is installed, so the next [`Self::apply`] rebuilds even
+    /// if the hash matches. The shells call this when something outside the
+    /// scene contract replaces the IBL: the HDRI drop, the sidebar picker,
+    /// or a background change that re-derives the procedural sky. Without
+    /// it, setting an HDRI by hand and then reopening the same one through
+    /// the node would be a no-op against a GPU state that had moved on.
+    pub fn invalidate(&mut self) {
+        self.installed = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EnvironmentOutcome, EnvironmentTracker};
+
+    #[test]
+    fn the_same_environment_installs_once_however_often_it_arrives() {
+        // This is the whole point of the type. The engine re-emits
+        // SetEnvironment on every scene rebuild, which is every cook, and
+        // installing one convolves an irradiance cubemap and runs a GPU
+        // prefilter. Without the dedupe a scene with an environment node
+        // would do that work every frame.
+        let mut t = EnvironmentTracker::default();
+        assert_eq!(t.decide(Some(0xAB)), EnvironmentOutcome::HdriInstalled);
+        for _ in 0..100 {
+            assert_eq!(t.decide(Some(0xAB)), EnvironmentOutcome::Unchanged);
+        }
+    }
+
+    #[test]
+    fn a_different_hdri_reinstalls() {
+        let mut t = EnvironmentTracker::default();
+        assert_eq!(t.decide(Some(1)), EnvironmentOutcome::HdriInstalled);
+        assert_eq!(t.decide(Some(2)), EnvironmentOutcome::HdriInstalled);
+        assert_eq!(t.decide(Some(2)), EnvironmentOutcome::Unchanged);
+    }
+
+    #[test]
+    fn no_environment_is_a_state_of_its_own_not_a_repeat_of_none() {
+        // `None` means "no environment", which the host answers with its
+        // own procedural sky. It has to clear exactly once: clearing on
+        // every frame would rebuild that sky forever, and never clearing
+        // would leave a deleted node's HDRI lighting the scene.
+        let mut t = EnvironmentTracker::default();
+        assert_eq!(t.decide(Some(7)), EnvironmentOutcome::HdriInstalled);
+        assert_eq!(t.decide(None), EnvironmentOutcome::Cleared);
+        assert_eq!(t.decide(None), EnvironmentOutcome::Unchanged);
+        assert_eq!(t.decide(Some(7)), EnvironmentOutcome::HdriInstalled);
+    }
+
+    #[test]
+    fn a_fresh_tracker_installs_even_an_empty_environment() {
+        // Startup has installed nothing, so the first op must act even
+        // when it carries no HDRI: the host has to reach a known state
+        // rather than assume its default already matches.
+        let mut t = EnvironmentTracker::default();
+        assert_eq!(t.decide(None), EnvironmentOutcome::Cleared);
+    }
+
+    #[test]
+    fn invalidate_forces_a_reinstall_of_the_same_hdri() {
+        // The shells replace the IBL outside the scene contract: the HDRI
+        // picker, the Clear button, a background change. After any of
+        // those, re-selecting the same HDRI through a node must reinstall
+        // rather than match a hash whose GPU state has moved on.
+        let mut t = EnvironmentTracker::default();
+        assert_eq!(t.decide(Some(9)), EnvironmentOutcome::HdriInstalled);
+        assert_eq!(t.decide(Some(9)), EnvironmentOutcome::Unchanged);
+        t.invalidate();
+        assert_eq!(t.decide(Some(9)), EnvironmentOutcome::HdriInstalled);
+    }
+}

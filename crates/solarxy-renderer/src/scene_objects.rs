@@ -264,6 +264,14 @@ impl SceneObjects {
                 SceneOp::SetCameras { cameras } => {
                     self.cameras = Some(cameras.clone());
                 }
+                // Handled by the shell, not here: the environment is the
+                // IBL and the skybox, which live in `IblResources` and
+                // `SceneEnvironment`. This type owns per-object GPU
+                // buffers and cannot reach either. `EnvironmentTracker`
+                // is what applies it, and both shells run it over the same
+                // delta. Matched explicitly rather than swept up by a
+                // wildcard so a future op cannot be silently dropped here.
+                SceneOp::SetEnvironment { .. } => {}
                 SceneOp::Clear => {
                     self.objects.clear();
                     self.texture_cache.sweep();

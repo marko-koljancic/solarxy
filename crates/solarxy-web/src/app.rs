@@ -144,6 +144,7 @@ fn default_display_settings() -> DisplaySettings {
         roughness_scale: 1.0,
         metallic_scale: 1.0,
         hdri_rotation: 0.0,
+        hdri_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
         point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
     }
 }
@@ -268,6 +269,12 @@ pub struct SolarxyApp {
     renderer: Renderer,
     scene_objects: SceneObjects,
     env: SceneEnvironment,
+    /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
+    /// whole environment on every rebuild and installing one convolves an
+    /// irradiance cubemap, so this remembers what is already on the GPU.
+    /// Invalidated by `set_environment_prepared` and `clear_environment`,
+    /// which move the IBL behind the scene contract's back.
+    environment: solarxy_renderer::environment::EnvironmentTracker,
     /// The bounds `env` was last built for (grid/floor/shadow fit).
     env_bounds: AABB,
     view: WebViewState,
@@ -545,6 +552,7 @@ impl SolarxyApp {
             preview: None,
             scene_objects: SceneObjects::new(),
             env,
+            environment: solarxy_renderer::environment::EnvironmentTracker::default(),
             env_bounds: bounds,
             view: WebViewState {
                 display: default_display_settings(),
@@ -646,6 +654,7 @@ impl SolarxyApp {
             {
                 log(&format!("scene delta apply failed: {e}"));
             }
+            self.apply_scene_environment(&delta);
         }
 
         // The manipulator is pull-based: recompute what it should be, every
@@ -2294,6 +2303,7 @@ impl SolarxyApp {
         self.renderer.ibl_res.ibl =
             solarxy_renderer::ibl::IblState::from_prepared(&self.device, &self.queue, &prepared);
         self.hdri = Some(HdriMeta { hash, name });
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
         Ok(())
     }
@@ -2311,6 +2321,7 @@ impl SolarxyApp {
             bottom,
         );
         self.hdri = None;
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
     }
 
@@ -2720,11 +2731,76 @@ impl SolarxyApp {
         self.env.lights_uniform.ibl_avg_r = ibl_avg[0];
         self.env.lights_uniform.ibl_avg_g = ibl_avg[1];
         self.env.lights_uniform.ibl_avg_b = ibl_avg[2];
+        self.env
+            .lights_uniform
+            .set_ibl_intensity(self.view.display.hdri_intensity);
         self.queue.write_buffer(
             &self.env.light_buffer,
             0,
             bytemuck::bytes_of(&self.env.lights_uniform),
         );
+    }
+
+    /// Apply any `SceneOp::SetEnvironment` in the frame's delta.
+    ///
+    /// Separate from `SceneObjects::apply` because the environment is the
+    /// IBL and the skybox, which that type cannot reach. The desktop shell
+    /// runs the same tracker over the same op.
+    fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
+        use solarxy_core::scene::{BackgroundKind, SceneOp};
+        use solarxy_renderer::environment::EnvironmentOutcome;
+
+        for op in &delta.ops {
+            let SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } = op
+            else {
+                continue;
+            };
+
+            // Rotation and intensity write through to the display settings
+            // the Environment modal's sliders read, so the node and the
+            // sliders show one value rather than fighting over two.
+            self.view.display.hdri_rotation = *rotation;
+            self.view.display.hdri_intensity = *intensity;
+
+            let outcome = self.environment.apply(
+                &self.device,
+                &self.queue,
+                &mut self.renderer.ibl_res,
+                hdri.as_ref(),
+            );
+            match outcome {
+                // Still rebuild: rotation or intensity may have moved even
+                // when the HDRI did not.
+                EnvironmentOutcome::Unchanged => {}
+                EnvironmentOutcome::HdriInstalled => {
+                    if *background == BackgroundKind::HdriSky {
+                        self.view.pane_settings[0].background_mode =
+                            solarxy_core::preferences::BackgroundMode::HDRI_SKY;
+                    }
+                }
+                // "No environment" is not "a black environment": fall back
+                // to the procedural sky, exactly as `clear_environment`
+                // does for the host-driven route.
+                EnvironmentOutcome::Cleared => {
+                    let (top, bottom) = self
+                        .resolve_background(&self.view.pane_settings[0])
+                        .sky_colors();
+                    self.renderer.ibl_res.ibl = solarxy_renderer::ibl::IblState::from_sky_colors(
+                        &self.device,
+                        &self.queue,
+                        top,
+                        bottom,
+                    );
+                }
+            }
+            self.rebuild_light_bind_group();
+            self.host_events.push(HostEvent::ViewChanged);
+        }
     }
 
     /// The `.slxy` environment section from the host state. The scene-wide

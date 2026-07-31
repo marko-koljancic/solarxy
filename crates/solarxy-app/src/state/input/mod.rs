@@ -427,6 +427,11 @@ impl State {
             // (the multi-object render harness; see state/dev.rs).
             #[cfg(debug_assertions)]
             KeyCode::F9 => self.toggle_dev_objects(),
+            // Debug-build-only: toggle a synthesized environment through
+            // the real SetEnvironment op, which nothing else on the
+            // desktop emits until the shell gains the node engine.
+            #[cfg(debug_assertions)]
+            KeyCode::F10 => self.toggle_dev_environment(),
             _ => {
                 if let Some(key) = to_camera_key(code) {
                     self.for_each_target_cam(|cam| {
@@ -536,6 +541,7 @@ impl State {
             .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
     }
 
@@ -578,6 +584,11 @@ impl State {
             .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        // The IBL just moved without the scene contract knowing, so forget
+        // what the tracker thinks is installed. Otherwise re-selecting the
+        // same HDRI through an environment node would match the stale hash
+        // and be skipped, leaving the procedural sky in place.
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
         self.gui.clear_hdri_info();
         self.gui.set_toast("HDRI cleared", ToastSeverity::Success);

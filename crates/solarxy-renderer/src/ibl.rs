@@ -228,7 +228,7 @@ impl IblState {
         path: &Path,
     ) -> Result<Self, RendererError> {
         let image = solarxy_formats::hdr::load_hdr_image(path)?;
-        Ok(Self::from_hdr_image(device, queue, image))
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Build IBL state from in-memory Radiance `.hdr` bytes.
@@ -238,7 +238,7 @@ impl IblState {
         bytes: &[u8],
     ) -> Result<Self, RendererError> {
         let image = solarxy_formats::hdr::decode_hdr_bytes(bytes)?;
-        Ok(Self::from_hdr_image(device, queue, image))
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Build IBL state from in-memory `OpenEXR` bytes.
@@ -248,20 +248,24 @@ impl IblState {
         bytes: &[u8],
     ) -> Result<Self, RendererError> {
         let image = solarxy_formats::hdr::decode_exr_bytes(bytes)?;
-        Ok(Self::from_hdr_image(device, queue, image))
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Shared HDRI-construction core: sanitize, convolve, prefilter, and
     /// assemble. Every HDRI entry point funnels through here so the
     /// IBL-derived CPU data stays consistent across constructors.
-    fn from_hdr_image(
+    ///
+    /// Takes the image by reference because it arrives from the scene
+    /// contract behind an `Arc`, shared with the engine, and cannot be
+    /// mutated in place. This module's `sanitized` helper avoids copying
+    /// it in the common case where there is nothing to sanitize.
+    pub fn from_hdr_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        image: solarxy_formats::RawImageHdr,
+        image: &solarxy_formats::RawImageHdr,
     ) -> Self {
         let (width, height) = (image.width, image.height);
-        let mut pixels = image.pixels;
-        sanitize_hdr_pixels(&mut pixels);
+        let pixels = sanitized(&image.pixels);
 
         let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
@@ -271,7 +275,7 @@ impl IblState {
             &PreparedHdri {
                 width,
                 height,
-                pixels,
+                pixels: pixels.into_owned(),
                 irradiance_faces,
                 irradiance_average,
             },
@@ -982,7 +986,30 @@ fn rgb(pixels: &[f32]) -> &[[f32; 3]] {
 /// amplifies into sparkle.
 fn sanitize_hdr_pixels(pixels: &mut [f32]) {
     for c in pixels {
-        *c = if c.is_finite() { c.max(0.0) } else { 0.0 };
+        *c = clean_sample(*c);
+    }
+}
+
+/// The single per-sample rule both sanitize paths apply, so the in-place
+/// one and the borrowed one cannot drift.
+fn clean_sample(c: f32) -> f32 {
+    if c.is_finite() { c.max(0.0) } else { 0.0 }
+}
+
+/// Borrowed-input sanitize: returns the input untouched when it is already
+/// clean, and a corrected copy only when it is not.
+///
+/// An HDRI arriving through the scene contract is shared behind an `Arc`
+/// with the engine, so it cannot be fixed in place. Copying every one
+/// unconditionally would mean a second full-resolution allocation per
+/// install (about 100 MB for a 4K equirect) to fix samples that almost
+/// never need fixing. Scanning first is one cheap read pass, and the clean
+/// case (nearly all of them) then costs nothing at all.
+fn sanitized(pixels: &[f32]) -> std::borrow::Cow<'_, [f32]> {
+    if pixels.iter().all(|c| c.is_finite() && *c >= 0.0) {
+        std::borrow::Cow::Borrowed(pixels)
+    } else {
+        std::borrow::Cow::Owned(pixels.iter().map(|c| clean_sample(*c)).collect())
     }
 }
 

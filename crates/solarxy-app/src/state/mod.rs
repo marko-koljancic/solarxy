@@ -112,6 +112,16 @@ pub struct State {
     /// later milestone.
     pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
     pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
+    /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
+    /// whole environment on every rebuild, and installing one convolves an
+    /// irradiance cubemap, so this remembers what is already on the GPU.
+    /// Invalidated whenever the sidebar or the HDRI dialog replaces the
+    /// IBL behind the scene contract's back.
+    pub(super) environment: solarxy_renderer::environment::EnvironmentTracker,
+    /// Whether the `F10` developer harness has a synthetic environment
+    /// installed. Debug builds only; see `state/dev.rs`.
+    #[cfg(debug_assertions)]
+    pub(super) dev_environment_on: bool,
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,

@@ -66,6 +66,86 @@ impl State {
                 offset,
                 bytemuck::cast_slice(&ibl_avg),
             );
+
+            // The environment's intensity is IBL-derived in the same sense
+            // and rides the same chokepoint, but it is not contiguous with
+            // the average, so it takes its own partial write rather than
+            // widening the one above.
+            scene
+                .env
+                .lights_uniform
+                .set_ibl_intensity(self.view.display.hdri_intensity);
+            self.queue.write_buffer(
+                &scene.env.light_buffer,
+                std::mem::offset_of!(LightsUniform, ibl_intensity) as u64,
+                bytemuck::bytes_of(&scene.env.lights_uniform.ibl_intensity),
+            );
+        }
+    }
+
+    /// Apply any `SceneOp::SetEnvironment` in a drained delta.
+    ///
+    /// Separate from `SceneObjects::apply` because the environment is the
+    /// IBL and the skybox, which that type cannot reach. The web host runs
+    /// the same tracker over the same op; this is the desktop half.
+    ///
+    /// Nothing emits this op on the desktop yet: `solarxy-app` has no
+    /// engine until the desktop gains one, so the only producer today is
+    /// the `F9` developer harness. That is deliberate rather than dead
+    /// code, and the harness is what makes it verifiable now.
+    pub(super) fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
+        use solarxy_core::scene::SceneOp;
+        use solarxy_renderer::environment::EnvironmentOutcome;
+
+        for op in &delta.ops {
+            let SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } = op
+            else {
+                continue;
+            };
+
+            // Rotation and intensity write through to the display settings
+            // the existing Properties sliders read, so the node and the
+            // sliders show one value rather than fighting over two.
+            self.view.display.hdri_rotation = *rotation;
+            self.view.display.hdri_intensity = *intensity;
+
+            let outcome = self.environment.apply(
+                &self.device,
+                &self.queue,
+                &mut self.renderer.ibl_res,
+                hdri.as_ref(),
+            );
+            match outcome {
+                // Still rebuild the bind group: rotation or intensity may
+                // have moved even when the HDRI did not.
+                EnvironmentOutcome::Unchanged => {}
+                EnvironmentOutcome::HdriInstalled => {
+                    if *background == solarxy_core::scene::BackgroundKind::HdriSky {
+                        self.view.pane_settings[0].background_mode =
+                            solarxy_core::preferences::BackgroundMode::HDRI_SKY;
+                    }
+                }
+                // "No environment" is not "a black environment": fall back
+                // to the procedural sky the pane's own background derives,
+                // which is exactly what the Clear HDRI button does.
+                EnvironmentOutcome::Cleared => {
+                    let (top, bottom) = self
+                        .resolve_background(&self.view.pane_settings[0])
+                        .sky_colors();
+                    self.renderer.ibl_res.ibl = solarxy_renderer::ibl::IblState::from_sky_colors(
+                        &self.device,
+                        &self.queue,
+                        top,
+                        bottom,
+                    );
+                }
+            }
+            self.rebuild_light_bind_group();
         }
     }
 
@@ -324,6 +404,10 @@ impl State {
                 self.renderer.ibl_res.ibl = new_ibl;
                 self.renderer.ibl_res.ibl_mode = IblMode::Full;
                 self.renderer.ibl_res.last_active_ibl_mode = IblMode::Full;
+                // The sidebar picker replaced the IBL outside the scene
+                // contract; see `clear_hdri` for why the tracker has to
+                // forget what it thinks is installed.
+                self.environment.invalidate();
                 self.rebuild_light_bind_group();
                 self.gui.clear_loading_message();
                 self.gui.set_toast("HDRI loaded", ToastSeverity::Success);

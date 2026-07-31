@@ -233,6 +233,16 @@ fn draw_hdri_section(
         snap.hdri_rotation = degrees.to_radians();
     }
 
+    ui.add(
+        egui::Slider::new(
+            &mut snap.hdri_intensity,
+            solarxy_core::view_config::MIN_HDRI_INTENSITY
+                ..=solarxy_core::view_config::MAX_HDRI_INTENSITY,
+        )
+        .text("Intensity"),
+    )
+    .on_hover_text("Scale the light the HDRI casts, without dimming the visible sky");
+
     ui.add_space(4.0);
     if ui
         .button("Clear HDRI")

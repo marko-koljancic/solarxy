@@ -149,6 +149,7 @@ impl State {
                     roughness_scale: 1.0,
                     metallic_scale: 1.0,
                     hdri_rotation: 0.0,
+                    hdri_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
                 },
                 cameras: [None, None, None, None],
                 active_pane: 0,
@@ -158,6 +159,9 @@ impl State {
             scene: None,
             scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
             pending_scene_deltas: Vec::new(),
+            environment: solarxy_renderer::environment::EnvironmentTracker::default(),
+            #[cfg(debug_assertions)]
+            dev_environment_on: false,
             input: InputState {
                 cursor_pos: (0.0, 0.0),
                 uv_last_mouse_pos: None,

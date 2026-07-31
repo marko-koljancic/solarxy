@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::aabb::AABB;
-use crate::geometry::{MeshTopology, RawMaterialData};
+use crate::geometry::{MeshTopology, RawImageHdr, RawMaterialData};
 use crate::validation::ValidationResult;
 
 /// Stable identity of one renderable object in the scene, minted by the
@@ -259,8 +259,45 @@ pub enum SceneOp {
     SetCameras {
         cameras: Vec<CameraDef>,
     },
+    /// Replace the whole lighting environment, following the `SetLights` and
+    /// `SetCameras` precedent for the same reason: there is exactly one, so
+    /// diffing buys nothing and costs a reconciliation bug surface.
+    ///
+    /// `hdri: None` means **no environment**, which is deliberately distinct
+    /// from a black one: the host keeps whatever background and procedural
+    /// sky it had, rather than going dark. Rebuilding image-based lighting
+    /// is expensive, so a host is expected to dedupe on
+    /// [`RawImageHdr::hash`](crate::RawImageHdr) and do nothing when the
+    /// same environment arrives twice.
+    SetEnvironment {
+        hdri: Option<Arc<RawImageHdr>>,
+        /// Yaw applied to both the visible sky and the lighting it
+        /// derives, in radians.
+        rotation: f32,
+        /// Multiplier on the lighting contribution; `1.0` is as authored.
+        intensity: f32,
+        background: BackgroundKind,
+    },
     /// Remove every object and light (document replaced).
     Clear,
+}
+
+/// What the environment asks the background to be.
+///
+/// Deliberately not a full background enum. Solid and gradient backdrops
+/// are per-pane host state (`preferences::BackgroundMode`), and a scene-wide
+/// op that could also set them would make two systems authoritative over one
+/// pixel. This says only whether the environment claims the backdrop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackgroundKind {
+    /// Leave the background alone: each pane keeps its own. The default,
+    /// and the state every scene authored before the environment node
+    /// existed is in.
+    #[default]
+    Keep,
+    /// Draw the HDRI itself as the backdrop. Meaningless without an `hdri`,
+    /// and a host receiving it with `hdri: None` keeps its own background.
+    HdriSky,
 }
 
 /// An ordered batch of scene mutations, drained by the renderer once per

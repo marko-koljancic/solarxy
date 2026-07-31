@@ -678,6 +678,7 @@ export interface DisplaySettingsDto {
   roughnessScale: number;
   metallicScale: number;
   hdriRotation: number;
+  hdriIntensity: number;
 }
 
 export interface PaneRectDto {

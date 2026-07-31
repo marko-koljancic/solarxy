@@ -47,6 +47,16 @@ pub const DEFAULT_POINT_SIZE: f32 = 6.0;
 pub const MIN_POINT_SIZE: f32 = 1.0;
 pub const MAX_POINT_SIZE: f32 = 32.0;
 
+/// Multiplier on the HDRI's lighting contribution when it is used as
+/// authored. Not zero: an unset intensity must leave the scene lit exactly
+/// as it was before the control existed.
+pub const DEFAULT_HDRI_INTENSITY: f32 = 1.0;
+/// The usable range. Zero kills the image-based lighting entirely, which
+/// the IBL mode control already expresses more clearly; the ceiling is
+/// where an HDRI stops reading as light and starts blowing out.
+pub const MIN_HDRI_INTENSITY: f32 = 0.0;
+pub const MAX_HDRI_INTENSITY: f32 = 8.0;
+
 /// Height of the per-pane viewport toolbar strip, in logical pixels.
 /// Each pane's 3D content is the pane rect minus this strip at the top.
 pub const PANE_TOOLBAR_HEIGHT: f32 = 22.0;
@@ -64,6 +74,16 @@ pub struct DisplaySettings {
     /// Scene-global HDRI yaw, in radians. Rotates the visible HDRI sky
     /// and the IBL it derives together. `0.0` when no HDRI is loaded.
     pub hdri_rotation: f32,
+    /// Scene-global multiplier on the HDRI's lighting contribution, with
+    /// `1.0` meaning "as authored". Scales the image-based lighting only,
+    /// not the visible sky, so a backdrop can stay readable while the key
+    /// it casts is dialed up or down.
+    ///
+    /// Defaulted rather than required because view sidecars written before
+    /// the environment node existed carry no such field, and `0.0` there
+    /// would load an unlit scene.
+    #[serde(default = "default_hdri_intensity")]
+    pub hdri_intensity: f32,
     /// On-screen point size in pixels.
     ///
     /// Global rather than per pane, unlike `line_weight`: there is no
@@ -75,6 +95,10 @@ pub struct DisplaySettings {
 
 fn default_point_size() -> f32 {
     DEFAULT_POINT_SIZE
+}
+
+fn default_hdri_intensity() -> f32 {
+    DEFAULT_HDRI_INTENSITY
 }
 
 impl DisplaySettings {

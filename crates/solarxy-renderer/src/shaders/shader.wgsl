@@ -206,7 +206,7 @@ struct LightsUniform {
     hemi_ground_r: f32,
     hemi_ground_g: f32,
     hemi_ground_b: f32,
-    _pad_tail: f32,
+    ibl_intensity: f32,
 }
 @group(2) @binding(0)
 var<uniform> lights: LightsUniform;
@@ -549,8 +549,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let is_clay = camera.material_override == 1u || camera.material_override == 2u
         || model_id == 4u || model_id == 5u;
     let ibl_ambient = vec3<f32>(lights.ibl_avg_r, lights.ibl_avg_g, lights.ibl_avg_b);
-    let diffuse_ibl = select(diffuse_ibl_pbr, ibl_ambient * albedo, is_clay);
-    let specular_ibl = select(specular_ibl_pbr, vec3<f32>(0.0), is_clay);
+    // The environment's intensity scales every image-based term, including
+    // the Clay ambient (which IS the IBL, reduced to its L0 coefficient),
+    // but never the hemisphere rows below: those come from ambient and
+    // hemisphere light nodes, which carry their own intensity. Seeded to
+    // 1.0 by every constructor, so this multiply is identity until the
+    // environment sets it.
+    let diffuse_ibl =
+        select(diffuse_ibl_pbr, ibl_ambient * albedo, is_clay) * lights.ibl_intensity;
+    let specular_ibl = select(specular_ibl_pbr, vec3<f32>(0.0), is_clay) * lights.ibl_intensity;
 
     // Hemisphere/ambient light-node term: blends ground-to-sky by the
     // world-space up component of the normal. All-zero (exactly no

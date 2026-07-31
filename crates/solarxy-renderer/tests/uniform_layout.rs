@@ -44,12 +44,26 @@ struct Case {
 /// binding, not shape), and several shaders rely on that. Those are not
 /// listed here, because a prefix is legitimately smaller. Only structs that
 /// declare the WHOLE CPU struct belong in this table.
-const CASES: &[Case] = &[Case {
-    shader: "label.wgsl",
-    struct_name: "LabelParams",
-    rust_size: solarxy_renderer::labels::LABEL_PARAMS_SIZE,
-    rust_type: "solarxy_renderer::labels::LabelParams",
-}];
+const CASES: &[Case] = &[
+    Case {
+        shader: "label.wgsl",
+        struct_name: "LabelParams",
+        rust_size: solarxy_renderer::labels::LABEL_PARAMS_SIZE,
+        rust_type: "solarxy_renderer::labels::LabelParams",
+    },
+    // `shader.wgsl` declares this one whole, including its trailing
+    // scalar, so it belongs here. It earned its place when that trailing
+    // slot stopped being padding and became the environment's IBL
+    // intensity: a rename on one side and not the other would put a real
+    // value where the shader expected nothing, and the Rust-side size
+    // assert cannot see the shader.
+    Case {
+        shader: "shader.wgsl",
+        struct_name: "LightsUniform",
+        rust_size: std::mem::size_of::<solarxy_renderer::light::LightsUniform>(),
+        rust_type: "solarxy_renderer::light::LightsUniform",
+    },
+];
 
 fn shader_source(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
