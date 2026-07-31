@@ -23,7 +23,7 @@ use solarxy_core::AABB;
 use solarxy_core::geometry::{
     MeshTopology, RawMaterialData, RawMeshData, RawModelData, compute_bounds, compute_normals,
 };
-use solarxy_core::scene::{CookedGeometry, CookedMesh};
+use solarxy_core::scene::{CookedGeometry, CookedMesh, InstanceXform};
 
 /// Which element of a mesh an attribute lane describes: one value per
 /// point (vertex) or one value per primitive (triangle, segment, or point
@@ -238,8 +238,23 @@ impl KernelMesh {
 pub struct GeometrySet {
     pub meshes: Vec<KernelMesh>,
     pub materials: Vec<Arc<RawMaterialData>>,
-    /// Union bounds over all renderable meshes (object space).
+    /// Union bounds over all renderable meshes, **including every
+    /// instance** (object space).
     pub bounds: AABB,
+    /// Per-instance placements for the whole set, or `None` for the
+    /// ordinary single-placement case.
+    ///
+    /// `None` preserves the pre-instancing meaning exactly: one implicit
+    /// identity placement. It sits on the set rather than on
+    /// [`KernelMesh`] because a multi-mesh prototype stays rigid within
+    /// each copy, which is what the copy operations already guarantee by
+    /// sharing one placement across every mesh.
+    ///
+    /// **An operation that cannot carry instances through must call
+    /// [`Self::baked`] first** rather than dropping the list. Silently
+    /// losing it would delete every copy but one with no error anywhere,
+    /// which is the worst failure this representation can have.
+    pub instances: Option<Arc<Vec<InstanceXform>>>,
 }
 
 impl GeometrySet {
@@ -251,6 +266,7 @@ impl GeometrySet {
             meshes: Vec::new(),
             materials: Vec::new(),
             bounds: compute_bounds(&[]),
+            instances: None,
         }
     }
 
@@ -260,7 +276,9 @@ impl GeometrySet {
         Self::from_parts(vec![mesh], Vec::new())
     }
 
-    /// A set from meshes + materials, computing union bounds.
+    /// A set from meshes + materials, computing union bounds. Produces a
+    /// single-placement set; use [`Self::from_parts_instanced`] to place
+    /// the same meshes many times.
     #[must_use]
     pub fn from_parts(meshes: Vec<KernelMesh>, materials: Vec<Arc<RawMaterialData>>) -> Self {
         let bounds = union_bounds(&meshes);
@@ -268,7 +286,75 @@ impl GeometrySet {
             meshes,
             materials,
             bounds,
+            instances: None,
         }
+    }
+
+    /// A set from meshes + materials placed once per instance.
+    ///
+    /// Bounds union the prototype's corners over every placement, not the
+    /// prototype alone: framing a ten-thousand-copy scatter on the box at
+    /// the origin would put the camera inside one rock.
+    #[must_use]
+    pub fn from_parts_instanced(
+        meshes: Vec<KernelMesh>,
+        materials: Vec<Arc<RawMaterialData>>,
+        instances: Vec<InstanceXform>,
+    ) -> Self {
+        let local = union_bounds(&meshes);
+        let bounds = instanced_bounds(&local, &instances);
+        Self {
+            meshes,
+            materials,
+            bounds,
+            instances: Some(Arc::new(instances)),
+        }
+    }
+
+    /// This set with every instance baked into real geometry, or itself
+    /// when it has none.
+    ///
+    /// The escape hatch for operations that cannot carry instances
+    /// through. Collapsing is slow and can hit the primitive ceiling,
+    /// which is the honest outcome: the alternative is an operation that
+    /// silently returns one copy where the user placed ten thousand.
+    ///
+    /// # Errors
+    /// Propagates the bake's error, and the ceiling error when the
+    /// collapsed output would exceed it.
+    pub fn baked(&self) -> Result<std::borrow::Cow<'_, Self>, String> {
+        let Some(instances) = &self.instances else {
+            return Ok(std::borrow::Cow::Borrowed(self));
+        };
+        let prims: usize = self.meshes.iter().map(KernelMesh::primitive_count).sum();
+        let verts: usize = self.meshes.iter().map(KernelMesh::vertex_count).sum();
+        let projected = prims.max(verts).saturating_mul(instances.len());
+        if projected > crate::array::MAX_OUTPUT_PRIMITIVES {
+            return Err(format!(
+                "baking {} instances would produce {projected} primitives (over the {} \
+                 ceiling); this operation cannot work on instanced geometry, so either \
+                 reduce the copy count or keep the copies as instances and move this \
+                 operation before the one that creates them",
+                instances.len(),
+                crate::array::MAX_OUTPUT_PRIMITIVES
+            ));
+        }
+        let mut copies: Vec<Arc<Self>> = Vec::with_capacity(instances.len());
+        let prototype = Self::from_parts(self.meshes.clone(), self.materials.clone());
+        for placement in instances.iter() {
+            let matrix = cgmath::Matrix4::from(placement.0);
+            let baked = crate::transform::bake_transform(&prototype, &matrix)
+                .map_err(|e: crate::KernelError| e.to_string())?;
+            copies.push(Arc::new(baked));
+        }
+        Ok(std::borrow::Cow::Owned(crate::merge::merge(&copies)))
+    }
+
+    /// How many placements this set draws: the instance count, or 1 for
+    /// the implicit identity placement.
+    #[must_use]
+    pub fn instance_count(&self) -> usize {
+        self.instances.as_ref().map_or(1, |i| i.len())
     }
 
     /// Renderable-empty means no mesh contributes drawable primitives
@@ -345,6 +431,7 @@ impl GeometrySet {
                 .collect(),
             materials: self.materials.clone(),
             bounds: self.bounds,
+            instances: self.instances.clone(),
         }
     }
 
@@ -421,6 +508,43 @@ impl GeometrySet {
 
 /// Union bounds over the renderable meshes; the `compute_bounds`
 /// empty-input fallback when none are.
+/// Union the prototype's bounds over every placement.
+///
+/// Transforms the eight corners of the local box rather than the box's
+/// min/max directly: a rotated placement's axis-aligned box is not the
+/// rotation of the min and max points, and using those would give a box
+/// too small to contain the geometry.
+fn instanced_bounds(local: &AABB, instances: &[InstanceXform]) -> AABB {
+    if instances.is_empty() {
+        return compute_bounds(&[]);
+    }
+    let corners = [
+        [local.min.x, local.min.y, local.min.z],
+        [local.max.x, local.min.y, local.min.z],
+        [local.min.x, local.max.y, local.min.z],
+        [local.max.x, local.max.y, local.min.z],
+        [local.min.x, local.min.y, local.max.z],
+        [local.max.x, local.min.y, local.max.z],
+        [local.min.x, local.max.y, local.max.z],
+        [local.max.x, local.max.y, local.max.z],
+    ];
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for placement in instances {
+        for corner in &corners {
+            let p = placement.apply(*corner);
+            for axis in 0..3 {
+                min[axis] = min[axis].min(p[axis]);
+                max[axis] = max[axis].max(p[axis]);
+            }
+        }
+    }
+    AABB {
+        min: min.into(),
+        max: max.into(),
+    }
+}
+
 fn union_bounds(meshes: &[KernelMesh]) -> AABB {
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
@@ -803,5 +927,147 @@ mod tests {
         let mut line = KernelMesh::polyline("l", vec![[0.0; 3], [1.0; 3]], vec![0, 1]);
         line.recompute_normals();
         assert!(line.normals.is_none());
+    }
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::*;
+
+    fn unit_cube() -> GeometrySet {
+        GeometrySet::from_mesh(KernelMesh::new(
+            "proto",
+            vec![
+                [-0.5, -0.5, -0.5],
+                [0.5, -0.5, -0.5],
+                [0.5, 0.5, -0.5],
+                [-0.5, 0.5, -0.5],
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        ))
+    }
+
+    fn translation(x: f32, y: f32, z: f32) -> InstanceXform {
+        InstanceXform([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [x, y, z, 1.0],
+        ])
+    }
+
+    #[test]
+    fn a_set_with_no_instances_still_draws_once() {
+        // `None` has to keep meaning exactly one placement, or every
+        // existing scene stops rendering.
+        assert_eq!(unit_cube().instance_count(), 1);
+        assert!(unit_cube().instances.is_none());
+    }
+
+    #[test]
+    fn instanced_bounds_cover_the_placements_not_the_prototype() {
+        // Framing is computed from bounds. A ten-thousand-copy scatter
+        // whose bounds described only the prototype would put the camera
+        // inside one copy.
+        let set = GeometrySet::from_parts_instanced(
+            unit_cube().meshes,
+            Vec::new(),
+            vec![translation(0.0, 0.0, 0.0), translation(10.0, 0.0, 0.0)],
+        );
+        assert!((set.bounds.min.x - -0.5).abs() < 1e-5, "{:?}", set.bounds);
+        assert!((set.bounds.max.x - 10.5).abs() < 1e-5, "{:?}", set.bounds);
+        assert_eq!(set.instance_count(), 2);
+    }
+
+    #[test]
+    fn instanced_bounds_of_a_rotated_placement_contain_the_geometry() {
+        // The corners are transformed, not the min and max points: the
+        // axis-aligned box of a rotated box is not the rotation of its
+        // two extreme corners, and using those gives a box too small.
+        let c = std::f32::consts::FRAC_1_SQRT_2;
+        let spun = InstanceXform([
+            [c, c, 0.0, 0.0],
+            [-c, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]);
+        let set = GeometrySet::from_parts_instanced(unit_cube().meshes, Vec::new(), vec![spun]);
+        // A unit square spun 45 degrees needs a box of half-diagonal
+        // 0.707, not the 0.5 an untransformed min/max would give.
+        assert!(set.bounds.max.x > 0.7, "{:?}", set.bounds);
+        assert!(set.bounds.max.y > 0.7, "{:?}", set.bounds);
+    }
+
+    #[test]
+    fn baking_instances_matches_placing_the_prototype_by_hand() {
+        // The parity that makes Instance a representation choice rather
+        // than a rendering change: the baked result of N instances is the
+        // same geometry as N transformed copies merged.
+        let places = [translation(1.0, 2.0, 3.0), translation(-4.0, 0.5, 0.0)];
+        let instanced =
+            GeometrySet::from_parts_instanced(unit_cube().meshes, Vec::new(), places.to_vec());
+        let baked = instanced.baked().expect("bake");
+
+        let by_hand: Vec<Arc<GeometrySet>> = places
+            .iter()
+            .map(|p| {
+                let m = cgmath::Matrix4::from(p.0);
+                Arc::new(crate::transform::bake_transform(&unit_cube(), &m).expect("bake"))
+            })
+            .collect();
+        let expected = crate::merge::merge(&by_hand);
+
+        let got: Vec<[f32; 3]> = baked
+            .meshes
+            .iter()
+            .flat_map(|m| m.positions.to_vec())
+            .collect();
+        let want: Vec<[f32; 3]> = expected
+            .meshes
+            .iter()
+            .flat_map(|m| m.positions.to_vec())
+            .collect();
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(want.iter()) {
+            for axis in 0..3 {
+                assert!((g[axis] - w[axis]).abs() < 1e-5, "{g:?} vs {w:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn baking_an_uninstanced_set_borrows_it_rather_than_copying() {
+        // The escape hatch is on the hot path of every operation that
+        // cannot carry instances, so the overwhelmingly common case (no
+        // instances at all) must not allocate.
+        let set = unit_cube();
+        let baked = set.baked().expect("bake");
+        assert!(matches!(baked, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn baking_past_the_ceiling_names_the_way_out() {
+        // G-14: the error has to say what to do, and "lower the point
+        // count" is the wrong advice when keeping the copies as instances
+        // would have worked.
+        let many = vec![translation(0.0, 0.0, 0.0); 5_000_000];
+        let set = GeometrySet::from_parts_instanced(unit_cube().meshes, Vec::new(), many);
+        let err = set.baked().expect_err("over the ceiling");
+        assert!(err.contains("instances"), "{err}");
+        assert!(err.contains("ceiling"), "{err}");
+    }
+
+    #[test]
+    fn instances_survive_the_trip_to_cooked_geometry() {
+        // The renderer reads the count off the cooked side; losing the
+        // list here would draw one copy and silently discard the rest.
+        let set = GeometrySet::from_parts_instanced(
+            unit_cube().meshes,
+            Vec::new(),
+            vec![translation(0.0, 0.0, 0.0), translation(1.0, 0.0, 0.0)],
+        );
+        let cooked = set.to_cooked();
+        assert_eq!(cooked.instance_count(), 2);
+        assert_eq!(cooked.bounds.max.x, set.bounds.max.x);
     }
 }

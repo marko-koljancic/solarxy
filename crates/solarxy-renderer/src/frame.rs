@@ -306,6 +306,39 @@ pub struct DrawObject<'a> {
     /// participation; which light owns the map is the light-side
     /// exclusive-caster rule). Desktop passes `true`.
     pub cast_shadow: bool,
+    /// How many instances of this object to draw. `1` for the ordinary
+    /// single-placement case, which is what a scene with no instanced
+    /// geometry has everywhere.
+    pub instances: u32,
+}
+
+impl<'a> DrawObject<'a> {
+    /// Draw one of this object's meshes across every instance.
+    ///
+    /// **Every per-object indexed draw in every pass goes through here.**
+    /// The instance range used to be a literal `0..1` written out ten
+    /// times across the shadow, gbuffer, main, outline, wireframe,
+    /// selection and validation passes. Threading a count through ten
+    /// literals means a scatter that draws but casts no shadow, or one
+    /// the validation overlay cannot see, is one forgotten edit away.
+    /// Here it is one edit, or none.
+    ///
+    /// The caller still binds vertex buffer 0 and its own bind groups:
+    /// those genuinely differ per pass. The index buffer and the draw do
+    /// not, so they live here.
+    pub fn draw_mesh(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..mesh.num_elements, 0, 0..self.instances);
+    }
+
+    /// Draw one of this object's point meshes across every instance.
+    ///
+    /// Points expand to six quad corners each in the vertex shader rather
+    /// than being indexed, so they take their own call; the instance
+    /// range is the same question and gets the same answer.
+    pub fn draw_points(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        pass.draw(0..mesh.num_vertices * 6, 0..self.instances);
+    }
 }
 
 pub struct Renderer {
@@ -828,8 +861,7 @@ impl Renderer {
                     continue;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(&mut pass, mesh);
             }
         }
     }
@@ -944,6 +976,11 @@ impl Renderer {
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1012,8 +1049,7 @@ impl Renderer {
                 }
                 pass.set_bind_group(1, &material.bind_group, &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(&mut pass, mesh);
             }
         }
     }
@@ -1389,6 +1425,11 @@ impl Renderer {
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1431,7 +1472,7 @@ impl Renderer {
                             continue;
                         };
                         pass.set_bind_group(2, &edge.bind_group, &[]);
-                        pass.draw(0..mesh.num_vertices * 6, 0..1);
+                        obj.draw_points(&mut pass, mesh);
                     }
                 }
             }
@@ -1556,8 +1597,7 @@ impl Renderer {
                     continue;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(pass, mesh);
             }
         }
     }
@@ -1700,8 +1740,7 @@ impl Renderer {
                 if let Some(colors) = &mesh.color_buffer {
                     pass.set_vertex_buffer(2, colors.slice(..));
                 }
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(pass, mesh);
             }
         }
 
@@ -1722,7 +1761,7 @@ impl Renderer {
                 }
                 pass.set_bind_group(2, &edge.bind_group, &[]);
                 pass.set_vertex_buffer(0, obj.instance_buffer.slice(..));
-                pass.draw(0..mesh.num_vertices * 6, 0..1);
+                obj.draw_points(pass, mesh);
             }
         }
     }
@@ -1851,6 +1890,11 @@ impl Renderer {
                     pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1945,6 +1989,10 @@ impl Renderer {
             }
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            // The UV passes draw the prototype's layout, never its
+            // placements: a UV map has one copy however many times the
+            // geometry is placed in the world, and the overlap counter
+            // would multiply every count by the instance number.
             pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
         }
     }
@@ -2031,6 +2079,11 @@ impl Renderer {
                     pass.set_bind_group(1, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }

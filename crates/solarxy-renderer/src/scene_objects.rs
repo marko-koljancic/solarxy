@@ -42,6 +42,25 @@ fn with_headroom(bytes: u64) -> u64 {
     bytes + bytes / 2
 }
 
+/// The object's per-instance GPU rows: its world transform composed with
+/// each placement, or a single row when it has none.
+///
+/// The composition order matters. The placement is object-local (where a
+/// copy sits within the scatter) and the transform is where the object
+/// sits in the world, so the object transform applies last.
+fn instance_raws(
+    transform: Matrix4<f32>,
+    instances: Option<&[solarxy_core::scene::InstanceXform]>,
+) -> Vec<InstanceRaw> {
+    match instances {
+        None => vec![InstanceRaw::from_matrix(transform)],
+        Some(list) => list
+            .iter()
+            .map(|placement| InstanceRaw::from_matrix(transform * Matrix4::from(placement.0)))
+            .collect(),
+    }
+}
+
 /// Recorded capacities of one mesh's growable buffers, parallel to
 /// `Model::meshes`.
 struct MeshCaps {
@@ -136,6 +155,7 @@ impl SceneObjects {
                 validation: o.validation_gpu.as_ref(),
                 selected: false,
                 cast_shadow: o.cast_shadow,
+                instances: o.geometry.instance_count(),
             })
     }
 
@@ -152,6 +172,7 @@ impl SceneObjects {
                 validation: o.validation_gpu.as_ref(),
                 selected: false,
                 cast_shadow: o.cast_shadow,
+                instances: o.geometry.instance_count(),
             })
     }
 
@@ -233,10 +254,17 @@ impl SceneObjects {
                 SceneOp::SetTransform { id, transform } => {
                     if let Some(obj) = self.objects.get_mut(id) {
                         obj.transform = (*transform).into();
+                        // Every placement is the object transform times
+                        // the instance's own, so moving the object moves
+                        // all of them: writing only entry zero would leave
+                        // a scatter's copies behind at the old position.
                         queue.write_buffer(
                             &obj.instance_buffer,
                             0,
-                            bytemuck::bytes_of(&InstanceRaw::from_matrix(obj.transform)),
+                            bytemuck::cast_slice(&instance_raws(
+                                obj.transform,
+                                obj.geometry.instances.as_ref().map(|i| i.as_slice()),
+                            )),
                         );
                     }
                 }
@@ -583,6 +611,24 @@ impl SceneObjects {
         };
 
         if let Some(existing) = self.objects.get_mut(&id) {
+            // The placement count can change between cooks (a scatter's
+            // point count is a parameter), and the instance buffer is
+            // sized to it, so it is rebuilt whenever the count moves
+            // rather than written in place.
+            let rows = instance_raws(
+                existing.transform,
+                cooked_arc.instances.as_ref().map(|i| i.as_slice()),
+            );
+            if rows.len() == existing.geometry.instance_count() as usize {
+                queue.write_buffer(&existing.instance_buffer, 0, bytemuck::cast_slice(&rows));
+            } else {
+                existing.instance_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("SceneObject Instance Buffer"),
+                        contents: bytemuck::cast_slice(&rows),
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+            }
             existing.model = model;
             existing.caps = caps;
             existing.geometry = Arc::clone(&cooked_arc);
@@ -595,7 +641,10 @@ impl SceneObjects {
             let transform = Matrix4::identity();
             let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("SceneObject Instance Buffer"),
-                contents: bytemuck::bytes_of(&InstanceRaw::from_matrix(transform)),
+                contents: bytemuck::cast_slice(&instance_raws(
+                    transform,
+                    cooked_arc.instances.as_ref().map(|i| i.as_slice()),
+                )),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
             self.objects.insert(
@@ -991,6 +1040,7 @@ pub fn cooked_from_parts(
         }],
         materials: Vec::new(),
         bounds,
+        instances: None,
     }
 }
 
@@ -1028,6 +1078,7 @@ mod tests {
                 cooked_mesh("also-empty", vec![[0.0; 3]], vec![]),
             ],
             materials: Vec::new(),
+            instances: None,
             bounds: compute_bounds(&[[0.0; 3]]),
         };
         let (built, raw_to_gpu) = build_meshes(&cooked);
@@ -1040,6 +1091,7 @@ mod tests {
         let a = CookedGeometry {
             meshes: vec![tri()],
             materials: Vec::new(),
+            instances: None,
             bounds: compute_bounds(&[[0.0; 3]]),
         };
         // Shared attribute Arcs: identical (the engine's per-frame
@@ -1056,6 +1108,7 @@ mod tests {
                 colors: None,
             }],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(same_geometry(&a, &shared));
@@ -1064,6 +1117,7 @@ mod tests {
         let recooked = CookedGeometry {
             meshes: vec![tri()],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(!same_geometry(&a, &recooked));
@@ -1072,6 +1126,7 @@ mod tests {
         let grown = CookedGeometry {
             meshes: vec![],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(!same_geometry(&a, &grown));
@@ -1089,6 +1144,7 @@ mod tests {
                 ..base.clone()
             }],
             materials: Vec::new(),
+            instances: None,
             bounds: compute_bounds(&[[0.0; 3]]),
         };
         // Same buffers, fresh colors Arc: a color recook, must re-upload.
@@ -1098,6 +1154,7 @@ mod tests {
                 ..a.meshes[0].clone()
             }],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(!same_geometry(&a, &recolored));
@@ -1106,6 +1163,7 @@ mod tests {
         let same = CookedGeometry {
             meshes: vec![a.meshes[0].clone()],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(same_geometry(&a, &same));
@@ -1117,6 +1175,7 @@ mod tests {
                 ..a.meshes[0].clone()
             }],
             materials: Vec::new(),
+            instances: None,
             bounds: a.bounds,
         };
         assert!(!same_geometry(&a, &retopo));
@@ -1149,6 +1208,7 @@ mod tests {
         let cooked = CookedGeometry {
             meshes: vec![cloud, wire],
             materials: Vec::new(),
+            instances: None,
             bounds: compute_bounds(&[[0.0; 3]]),
         };
         let (built, raw_to_gpu) = build_meshes(&cooked);
@@ -1190,6 +1250,7 @@ mod tests {
                 colors: None,
             }],
             materials: Vec::new(),
+            instances: None,
             bounds: compute_bounds(&[[0.0; 3]]),
         };
         let (built2, map2) = build_meshes(&cooked2);

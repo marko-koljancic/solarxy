@@ -231,5 +231,6 @@ fn dev_cube(name: &str) -> CookedGeometry {
         }],
         materials: Vec::new(),
         bounds,
+        instances: None,
     }
 }

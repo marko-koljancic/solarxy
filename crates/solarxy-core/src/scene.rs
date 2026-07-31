@@ -49,8 +49,64 @@ pub struct CookedMesh {
 pub struct CookedGeometry {
     pub meshes: Vec<CookedMesh>,
     pub materials: Vec<Arc<RawMaterialData>>,
-    /// Union bounds over all meshes (object space).
+    /// Union bounds over all meshes, **including every instance** (object
+    /// space), so camera framing and culling see the scatter rather than
+    /// the prototype sitting at the origin.
     pub bounds: AABB,
+    /// Per-instance placements for the whole set, or `None` for the
+    /// ordinary single-placement case.
+    ///
+    /// **`None` preserves today's meaning exactly**: one implicit identity
+    /// instance. Every existing producer and consumer is unaffected, which
+    /// is what makes this an additive change rather than a breaking one.
+    ///
+    /// On the set rather than on [`CookedMesh`] because instancing is a
+    /// property of the placement, not of one mesh in the prototype: a
+    /// multi-mesh prototype stays rigid within each copy, which is what
+    /// the kernel's copy operations already guarantee by sharing one
+    /// placement across every mesh. It also means one GPU instance buffer
+    /// per object instead of one per mesh.
+    pub instances: Option<Arc<Vec<InstanceXform>>>,
+}
+
+/// One instance placement: a column-major 4x4 model matrix, the same
+/// convention [`SceneOp::SetTransform`] uses.
+///
+/// The renderer derives each instance's normal matrix from this, so a
+/// mirrored or non-uniformly scaled placement shades correctly rather
+/// than inside out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InstanceXform(pub [[f32; 4]; 4]);
+
+impl InstanceXform {
+    /// The identity placement, which is what `instances: None` means.
+    pub const IDENTITY: Self = Self([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]);
+
+    /// Transform a point by this placement.
+    #[must_use]
+    pub fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        let m = &self.0;
+        std::array::from_fn(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
+    }
+}
+
+impl CookedGeometry {
+    /// How many instances this geometry draws: the instance count, or 1
+    /// for the implicit identity placement.
+    ///
+    /// The single place that turns "no list" into "one draw", so no caller
+    /// has to remember which absence means what.
+    #[must_use]
+    pub fn instance_count(&self) -> u32 {
+        self.instances
+            .as_ref()
+            .map_or(1, |i| u32::try_from(i.len()).unwrap_or(u32::MAX))
+    }
 }
 
 /// Light variety, mirroring the six light node types.

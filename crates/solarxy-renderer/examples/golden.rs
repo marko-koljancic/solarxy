@@ -468,6 +468,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             .copied()
             .collect();
         let geometry = CookedGeometry {
+            instances: None,
             bounds: compute_bounds(&all_positions),
             meshes: vec![cloud, wire, quad],
             materials: Vec::new(),

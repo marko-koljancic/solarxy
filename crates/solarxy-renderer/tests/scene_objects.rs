@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use solarxy_core::scene::{CookedGeometry, LightDef, LightKind, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{
+    CookedGeometry, InstanceXform, LightDef, LightKind, SceneDelta, SceneObjectId, SceneOp,
+};
 use solarxy_renderer::bind_groups::BindGroupLayouts;
 use solarxy_renderer::scene_objects::{SceneObjects, cooked_from_parts};
 
@@ -298,4 +300,83 @@ fn iteration_order_is_deterministic_by_id() {
     }
     let order: Vec<u64> = scene.iter().map(|(id, _)| id.0).collect();
     assert_eq!(order, vec![1, 3, 5]);
+}
+
+/// An instanced upsert must reach the draw path as N instances, not one.
+///
+/// This is the renderer half of the Bake-versus-Instance parity promise.
+/// The kernel proves the matrices are right; this proves the count
+/// survives the trip through `SceneObjects` into `DrawObject`, which is
+/// what every pass reads to size its draw.
+#[test]
+fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
+    let Gpu {
+        device,
+        queue,
+        layouts,
+    } = require_gpu!();
+    let mut objects = SceneObjects::new();
+
+    let mut cooked = cooked_from_parts(
+        "proto",
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        vec![0, 1, 2],
+        None,
+    );
+    cooked.instances = Some(std::sync::Arc::new(vec![
+        InstanceXform::IDENTITY,
+        InstanceXform([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [5.0, 0.0, 0.0, 1.0],
+        ]),
+        InstanceXform([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 5.0, 0.0, 1.0],
+        ]),
+    ]));
+
+    let id = SceneObjectId(1);
+    objects
+        .apply(
+            &device,
+            &queue,
+            &layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::UpsertGeometry {
+                    id,
+                    geometry: std::sync::Arc::new(cooked),
+                }],
+            },
+        )
+        .expect("apply");
+
+    let draw = objects.draw_object(id).expect("visible");
+    assert_eq!(draw.instances, 3);
+
+    // And a plain object still reports one, so nothing that existed
+    // before this feature changed its draw count.
+    let plain = SceneObjectId(2);
+    objects
+        .apply(
+            &device,
+            &queue,
+            &layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::UpsertGeometry {
+                    id: plain,
+                    geometry: std::sync::Arc::new(cooked_from_parts(
+                        "plain",
+                        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        vec![0, 1, 2],
+                        None,
+                    )),
+                }],
+            },
+        )
+        .expect("apply");
+    assert_eq!(objects.draw_object(plain).expect("visible").instances, 1);
 }
