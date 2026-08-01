@@ -63,6 +63,19 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::light::LightsUniform>(),
         rust_type: "solarxy_renderer::light::LightsUniform",
     },
+    // `shader.wgsl` declares this one whole too. It earned its place when
+    // the principled surface properties appended six vec4-shaped blocks:
+    // three of them carry a `vec3`, which WGSL aligns to 16 bytes in the
+    // uniform address space while Rust aligns `[f32; 3]` to 4. Get the
+    // pairing wrong and the Rust-side size assert still passes, the shader
+    // still compiles, and the viewport goes black at draw time. Nothing
+    // else in the build compares the two sides.
+    Case {
+        shader: "shader.wgsl",
+        struct_name: "MaterialUniform",
+        rust_size: std::mem::size_of::<solarxy_renderer::material::MaterialUniform>(),
+        rust_type: "solarxy_renderer::material::MaterialUniform",
+    },
 ];
 
 fn shader_source(name: &str) -> String {

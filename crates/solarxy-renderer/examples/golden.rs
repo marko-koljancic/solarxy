@@ -264,6 +264,96 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         println!("GOLDEN wrote {path}");
     }
 
+    // The principled surface proof.
+    //
+    // Every other capture here renders a material at its defaults, which is
+    // exactly what makes them useful: the principled properties are all
+    // identities at rest, so those captures must not move when the lobes
+    // are added, and a diff in them means a regression. That leaves the
+    // opposite question unanswered, and it is the one that matters just as
+    // much: does any of this new code run at all? A capture that is
+    // pixel-identical because the shader ignores the parameters looks
+    // exactly like one that is pixel-identical because the defaults are
+    // neutral.
+    //
+    // So: turn every principled property on at once and capture that. It is
+    // not a physically sensible material, deliberately, because the job here
+    // is coverage rather than beauty. Compare it against `shaded.png` and
+    // the two must differ; compare it across commits and it gates every
+    // lobe at once.
+    {
+        use solarxy_renderer::material::MaterialUniform;
+
+        for mat in &scene.model.materials {
+            let mut uniform = mat.uniform;
+            uniform.ior = 1.7;
+            uniform.transmission = 0.4;
+            uniform.thickness = 0.5;
+            uniform.attenuation_color = [0.8, 0.2, 0.1];
+            uniform.attenuation_distance = 1.0;
+            uniform.clearcoat = 0.8;
+            uniform.clearcoat_roughness = 0.2;
+            uniform.anisotropy = 0.6;
+            uniform.anisotropy_rotation = 0.7;
+            uniform.sheen_color = [0.3, 0.2, 0.5];
+            uniform.sheen_roughness = 0.4;
+            uniform.specular_color = [0.9, 0.8, 0.7];
+            uniform.specular_intensity = 0.6;
+            uniform.iridescence = 0.7;
+            uniform.iridescence_ior = 1.8;
+            uniform.iridescence_thickness_max = 550.0;
+            queue.write_buffer(&mat.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+        }
+
+        let pds = modes()[0].1;
+        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Principled Encoder"),
+        });
+        let objects = [scene.draw_object()];
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene.env,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            &pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            ToneMode::AcesFilmic,
+            1.0,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/principled.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path} (every principled lobe at once)");
+
+        // Put the materials back, so anything captured after this sees the
+        // scene it expects rather than the stress material.
+        for mat in &scene.model.materials {
+            queue.write_buffer(&mat.uniform_buffer, 0, bytemuck::cast_slice(&[mat.uniform]));
+        }
+    }
+
     // Extra (not part of the compare set): the multi-object proof — two
     // extra objects with independent transforms drawn through the
     // SceneObjects delta path beside the loaded model.
@@ -564,7 +654,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 /// once every branch in flight carries the capture, and it becomes a hard
 /// gate.
 fn grown_captures() -> &'static [&'static str] {
-    &["topology", "clay"]
+    &["topology", "clay", "principled"]
 }
 
 /// Replicates the app's per-pane partial camera-uniform write (inspection

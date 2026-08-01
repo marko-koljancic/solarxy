@@ -167,6 +167,28 @@ struct MaterialUniform {
     toon_steps: f32,
     // Offset 48 (vec4 alignment); factor x map, glTF style.
     base_color: vec4<f32>,
+    // Offsets 64 to 159: the principled surface properties, six
+    // vec4-shaped blocks so every vec3 lands on a 16-byte boundary.
+    // Mirrors `material::MaterialUniform`; the sizes are cross-checked in
+    // `tests/uniform_layout.rs`.
+    ior: f32,
+    transmission: f32,
+    thickness: f32,
+    attenuation_distance: f32,
+    attenuation_color: vec3<f32>,
+    emissive_strength: f32,
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    anisotropy: f32,
+    anisotropy_rotation: f32,
+    sheen_color: vec3<f32>,
+    sheen_roughness: f32,
+    specular_color: vec3<f32>,
+    specular_intensity: f32,
+    iridescence: f32,
+    iridescence_ior: f32,
+    iridescence_thickness_min: f32,
+    iridescence_thickness_max: f32,
 }
 @group(0) @binding(8) var<uniform> material: MaterialUniform;
 
@@ -235,19 +257,54 @@ fn F_schlick(cosTheta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
+/// The base surface's response to one direct light.
+///
+/// `f0` arrives computed rather than derived here, because the index of
+/// refraction, the specular tint and any thin film all modify it and all
+/// three are shared with the image-based and area-light paths. At the
+/// material defaults `f0` is exactly `mix(vec3(0.04), albedo, metallic)`,
+/// which is what this function used to compute for itself.
+///
+/// `tangent` and `bitangent` drive the anisotropic form. They are only
+/// consulted when anisotropy is non-zero: the anisotropic distribution
+/// reduces to the isotropic one mathematically at zero, but not to the
+/// same floating-point result, and preserving the old arithmetic exactly
+/// is what keeps the golden gate a signal rather than noise.
+fn cook_torrance(
+    N: vec3<f32>, V: vec3<f32>, L: vec3<f32>,
+    albedo: vec3<f32>, roughness: f32, metallic: f32,
+    f0: vec3<f32>, tangent: vec3<f32>, bitangent: vec3<f32>,
+) -> vec3<f32> {
     let H = normalize(V + L);
     let NdotV = max(dot(N, V), 0.001);
     let NdotL = max(dot(N, L), 0.001);
     let NdotH = max(dot(N, H), 0.0);
     let HdotV = max(dot(H, V), 0.0);
 
-    let F0 = mix(vec3(0.04), albedo, metallic);
-    let F = F_schlick(HdotV, F0);
-    let D = D_GGX(NdotH, roughness);
-    let G = G_smith(NdotV, NdotL, roughness);
+    let F = F_schlick(HdotV, f0);
 
-    let specular = (D * G * F) / (4.0 * NdotV * NdotL);
+    var specular: vec3<f32>;
+    if material.anisotropy == 0.0 {
+        let D = D_GGX(NdotH, roughness);
+        let G = G_smith(NdotV, NdotL, roughness);
+        specular = (D * G * F) / (4.0 * NdotV * NdotL);
+    } else {
+        // Split the roughness along the tangent frame. The clamp keeps the
+        // sharp axis from collapsing to a zero-width lobe at full
+        // anisotropy, which would divide by zero in the distribution.
+        let alpha = roughness * roughness;
+        let at = max(alpha * (1.0 + material.anisotropy), 1e-4);
+        let ab = max(alpha * (1.0 - material.anisotropy), 1e-4);
+        let D = D_GGX_aniso(NdotH, dot(tangent, H), dot(bitangent, H), at, ab);
+        let Vis = V_GGX_aniso(
+            NdotL, NdotV,
+            dot(tangent, V), dot(bitangent, V),
+            dot(tangent, L), dot(bitangent, L),
+            at, ab,
+        );
+        specular = D * Vis * F;
+    }
+
     let kD = (1.0 - F) * (1.0 - metallic);
     let diffuse = kD * albedo / PI;
 
@@ -257,6 +314,216 @@ fn cook_torrance(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, ro
 fn lambert_direct(N: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>) -> vec3<f32> {
     let NdotL = max(dot(N, L), 0.0);
     return (albedo / PI) * NdotL;
+}
+
+// --- Principled surface lobes ---
+//
+// The parameters these read are the industry principled set; the
+// evaluations below are the ones the KHR extension specifications define
+// against exactly those parameters, so nothing is remapped between what a
+// file carries and what the viewport shows. They are real-time
+// approximations: clearcoat, sheen and iridescence in a forward raster
+// shader cannot do the multiple scattering an offline integrator does, and
+// the parameter help says so. Reference-grade evaluation of this same data
+// is the path tracer's job.
+//
+// Every lobe is guarded on its own factor in `fs_main`, and every default
+// is the identity of its effect, so a material that sets none of them
+// takes precisely the arithmetic it took before any of this existed. That
+// is deliberate: it keeps the golden gate meaningful, because a diff then
+// means a real change rather than a reformulation.
+
+fn sq(x: f32) -> f32 {
+    return x * x;
+}
+
+/// Normal-incidence reflectance for the base surface.
+///
+/// The dielectric part comes from the index of refraction and is then
+/// tinted and scaled by the specular parameters; metals take the albedo as
+/// before. At the defaults (ior 1.5, specular 1.0, white tint) the branch
+/// keeps the literal 0.04, rather than recomputing it from the formula and
+/// landing on 0.040000001 instead.
+fn base_f0(albedo: vec3<f32>, metallic: f32) -> vec3<f32> {
+    var dielectric = vec3(0.04);
+    if material.ior != 1.5 {
+        dielectric = vec3(sq((material.ior - 1.0) / (material.ior + 1.0)));
+    }
+    dielectric = min(
+        dielectric * material.specular_color * material.specular_intensity,
+        vec3(1.0),
+    );
+    return mix(dielectric, albedo, metallic);
+}
+
+// Anisotropic GGX. At anisotropy 0 the two roughnesses are equal and this
+// reduces to the isotropic form mathematically, but NOT bit-exactly, which
+// is why `fs_main` keeps the isotropic path rather than routing everything
+// through here.
+fn D_GGX_aniso(NdotH: f32, TdotH: f32, BdotH: f32, at: f32, ab: f32) -> f32 {
+    let a2 = at * ab;
+    let f = vec3(ab * TdotH, at * BdotH, a2 * NdotH);
+    let w2 = a2 / dot(f, f);
+    return a2 * w2 * w2 / PI;
+}
+
+fn V_GGX_aniso(
+    NdotL: f32, NdotV: f32,
+    TdotV: f32, BdotV: f32, TdotL: f32, BdotL: f32,
+    at: f32, ab: f32,
+) -> f32 {
+    let lv = NdotL * length(vec3(at * TdotV, ab * BdotV, NdotV));
+    let ll = NdotV * length(vec3(at * TdotL, ab * BdotL, NdotL));
+    return 0.5 / max(lv + ll, 1e-6);
+}
+
+// Charlie distribution and its matching visibility term: the sheen lobe
+// that gives fabric its retroreflective rim. The rational fits are the
+// ones the sheen specification gives.
+fn D_Charlie(roughness: f32, NdotH: f32) -> f32 {
+    let alpha = max(roughness * roughness, 1e-6);
+    let inv = 1.0 / alpha;
+    let sin2h = max(1.0 - NdotH * NdotH, 1e-7);
+    return (2.0 + inv) * pow(sin2h, inv * 0.5) / (2.0 * PI);
+}
+
+fn lambda_sheen_helper(x: f32, alpha: f32) -> f32 {
+    let one_minus_sq = sq(1.0 - alpha);
+    let a = mix(21.5473, 25.3245, one_minus_sq);
+    let b = mix(3.82987, 3.32435, one_minus_sq);
+    let c = mix(0.19823, 0.16801, one_minus_sq);
+    let d = mix(-1.97760, -1.27393, one_minus_sq);
+    let e = mix(-4.32054, -4.85967, one_minus_sq);
+    return a / (1.0 + b * pow(max(x, 1e-6), c)) + d * x + e;
+}
+
+fn lambda_sheen(cos_theta: f32, alpha: f32) -> f32 {
+    if abs(cos_theta) < 0.5 {
+        return exp(lambda_sheen_helper(cos_theta, alpha));
+    }
+    return exp(
+        2.0 * lambda_sheen_helper(0.5, alpha)
+            - lambda_sheen_helper(max(1.0 - cos_theta, 1e-6), alpha),
+    );
+}
+
+fn V_Sheen(NdotL: f32, NdotV: f32, roughness: f32) -> f32 {
+    let alpha = max(roughness * roughness, 1e-6);
+    let denom = (1.0 + lambda_sheen(NdotV, alpha) + lambda_sheen(NdotL, alpha))
+        * (4.0 * NdotV * NdotL);
+    return clamp(1.0 / max(denom, 1e-6), 0.0, 1.0);
+}
+
+/// How much the base layer survives under the sheen lobe.
+///
+/// The specification scales the base by the sheen lobe's directional
+/// albedo, which its reference implementation reads from a lookup table.
+/// A table is a scene-level texture binding, and this pass is at 10 of the
+/// 16 sampled textures core WebGPU guarantees with the remainder already
+/// spoken for, so the scaling uses a compact analytic stand-in instead: it
+/// is monotonic in roughness, strongest at grazing angles, and reaches
+/// unity as the sheen colour goes to black. It is a stand-in, named as one
+/// here and in the parameter help, and the honest place to replace it is
+/// alongside the path tracer.
+fn sheen_albedo_scaling(NdotV: f32, NdotL: f32) -> f32 {
+    let strongest = max(
+        material.sheen_color.r,
+        max(material.sheen_color.g, material.sheen_color.b),
+    );
+    let alpha = max(material.sheen_roughness * material.sheen_roughness, 1e-6);
+    let at_v = alpha * (1.0 - NdotV * NdotV);
+    let at_l = alpha * (1.0 - NdotL * NdotL);
+    return clamp((1.0 - strongest * at_v) * (1.0 - strongest * at_l), 0.0, 1.0);
+}
+
+// --- Thin-film interference (iridescence) ---
+//
+// Belcour and Barla's airy-summation model, the one the iridescence
+// specification carries in its appendix. The spectral response is
+// integrated against three Gaussian-fitted sensitivity curves in XYZ and
+// converted to linear sRGB, which is why the constants below look like
+// nothing else in this file: they are the fit, not tunable values.
+
+const XYZ_TO_REC709: mat3x3<f32> = mat3x3<f32>(
+    vec3<f32>(3.2404542, -0.9692660, 0.0556434),
+    vec3<f32>(-1.5371385, 1.8760108, -0.2040259),
+    vec3<f32>(-0.4985314, 0.0415560, 1.0572252),
+);
+
+fn ior_to_f0(transmitted: f32, incident: f32) -> f32 {
+    return sq((transmitted - incident) / (transmitted + incident));
+}
+
+fn ior_to_f0_rgb(transmitted: vec3<f32>, incident: f32) -> vec3<f32> {
+    let d = (transmitted - vec3(incident)) / (transmitted + vec3(incident));
+    return d * d;
+}
+
+fn f0_to_ior(f0: vec3<f32>) -> vec3<f32> {
+    let root = sqrt(f0);
+    return (vec3(1.0) + root) / max(vec3(1.0) - root, vec3(1e-5));
+}
+
+fn eval_sensitivity(opd: f32, shift: vec3<f32>) -> vec3<f32> {
+    let phase = 2.0 * PI * opd * 1.0e-9;
+    let val = vec3(5.4856e-13, 4.4201e-13, 5.2481e-13);
+    let pos = vec3(1.6810e+06, 1.7953e+06, 2.2084e+06);
+    let var_ = vec3(4.3278e+09, 9.3046e+09, 6.6121e+09);
+
+    var xyz = val * sqrt(2.0 * PI * var_) * cos(pos * phase + shift)
+        * exp(-sq(phase) * var_);
+    xyz.x += 9.7470e-14 * sqrt(2.0 * PI * 4.5282e+09)
+        * cos(2.2399e+06 * phase + shift.x) * exp(-4.5282e+09 * sq(phase));
+    xyz /= 1.0685e-7;
+    return XYZ_TO_REC709 * xyz;
+}
+
+fn eval_iridescence(outer_ior: f32, film_ior: f32, cos_theta1: f32,
+                    thickness: f32, base: vec3<f32>) -> vec3<f32> {
+    // Fold the film back into the surrounding medium as thickness goes to
+    // zero, so the effect fades in rather than switching on.
+    let iri_ior = mix(outer_ior, film_ior, smoothstep(0.0, 0.03, thickness));
+    let sin_theta2_sq = sq(outer_ior / iri_ior) * (1.0 - sq(cos_theta1));
+    let cos_theta2_sq = 1.0 - sin_theta2_sq;
+    if cos_theta2_sq < 0.0 {
+        // Total internal reflection.
+        return vec3(1.0);
+    }
+    let cos_theta2 = sqrt(cos_theta2_sq);
+
+    // First interface, medium to film.
+    let r12 = F_schlick(cos_theta1, vec3(ior_to_f0(iri_ior, outer_ior))).x;
+    let t121 = 1.0 - r12;
+    var phi12 = 0.0;
+    if iri_ior < outer_ior {
+        phi12 = PI;
+    }
+    let phi21 = PI - phi12;
+
+    // Second interface, film to base.
+    let base_ior = f0_to_ior(clamp(base, vec3(0.0), vec3(0.9999)));
+    let r23 = F_schlick(cos_theta2, ior_to_f0_rgb(base_ior, iri_ior));
+    var phi23 = vec3(0.0);
+    if base_ior.x < iri_ior { phi23.x = PI; }
+    if base_ior.y < iri_ior { phi23.y = PI; }
+    if base_ior.z < iri_ior { phi23.z = PI; }
+
+    let opd = 2.0 * iri_ior * thickness * cos_theta2;
+    let phi = vec3(phi21) + phi23;
+
+    let r123 = clamp(r12 * r23, vec3(1e-5), vec3(0.9999));
+    let r123_root = sqrt(r123);
+    let rs = sq(t121) * r23 / (vec3(1.0) - r123);
+
+    // The DC term, then two pairs of diracs. Two is where the series has
+    // visually converged for the thickness range this exposes.
+    var result = r12 + rs;
+    var cm = rs - t121;
+    for (var m = 1; m <= 2; m++) {
+        cm *= r123_root;
+        result += cm * 2.0 * eval_sensitivity(f32(m) * opd, f32(m) * phi);
+    }
+    return max(result, vec3(0.0));
 }
 
 // --- Rect-area lights, via linearly transformed cosines ---
@@ -527,8 +794,48 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         N = N_world;
     }
 
-    let F0 = mix(vec3(0.04), albedo, metallic);
     let NdotV_ibl = max(dot(N_world, V_world), 0.001);
+
+    // The base reflectance every path below shares. Iridescence is a
+    // modification of it rather than a lobe of its own: a thin film changes
+    // what fraction reflects at each wavelength, so it belongs here where
+    // the direct, image-based and area-light paths all pick it up.
+    var F0 = base_f0(albedo, metallic);
+    if material.iridescence > 0.0 {
+        let film = eval_iridescence(
+            1.0,
+            material.iridescence_ior,
+            NdotV_ibl,
+            material.iridescence_thickness_max,
+            F0,
+        );
+        F0 = mix(F0, film, material.iridescence);
+    }
+
+    // The frame the anisotropic lobe stretches along. `transpose(tbn)` is
+    // mat3x3(T, B, N), so its first two columns are the world-space
+    // tangent and bitangent; the material's rotation turns them within the
+    // tangent plane. A mesh with no usable tangents yields a degenerate
+    // frame, so fall back to the geometric normal's basis rather than
+    // normalizing a zero vector into NaN.
+    let t2w = transpose(tbn);
+    var aniso_tangent = t2w[0];
+    var aniso_bitangent = t2w[1];
+    if dot(aniso_tangent, aniso_tangent) < 1e-8 {
+        aniso_tangent = normalize(cross(N_world, vec3(0.0, 0.0, 1.0)) + vec3(1e-6, 0.0, 0.0));
+        aniso_bitangent = cross(N_world, aniso_tangent);
+    } else {
+        aniso_tangent = normalize(aniso_tangent);
+        aniso_bitangent = normalize(aniso_bitangent);
+    }
+    if material.anisotropy_rotation != 0.0 {
+        let c = cos(material.anisotropy_rotation);
+        let s = sin(material.anisotropy_rotation);
+        let rotated_t = c * aniso_tangent + s * aniso_bitangent;
+        aniso_bitangent = c * aniso_bitangent - s * aniso_tangent;
+        aniso_tangent = rotated_t;
+    }
+
     let F_ibl = F_schlick(NdotV_ibl, F0);
     let kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
     let ibl_n = rotate_yaw(N_world, camera.hdri_rotation);
@@ -568,7 +875,74 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let hemi_up = clamp(N_world.y * 0.5 + 0.5, 0.0, 1.0);
     let hemi = mix(hemi_ground, hemi_sky, hemi_up) * albedo / PI;
 
-    let ambient = (diffuse_ibl + specular_ibl + hemi) * ao;
+    var ambient = (diffuse_ibl + specular_ibl + hemi) * ao;
+
+    // The principled layers over the image-based term. Each is guarded on
+    // its own factor and skipped entirely for the stylized looks, which
+    // define themselves by NOT being physically layered. Model 0 is the
+    // PBR arm, so this one test excludes matcap, toon, unlit, both clays,
+    // chrome and silhouette at once, and it is uniform across a draw
+    // because it reads only the material uniform and the viewport override.
+    let is_principled = camera.material_override == 0u && model_id == 0u;
+
+    if is_principled && material.transmission > 0.0 {
+        // Refract the environment. The specification's reference
+        // implementation copies the framebuffer so glass shows the scene
+        // behind it; this forward path has no such copy, and adding one is
+        // a pass, not a shader edit. So glass reads correctly against an
+        // environment and does not show objects behind it. Named in the
+        // parameter help rather than left to be discovered, and removed
+        // rather than approximated better by the path tracer.
+        let eta = 1.0 / max(material.ior, 1.0);
+        let refracted = refract(-V_world, N_world, eta);
+        let refr_dir = rotate_yaw(refracted, camera.hdri_rotation);
+        var through = textureSampleLevel(
+            t_prefiltered, s_prefiltered, refr_dir, mip_level).rgb;
+
+        // Beer-Lambert absorption over the volume's thickness.
+        if material.attenuation_distance > 0.0 {
+            let tint = clamp(material.attenuation_color, vec3(1e-4), vec3(1.0));
+            let sigma = -log(tint) / material.attenuation_distance;
+            through *= exp(-sigma * max(material.thickness, 0.0));
+        }
+
+        // Transmission replaces the diffuse lobe, not the specular one:
+        // light either scatters back out or passes through.
+        ambient = mix(ambient, through * lights.ibl_intensity + specular_ibl * ao,
+                      material.transmission);
+    }
+
+    if is_principled && material.sheen_color.r + material.sheen_color.g
+        + material.sheen_color.b > 0.0 {
+        // Sheen's image-based term, taken from the diffuse irradiance
+        // rather than a second prefiltered chain: the Charlie lobe is wide
+        // and low-frequency, so the irradiance map is already close to its
+        // convolution, and a second chain would cost a texture binding
+        // this pass does not have.
+        let scale = sheen_albedo_scaling(NdotV_ibl, NdotV_ibl);
+        ambient = ambient * scale
+            + irradiance * material.sheen_color * lights.ibl_intensity * ao;
+    }
+
+    if is_principled && material.clearcoat > 0.0 {
+        // A second specular lobe at the coat's own roughness, over a fixed
+        // index of refraction of 1.5. The coat both adds its own
+        // reflection and attenuates everything under it by what it
+        // reflects away.
+        let coat_mip = material.clearcoat_roughness * MAX_REFLECTION_LOD;
+        let coat_env = textureSampleLevel(
+            t_prefiltered, s_prefiltered, ibl_r, coat_mip).rgb;
+        let coat_brdf = textureSampleLevel(
+            t_brdf_lut,
+            s_brdf_lut,
+            vec2(NdotV_ibl, material.clearcoat_roughness),
+            0.0,
+        ).rg;
+        let coat_f = F_schlick(NdotV_ibl, vec3(0.04)).x * material.clearcoat;
+        ambient = ambient * (1.0 - coat_f)
+            + coat_env * (0.04 * coat_brdf.x + coat_brdf.y)
+                * material.clearcoat * lights.ibl_intensity;
+    }
 
     let proj = in.light_clip_pos.xyz / in.light_clip_pos.w;
     let uv = proj.xy * vec2(0.5, -0.5) + 0.5;
@@ -639,12 +1013,61 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         N, V_world, in.world_position, m_inv, corners, two_sided);
 
                     // Hill's LTC Fresnel: the table's magnitude and Fresnel
-                    // terms rebuild what the split-sum path would have given.
-                    let F0 = mix(vec3(0.04), albedo, metallic);
+                    // terms rebuild what the split-sum path would have
+                    // given. F0 is the shared one, so the index of
+                    // refraction, the specular tint and any thin film
+                    // reach area lights exactly as they reach the rest.
                     let fresnel = F0 * t2.x + (vec3(1.0) - F0) * t2.y;
                     let kD = (1.0 - metallic);
-                    radiance_acc += light.color * scale
-                        * (kD * albedo / PI * diffuse + fresnel * specular);
+                    var lit = kD * albedo / PI * diffuse + fresnel * specular;
+
+                    if is_principled {
+                        let NdotV_a = max(dot(N, V_world), 0.001);
+
+                        // Sheen has no published fit for the linearly
+                        // transformed cosine, so it evaluates against the
+                        // panel's dominant direction and is scaled by the
+                        // rectangle's own form factor. It degrades to the
+                        // point-light answer as the panel shrinks, which is
+                        // the same stand-in the toon arm above makes for
+                        // the same reason.
+                        if material.sheen_color.r + material.sheen_color.g
+                            + material.sheen_color.b > 0.0 {
+                            let to_center = normalize(light_pos - in.world_position);
+                            let Hs = normalize(V_world + to_center);
+                            let NdotL_a = max(dot(N, to_center), 0.001);
+                            let sheen = material.sheen_color
+                                * D_Charlie(material.sheen_roughness, max(dot(N, Hs), 0.0))
+                                * V_Sheen(NdotL_a, NdotV_a, material.sheen_roughness);
+                            lit = lit * sheen_albedo_scaling(NdotV_a, NdotL_a)
+                                + sheen * diffuse;
+                        }
+
+                        // Clearcoat DOES have a linearly transformed
+                        // cosine: it is a GGX lobe, so it is the same
+                        // machinery sampled a second time at the coat's
+                        // roughness. This is real parity, not a stand-in.
+                        if material.clearcoat > 0.0 {
+                            let coat_r = clamp(material.clearcoat_roughness, 0.04, 1.0);
+                            let coat_uv = ltc_uv(dot(N, V_world), coat_r);
+                            let c1 = textureSampleLevel(t_ltc_transform, s_ltc, coat_uv, 0.0);
+                            let c2 = textureSampleLevel(t_ltc_magnitude, s_ltc, coat_uv, 0.0);
+                            let coat_inv = mat3x3<f32>(
+                                vec3<f32>(c1.x, 0.0, c1.y),
+                                vec3<f32>(0.0, 1.0, 0.0),
+                                vec3<f32>(c1.z, 0.0, c1.w),
+                            );
+                            let coat_spec = ltc_evaluate(
+                                N, V_world, in.world_position, coat_inv, corners, two_sided);
+                            let coat_f0 = vec3(0.04);
+                            let coat_fresnel = coat_f0 * c2.x + (vec3(1.0) - coat_f0) * c2.y;
+                            let attenuate = F_schlick(NdotV_a, coat_f0).x * material.clearcoat;
+                            lit = lit * (1.0 - attenuate)
+                                + coat_fresnel * coat_spec * material.clearcoat;
+                        }
+                    }
+
+                    radiance_acc += light.color * scale * lit;
                 }
                 continue;
             }
@@ -688,10 +1111,46 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let shadow_factor = select(1.0, shadow, light.shadowed > 0.5);
             let scale = light.intensity * 3.0 * atten * shadow_factor;
             var brdf = select(
-                cook_torrance(N, V_world, L, albedo, roughness, metallic),
+                cook_torrance(
+                    N, V_world, L, albedo, roughness, metallic,
+                    F0, aniso_tangent, aniso_bitangent,
+                ),
                 lambert_direct(N, L, albedo),
                 is_clay,
             );
+
+            // The principled layers, on the same light. Sheen scales what
+            // is under it and adds its own lobe; the coat reflects a
+            // fraction away and adds its own on top. Same order as the
+            // image-based path above, so a surface reads consistently
+            // whether it is lit by an environment or by a light node.
+            if is_principled {
+                let NdotL_p = max(dot(N, L), 0.001);
+                let NdotV_p = max(dot(N, V_world), 0.001);
+                let H = normalize(V_world + L);
+
+                if material.sheen_color.r + material.sheen_color.g
+                    + material.sheen_color.b > 0.0 {
+                    let NdotH = max(dot(N, H), 0.0);
+                    let sheen = material.sheen_color
+                        * D_Charlie(material.sheen_roughness, NdotH)
+                        * V_Sheen(NdotL_p, NdotV_p, material.sheen_roughness);
+                    brdf = brdf * sheen_albedo_scaling(NdotV_p, NdotL_p)
+                        + sheen * NdotL_p;
+                }
+
+                if material.clearcoat > 0.0 {
+                    let NdotH = max(dot(N, H), 0.0);
+                    let HdotV = max(dot(H, V_world), 0.0);
+                    let coat_r = clamp(material.clearcoat_roughness, 0.04, 1.0);
+                    let coat_f = F_schlick(HdotV, vec3(0.04)).x * material.clearcoat;
+                    let coat = D_GGX(NdotH, coat_r)
+                        * G_smith(NdotV_p, NdotL_p, coat_r)
+                        / (4.0 * NdotV_p * NdotL_p);
+                    brdf = brdf * (1.0 - coat_f) + vec3(coat * coat_f) * NdotL_p;
+                }
+            }
+
             if is_toon {
                 // Cel shading: quantize the diffuse term into
                 // material.toon_steps bands (a stepped lambert).

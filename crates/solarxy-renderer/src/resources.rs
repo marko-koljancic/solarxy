@@ -194,19 +194,7 @@ pub fn upload_model(
             None,
         )?;
 
-        let uniform = material::MaterialUniform {
-            roughness_factor: mat.roughness_factor,
-            metallic_factor: mat.metallic_factor,
-            ao_strength: mat.occlusion_strength,
-            alpha_cutoff: mat.alpha_cutoff,
-            emissive: mat.emissive_factor,
-            alpha_mode: mat.alpha_mode.into(),
-            material_index: mat_idx as u32,
-            shading_model: mat.shading_model.into(),
-            toon_steps: mat.toon_steps,
-            _pad: 0.0,
-            base_color: mat.base_color_factor,
-        };
+        let uniform = material::MaterialUniform::from_material(mat, mat_idx as u32);
 
         gpu_materials.push(material::Material::new(
             device,
@@ -551,19 +539,7 @@ pub(crate) fn upload_cooked_materials(
             Some(cache),
         )?;
 
-        let uniform = material::MaterialUniform {
-            roughness_factor: mat.roughness_factor,
-            metallic_factor: mat.metallic_factor,
-            ao_strength: mat.occlusion_strength,
-            alpha_cutoff: mat.alpha_cutoff,
-            emissive: mat.emissive_factor,
-            alpha_mode: mat.alpha_mode.into(),
-            material_index: mat_idx as u32,
-            shading_model: mat.shading_model.into(),
-            toon_steps: mat.toon_steps,
-            _pad: 0.0,
-            base_color: mat.base_color_factor,
-        };
+        let uniform = material::MaterialUniform::from_material(mat, mat_idx as u32);
 
         gpu_materials.push(material::Material::new(
             device,
