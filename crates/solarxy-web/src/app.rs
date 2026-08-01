@@ -46,6 +46,7 @@ use crate::display_defaults::{self, DisplayDefaults};
 use crate::gizmo::{self, GizmoState, ToolMode};
 use solarxy_renderer::camera::{turntable_up, Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
 use solarxy_renderer::geometry::build_normals_geometry;
@@ -1553,8 +1554,8 @@ impl SolarxyApp {
             &self.queue,
             bloom,
             ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             pds.inspection_mode,
         );
         self.renderer.post.composite.render(
@@ -3733,12 +3734,13 @@ impl SolarxyApp {
             width,
             height,
         );
-        self.renderer.post.composite.resize(
+        self.renderer.post.composite.rebuild_bind_group(
             &self.device,
             &self.renderer.layouts,
             &self.renderer.targets.hdr_resolve_view,
             &self.renderer.post.bloom.ping_view,
             &self.renderer.post.bloom.sampler,
+            &self.renderer.post.luts,
         );
         let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
         self.renderer.uv_overlap.count_texture = ct;
@@ -3842,8 +3844,8 @@ impl SolarxyApp {
             &self.queue,
             pane_bloom,
             pane_ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             pane_inspection,
         );
         let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
@@ -4397,8 +4399,8 @@ impl SolarxyApp {
             &self.queue,
             false,
             false,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             pds.inspection_mode,
         );
         self.renderer.post.composite.render(

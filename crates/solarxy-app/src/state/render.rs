@@ -15,7 +15,10 @@ use solarxy_core::preferences::{
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
+use super::{
+    BackgroundModeExt, CompositeLook, GradientUniform, Pane, State, WireframeParams,
+    lights_from_camera,
+};
 
 impl State {
     /// Resolve a pane's background choice against the user
@@ -230,8 +233,8 @@ impl State {
             &self.queue,
             pane_bloom,
             pane_ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             pane_inspection,
         );
 

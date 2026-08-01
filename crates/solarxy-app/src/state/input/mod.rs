@@ -30,7 +30,7 @@ use solarxy_core::preferences::{
 };
 use solarxy_renderer::validation::{material_meshes_aabb, resolve_issue_aabb};
 
-use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
+use super::{BackgroundModeExt, BoundsMode, CompositeLook, State, ViewLayout};
 
 /// winit-to-renderer input mapping: the renderer is windowing-agnostic and
 /// consumes its own [`CameraKey`] / [`PointerButton`] enums.
@@ -448,8 +448,8 @@ impl State {
             &self.queue,
             self.renderer.post.bloom_enabled,
             self.renderer.post.ssao_enabled,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             active_inspection,
         );
     }

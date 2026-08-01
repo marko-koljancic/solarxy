@@ -25,6 +25,8 @@ use solarxy_core::preferences::{
 use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::composite::CompositeLook;
+use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::ibl::BrdfLut;
 use solarxy_renderer::scene::{BackgroundModeExt, ModelScene};
@@ -178,7 +180,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         ibl_mode: IblMode::Full,
         uv_checker_png: include_bytes!("../../../res/textures/uv-checker_1k.png"),
     };
-    let renderer = Renderer::new(&device, &queue, &config, &init)
+    let mut renderer = Renderer::new(&device, &queue, &config, &init)
         .map_err(|e| anyhow::anyhow!("Renderer::new: {e}"))?;
 
     let brdf_placeholder = BrdfLut::fallback(&device, &queue);
@@ -241,8 +243,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             &queue,
             false,
             false,
-            ToneMode::AcesFilmic,
-            1.0,
+            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            &renderer.post.luts,
             pds.inspection_mode,
         );
         renderer.post.composite.render(
@@ -282,8 +284,6 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
     // the two must differ; compare it across commits and it gates every
     // lobe at once.
     {
-        use solarxy_renderer::material::MaterialUniform;
-
         for mat in &scene.model.materials {
             let mut uniform = mat.uniform;
             uniform.ior = 1.7;
@@ -325,8 +325,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             &queue,
             false,
             false,
-            ToneMode::AcesFilmic,
-            1.0,
+            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            &renderer.post.luts,
             pds.inspection_mode,
         );
         renderer.post.composite.render(
@@ -352,6 +352,96 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         for mat in &scene.model.materials {
             queue.write_buffer(&mat.uniform_buffer, 0, bytemuck::cast_slice(&[mat.uniform]));
         }
+    }
+
+    // The colour-grading proof, and it exists for exactly the reason the
+    // principled capture above does.
+    //
+    // Every capture in the compare set renders at a neutral look, which is
+    // what makes them useful: grading is an identity at rest, so none of
+    // them may move when it lands. That leaves "does the grading code run
+    // at all?" unanswered, and an inert feature and a missing feature
+    // produce the same pixels.
+    //
+    // So: both slots loaded and a heavy grade, all at once. Not a look
+    // anyone would ship, deliberately, because the job is coverage.
+    {
+        // A table nothing could produce by accident: channels rotated, so
+        // a frame that came through it is unmistakable. Built here rather
+        // than committed, because a 33-cubed .cube is most of a megabyte
+        // of text and this is three lines.
+        let n = 17u32;
+        let last = f32::from(u16::try_from(n - 1).unwrap_or(1));
+        let mut swapped = Vec::with_capacity((n as usize).pow(3) * 3);
+        for b in 0..n {
+            for g in 0..n {
+                for r in 0..n {
+                    swapped.push(f32::from(u16::try_from(b).unwrap_or(0)) / last);
+                    swapped.push(f32::from(u16::try_from(r).unwrap_or(0)) / last);
+                    swapped.push(f32::from(u16::try_from(g).unwrap_or(0)) / last);
+                }
+            }
+        }
+        let rotate = solarxy_core::LutCube::new(n, swapped, [0.0; 3], [1.0; 3]);
+        renderer.set_lut(&device, &queue, LutSlot::A, Some(&rotate));
+        renderer.set_lut(&device, &queue, LutSlot::B, Some(&rotate));
+
+        let look = CompositeLook {
+            tone_mode: ToneMode::AcesFilmic,
+            exposure: 1.3,
+            lift: [0.02, 0.0, -0.01],
+            gamma: [1.1, 1.0, 0.9],
+            gain: [1.0, 1.05, 1.2],
+            lut_a_strength: 0.5,
+            lut_b_strength: 0.75,
+        };
+
+        let pds = modes()[0].1;
+        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Graded Encoder"),
+        });
+        let objects = [scene.draw_object()];
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene.env,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            &pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            &look,
+            &renderer.post.luts,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/graded.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path} (both LUT slots plus lift/gamma/gain)");
+
+        // Clear the slots, so anything captured after this sees the neutral
+        // look the rest of the suite is built on.
+        renderer.set_lut(&device, &queue, LutSlot::A, None);
+        renderer.set_lut(&device, &queue, LutSlot::B, None);
     }
 
     // Extra (not part of the compare set): the multi-object proof — two
@@ -443,8 +533,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             &queue,
             false,
             false,
-            ToneMode::AcesFilmic,
-            1.0,
+            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            &renderer.post.luts,
             pds.inspection_mode,
         );
         renderer.post.composite.render(
@@ -613,8 +703,8 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             &queue,
             false,
             false,
-            ToneMode::AcesFilmic,
-            1.0,
+            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            &renderer.post.luts,
             pds.inspection_mode,
         );
         renderer.post.composite.render(
@@ -654,7 +744,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 /// once every branch in flight carries the capture, and it becomes a hard
 /// gate.
 fn grown_captures() -> &'static [&'static str] {
-    &["topology", "clay", "principled"]
+    &["topology", "clay", "principled", "graded"]
 }
 
 /// Replicates the app's per-pane partial camera-uniform write (inspection

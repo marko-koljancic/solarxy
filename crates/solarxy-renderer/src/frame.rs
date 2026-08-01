@@ -108,6 +108,9 @@ pub struct PostProcessing {
     pub ssao: SsaoState,
     pub ssao_enabled: bool,
     pub composite: CompositeState,
+    /// The colour-grading tables the composite pass samples. They live
+    /// beside `composite` because it is their only consumer.
+    pub luts: crate::lut::LutSlots,
     pub tone_mode: ToneMode,
     pub exposure: f32,
 }
@@ -547,12 +550,15 @@ impl Renderer {
             height,
         );
 
+        let luts = crate::lut::LutSlots::new(device, queue, &shared_samplers.linear_clamp);
+
         let composite = CompositeState::new(
             device,
             &layouts,
             &hdr_resolve_view,
             &bloom.ping_view,
             &bloom.sampler,
+            &luts,
             init.bloom_enabled,
             init.ssao_enabled,
             init.tone_mode,
@@ -692,6 +698,7 @@ impl Renderer {
                 ssao,
                 ssao_enabled: init.ssao_enabled,
                 composite,
+                luts,
                 tone_mode: init.tone_mode,
                 exposure: init.exposure,
             },
@@ -1333,6 +1340,37 @@ impl Renderer {
         }
         queue.write_buffer(&self.light_helper_buf, 0, bytes);
         self.light_helper_count = u32::try_from(lines.len()).unwrap_or(0);
+    }
+
+    /// Points a colour-grading slot at a table, or clears it with `None`.
+    ///
+    /// **The single chokepoint**, in the same spirit as the app's
+    /// `rebuild_light_bind_group`: a bind group captures the texture views
+    /// it was built from, so changing which table a slot binds without
+    /// rebuilding leaves the previous one on screen. Uploading and
+    /// rebuilding therefore happen here together rather than being two
+    /// things a host has to remember to pair.
+    ///
+    /// Deduped on the table's content hash, so a host may call this every
+    /// frame with the same table (which the scene delta encourages, since
+    /// it replaces the whole camera list) for the cost of a comparison.
+    pub fn set_lut(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: crate::lut::LutSlot,
+        cube: Option<&solarxy_core::LutCube>,
+    ) {
+        if self.post.luts.set(device, queue, slot, cube) {
+            self.post.composite.rebuild_bind_group(
+                device,
+                &self.layouts,
+                &self.targets.hdr_resolve_view,
+                &self.post.bloom.ping_view,
+                &self.post.bloom.sampler,
+                &self.post.luts,
+            );
+        }
     }
 
     /// Sets (or clears) the manipulator for this frame. Pull-based, like every

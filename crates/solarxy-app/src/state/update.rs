@@ -333,12 +333,13 @@ impl State {
             width,
             height,
         );
-        self.renderer.post.composite.resize(
+        self.renderer.post.composite.rebuild_bind_group(
             &self.device,
             &self.renderer.layouts,
             &self.renderer.targets.hdr_resolve_view,
             &self.renderer.post.bloom.ping_view,
             &self.renderer.post.bloom.sampler,
+            &self.renderer.post.luts,
         );
         let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
         self.renderer.uv_overlap.count_texture = ct;

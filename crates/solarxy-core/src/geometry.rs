@@ -229,6 +229,128 @@ impl RawImageHdr {
     }
 }
 
+/// The smallest cube edge a lookup table may declare. Two is the degenerate
+/// useful case: one entry per corner, which trilinear filtering turns into a
+/// pure linear remap, and which is exactly what an identity slot needs.
+pub const LUT_MIN_SIZE: u32 = 2;
+
+/// The largest cube edge a lookup table may declare. Well inside core
+/// WebGPU's `max_texture_dimension_3d` of 2048; the cap exists because the
+/// table is `size.pow(3)` entries and a typo in a text file should not turn
+/// into a gigabyte of allocation. 64 cubed is 262,144 entries, comfortably
+/// past the 33 and 65 that grading suites actually export.
+pub const LUT_MAX_SIZE: u32 = 64;
+
+/// The darkest stop the pre-tone-map LUT slot's log encoding reaches.
+///
+/// A three-dimensional table is sampled on 0 to 1, but the value reaching
+/// the pre-tone-map slot is unbounded linear scene light, so something has
+/// to map one onto the other. A log encoding is that something, and it is
+/// also why a table authored for that slot is called a log LUT: a linear
+/// normalization would spend almost all of its resolution on highlights
+/// and leave the shadows banded.
+///
+/// This window, `-10` to `+6.5` stops around mid grey, is the contract a
+/// table in that slot is authored against, and it is stated here rather
+/// than in a shader literal so the renderer and the parameter help that
+/// documents it cannot drift apart.
+pub const LUT_LOG_MIN_STOP: f32 = -10.0;
+
+/// The brightest stop the pre-tone-map LUT slot's log encoding reaches.
+/// See [`LUT_LOG_MIN_STOP`].
+pub const LUT_LOG_MAX_STOP: f32 = 6.5;
+
+/// A decoded three-dimensional colour lookup table.
+///
+/// **Three `f32` per entry, red varying fastest**, so the entry at grid
+/// position `(r, g, b)` occupies `data[((b * size + g) * size + r) * 3 ..][..3]`
+/// and `data.len() == size.pow(3) * 3`. That is the `.cube` format's own
+/// ordering, so the decoder writes the table straight through and the GPU
+/// upload reads it through a cast; nothing on the path copies to reshape it.
+///
+/// `domain_min` and `domain_max` are the input range the table covers, per
+/// the file's `DOMAIN_MIN` / `DOMAIN_MAX` lines, defaulting to 0 and 1. A
+/// sampler normalizes into that window before the lookup, which is the one
+/// place the two LUT slots differ: the pre-tone-map slot log-encodes first,
+/// the display-referred slot does not.
+///
+/// The sibling of [`RawImageHdr`] in every other respect, including the
+/// content hash stamped once at construction: instances are shared behind
+/// `Arc` and deduped on `hash`, so a mutated table would silently keep a
+/// stale GPU upload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LutCube {
+    /// The cube edge, in [`LUT_MIN_SIZE`]`..=`[`LUT_MAX_SIZE`].
+    pub size: u32,
+    pub data: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+    /// FNV-1a over the size, the domain, and the entry bits; see [`Self::new`].
+    pub hash: u64,
+}
+
+impl LutCube {
+    /// Build a table and stamp its content hash.
+    #[must_use]
+    pub fn new(size: u32, data: Vec<f32>, domain_min: [f32; 3], domain_max: [f32; 3]) -> Self {
+        debug_assert_eq!(
+            data.len() as u64,
+            u64::from(size).pow(3) * 3,
+            "LutCube is three floats per entry over a size-cubed grid"
+        );
+        let hash = Self::content_hash(size, &data, domain_min, domain_max);
+        Self {
+            size,
+            data,
+            domain_min,
+            domain_max,
+            hash,
+        }
+    }
+
+    /// The table that changes nothing: every entry is its own coordinate.
+    /// Used for the no-op test and for the texture bound to an empty slot,
+    /// so the shader's bindings are always satisfied and a disabled slot
+    /// needs no pipeline permutation.
+    #[must_use]
+    pub fn identity(size: u32) -> Self {
+        let n = size.clamp(LUT_MIN_SIZE, LUT_MAX_SIZE);
+        let last = (n - 1) as f32;
+        let mut data = Vec::with_capacity((n as usize).pow(3) * 3);
+        for b in 0..n {
+            for g in 0..n {
+                for r in 0..n {
+                    data.push(r as f32 / last);
+                    data.push(g as f32 / last);
+                    data.push(b as f32 / last);
+                }
+            }
+        }
+        Self::new(n, data, [0.0; 3], [1.0; 3])
+    }
+
+    /// FNV-1a 64 over the size, then the domain bounds, then each entry's
+    /// IEEE-754 bit pattern little-endian. Hashing bits rather than the
+    /// backing allocation's bytes keeps the result identical on a big-endian
+    /// target, which matters because this hash is a GPU-cache key.
+    #[must_use]
+    pub fn content_hash(
+        size: u32,
+        data: &[f32],
+        domain_min: [f32; 3],
+        domain_max: [f32; 3],
+    ) -> u64 {
+        let mut h = Fnv1a::over_dimensions(size, size);
+        for bound in domain_min.iter().chain(domain_max.iter()) {
+            h.eat(&bound.to_bits().to_le_bytes());
+        }
+        for sample in data {
+            h.eat(&sample.to_bits().to_le_bytes());
+        }
+        h.finish()
+    }
+}
+
 /// PBR alpha-blending mode for [`RawMaterialData`].
 /// Discriminants match the GPU wire format
 /// (`solarxy-renderer::material::MaterialUniform.alpha_mode: u32`)
@@ -1144,5 +1266,53 @@ mod tests {
             RawImageHdr::content_hash(&[1.0f32, 0.5, 0.25], 1, 1),
             0xc739_37a6_695b_27eb
         );
+    }
+
+    #[test]
+    fn lut_identity_maps_every_entry_to_its_own_coordinate() {
+        // 33 is what grading suites export, so exercise the real shape
+        // rather than only the degenerate 2.
+        let lut = LutCube::identity(33);
+        assert_eq!(lut.size, 33);
+        assert_eq!(lut.data.len(), 33 * 33 * 33 * 3);
+        let last = 32.0f32;
+        for b in 0..33usize {
+            for g in 0..33usize {
+                for r in 0..33usize {
+                    let at = ((b * 33 + g) * 33 + r) * 3;
+                    assert_eq!(
+                        &lut.data[at..at + 3],
+                        &[r as f32 / last, g as f32 / last, b as f32 / last],
+                        "entry ({r}, {g}, {b})"
+                    );
+                }
+            }
+        }
+        // The corners are the ones a sampler reaches at the domain ends.
+        assert_eq!(&lut.data[..3], &[0.0, 0.0, 0.0]);
+        assert_eq!(&lut.data[lut.data.len() - 3..], &[1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn lut_identity_clamps_a_size_it_cannot_build() {
+        assert_eq!(LutCube::identity(0).size, LUT_MIN_SIZE);
+        assert_eq!(LutCube::identity(1).size, LUT_MIN_SIZE);
+        assert_eq!(LutCube::identity(9_999).size, LUT_MAX_SIZE);
+    }
+
+    #[test]
+    fn lut_hash_separates_the_domain_from_the_entries() {
+        // Two tables with identical entries and different domains are
+        // different transforms, and the hash is a GPU-cache key: if it
+        // ignored the domain, changing DOMAIN_MAX would leave the old
+        // upload on screen.
+        let entries = LutCube::identity(2).data;
+        let unit = LutCube::new(2, entries.clone(), [0.0; 3], [1.0; 3]);
+        let wide = LutCube::new(2, entries.clone(), [0.0; 3], [4.0; 3]);
+        assert_ne!(unit.hash, wide.hash);
+
+        let mut altered = entries;
+        altered[0] = 0.5;
+        assert_ne!(unit.hash, LutCube::new(2, altered, [0.0; 3], [1.0; 3]).hash);
     }
 }

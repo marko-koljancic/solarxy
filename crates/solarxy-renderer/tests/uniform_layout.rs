@@ -76,6 +76,18 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::material::MaterialUniform>(),
         rust_type: "solarxy_renderer::material::MaterialUniform",
     },
+    // `composite.wgsl` declares this one whole. It was absent while the
+    // struct was eight scalars and nothing could misalign; the colour
+    // grade appended seven `vec3`-carrying blocks and made it exactly the
+    // shape the two entries above are here for. The composite pass is also
+    // the worst place to get this wrong: it is the last pass in every
+    // pane's encoder, so a rejected binding discards the whole frame.
+    Case {
+        shader: "composite.wgsl",
+        struct_name: "CompositeParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::composite::CompositeParams>(),
+        rust_type: "solarxy_renderer::composite::CompositeParams",
+    },
 ];
 
 fn shader_source(name: &str) -> String {

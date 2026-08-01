@@ -35,11 +35,12 @@
 pub mod export;
 pub mod gltf;
 pub mod hdr;
+pub mod lut;
 pub mod obj;
 pub mod ply;
 pub mod stl;
 
-pub use solarxy_core::{RawImageData, RawImageHdr, RawMaterialData, RawMeshData, RawModelData};
+pub use solarxy_core::{LutCube, RawImageData, RawImageHdr, RawMaterialData, RawMeshData, RawModelData};
 
 /// Errors produced by the format loaders.
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +78,14 @@ pub enum FormatsError {
          file; import or place it alongside the model"
     )]
     MissingAsset(String),
+    /// A `.cube` colour lookup table that read as text but is not a usable
+    /// table. The line is 1-based and counts the file as written, blank
+    /// lines and comments included, so the number matches what an editor
+    /// shows. Separate from [`Self::Invalid`] because a grading LUT is
+    /// hand-edited far more often than a mesh is, and "line 4108" is the
+    /// difference between a fixable file and a mysterious one.
+    #[error("LUT parse error at line {line}: {message}")]
+    Lut { line: usize, message: String },
     /// Structurally valid file with unusable content (no geometry, missing
     /// required elements).
     #[error("{0}")]
