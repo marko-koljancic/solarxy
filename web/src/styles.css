@@ -3293,6 +3293,26 @@ body.reduce-motion .cook-arc {
   padding-top: 8px;
 }
 
+/* A labelled division inside a tab. The tab strip is a single
+ * non-wrapping row, so a node with many related families (the material
+ * node's five principled ones) needs a level below the tab rather than a
+ * tab each. Styled as a quiet heading, not a second tier of chrome: the
+ * point is to say where a family starts, not to compete with the tab. */
+.param-subgroup {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 4px 0 2px;
+}
+
+/* The first section in a tab needs no separating space; every later one
+ * reads as a break. */
+.param-section + .param-section {
+  margin-top: 10px;
+}
+
 /* ---- Ghost-text viewport controls ---- */
 
 /* These labels float directly on the 3D scene: there is no strip fill, by

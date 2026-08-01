@@ -116,7 +116,12 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
     }
     NodeTypeDescriptor {
         type_id: "principled",
-        version: 1,
+        // v2: the principled surface properties, which arrive here because
+        // this node shares `factor_params` and `MAP_PORTS` with the
+        // geo-side `material` node. Sharing them is the point: the two
+        // cannot describe the same surface differently. Pure additions
+        // filling from registry defaults, so no migration hook.
+        version: 2,
         display_name: "Principled",
         category: Category::Shaders,
         contexts: ContextSet::MAT,

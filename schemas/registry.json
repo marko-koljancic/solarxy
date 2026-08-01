@@ -7120,7 +7120,7 @@
     },
     {
       "typeId": "material",
-      "version": 2,
+      "version": 3,
       "displayName": "Material",
       "category": "shaders",
       "categoryLabel": "Shaders",
@@ -7236,7 +7236,8 @@
         {
           "key": "mode",
           "label": "Mode",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "enum",
           "enumVariants": [
             [
@@ -7260,7 +7261,8 @@
         {
           "key": "material_path",
           "label": "Material Network",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "nodePath",
           "enumVariants": [],
           "accept": [],
@@ -7288,7 +7290,8 @@
         {
           "key": "target",
           "label": "Target Meshes",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -7303,7 +7306,7 @@
         {
           "key": "base_color",
           "label": "Base Color",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -7332,7 +7335,7 @@
         {
           "key": "metallic",
           "label": "Metallic",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -7362,7 +7365,7 @@
         {
           "key": "roughness",
           "label": "Roughness",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -7392,7 +7395,7 @@
         {
           "key": "emissive",
           "label": "Emissive",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -7419,9 +7422,39 @@
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
+          "key": "emissive_strength",
+          "label": "Emissive Strength",
+          "group": "base",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            100.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Multiplies Emissive, so emission can exceed the unit range a colour can express. 1 is no change. Reach for it when a surface should read as a light source rather than as a bright material: past about 1 the tone mapper starts rolling it off, which is what makes it bloom rather than clip."
+        },
+        {
           "key": "material_name",
           "label": "Material Name",
-          "group": "material",
+          "group": "base",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -7432,6 +7465,575 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "What the material is called wherever it is listed. It has no effect on the shading. Empty falls back to `material`. The geo-side `material` node keeps this visible in Reference mode but ignores it there: a referenced network's material carries its own name."
+        },
+        {
+          "key": "clearcoat",
+          "label": "Clearcoat",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+        },
+        {
+          "key": "clearcoat_roughness",
+          "label": "Clearcoat Roughness",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "clearcoat",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How polished the coat is, independent of the surface beneath it. This is the point of a separate coat: a rough, worn base under a mirror-smooth lacquer is a combination one roughness value cannot express."
+        },
+        {
+          "key": "sheen_color",
+          "label": "Sheen Color",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "sheen_roughness",
+          "label": "Sheen Roughness",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How wide the sheen band is. Low keeps it a tight rim at the silhouette; high spreads it across the whole surface for a dusty, powdery look."
+        },
+        {
+          "key": "iridescence",
+          "label": "Iridescence",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "iridescence_ior",
+          "label": "Film IOR",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.3,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Index of refraction of the film itself, not of the surface under it. It sets how strongly the film bends light and so how saturated the interference colours are."
+        },
+        {
+          "key": "iridescence_thickness_min",
+          "label": "Film Thickness Min",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 100.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The low end of the film thickness range, in nanometres. It only matters once a thickness map varies the film across the surface; with no map the maximum is used everywhere."
+        },
+        {
+          "key": "iridescence_thickness_max",
+          "label": "Film Thickness Max",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 400.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The high end of the film thickness range, in nanometres, and the thickness used everywhere when no thickness map is present. This is the dial that chooses which colours appear: a few hundred nanometres is where visible light interferes, and sweeping it walks the whole rainbow."
+        },
+        {
+          "key": "specular_intensity",
+          "label": "Specular",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Scales the reflectance a dielectric has when you look straight at it, the value IOR derives. 1 leaves it alone. Lower it to dull a surface's reflections without making it rougher, which roughness alone cannot do. It has no effect on metals, whose reflectance is the base colour."
+        },
+        {
+          "key": "specular_color",
+          "label": "Specular Color",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Tints that same head-on reflectance. White is untinted and is what almost every real dielectric wants; this exists for the ones that do not, and for matching a reference that was authored with it."
+        },
+        {
+          "key": "anisotropy",
+          "label": "Anisotropy",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+        },
+        {
+          "key": "anisotropy_rotation",
+          "label": "Anisotropy Rotation",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            -360.0,
+            360.0
+          ],
+          "soft": [
+            0.0,
+            360.0
+          ],
+          "step": 1.0,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "anisotropy",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Turns the stretch direction within the surface, for when the brushing runs across the UVs rather than along them."
+        },
+        {
+          "key": "transmission",
+          "label": "Transmission",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+        },
+        {
+          "key": "ior",
+          "label": "IOR",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Index of refraction: how strongly the material bends light, and with it how much reflects at a glancing angle. 1.5 is window glass and the default every surface used before this was exposed. Water is about 1.33, diamond about 2.42. It drives reflectance whether or not the surface transmits."
+        },
+        {
+          "key": "thickness",
+          "label": "Thickness",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How far light travels through the interior, in world units. 0 means the surface is thin-walled, a bubble or a pane with no volume behind it. It only matters alongside Attenuation Distance, which is what turns distance travelled into colour."
+        },
+        {
+          "key": "attenuation_color",
+          "label": "Attenuation Color",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The colour light becomes after travelling Attenuation Distance through the interior. White is no tint. This is why thick green glass is green at its edge and clear at its face: the colour is a property of the distance travelled, not of the surface."
+        },
+        {
+          "key": "attenuation_distance",
+          "label": "Attenuation Distance",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The distance over which light reaches Attenuation Color. Shorter absorbs faster, so a small value tints even thin glass strongly. 0 disables absorption entirely and is the default, which is why a transmissive surface starts out water-clear."
         }
       ],
       "bypass": {
@@ -9073,7 +9675,7 @@
     },
     {
       "typeId": "principled",
-      "version": 1,
+      "version": 2,
       "displayName": "Principled",
       "category": "shaders",
       "categoryLabel": "Shaders",
@@ -9179,7 +9781,7 @@
         {
           "key": "base_color",
           "label": "Base Color",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -9199,7 +9801,7 @@
         {
           "key": "metallic",
           "label": "Metallic",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -9220,7 +9822,7 @@
         {
           "key": "roughness",
           "label": "Roughness",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -9241,7 +9843,7 @@
         {
           "key": "emissive",
           "label": "Emissive",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -9259,9 +9861,30 @@
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
+          "key": "emissive_strength",
+          "label": "Emissive Strength",
+          "group": "base",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            100.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Multiplies Emissive, so emission can exceed the unit range a colour can express. 1 is no change. Reach for it when a surface should read as a light source rather than as a bright material: past about 1 the tone mapper starts rolling it off, which is what makes it bloom rather than clip."
+        },
+        {
           "key": "material_name",
           "label": "Material Name",
-          "group": "material",
+          "group": "base",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -9272,6 +9895,438 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "What the material is called wherever it is listed. It has no effect on the shading. Empty falls back to `material`. The geo-side `material` node keeps this visible in Reference mode but ignores it there: a referenced network's material carries its own name."
+        },
+        {
+          "key": "clearcoat",
+          "label": "Clearcoat",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+        },
+        {
+          "key": "clearcoat_roughness",
+          "label": "Clearcoat Roughness",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "clearcoat",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How polished the coat is, independent of the surface beneath it. This is the point of a separate coat: a rough, worn base under a mirror-smooth lacquer is a combination one roughness value cannot express."
+        },
+        {
+          "key": "sheen_color",
+          "label": "Sheen Color",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "sheen_roughness",
+          "label": "Sheen Roughness",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How wide the sheen band is. Low keeps it a tight rim at the silhouette; high spreads it across the whole surface for a dusty, powdery look."
+        },
+        {
+          "key": "iridescence",
+          "label": "Iridescence",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "iridescence_ior",
+          "label": "Film IOR",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.3,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "Index of refraction of the film itself, not of the surface under it. It sets how strongly the film bends light and so how saturated the interference colours are."
+        },
+        {
+          "key": "iridescence_thickness_min",
+          "label": "Film Thickness Min",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 100.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The low end of the film thickness range, in nanometres. It only matters once a thickness map varies the film across the surface; with no map the maximum is used everywhere."
+        },
+        {
+          "key": "iridescence_thickness_max",
+          "label": "Film Thickness Max",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 400.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The high end of the film thickness range, in nanometres, and the thickness used everywhere when no thickness map is present. This is the dial that chooses which colours appear: a few hundred nanometres is where visible light interferes, and sweeping it walks the whole rainbow."
+        },
+        {
+          "key": "specular_intensity",
+          "label": "Specular",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Scales the reflectance a dielectric has when you look straight at it, the value IOR derives. 1 leaves it alone. Lower it to dull a surface's reflections without making it rougher, which roughness alone cannot do. It has no effect on metals, whose reflectance is the base colour."
+        },
+        {
+          "key": "specular_color",
+          "label": "Specular Color",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Tints that same head-on reflectance. White is untinted and is what almost every real dielectric wants; this exists for the ones that do not, and for matching a reference that was authored with it."
+        },
+        {
+          "key": "anisotropy",
+          "label": "Anisotropy",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+        },
+        {
+          "key": "anisotropy_rotation",
+          "label": "Anisotropy Rotation",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            -360.0,
+            360.0
+          ],
+          "soft": [
+            0.0,
+            360.0
+          ],
+          "step": 1.0,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "anisotropy",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "Turns the stretch direction within the surface, for when the brushing runs across the UVs rather than along them."
+        },
+        {
+          "key": "transmission",
+          "label": "Transmission",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+        },
+        {
+          "key": "ior",
+          "label": "IOR",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Index of refraction: how strongly the material bends light, and with it how much reflects at a glancing angle. 1.5 is window glass and the default every surface used before this was exposed. Water is about 1.33, diamond about 2.42. It drives reflectance whether or not the surface transmits."
+        },
+        {
+          "key": "thickness",
+          "label": "Thickness",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How far light travels through the interior, in world units. 0 means the surface is thin-walled, a bubble or a pane with no volume behind it. It only matters alongside Attenuation Distance, which is what turns distance travelled into colour."
+        },
+        {
+          "key": "attenuation_color",
+          "label": "Attenuation Color",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The colour light becomes after travelling Attenuation Distance through the interior. White is no tint. This is why thick green glass is green at its edge and clear at its face: the colour is a property of the distance travelled, not of the surface."
+        },
+        {
+          "key": "attenuation_distance",
+          "label": "Attenuation Distance",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The distance over which light reaches Attenuation Color. Shorter absorbs faster, so a small value tints even thin glass strongly. 0 disables absorption entirely and is the default, which is why a transmissive surface starts out water-clear."
         }
       ],
       "bypass": {

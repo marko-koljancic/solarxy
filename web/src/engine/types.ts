@@ -396,6 +396,12 @@ export interface ParamSnapshot {
   key: string;
   label: string;
   group: string;
+  /** A labelled division inside the group, rendered as a heading above the
+   * run of params that share it. A group is a tab and the tab strip is a
+   * single non-wrapping row, so a node with many related families needs a
+   * level below the tab rather than a tab each. Absent on params that
+   * declare none. */
+  subgroup?: string;
   paramType: string;
   enumVariants: [string, string][];
   accept: string[];

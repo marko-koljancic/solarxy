@@ -200,6 +200,20 @@ pub struct ParamSpec {
     pub label: String,
     /// Two-level presentation grouping (general, geometry, transform, ...).
     pub group: String,
+    /// An optional labelled division inside the group, rendered as a
+    /// heading above the runs of params that share it.
+    ///
+    /// A group is a tab, and the tab strip is a single non-wrapping row, so
+    /// a node with many related families cannot afford a tab each. The
+    /// material node is the first to hit that: one tab per property family
+    /// overflows the panel, while dropping every property into one flat
+    /// list loses which scalar belongs to which effect. A subgroup keeps
+    /// broad tabs and says where the families start.
+    ///
+    /// Presentation only, exactly like `group`: storage stays flat, keys
+    /// stay unique across the whole node, and a param with no subgroup
+    /// simply renders where it sits.
+    pub subgroup: Option<String>,
     pub ty: ParamType,
     pub default: ParamValue,
     pub range: Option<ParamRange>,
@@ -231,6 +245,7 @@ impl ParamSpec {
             key: key.into(),
             label: label.into(),
             group: group.into(),
+            subgroup: None,
             ty,
             default,
             range: None,
@@ -290,6 +305,14 @@ impl ParamSpec {
     #[must_use]
     pub fn driven_by_port(mut self, port: impl Into<String>) -> Self {
         self.driven_by_port = Some(port.into());
+        self
+    }
+
+    /// Puts this param under a labelled division inside its group. See
+    /// [`ParamSpec::subgroup`] for why the level exists.
+    #[must_use]
+    pub fn subgroup(mut self, subgroup: impl Into<String>) -> Self {
+        self.subgroup = Some(subgroup.into());
         self
     }
 

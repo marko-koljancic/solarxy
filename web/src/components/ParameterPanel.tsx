@@ -41,6 +41,7 @@ import {
 import { nodeLabel } from "../flow/nodeLabel";
 import { nodePathOf } from "../flow/nodeActions";
 import {
+  paramSections,
   paramTabs,
   paramVisible,
   resolveActiveTab,
@@ -645,7 +646,8 @@ export function ParameterPanel({
   // Tabs (Minimystix underline pattern, D1): general first, the
   // rest in declaration order, plus a Validation tab when a report exists.
   const report = reports[node.id];
-  const tabs = paramTabs(desc?.params ?? [], Boolean(report));
+  const isVisible = (p: ParamSnapshot) => paramVisible(p, desc?.params ?? [], node.params);
+  const tabs = paramTabs(desc?.params ?? [], Boolean(report), isVisible);
   const active = resolveActiveTab(tabs, tab);
 
   return (
@@ -695,26 +697,31 @@ export function ParameterPanel({
       <div className="param-body">
         {active !== undefined && active !== VALIDATION_TAB && (
           <div className="param-tab-body" role="tabpanel">
-            {(groups.get(active) ?? [])
-              .filter((p) => paramVisible(p, desc?.params ?? [], node.params))
-              .map((p) => {
-              // Registry-driven map-overrides-factor indicator: a param
-              // declaring drivenByPort dims while that input port is
-              // connected (the map fully drives the channel; the factor
-              // value is preserved for when the map disconnects).
-              const driven =
-                p.drivenByPort != null &&
-                graph.edges.some((e) => e.to === node.id && e.toPort === p.drivenByPort);
-              if (!driven) {
-                return <Field key={p.key} ctx={current} node={node} spec={p} />;
-              }
-              return (
-                <div key={p.key} className="param-driven" title="Driven by the connected input">
-                  <Field ctx={current} node={node} spec={p} />
-                  <div className="param-driven-hint">Driven by connected input</div>
-                </div>
-              );
-            })}
+            {paramSections((groups.get(active) ?? []).filter(isVisible)).map((section, i) => (
+              <div key={section.subgroup ?? `_${i}`} className="param-section">
+                {section.subgroup !== undefined && (
+                  <div className="param-subgroup">{section.subgroup}</div>
+                )}
+                {section.params.map((p) => {
+                  // Registry-driven map-overrides-factor indicator: a param
+                  // declaring drivenByPort dims while that input port is
+                  // connected (the map fully drives the channel; the factor
+                  // value is preserved for when the map disconnects).
+                  const driven =
+                    p.drivenByPort != null &&
+                    graph.edges.some((e) => e.to === node.id && e.toPort === p.drivenByPort);
+                  if (!driven) {
+                    return <Field key={p.key} ctx={current} node={node} spec={p} />;
+                  }
+                  return (
+                    <div key={p.key} className="param-driven" title="Driven by the connected input">
+                      <Field ctx={current} node={node} spec={p} />
+                      <div className="param-driven-hint">Driven by connected input</div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
         {active === VALIDATION_TAB && report && (

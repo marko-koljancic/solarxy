@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ParamSnapshot, ParamSource } from "../engine/types";
 import {
   groupKeys,
+  paramSections,
   paramTabs,
   paramVisible,
   resolveActiveTab,
@@ -133,5 +134,63 @@ describe("paramVisible", () => {
     const specs = [...SPECS, flag, both];
     expect(paramVisible(both, specs, {})).toBe(false);
     expect(paramVisible(both, specs, { flag: lit("bool", true) })).toBe(true);
+  });
+});
+
+describe("paramSections", () => {
+  it("keeps a node that declares no subgroups as one unlabelled run", () => {
+    const specs = [spec({ key: "a" }), spec({ key: "b" })];
+    const sections = paramSections(specs);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].subgroup).toBeUndefined();
+    expect(sections[0].params.map((p) => p.key)).toEqual(["a", "b"]);
+  });
+
+  it("splits consecutive runs and merges neighbours sharing a name", () => {
+    const specs = [
+      spec({ key: "a" }),
+      spec({ key: "b", subgroup: "Clearcoat" }),
+      spec({ key: "c", subgroup: "Clearcoat" }),
+      spec({ key: "d", subgroup: "Sheen" }),
+    ];
+    expect(paramSections(specs).map((s) => [s.subgroup, s.params.map((p) => p.key)])).toEqual([
+      [undefined, ["a"]],
+      ["Clearcoat", ["b", "c"]],
+      ["Sheen", ["d"]],
+    ]);
+  });
+
+  it("reopens a section when a name returns after a different one", () => {
+    // Declaration order is the author's stated intent, so a name coming
+    // back is a second section rather than a reason to reorder the panel.
+    const specs = [
+      spec({ key: "a", subgroup: "One" }),
+      spec({ key: "b", subgroup: "Two" }),
+      spec({ key: "c", subgroup: "One" }),
+    ];
+    expect(paramSections(specs).map((s) => s.subgroup)).toEqual(["One", "Two", "One"]);
+  });
+});
+
+describe("paramTabs visibility", () => {
+  it("drops a tab whose every param is hidden", () => {
+    // Reachable on the material node: switching it to Reference mode hides
+    // every surface factor, and the tabs holding them would otherwise stay
+    // in the strip with nothing under them.
+    const specs = [
+      spec({ key: "mode", group: "base", paramType: "enum", default: "inline" }),
+      spec({
+        key: "clearcoat",
+        group: "surface",
+        showIf: [{ param: "mode", pred: { kind: "eq", value: "inline" } }],
+      }),
+    ];
+    const visibleIn = (mode: string) => (p: ParamSnapshot) =>
+      paramVisible(p, specs, { mode: lit("enum", mode) });
+
+    expect(paramTabs(specs, false, visibleIn("inline"))).toEqual(["base", "surface"]);
+    expect(paramTabs(specs, false, visibleIn("reference"))).toEqual(["base"]);
+    // No predicate keeps every group, which is the pre-existing behaviour.
+    expect(paramTabs(specs, false)).toEqual(["base", "surface"]);
   });
 });
