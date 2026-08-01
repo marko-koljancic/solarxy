@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::aabb::AABB;
-use crate::geometry::{MeshTopology, RawImageHdr, RawMaterialData};
+use crate::geometry::{LutCube, MeshTopology, RawImageHdr, RawMaterialData};
 use crate::validation::ValidationResult;
 
 /// Stable identity of one renderable object in the scene, minted by the
@@ -249,6 +249,116 @@ pub enum CameraKind {
     Physical,
 }
 
+/// The tone-mapping transform the composite pass ends on.
+///
+/// Duplicates the variant set of `preferences::ToneMode`, and does so
+/// deliberately: `CameraDef` names a tone curve, `scene` is ungated, and
+/// `preferences` sits behind the `serde` feature, so the scene contract
+/// cannot reach the one with the serde derives on it. This copy owns the
+/// numbering the shader switches on; `ToneMode` keeps the user-facing
+/// labels, the config-file serialization and the `Shift+T` cycle, and
+/// converts to and from this. A drift test pins the two together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToneCurve {
+    /// Clip to the displayable range and nothing else.
+    None,
+    /// Also a clip; distinct from [`Self::None`] only in name and in what
+    /// a user reads it to mean.
+    Linear,
+    Reinhard,
+    #[default]
+    AcesFilmic,
+}
+
+impl ToneCurve {
+    /// The discriminant `composite.wgsl` switches on. **This function is
+    /// the numbering**; anything else that needs it converts to here
+    /// first, so there is one place a new curve has to be added.
+    #[must_use]
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Linear => 1,
+            Self::Reinhard => 2,
+            Self::AcesFilmic => 3,
+        }
+    }
+}
+
+/// A shot's rendering intent: everything that changes the picture without
+/// changing the scene.
+///
+/// Owned by the camera, which is the point rather than an implementation
+/// detail. A grade that lives in application state is lost the moment the
+/// tab closes and cannot be reviewed by anyone else; a grade that lives on
+/// the camera node saves in the `.slxy`, travels with the shot, and is
+/// visible in the graph beside the framing it belongs to.
+///
+/// [`Default`] is the neutral look, and neutral means **bit-identical**
+/// output rather than merely similar: `tone: None` inherits whatever the
+/// pane was already doing, and the renderer skips the grade entirely at
+/// these values rather than multiplying by one.
+#[derive(Debug, Clone)]
+pub struct CameraLook {
+    /// Linear multiplier applied before tone mapping. 1.0 is as rendered.
+    pub exposure: f32,
+    /// The tone curve to use, or `None` to inherit the pane's own choice.
+    /// Inheriting is the default so that adding a camera to an existing
+    /// scene does not silently restyle it.
+    pub tone: Option<ToneCurve>,
+    /// Added after the tone map: raises or lowers the floor. Neutral 0.
+    pub lift: [f32; 3],
+    /// Applied as a power last. Neutral 1.
+    pub gamma: [f32; 3],
+    /// Multiplied first: scales the ceiling. Neutral 1.
+    pub gain: [f32; 3],
+    /// The pre-tone-map table, sampled on log-encoded light. This is where
+    /// a tone transform goes.
+    pub lut_a: Option<Arc<LutCube>>,
+    pub lut_a_strength: f32,
+    /// The display-referred table, sampled after tone mapping. This is
+    /// where an ordinary look LUT goes.
+    pub lut_b: Option<Arc<LutCube>>,
+    pub lut_b_strength: f32,
+}
+
+impl Default for CameraLook {
+    fn default() -> Self {
+        Self {
+            exposure: 1.0,
+            tone: None,
+            lift: [0.0; 3],
+            gamma: [1.0; 3],
+            gain: [1.0; 3],
+            lut_a: None,
+            lut_a_strength: 1.0,
+            lut_b: None,
+            lut_b_strength: 1.0,
+        }
+    }
+}
+
+/// Compares tables by content hash rather than by contents.
+///
+/// Hand-written because the derived form would compare two 33-cubed
+/// `Vec<f32>` element by element, and `CameraDef` equality is reached once
+/// per camera per delta. The hash is what identity means for a table
+/// everywhere else in the pipeline, including the renderer's upload dedupe.
+impl PartialEq for CameraLook {
+    fn eq(&self, other: &Self) -> bool {
+        let table = |t: &Option<Arc<LutCube>>| t.as_ref().map(|c| c.hash);
+        self.exposure == other.exposure
+            && self.tone == other.tone
+            && self.lift == other.lift
+            && self.gamma == other.gamma
+            && self.gain == other.gain
+            && self.lut_a_strength == other.lut_a_strength
+            && self.lut_b_strength == other.lut_b_strength
+            && table(&self.lut_a) == table(&other.lut_a)
+            && table(&self.lut_b) == table(&other.lut_b)
+    }
+}
+
 /// One camera node's resolved runtime description. Lowered from a `camera`
 /// root node the same way [`LightDef`] is lowered from a light node, and read
 /// back by the host to drive a pane's look-through camera and its wireframe
@@ -275,6 +385,9 @@ pub struct CameraDef {
     pub show_gizmo: bool,
     /// The gizmo's world-space size, in meters.
     pub gizmo_size: f32,
+    /// The shot's rendering intent. A pane looking through this camera
+    /// composites with it; a free pane uses its own.
+    pub look: CameraLook,
 }
 
 /// One scene mutation. Transforms are column-major world matrices; a

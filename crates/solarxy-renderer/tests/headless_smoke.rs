@@ -488,7 +488,15 @@ fn the_two_grading_slots_behave_as_specified() {
             .count()
     }
 
+    // Strengths are explicit: a resolved look defaults to contributing no
+    // table at all (see `CompositeLook`), so a test that wants one has to
+    // ask, exactly as the camera path does.
     let neutral = CompositeLook::default();
+    let full = CompositeLook {
+        lut_a_strength: 1.0,
+        lut_b_strength: 1.0,
+        ..neutral
+    };
     let plain = composite_to_bytes(&renderer, &neutral);
     assert!(
         plain.iter().any(|&b| b != 0),
@@ -502,7 +510,7 @@ fn the_two_grading_slots_behave_as_specified() {
     //    and interpolated, so a sample can land a unit of last place off
     //    before the 8-bit swapchain quantizes it.
     renderer.set_lut(&device, &queue, LutSlot::B, Some(&identity));
-    let through_b = composite_to_bytes(&renderer, &neutral);
+    let through_b = composite_to_bytes(&renderer, &full);
     let diff_b = differing(&plain, &through_b, 1);
     assert_eq!(
         diff_b,
@@ -514,7 +522,7 @@ fn the_two_grading_slots_behave_as_specified() {
     // 2. Zero strength is a no-op no matter what the slot holds.
     let silent = CompositeLook {
         lut_b_strength: 0.0,
-        ..neutral
+        ..full
     };
     let through_silent = composite_to_bytes(&renderer, &silent);
     assert_eq!(
@@ -528,7 +536,7 @@ fn the_two_grading_slots_behave_as_specified() {
     //    doc comment: an identity table there returns the log encoding,
     //    which is a large, obvious change rather than a subtle one.
     renderer.set_lut(&device, &queue, LutSlot::A, Some(&identity));
-    let through_a = composite_to_bytes(&renderer, &neutral);
+    let through_a = composite_to_bytes(&renderer, &full);
     let diff_a = differing(&plain, &through_a, 1);
     assert!(
         diff_a > plain.len() / 10,
@@ -539,7 +547,20 @@ fn the_two_grading_slots_behave_as_specified() {
     );
     renderer.set_lut(&device, &queue, LutSlot::A, None);
 
-    // 4. Clearing both slots returns exactly the original frame, which is
+    // 4. A table bound for one pane must not leak into a path that did not
+    //    ask for one. The slots are renderer-global and the look is per
+    //    pane, so this is what keeps a graded viewport out of the asset
+    //    preview and out of every golden capture.
+    renderer.set_lut(&device, &queue, LutSlot::B, Some(&identity));
+    let unasked = composite_to_bytes(&renderer, &neutral);
+    assert_eq!(
+        differing(&plain, &unasked, 0),
+        0,
+        "a bound table applied to a look that requested none"
+    );
+    renderer.set_lut(&device, &queue, LutSlot::B, None);
+
+    // 5. Clearing both slots returns exactly the original frame, which is
     //    what makes the grade safe to leave wired up.
     let cleared = composite_to_bytes(&renderer, &neutral);
     assert_eq!(

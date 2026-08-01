@@ -1,21 +1,206 @@
 //! The `camera` root node: a viewport
 //! camera the user authors in the graph and looks through per pane.
 //!
-//! Portless, root-context, `Mute`-bypassable, and cooks passively: its
-//! `CameraDef` is resolved directly from its params by the engine's scene
-//! builder (`engine::scene`), exactly like a light's `LightDef`, never carried
-//! on a wire. Three kinds (perspective / orthographic / physical); physical
-//! derives its FOV from a focal length and sensor width. Not a geometry node:
-//! no ports, no material. The render/turntable-export consumer the catalog's
-//! camera deferral was waiting on now exists.
+//! Portless, root-context, `Mute`-bypassable: its `CameraDef` is resolved
+//! directly from its params by the engine's scene builder (`engine::scene`),
+//! exactly like a light's `LightDef`, never carried on a wire. Three kinds
+//! (perspective / orthographic / physical); physical derives its FOV from a
+//! focal length and sensor width. Not a geometry node: no ports, no material.
+//! The render/turntable-export consumer the catalog's camera deferral was
+//! waiting on now exists.
+//!
+//! It also owns the shot's **look**: exposure, tone mapper, lift/gamma/gain,
+//! and two colour-grading LUT slots. That is why it has a cook at all, having
+//! been passive until 0.8.2. A `.cube` table has to be decoded somewhere, and
+//! the cook is the right somewhere: it runs when the node changes rather than
+//! when a delta is built, and the driver caches the result per node. The
+//! decoded tables reach `CameraDef` through the cook's side channel, the same
+//! route the environment node's HDRI takes and for the same reason, which is
+//! that neither has a wire to travel on.
 
-use super::common::{general_params, passive_cook};
+use std::sync::Arc;
+
+use super::common::general_params;
+use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::param_spec::{EnumVariant, ParamSpec, ParamType, Pred, Unit};
+use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor};
 
 fn kind_is(variant: &str) -> Pred {
     Pred::Eq(ParamValue::Enum(variant.to_string()))
+}
+
+/// The `tone` variant meaning "leave the pane's own tone mapper alone".
+/// The default, so adding a camera to an existing scene never restyles it.
+pub const TONE_INHERIT: &str = "inherit";
+
+/// The camera's `look` group: exposure, tone, grade, and the two lookup
+/// table slots.
+///
+/// Grouped under one tab with subgroups rather than a tab each, for the
+/// reason the material node's layout records: the tab strip is a single
+/// non-wrapping row, and three more tabs overflow it.
+fn look_params() -> Vec<ParamSpec> {
+    vec![
+        ParamSpec::new(
+            "exposure",
+            "Exposure",
+            "look",
+            ParamType::Float,
+            ParamValue::Float(1.0),
+        )
+        .subgroup("Tone")
+        .hard(0.01, 64.0)
+        .soft(0.1, 8.0)
+        .doc(
+            "Linear multiplier on the whole image before tone mapping, so 2 \
+             is one stop brighter and 0.5 one stop darker. This is the first \
+             control to reach for when a render is broadly too dark or too \
+             bright, ahead of touching light intensities, because it moves \
+             the exposure of the shot rather than the lighting of the scene.",
+        ),
+        ParamSpec::new(
+            "tone",
+            "Tone Map",
+            "look",
+            ParamType::Enum {
+                variants: vec![
+                    EnumVariant::new(TONE_INHERIT, "Inherit from pane"),
+                    EnumVariant::new("none", "None (clip)"),
+                    EnumVariant::new("linear", "Linear"),
+                    EnumVariant::new("reinhard", "Reinhard"),
+                    EnumVariant::new("aces", "ACES Filmic"),
+                ],
+            },
+            ParamValue::Enum(TONE_INHERIT.to_string()),
+        )
+        .subgroup("Tone")
+        .doc(
+            "How high dynamic range is brought down to what a screen can \
+             show. Inherit leaves the pane's own choice alone, which is the \
+             default so that adding a camera never silently restyles a scene. \
+             Set it to None when the Pre-Tonemap LUT below carries a full \
+             tone transform such as ACES or AgX, because applying both would \
+             tone map the image twice.",
+        ),
+        ParamSpec::new(
+            "lift",
+            "Lift",
+            "look",
+            ParamType::Vec3,
+            ParamValue::Vec3([0.0; 3]),
+        )
+        .subgroup("Grade")
+        .hard(-1.0, 1.0)
+        .soft(-0.25, 0.25)
+        .doc(
+            "Raises or lowers the darkest part of the image, per channel, \
+             after tone mapping. Positive values lift the blacks towards grey \
+             for a faded or filmic base; negative values crush them. Because \
+             it is an addition rather than a multiplication it moves the \
+             shadows far more than the highlights, which is what separates it \
+             from Gain.",
+        ),
+        ParamSpec::new(
+            "gamma",
+            "Gamma",
+            "look",
+            ParamType::Vec3,
+            ParamValue::Vec3([1.0; 3]),
+        )
+        .subgroup("Grade")
+        .hard(0.01, 10.0)
+        .soft(0.4, 2.5)
+        .doc(
+            "Bends the midtones per channel without moving black or white: \
+             above 1 brightens them, below 1 darkens them. This is the \
+             control for an image whose ends are right and whose middle is \
+             not, and the one to reach for when a colour cast sits in the \
+             midtones rather than across the whole frame. 1 is neutral.",
+        ),
+        ParamSpec::new(
+            "gain",
+            "Gain",
+            "look",
+            ParamType::Vec3,
+            ParamValue::Vec3([1.0; 3]),
+        )
+        .subgroup("Grade")
+        .hard(0.0, 10.0)
+        .soft(0.0, 3.0)
+        .doc(
+            "Multiplies each channel, which moves the highlights most and \
+             leaves black at black. Use it to set the white point or to warm \
+             and cool an image by pushing the red and blue channels apart. \
+             1 is neutral on every channel.",
+        ),
+        ParamSpec::new(
+            "lut_a",
+            "Pre-Tonemap LUT",
+            "look",
+            ParamType::AssetRef {
+                accept: [".cube"].iter().map(ToString::to_string).collect(),
+            },
+            ParamValue::Asset(crate::params::AssetId(String::new())),
+        )
+        .subgroup("Lookup tables")
+        .doc(
+            "A `.cube` table applied BEFORE tone mapping, on log-encoded \
+             scene light. This is the slot for a full tone transform such as \
+             ACES or AgX, which replaces the tone mapper rather than \
+             decorating it, so set Tone Map to None when you load one here. \
+             An ordinary look LUT belongs in the slot below and will look \
+             wrong in this one.",
+        ),
+        ParamSpec::new(
+            "lut_a_strength",
+            "Pre-Tonemap Amount",
+            "look",
+            ParamType::Float,
+            ParamValue::Float(1.0),
+        )
+        .subgroup("Lookup tables")
+        .hard(0.0, 1.0)
+        .doc(
+            "How far to blend towards the pre-tonemap table, from 0 for none \
+             of it to 1 for all of it. Mostly useful for checking what the \
+             table is doing by sliding it off and on; a tone transform is \
+             usually wanted at full strength.",
+        ),
+        ParamSpec::new(
+            "lut_b",
+            "Look LUT",
+            "look",
+            ParamType::AssetRef {
+                accept: [".cube"].iter().map(ToString::to_string).collect(),
+            },
+            ParamValue::Asset(crate::params::AssetId(String::new())),
+        )
+        .subgroup("Lookup tables")
+        .doc(
+            "A `.cube` table applied AFTER tone mapping, on the finished \
+             image. This is the slot for the look LUTs people already own \
+             from a grading suite, which are authored against a \
+             display-referred picture. A tone transform belongs in the slot \
+             above and will look wrong in this one.",
+        ),
+        ParamSpec::new(
+            "lut_b_strength",
+            "Look Amount",
+            "look",
+            ParamType::Float,
+            ParamValue::Float(1.0),
+        )
+        .subgroup("Lookup tables")
+        .hard(0.0, 1.0)
+        .doc(
+            "How far to blend towards the look table, from 0 for none of it \
+             to 1 for all of it. Unlike the pre-tonemap slot this one is \
+             routinely dialled back: a look at half strength is a common way \
+             to keep its character without its full contrast.",
+        ),
+    ]
 }
 
 #[must_use]
@@ -238,10 +423,16 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
              it swamps a small one.",
         ),
     ]);
+    params.extend(look_params());
 
     NodeTypeDescriptor {
         type_id: "camera",
-        version: 1,
+        // v2 added the `look` group. A pure addition: every new param fills
+        // from its registry default and every default is the identity of
+        // its effect (exposure 1, neutral grade, no table, tone inherited),
+        // so a v1 camera renders exactly as it did and needs no migration
+        // hook.
+        version: 2,
         display_name: "Camera",
         category: Category::Cameras,
         contexts: ContextSet::OBJ,
@@ -271,9 +462,45 @@ pub fn camera_descriptor() -> NodeTypeDescriptor {
         search_aliases: &["camera", "view", "cam", "lens"],
         glyph: "camera",
         role: NodeRole::Camera,
-        cook: passive_cook,
+        cook: cook_camera,
         migrate: None,
     }
+}
+
+/// Decodes whatever `.cube` tables the two look slots point at.
+///
+/// The camera is still passive in the sense that matters: it produces no
+/// output value and nothing downstream reads it. This exists only because
+/// a table has to be decoded somewhere, and the cook is the right
+/// somewhere: it runs when the node changes rather than when a delta is
+/// built, and the driver caches the result per node. Decoding in the
+/// lowering instead would re-parse most of a megabyte of text on every
+/// frame that touched the scene.
+///
+/// Both slots decode inline on the web path as well as natively, unlike
+/// the environment's HDRI which parks on a worker job. A `.cube` is small
+/// ASCII and parses in well under a millisecond, so a job would cost a
+/// round trip to save nothing.
+fn cook_camera(
+    p: &ResolvedParams,
+    _in: &Inputs,
+    cx: &mut CookCtx,
+) -> Result<CookOutcome, CookError> {
+    for (slot, key) in [(0usize, "lut_a"), (1usize, "lut_b")] {
+        let Some(asset) = p.asset(key) else {
+            continue;
+        };
+        let entry = cx.assets.get(asset).ok_or_else(|| CookError::Failed {
+            message: format!("the table referenced by {key} is not staged"),
+        })?;
+        let table = solarxy_formats::lut::decode_cube_bytes(&entry.bytes).map_err(|e| {
+            CookError::Failed {
+                message: format!("{}: {e}", entry.name),
+            }
+        })?;
+        cx.set_lut(slot, Arc::new(table));
+    }
+    Ok(CookOutcome::Done(Outputs::empty()))
 }
 
 #[cfg(test)]

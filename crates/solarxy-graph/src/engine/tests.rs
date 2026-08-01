@@ -2046,6 +2046,286 @@ fn scene_delta_lowers_a_camera_node() {
     assert_eq!(def.kind, CameraKind::Orthographic);
 }
 
+/// The look reaches the scene contract, and the tone override means
+/// "inherit" until it is set.
+#[test]
+fn scene_delta_lowers_the_cameras_look() {
+    use solarxy_core::scene::{SceneOp, ToneCurve};
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+
+    let look_of = |e: &mut Engine| {
+        e.take_scene_delta()
+            .ops
+            .into_iter()
+            .find_map(|op| match op {
+                SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+                _ => None,
+            })
+            .expect("a camera in the delta")
+            .look
+    };
+
+    // Fresh out of the palette: neutral, and inheriting.
+    let fresh = look_of(&mut e);
+    assert_eq!(fresh.exposure, 1.0);
+    assert_eq!(fresh.tone, None, "a new camera must not restyle the scene");
+    assert_eq!(fresh.lift, [0.0; 3]);
+    assert_eq!(fresh.gamma, [1.0; 3]);
+    assert_eq!(fresh.gain, [1.0; 3]);
+    assert!(fresh.lut_a.is_none() && fresh.lut_b.is_none());
+
+    for (key, value) in [
+        ("exposure", ParamValue::Float(2.5)),
+        ("tone", ParamValue::Enum("reinhard".to_string())),
+        ("lift", ParamValue::Vec3([0.1, 0.0, -0.05])),
+        ("gamma", ParamValue::Vec3([1.2, 1.0, 0.8])),
+        ("gain", ParamValue::Vec3([1.0, 1.1, 1.3])),
+        ("lut_b_strength", ParamValue::Float(0.25)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: cam,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    let set = look_of(&mut e);
+    assert_eq!(set.exposure, 2.5);
+    assert_eq!(set.tone, Some(ToneCurve::Reinhard));
+    assert_eq!(set.lift, [0.1, 0.0, -0.05]);
+    assert_eq!(set.gamma, [1.2, 1.0, 0.8]);
+    assert_eq!(set.gain, [1.0, 1.1, 1.3]);
+    assert_eq!(set.lut_b_strength, 0.25);
+}
+
+/// A staged `.cube` reaches `CameraDef` as a decoded table.
+///
+/// The table travels on the cook's side cache rather than on a wire, so
+/// this exercises the whole chain the way the environment node's HDRI test
+/// does: stage bytes, cook, and read the lowered scene op.
+#[test]
+fn a_staged_cube_reaches_the_camera_look() {
+    use solarxy_core::scene::SceneOp;
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+
+    // A 2-cubed identity, which is the smallest legal table.
+    let mut src = String::from("LUT_3D_SIZE 2\n");
+    for b in 0..2 {
+        for g in 0..2 {
+            for r in 0..2 {
+                src.push_str(&format!("{r}.0 {g}.0 {b}.0\n"));
+            }
+        }
+    }
+    let id = e.stage_asset("look.cube", "text/plain", src.into_bytes());
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "lut_b".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(id)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let look = e
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the delta")
+        .look;
+    let table = look
+        .lut_b
+        .expect("the display-referred slot carries a table");
+    assert_eq!(table.size, 2);
+    assert_eq!(table.data.len(), 8 * 3);
+    assert!(
+        look.lut_a.is_none(),
+        "only the slot that was pointed at a file may carry one"
+    );
+}
+
+/// A malformed table is a cook error on the node, not a silent no-op.
+///
+/// This is the payoff of decoding engine-side rather than host-side: the
+/// node that references the bad file is the node that reports it.
+#[test]
+fn a_malformed_cube_fails_the_cameras_cook() {
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    let id = e.stage_asset("broken.cube", "text/plain", b"LUT_3D_SIZE 8\n1 2".to_vec());
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "lut_a".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(id)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let status = e.cook.status(cam).expect("the camera cooked");
+    assert!(
+        matches!(status, crate::cook::state::CookStatus::Error { .. }),
+        "a malformed table must surface on the node, got {status:?}"
+    );
+}
+
+/// The camera's look survives a scene-file save and load.
+///
+/// Through the real seam rather than by cloning a struct: to JSON, back
+/// out, into a fresh engine, and cooked. This is the criterion that makes
+/// the look worth putting on the camera at all, since a look that does not
+/// travel with the document is just application state with extra steps.
+#[test]
+fn the_cameras_look_survives_a_scene_file_round_trip() {
+    use solarxy_core::scene::{SceneOp, ToneCurve};
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    for (key, value) in [
+        ("exposure", ParamValue::Float(0.75)),
+        ("tone", ParamValue::Enum("none".to_string())),
+        ("lift", ParamValue::Vec3([0.02, 0.0, 0.03])),
+        ("gain", ParamValue::Vec3([1.4, 1.0, 0.9])),
+        ("lut_a_strength", ParamValue::Float(0.5)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: cam,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+
+    let scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a clean save must not warn: {warnings:?}"
+    );
+
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    let look = reopened
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the reopened delta")
+        .look;
+    assert_eq!(look.exposure, 0.75);
+    assert_eq!(look.tone, Some(ToneCurve::None));
+    assert_eq!(look.lift, [0.02, 0.0, 0.03]);
+    assert_eq!(look.gain, [1.4, 1.0, 0.9]);
+    assert_eq!(look.lut_a_strength, 0.5);
+}
+
+/// A camera written before the look existed opens neutral rather than dark.
+///
+/// The v1-to-v2 bump carries no migration hook because every added
+/// parameter fills from its registry default and every default is the
+/// identity of its effect. That is a claim about the defaults, so it is
+/// worth checking against a document that genuinely lacks the keys rather
+/// than one that round-tripped through the current writer.
+#[test]
+fn a_camera_saved_before_the_look_opens_neutral() {
+    use solarxy_core::scene::SceneOp;
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "fov_y".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(60.0)),
+    })
+    .unwrap();
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    // Age it: strip every look key and stamp the node back to v1, which is
+    // exactly what a pre-0.8.2 scene holds on disk.
+    let mut aged = 0;
+    for node in &mut scene.graph.nodes {
+        if node.type_id == "camera" {
+            node.type_version = 1;
+            for key in [
+                "exposure",
+                "tone",
+                "lift",
+                "gamma",
+                "gain",
+                "lut_a",
+                "lut_a_strength",
+                "lut_b",
+                "lut_b_strength",
+            ] {
+                node.params.remove(key);
+            }
+            aged += 1;
+        }
+    }
+    assert_eq!(aged, 1, "the camera node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "filling from defaults must not warn: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    let look = reopened
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the reopened delta")
+        .look;
+    assert_eq!(look.exposure, 1.0, "a v1 camera must not open darkened");
+    assert_eq!(
+        look.tone, None,
+        "a v1 camera must inherit the pane's tone mapper, not impose one"
+    );
+    assert_eq!(look.lift, [0.0; 3]);
+    assert_eq!(look.gamma, [1.0; 3]);
+    assert_eq!(look.gain, [1.0; 3]);
+    assert!(look.lut_a.is_none() && look.lut_b.is_none());
+}
+
 #[test]
 fn physical_camera_derives_fov_from_focal_and_sensor() {
     let mut e = engine();

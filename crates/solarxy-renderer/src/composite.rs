@@ -7,6 +7,8 @@ use crate::lut::{LutSlot, LutSlots};
 use crate::pipelines::Pipelines;
 use crate::ssao::SsaoState;
 use solarxy_core::preferences::{InspectionMode, ToneMode};
+use solarxy_core::scene::CameraLook;
+use solarxy_core::view_config::PaneLook;
 use solarxy_core::{LUT_LOG_MAX_STOP, LUT_LOG_MIN_STOP};
 use wgpu::util::DeviceExt;
 
@@ -36,8 +38,16 @@ pub struct CompositeLook {
     /// Multiplied before lift: scales the ceiling. Neutral 1.
     pub gain: [f32; 3],
     /// How much of the pre-tone-map table to blend in, 0 to 1.
+    ///
+    /// **Defaults to zero, unlike the camera parameter it comes from.**
+    /// The slots are renderer-global while this struct is per pane, so a
+    /// table bound for a graded viewport is still bound when the asset
+    /// preview, a screenshot of a different pane, or the golden harness
+    /// composites. Defaulting the contribution to nothing means only a
+    /// path that deliberately asks for a table gets one.
     pub lut_a_strength: f32,
-    /// How much of the display-referred table to blend in, 0 to 1.
+    /// How much of the display-referred table to blend in, 0 to 1. Zero by
+    /// default for the reason above.
     pub lut_b_strength: f32,
 }
 
@@ -49,8 +59,8 @@ impl Default for CompositeLook {
             lift: [0.0; 3],
             gamma: [1.0; 3],
             gain: [1.0; 3],
-            lut_a_strength: 1.0,
-            lut_b_strength: 1.0,
+            lut_a_strength: 0.0,
+            lut_b_strength: 0.0,
         }
     }
 }
@@ -242,6 +252,46 @@ impl CompositeState {
 /// that wrong and the Rust size assert still passes, the shader still
 /// compiles, and the viewport goes wrong at draw time. Same reasoning
 /// `MaterialUniform` records for its own appended blocks.
+/// Resolve one pane's look: the camera it is looking through, if any,
+/// otherwise the pane's own.
+///
+/// The whole precedence rule in one place, because it is the sort of thing
+/// that otherwise gets written slightly differently in each host and then
+/// disagrees between the viewport and a screenshot. A camera's tone of
+/// `None` means inherit, so a camera can own an exposure and a grade while
+/// leaving the tone mapper to the pane.
+///
+/// Free-standing rather than a method because both hosts and the golden
+/// harness call it, and it is the shape the shared host crate will lift as
+/// is.
+#[must_use]
+pub fn resolve_look(camera: Option<&CameraLook>, pane: &PaneLook) -> CompositeLook {
+    match camera {
+        Some(look) => CompositeLook {
+            tone_mode: look.tone.map_or(pane.tone_mode, ToneMode::from),
+            exposure: look.exposure,
+            lift: look.lift,
+            gamma: look.gamma,
+            gain: look.gain,
+            lut_a_strength: look.lut_a_strength,
+            lut_b_strength: look.lut_b_strength,
+        },
+        None => CompositeLook {
+            tone_mode: pane.tone_mode,
+            exposure: pane.exposure,
+            lift: pane.lift,
+            gamma: pane.gamma,
+            gain: pane.gain,
+            // A table is a document asset and a free pane is not a document
+            // object, so it reaches neither slot. The strengths are moot
+            // with nothing bound, and the composite gates on `is_loaded`
+            // regardless.
+            lut_a_strength: 0.0,
+            lut_b_strength: 0.0,
+        },
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CompositeParams {
@@ -399,5 +449,70 @@ mod tests {
         assert_eq!(look.exposure, 1.0);
         assert_eq!(look.tone_mode, ToneMode::default());
         assert!(CompositeLook::from_tone(ToneMode::Reinhard, 2.0).grade_is_neutral());
+    }
+
+    #[test]
+    fn a_free_pane_resolves_to_its_own_look() {
+        let pane = PaneLook {
+            exposure: 2.0,
+            tone_mode: ToneMode::Reinhard,
+            gain: [1.5; 3],
+            ..PaneLook::default()
+        };
+        let got = resolve_look(None, &pane);
+        assert_eq!(got.exposure, 2.0);
+        assert_eq!(got.tone_mode, ToneMode::Reinhard);
+        assert_eq!(got.gain, [1.5; 3]);
+        // A table is a document asset; a free pane reaches neither slot.
+        assert_eq!(got.lut_a_strength, 0.0);
+        assert_eq!(got.lut_b_strength, 0.0);
+    }
+
+    #[test]
+    fn a_look_through_pane_takes_the_cameras_look() {
+        let pane = PaneLook {
+            exposure: 2.0,
+            tone_mode: ToneMode::Reinhard,
+            ..PaneLook::default()
+        };
+        let camera = CameraLook {
+            exposure: 0.5,
+            lift: [0.1, 0.0, 0.0],
+            ..CameraLook::default()
+        };
+        let got = resolve_look(Some(&camera), &pane);
+        assert_eq!(got.exposure, 0.5, "the camera's exposure wins");
+        assert_eq!(got.lift, [0.1, 0.0, 0.0]);
+        assert_eq!(
+            got.tone_mode,
+            ToneMode::Reinhard,
+            "an inheriting camera leaves the pane's tone mapper alone, which is \
+             what stops adding a camera from restyling an existing scene"
+        );
+    }
+
+    #[test]
+    fn a_camera_that_states_a_tone_curve_overrides_the_pane() {
+        let pane = PaneLook {
+            tone_mode: ToneMode::Reinhard,
+            ..PaneLook::default()
+        };
+        let camera = CameraLook {
+            tone: Some(solarxy_core::scene::ToneCurve::None),
+            ..CameraLook::default()
+        };
+        assert_eq!(resolve_look(Some(&camera), &pane).tone_mode, ToneMode::None);
+    }
+
+    /// The default camera and the default pane must resolve to the same
+    /// neutral look, or placing a camera would change the image.
+    #[test]
+    fn the_two_defaults_resolve_identically() {
+        let pane = PaneLook::default();
+        let through = resolve_look(Some(&CameraLook::default()), &pane);
+        let free = resolve_look(None, &pane);
+        assert_eq!(through.tone_mode, free.tone_mode);
+        assert_eq!(through.exposure, free.exposure);
+        assert!(through.grade_is_neutral() && free.grade_is_neutral());
     }
 }

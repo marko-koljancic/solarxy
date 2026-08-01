@@ -689,6 +689,24 @@ export interface PaneDisplaySettings {
   turntableActive: boolean;
 }
 
+/** A free pane's own rendering intent, pinned to
+ * `solarxy_core::view_config::PaneLook`.
+ *
+ * The scalar half of the look only. Lookup-table slots live on the camera
+ * node, because a table is a staged document asset and a pane is not a
+ * document object; a pane looking through a camera composites with that
+ * camera's look instead of this one. */
+export interface PaneLook {
+  exposure: number;
+  toneMode: "None" | "Linear" | "Reinhard" | "AcesFilmic";
+  /** Added after tone mapping; neutral [0, 0, 0]. */
+  lift: [number, number, number];
+  /** Applied as a power; neutral [1, 1, 1]. */
+  gamma: [number, number, number];
+  /** Multiplied first; neutral [1, 1, 1]. */
+  gain: [number, number, number];
+}
+
 export interface DisplaySettingsDto {
   turntableActive: boolean;
   turntableRpm: number;
@@ -714,6 +732,8 @@ export interface ViewStateDto {
   activePane: number;
   camerasLinked: boolean;
   paneSettings: PaneDisplaySettings[];
+  /** Each pane's own look, used when the pane is a free view. */
+  paneLooks: PaneLook[];
   display: DisplaySettingsDto;
   paneProjections: ("perspective" | "orthographic")[];
   paneRects: PaneRectDto[];

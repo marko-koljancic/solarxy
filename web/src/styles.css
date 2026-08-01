@@ -1975,6 +1975,25 @@ body.row-resizing .viewport-divider {
   font-size: 1.1rem;
 }
 
+/* One channel of a grade vector in the pane Look dialog: a tight R/G/B
+ * caption against its own number field, so three of them read as one
+ * control rather than as three unrelated inputs. */
+.look-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.look-channel .input-field {
+  width: 6rem;
+}
+
+.look-channel-label {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  min-width: 1rem;
+}
+
 /* ---- Review: marker overlay, popup editor, side panel ---- */
 
 /* Category colors (--cat-info/-warning/-question/-change) are generated

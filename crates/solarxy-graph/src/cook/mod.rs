@@ -370,6 +370,18 @@ pub struct CookCtx<'a> {
     /// exhaustive over `DataType`. The environment has no wire to travel
     /// on anyway, exactly like a light or a camera, so it needs no port.
     environment: Option<Arc<solarxy_core::RawImageHdr>>,
+    /// Side-channel for a cook that decoded colour-grading tables (the
+    /// camera node's two slots): index 0 is the pre-tone-map slot, 1 the
+    /// display-referred one. Drained on commit into the driver's per-node
+    /// cache, which the scene lowering reads to fill `CameraDef::look`.
+    ///
+    /// A side-channel for the same reason the environment is one: a table
+    /// has no wire to travel on, and giving it one would mean a new
+    /// `DataType`, which is a deliberate frontend change. Decoding in the
+    /// cook rather than in the lowering is also what keeps it off the
+    /// per-frame path, since a delta is built far more often than a node
+    /// recooks and a 33-cubed table is most of a megabyte of text.
+    luts: [Option<Arc<solarxy_core::LutCube>>; 2],
     /// The published values of networks this node references through its
     /// `NodePath` params, pre-resolved by the driver before the compute
     /// runs (keyed by the referenced container's id). The engine cooks
@@ -397,6 +409,7 @@ impl<'a> CookCtx<'a> {
             warnings: Vec::new(),
             validation: None,
             environment: None,
+            luts: [None, None],
             referenced: BTreeMap::new(),
             eval: crate::expr::EvalCtx::default(),
         }
@@ -452,6 +465,22 @@ impl<'a> CookCtx<'a> {
     #[must_use]
     pub fn take_environment(&mut self) -> Option<Arc<solarxy_core::RawImageHdr>> {
         self.environment.take()
+    }
+
+    /// Records a colour-grading table this cook decoded. `slot` is 0 for
+    /// the pre-tone-map table and 1 for the display-referred one; anything
+    /// else is ignored rather than panicking, because a cook is reached
+    /// from user data.
+    pub fn set_lut(&mut self, slot: usize, table: Arc<solarxy_core::LutCube>) {
+        if let Some(entry) = self.luts.get_mut(slot) {
+            *entry = Some(table);
+        }
+    }
+
+    /// Drains the grading tables recorded during one cook.
+    #[must_use]
+    pub fn take_luts(&mut self) -> [Option<Arc<solarxy_core::LutCube>>; 2] {
+        std::mem::take(&mut self.luts)
     }
 
     /// Drains the validation result recorded during one cook.

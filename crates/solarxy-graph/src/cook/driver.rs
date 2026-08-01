@@ -84,6 +84,11 @@ pub struct CookEngine {
     /// Same lifecycle as `validation`: replaced on recook, removed when a
     /// cook stops producing one, so deleting the node's asset clears it.
     environment: BTreeMap<NodeId, Arc<solarxy_core::RawImageHdr>>,
+    /// Per-node decoded colour-grading tables (the camera node's two
+    /// slots). Same lifecycle as `environment`: replaced on recook,
+    /// removed when a cook stops producing them, so clearing the node's
+    /// asset clears the table.
+    luts: BTreeMap<NodeId, [Option<Arc<solarxy_core::LutCube>>; 2]>,
     /// Per-node cook warnings from the last completed cook (reserved-lane
     /// mismatches, lane type replacements, empty-input fallbacks). Absent
     /// when the last cook warned nothing; read back by the node info UI.
@@ -180,6 +185,7 @@ impl CookEngine {
         self.outputs.remove(&node);
         self.validation.remove(&node);
         self.environment.remove(&node);
+        self.luts.remove(&node);
         self.status.remove(&node);
         self.stats.remove(&node);
         self.generation.remove(&node);
@@ -218,6 +224,16 @@ impl CookEngine {
     #[must_use]
     pub fn environment(&self, node: NodeId) -> Option<&Arc<solarxy_core::RawImageHdr>> {
         self.environment.get(&node)
+    }
+
+    /// The node's cached grading tables, if its last cook decoded any.
+    /// Index 0 is the pre-tone-map slot, 1 the display-referred one. The
+    /// `Arc`s are stable until the node recooks, so the scene lowering can
+    /// hand them straight to `CameraDef::look` and the renderer can dedupe
+    /// on the content hash.
+    #[must_use]
+    pub fn luts(&self, node: NodeId) -> Option<&[Option<Arc<solarxy_core::LutCube>>; 2]> {
+        self.luts.get(&node)
     }
 
     #[must_use]
@@ -424,6 +440,7 @@ impl CookEngine {
                 self.commit_outputs(node, outputs, elapsed, report);
                 self.commit_validation(node, cx.take_validation(), report);
                 self.commit_environment(node, cx.take_environment());
+                self.commit_luts(node, cx.take_luts());
                 self.state.insert(node, CookState::Clean);
             }
             Ok(CookOutcome::Pending(request)) => {
@@ -685,6 +702,17 @@ impl CookEngine {
             None => {
                 self.environment.remove(&node);
             }
+        }
+    }
+
+    /// Caches the grading tables a cook produced, or clears the entry when
+    /// it produced none. Stored as one pair rather than two entries so the
+    /// two slots cannot get out of step with each other.
+    fn commit_luts(&mut self, node: NodeId, luts: [Option<Arc<solarxy_core::LutCube>>; 2]) {
+        if luts.iter().any(Option::is_some) {
+            self.luts.insert(node, luts);
+        } else {
+            self.luts.remove(&node);
         }
     }
 

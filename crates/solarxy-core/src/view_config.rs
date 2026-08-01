@@ -9,7 +9,7 @@
 //! Available with the `serialization` feature.
 
 use crate::preferences::{
-    BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+    BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode, ToneMode,
     UvMapBackground, UvMode, ViewMode,
 };
 
@@ -136,6 +136,70 @@ impl std::fmt::Display for BoundsMode {
             BoundsMode::Off => write!(f, "Off"),
             BoundsMode::WholeModel => write!(f, "Model"),
             BoundsMode::PerMesh => write!(f, "Per Mesh"),
+        }
+    }
+}
+
+/// A free pane's own rendering intent.
+///
+/// The counterpart to `scene::CameraLook`, and deliberately the smaller of
+/// the two: a pane looking through a camera composites with that camera's
+/// look, and a pane looking at nothing in particular gets this. It carries
+/// the scalar half only, no lookup tables, because a table is a staged
+/// document asset and a free pane is a viewport rather than a document
+/// object. Load a table by pointing a camera at it.
+///
+/// Separate from [`PaneDisplaySettings`] rather than more fields on it,
+/// because that struct is constructed as a literal in the golden harness
+/// and mirrored field for field in the frontend; the look is a different
+/// concern with a different lifetime and it reads better apart.
+///
+/// [`Default`] is neutral, and neutral is bit-identical: the renderer
+/// skips the grade at these values rather than multiplying by one.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneLook {
+    #[serde(default = "default_exposure")]
+    pub exposure: f32,
+    #[serde(default)]
+    pub tone_mode: ToneMode,
+    #[serde(default)]
+    pub lift: [f32; 3],
+    #[serde(default = "unit_vec3")]
+    pub gamma: [f32; 3],
+    #[serde(default = "unit_vec3")]
+    pub gain: [f32; 3],
+}
+
+fn default_exposure() -> f32 {
+    1.0
+}
+
+fn unit_vec3() -> [f32; 3] {
+    [1.0; 3]
+}
+
+impl Default for PaneLook {
+    fn default() -> Self {
+        Self {
+            exposure: default_exposure(),
+            tone_mode: ToneMode::default(),
+            lift: [0.0; 3],
+            gamma: unit_vec3(),
+            gain: unit_vec3(),
+        }
+    }
+}
+
+impl PaneLook {
+    /// Seed from the host's global tone mapper and exposure, which is what
+    /// the desktop shell's sidebar and its `E` / `Shift+T` keys drive.
+    #[must_use]
+    pub fn from_tone(tone_mode: ToneMode, exposure: f32) -> Self {
+        Self {
+            exposure,
+            tone_mode,
+            ..Self::default()
         }
     }
 }

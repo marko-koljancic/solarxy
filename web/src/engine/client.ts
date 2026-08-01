@@ -28,6 +28,7 @@ import type {
   NodeId,
   NodeReport,
   PaneDisplaySettings,
+  PaneLook,
   PaneRectDto,
   ParamSource,
   PickDetail,
@@ -342,6 +343,10 @@ export class SolarxyClient {
 
   setPaneSettings(pane: number, settings: PaneDisplaySettings): ViewStateDto {
     return this.app.set_pane_settings(pane, settings) as ViewStateDto;
+  }
+
+  setPaneLook(pane: number, look: PaneLook): ViewStateDto {
+    return this.app.set_pane_look(pane, look) as ViewStateDto;
   }
 
   setDisplaySettings(settings: DisplaySettingsDto): ViewStateDto {

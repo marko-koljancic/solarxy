@@ -29,7 +29,7 @@ use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
 };
-use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, ViewLayout};
+use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook, ViewLayout};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
@@ -47,6 +47,7 @@ use crate::gizmo::{self, GizmoState, ToolMode};
 use solarxy_renderer::camera::{turntable_up, Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
+use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
 use solarxy_renderer::geometry::build_normals_geometry;
@@ -150,6 +151,15 @@ fn default_display_settings() -> DisplaySettings {
     }
 }
 
+/// The key a pane's look rides under inside `PaneJson::display`.
+///
+/// That field is declared opaque and round-tripped uninterpreted by the
+/// scene file, which makes it the right place for pane state the schema
+/// does not name: persisting here costs no `schema_version` bump and no
+/// `min_reader` gate, and a scene written before this existed simply has
+/// no such key.
+const PANE_LOOK_KEY: &str = "look";
+
 /// Host-owned view state: the web mirror of the desktop `ViewState`.
 struct WebViewState {
     display: DisplaySettings,
@@ -157,6 +167,10 @@ struct WebViewState {
     cameras_linked: bool,
     cameras: [Option<CameraState>; 4],
     pane_settings: [PaneDisplaySettings; 4],
+    /// Each pane's own rendering intent, used when the pane is a free view.
+    /// A pane looking through a camera composites with that camera's look
+    /// instead; see `SolarxyApp::pane_look`.
+    pane_looks: [PaneLook; 4],
     /// Which `camera` node each pane looks through (`None` = free view).
     look_through: [Option<NodeId>; 4],
     /// Whether a look-through pane is locked so navigation reframes the camera
@@ -569,6 +583,7 @@ impl SolarxyApp {
             env_bounds: bounds,
             view: WebViewState {
                 display: default_display_settings(),
+                pane_looks: [PaneLook::default(); 4],
                 active_pane: 0,
                 cameras_linked: false,
                 cameras: [None, None, None, None],
@@ -1550,11 +1565,15 @@ impl SolarxyApp {
         // cleared (unlike the per-pane path, which clears only pane 0).
         let bloom = self.renderer.post.bloom_enabled && !is_uv && scene_present;
         let ssao = self.renderer.post.ssao_enabled && !is_uv && scene_present;
+        // A capture runs outside the frame loop, so the slots still hold
+        // whatever the last pane drawn happened to bind. Without this, a
+        // screenshot of one camera could carry another camera's tables.
+        self.bind_pane_luts(pane_idx);
         self.renderer.post.composite.write_params(
             &self.queue,
             bloom,
             ssao,
-            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.pane_look(pane_idx),
             &self.renderer.post.luts,
             pds.inspection_mode,
         );
@@ -1864,6 +1883,23 @@ impl SolarxyApp {
 
     /// Replaces the global display settings (layout, split, turntable,
     /// lights lock, material scales, HDRI rotation).
+    /// Replace one pane's own look: exposure, tone mapper, and the
+    /// lift/gamma/gain grade.
+    ///
+    /// Only reaches a pane that is a free view. A pane looking through a
+    /// camera composites with that camera's look, which is a document
+    /// value and is edited by setting the node's parameters like any
+    /// other. Carries no lookup-table slots for the same reason: a table
+    /// is a staged document asset, and a pane is not a document object.
+    pub fn set_pane_look(&mut self, pane: usize, look: JsValue) -> Result<JsValue, JsError> {
+        let look: PaneLook = serde_wasm_bindgen::from_value(look)
+            .map_err(|e| JsError::new(&format!("bad pane look: {e}")))?;
+        if let Some(slot) = self.view.pane_looks.get_mut(pane) {
+            *slot = look;
+        }
+        self.view_state()
+    }
+
     pub fn set_display_settings(&mut self, settings: JsValue) -> Result<JsValue, JsError> {
         let settings: DisplaySettings = serde_wasm_bindgen::from_value(settings)
             .map_err(|e| JsError::new(&format!("bad display settings: {e}")))?;
@@ -3792,6 +3828,8 @@ impl SolarxyApp {
         let pane_aspect = pane.width / pane.height.max(1.0);
         let pds = self.view.pane_settings[i];
         let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
+        // Before any of the three exits below, all of which composite.
+        self.bind_pane_luts(i);
 
         let Some(cam_data) = cam_data else {
             self.renderer
@@ -3828,6 +3866,48 @@ impl SolarxyApp {
         self.composite_and_submit(encoder, surface_view, i, pane, false, true);
     }
 
+    /// The look of the `camera` node a pane is looking through, if any.
+    ///
+    /// Reads the lowered `CameraDef` rather than the document, so it sees
+    /// exactly what the last delta carried, including the tables the
+    /// camera's cook decoded.
+    fn pane_camera_look(&self, pane: usize) -> Option<&solarxy_core::scene::CameraLook> {
+        let node = (*self.view.look_through.get(pane)?)?;
+        self.scene_objects
+            .cameras()?
+            .iter()
+            .find(|c| c.id == solarxy_core::scene::SceneObjectId(node.0))
+            .map(|c| &c.look)
+    }
+
+    /// The resolved look a pane composites with.
+    fn pane_look(&self, pane: usize) -> CompositeLook {
+        let fallback = self.view.pane_looks.get(pane).copied().unwrap_or_default();
+        solarxy_renderer::composite::resolve_look(self.pane_camera_look(pane), &fallback)
+    }
+
+    /// Bind the grading tables a pane's camera carries, before that pane
+    /// composites.
+    ///
+    /// There is one pair of table textures for the whole renderer while a
+    /// look is per pane, so the pair has to follow whichever pane is about
+    /// to composite. `set_lut` dedupes on content hash, so the common case
+    /// (no tables, or every pane through the same camera) costs two
+    /// comparisons and rebuilds nothing. The case that does cost something
+    /// is several panes through several cameras with *different* tables,
+    /// which rebuilds the composite bind group once per pane per frame;
+    /// that is a known cost of one shared pair, and caching a bind group
+    /// per distinct pair is the fix if it ever shows up in a profile.
+    fn bind_pane_luts(&mut self, pane: usize) {
+        let (a, b) = self
+            .pane_camera_look(pane)
+            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::A, a.as_deref());
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::B, b.as_deref());
+    }
+
     fn composite_and_submit(
         &self,
         mut encoder: wgpu::CommandEncoder,
@@ -3844,7 +3924,7 @@ impl SolarxyApp {
             &self.queue,
             pane_bloom,
             pane_ssao,
-            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.pane_look(i),
             &self.renderer.post.luts,
             pane_inspection,
         );
@@ -4089,6 +4169,7 @@ impl SolarxyApp {
             display: self.view.display,
             pane_projections: projections,
             pane_rects: self.pane_rects_css(),
+            pane_looks: self.view.pane_looks,
             pane_look_through,
             pane_camera_locked: self.view.camera_locked,
             pane_gate_aspect,
@@ -4110,10 +4191,19 @@ impl SolarxyApp {
                     .map_or_else(solarxy_scenefile::CameraJson::default, |c| {
                         camera_to_json(&c.camera)
                     });
+                // The pane's look rides inside the display blob rather than
+                // taking a schema field of its own. `PaneJson::display` is
+                // declared opaque and round-tripped uninterpreted, and
+                // `PaneDisplaySettings` ignores keys it does not know, so
+                // this persists a free pane's exposure and grade with no
+                // scene-schema change and no reader-version gate.
                 let display = serde_json::to_value(self.view.pane_settings[i])
                     .ok()
                     .and_then(|v| {
-                        if let serde_json::Value::Object(map) = v {
+                        if let serde_json::Value::Object(mut map) = v {
+                            if let Ok(look) = serde_json::to_value(self.view.pane_looks[i]) {
+                                map.insert(PANE_LOOK_KEY.to_string(), look);
+                            }
                             Some(map.into_iter().collect())
                         } else {
                             None
@@ -4150,6 +4240,13 @@ impl SolarxyApp {
         for (i, pane) in view.panes.iter().take(4).enumerate() {
             if !pane.display.is_empty() {
                 let value = serde_json::Value::Object(pane.display.clone().into_iter().collect());
+                // Absent on any scene saved before the look existed, which
+                // is the whole reason it defaults rather than failing.
+                self.view.pane_looks[i] = pane
+                    .display
+                    .get(PANE_LOOK_KEY)
+                    .and_then(|v| serde_json::from_value::<PaneLook>(v.clone()).ok())
+                    .unwrap_or_default();
                 if let Ok(mut settings) = serde_json::from_value::<PaneDisplaySettings>(value) {
                     // Viewport shading overrides and the turntable spin are
                     // session-temporary (items 7, 9): never restored from a
@@ -4656,6 +4753,10 @@ struct ViewStateDto {
     active_pane: usize,
     cameras_linked: bool,
     pane_settings: [PaneDisplaySettings; 4],
+    /// Each pane's own look, which the Look dialog edits. A pane looking
+    /// through a camera shows that camera's look instead and edits it on
+    /// the node.
+    pane_looks: [PaneLook; 4],
     display: DisplaySettings,
     pane_projections: [String; 4],
     pane_rects: Vec<RectDto>,

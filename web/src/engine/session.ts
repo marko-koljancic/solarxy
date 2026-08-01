@@ -37,6 +37,7 @@ import type {
   ImportOptions,
   NodeId,
   PaneDisplaySettings,
+  PaneLook,
   ParamSource,
   PickDetail,
   ReviewAnchor,
@@ -611,6 +612,13 @@ export function setActivePane(pane: number): void {
 
 export function setPaneSettings(pane: number, settings: PaneDisplaySettings): void {
   useViewState.getState().setView(getClient().setPaneSettings(pane, settings));
+}
+
+/** Replace one pane's own look. Only meaningful for a free pane: a pane
+ * looking through a camera composites with that camera's look, which is a
+ * document value edited by setting the node's parameters. */
+export function setPaneLook(pane: number, look: PaneLook): void {
+  useViewState.getState().setView(getClient().setPaneLook(pane, look));
 }
 
 export function setDisplaySettings(settings: DisplaySettingsDto): void {

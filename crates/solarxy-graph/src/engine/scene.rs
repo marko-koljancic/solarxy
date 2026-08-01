@@ -20,7 +20,9 @@ use std::collections::BTreeSet;
 use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
-use solarxy_core::scene::{CameraDef, LightDef, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{
+    CameraDef, CameraLook, LightDef, SceneDelta, SceneObjectId, SceneOp, ToneCurve,
+};
 
 use crate::cook::CookEngine;
 use crate::document::{Document, GraphContext, NodeId};
@@ -94,7 +96,7 @@ pub fn build_scene_delta(
                 }
             }
             "camera" => {
-                if let Some(cam) = camera_from_node(doc, registry, previews, node) {
+                if let Some(cam) = camera_from_node(doc, registry, previews, cook, node) {
                     cameras.push(cam);
                 }
             }
@@ -499,6 +501,7 @@ fn camera_from_node(
     doc: &Document,
     registry: &Registry,
     previews: &Previews,
+    cook: &CookEngine,
     node: &crate::document::NodeData,
 ) -> Option<CameraDef> {
     use solarxy_core::scene::CameraKind;
@@ -528,6 +531,51 @@ fn camera_from_node(
         if v > 1e-4 { v } else { 45.0_f32.to_radians() }
     };
     let aspect = f32p("aspect");
+
+    // The look. Tables come from the cook's per-node side cache rather than
+    // from a param, for the reason the environment's image does: they have
+    // no wire to travel on. A camera whose table failed to parse simply
+    // reports none, and the node carries the diagnostic.
+    let tables = cook.luts(node.id);
+    let table = |slot: usize| {
+        tables
+            .and_then(|t| t[slot].as_ref())
+            .map(std::sync::Arc::clone)
+    };
+    let tone = match p.get("tone") {
+        Some(ParamValue::Enum(k)) if k == "none" => Some(ToneCurve::None),
+        Some(ParamValue::Enum(k)) if k == "linear" => Some(ToneCurve::Linear),
+        Some(ParamValue::Enum(k)) if k == "reinhard" => Some(ToneCurve::Reinhard),
+        Some(ParamValue::Enum(k)) if k == "aces" => Some(ToneCurve::AcesFilmic),
+        // Anything else, including the `inherit` default and a v1 camera
+        // with no such param at all, leaves the pane's choice alone.
+        _ => None,
+    };
+    let exposure = match p.get("exposure") {
+        Some(ParamValue::Float(v)) => *v as f32,
+        // Absent means as-rendered, never black.
+        _ => 1.0,
+    };
+    let strength = |key: &str| match p.get(key) {
+        Some(ParamValue::Float(v)) => (*v as f32).clamp(0.0, 1.0),
+        _ => 1.0,
+    };
+    let vec3_or = |key: &str, fallback: [f32; 3]| match p.get(key) {
+        Some(ParamValue::Vec3(_)) => p.vec3_f32(key),
+        _ => fallback,
+    };
+    let look = CameraLook {
+        exposure,
+        tone,
+        lift: vec3_or("lift", [0.0; 3]),
+        gamma: vec3_or("gamma", [1.0; 3]),
+        gain: vec3_or("gain", [1.0; 3]),
+        lut_a: table(0),
+        lut_a_strength: strength("lut_a_strength"),
+        lut_b: table(1),
+        lut_b_strength: strength("lut_b_strength"),
+    };
+
     Some(CameraDef {
         id: SceneObjectId(node.id.0),
         kind,
@@ -541,6 +589,7 @@ fn camera_from_node(
         aspect: if aspect > 1e-3 { aspect } else { 16.0 / 9.0 },
         show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
         gizmo_size: f32p("gizmo_size"),
+        look,
     })
 }
 
