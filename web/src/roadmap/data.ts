@@ -13,7 +13,7 @@
  * other. counts.test.ts pins NODE_TYPE_COUNT to the landing page stats band.
  */
 
-export const NODE_TYPE_COUNT = 76;
+export const NODE_TYPE_COUNT = 77;
 export const CRATE_COUNT = 12;
 export const CONTEXT_COUNT = 4;
 export const SHELL_COUNT = 3;
