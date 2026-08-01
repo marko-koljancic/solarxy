@@ -83,13 +83,14 @@ fn intensity(default: f64, soft_max: f64) -> ParamSpec {
     .soft(0.0, soft_max)
     .doc(
         "Linear multiplier on this light's contribution, and linear means \
-         what it says: doubling this doubles the light, and two lights at \
-         4.5 and 9 differ by exactly one stop. 0 turns the light off without \
-         removing it from the scene, which is the quick way to A/B one you \
-         want to keep. There are still no lumens or watts behind the number, \
-         so it is not calibrated against the physical world, but it is \
-         consistent within a scene and against a value authored anywhere \
-         else: nothing is scaled behind your back on the way to the shader.",
+         what it says: doubling this doubles the light, and two lights an \
+         octave apart in this number are an octave apart on screen. 0 turns \
+         the light off without removing it from the scene, which is the \
+         quick way to A/B one you want to keep. There are still no lumens or \
+         watts behind the number, so it is not calibrated against the \
+         physical world, but it is consistent within a scene and against a \
+         value authored anywhere else: nothing is scaled behind your back on \
+         the way to the shader.",
     )
 }
 

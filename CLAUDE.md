@@ -68,7 +68,7 @@ The web frontend needs a served secure context (localhost qualifies) for WebGPU 
 |-------|------|
 | `solarxy` (root) | Thin GUI entrypoint. `src/main.rs` parses its own small `GuiArgs`, sets up tracing, loads preferences, calls `solarxy_app::run_viewer`. |
 | `solarxy-core` | Pure data types: `AABB`, `geometry`, `validation`, `preferences`, `report`, `view_config`, `json`, `install_source`, `project_config`, `review`, `scene` (the GPU-free `SceneDelta`/`CookedGeometry`/`LightDef` engine-renderer contract), `raycast` (Moller-Trumbore, used by web picking), and `theme` (the ungated shared interface palette: two-tier primitives + roles driving the egui GUI, the analyze TUI, and — via `examples/gen_tokens.rs` — the web's `tokens.generated.css`; drift-guarded by `tests/tokens_drift.rs`). Feature-gated: `serde` (wasm-facing), `fs`, `serialization`. No GPU, no winit, no egui. |
-| `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`. Byte-first `load_*_bytes` API always available; `std-fs` (default) adds the path wrappers, off for wasm. |
+| `solarxy-formats` | Format loaders (OBJ, STL, PLY, glTF/GLB) → `RawModelData`, plus `hdr` (Radiance/OpenEXR → `RawImageHdr`) and `lut` (Adobe `.cube` → `LutCube`). Byte-first `load_*_bytes` API always available; `std-fs` (default) adds the path wrappers, off for wasm. |
 | `solarxy-imaging` | Pure-CPU image operators for the texture context (phase 19): adjust/composite/generate/filter/ORM ops over `RawImageData`, deterministic, single-threaded, wasm-clean. |
 | `solarxy-kernel` | Pure-CPU parametric geometry: `GeometrySet`/`KernelMesh` (per-buffer `Arc`, converged with `core::scene`), the 7 primitive generators, transform bake, merge. wasm-clean, no wgpu/fs. |
 | `solarxy-graph` | The headless studio core: document/topology/cook engine/registry (77 registered node types, test-asserted in `nodes/mod.rs`: the MVP set plus the texture/material/output contexts and the scene environment, all behind the typed-port coercion matrix + declarative param schemas)/undo/review, and the `Engine` facade (`Command` in, `EventBatch` out, budgeted resumable cook, `take_scene_delta`, `pick`, `invoke_action`, JSON `save_document`/`load_document`). Typed contexts (`ContextKind { Obj, Geo, Mat, Tex }` on every graph; containers declare `opens`; placement judged by graph kind; cross-context data travels by path reference with cycle refusal at set time and reference-ordered cooking). Mirror-and-command model. No wgpu, no winit. |
@@ -138,12 +138,13 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
 - `camera.rs` / `camera_state.rs` — orbit camera, per-pane camera bundle, `CameraUniform`.
 - `light.rs` — `LightEntry`, `LightsUniform` (CPU side of lights + IBL ambient L0).
 - `ibl.rs` — `IblState` with constructors `fallback`, `from_sky_colors`, `from_hdri`, `from_hdr_bytes`/`from_exr_bytes`, and `from_prepared`. `PreparedHdri` holds the GPU-free stages (decode + sanitize + irradiance convolution + average) with a pack/unpack codec for the web worker boundary; a bitwise determinism test pins the worker path to the inline path. `BrdfLut`.
-- `ssao.rs`, `bloom.rs`, `shadow.rs`, `composite.rs` — post-FX + per-pane compositing (viewport/scissor + tone mapping).
+- `ssao.rs`, `bloom.rs`, `shadow.rs`, `composite.rs` — post-FX + per-pane compositing (viewport/scissor). `composite.rs` owns the whole finishing chain: exposure, the pre-tone-map LUT slot, the tone-map switch, the display-referred LUT slot, then lift/gamma/gain. `CompositeLook` is the resolved per-pane look and `resolve_look` is the one place the camera-versus-pane precedence is written.
+- `lut.rs` — colour-grading tables on the GPU: `LutCube` uploaded as an `Rgba16Float` 3D texture, deduped on content hash, with an identity table bound to any empty slot so a disabled slot costs no pipeline permutation. **Parsing is not here**: it lives in `solarxy-formats::lut`, because the camera node has to carry a table so the look saves with the document and the engine cannot depend on the renderer. `Renderer::set_lut` is the single chokepoint that pairs upload with the bind-group rebuild.
 - `visualization.rs` — grid, axes gizmo, bounds, normals.
 - `model.rs`, `material.rs`, `texture.rs`, `uv_camera.rs`, `validation.rs`, `resources.rs`, `geometry.rs` — GPU resources + loaders.
 - `skybox.rs` — HDRI sky pass; keeps the source equirectangular texture after IBL convolution so `BackgroundMode::HdriSky` can render it as a backdrop.
 - `overdraw.rs` — overdraw inspection (count + visualize passes).
-- `shaders/` — 22 WGSL files (listed in the render pipeline below).
+- `shaders/` — 24 WGSL files (the render pipeline below lists the ones a pass is named for).
 
 ### Render pipeline (multi-pass, per pane in split mode)
 
@@ -156,7 +157,7 @@ Version is single-sourced in `[workspace.package]` and inherited via `version.wo
 7. Grid (`grid.wgsl`), normals (`normals.wgsl`), axis gizmo (`gizmo.wgsl`).
 8. Validation overlay (`validation.wgsl`) — color-coded issue highlights.
 9. SSAO (`ssao.wgsl` + `ssao_blur.wgsl`) + Bloom (`bloom.wgsl`) post-processing.
-10. Composite pass (`composite.wgsl`) — tone mapping, viewport/scissor rect.
+10. Composite pass (`composite.wgsl`) — the finishing chain in order: bloom add, AO multiply, exposure, the pre-tone-map LUT slot (log-encoded input), the tone-map switch, the display-referred LUT slot, then lift/gamma/gain. Plus the viewport/scissor rect.
 11. UV Map passes (UV panes): `uv_map.wgsl` (checker/texture/wire), `uv_debug.wgsl`, `uv_overlap.wgsl`.
 12. egui overlay (menu bar, per-pane toolbars, docked panels, status bar, toasts, modals).
 
