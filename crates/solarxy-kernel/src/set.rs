@@ -654,37 +654,9 @@ mod tests {
     fn material(name: &str) -> RawMaterialData {
         RawMaterialData {
             name: name.to_string(),
-            diffuse_texture_path: None,
-            normal_texture_path: None,
-            diffuse_texture_data: None,
-            normal_texture_data: None,
-            metallic_roughness_texture_path: None,
-            metallic_roughness_texture_data: None,
-            occlusion_texture_path: None,
-            occlusion_texture_data: None,
-            emissive_texture_path: None,
-            emissive_texture_data: None,
             roughness_factor: 0.5,
-            metallic_factor: 0.0,
-            occlusion_strength: 1.0,
-            emissive_factor: [0.0; 3],
-            base_color_factor: [1.0, 1.0, 1.0, 1.0],
-            alpha_mode: solarxy_core::geometry::AlphaMode::Opaque,
             alpha_cutoff: 0.5,
-            shading_model: solarxy_core::geometry::ShadingModel::default(),
-            toon_steps: 3.0,
-            ambient: None,
-            diffuse: None,
-            specular: None,
-            shininess: None,
-            dissolve: None,
-            optical_density: None,
-            ambient_texture_name: None,
-            diffuse_texture_name: None,
-            specular_texture_name: None,
-            normal_texture_name: None,
-            shininess_texture_name: None,
-            dissolve_texture_name: None,
+            ..RawMaterialData::default()
         }
     }
 

@@ -112,6 +112,62 @@ pub fn material_content_hash(mat: &RawMaterialData) -> u64 {
     mat.shininess_texture_name.hash(h);
     mat.dissolve_texture_name.hash(h);
 
+    // The principled surface properties. Two materials differing only here
+    // still compare unequal and stay separate, because the dedup above
+    // confirms equality inside the bucket rather than trusting the hash, so
+    // omitting one of these would cost a collision and not a wrong merge.
+    // They are hashed anyway: a scene of glass variants is exactly the case
+    // that would otherwise degrade to a linear scan.
+    hash_f32(mat.ior, h);
+    hash_f32(mat.transmission, h);
+    hash_f32(mat.thickness, h);
+    for c in mat.attenuation_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.attenuation_distance, h);
+    hash_f32(mat.clearcoat, h);
+    hash_f32(mat.clearcoat_roughness, h);
+    for c in mat.sheen_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.sheen_roughness, h);
+    hash_f32(mat.iridescence, h);
+    hash_f32(mat.iridescence_ior, h);
+    hash_f32(mat.iridescence_thickness_min, h);
+    hash_f32(mat.iridescence_thickness_max, h);
+    hash_f32(mat.specular_intensity, h);
+    for c in mat.specular_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.anisotropy, h);
+    hash_f32(mat.anisotropy_rotation, h);
+    hash_f32(mat.emissive_strength, h);
+
+    mat.transmission_texture_path.hash(h);
+    hash_opt_image(mat.transmission_texture_data.as_deref(), h);
+    mat.thickness_texture_path.hash(h);
+    hash_opt_image(mat.thickness_texture_data.as_deref(), h);
+    mat.clearcoat_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_texture_data.as_deref(), h);
+    mat.clearcoat_roughness_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_roughness_texture_data.as_deref(), h);
+    mat.clearcoat_normal_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_normal_texture_data.as_deref(), h);
+    mat.sheen_color_texture_path.hash(h);
+    hash_opt_image(mat.sheen_color_texture_data.as_deref(), h);
+    mat.sheen_roughness_texture_path.hash(h);
+    hash_opt_image(mat.sheen_roughness_texture_data.as_deref(), h);
+    mat.iridescence_texture_path.hash(h);
+    hash_opt_image(mat.iridescence_texture_data.as_deref(), h);
+    mat.iridescence_thickness_texture_path.hash(h);
+    hash_opt_image(mat.iridescence_thickness_texture_data.as_deref(), h);
+    mat.specular_texture_path.hash(h);
+    hash_opt_image(mat.specular_texture_data.as_deref(), h);
+    mat.specular_color_texture_path.hash(h);
+    hash_opt_image(mat.specular_color_texture_data.as_deref(), h);
+    mat.anisotropy_texture_path.hash(h);
+    hash_opt_image(mat.anisotropy_texture_data.as_deref(), h);
+
     hasher.finish()
 }
 
@@ -160,37 +216,9 @@ mod tests {
     fn material(name: &str, roughness: f32) -> RawMaterialData {
         RawMaterialData {
             name: name.to_string(),
-            diffuse_texture_path: None,
-            normal_texture_path: None,
-            diffuse_texture_data: None,
-            normal_texture_data: None,
-            metallic_roughness_texture_path: None,
-            metallic_roughness_texture_data: None,
-            occlusion_texture_path: None,
-            occlusion_texture_data: None,
-            emissive_texture_path: None,
-            emissive_texture_data: None,
             roughness_factor: roughness,
-            metallic_factor: 0.0,
-            occlusion_strength: 1.0,
-            emissive_factor: [0.0; 3],
-            base_color_factor: [1.0, 1.0, 1.0, 1.0],
-            alpha_mode: solarxy_core::geometry::AlphaMode::Opaque,
             alpha_cutoff: 0.5,
-            shading_model: solarxy_core::geometry::ShadingModel::default(),
-            toon_steps: 3.0,
-            ambient: None,
-            diffuse: None,
-            specular: None,
-            shininess: None,
-            dissolve: None,
-            optical_density: None,
-            ambient_texture_name: None,
-            diffuse_texture_name: None,
-            specular_texture_name: None,
-            normal_texture_name: None,
-            shininess_texture_name: None,
-            dissolve_texture_name: None,
+            ..RawMaterialData::default()
         }
     }
 

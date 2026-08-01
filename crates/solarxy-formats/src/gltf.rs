@@ -146,39 +146,13 @@ fn build_model(
     let (meshes, polygon_count) = extract_meshes(document, buffers);
 
     if materials.is_empty() && meshes.iter().any(|m| m.material_index.is_some()) {
+        // Only the three values that differ from the material default are
+        // named; the rest were an exhaustive restatement of `Default`.
         materials.push(RawMaterialData {
             name: "gltf_default".to_string(),
-            diffuse_texture_path: None,
-            normal_texture_path: None,
-            diffuse_texture_data: None,
-            normal_texture_data: None,
-            metallic_roughness_texture_path: None,
-            metallic_roughness_texture_data: None,
-            occlusion_texture_path: None,
-            occlusion_texture_data: None,
-            emissive_texture_path: None,
-            emissive_texture_data: None,
             roughness_factor: 0.5,
-            metallic_factor: 0.0,
-            occlusion_strength: 1.0,
-            emissive_factor: [0.0, 0.0, 0.0],
-            base_color_factor: [1.0, 1.0, 1.0, 1.0],
-            alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
-            shading_model: solarxy_core::geometry::ShadingModel::default(),
-            toon_steps: 3.0,
-            ambient: None,
-            diffuse: None,
-            specular: None,
-            shininess: None,
-            dissolve: None,
-            optical_density: None,
-            ambient_texture_name: None,
-            diffuse_texture_name: None,
-            specular_texture_name: None,
-            normal_texture_name: None,
-            shininess_texture_name: None,
-            dissolve_texture_name: None,
+            ..RawMaterialData::default()
         });
     }
 
@@ -237,9 +211,10 @@ fn extract_materials(
             let alpha_cutoff = mat.alpha_cutoff().unwrap_or(0.5);
 
             let base_color = pbr.base_color_factor();
+            let label = mat.name().unwrap_or("gltf_material").to_string();
 
-            RawMaterialData {
-                name: mat.name().unwrap_or("gltf_material").to_string(),
+            let mut out = RawMaterialData {
+                name: label.clone(),
                 diffuse_texture_path: diffuse_path,
                 normal_texture_path: normal_path,
                 diffuse_texture_data: diffuse_data,
@@ -281,9 +256,274 @@ fn extract_materials(
                     .map(|t| format!("texture_index:{}", t.texture().source().index())),
                 shininess_texture_name: None,
                 dissolve_texture_name: None,
-            }
+                ..RawMaterialData::default()
+            };
+
+            apply_typed_extensions(&mat, &mut out, images, texture_base);
+            apply_raw_extensions(&mat, &mut out, document, images, texture_base, &label);
+            out
         })
         .collect()
+}
+
+/// Resolve an optional typed texture reference into the path-and-data pair
+/// [`RawMaterialData`] stores.
+fn typed_texture(
+    info: Option<::gltf::texture::Info>,
+    images: &[Option<Arc<RawImageData>>],
+    texture_base: Option<&Path>,
+) -> (Option<PathBuf>, Option<Arc<RawImageData>>) {
+    match info {
+        Some(info) => resolve_texture(&info.texture(), images, texture_base),
+        None => (None, None),
+    }
+}
+
+/// The five principled extensions the pinned gltf crate exposes through
+/// typed accessors, each behind a cargo feature of the same name. These get
+/// the crate's own validation, which is why they are read this way rather
+/// than uniformly through the raw extension map.
+fn apply_typed_extensions(
+    mat: &::gltf::Material,
+    out: &mut RawMaterialData,
+    images: &[Option<Arc<RawImageData>>],
+    texture_base: Option<&Path>,
+) {
+    if let Some(ior) = mat.ior() {
+        out.ior = ior;
+    }
+    if let Some(strength) = mat.emissive_strength() {
+        out.emissive_strength = strength;
+    }
+    if let Some(transmission) = mat.transmission() {
+        out.transmission = transmission.transmission_factor();
+        (out.transmission_texture_path, out.transmission_texture_data) =
+            typed_texture(transmission.transmission_texture(), images, texture_base);
+    }
+    if let Some(volume) = mat.volume() {
+        out.thickness = volume.thickness_factor();
+        out.attenuation_color = volume.attenuation_color();
+        // The crate reports the specification's infinite default verbatim.
+        // This type carries "no attenuation" as zero instead, because the
+        // value is serialized as JSON and a non-finite float becomes null
+        // on the way out and fails to parse on the way back in.
+        let distance = volume.attenuation_distance();
+        out.attenuation_distance = if distance.is_finite() { distance } else { 0.0 };
+        (out.thickness_texture_path, out.thickness_texture_data) =
+            typed_texture(volume.thickness_texture(), images, texture_base);
+    }
+    if let Some(specular) = mat.specular() {
+        out.specular_intensity = specular.specular_factor();
+        out.specular_color = specular.specular_color_factor();
+        (out.specular_texture_path, out.specular_texture_data) =
+            typed_texture(specular.specular_texture(), images, texture_base);
+        (
+            out.specular_color_texture_path,
+            out.specular_color_texture_data,
+        ) = typed_texture(specular.specular_color_texture(), images, texture_base);
+    }
+}
+
+/// Read a scalar out of a raw extension object.
+///
+/// An absent key keeps `fallback`, which is the extension's own default. A
+/// key that is present but not a number is a malformed file rather than an
+/// omission, so it warns and still keeps the fallback.
+#[allow(clippy::cast_possible_truncation)] // JSON is f64; these are f32 factors
+fn raw_f32(
+    ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    fallback: f32,
+    material: &str,
+) -> f32 {
+    let Some(value) = ext.get(key) else {
+        return fallback;
+    };
+    let Some(number) = value.as_f64() else {
+        tracing::warn!("material '{material}': {key} is not a number; using {fallback}");
+        return fallback;
+    };
+    number as f32
+}
+
+/// Read a linear RGB triple out of a raw extension object, with the same
+/// absent-versus-malformed distinction as [`raw_f32`].
+#[allow(clippy::cast_possible_truncation)] // JSON is f64; these are f32 factors
+fn raw_rgb(
+    ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    fallback: [f32; 3],
+    material: &str,
+) -> [f32; 3] {
+    let Some(value) = ext.get(key) else {
+        return fallback;
+    };
+    let Some(items) = value.as_array().filter(|a| a.len() == 3) else {
+        tracing::warn!("material '{material}': {key} is not a three-number array; ignoring it");
+        return fallback;
+    };
+    let mut rgb = fallback;
+    for (slot, item) in rgb.iter_mut().zip(items) {
+        if let Some(number) = item.as_f64() {
+            *slot = number as f32;
+        }
+    }
+    rgb
+}
+
+/// Resolve a texture named by index inside a raw extension object.
+///
+/// Nothing here is validated by the gltf crate, so every step is treated as
+/// untrusted input: a missing key, a non-integer index, or an index past the
+/// end of the document's texture table yields no texture and a diagnostic,
+/// never a panic.
+fn raw_texture(
+    ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    document: &::gltf::Document,
+    images: &[Option<Arc<RawImageData>>],
+    texture_base: Option<&Path>,
+    material: &str,
+) -> (Option<PathBuf>, Option<Arc<RawImageData>>) {
+    let Some(info) = ext.get(key) else {
+        return (None, None);
+    };
+    let index = info
+        .get("index")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|i| usize::try_from(i).ok());
+    let Some(index) = index else {
+        tracing::warn!("material '{material}': {key} carries no usable texture index; ignoring it");
+        return (None, None);
+    };
+    let Some(texture) = document.textures().nth(index) else {
+        tracing::warn!(
+            "material '{material}': {key} refers to texture {index}, which this file does not \
+             contain; ignoring it"
+        );
+        return (None, None);
+    };
+    resolve_texture(&texture, images, texture_base)
+}
+
+/// The four principled extensions the pinned gltf crate has no typed support
+/// for at any level, read through the `extensions` feature and the raw
+/// extension map. This is the only genuinely new parsing here, and the only
+/// place in this file where the input carries no crate-level validation.
+fn apply_raw_extensions(
+    mat: &::gltf::Material,
+    out: &mut RawMaterialData,
+    document: &::gltf::Document,
+    images: &[Option<Arc<RawImageData>>],
+    texture_base: Option<&Path>,
+    label: &str,
+) {
+    let object = |key: &str| -> Option<serde_json::Map<String, serde_json::Value>> {
+        let value = mat.extension_value(key)?;
+        let Some(map) = value.as_object() else {
+            tracing::warn!("material '{label}': {key} is not an object; ignoring it");
+            return None;
+        };
+        Some(map.clone())
+    };
+
+    if let Some(ext) = object("KHR_materials_clearcoat") {
+        out.clearcoat = raw_f32(&ext, "clearcoatFactor", 0.0, label);
+        out.clearcoat_roughness = raw_f32(&ext, "clearcoatRoughnessFactor", 0.0, label);
+        (out.clearcoat_texture_path, out.clearcoat_texture_data) = raw_texture(
+            &ext,
+            "clearcoatTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+        (
+            out.clearcoat_roughness_texture_path,
+            out.clearcoat_roughness_texture_data,
+        ) = raw_texture(
+            &ext,
+            "clearcoatRoughnessTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+        (
+            out.clearcoat_normal_texture_path,
+            out.clearcoat_normal_texture_data,
+        ) = raw_texture(
+            &ext,
+            "clearcoatNormalTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+    }
+
+    if let Some(ext) = object("KHR_materials_sheen") {
+        out.sheen_color = raw_rgb(&ext, "sheenColorFactor", [0.0; 3], label);
+        out.sheen_roughness = raw_f32(&ext, "sheenRoughnessFactor", 0.0, label);
+        (out.sheen_color_texture_path, out.sheen_color_texture_data) = raw_texture(
+            &ext,
+            "sheenColorTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+        (
+            out.sheen_roughness_texture_path,
+            out.sheen_roughness_texture_data,
+        ) = raw_texture(
+            &ext,
+            "sheenRoughnessTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+    }
+
+    if let Some(ext) = object("KHR_materials_iridescence") {
+        out.iridescence = raw_f32(&ext, "iridescenceFactor", 0.0, label);
+        out.iridescence_ior = raw_f32(&ext, "iridescenceIor", 1.3, label);
+        out.iridescence_thickness_min = raw_f32(&ext, "iridescenceThicknessMinimum", 100.0, label);
+        out.iridescence_thickness_max = raw_f32(&ext, "iridescenceThicknessMaximum", 400.0, label);
+        (out.iridescence_texture_path, out.iridescence_texture_data) = raw_texture(
+            &ext,
+            "iridescenceTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+        (
+            out.iridescence_thickness_texture_path,
+            out.iridescence_thickness_texture_data,
+        ) = raw_texture(
+            &ext,
+            "iridescenceThicknessTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+    }
+
+    if let Some(ext) = object("KHR_materials_anisotropy") {
+        out.anisotropy = raw_f32(&ext, "anisotropyStrength", 0.0, label);
+        out.anisotropy_rotation = raw_f32(&ext, "anisotropyRotation", 0.0, label);
+        (out.anisotropy_texture_path, out.anisotropy_texture_data) = raw_texture(
+            &ext,
+            "anisotropyTexture",
+            document,
+            images,
+            texture_base,
+            label,
+        );
+    }
 }
 
 fn resolve_texture(

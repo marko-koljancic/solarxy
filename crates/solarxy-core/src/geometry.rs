@@ -352,6 +352,152 @@ pub struct RawMaterialData {
     /// Toon band count (only read when `shading_model` is `Toon`).
     #[cfg_attr(feature = "serde", serde(default = "default_toon_steps"))]
     pub toon_steps: f32,
+
+    // ---- Principled surface properties ----
+    //
+    // The properties beyond metallic-roughness that every principled surface
+    // model carries: Blender's Principled BSDF, Houdini's Principled Shader,
+    // Autodesk Standard Surface and glTF's KHR material extensions describe
+    // the same physical family under different names, and these are its
+    // parameters. Defaults are the identity of each effect, so a material
+    // that never sets them shades exactly as it did before they existed.
+    //
+    // Every field below carries a serde default: they are absent from every
+    // document and transfer blob written before this release.
+    /// Index of refraction of the base dielectric, which sets its normal
+    /// incidence reflectance. 1.5 is the default and the value the previous
+    /// hardcoded 0.04 reflectance corresponds to.
+    #[cfg_attr(feature = "serde", serde(default = "default_ior"))]
+    pub ior: f32,
+    /// How much light passes through the surface rather than reflecting
+    /// diffusely. 0.0 is opaque.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub transmission: f32,
+    /// Distance light travels through the volume, in local units. 0.0 means
+    /// the surface is thin-walled and has no interior.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub thickness: f32,
+    /// The colour light becomes after travelling [`Self::attenuation_distance`]
+    /// through the volume. White is no tint.
+    #[cfg_attr(feature = "serde", serde(default = "white_rgb"))]
+    pub attenuation_color: [f32; 3],
+    /// Distance at which transmitted light reaches
+    /// [`Self::attenuation_color`]. **0.0 means no attenuation**, standing in
+    /// for the specification's infinite default: the value is serialized as
+    /// JSON, where a non-finite float becomes `null` and fails to load back.
+    /// The specification's own domain is strictly positive, so zero is free
+    /// to carry this meaning.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attenuation_distance: f32,
+    /// Strength of the clear-coat layer over the base surface. 0.0 is no
+    /// coat.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat: f32,
+    /// Roughness of the clear-coat layer, independent of the base roughness.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_roughness: f32,
+    /// Colour of the retroreflective sheen lobe that gives fabric its rim.
+    /// Black is no sheen, which is why the default is not white here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_color: [f32; 3],
+    /// Roughness of the sheen lobe.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_roughness: f32,
+    /// Strength of the thin-film interference effect. 0.0 is none.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence: f32,
+    /// Index of refraction of the thin film itself.
+    #[cfg_attr(feature = "serde", serde(default = "default_iridescence_ior"))]
+    pub iridescence_ior: f32,
+    /// Thin-film thickness in nanometres at the low end of the range a
+    /// thickness map addresses. Without a map only the maximum is used.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "default_iridescence_thickness_min")
+    )]
+    pub iridescence_thickness_min: f32,
+    /// Thin-film thickness in nanometres at the high end of the range, and
+    /// the thickness used when no thickness map is present.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "default_iridescence_thickness_max")
+    )]
+    pub iridescence_thickness_max: f32,
+    /// Scales the dielectric normal-incidence reflectance derived from
+    /// [`Self::ior`]. 1.0 leaves it alone.
+    #[cfg_attr(feature = "serde", serde(default = "one_f32"))]
+    pub specular_intensity: f32,
+    /// Tints the dielectric reflectance at normal incidence. White is
+    /// untinted.
+    #[cfg_attr(feature = "serde", serde(default = "white_rgb"))]
+    pub specular_color: [f32; 3],
+    /// How much the specular highlight stretches along the tangent
+    /// direction. 0.0 is isotropic.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy: f32,
+    /// Rotation of the anisotropy direction within the tangent plane, in
+    /// radians.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy_rotation: f32,
+    /// Multiplies [`Self::emissive_factor`], letting emission exceed the
+    /// unit range a colour can express. 1.0 is no change.
+    #[cfg_attr(feature = "serde", serde(default = "one_f32"))]
+    pub emissive_strength: f32,
+
+    // ---- Principled surface texture slots ----
+    //
+    // Same path-plus-data shape as the five slots above. These round-trip
+    // through import and export; the raster path does not sample them,
+    // because the fragment stage is at 10 of the 16 sampled textures core
+    // WebGPU guarantees and these twelve do not fit in the remainder.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub transmission_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub transmission_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub thickness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub thickness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_roughness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_roughness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_normal_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_normal_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_color_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub sheen_color_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_roughness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub sheen_roughness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub iridescence_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence_thickness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub iridescence_thickness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub specular_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub specular_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub specular_color_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub specular_color_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub anisotropy_texture_data: Option<std::sync::Arc<RawImageData>>,
 }
 
 fn default_toon_steps() -> f32 {
@@ -360,6 +506,32 @@ fn default_toon_steps() -> f32 {
 
 fn white_rgba() -> [f32; 4] {
     [1.0, 1.0, 1.0, 1.0]
+}
+
+fn white_rgb() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+/// The multiplicative identity, shared by every principled factor whose
+/// "leave it alone" value is one rather than zero.
+fn one_f32() -> f32 {
+    1.0
+}
+
+fn default_ior() -> f32 {
+    1.5
+}
+
+fn default_iridescence_ior() -> f32 {
+    1.3
+}
+
+fn default_iridescence_thickness_min() -> f32 {
+    100.0
+}
+
+fn default_iridescence_thickness_max() -> f32 {
+    400.0
 }
 
 #[cfg(feature = "serde")]
@@ -406,6 +578,48 @@ impl Default for RawMaterialData {
             normal_texture_name: None,
             shininess_texture_name: None,
             dissolve_texture_name: None,
+            ior: default_ior(),
+            transmission: 0.0,
+            thickness: 0.0,
+            attenuation_color: white_rgb(),
+            attenuation_distance: 0.0,
+            clearcoat: 0.0,
+            clearcoat_roughness: 0.0,
+            sheen_color: [0.0; 3],
+            sheen_roughness: 0.0,
+            iridescence: 0.0,
+            iridescence_ior: default_iridescence_ior(),
+            iridescence_thickness_min: default_iridescence_thickness_min(),
+            iridescence_thickness_max: default_iridescence_thickness_max(),
+            specular_intensity: one_f32(),
+            specular_color: white_rgb(),
+            anisotropy: 0.0,
+            anisotropy_rotation: 0.0,
+            emissive_strength: one_f32(),
+            transmission_texture_path: None,
+            transmission_texture_data: None,
+            thickness_texture_path: None,
+            thickness_texture_data: None,
+            clearcoat_texture_path: None,
+            clearcoat_texture_data: None,
+            clearcoat_roughness_texture_path: None,
+            clearcoat_roughness_texture_data: None,
+            clearcoat_normal_texture_path: None,
+            clearcoat_normal_texture_data: None,
+            sheen_color_texture_path: None,
+            sheen_color_texture_data: None,
+            sheen_roughness_texture_path: None,
+            sheen_roughness_texture_data: None,
+            iridescence_texture_path: None,
+            iridescence_texture_data: None,
+            iridescence_thickness_texture_path: None,
+            iridescence_thickness_texture_data: None,
+            specular_texture_path: None,
+            specular_texture_data: None,
+            specular_color_texture_path: None,
+            specular_color_texture_data: None,
+            anisotropy_texture_path: None,
+            anisotropy_texture_data: None,
         }
     }
 }
@@ -573,6 +787,85 @@ pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A material serialized before the principled properties existed must
+    /// load with every one of them at the identity of its effect, or every
+    /// document and transfer blob written before this release renders
+    /// differently after it.
+    ///
+    /// The fixture is the raw stored shape, keys and all, rather than a
+    /// struct round trip: a round trip would serialize the new fields and
+    /// so could never observe them being absent, which is exactly the
+    /// mistake the geo rotate-order migration's tests made.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_material_stored_before_the_principled_properties_loads_neutral() {
+        let stored = r#"{
+            "name": "old",
+            "diffuse_texture_path": null,
+            "normal_texture_path": null,
+            "metallic_roughness_texture_path": null,
+            "occlusion_texture_path": null,
+            "emissive_texture_path": null,
+            "roughness_factor": 0.5,
+            "metallic_factor": 0.0,
+            "emissive_factor": [0.0, 0.0, 0.0],
+            "alpha_mode": "Opaque",
+            "alpha_cutoff": 0.5,
+            "ambient": null,
+            "diffuse": null,
+            "specular": null,
+            "shininess": null,
+            "dissolve": null,
+            "optical_density": null,
+            "ambient_texture_name": null,
+            "diffuse_texture_name": null,
+            "specular_texture_name": null,
+            "normal_texture_name": null,
+            "shininess_texture_name": null,
+            "dissolve_texture_name": null
+        }"#;
+        let mat: RawMaterialData = serde_json::from_str(stored).expect("old blob still loads");
+
+        assert_eq!(mat.name, "old");
+        // The identities that are one, not zero. A zero default on any of
+        // these would darken or flatten every pre-existing material.
+        assert!((mat.ior - 1.5).abs() < 1e-6, "ior");
+        assert!((mat.specular_intensity - 1.0).abs() < 1e-6, "specular");
+        assert_eq!(mat.specular_color, [1.0, 1.0, 1.0]);
+        assert!((mat.emissive_strength - 1.0).abs() < 1e-6, "emissive");
+        assert_eq!(mat.attenuation_color, [1.0, 1.0, 1.0]);
+        assert!((mat.iridescence_ior - 1.3).abs() < 1e-6, "iridescence ior");
+        // The identities that are zero, meaning the effect is off.
+        assert!((mat.transmission - 0.0).abs() < 1e-6, "transmission");
+        assert!((mat.thickness - 0.0).abs() < 1e-6, "thickness");
+        assert!((mat.attenuation_distance - 0.0).abs() < 1e-6, "attenuation");
+        assert!((mat.clearcoat - 0.0).abs() < 1e-6, "clearcoat");
+        assert_eq!(mat.sheen_color, [0.0, 0.0, 0.0]);
+        assert!((mat.iridescence - 0.0).abs() < 1e-6, "iridescence");
+        assert!((mat.anisotropy - 0.0).abs() < 1e-6, "anisotropy");
+        // And no texture slot invented itself.
+        assert!(mat.clearcoat_texture_path.is_none());
+        assert!(mat.anisotropy_texture_path.is_none());
+    }
+
+    /// `attenuation_distance` carries "no attenuation" as zero rather than
+    /// as the specification's infinity, because JSON is the storage format
+    /// and a non-finite float does not survive it. This pins that choice:
+    /// if anyone restores the infinite default, the value silently becomes
+    /// null on write and fails on read.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn every_material_default_survives_a_json_round_trip() {
+        let mat = RawMaterialData::default();
+        let text = serde_json::to_string(&mat).expect("serialize");
+        assert!(
+            !text.contains("null,\"attenuation") && !text.contains("\"attenuation_distance\":null"),
+            "a non-finite float would serialize as null: {text}"
+        );
+        let back: RawMaterialData = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back, mat);
+    }
 
     /// Locks `AlphaMode` discriminants to the GPU wire format
     /// (`MaterialUniform.alpha_mode: u32` and the WGSL shaders).

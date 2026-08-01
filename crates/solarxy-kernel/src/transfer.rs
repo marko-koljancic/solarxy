@@ -60,8 +60,14 @@ fn topology_from_wire(v: u32) -> MeshTopology {
     }
 }
 
-/// The five texture roles a material can carry, in wire order.
-const TEXTURE_ROLES: usize = 5;
+/// The texture roles a material can carry, in wire order: the original five
+/// followed by the twelve principled surface slots.
+///
+/// The order is the wire format, so append rather than reorder. Both ends of
+/// this blob ship together within one page load, so there is no stored blob
+/// to stay compatible with, but the two slot functions below must always
+/// agree with each other and with this count.
+const TEXTURE_ROLES: usize = 17;
 
 fn texture_data_slots(m: &RawMaterialData) -> [&Option<Arc<RawImageData>>; TEXTURE_ROLES] {
     [
@@ -70,6 +76,18 @@ fn texture_data_slots(m: &RawMaterialData) -> [&Option<Arc<RawImageData>>; TEXTU
         &m.metallic_roughness_texture_data,
         &m.occlusion_texture_data,
         &m.emissive_texture_data,
+        &m.transmission_texture_data,
+        &m.thickness_texture_data,
+        &m.clearcoat_texture_data,
+        &m.clearcoat_roughness_texture_data,
+        &m.clearcoat_normal_texture_data,
+        &m.sheen_color_texture_data,
+        &m.sheen_roughness_texture_data,
+        &m.iridescence_texture_data,
+        &m.iridescence_thickness_texture_data,
+        &m.specular_texture_data,
+        &m.specular_color_texture_data,
+        &m.anisotropy_texture_data,
     ]
 }
 
@@ -82,6 +100,18 @@ fn texture_data_slots_mut(
         &mut m.metallic_roughness_texture_data,
         &mut m.occlusion_texture_data,
         &mut m.emissive_texture_data,
+        &mut m.transmission_texture_data,
+        &mut m.thickness_texture_data,
+        &mut m.clearcoat_texture_data,
+        &mut m.clearcoat_roughness_texture_data,
+        &mut m.clearcoat_normal_texture_data,
+        &mut m.sheen_color_texture_data,
+        &mut m.sheen_roughness_texture_data,
+        &mut m.iridescence_texture_data,
+        &mut m.iridescence_thickness_texture_data,
+        &mut m.specular_texture_data,
+        &mut m.specular_color_texture_data,
+        &mut m.anisotropy_texture_data,
     ]
 }
 
@@ -508,6 +538,64 @@ mod tests {
         let em = m.emissive_texture_data.as_ref().expect("emissive texture");
         assert_eq!(em.pixels, vec![9, 9, 9, 9]);
         assert!(m.normal_texture_data.is_none());
+    }
+
+    #[test]
+    fn principled_properties_and_their_texture_slots_round_trip() {
+        // The blob is what carries a parsed model out of the import worker,
+        // so anything the wire format forgets is dropped between parsing a
+        // file and seeing it. The slot table grew from five roles to
+        // seventeen; this pins that both halves of it agree.
+        let mesh = KernelMesh::new(
+            "glass",
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        );
+        let material = RawMaterialData {
+            name: "glass".to_string(),
+            ior: 1.7,
+            transmission: 0.9,
+            thickness: 2.5,
+            attenuation_color: [0.8, 0.2, 0.1],
+            attenuation_distance: 3.0,
+            clearcoat: 0.75,
+            clearcoat_roughness: 0.25,
+            sheen_color: [0.4, 0.5, 0.6],
+            sheen_roughness: 0.35,
+            iridescence: 0.5,
+            iridescence_ior: 1.8,
+            iridescence_thickness_min: 200.0,
+            iridescence_thickness_max: 600.0,
+            specular_intensity: 0.6,
+            specular_color: [0.9, 0.8, 0.7],
+            anisotropy: 0.65,
+            anisotropy_rotation: 1.2,
+            emissive_strength: 4.0,
+            clearcoat_texture_data: Some(Arc::new(RawImageData::new(vec![1, 2, 3, 4], 1, 1))),
+            anisotropy_texture_data: Some(Arc::new(RawImageData::new(vec![5, 6, 7, 8], 1, 1))),
+            ..RawMaterialData::default()
+        };
+        let set = GeometrySet::from_parts(vec![mesh], vec![Arc::new(material.clone())]);
+
+        let back = unpack(&pack(&set)).expect("round trip");
+        let m = &back.materials[0];
+        assert_eq!(**m, material, "every field survived the codec");
+
+        // Named explicitly, because the equality above would also pass if
+        // both sides were empty.
+        assert_eq!(
+            m.clearcoat_texture_data.as_ref().expect("coat map").pixels,
+            vec![1, 2, 3, 4]
+        );
+        assert_eq!(
+            m.anisotropy_texture_data
+                .as_ref()
+                .expect("anisotropy map")
+                .pixels,
+            vec![5, 6, 7, 8]
+        );
+        // The last slot in the table is the one an off-by-one drops.
+        assert!(m.specular_color_texture_data.is_none());
     }
 
     #[test]

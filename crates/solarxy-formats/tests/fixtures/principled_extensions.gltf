@@ -1,0 +1,232 @@
+{
+ "asset": {
+  "version": "2.0"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0,
+    1
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0
+  },
+  {
+   "mesh": 1
+  }
+ ],
+ "meshes": [
+  {
+   "name": "full",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "name": "broken",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1,
+     "material": 1
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "principled_full",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.4
+   },
+   "extensions": {
+    "KHR_materials_ior": {
+     "ior": 1.7
+    },
+    "KHR_materials_transmission": {
+     "transmissionFactor": 0.9,
+     "transmissionTexture": {
+      "index": 0
+     }
+    },
+    "KHR_materials_volume": {
+     "thicknessFactor": 2.5,
+     "attenuationColor": [
+      0.8,
+      0.2,
+      0.1
+     ],
+     "attenuationDistance": 3.0,
+     "thicknessTexture": {
+      "index": 1
+     }
+    },
+    "KHR_materials_specular": {
+     "specularFactor": 0.6,
+     "specularColorFactor": [
+      0.9,
+      0.8,
+      0.7
+     ]
+    },
+    "KHR_materials_emissive_strength": {
+     "emissiveStrength": 4.0
+    },
+    "KHR_materials_clearcoat": {
+     "clearcoatFactor": 0.75,
+     "clearcoatRoughnessFactor": 0.25,
+     "clearcoatTexture": {
+      "index": 0
+     }
+    },
+    "KHR_materials_sheen": {
+     "sheenColorFactor": [
+      0.4,
+      0.5,
+      0.6
+     ],
+     "sheenRoughnessFactor": 0.35
+    },
+    "KHR_materials_iridescence": {
+     "iridescenceFactor": 0.5,
+     "iridescenceIor": 1.8,
+     "iridescenceThicknessMinimum": 200.0,
+     "iridescenceThicknessMaximum": 600.0
+    },
+    "KHR_materials_anisotropy": {
+     "anisotropyStrength": 0.65,
+     "anisotropyRotation": 1.2
+    }
+   }
+  },
+  {
+   "name": "principled_broken",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.25,
+     0.5,
+     0.75,
+     1.0
+    ],
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.6
+   },
+   "extensions": {
+    "KHR_materials_clearcoat": {
+     "clearcoatFactor": "very shiny",
+     "clearcoatRoughnessFactor": 0.5,
+     "clearcoatNormalTexture": {
+      "index": 99
+     }
+    },
+    "KHR_materials_sheen": {
+     "sheenColorFactor": [
+      0.1,
+      0.2
+     ]
+    },
+    "KHR_materials_iridescence": {
+     "iridescenceFactor": 0.5,
+     "iridescenceTexture": {
+      "texCoord": 0
+     }
+    },
+    "KHR_materials_anisotropy": [
+     1,
+     2,
+     3
+    ]
+   }
+  }
+ ],
+ "textures": [
+  {
+   "source": 0
+  },
+  {
+   "source": 1
+  }
+ ],
+ "images": [
+  {
+   "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg=="
+  },
+  {
+   "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAD0lEQVR4nGNgYPgPRmAKABf2A/1+6zfzAAAAAElFTkSuQmCC"
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 3,
+   "type": "VEC3",
+   "min": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max": [
+    1.0,
+    1.0,
+    0.0
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5125,
+   "count": 3,
+   "type": "SCALAR"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 36,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 36,
+   "byteLength": 12,
+   "target": 34963
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 48,
+   "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAEAAAACAAAA"
+  }
+ ],
+ "extensionsUsed": [
+  "KHR_materials_anisotropy",
+  "KHR_materials_clearcoat",
+  "KHR_materials_emissive_strength",
+  "KHR_materials_ior",
+  "KHR_materials_iridescence",
+  "KHR_materials_sheen",
+  "KHR_materials_specular",
+  "KHR_materials_transmission",
+  "KHR_materials_volume"
+ ]
+}

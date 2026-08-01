@@ -23,9 +23,22 @@ tobj = { version = "4.0.3", default-features = false }
 serde_json = "1"
 stl_io = "0.7"
 ply-rs-bw = "3.0.3"
-# KHR_materials_unlit maps onto the per-material Unlit shading model
-# (context-expansion phase 18); the extension is parse-only.
-gltf = { version = "1.4", features = ["KHR_materials_unlit"] }
+# The principled surface extensions, in the two mechanisms this crate
+# version offers. `KHR_materials_unlit` maps onto the per-material Unlit
+# shading model and is parse-only; the next five reach typed accessors on
+# `gltf::Material`. Clearcoat, sheen, iridescence and anisotropy have no
+# typed support at 1.4, so they are read through `extensions` and the raw
+# extension map instead. Every one of these is a cfg-gated field in
+# `gltf-json`, which is already in the tree, so no new crate is pulled.
+gltf = { version = "1.4", features = [
+    "KHR_materials_unlit",
+    "KHR_materials_ior",
+    "KHR_materials_transmission",
+    "KHR_materials_volume",
+    "KHR_materials_specular",
+    "KHR_materials_emissive_strength",
+    "extensions",
+] }
 # Percent-decoding for glTF URIs handed to the AssetResolver (matches the
 # gltf importer's own handling; already in the tree via gltf).
 urlencoding = "2"

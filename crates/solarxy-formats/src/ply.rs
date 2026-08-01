@@ -14,7 +14,7 @@ use ply_rs_bw::ply::Property;
 
 use crate::FormatsError;
 use solarxy_core::geometry::srgb_to_linear;
-use solarxy_core::{AlphaMode, MeshTopology, RawMaterialData, RawMeshData, RawModelData};
+use solarxy_core::{MeshTopology, RawMaterialData, RawMeshData, RawModelData};
 
 fn ply_prop_to_f32(prop: &Property) -> f32 {
     match *prop {
@@ -306,39 +306,14 @@ fn parse_ply(
     } else {
         "clay_default"
     };
+    // Only the values that differ from the material default are named; the
+    // rest were an exhaustive restatement of `Default`.
     materials.push(RawMaterialData {
         name: mat_name.to_string(),
         diffuse_texture_path: companion_tex,
-        normal_texture_path: None,
-        diffuse_texture_data: None,
-        normal_texture_data: None,
-        metallic_roughness_texture_path: None,
-        metallic_roughness_texture_data: None,
-        occlusion_texture_path: None,
-        occlusion_texture_data: None,
-        emissive_texture_path: None,
-        emissive_texture_data: None,
         roughness_factor: 0.5,
-        metallic_factor: 0.0,
-        occlusion_strength: 1.0,
-        emissive_factor: [0.0, 0.0, 0.0],
-        base_color_factor: [1.0, 1.0, 1.0, 1.0],
-        alpha_mode: AlphaMode::Opaque,
         alpha_cutoff: 0.5,
-        shading_model: solarxy_core::geometry::ShadingModel::default(),
-        toon_steps: 3.0,
-        ambient: None,
-        diffuse: None,
-        specular: None,
-        shininess: None,
-        dissolve: None,
-        optical_density: None,
-        ambient_texture_name: None,
-        diffuse_texture_name: None,
-        specular_texture_name: None,
-        normal_texture_name: None,
-        shininess_texture_name: None,
-        dissolve_texture_name: None,
+        ..RawMaterialData::default()
     });
 
     Ok(RawModelData {
