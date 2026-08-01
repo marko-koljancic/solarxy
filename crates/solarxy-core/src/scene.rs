@@ -152,6 +152,15 @@ pub struct LightDef {
     /// Linear RGB. Hemisphere uses `color` as the sky color and
     /// `ground_color` for the lower hemisphere.
     pub color: [f32; 3],
+    /// A plain linear scale on this light's contribution: the renderer
+    /// multiplies by exactly this and nothing else.
+    ///
+    /// Worth stating because it was not always true. Until 0.8.2 the
+    /// raster path multiplied every slot-consuming light by a hardcoded
+    /// three, so no authored value could be matched against a reference
+    /// and the node's own help called its scale arbitrary. It is still not
+    /// calibrated in lumens or watts, but it is consistent: two lights an
+    /// octave apart in this number are an octave apart on screen.
     pub intensity: f32,
     /// Point / Spot cutoff distance; `0` means unlimited.
     pub range: f32,

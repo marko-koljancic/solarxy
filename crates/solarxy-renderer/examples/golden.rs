@@ -444,6 +444,116 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         renderer.set_lut(&device, &queue, LutSlot::B, None);
     }
 
+    // The node-driven light path, which nothing else in this suite covers.
+    //
+    // Every other capture renders on the synthesized viewer rig, because
+    // the golden scenes carry no light node. That is exactly what makes
+    // them useful for judging a shading change, and exactly what makes
+    // them blind to `LightsUniform::from_defs`, the path a real scene's
+    // lights take. This capture drives that path with explicit defs at the
+    // light-node default.
+    //
+    // It also served a one-off purpose worth recording: when the hardcoded
+    // brightness multiplier left the shader, this capture at the old
+    // default (1.5, times three in the shader) and at the new one (4.5,
+    // times nothing) had to be the same image. That is the neutrality
+    // claim, checked on the path the rig cannot reach.
+    {
+        use solarxy_core::scene::{LightDef, LightKind};
+        use solarxy_renderer::light::LightsUniform;
+
+        /// The light-node default. Kept as a named constant because this
+        /// capture's whole point is that changing it in step with the
+        /// shader leaves the image alone.
+        const LIT_INTENSITY: f32 = 4.5;
+
+        let c = scene.model.bounds.center();
+        let d = scene.model.bounds.diagonal().max(1e-3);
+        let at = |x: f32, y: f32, z: f32| [c.x + x * d, c.y + y * d, c.z + z * d];
+        let lamp = |position: [f32; 3], color: [f32; 3], intensity: f32| LightDef {
+            kind: LightKind::Point,
+            position,
+            direction: [0.0, -1.0, 0.0],
+            color,
+            intensity,
+            // Range and decay both zero is the no-falloff parity path the
+            // synthesized rig also takes, so this capture isolates the
+            // intensity rather than the attenuation curve.
+            range: 0.0,
+            decay: 0.0,
+            inner_cone: 0.0,
+            outer_cone: 0.0,
+            area_extent: [0.0; 2],
+            rotate: [0.0; 3],
+            two_sided: false,
+            ground_color: [0.0; 3],
+            cast_shadow: false,
+            shadow_map_size: SHADOW_MAP_SIZE,
+            shadow_bias: 0.0,
+            visible: true,
+            show_helper: false,
+            helper_size: 1.0,
+        };
+        let defs = [
+            lamp(at(-0.5, 0.8, 0.5), [1.0, 0.98, 0.95], LIT_INTENSITY),
+            lamp(at(1.0, 0.5, 0.5), [0.90, 0.93, 1.00], LIT_INTENSITY * 0.5),
+            lamp(at(0.0, 0.5, -1.5), [1.0, 1.0, 1.0], LIT_INTENSITY * 0.4),
+        ];
+        let base = scene.env.lights_uniform;
+        let lit = LightsUniform::from_defs(
+            &defs,
+            base.sphere_scale,
+            [base.ibl_avg_r, base.ibl_avg_g, base.ibl_avg_b],
+        );
+        queue.write_buffer(&scene.env.light_buffer, 0, bytemuck::bytes_of(&lit));
+
+        let pds = modes()[0].1;
+        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Golden Lit Encoder"),
+        });
+        let objects = [scene.draw_object()];
+        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
+        renderer.render_main_pass(
+            &mut encoder,
+            &scene.env,
+            &objects,
+            &cam.bind_group,
+            &cam.camera,
+            &pds,
+            background,
+        );
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            &renderer.post.luts,
+            pds.inspection_mode,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+            true,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = read_target(&device, &queue, &target)?;
+        let path = format!("{out_dir}/lit.png");
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .context("malformed pixel buffer")?
+            .save_with_format(&path, image::ImageFormat::Png)?;
+        println!("GOLDEN wrote {path} (explicit light defs, not the viewer rig)");
+
+        // Put the synthesized rig back, so anything captured after this
+        // sees the lighting the rest of the suite is built on.
+        queue.write_buffer(&scene.env.light_buffer, 0, bytemuck::bytes_of(&base));
+    }
+
     // Extra (not part of the compare set): the multi-object proof — two
     // extra objects with independent transforms drawn through the
     // SceneObjects delta path beside the loaded model.
@@ -744,7 +854,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 /// once every branch in flight carries the capture, and it becomes a hard
 /// gate.
 fn grown_captures() -> &'static [&'static str] {
-    &["topology", "clay", "principled", "graded"]
+    &["topology", "clay", "principled", "graded", "lit"]
 }
 
 /// Replicates the app's per-pane partial camera-uniform write (inspection

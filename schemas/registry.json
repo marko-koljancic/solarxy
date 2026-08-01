@@ -82,7 +82,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "visible",
@@ -4248,7 +4248,7 @@
     },
     {
       "typeId": "directional_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Directional Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -4354,19 +4354,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "cast_shadow",
@@ -5805,7 +5805,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "visible",
@@ -9501,7 +9501,7 @@
     },
     {
       "typeId": "point_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Point Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -9588,19 +9588,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "range",
@@ -10731,7 +10731,7 @@
     },
     {
       "typeId": "rect_area_light",
-      "version": 3,
+      "version": 4,
       "displayName": "Rect Area Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -10818,19 +10818,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "width",
@@ -11453,7 +11453,7 @@
     },
     {
       "typeId": "spot_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Spot Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -11559,19 +11559,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights at 4.5 and 9 differ by exactly one stop. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "range",

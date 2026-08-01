@@ -191,3 +191,69 @@ fn the_instancing_sample_keeps_its_copies_as_placements() {
          collapsed copy: {placements:?}"
     );
 }
+
+/// Every bundled sample lights at the brightness it was authored at.
+///
+/// The intensity rescale moved four light types by a factor of three and
+/// migrates stored numbers automatically, so most samples needed nothing.
+/// One did: `animated-field.slxy` drives its key light from an expression,
+/// which is the single case the migration cannot rewrite, so that file was
+/// corrected by hand and stamped past the migration. A hand-edited binary
+/// with no test is how a sample quietly goes dim, and the load sweep above
+/// would not notice: it checks for warnings, and the corrected file has
+/// none precisely because it no longer migrates.
+#[test]
+fn the_animated_sample_lights_at_the_rescaled_brightness() {
+    use solarxy_core::scene::{LightKind, SceneOp};
+
+    let path = samples_dir().join("animated-field.slxy");
+    if !path.is_file() {
+        eprintln!("skipping: no animated-field.slxy at {}", path.display());
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("animated-field loads");
+    for _ in 0..8 {
+        if engine.cook(&mut || true).is_empty() {
+            break;
+        }
+    }
+
+    let lights = engine
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetLights { lights } => Some(lights),
+            _ => None,
+        })
+        .expect("the sample has lights");
+
+    let key = lights
+        .iter()
+        .find(|l| l.kind == LightKind::Directional)
+        .expect("the sample has a directional key light");
+    // The expression is `4.5 + sin($T * 1.1) * 1.35`, which is the original
+    // `1.5 + sin($T * 1.1) * 0.45` with every term tripled. At the first
+    // frame the sine term is near zero, so the key sits near its 4.5 base.
+    assert!(
+        (key.intensity - 4.5).abs() < 0.2,
+        "the key light resolved to {}, not the rescaled base of 4.5; the \
+         sample's expression was not tripled with the rest of the release",
+        key.intensity
+    );
+
+    // The fill folds into the hemisphere rows and never saw the
+    // multiplier, so it must NOT have moved.
+    let fill = lights
+        .iter()
+        .find(|l| l.kind == LightKind::Hemisphere)
+        .expect("the sample has a hemisphere fill");
+    assert!(
+        (fill.intensity - 0.7).abs() < 1e-6,
+        "the hemisphere fill resolved to {}, not the 0.7 it was authored \
+         at; ambient and hemisphere are outside the rescale",
+        fill.intensity
+    );
+}

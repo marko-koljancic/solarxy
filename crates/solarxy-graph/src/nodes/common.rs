@@ -346,7 +346,9 @@ pub fn migrate_pin_copy_mode_to_bake(
 /// v1 -> v2 for `rect_area_light`: the v1 soft point-light approximation
 /// never read `rotate` / `scale` / `uniform_scale`; they return with a
 /// real LTC area-light model (backlog note). Silently stripped.
-#[allow(clippy::unnecessary_wraps)] // signature matches MigrateFn
+///
+/// v3 -> v4 additionally rescales the stored intensity, for the reason
+/// [`migrate_scale_intensity`] gives.
 pub fn migrate_strip_rect_area_transform(
     from: u32,
     params: &mut serde_json::Map<String, serde_json::Value>,
@@ -354,7 +356,74 @@ pub fn migrate_strip_rect_area_transform(
     if from == 1 {
         strip_keys(params, &["rotate", "scale", "uniform_scale"]);
     }
+    if from == 3 {
+        scale_stored_intensity(from, params)?;
+    }
     Ok(())
+}
+
+/// v1 -> v2 for the point, directional and spot lights: the raster path
+/// stopped multiplying every light's contribution by three, so a stored
+/// intensity has to move by the same factor to mean what it did.
+///
+/// **Only the four lights that entered that loop migrate.** Ambient and
+/// hemisphere fold into the hemisphere rows of the light uniform and never
+/// reached the multiplier, so their stored values already meant what they
+/// said and scaling them would be a three-fold brightening of every old
+/// scene that used one. Rect-area is the fourth and migrates on its own
+/// hook, because it was already at v3 for an unrelated reason.
+pub fn migrate_scale_intensity(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    if from == 1 {
+        scale_stored_intensity(from, params)?;
+    }
+    Ok(())
+}
+
+/// The factor the raster path used to apply behind the user's back.
+const INTENSITY_RESCALE: f64 = 3.0;
+
+/// Multiply a stored `intensity` by [`INTENSITY_RESCALE`], in the raw
+/// stored shape.
+///
+/// Three cases, and the third is the one worth having a rule for:
+///
+/// - **Absent.** Nothing to do. The param fills from the registry default,
+///   which moved by the same factor, so the light keeps its brightness.
+/// - **A number.** Multiplied.
+/// - **An expression** (`{"$expr": ...}`, the only object form a stored
+///   param takes). Left alone and reported. Rewriting the source text
+///   would mean parsing and re-emitting a user's expression to inject a
+///   factor, which is a transformation with no safe general form; leaving
+///   it silently would make that one light three times dimmer than the
+///   rest of the scene with nothing said. The migration loop turns the
+///   error into a load warning naming the node, so it surfaces where the
+///   user can act on it.
+fn scale_stored_intensity(
+    from: u32,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MigrateError> {
+    let Some(stored) = params.get("intensity") else {
+        return Ok(());
+    };
+    if let Some(n) = stored.as_f64() {
+        if let Some(scaled) = serde_json::Number::from_f64(n * INTENSITY_RESCALE) {
+            params.insert("intensity".to_string(), serde_json::Value::Number(scaled));
+        }
+        return Ok(());
+    }
+    Err(MigrateError {
+        from,
+        reason: format!(
+            "this light's Intensity is an expression, and light intensity is now a plain \
+             linear scale rather than one the renderer multiplied by {INTENSITY_RESCALE:.0} \
+             behind it. The expression was left as written, so this light is now \
+             {INTENSITY_RESCALE:.0} times dimmer than it was; multiply it by \
+             {INTENSITY_RESCALE:.0} to restore it"
+        ),
+    })
 }
 
 /// Warns when a lane is written under a reserved attribute name with a

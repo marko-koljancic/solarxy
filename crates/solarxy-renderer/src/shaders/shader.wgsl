@@ -975,7 +975,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let half_y = vec3<f32>(light.half_y);
                 let corners = ltc_corners(light_pos, half_x, half_y);
                 let two_sided = light.two_sided > 0.5;
-                let scale = light.intensity * 3.0;
+                // No hidden multiplier: intensity is a plain linear scale.
+                // There used to be a * 3.0 here and in the punctual arm
+                // below, which meant no authored value could be matched
+                // against a reference. Removing it is only safe alongside
+                // the node defaults and the synthesized viewer rig, which
+                // moved by the same factor in the same commit.
+                let scale = light.intensity;
 
                 // Diffuse is the plain cosine integral: the identity
                 // transform IS the cosine lobe.
@@ -1109,7 +1115,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
 
             let shadow_factor = select(1.0, shadow, light.shadowed > 0.5);
-            let scale = light.intensity * 3.0 * atten * shadow_factor;
+            // See the rect-area arm above: intensity is a plain linear
+            // scale, and dropping the multiplier at one site and not the
+            // other would leave area lights three times brighter than
+            // everything else with nothing to show for it.
+            let scale = light.intensity * atten * shadow_factor;
             var brdf = select(
                 cook_torrance(
                     N, V_world, L, albedo, roughness, metallic,

@@ -2046,6 +2046,97 @@ fn scene_delta_lowers_a_camera_node() {
     assert_eq!(def.kind, CameraKind::Orthographic);
 }
 
+/// Light intensity means the same thing before and after the rescale.
+///
+/// Not by comparing a stored number, which the migration unit tests
+/// already do, but by comparing the two things a user would call "the same
+/// light": one saved before the multiplier left the shader, and one placed
+/// fresh afterwards. Both must reach the renderer as the same `LightDef`
+/// intensity, because the shader no longer multiplies and the two would
+/// otherwise differ by a factor of three with nothing on screen to say why.
+#[test]
+fn a_light_saved_before_the_rescale_matches_one_placed_after_it() {
+    use solarxy_core::scene::SceneOp;
+
+    fn lowered_intensity(e: &mut Engine) -> f32 {
+        e.take_scene_delta()
+            .ops
+            .into_iter()
+            .find_map(|op| match op {
+                SceneOp::SetLights { lights } => lights.into_iter().next(),
+                _ => None,
+            })
+            .expect("a light in the delta")
+            .intensity
+    }
+
+    // (type id, the version a pre-rescale document stored it at)
+    for (type_id, stored_version) in [
+        ("point_light", 1),
+        ("directional_light", 1),
+        ("spot_light", 1),
+        ("rect_area_light", 3),
+    ] {
+        // The reference: a light placed today, untouched.
+        let mut fresh = engine();
+        add(&mut fresh, GraphContext::Root, type_id);
+        let want = lowered_intensity(&mut fresh);
+
+        // The same light as a pre-rescale document holds it: the old
+        // default written out explicitly, at the old version.
+        let mut before = engine();
+        let light = add(&mut before, GraphContext::Root, type_id);
+        before
+            .apply(Command::SetParam {
+                ctx: GraphContext::Root,
+                node: light,
+                key: "intensity".to_string(),
+                value: ParamSource::Literal(ParamValue::Float(1.5)),
+            })
+            .unwrap();
+        let mut scene = crate::engine::scenefile::document_to_scene(
+            &before.doc.to_data(),
+            before.cook_mode,
+            &crate::runtime::RuntimeSettings::default(),
+            &SceneSidecar::default(),
+            Vec::new(),
+        );
+        let mut aged = 0;
+        for node in &mut scene.graph.nodes {
+            if node.type_id == type_id {
+                node.type_version = stored_version;
+                aged += 1;
+            }
+        }
+        assert_eq!(aged, 1, "{type_id}: the light was found and aged");
+
+        let (document, warnings) =
+            crate::engine::scenefile::scene_to_document(&scene, &before.registry);
+        assert!(
+            warnings.is_empty(),
+            "{type_id}: a clean rescale must not warn: {warnings:?}"
+        );
+        let mut reopened = engine();
+        reopened.load_document(&DocumentFile {
+            format_version: 1,
+            document,
+            cook_mode: before.cook_mode,
+        });
+        reopened.cook(&mut || true);
+
+        assert!(
+            (lowered_intensity(&mut reopened) - want).abs() < 1e-6,
+            "{type_id}: a document saved before the rescale reaches the \
+             renderer at a different brightness than a light placed after it"
+        );
+        assert!(
+            (want - 4.5).abs() < 1e-6,
+            "{type_id}: the new default should be the old 1.5 times the \
+             multiplier that left the shader"
+        );
+    }
+}
+
 /// The look reaches the scene contract, and the tone override means
 /// "inherit" until it is set.
 #[test]

@@ -310,10 +310,18 @@ pub fn lights_from_camera(
         }
     };
 
+    // Key, fill, rim. These were 2.0 / 1.0 / 0.8 while the shader
+    // multiplied every light by three; they are the same three lights at
+    // the same three brightnesses, now stated in the units the shader
+    // actually uses. **This is what makes dropping that multiplier
+    // golden-neutral**: the golden scenes carry no light node, so they
+    // render entirely on this path, and moving the shader without moving
+    // these would darken every capture by two thirds while looking like an
+    // ordinary re-baseline.
     let mut lights = [LightEntry::disabled(); crate::light::MAX_LIGHTS];
-    lights[0] = rig(key, [1.0, 0.98, 0.95], 2.0, 1.0);
-    lights[1] = rig(fill, [0.90, 0.93, 1.00], 1.0, 0.0);
-    lights[2] = rig(rim, [1.0, 1.00, 1.00], 0.8, 0.0);
+    lights[0] = rig(key, [1.0, 0.98, 0.95], 6.0, 1.0);
+    lights[1] = rig(fill, [0.90, 0.93, 1.00], 3.0, 0.0);
+    lights[2] = rig(rim, [1.0, 1.00, 1.00], 2.4, 0.0);
 
     LightsUniform {
         lights,
