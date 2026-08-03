@@ -22,10 +22,48 @@ use solarxy_core::raycast::{
     Ray, closest_point_ray_line, closest_points_ray_segment, intersect_obb, intersect_plane,
     intersect_quad, intersect_ring_band,
 };
-use solarxy_graph::engine::GizmoTarget;
-use solarxy_graph::params::{ParamSource, ParamValue};
-use solarxy_kernel::transform::{decompose_rotation, rotation_matrix};
+use solarxy_kernel::transform::{RotateOrder, decompose_rotation, rotation_matrix};
 use solarxy_renderer::manipulator::{HIT_PX, Handle, ManipulatorState, ManipulatorTool};
+
+/// Everything the drag solver knows about what it is dragging.
+///
+/// Deliberately a pose and nothing more. The engine's own target type also
+/// carries *where* a result is addressed (which graph context, which node) and
+/// whether a transform node still has to be appended; none of that is
+/// arithmetic, and carrying it here would mean this crate — which sits under
+/// both shells, one of which has no engine — depending on the engine to
+/// multiply matrices. The shell that owns the document holds the addressing
+/// and builds one of these to ask a question.
+///
+/// The pivot is absent because it is already inside `anchor`: rotation and
+/// scale happen about `translate + pivot`, which is where the anchor is
+/// placed, so the solver never needs it separately.
+#[derive(Debug, Clone, Copy)]
+pub struct GizmoPose {
+    /// The target's current translate, previews included, so a handle tracks
+    /// the object mid-drag.
+    pub translate: [f32; 3],
+    /// The current rotate, in **degrees**, matching what a param write stores.
+    /// Deliberately not radians: handing back radians here would put a silent
+    /// 57x error one careless assignment away.
+    pub rotate: [f32; 3],
+    /// The order the target composes its rotation in, so a rotate drag can
+    /// decompose its result back into the angles this node actually means.
+    pub rotate_order: RotateOrder,
+    /// The current per-axis scale.
+    pub scale: [f32; 3],
+    /// The current uniform-scale factor (the centre handle's param).
+    pub uniform_scale: f32,
+    /// World matrix placing the manipulator, pivot included.
+    pub anchor: [[f32; 4]; 4],
+    /// The target's own orthonormal orientation basis, for local-space handles.
+    pub basis: [[f32; 3]; 3],
+    /// The parent's orientation basis, for resolving a world-space drag into
+    /// the parent space the params are expressed in.
+    pub parent_basis: [[f32; 3]; 3],
+    /// The full parent transform, for the same reason.
+    pub parent: [[f32; 4]; 4],
+}
 
 /// The active viewport tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -167,7 +205,7 @@ impl DragParam {
     /// The target's current value for this param, previews included. This is how
     /// the commit reads back whatever the drag last streamed.
     #[must_use]
-    pub fn read(self, t: &GizmoTarget) -> DragValue {
+    pub fn read(self, t: &GizmoPose) -> DragValue {
         match self {
             DragParam::Translate => DragValue::Translate(t.translate),
             DragParam::Rotate => DragValue::Rotate(t.rotate),
@@ -196,17 +234,6 @@ impl DragValue {
             DragValue::Scale(_) => DragParam::Scale,
             DragValue::UniformScale(_) => DragParam::UniformScale,
         }
-    }
-
-    #[must_use]
-    pub fn to_param_source(self) -> ParamSource {
-        let value = match self {
-            DragValue::Translate(v) | DragValue::Rotate(v) | DragValue::Scale(v) => {
-                ParamValue::Vec3([f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
-            }
-            DragValue::UniformScale(f) => ParamValue::Float(f64::from(f)),
-        };
-        ParamSource::Literal(value)
     }
 
     /// Whether the drag actually moved anything. A click on a handle that never
@@ -310,7 +337,7 @@ pub struct Drag {
     /// The target as resolved at drag START, with `node` already replaced by the
     /// real target on the append path (the engine minted it via
     /// `EnsureTransformTarget`).
-    pub target: GizmoTarget,
+    pub target: GizmoPose,
     /// Which param this drag writes, asked once and honoured everywhere.
     pub param: DragParam,
     /// That param's value when the drag began.
@@ -335,7 +362,7 @@ impl GizmoState {
     #[must_use]
     pub fn manipulator(
         &self,
-        target: &GizmoTarget,
+        target: &GizmoPose,
         view_dir: Vector3<f32>,
         scale: f32,
     ) -> Option<ManipulatorState> {
@@ -359,7 +386,7 @@ impl GizmoState {
     /// and there is no shear param (nor should there be). Maya makes the same
     /// call for the same reason. When the object is unrotated the two frames
     /// coincide, so the distinction is invisible in the common case.
-    fn handle_basis(&self, target: &GizmoTarget, tool: ManipulatorTool) -> Matrix3<f32> {
+    fn handle_basis(&self, target: &GizmoPose, tool: ManipulatorTool) -> Matrix3<f32> {
         let local = Matrix3::from(target.basis);
         match tool {
             ManipulatorTool::Scale => local,
@@ -689,7 +716,7 @@ fn snap_changed_lanes(next: &mut [f32; 3], start: [f32; 3], step: f32) {
 pub fn begin_drag(
     ray: &Ray,
     state: &ManipulatorState,
-    target: GizmoTarget,
+    target: GizmoPose,
     handle: Handle,
 ) -> Option<Drag> {
     let param = DragParam::for_handle(handle);
@@ -755,8 +782,6 @@ pub fn solve_drag(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solarxy_graph::document::{GraphContext, NodeId};
-    use solarxy_kernel::transform::RotateOrder;
 
     fn state_for(tool: ManipulatorTool, basis: Matrix3<f32>, scale: f32) -> ManipulatorState {
         ManipulatorState {
@@ -781,21 +806,17 @@ mod tests {
         }
     }
 
-    fn target(parent: Matrix4<f32>) -> GizmoTarget {
-        GizmoTarget {
-            ctx: GraphContext::Root,
-            node: NodeId(1),
+    fn target(parent: Matrix4<f32>) -> GizmoPose {
+        GizmoPose {
             translate: [0.0; 3],
             rotate: [0.0; 3],
             rotate_order: RotateOrder::Xyz,
             scale: [1.0; 3],
             uniform_scale: 1.0,
-            pivot: [0.0; 3],
             anchor: Matrix4::identity().into(),
             basis: mat3(Matrix3::identity()),
             parent_basis: mat3(Matrix3::identity()),
             parent: parent.into(),
-            append_pending: false,
         }
     }
 

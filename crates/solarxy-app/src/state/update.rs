@@ -9,78 +9,14 @@ use std::sync::mpsc;
 use super::*;
 
 impl State {
-    pub(super) fn active_ibl(&self) -> &IblState {
-        match self.renderer.ibl_res.ibl_mode {
-            IblMode::Off => &self.renderer.ibl_res.ibl_fallback,
-            IblMode::Diffuse | IblMode::Full => &self.renderer.ibl_res.ibl,
-        }
-    }
-
     pub(super) fn rebuild_light_bind_group(&mut self) {
-        // The skybox pass samples the active IBL's source equirect — track
-        // it here so HDRI load / IBL swaps keep the visible sky in sync.
-        self.renderer.skybox_bind_group = self.renderer.ibl_res.ibl.equirect.as_ref().map(|eq| {
-            solarxy_renderer::skybox::create_skybox_bind_group(
-                &self.device,
-                &self.renderer.layouts.skybox,
-                eq,
-            )
-        });
-
-        let ibl_avg = self.active_ibl().irradiance_average;
-        if let Some(scene) = &mut self.scene {
-            scene.env.light_bind_group = match self.renderer.ibl_res.ibl_mode {
-                IblMode::Off => create_light_bind_group(
-                    &self.device,
-                    &self.renderer.layouts,
-                    &scene.env.light_buffer,
-                    &self.renderer.ibl_res.ibl_fallback,
-                    &self.renderer.ibl_res.brdf_lut,
-                    &self.renderer.ibl_res.ltc,
-                ),
-                IblMode::Diffuse => create_light_bind_group_selective(
-                    &self.device,
-                    &self.renderer.layouts,
-                    &scene.env.light_buffer,
-                    &self.renderer.ibl_res.ibl,
-                    &self.renderer.ibl_res.ibl_fallback,
-                    &self.renderer.ibl_res.brdf_lut,
-                    &self.renderer.ibl_res.ltc,
-                ),
-                IblMode::Full => create_light_bind_group(
-                    &self.device,
-                    &self.renderer.layouts,
-                    &scene.env.light_buffer,
-                    &self.renderer.ibl_res.ibl,
-                    &self.renderer.ibl_res.brdf_lut,
-                    &self.renderer.ibl_res.ltc,
-                ),
-            };
-
-            scene.env.lights_uniform.ibl_avg_r = ibl_avg[0];
-            scene.env.lights_uniform.ibl_avg_g = ibl_avg[1];
-            scene.env.lights_uniform.ibl_avg_b = ibl_avg[2];
-            let offset = std::mem::offset_of!(LightsUniform, ibl_avg_r) as u64;
-            self.queue.write_buffer(
-                &scene.env.light_buffer,
-                offset,
-                bytemuck::cast_slice(&ibl_avg),
-            );
-
-            // The environment's intensity is IBL-derived in the same sense
-            // and rides the same chokepoint, but it is not contiguous with
-            // the average, so it takes its own partial write rather than
-            // widening the one above.
-            scene
-                .env
-                .lights_uniform
-                .set_ibl_intensity(self.view.display.hdri_intensity);
-            self.queue.write_buffer(
-                &scene.env.light_buffer,
-                std::mem::offset_of!(LightsUniform, ibl_intensity) as u64,
-                bytemuck::bytes_of(&scene.env.lights_uniform.ibl_intensity),
-            );
-        }
+        solarxy_host::rebuild_light_bind_group(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            self.scene.as_mut().map(|s| &mut s.env),
+            self.view.display.hdri_intensity,
+        );
     }
 
     /// Apply any `SceneOp::SetEnvironment` in a drained delta.
@@ -150,37 +86,13 @@ impl State {
     }
 
     pub(super) fn update_wireframe_params(&self) {
-        self.write_wireframe_params_for(&self.view.pane_settings[0]);
-    }
-
-    pub(super) fn write_gradient_colors_for(&self, pds: &PaneDisplaySettings) {
-        let (top, bottom) = self.resolve_background(pds).sky_colors();
-        let data = GradientUniform {
-            top_color: [top[0], top[1], top[2], 1.0],
-            bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
-            uv_y_offset: 0.0,
-            uv_y_scale: 1.0,
-            _pad: [0.0; 2],
-        };
-        self.queue.write_buffer(
-            &self.renderer.wire._gradient_buffer,
-            0,
-            bytemuck::bytes_of(&data),
-        );
-    }
-
-    pub(super) fn write_wireframe_params_for(&self, pds: &PaneDisplaySettings) {
-        let params = WireframeParams {
-            color: self.resolve_background(pds).wireframe_color(),
-            line_width: pds.line_weight.width_px(),
-            screen_width: self.renderer.target_width as f32,
-            screen_height: self.renderer.target_height as f32,
-            point_size: self.view.display.point_size,
-        };
-        self.queue.write_buffer(
-            &self.renderer.wire.wireframe_params_buffer,
-            0,
-            bytemuck::bytes_of(&params),
+        let pds = &self.view.pane_settings[0];
+        solarxy_host::write_wireframe_params(
+            &self.queue,
+            &self.renderer,
+            self.resolve_background(pds),
+            pds,
+            &self.view.display,
         );
     }
 
@@ -265,40 +177,17 @@ impl State {
         let Some(bounds) = self.scene.as_ref().map(|s| s.model.bounds) else {
             return;
         };
-        let count = self.view.display.layout.pane_count();
         let (tw, th) = self.target_dimensions();
         let aspect = tw as f32 / th.max(1) as f32;
-        for i in 0..count {
-            if self.view.cameras[i].is_some() {
-                continue;
-            }
-            let mut cam = if i == 0 {
-                CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect)
-            } else if let Some(src) = self.view.cameras[0].as_ref() {
-                src.clone_with_new_resources(&self.device, &self.renderer.layouts.camera)
-            } else {
-                continue;
-            };
-            match i {
-                0 => cam.set_projection(self.preferences.display.projection_mode),
-                1 => cam.reset_to_bounds_axis(
-                    &bounds,
-                    cgmath::Vector3::unit_y(),
-                    -cgmath::Vector3::unit_z(),
-                ),
-                2 => cam.reset_to_bounds_axis(
-                    &bounds,
-                    cgmath::Vector3::unit_z(),
-                    cgmath::Vector3::unit_y(),
-                ),
-                _ => cam.reset_to_bounds_axis(
-                    &bounds,
-                    -cgmath::Vector3::unit_x(),
-                    cgmath::Vector3::unit_y(),
-                ),
-            }
-            self.view.cameras[i] = Some(cam);
-        }
+        solarxy_host::ensure_pane_cameras(
+            &self.device,
+            &self.renderer.layouts.camera,
+            &mut self.view.cameras,
+            &bounds,
+            aspect,
+            self.view.display.layout.pane_count(),
+            Some(self.preferences.display.projection_mode),
+        );
     }
 
     pub(super) fn resize_render_targets(&mut self, width: u32, height: u32) {
@@ -431,7 +320,7 @@ impl State {
         if let Some(pending) = self.pending_load.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(mut new_scene)) => {
-                    let active_ibl = self.active_ibl();
+                    let active_ibl = solarxy_host::active_ibl(&self.renderer);
                     new_scene.env.light_bind_group = create_light_bind_group(
                         &self.device,
                         &self.renderer.layouts,
@@ -537,7 +426,7 @@ impl State {
         }
 
         if !self.view.display.lights_locked {
-            let ibl_avg = self.active_ibl().irradiance_average;
+            let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
             let cam0 = self.view.cameras[0].as_ref().map(|c| c.camera);
             if let (Some(cam0), Some(scene)) = (cam0, &mut self.scene) {
                 scene.env.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);

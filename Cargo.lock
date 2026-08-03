@@ -4066,6 +4066,7 @@ dependencies = [
  "serde_json",
  "solarxy-core",
  "solarxy-formats",
+ "solarxy-host",
  "solarxy-renderer",
  "time",
  "tracing",
@@ -4145,6 +4146,20 @@ dependencies = [
  "solarxy-scenefile",
  "thiserror 2.0.17",
  "zip",
+]
+
+[[package]]
+name = "solarxy-host"
+version = "0.8.1"
+dependencies = [
+ "bytemuck",
+ "cgmath",
+ "serde",
+ "serde_json",
+ "solarxy-core",
+ "solarxy-kernel",
+ "solarxy-renderer",
+ "wgpu",
 ]
 
 [[package]]
@@ -4229,6 +4244,7 @@ dependencies = [
  "serde_json",
  "solarxy-core",
  "solarxy-graph",
+ "solarxy-host",
  "solarxy-kernel",
  "solarxy-renderer",
  "solarxy-scenefile",

@@ -9,6 +9,7 @@ members = [
     "crates/solarxy-scenefile",
     "crates/solarxy-web",
     "crates/solarxy-renderer",
+    "crates/solarxy-host",
     "crates/solarxy-app",
     "crates/solarxy-cli",
     "crates/solarxy-validate",

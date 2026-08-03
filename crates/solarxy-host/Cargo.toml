@@ -1,0 +1,37 @@
+[package]
+name = "solarxy-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Shared host orchestration for the Solarxy shells: the per-pane render loop, the lighting chokepoint, the view-state model, and the gizmo drag solver."
+publish = false
+
+[dependencies]
+# `serde` only, matching the renderer: this crate reaches preferences enums,
+# view_config, the scene contract and the raycast primitive, never file IO.
+solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
+# `default-features = false` drops `std-fs`, which is what keeps this crate
+# compiling for wasm32 alongside the web shell.
+solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
+# The rotate drag composes and decomposes Euler rotations through the kernel.
+solarxy-kernel = { path = "../solarxy-kernel" }
+wgpu = "27.0.1"
+cgmath = { workspace = true }
+bytemuck = { version = "1.24", features = ["derive"] }
+# The attribute-visualization state derives its boundary shapes here rather
+# than in the shell, so the shell's DTO stays a thin re-export.
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The display-defaults drift tests assert the parsed names against the enums'
+# own serde names, so they need a serializer to ask what those names are.
+serde_json = "1"
+
+# Deliberately ABSENT: `solarxy-graph`. A host crate sitting under both shells
+# must not drag the engine into `solarxy-app`, which has no engine until the
+# desktop gains one. The gizmo's drag solver is graph-free for exactly this
+# reason: it reads a pose, and the shell that owns the document decides where
+# the result is addressed.

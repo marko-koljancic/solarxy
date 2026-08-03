@@ -7,18 +7,14 @@
 //! drives any expensive recomputations (background, wireframe, composite,
 //! IBL).
 
-use solarxy_renderer::camera::{Camera, CameraUniform};
-use solarxy_renderer::visualization::GridUniform;
+use solarxy_renderer::camera::Camera;
 use solarxy_core::preferences::{
     InspectionMode, MaterialOverride, PaneMode, ResolvedBackground, UvMapBackground,
 };
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{
-    BackgroundModeExt, CompositeLook, GradientUniform, Pane, State, WireframeParams,
-    lights_from_camera,
-};
+use super::{CompositeLook, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
 
 impl State {
     /// Resolve a pane's background choice against the user
@@ -341,60 +337,21 @@ impl State {
     }
 
     fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
-        self.write_wireframe_params_for(pds);
-        self.write_gradient_colors_for(pds);
-        if let Some(scene) = &self.scene {
-            let color = self.resolve_background(pds).grid_color();
-            self.queue.write_buffer(
-                &scene.env.vis.grid_uniform_buf,
-                GridUniform::COLOR_OFFSET,
-                bytemuck::cast_slice(&color),
-            );
-        }
-
-        let cam_buf = self.view.cameras[i].as_ref().map(|c| &c.buffer);
-        let depth_bounds = self.view.cameras[i]
-            .as_ref()
-            .zip(self.scene.as_ref())
-            .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds));
-        if let Some(buf) = cam_buf {
-            let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
-            let data: [u32; 8] = [
-                pds.inspection_mode.as_u32(),
-                pds.texel_density_target.to_bits(),
-                pds.material_override.as_u32(),
-                depth_near.to_bits(),
-                depth_far.to_bits(),
-                self.view.display.roughness_scale.to_bits(),
-                self.view.display.metallic_scale.to_bits(),
-                self.view.display.hdri_rotation.to_bits(),
-            ];
-            self.queue.write_buffer(
-                buf,
-                CameraUniform::INSPECTION_OFFSET,
-                bytemuck::cast_slice(&data),
-            );
-        }
-    }
-
-    fn compute_depth_bounds(
-        camera: &solarxy_renderer::camera::Camera,
-        bounds: &solarxy_core::AABB,
-    ) -> (f32, f32) {
-        let view = camera.build_view_matrix();
-        let mut z_min = f32::INFINITY;
-        let mut z_max = f32::NEG_INFINITY;
-        for corner in &bounds.corners() {
-            let vp = view * corner.to_homogeneous();
-            let z = -vp.z;
-            z_min = z_min.min(z);
-            z_max = z_max.max(z);
-        }
-        z_min = z_min.max(0.001);
-        if z_max <= z_min {
-            z_max = z_min + 1.0;
-        }
-        (z_min, z_max)
+        solarxy_host::write_pane_uniforms(
+            &self.queue,
+            &self.renderer,
+            &solarxy_host::PaneUniforms {
+                background: self.resolve_background(pds),
+                pds,
+                display: &self.view.display,
+                camera: self.view.cameras[i].as_ref(),
+                env: self.scene.as_ref().map(|s| &s.env),
+                bounds: self.scene.as_ref().map(|s| &s.model.bounds),
+                // This shell does not steer the grid plane from the camera, so
+                // the plane offset is left exactly as it was initialised.
+                grid_plane: None,
+            },
+        );
     }
 
     fn render_3d_passes(
@@ -455,7 +412,7 @@ impl State {
     /// `update()` set from slot 0's camera.
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
         if !self.view.display.lights_locked {
-            let ibl_avg = self.active_ibl().irradiance_average;
+            let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
             if let Some(scene) = &mut self.scene {
                 scene.env.lights_uniform =
                     lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);

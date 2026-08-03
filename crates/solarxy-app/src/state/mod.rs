@@ -39,8 +39,7 @@ pub(super) use solarxy_renderer::frame::{
     GradientUniform, Renderer, UvOverlapResources, WireframeParams,
 };
 pub(super) use solarxy_renderer::scene::{
-    BackgroundModeExt, ModelScene, create_light_bind_group, create_light_bind_group_selective,
-    lights_from_camera,
+    BackgroundModeExt, ModelScene, create_light_bind_group, lights_from_camera,
 };
 
 pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
@@ -48,9 +47,7 @@ pub(super) use solarxy_core::preferences::{
     self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
     ViewMode,
 };
-pub(super) use solarxy_renderer::camera_state::CameraState;
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
-pub(super) use solarxy_renderer::light::LightsUniform;
 pub(super) use solarxy_renderer::texture;
 
 use std::sync::{Arc, mpsc};

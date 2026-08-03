@@ -153,7 +153,7 @@ The `getrandom_backend="wasm_js"` rustflag for `wasm32` lives in the workspace `
 
 ## Workspace Structure
 
-Solarxy is a Rust workspace of 12 members: the root GUI binary plus 11 crates spanning the desktop GUI, the CLI, and the web shell, alongside the `web/` React frontend.
+Solarxy is a Rust workspace of 13 members: the root GUI binary plus 12 crates spanning the desktop GUI, the CLI, and the web shell, alongside the `web/` React frontend.
 
 | Crate | Description |
 |---|---|
@@ -165,6 +165,7 @@ Solarxy is a Rust workspace of 12 members: the root GUI binary plus 11 crates sp
 | [`solarxy-graph`](crates/solarxy-graph/) | The headless studio core: node-graph document, topology, cook engine, node registry (77 node types + typed-port coercion), undo, review, and the `Engine` facade (Command in, EventBatch out). No wgpu, no winit. |
 | [`solarxy-scenefile`](crates/solarxy-scenefile/) | The `.slxy` self-contained scene file: schema-owned scene/manifest types, the ZIP container with content-addressed asset blobs, SHA-256 integrity, and the schema-version migration gate. |
 | [`solarxy-renderer`](crates/solarxy-renderer/) | All wgpu state: pipelines, shaders, IBL / SSAO / bloom / shadow / composite, and the multi-object `SceneObjects` path. winit/egui-decoupled; compiles to wasm32. |
+| [`solarxy-host`](crates/solarxy-host/) | Shared host orchestration both shells drive: the per-pane uniform writes, the lighting chokepoint, the per-pane camera lifecycle, the view-state model, and the gizmo drag solver. No engine dependency, no renderer trait. |
 | [`solarxy-app`](crates/solarxy-app/) | winit `ApplicationHandler` + egui: the desktop shell (sidebar, menu, console, dialogs, dock, review UI). |
 | [`solarxy-web`](crates/solarxy-web/) | The `wasm-bindgen` boundary + WebGPU host: hosts the canvas, drives the frame loop, and serializes Commands and Events between the Rust core and the React frontend. |
 | [`solarxy-validate`](crates/solarxy-validate/) | Validation orchestration + pipeline adapters (GitHub Actions / generic-JSON). Library API for integrators; consumed by `solarxy-cli`. |

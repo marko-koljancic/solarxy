@@ -12,6 +12,8 @@ description = "winit + egui app shell for the Solarxy viewer"
 solarxy-core = { path = "../solarxy-core" }
 solarxy-formats = { path = "../solarxy-formats" }
 solarxy-renderer = { path = "../solarxy-renderer" }
+# The shared host orchestration, also driving the web shell.
+solarxy-host = { path = "../solarxy-host" }
 winit = "0.30.12"
 wgpu = "27.0.1"
 egui = "0.33"
