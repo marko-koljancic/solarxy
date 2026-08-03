@@ -6684,7 +6684,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 16
+                  "fontSize": 16,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -6742,7 +6743,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 15
+                  "fontSize": 15,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -6800,7 +6802,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 14
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -6858,7 +6861,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 13
+                  "fontSize": 13,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -6916,7 +6920,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 12.5
+                  "fontSize": 12.5,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -6974,7 +6979,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 11
+                  "fontSize": 11,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7032,7 +7038,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 10
+                  "fontSize": 10,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7090,7 +7097,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-ui",
-                  "fontSize": 9
+                  "fontSize": 9,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7182,7 +7190,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-mono",
-                  "fontSize": 13
+                  "fontSize": 13,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7240,7 +7249,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-mono",
-                  "fontSize": 12
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7298,7 +7308,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-mono",
-                  "fontSize": 11
+                  "fontSize": 11,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7356,7 +7367,8 @@
                   "width": 300,
                   "content": "Solarxy 0.8.2",
                   "fontFamily": "$font-mono",
-                  "fontSize": 10
+                  "fontSize": 10,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -7641,7 +7653,6 @@
       "x": -1060,
       "y": 1902,
       "name": "AS-IS 02 / Widgets and states",
-      "theme": {},
       "clip": true,
       "fill": "$surface-canvas",
       "layout": "vertical",
