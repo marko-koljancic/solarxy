@@ -14,7 +14,7 @@
  */
 
 export const NODE_TYPE_COUNT = 77;
-export const CRATE_COUNT = 12;
+export const CRATE_COUNT = 13;
 export const CONTEXT_COUNT = 4;
 export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;
@@ -155,6 +155,10 @@ export const ARCH_LAYERS: ArchLayer[] = [
       {
         n: "solarxy-web",
         d: "wasm-bindgen boundary + WebGPU host driving the full renderer (cdylib).",
+      },
+      {
+        n: "solarxy-host",
+        d: "The orchestration both GPU shells share: pane render loop, lighting chokepoint, view state, gizmo solver.",
       },
       { n: "solarxy-cli", d: "clap args + the analyze TUI + analyzer." },
       {
