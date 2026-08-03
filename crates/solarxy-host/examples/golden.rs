@@ -2,13 +2,19 @@
 //! testing. Made possible by the winit decoupling: `Renderer::new` builds
 //! the full renderer without a window or surface.
 //!
+//! **It lives in `solarxy-host` and renders through the shared pane path.**
+//! It used to sit in `solarxy-renderer` and carry a third copy of the per-pane
+//! uniform write and the depth-bounds math, plus six near-identical
+//! repetitions of the pass chain. Driving the real shared orchestration means
+//! the gate covers the code both shells run, instead of a lookalike beside it.
+//!
 //! Capture a baseline before a rendering refactor, re-capture after, and
 //! compare:
 //!
 //! ```bash
-//! cargo run -p solarxy-renderer --example golden -- \
+//! cargo run -p solarxy-host --example golden -- \
 //!     capture --model res/models/xyzrgb_dragon.obj --out .goldens/baseline
-//! cargo run -p solarxy-renderer --example golden -- \
+//! cargo run -p solarxy-host --example golden -- \
 //!     compare .goldens/baseline .goldens/after --tolerance 0
 //! ```
 //!
@@ -23,7 +29,6 @@ use solarxy_core::preferences::{
     ToneMode, UvMapBackground, UvMode, ViewMode,
 };
 use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
-use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
@@ -223,40 +228,21 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
     for (name, pds) in modes() {
-        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Encoder"),
-        });
         let objects = [scene.draw_object()];
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            &pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            &pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            "Golden Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/{name}.png");
@@ -306,39 +292,21 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         }
 
         let pds = modes()[0].1;
-        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Principled Encoder"),
-        });
         let objects = [scene.draw_object()];
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            &pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            &pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            "Golden Principled Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/principled.png");
@@ -397,39 +365,21 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         };
 
         let pds = modes()[0].1;
-        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Graded Encoder"),
-        });
         let objects = [scene.draw_object()];
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            &pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &look,
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            &pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            look,
+            "Golden Graded Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/graded.png");
@@ -508,39 +458,21 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         queue.write_buffer(&scene.env.light_buffer, 0, bytemuck::bytes_of(&lit));
 
         let pds = modes()[0].1;
-        write_inspection_block(&queue, &cam, &pds, &scene.model.bounds);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Lit Encoder"),
-        });
         let objects = [scene.draw_object()];
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            &pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            &pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            "Golden Lit Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/lit.png");
@@ -623,40 +555,22 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 
         let (name, pds) = &modes()[0];
         let _ = name;
-        write_inspection_block(&queue, &cam, pds, &scene.model.bounds);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Two-Object Encoder"),
-        });
         let mut objects = vec![scene.draw_object()];
         objects.extend(extra.draw_objects());
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            "Golden Two-Object Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/two_objects.png");
@@ -793,40 +707,22 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("SceneObjects::apply: {e}"))?;
 
         let (_, pds) = &modes()[0];
-        write_inspection_block(&queue, &cam, pds, &scene.model.bounds);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Golden Topology Encoder"),
-        });
         let mut objects = vec![scene.draw_object()];
         objects.extend(extra.draw_objects());
-        renderer.render_shadow_pass(&mut encoder, &scene.env, &objects);
-        renderer.render_main_pass(
-            &mut encoder,
-            &scene.env,
-            &objects,
-            &cam.bind_group,
-            &cam.camera,
-            pds,
-            background,
-        );
-        renderer.post.composite.write_params(
+        capture_through_host(
+            &device,
             &queue,
-            false,
-            false,
-            &CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
-            &renderer.post.luts,
-            pds.inspection_mode,
-        );
-        renderer.post.composite.render(
-            &mut encoder,
-            &renderer.pipelines,
+            &renderer,
+            &scene.env,
+            &cam,
+            pds,
+            &scene.model.bounds,
+            background,
+            &objects,
             &target_view,
-            false,
-            &renderer.post.ssao,
-            Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
-            true,
+            CompositeLook::from_tone(ToneMode::AcesFilmic, 1.0),
+            "Golden Topology Encoder",
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let pixels = read_target(&device, &queue, &target)?;
         let path = format!("{out_dir}/topology.png");
@@ -857,48 +753,70 @@ fn grown_captures() -> &'static [&'static str] {
     &["topology", "clay", "principled", "graded", "lit"]
 }
 
-/// Replicates the app's per-pane partial camera-uniform write (inspection
-/// mode, texel density, overrides, depth bounds) for deterministic modes.
-fn write_inspection_block(
+/// Capture one mode through the **shared host pane path**.
+///
+/// This is the point of the harness living in this crate. The pixels compared
+/// by the golden gate now come out of the same `render_3d_passes` and
+/// `composite_and_submit` that both shells drive, so the extracted
+/// orchestration is under the gate rather than beside it. Before this, the
+/// harness carried its own partial copy of the per-pane uniform write and the
+/// depth-bounds math, and repeated the pass chain six times in this file.
+///
+/// The shared composite derives its bloom and SSAO flags from the renderer,
+/// which this harness builds with both disabled, so it resolves to the same
+/// `false, false` the six hand-written copies passed.
+fn capture_through_host(
+    device: &wgpu::Device,
     queue: &wgpu::Queue,
+    renderer: &Renderer,
+    env: &solarxy_renderer::environment::SceneEnvironment,
     cam: &CameraState,
     pds: &PaneDisplaySettings,
     bounds: &AABB,
+    background: solarxy_core::preferences::ResolvedBackground,
+    objects: &[solarxy_renderer::frame::DrawObject<'_>],
+    target_view: &wgpu::TextureView,
+    look: CompositeLook,
+    label: &str,
 ) {
-    let (near, far) = depth_bounds(&cam.camera, bounds);
-    let data: [u32; 8] = [
-        pds.inspection_mode.as_u32(),
-        pds.texel_density_target.to_bits(),
-        pds.material_override.as_u32(),
-        near.to_bits(),
-        far.to_bits(),
-        1.0f32.to_bits(),
-        1.0f32.to_bits(),
-        0.0f32.to_bits(),
-    ];
-    queue.write_buffer(
-        &cam.buffer,
-        CameraUniform::INSPECTION_OFFSET,
-        bytemuck::cast_slice(&data),
+    solarxy_host::write_inspection_block(queue, cam, pds, Some(bounds), 1.0, 1.0, 0.0);
+    let mut encoder =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+    solarxy_host::render_3d_passes(
+        renderer,
+        queue,
+        &mut encoder,
+        &solarxy_host::PaneScene {
+            objects,
+            env,
+            cam_bg: &cam.bind_group,
+            cam_data: &cam.camera,
+            pds,
+            background,
+            shadow: true,
+            selected: false,
+        },
     );
-}
-
-/// Same math as the app's `compute_depth_bounds`.
-fn depth_bounds(camera: &Camera, bounds: &AABB) -> (f32, f32) {
-    let view = camera.build_view_matrix();
-    let mut z_min = f32::INFINITY;
-    let mut z_max = f32::NEG_INFINITY;
-    for corner in &bounds.corners() {
-        let vp = view * corner.to_homogeneous();
-        let z = -vp.z;
-        z_min = z_min.min(z);
-        z_max = z_max.max(z);
-    }
-    z_min = z_min.max(0.001);
-    if z_max <= z_min {
-        z_max = z_min + 1.0;
-    }
-    (z_min, z_max)
+    solarxy_host::composite_and_submit(
+        queue,
+        renderer,
+        encoder,
+        target_view,
+        &solarxy_host::PaneComposite {
+            index: 0,
+            rect: solarxy_renderer::panes::PaneRect {
+                x: 0.0,
+                y: 0.0,
+                width: WIDTH as f32,
+                height: HEIGHT as f32,
+            },
+            look,
+            inspection: pds.inspection_mode,
+            is_uv_map: false,
+            scene_present: true,
+            outline: false,
+        },
+    );
 }
 
 /// Blocking BGRA readback of the offscreen target, returned as RGBA rows.

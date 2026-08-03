@@ -29,6 +29,21 @@ serde = { version = "1", features = ["derive"] }
 # The display-defaults drift tests assert the parsed names against the enums'
 # own serde names, so they need a serializer to ask what those names are.
 serde_json = "1"
+# The golden-capture harness lives here as an example: it drives the shared
+# pane path, which is what puts the extracted orchestration under the pixel
+# gate rather than beside it.
+anyhow = { workspace = true }
+pollster = "0.4.0"
+solarxy-formats = { path = "../solarxy-formats" }
+# `std-fs` for the example only: it loads a model from a path. The library
+# above takes the renderer with default features off, which is what keeps this
+# crate compiling for wasm32 alongside the web shell.
+solarxy-renderer = { path = "../solarxy-renderer", features = ["std-fs"] }
+
+[dev-dependencies.image]
+version = "0.25.9"
+default-features = false
+features = ["png"]
 
 # Deliberately ABSENT: `solarxy-graph`. A host crate sitting under both shells
 # must not drag the engine into `solarxy-app`, which has no engine until the

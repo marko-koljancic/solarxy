@@ -29,8 +29,10 @@ tracing     = "0.1"
 thiserror   = { workspace = true }
 
 [dev-dependencies]
+# Blocking device setup in the integration tests. The golden-capture harness
+# used this too before it moved to `solarxy-host`; the tests still need it.
 pollster = "0.4.0"
-# Binary-style error handling for the golden-capture example only.
+# Binary-style error handling for the two generator examples below.
 anyhow = { workspace = true }
 # Rasterizes the label glyph atlas in the gen_glyph_atlas example only;
 # examples never compile into the wasm cdylib, so no runtime font dep.

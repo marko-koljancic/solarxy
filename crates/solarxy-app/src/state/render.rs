@@ -14,7 +14,7 @@ use solarxy_core::preferences::{
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{CompositeLook, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
+use super::{GradientUniform, Pane, State, WireframeParams};
 
 impl State {
     /// Resolve a pane's background choice against the user
@@ -147,7 +147,7 @@ impl State {
         let Some(cam_data) = cam_data else {
             self.renderer
                 .render_empty_pass(&mut encoder, self.resolve_background(&pds));
-            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false, false);
+            self.composite_and_submit(encoder, surface_view, i, pane, false, false);
             return;
         };
 
@@ -167,37 +167,37 @@ impl State {
             self.write_3d_pane_uniforms(i, &pds);
 
             if pds.inspection_mode == InspectionMode::Overdraw {
-                self.render_overdraw_pane(&mut encoder, i, pane, is_split);
+                self.render_overdraw_pane(&mut encoder, i, *pane, is_split);
             } else {
                 self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
             }
         }
 
-        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
+        self.composite_and_submit(encoder, surface_view, i, pane, is_uv_map, true);
     }
 
     fn render_overdraw_pane(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         i: usize,
-        pane: &Pane,
+        pane: Pane,
         is_split: bool,
     ) {
-        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
         let Some(scene) = &self.scene else {
             return;
         };
-        let Some(cam_bg) = cam_bg else {
+        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             return;
         };
-        let pane_viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
         let objects = self.draw_objects(scene);
-        self.renderer
-            .render_overdraw_passes(encoder, &objects, cam_bg, pane_viewport);
+        solarxy_host::render_overdraw_pane(
+            &self.renderer,
+            encoder,
+            &objects,
+            cam_bg,
+            pane,
+            is_split,
+        );
     }
 
     /// The frame's draw list: the loaded model plus every visible
@@ -211,41 +211,43 @@ impl State {
         objects
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn composite_and_submit(
         &self,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: wgpu::CommandEncoder,
         surface_view: &wgpu::TextureView,
         i: usize,
         pane: &Pane,
-        is_split: bool,
         is_uv_map: bool,
         scene_present: bool,
     ) {
-        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
-        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
-        let pane_inspection = self.view.pane_settings[i].inspection_mode;
-        self.renderer.post.composite.write_params(
+        // This shell has no camera nodes yet, so every pane is a free view and
+        // resolves to its own look. Equal field for field to the
+        // `CompositeLook::from_tone` this used to build, which is what makes
+        // adopting the shared path golden-neutral here.
+        let look = solarxy_renderer::composite::resolve_look(
+            None,
+            &solarxy_core::view_config::PaneLook::from_tone(
+                self.renderer.post.tone_mode,
+                self.renderer.post.exposure,
+            ),
+        );
+        solarxy_host::composite_and_submit(
             &self.queue,
-            pane_bloom,
-            pane_ssao,
-            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
-            &self.renderer.post.luts,
-            pane_inspection,
-        );
-
-        let _ = is_split;
-        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
-        self.renderer.post.composite.render(
-            &mut encoder,
-            &self.renderer.pipelines,
+            &self.renderer,
+            encoder,
             surface_view,
-            pane_ssao,
-            &self.renderer.post.ssao,
-            viewport,
-            i == 0,
+            &solarxy_host::PaneComposite {
+                index: i,
+                rect: *pane,
+                look,
+                inspection: self.view.pane_settings[i].inspection_mode,
+                is_uv_map,
+                scene_present,
+                // No selection concept in this shell yet, so the rim is never
+                // blitted.
+                outline: false,
+            },
         );
-        self.queue.submit(std::iter::once(encoder.finish()));
     }
 
     fn render_uv_map_pane(
@@ -361,49 +363,33 @@ impl State {
         cam_data: &Camera,
         pds: &PaneDisplaySettings,
     ) {
-        if (i == 0 || !self.view.display.lights_locked)
-            && let Some(scene) = &self.scene
-        {
-            let objects = self.draw_objects(scene);
-            self.renderer
-                .render_shadow_pass(encoder, &scene.env, &objects);
-        }
-
-        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
-        if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
-            let objects = self.draw_objects(scene);
-            if self.renderer.post.ssao_enabled {
-                self.renderer.render_gbuffer_pass(encoder, &objects, cam_bg);
-            }
-            self.renderer.render_main_pass(
-                encoder,
-                &scene.env,
-                &objects,
+        let background = self.resolve_background(pds);
+        // Both are always present by the time a pane reaches here: this shell
+        // clears its scene and its pane cameras together, so a closed model
+        // routes every pane to the empty path in `render_pane` instead.
+        let (Some(scene), Some(cam_bg)) = (
+            &self.scene,
+            self.view.cameras[i].as_ref().map(|c| &c.bind_group),
+        ) else {
+            self.renderer.render_empty_pass(encoder, background);
+            return;
+        };
+        let objects = self.draw_objects(scene);
+        solarxy_host::render_3d_passes(
+            &self.renderer,
+            &self.queue,
+            encoder,
+            &solarxy_host::PaneScene {
+                objects: &objects,
+                env: &scene.env,
                 cam_bg,
                 cam_data,
                 pds,
-                self.resolve_background(pds),
-            );
-        } else {
-            self.renderer
-                .render_empty_pass(encoder, self.resolve_background(pds));
-        }
-
-        if self.renderer.post.ssao_enabled
-            && let Some(cam_bg) = cam_bg
-        {
-            self.renderer.render_ssao_passes(encoder, cam_bg);
-        }
-
-        if self.renderer.post.bloom_enabled {
-            self.renderer.post.bloom.render(
-                encoder,
-                &self.renderer.pipelines,
-                &self.queue,
-                self.renderer.target_width,
-                self.renderer.target_height,
-            );
-        }
+                background,
+                shadow: i == 0 || !self.view.display.lights_locked,
+                selected: false,
+            },
+        );
     }
 
     /// Recompute the camera-relative light rig for a non-primary pane
@@ -411,24 +397,19 @@ impl State {
     /// own viewpoint. No-op when lights are locked. Pane 0 keeps the rig
     /// `update()` set from slot 0's camera.
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
-        if !self.view.display.lights_locked {
-            let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
-            if let Some(scene) = &mut self.scene {
-                scene.env.lights_uniform =
-                    lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);
-                self.queue.write_buffer(
-                    &scene.env.light_buffer,
-                    0,
-                    bytemuck::cast_slice(&[scene.env.lights_uniform]),
-                );
-                let key_pos = scene.env.lights_uniform.lights[0].position;
-                scene.env.shadow.update_light_vp(
-                    &self.queue,
-                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                    scene.model.bounds.center(),
-                    scene.model.bounds.diagonal() / 2.0,
-                );
-            }
+        if self.view.display.lights_locked {
+            return;
+        }
+        let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
+        if let Some(scene) = &mut self.scene {
+            let bounds = scene.model.bounds;
+            solarxy_host::setup_pane_lighting(
+                &self.queue,
+                &mut scene.env,
+                cam_data,
+                &bounds,
+                ibl_avg,
+            );
         }
     }
 

@@ -4152,11 +4152,15 @@ dependencies = [
 name = "solarxy-host"
 version = "0.8.1"
 dependencies = [
+ "anyhow",
  "bytemuck",
  "cgmath",
+ "image",
+ "pollster",
  "serde",
  "serde_json",
  "solarxy-core",
+ "solarxy-formats",
  "solarxy-kernel",
  "solarxy-renderer",
  "wgpu",

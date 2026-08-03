@@ -3926,49 +3926,33 @@ impl SolarxyApp {
 
     fn composite_and_submit(
         &self,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: wgpu::CommandEncoder,
         surface_view: &wgpu::TextureView,
         i: usize,
         pane: PaneRect,
         is_uv_map: bool,
         scene_present: bool,
     ) {
-        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
-        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
-        let pane_inspection = self.view.pane_settings[i].inspection_mode;
-        self.renderer.post.composite.write_params(
-            &self.queue,
-            pane_bloom,
-            pane_ssao,
-            &self.pane_look(i),
-            &self.renderer.post.luts,
-            pane_inspection,
-        );
-        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
-        self.renderer.post.composite.render(
-            &mut encoder,
-            &self.renderer.pipelines,
-            surface_view,
-            pane_ssao,
-            &self.renderer.post.ssao,
-            viewport,
-            i == 0,
-        );
-        // The selection-outline rim lands after tone mapping,
-        // so it never blooms and AO never darkens it.
-        if scene_present
-            && !is_uv_map
-            && self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
-            && self.selected_object.is_some()
+        let outline = self.renderer.selection_style
+            == solarxy_renderer::frame::SelectionStyle::Outline
             && self
                 .selected_object
-                .is_some_and(|id| self.scene_objects.draw_object(id).is_some())
-            && self.view.pane_settings[i].inspection_mode != InspectionMode::Overdraw
-        {
-            self.renderer
-                .composite_selection_outline(&mut encoder, surface_view, viewport);
-        }
-        self.queue.submit(std::iter::once(encoder.finish()));
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+        solarxy_host::composite_and_submit(
+            &self.queue,
+            &self.renderer,
+            encoder,
+            surface_view,
+            &solarxy_host::PaneComposite {
+                index: i,
+                rect: pane,
+                look: self.pane_look(i),
+                inspection: self.view.pane_settings[i].inspection_mode,
+                is_uv_map,
+                scene_present,
+                outline,
+            },
+        );
     }
 
     fn render_overdraw_pane(
@@ -3981,14 +3965,15 @@ impl SolarxyApp {
         let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             return;
         };
-        let pane_viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
         let objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        self.renderer
-            .render_overdraw_passes(encoder, &objects, cam_bg, pane_viewport);
+        solarxy_host::render_overdraw_pane(
+            &self.renderer,
+            encoder,
+            &objects,
+            cam_bg,
+            pane,
+            is_split,
+        );
     }
 
     fn render_3d_passes(
@@ -3999,8 +3984,8 @@ impl SolarxyApp {
         pds: &PaneDisplaySettings,
     ) {
         let mut objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        // The picking-sync selection highlight: flag the
-        // selected node's object so the main pass draws its accent tint.
+        // The picking-sync selection highlight: flag the selected node's object
+        // so the main pass draws its accent tint.
         if let Some(id) = self.selected_object
             && let Some(selected) = self.scene_objects.draw_object(id)
         {
@@ -4011,76 +3996,41 @@ impl SolarxyApp {
             }
         }
 
-        if i == 0 || !self.view.display.lights_locked {
-            self.renderer
-                .render_shadow_pass(encoder, &self.env, &objects);
-        }
-
+        let background = self.resolve_background(pds);
         let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            self.renderer
-                .render_empty_pass(encoder, self.resolve_background(pds));
+            self.renderer.render_empty_pass(encoder, background);
             return;
         };
-
-        if self.renderer.post.ssao_enabled {
-            self.renderer.render_gbuffer_pass(encoder, &objects, cam_bg);
-        }
-        self.renderer.render_main_pass(
+        let selected = objects.iter().any(|o| o.selected);
+        solarxy_host::render_3d_passes(
+            &self.renderer,
+            &self.queue,
             encoder,
-            &self.env,
-            &objects,
-            cam_bg,
-            cam_data,
-            pds,
-            self.resolve_background(pds),
+            &solarxy_host::PaneScene {
+                objects: &objects,
+                env: &self.env,
+                cam_bg,
+                cam_data,
+                pds,
+                background,
+                shadow: i == 0 || !self.view.display.lights_locked,
+                selected,
+            },
         );
-
-        // Selection outline: the offscreen mask + jump-flood
-        // stages run here; the rim blits onto the swapchain after the
-        // composite pass (composite_and_submit reads has_selection).
-        if self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
-            && objects.iter().any(|o| o.selected)
-        {
-            self.renderer
-                .render_selection_outline(encoder, &objects, cam_bg);
-        }
-
-        if self.renderer.post.ssao_enabled {
-            self.renderer.render_ssao_passes(encoder, cam_bg);
-        }
-        if self.renderer.post.bloom_enabled {
-            self.renderer.post.bloom.render(
-                encoder,
-                &self.renderer.pipelines,
-                &self.queue,
-                self.renderer.target_width,
-                self.renderer.target_height,
-            );
-        }
     }
 
     /// Recomputes the camera-relative light rig for a non-primary pane
     /// (only meaningful for the synthesized viewer rig; engine light nodes
     /// are world-fixed).
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
+        // Engine light nodes are world-fixed and owe nothing to a camera, so
+        // the synthesized viewer rig is the only thing this applies to.
         if self.view.display.lights_locked || self.scene_objects.lights().is_some() {
             return;
         }
         let bounds = self.scene_bounds();
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
-        self.env.lights_uniform = lights_from_camera(cam_data, &bounds, ibl_avg);
-        self.queue.write_buffer(
-            &self.env.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.env.lights_uniform]),
-        );
-        let key_pos = self.env.lights_uniform.lights[0].position;
-        self.env.shadow.update_light_vp(
-            &self.queue,
-            Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-            bounds.center(),
-            bounds.diagonal() / 2.0,
-        );
+        solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, cam_data, &bounds, ibl_avg);
     }
 
     /// Per-pane uniform writes ahead of the 3D passes: grid color,
