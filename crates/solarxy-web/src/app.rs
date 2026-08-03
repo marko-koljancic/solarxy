@@ -96,10 +96,7 @@ fn log(msg: &str) {
 
 /// Placeholder scene bounds before anything cooks (frames the grid).
 fn default_bounds() -> AABB {
-    AABB {
-        min: Point3::new(-2.0, -2.0, -2.0),
-        max: Point3::new(2.0, 2.0, 2.0),
-    }
+    solarxy_renderer::environment::placeholder_bounds()
 }
 
 /// The pane display defaults every pane starts from (desktop parity:
@@ -2932,7 +2929,7 @@ impl SolarxyApp {
             &self.device,
             &self.queue,
             &mut self.renderer,
-            Some(&mut self.env),
+            &mut self.env,
             self.view.display.hdri_intensity,
         );
     }
@@ -4053,7 +4050,7 @@ impl SolarxyApp {
                 pds,
                 display: &self.view.display,
                 camera: self.view.cameras[i].as_ref(),
-                env: Some(&self.env),
+                env: &self.env,
                 bounds: Some(&bounds),
                 grid_plane,
             },

@@ -105,6 +105,18 @@ impl State {
         };
         let renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
 
+        // The viewport renders before any model is chosen, so the scene
+        // environment exists from startup, fitted to a placeholder box.
+        let env_bounds = solarxy_renderer::environment::placeholder_bounds();
+        let env = super::update::build_bounds_env(
+            &device,
+            &queue,
+            &renderer,
+            &env_bounds,
+            background.grid_color(),
+            preferences.rendering.shadow_map_size,
+        );
+
         let mut state = Self {
             surface,
             device,
@@ -158,6 +170,8 @@ impl State {
             gui,
             scene: None,
             scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
+            env,
+            env_bounds,
             pending_scene_deltas: Vec::new(),
             environment: solarxy_renderer::environment::EnvironmentTracker::default(),
             #[cfg(debug_assertions)]

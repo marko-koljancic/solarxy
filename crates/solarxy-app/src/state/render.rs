@@ -173,7 +173,14 @@ impl State {
             }
         }
 
-        self.composite_and_submit(encoder, surface_view, i, pane, is_uv_map, true);
+        self.composite_and_submit(
+            encoder,
+            surface_view,
+            i,
+            pane,
+            is_uv_map,
+            self.scene_present(),
+        );
     }
 
     fn render_overdraw_pane(
@@ -183,13 +190,14 @@ impl State {
         pane: Pane,
         is_split: bool,
     ) {
-        let Some(scene) = &self.scene else {
-            return;
-        };
         let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             return;
         };
-        let objects = self.draw_objects(scene);
+        // No scene guard: the count target is cleared by the pass itself and
+        // the show pass writes the zero-count colour, so a pane with nothing
+        // in it reads black — which is what overdraw already shows wherever
+        // geometry does not cover.
+        let objects = self.draw_objects();
         solarxy_host::render_overdraw_pane(
             &self.renderer,
             encoder,
@@ -200,15 +208,37 @@ impl State {
         );
     }
 
-    /// The frame's draw list: the loaded model plus every visible
-    /// multi-object entry, in that order.
-    fn draw_objects<'a>(
-        &'a self,
-        scene: &'a solarxy_renderer::scene::ModelScene,
-    ) -> Vec<solarxy_renderer::frame::DrawObject<'a>> {
-        let mut objects = vec![scene.draw_object()];
+    /// The frame's draw list: the file-loaded model when one is open, then
+    /// every visible multi-object entry.
+    ///
+    /// Order is load-bearing, not incidental. Overdraw counts fragments in
+    /// submission order, and the depth-equal overlays (edge wireframe,
+    /// validation lines) resolve against whatever landed first, so the file
+    /// model stays ahead of the delta-fed objects exactly as it did when it
+    /// was the only entry that could come first.
+    ///
+    /// An empty list is a legitimate frame. The background, grid, floor and
+    /// axes come from the environment, not from this list.
+    fn draw_objects(&self) -> Vec<solarxy_renderer::frame::DrawObject<'_>> {
+        let mut objects =
+            Vec::with_capacity(usize::from(self.scene.is_some()) + self.scene_objects.len());
+        if let Some(scene) = &self.scene {
+            objects.push(scene.draw_object(&self.env.instance_buffer));
+        }
         objects.extend(self.scene_objects.draw_objects());
         objects
+    }
+
+    /// Whether this frame has scene content: a file-loaded model, or at least
+    /// one visible object in the multi-object scene.
+    ///
+    /// The composite pass folds in the bloom and ambient-occlusion textures
+    /// only when this is true. It deliberately is not "does the pane have a
+    /// camera": a pane with a camera and nothing in it renders the
+    /// background, the grid and the floor, and blooming that would put a glow
+    /// on a bare viewport nobody asked for.
+    fn scene_present(&self) -> bool {
+        self.scene.is_some() || self.scene_objects.draw_objects().next().is_some()
     }
 
     fn composite_and_submit(
@@ -258,7 +288,7 @@ impl State {
     ) {
         if let Some(scene) = &self.scene {
             if scene.model.has_uvs {
-                let uv_object = scene.draw_object();
+                let uv_object = scene.draw_object(&self.env.instance_buffer);
                 self.renderer
                     .uv_cam
                     .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
@@ -339,6 +369,9 @@ impl State {
     }
 
     fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
+        // Bound locally: `PaneUniforms` holds a borrow, so an inline
+        // `Some(&self.scene_bounds())` would not outlive the statement.
+        let bounds = self.scene_bounds();
         solarxy_host::write_pane_uniforms(
             &self.queue,
             &self.renderer,
@@ -347,8 +380,8 @@ impl State {
                 pds,
                 display: &self.view.display,
                 camera: self.view.cameras[i].as_ref(),
-                env: self.scene.as_ref().map(|s| &s.env),
-                bounds: self.scene.as_ref().map(|s| &s.model.bounds),
+                env: &self.env,
+                bounds: Some(&bounds),
                 // This shell does not steer the grid plane from the camera, so
                 // the plane offset is left exactly as it was initialised.
                 grid_plane: None,
@@ -364,24 +397,24 @@ impl State {
         pds: &PaneDisplaySettings,
     ) {
         let background = self.resolve_background(pds);
-        // Both are always present by the time a pane reaches here: this shell
-        // clears its scene and its pane cameras together, so a closed model
-        // routes every pane to the empty path in `render_pane` instead.
-        let (Some(scene), Some(cam_bg)) = (
-            &self.scene,
-            self.view.cameras[i].as_ref().map(|c| &c.bind_group),
-        ) else {
+        // The camera is what binds this chain to a viewpoint, so without one
+        // there is nothing sensible to encode. A pane in that state has
+        // already been sent to the empty path by `render_pane`; the guard
+        // stays because the invariant belongs next to the code that needs it.
+        // The scene is a different matter: an empty draw list still renders
+        // the background, grid, floor and axes off the environment.
+        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             self.renderer.render_empty_pass(encoder, background);
             return;
         };
-        let objects = self.draw_objects(scene);
+        let objects = self.draw_objects();
         solarxy_host::render_3d_passes(
             &self.renderer,
             &self.queue,
             encoder,
             &solarxy_host::PaneScene {
                 objects: &objects,
-                env: &scene.env,
+                env: &self.env,
                 cam_bg,
                 cam_data,
                 pds,
@@ -401,16 +434,11 @@ impl State {
             return;
         }
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
-        if let Some(scene) = &mut self.scene {
-            let bounds = scene.model.bounds;
-            solarxy_host::setup_pane_lighting(
-                &self.queue,
-                &mut scene.env,
-                cam_data,
-                &bounds,
-                ibl_avg,
-            );
-        }
+        // Bound before the mutable borrow of the environment: the accessor
+        // reads the whole of `self`, and the result is owned, so the shared
+        // borrow ends here.
+        let bounds = self.scene_bounds();
+        solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, cam_data, &bounds, ibl_avg);
     }
 
     fn render_gui_overlay(

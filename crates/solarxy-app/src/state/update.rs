@@ -14,9 +14,133 @@ impl State {
             &self.device,
             &self.queue,
             &mut self.renderer,
-            self.scene.as_mut().map(|s| &mut s.env),
+            &mut self.env,
             self.view.display.hdri_intensity,
         );
+    }
+
+    /// The bounds every camera frames against and every bounds-derived
+    /// uniform fits to: the loaded file model unioned with the visible
+    /// multi-object scene, falling back to the box the environment is
+    /// currently fitted to when the viewport holds neither.
+    ///
+    /// The two halves are independent. A file model can be open with nothing
+    /// cooked, cooked objects can exist with no file open, and closing a
+    /// model leaves the pane cameras alive framing whatever is left. Framing
+    /// a union is also what keeps a cooked object inside the shadow frustum
+    /// and inside the Depth mode's fitted near/far range.
+    ///
+    /// Object transforms are not applied to the multi-object half yet, so an
+    /// engine-only scene frames its objects' local boxes about the origin.
+    pub(super) fn scene_bounds(&self) -> solarxy_core::AABB {
+        match (
+            self.scene.as_ref().map(|s| s.model.bounds),
+            self.scene_objects.visible_bounds(),
+        ) {
+            (Some(model), Some(objects)) => model.union(&objects),
+            (Some(only), None) | (None, Some(only)) => only,
+            // Deliberately the fixed placeholder rather than `env_bounds`.
+            // `env_bounds` records what the environment is currently fitted
+            // to, which on an emptied scene is whatever was there last; using
+            // it here would let each round of "add something, frame it,
+            // remove it" answer from the previous round's box, so repeated
+            // cycles would shrink toward nothing.
+            (None, None) => solarxy_renderer::environment::placeholder_bounds(),
+        }
+    }
+
+    /// Replace the scene environment with one fitted to `bounds`.
+    ///
+    /// The fresh environment arrives with a three-point rig synthesized from
+    /// `bounds`, which is right when the lights are free to follow the view
+    /// and wrong when they are locked: a locked rig is the one thing the user
+    /// asked not to move, and no later frame would put it back, because every
+    /// path that recomputes lighting is skipped under the lock. So the rig is
+    /// carried across the swap while locked, shadow frustum included.
+    ///
+    /// The IBL chokepoint at the end restores the environment intensity and
+    /// the ambient average, and writes the whole uniform, so the carried rig
+    /// reaches the GPU without a second write.
+    fn rebuild_env(&mut self, bounds: solarxy_core::AABB) {
+        let grid_color = self
+            .resolve_background(&self.view.pane_settings[0])
+            .grid_color();
+        let carried = self
+            .view
+            .display
+            .lights_locked
+            .then_some(self.env.lights_uniform);
+        self.env = build_bounds_env(
+            &self.device,
+            &self.queue,
+            &self.renderer,
+            &bounds,
+            grid_color,
+            self.preferences.rendering.shadow_map_size,
+        );
+        self.env_bounds = bounds;
+        if let Some(previous) = carried {
+            self.env.lights_uniform = previous;
+            let key = previous.lights[0].position;
+            self.env.shadow.update_light_vp(
+                &self.queue,
+                cgmath::Point3::new(key[0], key[1], key[2]),
+                bounds.center(),
+                bounds.diagonal() / 2.0,
+            );
+        }
+        self.rebuild_light_bind_group();
+    }
+
+    /// Swap the file model's environment for a bounds-only one, keeping
+    /// whatever the multi-object scene still holds in frame.
+    ///
+    /// Called when the model closes. That environment's visualization half
+    /// was built from the model - per-mesh bounds, per-mesh normal arrows -
+    /// and the normal-arrow segments are drawn zipped against the frame's
+    /// draw list, so leaving it installed would paint the closed model's
+    /// arrows over whatever geometry remains.
+    /// The ground keeps the box it already had when nothing is left to fit
+    /// to. The pane cameras deliberately survive a close, so they are still
+    /// framing what was just closed; snapping the floor and the grid to a
+    /// fixed placeholder underneath them would read as the ground jumping.
+    pub(super) fn reset_env_for_empty_scene(&mut self) {
+        let bounds = self
+            .scene_objects
+            .visible_bounds()
+            .unwrap_or(self.env_bounds);
+        self.rebuild_env(bounds);
+    }
+
+    /// Refit the environment - grid, floor, shadow frustum - when the
+    /// multi-object scene's bounds move.
+    ///
+    /// Frozen while a file model is loaded. That environment came off the
+    /// loader thread carrying the model's normal-arrow buffers; refitting it
+    /// from bounds alone would drop them, and refitting it with them would
+    /// put a triangle-count-sized buffer build on the frame loop. So a model
+    /// pins the environment to itself, and objects arriving beside it draw
+    /// against the model's ground, which is what they did before.
+    pub(super) fn sync_env_bounds(&mut self) {
+        if self.scene.is_some() {
+            return;
+        }
+        // Nothing to fit to leaves the ground where it is, for the reason
+        // stated on `reset_env_for_empty_scene`: refitting an emptied scene
+        // to a placeholder moves the floor and the grid under a camera that
+        // has not moved. Framing and sizing do not read the environment for
+        // this, they ask `scene_bounds`, which answers with the placeholder.
+        let Some(bounds) = self.scene_objects.visible_bounds() else {
+            return;
+        };
+        let eps = (self.env_bounds.diagonal() * 1e-3).max(1e-6);
+        let close = |a: cgmath::Point3<f32>, b: cgmath::Point3<f32>| {
+            (a.x - b.x).abs() < eps && (a.y - b.y).abs() < eps && (a.z - b.z).abs() < eps
+        };
+        if close(bounds.min, self.env_bounds.min) && close(bounds.max, self.env_bounds.max) {
+            return;
+        }
+        self.rebuild_env(bounds);
     }
 
     /// Apply any `SceneOp::SetEnvironment` in a drained delta.
@@ -124,7 +248,7 @@ impl State {
             // with nothing to degrade to, and this bind group is rebuilt
             // against the renderer's own copy as soon as the load lands.
             let ltc = solarxy_renderer::ltc::LtcLuts::load(&device, &queue);
-            let result = ModelScene::new(
+            let result = LoadedModel::load(
                 model_path,
                 &device,
                 &queue,
@@ -166,28 +290,39 @@ impl State {
         }
     }
 
-    /// Lazily create a [`CameraState`] for every pane slot the current
-    /// layout uses. Idempotent — a slot that already holds a camera is
-    /// skipped, so layout toggles preserve per-slot cameras within a
-    /// session. No-op until a model is loaded (bounds frame the camera).
-    /// Slot 0 is the perspective Single-layout camera; slots 1-3 seed to
-    /// orthographic Top / Front / Left — a one-time convenience that the
-    /// user re-orients with T / F / L.
-    pub(super) fn ensure_pane_cameras(&mut self) {
-        let Some(bounds) = self.scene.as_ref().map(|s| s.model.bounds) else {
-            return;
-        };
+    /// Lazily create a `CameraState` for every pane slot the current layout
+    /// uses, framing `bounds`. Idempotent — a slot that already holds a
+    /// camera is skipped, so layout toggles preserve per-slot cameras within
+    /// a session. Slot 0 is the perspective Single-layout camera; slots 1-3
+    /// seed to orthographic Top / Front / Left — a one-time convenience that
+    /// the user re-orients with T / F / L.
+    ///
+    /// Takes its subject explicitly because the two callers disagree about
+    /// what to frame: a freshly opened file frames itself, while the
+    /// per-frame path frames the whole scene.
+    pub(super) fn ensure_pane_cameras_with(&mut self, bounds: &solarxy_core::AABB) {
         let (tw, th) = self.target_dimensions();
         let aspect = tw as f32 / th.max(1) as f32;
         solarxy_host::ensure_pane_cameras(
             &self.device,
             &self.renderer.layouts.camera,
             &mut self.view.cameras,
-            &bounds,
+            bounds,
             aspect,
             self.view.display.layout.pane_count(),
             Some(self.preferences.display.projection_mode),
         );
+    }
+
+    /// Seed any missing pane camera against the whole scene.
+    ///
+    /// The per-frame entry point. With nothing loaded it frames the
+    /// placeholder box rather than doing nothing, so every pane has a camera
+    /// from the first frame and renders through the full pass chain — grid,
+    /// floor, axes and background — instead of the empty pass.
+    pub(super) fn ensure_pane_cameras(&mut self) {
+        let bounds = self.scene_bounds();
+        self.ensure_pane_cameras_with(&bounds);
     }
 
     pub(super) fn resize_render_targets(&mut self, width: u32, height: u32) {
@@ -319,18 +454,23 @@ impl State {
 
         if let Some(pending) = self.pending_load.take() {
             match pending.receiver.try_recv() {
-                Ok(Ok(mut new_scene)) => {
+                Ok(Ok(loaded)) => {
+                    let LoadedModel {
+                        scene: new_scene,
+                        mut env,
+                    } = loaded;
                     let active_ibl = solarxy_host::active_ibl(&self.renderer);
-                    new_scene.env.light_bind_group = create_light_bind_group(
+                    env.light_bind_group = create_light_bind_group(
                         &self.device,
                         &self.renderer.layouts,
-                        &new_scene.env.light_buffer,
+                        &env.light_buffer,
                         active_ibl,
                         &self.renderer.ibl_res.brdf_lut,
                         &self.renderer.ibl_res.ltc,
                     );
                     let file_size = std::fs::metadata(&pending.path).map_or(0, |m| m.len());
-                    let bounds_size = new_scene.model.bounds.size();
+                    let model_bounds = new_scene.model.bounds;
+                    let bounds_size = model_bounds.size();
                     self.gui.update_model_info(
                         &pending.filename,
                         &pending.path,
@@ -356,6 +496,11 @@ impl State {
                     self.window
                         .set_title(&format!("Solarxy \u{2014} {}", pending.filename));
                     preferences::add_recent_file(&mut self.preferences, &pending.path);
+                    // The worker-built environment carries this model's
+                    // normal-arrow buffers and per-mesh bounds, so it
+                    // replaces whatever the viewport was fitted to.
+                    self.env_bounds = model_bounds;
+                    self.env = env;
                     self.scene = Some(new_scene);
                     // Flush unsaved review notes for the outgoing model
                     // before its sidecar path is cleared by the reload.
@@ -364,7 +509,11 @@ impl State {
                     }
                     self.load_review_for_model(&pending.path);
                     self.view.cameras = [None, None, None, None];
-                    self.ensure_pane_cameras();
+                    // Framed on the file just opened, not on the whole
+                    // scene: opening a file is a user act with an explicit
+                    // subject, and unioning in leftover cooked objects would
+                    // land the new model small and off-centre.
+                    self.ensure_pane_cameras_with(&model_bounds);
 
                     self.view.pane_settings[0].view_mode = self.preferences.display.view_mode;
                     self.view.pane_settings[0].prev_non_ghosted_mode = ViewMode::Shaded;
@@ -399,6 +548,8 @@ impl State {
             }
         }
 
+        self.sync_env_bounds();
+
         let now = Instant::now();
         self.dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
         self.last_frame_time = now;
@@ -425,24 +576,65 @@ impl State {
             cam.update(&self.queue, self.dt);
         }
 
-        if !self.view.display.lights_locked {
+        if !self.view.display.lights_locked
+            && let Some(cam0) = self.view.cameras[0].as_ref().map(|c| c.camera)
+        {
             let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
-            let cam0 = self.view.cameras[0].as_ref().map(|c| c.camera);
-            if let (Some(cam0), Some(scene)) = (cam0, &mut self.scene) {
-                scene.env.lights_uniform = lights_from_camera(&cam0, &scene.model.bounds, ibl_avg);
-                self.queue.write_buffer(
-                    &scene.env.light_buffer,
-                    0,
-                    bytemuck::cast_slice(&[scene.env.lights_uniform]),
-                );
-                let key_pos = scene.env.lights_uniform.lights[0].position;
-                scene.env.shadow.update_light_vp(
-                    &self.queue,
-                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                    scene.model.bounds.center(),
-                    scene.model.bounds.diagonal() / 2.0,
-                );
-            }
+            let bounds = self.scene_bounds();
+            solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, &cam0, &bounds, ibl_avg);
         }
     }
+}
+
+/// Build a scene environment around `bounds` with no model-derived
+/// visualization contents, and point its light bind group at the IBL the
+/// current mode shades with.
+///
+/// Cheap enough for the frame loop, unlike the environment a model load
+/// produces: with no normals geometry the visualization half allocates only
+/// the grid, floor, axes and bounds line buffers, every one of them sized by
+/// `bounds` rather than by a triangle count.
+///
+/// Free rather than a method because startup builds one before there is a
+/// `State` to call a method on, and the two must not drift apart.
+pub(super) fn build_bounds_env(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    renderer: &Renderer,
+    bounds: &solarxy_core::AABB,
+    grid_color: [f32; 3],
+    shadow_map_size: u32,
+) -> solarxy_renderer::environment::SceneEnvironment {
+    let vis = solarxy_renderer::visualization::VisualizationState::new_from_parts(
+        device,
+        &renderer.layouts,
+        bounds,
+        &[],
+        None,
+        grid_color,
+    );
+    let aspect = renderer.target_width.max(1) as f32 / renderer.target_height.max(1) as f32;
+    let mut env = solarxy_renderer::environment::SceneEnvironment::new(
+        device,
+        queue,
+        &renderer.layouts,
+        bounds,
+        aspect,
+        &renderer.ibl_res.brdf_lut,
+        &renderer.ibl_res.ltc,
+        shadow_map_size,
+        vis,
+    );
+    // `SceneEnvironment::new` seeds the bind group against a throwaway
+    // fallback IBL; rebind it to the live one, exactly as the model-load
+    // path does with the worker-built environment.
+    env.light_bind_group = create_light_bind_group(
+        device,
+        &renderer.layouts,
+        &env.light_buffer,
+        solarxy_host::active_ibl(renderer),
+        &renderer.ibl_res.brdf_lut,
+        &renderer.ibl_res.ltc,
+    );
+    env
 }

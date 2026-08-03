@@ -25,11 +25,12 @@ pub struct PaneUniforms<'a> {
     /// The pane's camera, or `None` for a slot that has none yet — in which
     /// case the camera-uniform block is not written at all, exactly as before.
     pub camera: Option<&'a CameraState>,
-    /// The environment holding the grid uniform, or `None` where the shell has
-    /// no scene yet and therefore no grid buffer to write.
-    pub env: Option<&'a SceneEnvironment>,
-    /// Bounds to fit the depth range against. `None` falls back to the fixed
-    /// 0.01-to-100 range the desktop shell used when no model was loaded.
+    /// The environment holding the grid uniform.
+    pub env: &'a SceneEnvironment,
+    /// Bounds to fit the depth range against. Both shells always have some,
+    /// falling back to the box their environment is fitted to; the `None`
+    /// arm's fixed 0.01-to-100 range is retained only for callers of
+    /// [`write_inspection_block`] that have no scene at all.
     pub bounds: Option<&'a AABB>,
     /// The grid plane this pane's camera wants, or `None` to leave the plane
     /// untouched.
@@ -88,20 +89,18 @@ pub fn write_pane_uniforms(queue: &wgpu::Queue, renderer: &Renderer, u: &PaneUni
         bytemuck::bytes_of(&gradient),
     );
 
-    if let Some(env) = u.env {
-        let grid = u.background.grid_color();
+    let grid = u.background.grid_color();
+    queue.write_buffer(
+        &u.env.vis.grid_uniform_buf,
+        GridUniform::COLOR_OFFSET,
+        bytemuck::cast_slice(&grid),
+    );
+    if let Some(plane) = u.grid_plane {
         queue.write_buffer(
-            &env.vis.grid_uniform_buf,
-            GridUniform::COLOR_OFFSET,
-            bytemuck::cast_slice(&grid),
+            &u.env.vis.grid_uniform_buf,
+            GridUniform::PLANE_OFFSET,
+            bytemuck::bytes_of(&plane),
         );
-        if let Some(plane) = u.grid_plane {
-            queue.write_buffer(
-                &env.vis.grid_uniform_buf,
-                GridUniform::PLANE_OFFSET,
-                bytemuck::bytes_of(&plane),
-            );
-        }
     }
 
     if let Some(cam) = u.camera {
@@ -184,9 +183,11 @@ pub struct PaneScene<'a> {
 /// `cam_bg` and `env` are not optional, and the reason is worth recording
 /// because the code this replaced looked as though they were. Both shells
 /// return from `render_pane` before reaching this point when the pane has no
-/// camera, and the desktop shell clears its scene and its pane cameras in the
-/// same breath, deliberately, so that closing a model routes every pane to the
-/// empty path. A pane that gets here therefore has both.
+/// camera, and both own their scene environment for the whole session rather
+/// than for as long as a model is loaded. A pane that gets here therefore has
+/// both. The draw list is the part that is allowed to be empty: a viewport
+/// with nothing in it still renders its background, grid, floor and axes
+/// through this chain.
 pub fn render_3d_passes(
     renderer: &Renderer,
     queue: &wgpu::Queue,

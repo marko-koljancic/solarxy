@@ -10,7 +10,7 @@ description = "wgpu-based PBR renderer for Solarxy"
 
 [features]
 # Path-based entry points (load_model_any, load_texture, load_binary,
-# ModelScene::new, IblState::from_hdri). Off for wasm builds; the byte-fed
+# LoadedModel::load, IblState::from_hdri). Off for wasm builds; the byte-fed
 # APIs (upload_model, from_hdr_bytes/from_exr_bytes, Texture::from_bytes)
 # are always available.
 default = ["std-fs"]

@@ -26,10 +26,10 @@
 //! # How the shared functions are shaped
 //!
 //! Free functions over explicit borrowed parameters, never methods on a host
-//! type. Each shell keeps its own state layout — the desktop's is still rooted
-//! in an `Option<ModelScene>`, the web's holds `SceneObjects` and
-//! `SceneEnvironment` as siblings — and builds the parameters from whatever it
-//! has.
+//! type. Each shell keeps its own state layout — both hold `SceneObjects` and
+//! `SceneEnvironment` as siblings, and the desktop additionally keeps its
+//! file-loaded model in an `Option<ModelScene>` beside them — and builds the
+//! parameters from whatever it has.
 //!
 //! Where one shell has a capability the other does not, the parameter is an
 //! `Option` whose `None` **already means** what the shell without it needs,

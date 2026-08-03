@@ -34,7 +34,7 @@ use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::ibl::BrdfLut;
-use solarxy_renderer::scene::{BackgroundModeExt, ModelScene};
+use solarxy_renderer::scene::{BackgroundModeExt, LoadedModel};
 
 const WIDTH: u32 = 1024;
 const HEIGHT: u32 = 768;
@@ -189,7 +189,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Renderer::new: {e}"))?;
 
     let brdf_placeholder = BrdfLut::fallback(&device, &queue);
-    let scene = ModelScene::new(
+    let LoadedModel { scene, env } = LoadedModel::load(
         model_path.clone(),
         &device,
         &queue,
@@ -200,7 +200,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         &renderer.ibl_res.ltc,
         SHADOW_MAP_SIZE,
     )
-    .map_err(|e| anyhow::anyhow!("ModelScene::new: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("LoadedModel::load: {e}"))?;
 
     let mut cam = CameraState::new(
         &device,
@@ -228,12 +228,12 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
     for (name, pds) in modes() {
-        let objects = [scene.draw_object()];
+        let objects = [scene.draw_object(&env.instance_buffer)];
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             &pds,
             &scene.model.bounds,
@@ -292,12 +292,12 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         }
 
         let pds = modes()[0].1;
-        let objects = [scene.draw_object()];
+        let objects = [scene.draw_object(&env.instance_buffer)];
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             &pds,
             &scene.model.bounds,
@@ -365,12 +365,12 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         };
 
         let pds = modes()[0].1;
-        let objects = [scene.draw_object()];
+        let objects = [scene.draw_object(&env.instance_buffer)];
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             &pds,
             &scene.model.bounds,
@@ -449,21 +449,21 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             lamp(at(1.0, 0.5, 0.5), [0.90, 0.93, 1.00], LIT_INTENSITY * 0.5),
             lamp(at(0.0, 0.5, -1.5), [1.0, 1.0, 1.0], LIT_INTENSITY * 0.4),
         ];
-        let base = scene.env.lights_uniform;
+        let base = env.lights_uniform;
         let lit = LightsUniform::from_defs(
             &defs,
             base.sphere_scale,
             [base.ibl_avg_r, base.ibl_avg_g, base.ibl_avg_b],
         );
-        queue.write_buffer(&scene.env.light_buffer, 0, bytemuck::bytes_of(&lit));
+        queue.write_buffer(&env.light_buffer, 0, bytemuck::bytes_of(&lit));
 
         let pds = modes()[0].1;
-        let objects = [scene.draw_object()];
+        let objects = [scene.draw_object(&env.instance_buffer)];
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             &pds,
             &scene.model.bounds,
@@ -483,7 +483,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 
         // Put the synthesized rig back, so anything captured after this
         // sees the lighting the rest of the suite is built on.
-        queue.write_buffer(&scene.env.light_buffer, 0, bytemuck::bytes_of(&base));
+        queue.write_buffer(&env.light_buffer, 0, bytemuck::bytes_of(&base));
     }
 
     // Extra (not part of the compare set): the multi-object proof — two
@@ -555,13 +555,13 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 
         let (name, pds) = &modes()[0];
         let _ = name;
-        let mut objects = vec![scene.draw_object()];
+        let mut objects = vec![scene.draw_object(&env.instance_buffer)];
         objects.extend(extra.draw_objects());
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             pds,
             &scene.model.bounds,
@@ -707,13 +707,13 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("SceneObjects::apply: {e}"))?;
 
         let (_, pds) = &modes()[0];
-        let mut objects = vec![scene.draw_object()];
+        let mut objects = vec![scene.draw_object(&env.instance_buffer)];
         objects.extend(extra.draw_objects());
         capture_through_host(
             &device,
             &queue,
             &renderer,
-            &scene.env,
+            &env,
             &cam,
             pds,
             &scene.model.bounds,

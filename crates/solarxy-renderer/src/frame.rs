@@ -281,7 +281,7 @@ pub struct ValidationColorResources {
 /// Per-object validation overlay GPU resources: the per-mesh issue
 /// category (index into [`ValidationColorResources`]) and the
 /// non-manifold edge index buffers, both parallel to the object's
-/// `model.meshes`. Built by `ModelScene::new` on desktop and by
+/// `model.meshes`. Built by `LoadedModel::load` on desktop and by
 /// `SceneObjects` from `SceneOp::SetValidation` on the web.
 pub struct ObjectValidationGpu {
     pub mesh_cat: Vec<Option<usize>>,
@@ -2172,9 +2172,11 @@ impl Renderer {
             return;
         }
         // The normal-arrow segments are parallel to the drawn objects'
-        // meshes FLATTENED in draw order (desktop passes one object, so
-        // this is exactly its mesh list; the web host aggregates every
-        // displayed object in the same order). Visibility flags gate the
+        // meshes FLATTENED in draw order. The desktop builds them from its
+        // file-loaded model, which it always draws first, so the segments
+        // line up with the head of the list and any cooked objects behind
+        // it simply run past the end; the web host aggregates every
+        // displayed object in the same order. Visibility flags gate the
         // per-mesh draws.
         let flat_meshes = || objects.iter().flat_map(|o| o.model.meshes.iter());
         pass.set_pipeline(&self.pipelines.overlay.normals);

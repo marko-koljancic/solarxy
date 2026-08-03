@@ -39,7 +39,7 @@ pub(super) use solarxy_renderer::frame::{
     GradientUniform, Renderer, UvOverlapResources, WireframeParams,
 };
 pub(super) use solarxy_renderer::scene::{
-    BackgroundModeExt, ModelScene, create_light_bind_group, lights_from_camera,
+    BackgroundModeExt, LoadedModel, ModelScene, create_light_bind_group,
 };
 
 pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
@@ -59,7 +59,7 @@ use winit::{keyboard::ModifiersState, window::Window};
 pub(super) use solarxy_renderer::panes::{PaneRect as Pane, compute_target_dimensions, hit_test_pane};
 
 pub(super) struct PendingLoad {
-    pub(super) receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
+    pub(super) receiver: mpsc::Receiver<anyhow::Result<LoadedModel>>,
     pub(super) filename: String,
     pub(super) path: String,
 }
@@ -109,6 +109,13 @@ pub struct State {
     /// the top of each frame; the node engine becomes the producer in a
     /// later milestone.
     pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
+    /// Scene-level GPU state every pane draws through: the light rig, the
+    /// shadow map, the identity instance buffer bound for scene-level draws,
+    /// and the grid/floor/axes buffers. Owned here rather than by `scene`, so
+    /// the viewport keeps its full pass chain with no file model loaded.
+    pub(super) env: solarxy_renderer::environment::SceneEnvironment,
+    /// The bounds `env` was last built around (grid, floor and shadow fit).
+    pub(super) env_bounds: solarxy_core::AABB,
     pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
     /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
     /// whole environment on every rebuild, and installing one convolves an

@@ -3,12 +3,11 @@
 //! identity instance buffer for floor/overlay draws, the shadow map, and
 //! the grid/floor/gizmo visualization buffers.
 //!
-//! Extracted from [`crate::scene::ModelScene`] in the web milestone's
-//! so a shell without a file-loaded model (the web host, whose
-//! geometry arrives through `SceneObjects` deltas) can drive the full
-//! pass set. `ModelScene` recomposes as `{ env, model, ... }` with the
-//! construction order copied verbatim; desktop output is bit-identical
-//! (golden-verified).
+//! Owned by the shell, one per session, so a shell with no file-loaded
+//! model still drives the full pass set: the web host's geometry arrives
+//! through `SceneObjects` deltas, and the desktop shell keeps one beside
+//! its `Option<ModelScene>` so an empty viewport still draws its
+//! background, grid, floor and axes.
 
 use solarxy_core::AABB;
 
@@ -104,6 +103,19 @@ impl SceneEnvironment {
     }
 }
 
+/// The bounds an environment is fitted to before any geometry exists: a
+/// 4-unit box centred on the origin, which frames the grid and the floor at
+/// a usable size for an empty viewport.
+///
+/// Shared so the two shells cannot disagree about how big an empty scene is.
+#[must_use]
+pub fn placeholder_bounds() -> AABB {
+    AABB {
+        min: cgmath::Point3::new(-2.0, -2.0, -2.0),
+        max: cgmath::Point3::new(2.0, 2.0, 2.0),
+    }
+}
+
 /// The host-side memory that makes
 /// [`solarxy_core::scene::SceneOp::SetEnvironment`] idempotent.
 ///
@@ -119,8 +131,8 @@ impl SceneEnvironment {
 /// construction precisely so identity is cheap here.
 ///
 /// Both shells own one. It lives beside [`SceneEnvironment`] rather than
-/// inside it because the desktop's `ModelScene` and the web host reach the
-/// IBL through different owners, and the tracker only needs the two.
+/// inside it because the IBL belongs to the renderer, not to the
+/// environment, and the tracker only needs the two.
 #[derive(Debug, Default)]
 pub struct EnvironmentTracker {
     installed: Option<EnvironmentIdentity>,

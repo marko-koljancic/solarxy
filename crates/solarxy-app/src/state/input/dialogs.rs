@@ -77,10 +77,15 @@ impl State {
         }
         self.review.clear_for_new_model();
         self.scene = None;
-        // Reset the pane cameras (the model-load path does the same). This
-        // routes `render_pane` to its empty path so SSAO/bloom no longer
-        // sample the closed model's stale GBuffer as a ghost silhouette.
-        self.view.cameras = [None, None, None, None];
+        self.reset_env_for_empty_scene();
+        // The pane cameras deliberately survive. Closing a model leaves a
+        // viewport, not a void: the background, grid, floor and axes keep
+        // rendering through the full pass chain, and anything the
+        // multi-object scene holds keeps drawing. Clearing them used to be
+        // how the composite was kept off the closed model's last bloom and
+        // occlusion textures, which the empty path leaves resident because it
+        // encodes neither pass; `scene_present` answers that directly now, so
+        // the cameras no longer have to disappear to make it true.
         self.gui.clear_model_info();
         self.window.set_title("Solarxy");
         self.renderer.uv_overlap.overlap_pct = None;

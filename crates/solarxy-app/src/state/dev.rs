@@ -15,16 +15,12 @@ const DEV_CUBE_A: SceneObjectId = SceneObjectId(0xDE10);
 const DEV_CUBE_B: SceneObjectId = SceneObjectId(0xDE11);
 
 impl State {
-    /// Toggle the two dev cubes. Requires a loaded model (the cubes are
-    /// placed and sized relative to its bounds, and the scene-level light
-    /// and shadow state live on the `ModelScene`).
+    /// Toggle the two dev cubes, placed and sized relative to whatever the
+    /// viewport currently frames: the loaded model, the cooked scene, or the
+    /// placeholder box when it holds neither. Deliberately works with nothing
+    /// loaded, since an engine-only scene is the state this harness exists to
+    /// exercise on hardware.
     pub(super) fn toggle_dev_objects(&mut self) {
-        let Some(scene) = &self.scene else {
-            self.gui
-                .set_toast("Dev objects need a loaded model", ToastSeverity::Warning);
-            return;
-        };
-
         if self.scene_objects.get(DEV_CUBE_A).is_some() {
             self.pending_scene_deltas.push(SceneDelta {
                 ops: vec![
@@ -37,7 +33,7 @@ impl State {
             return;
         }
 
-        let bounds = scene.model.bounds;
+        let bounds = self.scene_bounds();
         let center = bounds.center();
         let d = bounds.diagonal();
         let s_a = d * 0.12;

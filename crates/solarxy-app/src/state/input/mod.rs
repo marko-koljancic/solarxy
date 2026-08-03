@@ -104,10 +104,8 @@ impl State {
                 } else if self.input.modifiers.alt_key() {
                     self.show_all_meshes();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
                 }
             }
             KeyCode::Slash => {
@@ -117,29 +115,25 @@ impl State {
                 if self.input.modifiers.shift_key() {
                     self.toggle_tone_mode();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                cgmath::Vector3::unit_y(),
-                                -cgmath::Vector3::unit_z(),
-                            );
-                        });
-                    }
-                }
-            }
-            KeyCode::KeyF => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
+                    let bounds = self.scene_bounds();
                     self.for_each_target_cam(|cam| {
                         cam.reset_to_bounds_axis(
                             &bounds,
-                            cgmath::Vector3::unit_z(),
                             cgmath::Vector3::unit_y(),
+                            -cgmath::Vector3::unit_z(),
                         );
                     });
                 }
+            }
+            KeyCode::KeyF => {
+                let bounds = self.scene_bounds();
+                self.for_each_target_cam(|cam| {
+                    cam.reset_to_bounds_axis(
+                        &bounds,
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Vector3::unit_y(),
+                    );
+                });
             }
             KeyCode::KeyL => {
                 let cmd_or_ctrl = if cfg!(target_os = "macos") {
@@ -166,32 +160,28 @@ impl State {
                     };
                     self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                -cgmath::Vector3::unit_x(),
-                                cgmath::Vector3::unit_y(),
-                            );
-                        });
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            -cgmath::Vector3::unit_x(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyR => {
                 if self.input.modifiers.shift_key() {
                     self.toggle_review_mode();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                cgmath::Vector3::unit_x(),
-                                cgmath::Vector3::unit_y(),
-                            );
-                        });
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            cgmath::Vector3::unit_x(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyP => {

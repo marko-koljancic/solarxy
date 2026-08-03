@@ -47,6 +47,28 @@ impl AABB {
         )
     }
 
+    /// The smallest box containing both `self` and `other`.
+    ///
+    /// Exists for viewports fed by two independent sources of geometry - the
+    /// desktop shell draws a file-loaded model beside its cooked scene
+    /// objects - where camera framing, the depth-range fit and the shadow
+    /// frustum all have to cover everything on screen rather than one half
+    /// of it.
+    pub fn union(&self, other: &AABB) -> AABB {
+        AABB {
+            min: Point3::new(
+                self.min.x.min(other.min.x),
+                self.min.y.min(other.min.y),
+                self.min.z.min(other.min.z),
+            ),
+            max: Point3::new(
+                self.max.x.max(other.max.x),
+                self.max.y.max(other.max.y),
+                self.max.z.max(other.max.z),
+            ),
+        }
+    }
+
     /// Eight corners ordered as `(min, max)` combinations along x, then y,
     /// then z (z slowest-varying). `corners()[0] == min` and `corners()[7] == max`.
     pub fn corners(&self) -> [Point3<f32>; 8] {
@@ -130,5 +152,29 @@ mod tests {
         let c2 = aabb.corners();
         assert_eq!(c2[0], aabb.min);
         assert_eq!(c2[7], aabb.max);
+    }
+
+    #[test]
+    fn union_covers_both_boxes() {
+        let a = AABB {
+            min: Point3::new(-1.0, 0.0, 0.0),
+            max: Point3::new(1.0, 2.0, 1.0),
+        };
+        let b = AABB {
+            min: Point3::new(0.0, -3.0, 5.0),
+            max: Point3::new(4.0, 1.0, 6.0),
+        };
+        let u = a.union(&b);
+        assert_eq!(u.min, Point3::new(-1.0, -3.0, 0.0));
+        assert_eq!(u.max, Point3::new(4.0, 2.0, 6.0));
+
+        // Order-independent, and unioning a box with itself is the identity:
+        // the property the single-source case relies on to stay pixel-exact.
+        let flipped = b.union(&a);
+        assert_eq!(flipped.min, u.min);
+        assert_eq!(flipped.max, u.max);
+        let self_union = a.union(&a);
+        assert_eq!(self_union.min, a.min);
+        assert_eq!(self_union.max, a.max);
     }
 }

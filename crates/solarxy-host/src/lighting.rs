@@ -35,15 +35,15 @@ pub fn active_ibl(renderer: &Renderer) -> &IblState {
 /// and the two partial writes each mirrored a CPU field assignment at the
 /// matching offset. Nothing mutates the GPU copy behind the CPU struct, so
 /// widening the write cannot change what the shader reads.
-/// `env` is an `Option` because the desktop shell has no scene environment
-/// until a model is loaded, and the skybox half of this function still has to
-/// run in that state — it did before this crate existed, since the skybox
-/// retarget sat outside that shell's `if let Some(scene)` guard.
+///
+/// `env` is not optional. Both shells own their scene environment for the
+/// whole session, so there is no state in which the skybox half of this
+/// function has to run while the lighting half is skipped.
 pub fn rebuild_light_bind_group(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut Renderer,
-    env: Option<&mut SceneEnvironment>,
+    env: &mut SceneEnvironment,
     hdri_intensity: f32,
 ) {
     // The skybox pass samples the active IBL's source equirect, so it is
@@ -52,10 +52,6 @@ pub fn rebuild_light_bind_group(
     renderer.skybox_bind_group = renderer.ibl_res.ibl.equirect.as_ref().map(|eq| {
         solarxy_renderer::skybox::create_skybox_bind_group(device, &renderer.layouts.skybox, eq)
     });
-
-    let Some(env) = env else {
-        return;
-    };
 
     let ibl_avg = active_ibl(renderer).irradiance_average;
     env.light_bind_group = match renderer.ibl_res.ibl_mode {
