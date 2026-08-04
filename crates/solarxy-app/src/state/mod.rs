@@ -21,6 +21,7 @@
 mod capture;
 #[cfg(debug_assertions)]
 mod dev;
+pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
 mod init;
 mod input;
@@ -112,6 +113,14 @@ pub struct State {
     /// and framing already unions them, but one root at a time is what keeps
     /// Close unambiguous and the inspection panels presenting one tree.
     pub(super) engine: Option<Box<solarxy_graph::Engine>>,
+    /// What the inspection panels read about the open scene: its file
+    /// identity, per-object names, summed geometry counters, and every
+    /// object's validation merged into one report.
+    ///
+    /// `Some` exactly when `engine` is. Rebuilt on each drained scene
+    /// delta rather than per frame, because deltas are the only thing that
+    /// changes it and the merged issue order has to be stable.
+    pub(super) engine_scene: Option<engine_scene::EngineSceneInfo>,
     /// Multi-object dynamic scene drawn beside `scene`. Fed by
     /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
     /// the top of each frame. The engine above is the producer once a scene

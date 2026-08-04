@@ -68,6 +68,11 @@ impl State {
                 }
                 self.apply_scene_environment(&delta);
             }
+            // The panels read summed counters and one merged validation
+            // report. Both are derived from what just landed, so they are
+            // rebuilt here rather than per frame: a delta is the only thing
+            // that can change either.
+            self.refresh_engine_scene_info();
         }
 
         let viewport_present = self.gui.viewport_tab_present();
@@ -557,7 +562,28 @@ impl State {
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
-        let validation_report = self.scene.as_ref().map(|s| &s.validation);
+        // Whichever root is open supplies the panels. The two are mutually
+        // exclusive, so this is a choice rather than a merge; a file model
+        // wins the tie only because it cannot occur.
+        let validation = match (&self.scene, &self.engine_scene) {
+            (Some(scene), _) => crate::gui::ValidationView {
+                report: Some(&scene.validation),
+                owners: &[],
+            },
+            (None, Some(info)) => crate::gui::ValidationView {
+                report: Some(&info.validation.report),
+                owners: &info.validation.labels,
+            },
+            (None, None) => crate::gui::ValidationView::default(),
+        };
+        let outliner_source = match (&self.scene, &self.engine_scene) {
+            (Some(scene), _) => crate::gui::OutlinerSource::Model(&scene.model),
+            (None, Some(info)) => crate::gui::OutlinerSource::Scene {
+                objects: &self.scene_objects,
+                names: &info.object_names,
+            },
+            (None, None) => crate::gui::OutlinerSource::Empty,
+        };
 
         let recent_files = self.preferences.history.recent_files.clone();
         let model = self.scene.as_ref().map(|s| &s.model);
@@ -584,7 +610,7 @@ impl State {
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
-            validation_report,
+            validation,
             &self.device,
             &self.queue,
             &mut encoder,
@@ -598,6 +624,7 @@ impl State {
             &recent_files,
             &mut self.review,
             model,
+            outliner_source,
             pane_toolbar,
             &mut properties_events,
             &mut outliner_events,

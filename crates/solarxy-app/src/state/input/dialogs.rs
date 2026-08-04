@@ -176,6 +176,17 @@ impl State {
         let view = loaded.sidecar.view.clone();
         let environment = loaded.sidecar.environment.clone();
         self.engine = Some(engine);
+        // Identity now; the counters and the merged report fill in as the
+        // first cook's delta drains, since nothing has cooked yet.
+        self.engine_scene = Some(crate::state::engine_scene::EngineSceneInfo::new(
+            filename.clone(),
+            path.display().to_string(),
+            u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        ));
+        // A previous document's thumbnails are keyed only by material index
+        // and role, so without this the new scene's slots would be served
+        // stale textures.
+        self.gui.reset_material_inspector();
 
         self.apply_scene_view(&view);
         self.restore_scene_environment(&environment);
@@ -308,10 +319,15 @@ impl State {
     /// Drop the engine and everything it put on the GPU.
     pub fn close_scene(&mut self) {
         self.engine = None;
+        self.engine_scene = None;
         self.clear_scene_objects();
         self.environment.invalidate();
         self.reset_env_for_empty_scene();
         self.gui.clear_model_info();
+        // The thumbnail cache is keyed by (material index, role) with no
+        // notion of which document filled it, so it has to be dropped on
+        // the way out of a scene exactly as it is on a model swap.
+        self.gui.reset_material_inspector();
         self.window.set_title("Solarxy");
     }
 

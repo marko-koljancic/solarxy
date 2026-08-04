@@ -14,12 +14,27 @@ use solarxy_core::preferences::IblMode;
 use solarxy_core::validation::ValidationReport;
 use solarxy_renderer::resources::ModelStats;
 
+use crate::state::engine_scene::SceneGeometryCounts;
 use crate::state::hdri_info::HdriInfo;
 
 use super::snapshot::GuiSnapshot;
 
-/// File + geometry stats for the loaded model. Owned by `EguiRenderer`,
-/// populated via `EguiRenderer::update_model_info`.
+/// The Validation section's input: the report to list, plus the owning
+/// object's name per issue.
+///
+/// A file model has one owner, so `owners` is empty there. A scene's issue
+/// scopes collide across objects (every object's first mesh renders as
+/// `Mesh [0]`), so the merged list needs the owner to be readable at all.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ValidationView<'a> {
+    pub report: Option<&'a ValidationReport>,
+    /// Parallel to `report.issues` when non-empty.
+    pub owners: &'a [String],
+}
+
+/// File + geometry stats for the open document. Owned by `EguiRenderer`,
+/// populated via `EguiRenderer::update_model_info` for a model file and
+/// `EguiRenderer::update_scene_info` for a scene.
 pub(super) struct ModelInfo {
     pub filename: String,
     pub file_path: String,
@@ -27,9 +42,17 @@ pub(super) struct ModelInfo {
     pub format: String,
     pub mesh_count: usize,
     pub material_count: usize,
+    /// For a scene these are the **drawn** totals, with instanced geometry
+    /// counted once per placement. `polys` is zero there and its row is
+    /// skipped: cooked geometry is triangles, so a polygon count would only
+    /// repeat the triangle count under a second name.
     pub stats: ModelStats,
     pub bounds_size: [f32; 3],
     pub has_uvs: bool,
+    /// Present when the open document is a scene rather than a single model
+    /// file. Carries the counters a multi-object scene has and a file model
+    /// does not, and its presence is what switches this section's wording.
+    pub scene: Option<SceneGeometryCounts>,
 }
 
 /// Events raised by the Properties panel during an egui pass, drained by
@@ -43,6 +66,26 @@ pub(crate) struct PropertiesEvents {
     pub clear_hdri: bool,
     /// The `[Load HDRI…]` button (shown when none is loaded) was pressed.
     pub load_hdri: bool,
+}
+
+/// A drawn count, with the source count beside it when instancing makes
+/// the two differ.
+///
+/// A scatter draws its prototype once per placement, so the drawn number
+/// alone describes a ten-thousand-copy scatter as millions of triangles
+/// with no hint that it is one small mesh, and the source number alone
+/// describes it as that one small mesh with no hint of the scatter.
+fn count_with_source(drawn: usize, source: Option<usize>) -> String {
+    match source {
+        Some(source) if source != drawn => {
+            format!(
+                "{} ({} unique)",
+                format_number(drawn),
+                format_number(source)
+            )
+        }
+        _ => format_number(drawn),
+    }
 }
 
 fn format_file_size(bytes: u64) -> String {
@@ -63,19 +106,26 @@ pub(super) fn draw_properties_content(
     ui: &mut egui::Ui,
     model_info: Option<&ModelInfo>,
     hdri_info: Option<&HdriInfo>,
-    validation: Option<&ValidationReport>,
+    validation: ValidationView<'_>,
     snap: &mut GuiSnapshot,
     events: &mut PropertiesEvents,
 ) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(2.0);
 
-        egui::CollapsingHeader::new("Model")
+        // The heading names what is actually open, because "Model" over a
+        // scene's object counts reads as a mislabel rather than a synonym.
+        let heading = if model_info.is_some_and(|i| i.scene.is_some()) {
+            "Scene"
+        } else {
+            "Model"
+        };
+        egui::CollapsingHeader::new(heading)
             .default_open(true)
             .show(ui, |ui| match model_info {
                 Some(info) => draw_model_section(ui, info),
                 None => {
-                    ui.label(egui::RichText::new("No model loaded").weak());
+                    ui.label(egui::RichText::new("Nothing open").weak());
                 }
             });
 
@@ -124,17 +174,42 @@ fn draw_model_section(ui: &mut egui::Ui, info: &ModelInfo) {
         .num_columns(2)
         .spacing([8.0, 2.0])
         .show(ui, |ui| {
-            ui.label("Polygons");
-            ui.label(format_number(info.stats.polys));
-            ui.end_row();
+            // Cooked geometry is triangles, so a scene's polygon count would
+            // only restate its triangle count. The row is dropped there
+            // rather than shown as a duplicate or a zero.
+            if info.scene.is_none() {
+                ui.label("Polygons");
+                ui.label(format_number(info.stats.polys));
+                ui.end_row();
+            }
 
             ui.label("Triangles");
-            ui.label(format_number(info.stats.tris));
+            ui.label(count_with_source(
+                info.stats.tris,
+                info.scene.map(|s| s.unique_tris),
+            ));
             ui.end_row();
 
             ui.label("Vertices");
-            ui.label(format_number(info.stats.verts));
+            ui.label(count_with_source(
+                info.stats.verts,
+                info.scene.map(|s| s.unique_verts),
+            ));
             ui.end_row();
+
+            if let Some(scene) = info.scene {
+                ui.label("Objects");
+                ui.label(scene.objects.to_string());
+                ui.end_row();
+
+                // Only worth a row when something is actually placed more
+                // than once; otherwise it just repeats the mesh count.
+                if scene.is_instanced() {
+                    ui.label("Instances");
+                    ui.label(format_number(scene.instances));
+                    ui.end_row();
+                }
+            }
 
             ui.label("Meshes");
             ui.label(info.mesh_count.to_string());
@@ -255,11 +330,11 @@ fn draw_hdri_section(
 
 fn draw_validation_section(
     ui: &mut egui::Ui,
-    validation: Option<&ValidationReport>,
+    validation: ValidationView<'_>,
     events: &mut PropertiesEvents,
 ) {
-    let Some(report) = validation else {
-        ui.label(egui::RichText::new("No model loaded").weak());
+    let Some(report) = validation.report else {
+        ui.label(egui::RichText::new("Nothing open").weak());
         return;
     };
 
@@ -296,6 +371,20 @@ fn draw_validation_section(
                 ..Default::default()
             },
         );
+        // The owner leads, because the scope does not distinguish objects:
+        // every object's first mesh renders as `Mesh [0]`, so a merged list
+        // without the owner shows identical rows for different geometry.
+        if let Some(owner) = validation.owners.get(idx) {
+            job.append(
+                &format!("{owner}  "),
+                0.0,
+                egui::TextFormat {
+                    color: text_color.gamma_multiply(0.7),
+                    font_id: font.clone(),
+                    ..Default::default()
+                },
+            );
+        }
         job.append(
             &format!("{} \u{2014} {}", issue.scope, issue.message),
             0.0,

@@ -27,8 +27,6 @@
 
 use egui_dock::{DockState, NodeIndex, TabViewer};
 
-use solarxy_core::validation::ValidationReport;
-
 use crate::console::ConsoleState;
 use crate::state::hdri_info::HdriInfo;
 
@@ -97,9 +95,10 @@ pub(super) struct SolarxyTabViewer<'a> {
     pub review: &'a mut crate::state::review::ReviewState,
     pub console: &'a mut ConsoleState,
     pub model: Option<&'a solarxy_renderer::model::Model>,
+    pub outliner_source: super::outliner::OutlinerSource<'a>,
     pub model_info: Option<&'a ModelInfo>,
     pub hdri_info: Option<&'a HdriInfo>,
-    pub validation_report: Option<&'a ValidationReport>,
+    pub validation: super::properties::ValidationView<'a>,
     pub properties_events: &'a mut PropertiesEvents,
     pub outliner_events: &'a mut OutlinerEvents,
     pub material_inspector: &'a mut MaterialInspectorState,
@@ -163,7 +162,18 @@ impl TabViewer for SolarxyTabViewer<'_> {
                         &self.theme,
                     );
                 } else {
-                    draw_no_model_placeholder(ui);
+                    // A scene gets its own wording rather than "Nothing
+                    // open", which would read as a bug when the viewport is
+                    // plainly full of geometry. This panel inspects an
+                    // imported file's materials; a scene's are node
+                    // parameters and are read where the nodes are.
+                    draw_material_inspector_placeholder(
+                        ui,
+                        matches!(
+                            self.outliner_source,
+                            super::outliner::OutlinerSource::Scene { .. }
+                        ),
+                    );
                 }
             }
             SolarxyTab::Properties => {
@@ -171,13 +181,17 @@ impl TabViewer for SolarxyTabViewer<'_> {
                     ui,
                     self.model_info,
                     self.hdri_info,
-                    self.validation_report,
+                    self.validation,
                     self.snap,
                     self.properties_events,
                 );
             }
             SolarxyTab::Outliner => {
-                super::outliner::draw_outliner_content(ui, self.model, self.outliner_events);
+                super::outliner::draw_outliner_content(
+                    ui,
+                    self.outliner_source,
+                    self.outliner_events,
+                );
             }
         }
     }
@@ -212,10 +226,28 @@ impl TabViewer for SolarxyTabViewer<'_> {
     }
 }
 
-fn draw_no_model_placeholder(ui: &mut egui::Ui) {
+/// The Material Inspector's two empty states.
+///
+/// With a scene open the panel is empty for a reason the user should be
+/// told, not because nothing is loaded: it inspects the textures an
+/// imported file carried, and a scene's materials are node parameters with
+/// no imported source to show.
+fn draw_material_inspector_placeholder(ui: &mut egui::Ui, scene_open: bool) {
     ui.add_space(20.0);
     ui.vertical_centered(|ui| {
-        ui.label(egui::RichText::new("No model loaded").weak());
+        if scene_open {
+            ui.label(egui::RichText::new("Scene materials live on their nodes").weak());
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "This panel shows the textures an imported model file carried.",
+                )
+                .weak()
+                .small(),
+            );
+        } else {
+            ui.label(egui::RichText::new("Nothing open").weak());
+        }
     });
 }
 

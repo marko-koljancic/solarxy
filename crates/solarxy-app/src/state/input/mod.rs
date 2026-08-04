@@ -29,6 +29,9 @@ use solarxy_core::preferences::{
     NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
 use solarxy_renderer::validation::{material_meshes_aabb, resolve_issue_aabb};
+use solarxy_core::scene::SceneObjectId;
+use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::params::{ParamSource, ParamValue};
 
 use super::{BackgroundModeExt, BoundsMode, CompositeLook, State, ViewLayout};
 
@@ -588,16 +591,41 @@ impl State {
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
     pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
-        let aabb = self.scene.as_ref().and_then(|scene| {
-            scene.validation.issues.get(idx).and_then(|issue| {
+        let aabb = match &self.scene {
+            Some(scene) => scene.validation.issues.get(idx).and_then(|issue| {
                 resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
-            })
-        });
+            }),
+            None => self.scene_issue_aabb(idx),
+        };
         let Some(aabb) = aabb else {
             return;
         };
         self.view.pane_settings[self.view.active_pane].show_validation = true;
         self.frame_active_pane(aabb);
+    }
+
+    /// World-space bounds of the geometry behind one row of the **merged**
+    /// validation list.
+    ///
+    /// The list is N objects' reports concatenated, so the row index alone
+    /// is ambiguous and has to be resolved through the owner recorded when
+    /// they were merged. Re-deriving that owner here would create a second
+    /// ordering that must agree with the first forever, and a disagreement
+    /// would fly the camera to a different object's mesh, which looks
+    /// entirely plausible on screen and so would not be caught by looking.
+    fn scene_issue_aabb(&self, idx: usize) -> Option<solarxy_core::AABB> {
+        let info = self.engine_scene.as_ref()?;
+        let (id, local) = info.validation.owners.get(idx).copied()?;
+        let object = self.scene_objects.get(id)?;
+        let issue = self
+            .scene_objects
+            .validation(id)?
+            .report
+            .issues
+            .get(local)?;
+        let raw_to_gpu = self.scene_objects.raw_to_gpu(id)?;
+        resolve_issue_aabb(&issue.scope, &object.model, raw_to_gpu)
+            .map(|b| b.transformed(&object.transform))
     }
 
     /// Smoothly fly the active pane's camera to frame `bounds`.
@@ -693,6 +721,69 @@ impl State {
                     self.frame_active_pane(aabb);
                 }
             }
+            OutlinerAction::FrameObject(id) => {
+                // The object's own bounds are in its local space; the
+                // transform is what places it in the world, and framing the
+                // untransformed box would send the camera to the origin for
+                // anything the scene has moved.
+                let aabb = self
+                    .scene_objects
+                    .get(id)
+                    .map(|o| o.model.bounds.transformed(&o.transform));
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::FrameObjectMesh(id, mesh) => {
+                let aabb = self.scene_objects.get(id).and_then(|o| {
+                    o.model
+                        .mesh_bounds
+                        .get(mesh)
+                        .map(|b| b.transformed(&o.transform))
+                });
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::ToggleObject(id) => self.toggle_scene_object(id),
+        }
+    }
+
+    /// Flip a scene object's visibility through the engine.
+    ///
+    /// Writing the renderer's copy directly would look identical for one
+    /// frame and then be undone: the scene delta re-emits every object's
+    /// render flags from its owning node on each cook, so the parameter is
+    /// the only durable place to put this. Routing it through the engine
+    /// also puts the toggle in the undo stack for free.
+    fn toggle_scene_object(&mut self, id: SceneObjectId) {
+        let Some(visible) = self.scene_objects.get(id).map(|o| o.visible) else {
+            return;
+        };
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let command = solarxy_graph::Command::SetParam {
+            ctx: GraphContext::Root,
+            node: NodeId(id.0),
+            key: "visible".to_string(),
+            value: ParamSource::Literal(ParamValue::Bool(!visible)),
+        };
+        match engine.apply(command) {
+            Ok(_) => {
+                // Take the delta here rather than leaving it to the frame
+                // loop. `visible` is a render flag, not a cook input, so the
+                // next cook can legitimately produce nothing, and the frame
+                // loop only drains a delta when something ticked or cooked.
+                // A delta is a full rebuild from the document, so taking one
+                // now is what carries the flag to the renderer; the upserts
+                // it repeats are deduped by attribute identity.
+                let delta = engine.take_scene_delta();
+                if !delta.ops.is_empty() {
+                    self.pending_scene_deltas.push(delta);
+                }
+            }
+            Err(e) => tracing::warn!("Could not toggle object visibility: {e}"),
         }
     }
 

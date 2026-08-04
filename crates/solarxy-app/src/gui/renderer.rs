@@ -342,6 +342,42 @@ impl EguiRenderer {
             stats: *stats,
             bounds_size,
             has_uvs,
+            scene: None,
+        });
+    }
+
+    /// The scene equivalent of [`Self::update_model_info`]: the same panel
+    /// slot, filled from summed object counters rather than from one
+    /// loaded file.
+    ///
+    /// Called on every drained scene delta, not once at open, because a
+    /// cook changes the counts.
+    pub(crate) fn update_scene_info(
+        &mut self,
+        filename: &str,
+        path: &str,
+        file_size: u64,
+        counts: crate::state::engine_scene::SceneGeometryCounts,
+        bounds_size: [f32; 3],
+    ) {
+        self.model_info = Some(ModelInfo {
+            filename: filename.to_string(),
+            file_path: path.to_string(),
+            file_size,
+            format: "SLXY".to_string(),
+            mesh_count: counts.meshes,
+            material_count: counts.materials,
+            // Drawn totals. `polys` has no meaning for cooked geometry, so
+            // it stays zero and the panel drops its row rather than
+            // printing the triangle count twice.
+            stats: ModelStats {
+                polys: 0,
+                tris: counts.drawn_tris,
+                verts: counts.drawn_verts,
+            },
+            bounds_size,
+            has_uvs: counts.has_uvs,
+            scene: Some(counts),
         });
     }
 
@@ -360,7 +396,7 @@ impl EguiRenderer {
         &mut self,
         mut snap: GuiSnapshot,
         hud: &HudInfo,
-        validation_report: Option<&solarxy_core::validation::ValidationReport>,
+        validation: super::properties::ValidationView<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -373,7 +409,11 @@ impl EguiRenderer {
         review_panes: &[super::ReviewPaneOverlay],
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
+        // The file-loaded model, when one is open. Still separate from
+        // `outliner_source` because the Material Inspector and the review
+        // overlay are file-model surfaces and stay that way.
         model: Option<&solarxy_renderer::model::Model>,
+        outliner_source: super::outliner::OutlinerSource<'_>,
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
         properties_events: &mut PropertiesEvents,
         outliner_events: &mut OutlinerEvents,
@@ -401,8 +441,9 @@ impl EguiRenderer {
         let hdri_info = &self.hdri_info;
         let pane_label = &hud.pane_label;
         let cameras_linked = hud.cameras_linked;
-        let validation_counts =
-            validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
+        let validation_counts = validation
+            .report
+            .map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
         let mut actions = MenuActions::default();
 
@@ -499,9 +540,10 @@ impl EguiRenderer {
                 review,
                 console,
                 model,
+                outliner_source,
                 model_info: model_info.as_ref(),
                 hdri_info: hdri_info.as_ref(),
-                validation_report,
+                validation,
                 properties_events,
                 outliner_events,
                 material_inspector,

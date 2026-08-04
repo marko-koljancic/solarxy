@@ -6,7 +6,11 @@
 
 use std::sync::mpsc;
 
+use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::naming::node_name;
+
 use super::*;
+use super::engine_scene;
 
 /// Wall-clock ceiling on one frame's cook.
 ///
@@ -265,6 +269,61 @@ impl State {
                 self.pending_scene_deltas.push(delta);
             }
         }
+    }
+
+    /// Re-derive everything the inspection panels read from the cooked
+    /// scene, after a delta has been applied.
+    ///
+    /// Object names come from the document rather than from the renderer:
+    /// the engine mints each object's id from its owning node, so an object
+    /// resolves back to the name the user gave that node instead of being
+    /// listed as an opaque number.
+    pub(super) fn refresh_engine_scene_info(&mut self) {
+        let (Some(engine), Some(info)) = (self.engine.as_ref(), self.engine_scene.as_mut()) else {
+            return;
+        };
+
+        let registry = engine.registry();
+        let graph = engine.document().graph(GraphContext::Root).ok();
+        info.object_names = self
+            .scene_objects
+            .iter()
+            .map(|(id, _)| {
+                let name = graph
+                    .and_then(|g| g.node(NodeId(id.0)))
+                    .map_or_else(|| format!("Object {}", id.0), |n| node_name(n, registry));
+                (*id, name)
+            })
+            .collect();
+
+        info.counts = engine_scene::count_geometry(&self.scene_objects);
+
+        // Zipped rather than looked up per object: `object_names` was built
+        // from this same iterator a moment ago, so the orders agree by
+        // construction and the merged issue order is the iteration order.
+        let merged = engine_scene::merge_validation(
+            self.scene_objects
+                .iter()
+                .zip(&info.object_names)
+                .filter_map(|((id, _), (_, name))| {
+                    let result = self.scene_objects.validation(*id)?;
+                    Some((*id, name.as_str(), &result.report))
+                }),
+        );
+        info.validation = merged;
+
+        let bounds = self
+            .scene_objects
+            .visible_bounds()
+            .unwrap_or(self.env_bounds)
+            .size();
+        self.gui.update_scene_info(
+            &info.filename,
+            &info.path,
+            info.file_size,
+            info.counts,
+            [bounds.x, bounds.y, bounds.z],
+        );
     }
 
     pub(super) fn spawn_load(&mut self, model_path: String) {
