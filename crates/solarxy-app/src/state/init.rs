@@ -205,8 +205,13 @@ impl State {
             window,
         };
 
+        // Routed through the same handler the Open dialog and a drag and
+        // drop use, rather than straight into the model loader. Startup used
+        // to be the one entry point that could not open a scene, which made
+        // a supported file look unsupported; a second extension check here
+        // is how the three would drift apart again.
         if let Some(path) = model_path {
-            state.spawn_load(path);
+            state.handle_dropped_file(std::path::PathBuf::from(path));
         }
 
         Ok(state)
