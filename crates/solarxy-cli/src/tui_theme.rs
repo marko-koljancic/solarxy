@@ -39,6 +39,8 @@
 use ratatui::style::Color;
 use solarxy_core::theme::{Palette, Rgb};
 
+use super::tui::caps::{Capabilities, ColorTier};
+
 const fn color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
@@ -82,6 +84,32 @@ impl TuiTheme {
     /// bearing on the terminal the CLI is printing into.
     pub fn resolve() -> Self {
         Self::default()
+    }
+
+    /// The palette mapped onto what the terminal can render.
+    ///
+    /// At the 16-colour tier this is exactly [`Self::resolve`], which is
+    /// what makes that tier a description of the shipped surface rather
+    /// than a reconstruction of it. Above it the same values are quantised;
+    /// below it they are erased.
+    pub fn for_capabilities(caps: Capabilities) -> Self {
+        Self::resolve().degraded(caps.color)
+    }
+
+    /// Map every slot through a tier's degradation rule.
+    #[must_use]
+    pub fn degraded(self, tier: ColorTier) -> Self {
+        Self {
+            accent: tier.degrade(self.accent),
+            heading: tier.degrade(self.heading),
+            text: tier.degrade(self.text),
+            label: tier.degrade(self.label),
+            muted: tier.degrade(self.muted),
+            border: tier.degrade(self.border),
+            success: tier.degrade(self.success),
+            warning: tier.degrade(self.warning),
+            error: tier.degrade(self.error),
+        }
     }
 
     /// Map the shared palette onto ratatui, keeping the ink terminal-native.

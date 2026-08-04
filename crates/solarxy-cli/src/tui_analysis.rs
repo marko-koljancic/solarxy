@@ -2,7 +2,6 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin},
     style::{Modifier, Style},
-    symbols::border,
     text::{Line, Span, Text},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap},
     DefaultTerminal, Frame,
@@ -14,6 +13,7 @@ use std::io;
 use solarxy_core::json::report_to_json;
 use solarxy_core::report::{AnalysisReport, Severity};
 
+use super::tui::caps::{Capabilities, Glyphs};
 use super::tui::{kv_line, section_header};
 use super::tui_theme::TuiTheme;
 
@@ -52,13 +52,33 @@ pub struct TerminalApp {
     export_input: Option<String>,
     export_json_input: Option<String>,
     status_message: Option<(String, bool)>,
-    /// The shared palette, resolved once at construction. This shell draws
-    /// no color that does not come from here.
+    /// The shared palette, resolved once at construction and degraded to
+    /// what the terminal can render. This shell draws no color that does
+    /// not come from here.
     theme: TuiTheme,
+    /// The glyph repertoire, resolved once alongside the theme.
+    glyphs: Glyphs,
 }
 
 impl TerminalApp {
     pub fn new(report: AnalysisReport, model_path: String) -> Self {
+        let caps = Capabilities::detect();
+        // Emitted before `ratatui::init` takes the screen, so it lands on
+        // the normal terminal rather than smearing the alternate one. This
+        // is how a user confirms an override did what they asked.
+        tracing::debug!(
+            "resolved terminal capabilities: color={:?} glyphs={:?}",
+            caps.color,
+            caps.glyphs
+        );
+        Self::with_capabilities_and_report(report, model_path, caps)
+    }
+
+    fn with_capabilities_and_report(
+        report: AnalysisReport,
+        model_path: String,
+        caps: Capabilities,
+    ) -> Self {
         Self {
             exit: false,
             report,
@@ -69,11 +89,23 @@ impl TerminalApp {
             export_input: None,
             export_json_input: None,
             status_message: None,
-            theme: TuiTheme::resolve(),
+            theme: TuiTheme::for_capabilities(caps),
+            glyphs: caps.glyphs(),
         }
     }
 
-    /// Build with an explicit theme, bypassing the persisted preference.
+    /// Build against explicit capabilities rather than the environment.
+    ///
+    /// Tests pin a tier this way so they assert what a given terminal would
+    /// see rather than what the machine running them happens to report.
+    #[must_use]
+    pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
+        self.theme = TuiTheme::for_capabilities(caps);
+        self.glyphs = caps.glyphs();
+        self
+    }
+
+    /// Build with an explicit theme, bypassing capability resolution.
     #[must_use]
     pub fn with_theme(mut self, theme: TuiTheme) -> Self {
         self.theme = theme;
@@ -105,7 +137,7 @@ impl TerminalApp {
 
         let title = Line::from(vec![
             Span::raw(" "),
-            Span::styled("\u{2600}", Style::default().fg(self.theme.accent)),
+            Span::styled(self.glyphs.sun, Style::default().fg(self.theme.accent)),
             Span::raw(" "),
             Span::styled(
                 "Solarxy",
@@ -124,7 +156,7 @@ impl TerminalApp {
             .block(
                 Block::bordered()
                     .title(title.centered())
-                    .border_set(border::ROUNDED)
+                    .border_set(self.glyphs.border)
                     .border_style(Style::default().fg(self.theme.border)),
             )
             .select(self.active_tab.index())
@@ -134,7 +166,7 @@ impl TerminalApp {
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             )
             .style(Style::default().fg(self.theme.muted))
-            .divider(" \u{2502} ");
+            .divider(format!(" {} ", self.glyphs.divider));
         frame.render_widget(tabs_widget, chunks[0]);
 
         let tab_idx = self.active_tab.index();
@@ -163,7 +195,7 @@ impl TerminalApp {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(path.clone(), Style::default().fg(self.theme.text)),
-                Span::styled("\u{2588}", Style::default().fg(self.theme.accent)),
+                Span::styled(self.glyphs.caret, Style::default().fg(self.theme.accent)),
                 Span::raw("  "),
                 Span::styled(
                     "Enter",
@@ -190,7 +222,7 @@ impl TerminalApp {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(path.clone(), Style::default().fg(self.theme.text)),
-                Span::styled("\u{2588}", Style::default().fg(self.theme.accent)),
+                Span::styled(self.glyphs.caret, Style::default().fg(self.theme.accent)),
                 Span::raw("  "),
                 Span::styled(
                     "Enter",
@@ -272,8 +304,10 @@ impl TerminalApp {
         let content_block = Block::bordered()
             .title_bottom(instructions.left_aligned())
             .title_bottom(Line::from(position).centered())
-            .title_bottom(validation_status_line(&self.report, &self.theme).right_aligned())
-            .border_set(border::ROUNDED)
+            .title_bottom(
+                validation_status_line(&self.report, &self.theme, &self.glyphs).right_aligned(),
+            )
+            .border_set(self.glyphs.border)
             .border_style(Style::default().fg(self.theme.border));
 
         let paragraph = Paragraph::new(content_text)
@@ -284,8 +318,8 @@ impl TerminalApp {
 
         if self.content_heights[tab_idx] > inner_height {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("\u{2191}"))
-                .end_symbol(Some("\u{2193}"));
+                .begin_symbol(Some(self.glyphs.scroll_up))
+                .end_symbol(Some(self.glyphs.scroll_down));
             let mut scrollbar_state = ScrollbarState::new(self.content_heights[tab_idx] as usize)
                 .position(self.scroll_offsets[tab_idx] as usize)
                 .viewport_content_length(inner_height as usize);
@@ -547,9 +581,9 @@ impl TerminalApp {
             ));
 
             let normal_indicator = if mesh.normal_count == mesh.vertex_count {
-                "\u{2713}"
+                self.glyphs.check
             } else {
-                "\u{26a0}"
+                self.glyphs.warn
             };
             lines.push(kv_line(
                 "  Normals",
@@ -558,11 +592,11 @@ impl TerminalApp {
             ));
 
             let texcoord_indicator = if mesh.texcoord_count == mesh.vertex_count {
-                "\u{2713}"
+                self.glyphs.check
             } else if mesh.texcoord_count == 0 {
-                "\u{2717}"
+                self.glyphs.cross
             } else {
-                "\u{26a0}"
+                self.glyphs.warn
             };
             lines.push(kv_line(
                 "  Texture Coords",
@@ -704,7 +738,7 @@ impl TerminalApp {
 
         if self.report.validation.is_clean() {
             lines.push(Line::from(Span::styled(
-                "\u{2713} No issues found",
+                format!("{} No issues found", self.glyphs.check),
                 Style::default()
                     .fg(self.theme.success)
                     .add_modifier(Modifier::BOLD),
@@ -767,11 +801,17 @@ fn kv_line_label_only(label: &str, theme: &TuiTheme) -> Line<'static> {
     ))
 }
 
-fn validation_status_line(report: &AnalysisReport, theme: &TuiTheme) -> Line<'static> {
+/// Severity never rides colour alone: every chip carries a glyph and a
+/// word, so it still reads at the monochrome tier.
+fn validation_status_line(
+    report: &AnalysisReport,
+    theme: &TuiTheme,
+    glyphs: &Glyphs,
+) -> Line<'static> {
     let v = &report.validation;
     if v.is_clean() {
         Line::from(Span::styled(
-            " \u{2713} Clean ".to_string(),
+            format!(" {} Clean ", glyphs.check),
             Style::default()
                 .fg(theme.success)
                 .add_modifier(Modifier::BOLD),
@@ -783,7 +823,8 @@ fn validation_status_line(report: &AnalysisReport, theme: &TuiTheme) -> Line<'st
         if errors > 0 {
             spans.push(Span::styled(
                 format!(
-                    " \u{2717} {} error{} ",
+                    " {} {} error{} ",
+                    glyphs.cross,
                     errors,
                     if errors == 1 { "" } else { "s" }
                 ),
@@ -795,7 +836,8 @@ fn validation_status_line(report: &AnalysisReport, theme: &TuiTheme) -> Line<'st
         if warnings > 0 {
             spans.push(Span::styled(
                 format!(
-                    " \u{26a0} {} warning{} ",
+                    " {} {} warning{} ",
+                    glyphs.warn,
                     warnings,
                     if warnings == 1 { "" } else { "s" }
                 ),
@@ -837,15 +879,39 @@ mod tests {
         }
     }
 
+    use super::super::tui::caps::{ColorTier, GlyphTier};
+
+    /// The tier that describes the surface as it shipped before the
+    /// capability model existed. Every invariant below that was written
+    /// against that surface is asserted here, unchanged.
+    const TIER1: Capabilities = Capabilities {
+        color: ColorTier::Ansi16,
+        glyphs: GlyphTier::Unicode,
+    };
+
     /// Render the real widget tree and read the cells back.
     ///
     /// The TUI needs a tty, so this is the only way to assert what it
-    /// actually paints rather than what we believe it paints.
-    fn render(theme: TuiTheme) -> ratatui::buffer::Buffer {
+    /// actually paints rather than what we believe it paints. Capabilities
+    /// are always explicit: reading the ambient environment here would make
+    /// every assertion depend on the machine running the tests.
+    fn render_with(caps: Capabilities, theme: Option<TuiTheme>) -> ratatui::buffer::Buffer {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("test terminal");
-        let mut app = TerminalApp::new(report(), "frog.obj".to_string()).with_theme(theme);
+        let mut app =
+            TerminalApp::with_capabilities_and_report(report(), "frog.obj".to_string(), caps);
+        if let Some(theme) = theme {
+            app = app.with_theme(theme);
+        }
         terminal.draw(|f| app.draw(f)).expect("draw");
         terminal.backend().buffer().clone()
+    }
+
+    fn render_at(caps: Capabilities) -> ratatui::buffer::Buffer {
+        render_with(caps, None)
+    }
+
+    fn render(theme: TuiTheme) -> ratatui::buffer::Buffer {
+        render_with(TIER1, Some(theme))
     }
 
     /// Nothing the TUI paints may be a colour we invented for ink. Every
@@ -907,9 +973,10 @@ mod tests {
         );
     }
 
-    /// The TUI must never paint a background: the terminal's own ground
-    /// shows through, which is what keeps RGB foregrounds legible whatever
-    /// the user's terminal theme is.
+    /// At this tier and below, the TUI must never paint a background: the
+    /// terminal's own ground shows through, which is what keeps RGB
+    /// foregrounds legible whatever the user's terminal theme is. The
+    /// richer tiers do own a ground, so this is deliberately tier-scoped.
     #[test]
     fn never_paints_a_background() {
         let buffer = render(TuiTheme::resolve());
@@ -920,5 +987,115 @@ mod tests {
                 "the TUI painted a background, which fights the user's terminal"
             );
         }
+    }
+
+    fn every_pair() -> Vec<Capabilities> {
+        let mut pairs = Vec::new();
+        for color in [
+            ColorTier::Mono,
+            ColorTier::Ansi16,
+            ColorTier::Ansi256,
+            ColorTier::TrueColor,
+        ] {
+            for glyphs in [GlyphTier::Unicode, GlyphTier::Ascii] {
+                pairs.push(Capabilities { color, glyphs });
+            }
+        }
+        pairs
+    }
+
+    /// Every combination draws something. A tier that panics or paints an
+    /// empty frame is worse than one that paints plainly.
+    #[test]
+    fn every_tier_and_glyph_pair_renders() {
+        for caps in every_pair() {
+            let buffer = render_at(caps);
+            let painted = buffer
+                .content()
+                .iter()
+                .filter(|cell| !cell.symbol().trim().is_empty())
+                .count();
+            assert!(painted > 50, "{caps:?} painted only {painted} cells");
+        }
+    }
+
+    /// Tier 0 is for terminals that have no colour to give. Nothing may
+    /// reach a cell but the terminal's own ink, which is why every severity
+    /// also carries a glyph and a word.
+    #[test]
+    fn the_monochrome_tier_paints_no_colour() {
+        for glyphs in [GlyphTier::Unicode, GlyphTier::Ascii] {
+            let buffer = render_at(Capabilities {
+                color: ColorTier::Mono,
+                glyphs,
+            });
+            for cell in buffer.content() {
+                assert_eq!(
+                    cell.fg,
+                    ratatui::style::Color::Reset,
+                    "monochrome painted {:?} at {glyphs:?}",
+                    cell.fg
+                );
+                assert_eq!(cell.bg, ratatui::style::Color::Reset);
+            }
+        }
+    }
+
+    /// Lose detail, keep meaning. At the ASCII tier nothing outside the
+    /// repertoire may reach the screen, whatever the colour tier is doing.
+    #[test]
+    fn the_ascii_tier_paints_only_ascii() {
+        for color in [
+            ColorTier::Mono,
+            ColorTier::Ansi16,
+            ColorTier::Ansi256,
+            ColorTier::TrueColor,
+        ] {
+            let buffer = render_at(Capabilities {
+                color,
+                glyphs: GlyphTier::Ascii,
+            });
+            for cell in buffer.content() {
+                assert!(
+                    cell.symbol().is_ascii(),
+                    "{:?} reached the screen at the ASCII tier under {color:?}",
+                    cell.symbol()
+                );
+            }
+        }
+    }
+
+    /// The 256 tier renders exact palette entries rather than leaving the
+    /// terminal to approximate an RGB triple it cannot show.
+    #[test]
+    fn the_256_tier_paints_indexed_colour_and_never_raw_rgb() {
+        let buffer = render_at(Capabilities {
+            color: ColorTier::Ansi256,
+            glyphs: GlyphTier::Unicode,
+        });
+        let mut saw_indexed = false;
+        for cell in buffer.content() {
+            assert!(
+                !matches!(cell.fg, ratatui::style::Color::Rgb(..)),
+                "raw RGB reached a 256-colour terminal"
+            );
+            saw_indexed |= matches!(cell.fg, ratatui::style::Color::Indexed(_));
+        }
+        assert!(saw_indexed, "nothing was quantised at all");
+    }
+
+    /// The accent is the one hue the shell paints unconditionally, so it is
+    /// the cheapest proof that a tier reached the screen at all.
+    #[test]
+    fn the_richer_tiers_still_carry_the_accent() {
+        let truecolor = render_at(Capabilities {
+            color: ColorTier::TrueColor,
+            glyphs: GlyphTier::Unicode,
+        });
+        let accent = TuiTheme::resolve().accent;
+        assert!(
+            truecolor.content().iter().any(|cell| cell.fg == accent),
+            "the authored accent never reached a truecolor terminal"
+        );
     }
 }

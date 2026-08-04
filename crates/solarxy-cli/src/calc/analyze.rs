@@ -330,7 +330,6 @@ fn check_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solarxy_core::validation::ValidationConfig;
 
     fn config_with_budget_check(enabled: bool) -> ProjectConfig {
         let mut validation = ProjectConfig::default().validation;

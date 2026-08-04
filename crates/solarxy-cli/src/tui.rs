@@ -10,6 +10,8 @@ use ratatui::{
 
 use super::tui_theme::TuiTheme;
 
+pub(crate) mod caps;
+
 pub(crate) fn section_header(text: &str, theme: &TuiTheme) -> Line<'static> {
     Line::from(Span::styled(
         text.to_string(),
