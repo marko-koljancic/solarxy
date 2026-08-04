@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, Tabs, Wrap},
     DefaultTerminal, Frame,
 };
 use solarxy_core::format_number;
@@ -14,6 +14,7 @@ use solarxy_core::json::report_to_json;
 use solarxy_core::report::{AnalysisReport, Severity};
 
 use super::tui::caps::{Capabilities, Glyphs};
+use super::tui::scroll::{Extent, Scroll, rendered_rows};
 use super::tui::{kv_line, section_header};
 use super::tui_theme::TuiTheme;
 
@@ -47,8 +48,13 @@ pub struct TerminalApp {
     report: AnalysisReport,
     model_path: String,
     active_tab: Tab,
-    scroll_offsets: [u16; 4],
-    content_heights: [u16; 4],
+    /// One scroll position per tab, so switching tabs returns to where the
+    /// user left off.
+    scrolls: [Scroll; 4],
+    /// What each tab measured at its last draw, in rendered rows. A keystroke
+    /// arrives between frames, so this is the most recent description of the
+    /// content it can be clamped against.
+    extents: [Extent; 4],
     export_input: Option<String>,
     export_json_input: Option<String>,
     status_message: Option<(String, bool)>,
@@ -84,8 +90,8 @@ impl TerminalApp {
             report,
             model_path,
             active_tab: Tab::Overview,
-            scroll_offsets: [0; 4],
-            content_heights: [0; 4],
+            scrolls: [Scroll::default(); 4],
+            extents: [Extent::default(); 4],
             export_input: None,
             export_json_input: None,
             status_message: None,
@@ -171,19 +177,20 @@ impl TerminalApp {
 
         let tab_idx = self.active_tab.index();
         let content_text = self.format_tab_content();
-        self.content_heights[tab_idx] = content_text.lines.len() as u16;
 
-        let inner_height = chunks[1].height.saturating_sub(2);
-        self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx]
-            .min(self.content_heights[tab_idx].saturating_sub(inner_height));
-
-        let position = format!(
-            " [{}/{}] ",
-            self.scroll_offsets[tab_idx]
-                .saturating_add(1)
-                .min(self.content_heights[tab_idx]),
-            self.content_heights[tab_idx]
+        // Measured in rendered rows, not in logical lines: the body below
+        // wraps, and a count of lines under-reports it by however many rows
+        // the wrapping added. The clamp, the counter and the scrollbar all
+        // read this one figure.
+        let extent = Extent::new(
+            rendered_rows(&content_text, chunks[1].width.saturating_sub(2)),
+            chunks[1].height.saturating_sub(2),
         );
+        self.extents[tab_idx] = extent;
+        let offset = self.scrolls[tab_idx].offset(extent);
+
+        let (first_row, total_rows) = self.scrolls[tab_idx].position(extent);
+        let position = format!(" [{}/{}] ", first_row, total_rows);
 
         let instructions = if let Some(ref path) = self.export_json_input {
             Line::from(vec![
@@ -312,17 +319,15 @@ impl TerminalApp {
 
         let paragraph = Paragraph::new(content_text)
             .block(content_block)
-            .scroll((self.scroll_offsets[tab_idx], 0))
+            .scroll((offset, 0))
             .wrap(Wrap { trim: false });
         frame.render_widget(paragraph, chunks[1]);
 
-        if self.content_heights[tab_idx] > inner_height {
+        if extent.overflows() {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some(self.glyphs.scroll_up))
                 .end_symbol(Some(self.glyphs.scroll_down));
-            let mut scrollbar_state = ScrollbarState::new(self.content_heights[tab_idx] as usize)
-                .position(self.scroll_offsets[tab_idx] as usize)
-                .viewport_content_length(inner_height as usize);
+            let mut scrollbar_state = self.scrolls[tab_idx].scrollbar(extent);
             frame.render_stateful_widget(
                 scrollbar,
                 chunks[1].inner(Margin {
@@ -382,6 +387,7 @@ impl TerminalApp {
         self.status_message = None;
 
         let tab_idx = self.active_tab.index();
+        let extent = self.extents[tab_idx];
         match key_event.code {
             KeyCode::Char('q') | KeyCode::Esc => self.exit = true,
             KeyCode::Char('e') => {
@@ -390,20 +396,12 @@ impl TerminalApp {
             KeyCode::Char('J') => {
                 self.export_json_input = Some(self.default_json_export_path());
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx].saturating_sub(1);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx].saturating_add(1);
-            }
-            KeyCode::Char('g') => self.scroll_offsets[tab_idx] = 0,
-            KeyCode::Char('G') => self.scroll_offsets[tab_idx] = u16::MAX,
-            KeyCode::PageUp => {
-                self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx].saturating_sub(20);
-            }
-            KeyCode::PageDown => {
-                self.scroll_offsets[tab_idx] = self.scroll_offsets[tab_idx].saturating_add(20);
-            }
+            KeyCode::Up | KeyCode::Char('k') => self.scrolls[tab_idx].up(1),
+            KeyCode::Down | KeyCode::Char('j') => self.scrolls[tab_idx].down(1, extent),
+            KeyCode::Char('g') => self.scrolls[tab_idx].first(),
+            KeyCode::Char('G') => self.scrolls[tab_idx].last(extent),
+            KeyCode::PageUp => self.scrolls[tab_idx].up(20),
+            KeyCode::PageDown => self.scrolls[tab_idx].down(20, extent),
             KeyCode::Tab => {
                 let next = (self.active_tab.index() + 1) % Tab::ALL.len();
                 self.active_tab = Tab::ALL[next];
@@ -910,6 +908,23 @@ mod tests {
         render_with(caps, None)
     }
 
+    fn fixture() -> TerminalApp {
+        TerminalApp::with_capabilities_and_report(report(), "frog.obj".to_string(), TIER1)
+    }
+
+    /// Draw one frame, which is what populates the extent a keystroke is
+    /// clamped against. The real loop draws before it reads, so a test that
+    /// presses a key without drawing first is testing a state the shell never
+    /// reaches.
+    fn draw_at(app: &mut TerminalApp, width: u16, height: u16) {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+    }
+
+    fn send(app: &mut TerminalApp, codes: &[KeyCode]) {
+        crate::tui::harness::press(|event| app.handle_key_event(event), codes);
+    }
+
     fn render(theme: TuiTheme) -> ratatui::buffer::Buffer {
         render_with(TIER1, Some(theme))
     }
@@ -1096,6 +1111,184 @@ mod tests {
         assert!(
             truecolor.content().iter().any(|cell| cell.fg == accent),
             "the authored accent never reached a truecolor terminal"
+        );
+    }
+
+    // The bindings below pin what this shell does today, so the keymap that
+    // replaces it is measured against shipped behaviour rather than against
+    // memory. Twelve bindings exist and six are advertised, which is the
+    // whole reason a generated footer is being built.
+
+    #[test]
+    fn the_tab_bindings_dispatch() {
+        let mut app = fixture();
+        send(&mut app, &[KeyCode::Tab]);
+        assert_eq!(app.active_tab, Tab::Meshes);
+        send(&mut app, &[KeyCode::BackTab]);
+        assert_eq!(app.active_tab, Tab::Overview);
+        send(&mut app, &[KeyCode::BackTab]);
+        assert_eq!(app.active_tab, Tab::Validation, "the cycle wraps backwards");
+
+        for (code, expected) in [
+            (KeyCode::Char('1'), Tab::Overview),
+            (KeyCode::Char('2'), Tab::Meshes),
+            (KeyCode::Char('3'), Tab::Materials),
+            (KeyCode::Char('4'), Tab::Validation),
+        ] {
+            send(&mut app, &[code]);
+            assert_eq!(app.active_tab, expected, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn the_scroll_bindings_dispatch() {
+        let mut app = fixture();
+        draw_at(&mut app, 60, 8);
+        let extent = app.extents[0];
+        assert!(
+            extent.overflows(),
+            "the fixture has to be taller than the viewport to scroll at all"
+        );
+
+        for down in [KeyCode::Char('j'), KeyCode::Down] {
+            let mut app = fixture();
+            draw_at(&mut app, 60, 8);
+            send(&mut app, &[down]);
+            assert_eq!(app.scrolls[0].offset(extent), 1, "{down:?}");
+        }
+        for up in [KeyCode::Char('k'), KeyCode::Up] {
+            let mut app = fixture();
+            draw_at(&mut app, 60, 8);
+            send(&mut app, &[KeyCode::Char('j'), KeyCode::Char('j'), up]);
+            assert_eq!(app.scrolls[0].offset(extent), 1, "{up:?}");
+        }
+
+        send(&mut app, &[KeyCode::PageDown]);
+        assert!(app.scrolls[0].offset(extent) > 1, "PageDown moved nothing");
+        send(&mut app, &[KeyCode::PageUp]);
+        assert_eq!(app.scrolls[0].offset(extent), 0);
+
+        send(&mut app, &[KeyCode::Char('G')]);
+        assert_eq!(app.scrolls[0].offset(extent), extent.max_offset());
+        send(&mut app, &[KeyCode::Char('g')]);
+        assert_eq!(app.scrolls[0].offset(extent), 0);
+    }
+
+    /// Each tab keeps its own position, so switching away and back returns to
+    /// where the reader was rather than to the top.
+    #[test]
+    fn a_scroll_position_is_per_tab() {
+        let mut app = fixture();
+        draw_at(&mut app, 60, 8);
+        send(&mut app, &[KeyCode::Char('j'), KeyCode::Char('j')]);
+        let overview = app.extents[0];
+        assert_eq!(app.scrolls[0].offset(overview), 2);
+
+        send(&mut app, &[KeyCode::Char('2')]);
+        draw_at(&mut app, 60, 8);
+        assert_eq!(app.scrolls[1].offset(app.extents[1]), 0, "a fresh tab");
+
+        send(&mut app, &[KeyCode::Char('1')]);
+        assert_eq!(app.scrolls[0].offset(overview), 2, "the position survived");
+    }
+
+    /// The shipped shell quits on Esc as well as on `q`. Pinned because the
+    /// tiled workspace gives Esc a meaning of its own, so this is behaviour
+    /// that changes rather than behaviour that persists.
+    #[test]
+    fn both_quit_keys_dispatch() {
+        for code in [KeyCode::Char('q'), KeyCode::Esc] {
+            let mut app = fixture();
+            assert!(!app.exit);
+            send(&mut app, &[code]);
+            assert!(app.exit, "{code:?} did not quit");
+        }
+    }
+
+    /// The JSON export is bound to a shift-only key that appears nowhere in
+    /// the footer, which is the defect the generated help exists to close.
+    #[test]
+    fn the_export_bindings_open_their_buffers() {
+        let mut app = fixture();
+        send(&mut app, &[KeyCode::Char('e')]);
+        assert_eq!(app.export_input.as_deref(), Some("frog_report.txt"));
+        assert!(app.export_json_input.is_none());
+
+        let mut app = fixture();
+        send(&mut app, &[KeyCode::Char('J')]);
+        assert_eq!(app.export_json_input.as_deref(), Some("frog.json"));
+        assert!(app.export_input.is_none());
+    }
+
+    /// A text buffer takes the whole keyboard while it is open. Without that,
+    /// typing a path containing `q` would quit and a path containing a digit
+    /// would switch tabs underneath the prompt.
+    #[test]
+    fn text_entry_swallows_the_global_keys() {
+        for opener in [KeyCode::Char('e'), KeyCode::Char('J')] {
+            let mut app = fixture();
+            send(&mut app, &[opener]);
+            let before = app.active_tab;
+
+            send(
+                &mut app,
+                &[
+                    KeyCode::Backspace,
+                    KeyCode::Char('q'),
+                    KeyCode::Char('2'),
+                    KeyCode::Char('j'),
+                ],
+            );
+
+            let buffer = app
+                .export_input
+                .as_deref()
+                .or(app.export_json_input.as_deref())
+                .expect("the buffer stayed open");
+            assert!(buffer.ends_with("q2j"), "{opener:?} lost the typed text");
+            assert!(!app.exit, "{opener:?} quit while a path was being typed");
+            assert_eq!(app.active_tab, before, "{opener:?} switched tab");
+        }
+    }
+
+    /// Esc inside a text buffer cancels the entry and nothing more. It is the
+    /// same key that quits at the top level, so the precedence is the whole
+    /// behaviour.
+    #[test]
+    fn escape_cancels_text_entry_without_quitting() {
+        for opener in [KeyCode::Char('e'), KeyCode::Char('J')] {
+            let mut app = fixture();
+            send(&mut app, &[opener, KeyCode::Esc]);
+            assert!(app.export_input.is_none(), "{opener:?}");
+            assert!(app.export_json_input.is_none(), "{opener:?}");
+            assert!(!app.exit, "{opener:?} quit instead of cancelling");
+        }
+    }
+
+    /// The scroll defect, at the shell rather than at the model: a body whose
+    /// lines wrap is taller than its line count, and the shell has to measure
+    /// the taller figure or the reader cannot reach the end of it.
+    #[test]
+    fn the_shell_measures_rendered_rows_not_logical_lines() {
+        let mut wordy = report();
+        wordy.model_name = "a-delivered-asset-with-a-very-long-file-name.obj".to_owned();
+        let mut app =
+            TerminalApp::with_capabilities_and_report(wordy, "frog.obj".to_string(), TIER1);
+
+        draw_at(&mut app, 40, 10);
+        let logical = app.format_tab_content().lines.len() as u16;
+        let extent = app.extents[0];
+        assert!(
+            extent.rendered_rows > logical,
+            "nothing wrapped at 40 columns, so this proves nothing: \
+             {} rendered rows against {logical} lines",
+            extent.rendered_rows
+        );
+
+        send(&mut app, &[KeyCode::Char('G')]);
+        assert!(
+            app.scrolls[0].offset(extent) > logical.saturating_sub(extent.viewport_rows),
+            "jump-to-bottom stopped at the line count instead of the true end"
         );
     }
 }

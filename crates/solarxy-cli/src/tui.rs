@@ -11,6 +11,14 @@ use ratatui::{
 use super::tui_theme::TuiTheme;
 
 pub(crate) mod caps;
+pub(crate) mod scroll;
+
+/// The reference panel and the shared render-test machinery.
+///
+/// Test-only, and in the library rather than under `tests/` because this
+/// module tree is `pub(crate)`: an integration test cannot see it.
+#[cfg(test)]
+pub(crate) mod harness;
 
 pub(crate) fn section_header(text: &str, theme: &TuiTheme) -> Line<'static> {
     Line::from(Span::styled(
