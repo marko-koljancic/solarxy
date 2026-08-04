@@ -24,6 +24,11 @@ pub(crate) mod layout;
 #[allow(dead_code)]
 pub(crate) mod panels;
 pub(crate) mod prefs;
+// The plot panels that consume it land next; the rasteriser is deliberately
+// built and looked at first, because whether a dense mesh reads as a form is
+// the one thing only rendering settles.
+#[allow(dead_code)]
+pub(crate) mod raster;
 pub(crate) mod scroll;
 pub(crate) mod shell;
 pub(crate) mod theme;
