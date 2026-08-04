@@ -830,6 +830,10 @@ mod tests {
             meshes: Vec::new(),
             materials: Vec::new(),
             validation: ValidationReport::default(),
+            source_format: "obj".to_owned(),
+            file_size_bytes: None,
+            asset_category: None,
+            triangle_budget: None,
         }
     }
 

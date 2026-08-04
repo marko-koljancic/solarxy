@@ -265,6 +265,10 @@ mod tests {
             meshes: vec![],
             materials: vec![],
             validation: ValidationReport::default(),
+            source_format: "obj".to_owned(),
+            file_size_bytes: Some(1024),
+            asset_category: Some(crate::project_config::AssetCategory::Hero),
+            triangle_budget: Some(100_000),
         }
     }
 
@@ -281,6 +285,7 @@ mod tests {
     fn json_mesh_all_fields() {
         let m = MeshSummary {
             index: 2,
+            name: "trunk".to_owned(),
             vertex_count: 100,
             index_count: 300,
             triangle_count: 100,
@@ -288,6 +293,7 @@ mod tests {
             texcoord_count: 50,
             material_name: Some("wood".to_owned()),
             material_id: Some(1),
+            degenerate_faces: vec![4, 9],
         };
         let jm = JsonMesh::from(&m);
         assert_eq!(jm.index, 2);
@@ -396,6 +402,7 @@ mod tests {
         report.mesh_count = 1;
         report.meshes.push(MeshSummary {
             index: 0,
+            name: "tri".to_owned(),
             vertex_count: 3,
             index_count: 3,
             triangle_count: 1,
@@ -403,6 +410,7 @@ mod tests {
             texcoord_count: 0,
             material_name: None,
             material_id: None,
+            degenerate_faces: Vec::new(),
         });
         report.bounds = Some(BoundsSummary {
             min: [0.0, 0.0, 0.0],
@@ -419,5 +427,79 @@ mod tests {
         assert_eq!(parsed["meshes"][0]["vertex_count"], 3);
         assert!((parsed["bounds"]["diagonal"].as_f64().unwrap() - 3.742).abs() < 1e-3);
         assert_eq!(parsed["validation"]["error_count"], 0);
+    }
+
+    /// This wire format is a deliberate holdout: the text report and the
+    /// terminal shell gained the recovered analysis facts and this did not,
+    /// so a consumer's parser cannot change shape without a
+    /// `schema_version` bump.
+    ///
+    /// The holdout previously held only by construction, because every
+    /// conversion reads fields by name and simply never named the new ones.
+    /// Nothing failed if one were added. This pins it.
+    #[test]
+    fn the_json_report_key_set_is_unchanged() {
+        let json_str = report_to_json(&empty_report()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let mut keys: Vec<&str> = parsed
+            .as_object()
+            .expect("the report is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "bounds",
+                "material_count",
+                "materials",
+                "mesh_count",
+                "meshes",
+                "model_name",
+                "schema_version",
+                "total_indices",
+                "total_triangles",
+                "total_vertices",
+                "validation",
+            ],
+            "a field reached the JSON report without a schema_version bump"
+        );
+        assert_eq!(parsed["schema_version"], JSON_REPORT_SCHEMA_VERSION);
+    }
+
+    /// The fixture deliberately carries a source format, a file size, a
+    /// category, a budget, a mesh name and a degenerate face. None of them
+    /// may reach the wire until the holdout is deliberately lifted.
+    #[test]
+    fn the_recovered_facts_stay_out_of_the_json() {
+        let mut report = empty_report();
+        report.meshes.push(MeshSummary {
+            index: 0,
+            name: "trunk".to_owned(),
+            vertex_count: 3,
+            index_count: 3,
+            triangle_count: 1,
+            normal_count: 3,
+            texcoord_count: 0,
+            material_name: None,
+            material_id: None,
+            degenerate_faces: vec![4, 9],
+        });
+        let json_str = report_to_json(&report).unwrap();
+        for absent in [
+            "source_format",
+            "file_size",
+            "asset_category",
+            "triangle_budget",
+            "degenerate_faces",
+            "trunk",
+        ] {
+            assert!(
+                !json_str.contains(absent),
+                "`{absent}` leaked into the JSON report, which is a holdout until its \
+                 schema version is bumped"
+            );
+        }
     }
 }

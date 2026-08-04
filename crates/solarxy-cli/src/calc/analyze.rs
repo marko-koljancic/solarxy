@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use solarxy_core::geometry::RawModelData;
-use solarxy_core::project_config::{self, FilenameClassifier, ProjectConfig};
+use solarxy_core::project_config::{self, AssetCategory, ProjectConfig};
 
 use super::geometry::compute_bounds;
 use solarxy_core::report::{
@@ -11,6 +11,9 @@ use solarxy_core::report::{
 };
 
 pub struct AnalyzerMesh {
+    /// The name the file gave this mesh. Carried through conversion so a
+    /// report can say which mesh it means rather than only its index.
+    pub name: String,
     pub positions: Vec<f32>,
     pub indices: Vec<u32>,
     pub normals: Vec<f32>,
@@ -40,6 +43,19 @@ pub struct ModelAnalyzer {
     pub materials: Vec<AnalyzerMaterial>,
     pub obj_dir: Option<PathBuf>,
     base_validation: ValidationReport,
+    /// Per-mesh degenerate face indices, parallel to `meshes`.
+    ///
+    /// Validation computes these on every run. Until 0.8.2 they were
+    /// projected away with the rest of the result and only their count
+    /// survived, inside an issue message.
+    degenerate_faces: Vec<Vec<u32>>,
+    source_format: String,
+    file_size_bytes: Option<u64>,
+    /// Resolved for every model, not only when the budget check is on:
+    /// classification is a fact about the file, and switching the check off
+    /// should not make the report forget what the file is.
+    asset_category: AssetCategory,
+    triangle_budget: Option<u32>,
 }
 
 fn raw_to_analyzer(raw: &RawModelData) -> (Vec<AnalyzerMesh>, Vec<AnalyzerMaterial>) {
@@ -59,6 +75,7 @@ fn raw_to_analyzer(raw: &RawModelData) -> (Vec<AnalyzerMesh>, Vec<AnalyzerMateri
                 .map(|tcs| tcs.iter().flat_map(|tc| tc.iter().copied()).collect())
                 .unwrap_or_default();
             AnalyzerMesh {
+                name: m.name.clone(),
                 positions,
                 indices: m.indices.clone(),
                 normals,
@@ -133,15 +150,14 @@ impl ModelAnalyzer {
             }
         };
 
-        let budget = resolve_triangle_budget(&project_config, Path::new(path));
-        let base_validation = solarxy_core::validation::validate_raw_model_with_config(
+        let (asset_category, triangle_budget) = resolve_budget(&project_config, Path::new(path));
+        let validation = solarxy_core::validation::validate_raw_model_with_config(
             &raw,
             &ext,
             &project_config.validation,
             &project_config.thresholds,
-            budget,
-        )
-        .report;
+            triangle_budget,
+        );
         let (meshes, materials) = raw_to_analyzer(&raw);
 
         Ok(ModelAnalyzer {
@@ -149,7 +165,12 @@ impl ModelAnalyzer {
             meshes,
             materials,
             obj_dir: Path::new(path).parent().map(Path::to_path_buf),
-            base_validation,
+            base_validation: validation.report,
+            degenerate_faces: validation.degenerate_faces,
+            source_format: ext,
+            file_size_bytes: std::fs::metadata(path).ok().map(|m| m.len()),
+            asset_category,
+            triangle_budget,
         })
     }
 
@@ -181,6 +202,7 @@ impl ModelAnalyzer {
 
                 MeshSummary {
                     index: i,
+                    name: mesh.name.clone(),
                     vertex_count,
                     index_count,
                     triangle_count: index_count / 3,
@@ -188,6 +210,7 @@ impl ModelAnalyzer {
                     texcoord_count,
                     material_name,
                     material_id,
+                    degenerate_faces: self.degenerate_faces.get(i).cloned().unwrap_or_default(),
                 }
             })
             .collect();
@@ -245,21 +268,29 @@ impl ModelAnalyzer {
             meshes,
             materials,
             validation: ValidationReport { issues },
+            source_format: self.source_format.clone(),
+            file_size_bytes: self.file_size_bytes,
+            asset_category: Some(self.asset_category),
+            triangle_budget: self.triangle_budget,
         }
     }
 }
 
-/// Resolves the per-file triangle budget by classifying the model's file
-/// name with `project_config.filenames` and looking up the resulting
-/// `AssetCategory` in `project_config.budgets`. Returns `None` when the
-/// path has no filename (defensive — practically always `Some`).
-fn resolve_triangle_budget(project_config: &ProjectConfig, path: &Path) -> Option<u32> {
-    if !project_config.validation.triangle_budget {
-        return None;
-    }
-    let classifier: &FilenameClassifier = &project_config.filenames;
-    let category = classifier.classify(path);
-    Some(project_config.budgets.for_category(category))
+/// Classifies the model by filename and looks the resulting category up in
+/// the project's budget table.
+///
+/// The category is resolved unconditionally and the budget only when the
+/// project enables the triangle-budget check, so a project that has
+/// switched the check off still reports what kind of asset this is.
+/// A filename matching no rule classifies as `AssetCategory::Default`,
+/// which is an answer rather than a failure.
+fn resolve_budget(project_config: &ProjectConfig, path: &Path) -> (AssetCategory, Option<u32>) {
+    let category = project_config.filenames.classify(path);
+    let budget = project_config
+        .validation
+        .triangle_budget
+        .then(|| project_config.budgets.for_category(category));
+    (category, budget)
 }
 
 fn check_texture(
@@ -294,4 +325,46 @@ fn check_texture(
         path: path.clone(),
         exists,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solarxy_core::validation::ValidationConfig;
+
+    fn config_with_budget_check(enabled: bool) -> ProjectConfig {
+        let mut validation = ProjectConfig::default().validation;
+        validation.triangle_budget = enabled;
+        ProjectConfig {
+            validation,
+            ..ProjectConfig::default()
+        }
+    }
+
+    /// Classification is a fact about the file. Switching the budget check
+    /// off silences the budget, not the category, which before 0.8.2 was
+    /// resolved inside the guard and lost with it.
+    #[test]
+    fn the_category_survives_the_budget_check_being_off() {
+        let config = config_with_budget_check(false);
+        let path = Path::new("tree_environment.obj");
+        let (category, budget) = resolve_budget(&config, path);
+        assert!(budget.is_none(), "the budget must stay off");
+        assert_eq!(category, config.filenames.classify(path));
+    }
+
+    #[test]
+    fn an_enabled_budget_comes_from_the_category() {
+        let config = config_with_budget_check(true);
+        let (category, budget) = resolve_budget(&config, Path::new("anything.obj"));
+        assert_eq!(budget, Some(config.budgets.for_category(category)));
+    }
+
+    /// A filename matching no rule is classified, not left unclassified.
+    #[test]
+    fn an_unmatched_filename_classifies_as_default() {
+        let config = config_with_budget_check(true);
+        let (category, _) = resolve_budget(&config, Path::new("zzz.obj"));
+        assert_eq!(category, AssetCategory::Default);
+    }
 }
