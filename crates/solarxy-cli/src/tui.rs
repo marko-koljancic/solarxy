@@ -12,6 +12,17 @@ use super::tui_theme::TuiTheme;
 
 pub(crate) mod caps;
 pub(crate) mod contrast;
+// The tree and its grammar have no non-test consumer until the event loop
+// lands; the loop is what will split, close and draw one. Removed there.
+#[allow(dead_code)]
+pub(crate) mod arrange;
+#[allow(dead_code)]
+pub(crate) mod layout;
+// Writing the file, and reading the arrangement back out of it, belong to
+// the quit path and the loop that owns it. Reading the theme already has a
+// caller. Removed with the allow above when the loop lands.
+#[allow(dead_code)]
+pub(crate) mod prefs;
 pub(crate) mod scroll;
 pub(crate) mod theme;
 

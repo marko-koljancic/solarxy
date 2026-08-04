@@ -46,6 +46,7 @@ use ratatui::{Frame, Terminal};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::caps::{Capabilities, ColorTier, GlyphTier, Glyphs, PlotStyle};
+use super::layout::Layout as PanelLayout;
 use super::theme::{Slots, Theme, ThemeSet};
 
 /// The target terminal the specification names.
@@ -125,6 +126,55 @@ pub(crate) fn render_bundled(caps: Capabilities, name: &str) -> Buffer {
 /// The reference panel under the default theme.
 pub(crate) fn render_reference_at(caps: Capabilities) -> Buffer {
     render_bundled(caps, super::theme::DEFAULT_THEME)
+}
+
+/// Draw a whole arrangement as empty framed panels.
+///
+/// The panels have no bodies yet, which is exactly what makes this useful: it
+/// asserts the solve against cells rather than against arithmetic, so a border
+/// landing one column out shows up here instead of inside the first panel
+/// built on top of it.
+pub(crate) fn render_layout(caps: Capabilities, layout: &PanelLayout, area: Rect) -> Buffer {
+    let mut terminal =
+        Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
+    let set = ThemeSet::bundled();
+    let slots = set
+        .slots_for(super::theme::DEFAULT_THEME)
+        .expect("the default loads");
+    let theme = Theme::resolve(caps, super::theme::DEFAULT_THEME, &slots);
+    let glyphs = caps.glyphs();
+
+    terminal
+        .draw(|frame| {
+            for placement in layout.solve(area, None) {
+                let border = if placement.focused {
+                    glyphs.border_focused
+                } else {
+                    glyphs.border
+                };
+                let ink = if placement.focused {
+                    theme.slots.accent
+                } else {
+                    theme.slots.ink_dim
+                };
+                let title = Line::from(vec![
+                    Span::styled(glyphs.address(placement.address), Style::default().fg(ink)),
+                    Span::styled(
+                        placement.panel.name(),
+                        Style::default().fg(ink).add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+                frame.render_widget(
+                    Block::bordered()
+                        .title(title)
+                        .border_set(border)
+                        .border_style(Style::default().fg(ink)),
+                    placement.rect,
+                );
+            }
+        })
+        .expect("draw");
+    terminal.backend().buffer().clone()
 }
 
 /// Every slot the theme carries, named, so a failing cell says which one.
@@ -462,6 +512,8 @@ pub(crate) fn press(mut dispatch: impl FnMut(KeyEvent), codes: &[KeyCode]) {
 mod tests {
     use solarxy_core::theme::Palette;
 
+    use super::super::layout::Preset;
+
     use super::*;
 
     /// Every combination draws something. A tier that panics or paints an
@@ -734,6 +786,95 @@ mod tests {
             ascii.content().iter().any(|cell| cell.symbol() == densest),
             "the density ramp never reached an ASCII terminal"
         );
+    }
+
+    /// Every leaf's frame lands exactly where the solve said, and the corners
+    /// of adjacent panels meet without a gap or a doubled column. Arithmetic
+    /// alone passes an off-by-one here; cells do not.
+    #[test]
+    fn every_panel_frames_the_rect_the_solve_predicted() {
+        let caps = Capabilities {
+            color: ColorTier::TrueColor,
+            glyphs: GlyphTier::Unicode,
+        };
+        let area = Rect::new(0, 0, 140, 44);
+        let layout = Preset::Survey.layout();
+        let buffer = render_layout(caps, &layout, area);
+        let glyphs = caps.glyphs();
+
+        for placement in layout.solve(area, None) {
+            let rect = placement.rect;
+            let set = if placement.focused {
+                glyphs.border_focused
+            } else {
+                glyphs.border
+            };
+            let corner = |x: u16, y: u16| buffer[(x, y)].symbol().to_owned();
+            assert_eq!(
+                corner(rect.x, rect.y),
+                set.top_left,
+                "{} top left at {rect:?}",
+                placement.panel.name()
+            );
+            assert_eq!(
+                corner(rect.right() - 1, rect.bottom() - 1),
+                set.bottom_right,
+                "{} bottom right at {rect:?}",
+                placement.panel.name()
+            );
+        }
+    }
+
+    /// The panel name and its jump address reach the border, which is where
+    /// the design puts them instead of spending a row on a header.
+    #[test]
+    fn each_panel_carries_its_address_and_name_in_the_border() {
+        let caps = Capabilities {
+            color: ColorTier::TrueColor,
+            glyphs: GlyphTier::Unicode,
+        };
+        let area = Rect::new(0, 0, 140, 44);
+        let layout = Preset::Survey.layout();
+        let buffer = render_layout(caps, &layout, area);
+
+        for placement in layout.solve(area, None) {
+            let row: String = (placement.rect.x..placement.rect.right())
+                .map(|x| buffer[(x, placement.rect.y)].symbol())
+                .collect();
+            assert!(
+                row.contains(placement.panel.name()),
+                "{} is missing from its own border: {row}",
+                placement.panel.name()
+            );
+            assert!(
+                row.contains(&caps.glyphs().address(placement.address)),
+                "{} is missing address {}",
+                placement.panel.name(),
+                placement.address
+            );
+        }
+    }
+
+    /// Every cell of the pane belongs to exactly one panel, so no arrangement
+    /// leaves an unpainted seam.
+    #[test]
+    fn the_arrangement_leaves_no_unpainted_cell() {
+        let caps = Capabilities {
+            color: ColorTier::TrueColor,
+            glyphs: GlyphTier::Unicode,
+        };
+        let area = Rect::new(0, 0, 140, 44);
+        for preset in Preset::ALL {
+            let buffer = render_layout(caps, &preset.layout(), area);
+            for y in 0..area.height {
+                let row: String = (0..area.width).map(|x| buffer[(x, y)].symbol()).collect();
+                assert!(
+                    !row.trim().is_empty(),
+                    "{} left row {y} entirely blank",
+                    preset.name()
+                );
+            }
+        }
     }
 
     /// Uppercase arrives with the modifier a real terminal sets, so a keymap

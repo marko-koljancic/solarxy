@@ -15,6 +15,7 @@ use solarxy_core::report::{AnalysisReport, Severity};
 
 use super::tui::caps::{Capabilities, Glyphs};
 use super::tui::scroll::{Extent, Scroll, rendered_rows};
+use super::tui::prefs::TuiPrefs;
 use super::tui::theme::ThemeSet;
 use super::tui::{kv_line, section_header};
 use super::tui_theme::TuiTheme;
@@ -70,7 +71,11 @@ pub struct TerminalApp {
 impl TerminalApp {
     pub fn new(report: AnalysisReport, model_path: String, requested_theme: Option<&str>) -> Self {
         let caps = Capabilities::detect();
-        let (theme, notices) = ThemeSet::load().resolve(requested_theme, caps);
+        let (prefs, prefs_notices) = TuiPrefs::load();
+        // The flag wins for this run; the file is what the reader chose last
+        // time. Neither is an error when absent.
+        let wanted = requested_theme.or(prefs.theme.as_deref());
+        let (theme, notices) = ThemeSet::load().resolve(wanted, caps);
 
         // All of this lands before `ratatui::init` takes the screen, so it
         // reaches the normal terminal rather than smearing the alternate one.
@@ -82,6 +87,9 @@ impl TerminalApp {
             caps.glyphs,
             theme.name
         );
+        for notice in prefs_notices {
+            tracing::warn!("{notice}");
+        }
         for notice in notices {
             tracing::warn!("{notice}");
         }
