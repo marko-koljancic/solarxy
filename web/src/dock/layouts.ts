@@ -19,6 +19,14 @@ import type { DockviewApi, SerializedDockview } from "dockview-react";
 export const PANEL_IDS = ["viewport", "nodes", "properties", "review", "assets", "assetPreview", "texture", "attributes", "tree", "text"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
+/** The one panel every arrangement must contain. It is pinned against dragging
+ * and its tab has no close button, so the only way an arrangement loses it is a
+ * blob that was stale, hand-edited, or written by a different build. A
+ * restored layout without it used to leave a permanently dead app, because the
+ * engine booted from this panel's effect and nothing else. Named here so the
+ * pin and the restore guard state the same invariant. */
+export const VIEWPORT_PANEL_ID = "viewport";
+
 export type ViewportSide = "left" | "right";
 export type PropertiesDock = "bottom" | "right";
 

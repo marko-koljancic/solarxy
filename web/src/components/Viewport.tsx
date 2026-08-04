@@ -23,7 +23,6 @@ import { adoptViewportCanvas, viewportCanvas } from "../engine/canvas";
 import { useMirror } from "../store/mirror";
 import { usePrefs } from "../store/prefs";
 import { useReview } from "../store/review";
-import { useUi } from "../store/ui";
 import { useViewState } from "../store/viewState";
 import { pushToast } from "../store/toasts";
 import { PaneToolbars } from "./PaneToolbar";
@@ -80,15 +79,12 @@ export function Viewport() {
     let raf = 0;
     let mounted = true;
 
+    // The app shell starts the engine and owns the boot error; this awaits the
+    // same (idempotent) promise purely to know when the render loop may begin.
+    // The loop stays here rather than moving up with boot, because it
+    // reconciles the canvas against the surface every frame and belongs with
+    // the panel that owns that surface.
     bootSession(canvas)
-      .catch((err: unknown) => {
-        // WebGPU unavailable or wasm init failed: the boot overlay shows
-        // the message (the full unsupported-browser page is separate).
-        useUi
-          .getState()
-          .setBootError(err instanceof Error ? err.message : String(err));
-        throw err;
-      })
       .then(() => {
         if (!mounted) return;
 
@@ -120,6 +116,11 @@ export function Viewport() {
           raf = requestAnimationFrame(loop);
         };
         raf = requestAnimationFrame(loop);
+      })
+      .catch(() => {
+        // Boot failed; the shell has already surfaced it on the overlay. This
+        // exists so the rejection is handled rather than escaping as an
+        // unhandled promise rejection, and there is simply no loop to start.
       });
 
     return () => {

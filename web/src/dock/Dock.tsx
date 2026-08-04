@@ -14,7 +14,7 @@ import { useCallback, useEffect } from "react";
 import { setDockApi, restoreLayout } from "./api";
 import { clearHoveredPanel } from "./hover";
 import { DOCK_COMPONENTS, DOCK_TAB_COMPONENTS, MaximizeHeaderAction } from "./panels";
-import { DEFAULT_RECIPE, synthesizeRecipe } from "./layouts";
+import { DEFAULT_RECIPE, synthesizeRecipe, VIEWPORT_PANEL_ID } from "./layouts";
 import { loadLegacyArrangement, useUi } from "../store/ui";
 import { useReview } from "../store/review";
 
@@ -42,7 +42,7 @@ export function Dock() {
 
     // The pin: cancel any drag that would tear the viewport out of the dock.
     api.onWillDragPanel((e) => {
-      if (e.panel.id === "viewport") {
+      if (e.panel.id === VIEWPORT_PANEL_ID) {
         e.nativeEvent.preventDefault();
         e.nativeEvent.stopPropagation();
       }

@@ -11,7 +11,7 @@
 import { create } from "zustand";
 
 import type { SerializedDockview } from "dockview-react";
-import type { LegacyArrangement } from "../dock/layouts";
+import { VIEWPORT_PANEL_ID, type LegacyArrangement } from "../dock/layouts";
 import type { SidecarRefs } from "../engine/sidecars";
 import type { GraphContext } from "../engine/types";
 
@@ -150,16 +150,40 @@ interface UiState {
 }
 
 /** The persisted dock arrangement. A corrupt blob is discarded here rather than
- * handed to `fromJSON`, which would wedge the dock (dockview #341). */
+ * handed to `fromJSON`, which would wedge the dock (dockview #341).
+ *
+ * A blob that parses is not yet a blob worth restoring. It must also carry the
+ * viewport panel: `fromJSON` only throws on a *malformed* layout, so a
+ * well-formed one that happens to have no viewport is applied happily, and the
+ * result was an app stuck on the boot spinner with nothing logged. The
+ * viewport tab cannot be closed and cannot be dragged out, so its absence
+ * always means a blob from somewhere other than this build's own dock, and the
+ * default arrangement is a better answer than a dead window.
+ *
+ * A rejected blob is also DROPPED, not merely ignored. The fallback arrangement
+ * is built before the dock subscribes to its own layout-change events, so
+ * nothing overwrites the stored blob until the user next rearranges something,
+ * which may be never. Leaving a layout in storage that will be rejected on
+ * every future load serves nobody and misleads anyone who goes looking. */
 export function loadDockLayout(): SerializedDockview | null {
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(DOCK_LAYOUT_KEY);
   if (!raw) return null;
+  const reject = (): null => {
+    localStorage.removeItem(DOCK_LAYOUT_KEY);
+    return null;
+  };
   try {
     const parsed = JSON.parse(raw) as SerializedDockview;
-    return parsed && typeof parsed === "object" && "grid" in parsed ? parsed : null;
+    if (!parsed || typeof parsed !== "object" || !("grid" in parsed)) return reject();
+    // Read `panels` defensively: the whole premise here is that the blob is
+    // untrusted, so it may be any shape at all despite the cast above.
+    const panels: unknown = parsed.panels;
+    if (!panels || typeof panels !== "object") return reject();
+    if (!Object.hasOwn(panels, VIEWPORT_PANEL_ID)) return reject();
+    return parsed;
   } catch {
-    return null;
+    return reject();
   }
 }
 
