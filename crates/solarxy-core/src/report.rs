@@ -37,6 +37,12 @@ pub struct TextureEntry {
     pub slot: String,
     pub path: String,
     pub exists: bool,
+    /// Pixel dimensions, read from the file's header without decoding it.
+    ///
+    /// `None` when the file is missing, is not an image, or is in a format
+    /// this build cannot read. All three are the same answer to the question
+    /// a surface is asking, which is whether the resolution is knowable.
+    pub dimensions: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +275,21 @@ impl fmt::Display for AnalysisReport {
                             indicator
                         )?;
                     }
+
+                    // Appended at the end of the section rather than folded
+                    // into each row, because every line above already ships
+                    // and a pipeline matching one must keep working. A new
+                    // fact gets a new line; it does not reshape an old one.
+                    let measured: Vec<String> = mat
+                        .textures
+                        .iter()
+                        .filter_map(|tex| {
+                            tex.dimensions.map(|(w, h)| format!("{} {w}x{h}", tex.slot))
+                        })
+                        .collect();
+                    if !measured.is_empty() {
+                        writeln!(f, "    {:14} {}", "Resolutions:", measured.join(", "))?;
+                    }
                 }
 
                 if i < self.materials.len() - 1 {
@@ -469,6 +490,7 @@ mod tests {
                 slot: "diffuse".to_owned(),
                 path: "missing.png".to_owned(),
                 exists: false,
+                dimensions: Some((2048, 2048)),
             }],
         });
         let output = format!("{}", r);
@@ -556,6 +578,7 @@ mod tests {
                 slot: "diffuse".to_owned(),
                 path: "d.png".to_owned(),
                 exists: true,
+                dimensions: Some((2048, 2048)),
             }],
         });
         r

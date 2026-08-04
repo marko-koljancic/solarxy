@@ -321,6 +321,7 @@ mod tests {
                 slot: "normal".to_owned(),
                 path: "n.png".to_owned(),
                 exists: false,
+                dimensions: Some((2048, 2048)),
             }],
         };
         let jm = JsonMaterial::from(&m);

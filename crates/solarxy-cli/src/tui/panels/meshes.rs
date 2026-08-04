@@ -205,6 +205,11 @@ impl Panel for Meshes {
         }
     }
 
+    fn reveal(&mut self, row: usize) -> bool {
+        self.state.select(Some(row));
+        true
+    }
+
     fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
         Some(format!(
             "{} meshes \u{b7} {} tris",

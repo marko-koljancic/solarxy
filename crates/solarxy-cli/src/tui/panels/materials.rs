@@ -160,6 +160,11 @@ impl Panel for Materials {
         frame.render_stateful_widget(table, area, &mut self.state);
     }
 
+    fn reveal(&mut self, row: usize) -> bool {
+        self.state.select(Some(row));
+        true
+    }
+
     fn status(&self, ctx: &Ctx<'_>) -> Option<String> {
         let slots: usize = ctx.report.materials.iter().map(|m| m.textures.len()).sum();
         let missing = ctx

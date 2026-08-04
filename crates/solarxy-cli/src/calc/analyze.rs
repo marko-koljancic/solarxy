@@ -302,14 +302,27 @@ fn check_texture(
 ) -> Option<TextureEntry> {
     let path = tex_path?;
     if path.starts_with("texture_index:") {
+        // An embedded texture has no file to measure. Its resolution is
+        // knowable only by decoding the payload, which costs far more than
+        // the answer is worth here.
         return Some(TextureEntry {
             slot: slot.to_string(),
             path: path.clone(),
             exists: true,
+            dimensions: None,
         });
     }
 
-    let exists = obj_dir.as_ref().is_some_and(|dir| dir.join(path).exists());
+    let resolved = obj_dir.as_ref().map(|dir| dir.join(path));
+    let exists = resolved.as_ref().is_some_and(|p| p.exists());
+    // A header read, not a decode: a four thousand pixel texture is megabytes
+    // to decode and a few hundred bytes to measure, and only the number is
+    // wanted. The analyzer already stats this path to set `exists`, so this
+    // costs one more small read on a file it has already found.
+    let dimensions = resolved
+        .as_ref()
+        .filter(|_| exists)
+        .and_then(|p| solarxy_formats::image_dimensions(p));
 
     if !exists {
         issues.push(ValidationIssue {
@@ -324,6 +337,7 @@ fn check_texture(
         slot: slot.to_string(),
         path: path.clone(),
         exists,
+        dimensions,
     })
 }
 

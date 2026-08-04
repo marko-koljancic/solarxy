@@ -32,7 +32,7 @@ use solarxy_core::report::AnalysisReport;
 use super::caps::{Capabilities, Glyphs};
 use super::geometry::ModelView;
 use super::layout::{Layout, LeafId, Preset};
-use super::panels::{self, Ctx, Panel};
+use super::panels::{self, Action, Ctx, Panel};
 use super::shell::{Flow, Input, Surface};
 use super::theme::Theme;
 
@@ -114,6 +114,43 @@ impl<'a> App<'a> {
             glyphs: &self.glyphs,
             caps: self.caps,
             focused,
+        }
+    }
+
+    /// Move focus to the panel holding a subject and select it there.
+    ///
+    /// The one action that crosses panels, and the reason it exists: the
+    /// question a validation issue raises is always about something in another
+    /// panel, and making a reader find it by hand is the failure the shipped
+    /// shell has.
+    ///
+    /// It can fail in two honest ways, and both say so rather than moving
+    /// focus somewhere useless. A model-wide issue is about the asset rather
+    /// than a row, so there is nowhere to go; and the panel that would hold
+    /// the subject may simply not be in the arrangement the reader built.
+    fn jump(&mut self, scope: &solarxy_core::validation::IssueScope) {
+        use super::panels::validation::{home_of, row_of};
+
+        let Some(kind) = home_of(scope) else {
+            self.notice = Some("this issue is about the whole model".to_owned());
+            return;
+        };
+        let Some(target) = self
+            .layout
+            .leaves()
+            .into_iter()
+            .find(|(_, leaf)| *leaf == kind)
+            .map(|(id, _)| id)
+        else {
+            self.notice = Some(format!("no {} panel to jump to", kind.name()));
+            return;
+        };
+
+        if let (Some(row), Some(panel)) = (row_of(scope), self.panels.get_mut(&target))
+            && panel.reveal(row)
+        {
+            self.layout = self.layout.with_focus(target);
+            self.maximized = None;
         }
     }
 
@@ -293,8 +330,12 @@ impl Surface for App<'_> {
             caps: self.caps,
             focused: true,
         };
-        if let Some(panel) = self.panels.get_mut(&focus) {
-            let _ = panel.handle(key, &ctx);
+        let action = self
+            .panels
+            .get_mut(&focus)
+            .map_or(Action::None, |panel| panel.handle(key, &ctx));
+        if let Action::Jump(scope) = action {
+            self.jump(&scope);
         }
         Flow::Continue
     }
@@ -488,6 +529,73 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
         terminal.draw(|frame| app.draw(frame)).expect("draw");
         println!("{}", screen(terminal.backend().buffer(), 140, 45));
+    }
+
+    /// Jump is the only action that crosses panels, so it is the only one
+    /// whose effect the app rather than the panel has to be tested for.
+    #[test]
+    fn a_jump_moves_focus_to_the_panel_holding_the_subject() {
+        use solarxy_core::validation::IssueScope;
+
+        let report = report();
+        let model = ModelView::default();
+        let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
+        let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
+        let mut app = App::new(&report, &model, Preset::Survey.layout(), theme, CAPS);
+
+        app.jump(&IssueScope::Mesh(1));
+        assert_eq!(
+            app.layout.panel_of(app.layout.focus()),
+            Some(PanelType::Meshes),
+            "a mesh issue did not reach the mesh table"
+        );
+        assert!(app.notice.is_none(), "{:?}", app.notice);
+
+        app.jump(&IssueScope::Material(0));
+        assert_eq!(
+            app.layout.panel_of(app.layout.focus()),
+            Some(PanelType::Materials)
+        );
+    }
+
+    /// Two honest failures, and both say so rather than moving focus
+    /// somewhere that will not show the reader what they asked for.
+    #[test]
+    fn a_jump_with_nowhere_to_go_says_so() {
+        use solarxy_core::validation::IssueScope;
+
+        let report = report();
+        let model = ModelView::default();
+        let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
+        let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
+
+        let mut app = App::new(
+            &report,
+            &model,
+            Preset::Survey.layout(),
+            theme.clone(),
+            CAPS,
+        );
+        app.jump(&IssueScope::Model);
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("whole model")),
+            "{:?}",
+            app.notice
+        );
+
+        // The validation preset holds no mesh table, so a mesh issue has no
+        // panel to land in and the reader is told rather than moved.
+        let mut app = App::new(&report, &model, Preset::Validation.layout(), theme, CAPS);
+        let before = app.layout.focus();
+        app.jump(&IssueScope::Mesh(0));
+        assert_eq!(app.layout.focus(), before, "focus moved with no target");
+        assert!(
+            app.notice.as_deref().is_some_and(|n| n.contains("meshes")),
+            "{:?}",
+            app.notice
+        );
     }
 
     /// The opt-in reads like every other override this shell has.

@@ -33,13 +33,16 @@ use super::geometry::ModelView;
 use super::layout::PanelType;
 use super::theme::Slots;
 
+pub mod bounds;
 pub mod distributions;
 pub mod geometry;
 pub mod health;
 pub mod materials;
 pub mod meshes;
 pub mod silhouette;
+pub mod textures;
 pub mod uv;
+pub mod validation;
 
 /// Everything a panel is allowed to read.
 ///
@@ -98,13 +101,18 @@ pub trait Panel {
     fn status(&self, _ctx: &Ctx<'_>) -> Option<String> {
         None
     }
+
+    /// Select a row on behalf of a jump from somewhere else.
+    ///
+    /// Returns whether it could. A panel that holds no rows says no, which is
+    /// how the app knows to tell the reader rather than move focus to
+    /// something that will not show them what they asked for.
+    fn reveal(&mut self, _row: usize) -> bool {
+        false
+    }
 }
 
 /// Build the panel for a type.
-///
-/// The types with no implementation yet render as a named placeholder rather
-/// than as nothing, so an arrangement holding one is still legible and the
-/// reader can see what is coming.
 pub fn make(kind: PanelType) -> Box<dyn Panel> {
     match kind {
         PanelType::Geometry => Box::new(geometry::Geometry),
@@ -114,20 +122,22 @@ pub fn make(kind: PanelType) -> Box<dyn Panel> {
         PanelType::Silhouette => Box::new(silhouette::Silhouette::default()),
         PanelType::Uv => Box::new(uv::Uv::default()),
         PanelType::Distributions => Box::new(distributions::Distributions::default()),
-        other => Box::new(Pending(other)),
+        PanelType::Validation => Box::new(validation::Validation::default()),
+        PanelType::Textures => Box::new(textures::Textures::default()),
+        PanelType::Bounds => Box::new(bounds::Bounds),
+        PanelType::Catalogue => Box::new(Catalogue),
     }
 }
 
-/// A panel type that exists in the catalogue but has no body yet.
-pub struct Pending(pub PanelType);
+/// A leaf that exists but has not been given a panel yet.
+///
+/// A split creates one of these rather than guessing what the reader wanted,
+/// so it says what it is waiting for instead of sitting blank.
+pub struct Catalogue;
 
-impl Panel for Pending {
+impl Panel for Catalogue {
     fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx<'_>) {
-        let (line, rect) = super::widgets::empty_state(
-            &format!("{} arrives in a later commit", self.0.name()),
-            area,
-            ctx.theme,
-        );
+        let (line, rect) = super::widgets::empty_state("pick a panel", area, ctx.theme);
         frame.render_widget(ratatui::widgets::Paragraph::new(line), rect);
     }
 }
