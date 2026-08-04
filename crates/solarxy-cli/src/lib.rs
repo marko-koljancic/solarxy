@@ -42,6 +42,7 @@ pub fn print_theme_listing() {
 #[cfg(all(feature = "tui", feature = "analyzer"))]
 pub fn run_tiled_analyze(
     report: &solarxy_core::report::AnalysisReport,
+    model: &tui::geometry::ModelView<'_>,
     requested_theme: Option<&str>,
 ) -> std::io::Result<()> {
     use tui::app::App;
@@ -64,8 +65,28 @@ pub fn run_tiled_analyze(
     let layout = prefs
         .opening_layout()
         .unwrap_or_else(|| Preset::Survey.layout());
-    let mut app = App::new(report, layout, resolved, caps);
+    let mut app = App::new(report, model, layout, resolved, caps);
     tui::shell::run(&mut app)
+}
+
+/// The plot geometry, borrowed from an analyzer that is still alive.
+///
+/// Built at the call site rather than inside, because the analyzer owns the
+/// arrays and this is a view onto them: copying would throw away the reason
+/// the plots cost nothing.
+#[cfg(all(feature = "tui", feature = "analyzer"))]
+pub fn model_view(analyzer: &calc::analyze::ModelAnalyzer) -> tui::geometry::ModelView<'_> {
+    tui::geometry::ModelView {
+        meshes: analyzer
+            .meshes
+            .iter()
+            .map(|mesh| tui::geometry::MeshView {
+                positions: &mesh.positions,
+                texcoords: &mesh.texcoords,
+                indices: &mesh.indices,
+            })
+            .collect(),
+    }
 }
 
 /// Whether the reader asked for the tiled surface.

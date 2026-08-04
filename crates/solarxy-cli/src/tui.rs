@@ -17,6 +17,7 @@ pub(crate) mod contrast;
 // surface consumes the tree already.
 #[allow(dead_code)]
 pub(crate) mod arrange;
+pub(crate) mod geometry;
 pub(crate) mod layout;
 // Writing the file, and reading the arrangement back out of it, belong to
 // the quit path and the loop that owns it. Reading the theme already has a
@@ -24,14 +25,11 @@ pub(crate) mod layout;
 #[allow(dead_code)]
 pub(crate) mod panels;
 pub(crate) mod prefs;
-// The plot panels that consume it land next; the rasteriser is deliberately
-// built and looked at first, because whether a dense mesh reads as a form is
-// the one thing only rendering settles.
-#[allow(dead_code)]
 pub(crate) mod raster;
 pub(crate) mod scroll;
 pub(crate) mod shell;
 pub(crate) mod theme;
+pub(crate) mod uv;
 pub(crate) mod widgets;
 
 /// The reference panel and the shared render-test machinery.

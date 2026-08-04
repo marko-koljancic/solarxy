@@ -29,13 +29,17 @@ use solarxy_core::report::AnalysisReport;
 use solarxy_core::validation::IssueScope;
 
 use super::caps::{Capabilities, Glyphs};
+use super::geometry::ModelView;
 use super::layout::PanelType;
 use super::theme::Slots;
 
+pub mod distributions;
 pub mod geometry;
 pub mod health;
 pub mod materials;
 pub mod meshes;
+pub mod silhouette;
+pub mod uv;
 
 /// Everything a panel is allowed to read.
 ///
@@ -43,6 +47,9 @@ pub mod meshes;
 /// cannot accumulate a private copy of the model that drifts from the report.
 pub struct Ctx<'a> {
     pub report: &'a AnalysisReport,
+    /// The raw arrays the plots project, borrowed from the analyzer rather
+    /// than copied into the report.
+    pub model: &'a ModelView<'a>,
     pub theme: &'a Slots,
     pub glyphs: &'a Glyphs,
     pub caps: Capabilities,
@@ -104,6 +111,9 @@ pub fn make(kind: PanelType) -> Box<dyn Panel> {
         PanelType::Health => Box::new(health::Health::default()),
         PanelType::Meshes => Box::new(meshes::Meshes::default()),
         PanelType::Materials => Box::new(materials::Materials::default()),
+        PanelType::Silhouette => Box::new(silhouette::Silhouette::default()),
+        PanelType::Uv => Box::new(uv::Uv::default()),
+        PanelType::Distributions => Box::new(distributions::Distributions::default()),
         other => Box::new(Pending(other)),
     }
 }

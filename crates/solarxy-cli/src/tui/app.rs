@@ -30,6 +30,7 @@ use ratatui::widgets::Block;
 use solarxy_core::report::AnalysisReport;
 
 use super::caps::{Capabilities, Glyphs};
+use super::geometry::ModelView;
 use super::layout::{Layout, LeafId, Preset};
 use super::panels::{self, Ctx, Panel};
 use super::shell::{Flow, Input, Surface};
@@ -50,6 +51,7 @@ pub fn opted_in(lookup: impl Fn(&str) -> Option<String>) -> bool {
 
 pub struct App<'a> {
     report: &'a AnalysisReport,
+    model: &'a ModelView<'a>,
     layout: Layout,
     maximized: Option<LeafId>,
     /// One panel per leaf, so two of a type are two panels with their own
@@ -67,12 +69,14 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     pub fn new(
         report: &'a AnalysisReport,
+        model: &'a ModelView<'a>,
         layout: Layout,
         theme: Theme,
         caps: Capabilities,
     ) -> Self {
         let mut app = Self {
             report,
+            model,
             layout,
             maximized: None,
             panels: HashMap::new(),
@@ -105,6 +109,7 @@ impl<'a> App<'a> {
     fn context(&self, focused: bool) -> Ctx<'_> {
         Ctx {
             report: self.report,
+            model: self.model,
             theme: &self.theme.slots,
             glyphs: &self.glyphs,
             caps: self.caps,
@@ -216,6 +221,7 @@ impl Surface for App<'_> {
             if let Some(panel) = self.panels.get_mut(&placement.id) {
                 let ctx = Ctx {
                     report: self.report,
+                    model: self.model,
                     theme: &self.theme.slots,
                     glyphs: &self.glyphs,
                     caps: self.caps,
@@ -281,6 +287,7 @@ impl Surface for App<'_> {
         let focus = self.layout.focus();
         let ctx = Ctx {
             report: self.report,
+            model: self.model,
             theme: &self.theme.slots,
             glyphs: &self.glyphs,
             caps: self.caps,
@@ -434,7 +441,8 @@ mod tests {
             .slots_for(DEFAULT_THEME)
             .expect("the default loads");
         let theme = Theme::resolve(caps, DEFAULT_THEME, &slots);
-        let mut app = App::new(&report, Preset::Survey.layout(), theme, caps);
+        let model = ModelView::default();
+        let mut app = App::new(&report, &model, Preset::Survey.layout(), theme, caps);
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal.draw(|frame| app.draw(frame)).expect("draw");
         terminal.backend().buffer().clone()
@@ -457,6 +465,29 @@ mod tests {
     fn preview() {
         let buffer = render(CAPS, 140, 45);
         println!("{}", screen(&buffer, 140, 45));
+    }
+
+    /// Not an assertion: the whole surface over a real model, which is the
+    /// only way to judge the plots.
+    #[test]
+    #[ignore]
+    fn preview_a_real_model() {
+        const DEFAULT: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../res/models/xyzrgb_dragon.obj"
+        );
+        let path = std::env::var("SOLARXY_PREVIEW_MODEL").unwrap_or_else(|_| DEFAULT.to_owned());
+        let analyzer =
+            crate::calc::analyze::ModelAnalyzer::new_with_config(&path, None).expect("loads");
+        let report = analyzer.generate_report();
+        let model = crate::model_view(&analyzer);
+
+        let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
+        let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
+        let mut app = App::new(&report, &model, Preset::Survey.layout(), theme, CAPS);
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        println!("{}", screen(terminal.backend().buffer(), 140, 45));
     }
 
     /// The opt-in reads like every other override this shell has.
@@ -574,7 +605,8 @@ mod tests {
             .find(|(_, kind)| *kind == PanelType::Meshes)
             .expect("survey holds a mesh panel")
             .0;
-        let mut app = App::new(&report, layout.with_focus(meshes), theme, CAPS);
+        let model = ModelView::default();
+        let mut app = App::new(&report, &model, layout.with_focus(meshes), theme, CAPS);
 
         let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
         terminal.draw(|frame| app.draw(frame)).expect("draw");

@@ -93,7 +93,11 @@ pub fn bar_row(
     };
     Line::from(vec![
         Span::styled(
-            format!("{name:<width$} ", width = usize::from(name_width)),
+            format!(
+                "{:<width$} ",
+                fit(name, name_width),
+                width = usize::from(name_width)
+            ),
             Style::default().fg(theme.ink_dim),
         ),
         Span::styled(filled_glyph.repeat(filled), Style::default().fg(ink)),
@@ -103,6 +107,19 @@ pub fn bar_row(
             Style::default().fg(theme.ink),
         ),
     ])
+}
+
+/// Cut a label to the column it has, so a long one cannot push the rest of
+/// the row off the panel.
+///
+/// Cut rather than elided: the ellipsis is not in the ASCII repertoire, and a
+/// name that has lost its tail is still the name a reader recognises.
+pub fn fit(name: &str, width: u16) -> String {
+    let width = usize::from(width);
+    if name.chars().count() <= width {
+        return name.to_owned();
+    }
+    name.chars().take(width).collect()
 }
 
 /// A label and its value on one row.
@@ -234,6 +251,30 @@ mod tests {
 
         let none = bar_row("none", 0, 10_000, 12, 20, paint(&theme, &glyphs));
         assert!(none.spans[1].content.is_empty(), "zero drew a bar");
+    }
+
+    /// A long label must not push the bar and its count off the panel, which
+    /// is what an unbounded name does to a column layout.
+    #[test]
+    fn a_long_label_is_cut_to_its_column() {
+        let theme = slots();
+        let glyphs = Glyphs::for_tier(GlyphTier::Unicode);
+        let short = bar_row("uv", 3, 9, 12, 10, paint(&theme, &glyphs));
+        let long = bar_row(
+            "triangle budget exceeded",
+            3,
+            9,
+            12,
+            10,
+            paint(&theme, &glyphs),
+        );
+        assert_eq!(
+            width_of(&short),
+            width_of(&long),
+            "a long name changed the row width"
+        );
+        assert_eq!(fit("uv", 12), "uv");
+        assert_eq!(fit("triangle budget exceeded", 12), "triangle bud");
     }
 
     #[test]
