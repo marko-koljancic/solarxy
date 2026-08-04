@@ -165,6 +165,9 @@ fn run_analyze(
         eprintln!("{reason}");
         print!("{rendered}");
         Ok(())
+    } else if solarxy_cli::tiled_analyze_requested() {
+        solarxy_cli::run_tiled_analyze(&report, tui_theme)?;
+        Ok(())
     } else {
         TerminalApp::new(report, model_path, tui_theme).run()?;
         Ok(())

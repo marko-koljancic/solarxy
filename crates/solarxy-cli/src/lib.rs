@@ -34,6 +34,46 @@ pub fn print_theme_listing() {
     tui::theme::print_listing();
 }
 
+/// Run the tiled analyze surface over a report.
+///
+/// Reachable only through `SOLARXY_TUI=next` until the cutover, which is what
+/// lets the panels be looked at as they are built rather than all at once at
+/// the end. Both the switch and this entry point are temporary.
+#[cfg(all(feature = "tui", feature = "analyzer"))]
+pub fn run_tiled_analyze(
+    report: &solarxy_core::report::AnalysisReport,
+    requested_theme: Option<&str>,
+) -> std::io::Result<()> {
+    use tui::app::App;
+    use tui::caps::Capabilities;
+    use tui::layout::Preset;
+    use tui::theme::{Theme, ThemeSet};
+
+    let caps = Capabilities::detect();
+    let (prefs, notices) = tui::prefs::TuiPrefs::load();
+    let wanted = requested_theme.or(prefs.theme.as_deref());
+    let (resolved, theme_notices) = ThemeSet::load().resolve(wanted, caps);
+    for notice in notices {
+        tracing::warn!("{notice}");
+    }
+    for notice in theme_notices {
+        tracing::warn!("{notice}");
+    }
+    let _ = Theme::resolve(caps, &resolved.name, &resolved.slots);
+
+    let layout = prefs
+        .opening_layout()
+        .unwrap_or_else(|| Preset::Survey.layout());
+    let mut app = App::new(report, layout, resolved, caps);
+    tui::shell::run(&mut app)
+}
+
+/// Whether the reader asked for the tiled surface.
+#[cfg(feature = "tui")]
+pub fn tiled_analyze_requested() -> bool {
+    tui::app::opted_in(|key| std::env::var(key).ok())
+}
+
 /// Why this terminal is too small for the analyze surface, if it is.
 ///
 /// The second entry point the binary needs into the terminal module tree,

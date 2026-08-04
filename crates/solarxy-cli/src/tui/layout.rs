@@ -143,13 +143,6 @@ impl Direction {
             Self::Horizontal => 'H',
         }
     }
-
-    pub fn flipped(self) -> Self {
-        match self {
-            Self::Vertical => Self::Horizontal,
-            Self::Horizontal => Self::Vertical,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,6 +199,10 @@ pub struct Layout {
 
 impl Layout {
     /// A single panel filling the pane.
+    ///
+    /// The starting point for a reader who closes their way down to one, and
+    /// the fixture most layout tests build from.
+    #[allow(dead_code)]
     pub fn single(panel: PanelType) -> Self {
         Self {
             root: Node::Leaf {
@@ -219,10 +216,6 @@ impl Layout {
 
     pub fn focus(&self) -> LeafId {
         self.focus
-    }
-
-    pub fn root(&self) -> &Node {
-        &self.root
     }
 
     /// Every leaf in reading order.
@@ -296,6 +289,10 @@ impl Layout {
     }
 
     /// Give the focused leaf a panel type.
+    ///
+    /// Called when a reader picks from the catalogue, which is arrange mode's
+    /// `a` and therefore waits for the keymap.
+    #[allow(dead_code)]
     #[must_use]
     pub fn assign(&self, panel: PanelType) -> Self {
         let mut next = self.clone();
@@ -580,6 +577,9 @@ pub enum Preset {
 }
 
 impl Preset {
+    /// Every preset, for the tests that assert all three parse and render.
+    /// The cycle a reader walks uses [`Self::next`] instead.
+    #[allow(dead_code)]
     pub const ALL: [Preset; 3] = [Preset::Survey, Preset::Meshes, Preset::Validation];
 
     pub fn name(self) -> &'static str {

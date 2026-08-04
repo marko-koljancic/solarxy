@@ -10,22 +10,24 @@ use ratatui::{
 
 use super::tui_theme::TuiTheme;
 
+pub(crate) mod app;
 pub(crate) mod caps;
 pub(crate) mod contrast;
-// The tree and its grammar have no non-test consumer until the event loop
-// lands; the loop is what will split, close and draw one. Removed there.
+// Arrange mode's grammar waits for the keymap that binds it; the tiled
+// surface consumes the tree already.
 #[allow(dead_code)]
 pub(crate) mod arrange;
-#[allow(dead_code)]
 pub(crate) mod layout;
 // Writing the file, and reading the arrangement back out of it, belong to
 // the quit path and the loop that owns it. Reading the theme already has a
 // caller. Removed with the allow above when the loop lands.
 #[allow(dead_code)]
+pub(crate) mod panels;
 pub(crate) mod prefs;
 pub(crate) mod scroll;
 pub(crate) mod shell;
 pub(crate) mod theme;
+pub(crate) mod widgets;
 
 /// The reference panel and the shared render-test machinery.
 ///
