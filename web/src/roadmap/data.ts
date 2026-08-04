@@ -823,7 +823,7 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
     items: [
       "The egui node canvas, palette, parameter panel, transform gizmo and undo.",
       "One core, two shells becomes literally true rather than aspirational.",
-      "Sized after the node-canvas library spike that runs inside 0.8.2.",
+      "Sized: the node-canvas library spike inside 0.8.2 has run and found a native substrate that fits, so this release builds the canvas rather than the ground under it.",
     ],
   },
   {
@@ -2335,8 +2335,8 @@ export const CARDS: Card[] = [
     split: ["a: engine surface, v0.8.2", "b: node canvas, v0.9.5"],
     what: "Connect the desktop GUI to the node engine so node editing works natively, not only on web. Splits in two: first the engine surface, which hoists scene-environment ownership and adds the Command / EventBatch loop so the desktop opens, cooks and renders .slxy scenes with no canvas; then the canvas, palette, parameter panel and gizmo.",
     why: "Every release since v0.8.0 has been web-only; five of six features in 0.8.1 have no desktop surface. The engine-surface half stops the debt compounding for roughly a tenth of full parity's cost.",
-    dep: "Both halves depend on the shared-host extraction, which collapses about 2,000 lines already duplicated between the two hosts. The canvas half also waits on the node-canvas library spike that runs inside v0.8.2.",
-    risk: "egui has no node editor, and the web canvas library donates a viewport substrate (pan, zoom, marquee, edge routing and hit-testing, connection drag) that has no native equivalent. That substrate, not the canvas code, is the real cost of the canvas half.",
+    dep: "Both halves depend on the shared-host extraction, which collapses about 2,000 lines already duplicated between the two hosts. The canvas half was gated on the node-canvas library spike inside v0.8.2, which has now run.",
+    risk: "Retired by the spike. egui has no node editor of its own, and the substrate the web canvas library donates (pan, zoom, marquee, edge routing and hit-testing, connection drag) was the real cost of the canvas half. A native substrate was measured against the engine-owns-the-document rule and fits: it can be driven from mirrored state, with node position reconciled the same way the web already reconciles it. Roughly 6,400 lines of groundwork leave the canvas half's scope.",
   },
   {
     id: "18.2",
