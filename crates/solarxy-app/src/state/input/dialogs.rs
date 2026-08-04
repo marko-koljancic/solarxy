@@ -187,6 +187,10 @@ impl State {
         // and role, so without this the new scene's slots would be served
         // stale textures.
         self.gui.reset_material_inspector();
+        // The tree's dived context and folded set both address node ids,
+        // and the new document need not contain any of them.
+        self.gui.reset_node_tree();
+        self.selected_object = None;
 
         self.apply_scene_view(&view);
         self.restore_scene_environment(&environment);
@@ -328,6 +332,8 @@ impl State {
         // notion of which document filled it, so it has to be dropped on
         // the way out of a scene exactly as it is on a model swap.
         self.gui.reset_material_inspector();
+        self.gui.reset_node_tree();
+        self.selected_object = None;
         self.window.set_title("Solarxy");
     }
 

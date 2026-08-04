@@ -474,6 +474,13 @@ fn draw_window_menu(ui: &mut egui::Ui, vis: &mut MenuBarVisibility, has_model: b
             ui.close();
         }
         if ui
+            .add(egui::Button::new("Node Tree").selected(vis.node_tree_visible))
+            .clicked()
+        {
+            vis.node_tree_visible = !vis.node_tree_visible;
+            ui.close();
+        }
+        if ui
             .add(egui::Button::new("Properties").selected(vis.properties_visible))
             .clicked()
         {

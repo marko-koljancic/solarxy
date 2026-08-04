@@ -21,7 +21,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
+use crate::gui::{NodeTreeAction, OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
 use solarxy_renderer::input::{CameraKey, PointerButton};
 use solarxy_core::preferences::{
@@ -747,6 +747,43 @@ impl State {
             }
             OutlinerAction::ToggleObject(id) => self.toggle_scene_object(id),
         }
+    }
+
+    /// Apply a Node Tree row click: select the node engine-side, and
+    /// outline its object if it has one.
+    ///
+    /// **Only a root-context selection can outline anything.** The scene
+    /// delta names a geo container's object `SceneObjectId(geo.0)`, so a
+    /// root node id maps straight onto one; a node inside a container owns
+    /// no object of its own. Selecting one still selects it in the engine
+    /// and still highlights the row, it just leaves the viewport alone —
+    /// the same behaviour the web shell has for the same gesture.
+    ///
+    /// Unlike [`Self::toggle_scene_object`], no delta is taken: selection
+    /// is neither a render flag nor a cook input, and the engine emits no
+    /// scene ops for it.
+    pub(super) fn handle_node_tree_action(&mut self, action: NodeTreeAction) {
+        let NodeTreeAction::Select(ctx, node) = action;
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        if let Err(e) = engine.apply(solarxy_graph::Command::SetSelection {
+            ctx,
+            ids: vec![node],
+        }) {
+            tracing::warn!("Could not select node: {e}");
+            return;
+        }
+        self.selected_object = match ctx {
+            GraphContext::Root => {
+                let id = SceneObjectId(node.0);
+                // Absent or hidden objects are filtered out of the draw
+                // list entirely, so pointing at one would outline nothing
+                // while claiming a selection is showing.
+                self.scene_objects.get(id).filter(|o| o.visible).map(|_| id)
+            }
+            GraphContext::Subflow(_) => None,
+        };
     }
 
     /// Flip a scene object's visibility through the engine.

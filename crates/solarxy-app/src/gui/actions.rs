@@ -49,6 +49,7 @@ pub(crate) struct DividerInfo {
 pub(super) struct MenuBarVisibility {
     pub sidebar_visible: bool,
     pub outliner_visible: bool,
+    pub node_tree_visible: bool,
     pub menu_bar_visible: bool,
     pub properties_visible: bool,
     pub status_bar_visible: bool,

@@ -214,7 +214,8 @@ impl State {
     }
 
     /// The frame's draw list: the file-loaded model when one is open, then
-    /// every visible multi-object entry.
+    /// every visible multi-object entry, with the Node Tree's selection
+    /// flagged so the main pass and the outline pass can find it.
     ///
     /// Order is load-bearing, not incidental. Overdraw counts fragments in
     /// submission order, and the depth-equal overlays (edge wireframe,
@@ -231,6 +232,19 @@ impl State {
             objects.push(scene.draw_object(&self.env.instance_buffer));
         }
         objects.extend(self.scene_objects.draw_objects());
+        // `SceneObjects` hands out its draw objects unselected, so the
+        // flag is set here by matching on model identity — the same
+        // approach the web host takes, and the reason the lookup filters
+        // hidden objects: a hidden one is not in this list at all.
+        if let Some(id) = self.selected_object
+            && let Some(selected) = self.scene_objects.draw_object(id)
+        {
+            for object in &mut objects {
+                if std::ptr::eq(object.model, selected.model) {
+                    object.selected = true;
+                }
+            }
+        }
         objects
     }
 
@@ -278,9 +292,11 @@ impl State {
                 inspection: self.view.pane_settings[i].inspection_mode,
                 is_uv_map,
                 scene_present,
-                // No selection concept in this shell yet, so the rim is never
-                // blitted.
-                outline: false,
+                // Must agree with `PaneScene.selected` above: that switches
+                // the rim's offscreen stages on, this blits the result. A
+                // blit with no mask behind it paints nothing, but it is a
+                // pass submitted for no reason.
+                outline: self.selected_object.is_some(),
             },
         );
     }
@@ -413,6 +429,10 @@ impl State {
             return;
         };
         let objects = self.draw_objects();
+        // Asked of the list rather than of `selected_object`, because a
+        // selection that resolves to nothing drawable must not switch on
+        // the mask and jump-flood stages for an empty silhouette.
+        let selected = objects.iter().any(|o| o.selected);
         solarxy_host::render_3d_passes(
             &self.renderer,
             &self.queue,
@@ -425,7 +445,7 @@ impl State {
                 pds,
                 background,
                 shadow: i == 0 || !self.view.display.lights_locked,
-                selected: false,
+                selected,
             },
         );
     }
@@ -511,6 +531,7 @@ impl State {
         let mut projection_change = None;
         let mut properties_events = crate::gui::PropertiesEvents::default();
         let mut outliner_events = crate::gui::OutlinerEvents::default();
+        let mut node_tree_events = crate::gui::NodeTreeEvents::default();
 
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
@@ -584,6 +605,23 @@ impl State {
             },
             (None, None) => crate::gui::OutlinerSource::Empty,
         };
+        // Folded fresh each frame rather than cached on a delta, because
+        // selection is part of what the tree draws and selection changes
+        // without a delta. Skipped outright when the tab is closed, which
+        // is the only case where the cost would be paid for nothing.
+        let node_tree_source = match &self.engine {
+            _ if !self.gui.node_tree_tab_present() => crate::gui::NodeTreeSource::Empty,
+            Some(engine) => crate::gui::NodeTreeSource::Scene {
+                doc: engine.document(),
+                registry: engine.registry(),
+            },
+            // A model file is open, or nothing is. The panel distinguishes
+            // the two: "no graph" and "nothing open" are different facts,
+            // and a panel that conflates them reads as broken while the
+            // viewport is plainly full of geometry.
+            None if self.scene.is_some() => crate::gui::NodeTreeSource::ModelFile,
+            None => crate::gui::NodeTreeSource::Empty,
+        };
 
         let recent_files = self.preferences.history.recent_files.clone();
         let model = self.scene.as_ref().map(|s| &s.model);
@@ -625,9 +663,11 @@ impl State {
             &mut self.review,
             model,
             outliner_source,
+            node_tree_source,
             pane_toolbar,
             &mut properties_events,
             &mut outliner_events,
+            &mut node_tree_events,
             &mut self.viewport_context_menu,
             force_expand_review,
             suppress_screenshot_modal,
@@ -676,6 +716,11 @@ impl State {
         // Outliner events: mesh / material visibility + camera framing.
         if let Some(action) = outliner_events.action {
             self.handle_outliner_action(action);
+        }
+
+        // Node Tree events: selection, engine-side and in the viewport.
+        if let Some(action) = node_tree_events.action {
+            self.handle_node_tree_action(action);
         }
 
         // Review panel: clicking a note row flies the camera to its anchor.

@@ -121,6 +121,15 @@ pub struct State {
     /// delta rather than per frame, because deltas are the only thing that
     /// changes it and the merged issue order has to be stable.
     pub(super) engine_scene: Option<engine_scene::EngineSceneInfo>,
+    /// The scene object the viewport outlines, set by a Node Tree
+    /// selection.
+    ///
+    /// Only a **root-context** selection lands here, because only a root
+    /// geo node owns a scene object (the delta names it
+    /// `SceneObjectId(geo.0)`). Selecting a node inside a container
+    /// selects engine-side and leaves the viewport alone, which is what
+    /// the web shell does with the same gesture.
+    pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
     /// Multi-object dynamic scene drawn beside `scene`. Fed by
     /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
     /// the top of each frame. The engine above is the producer once a scene

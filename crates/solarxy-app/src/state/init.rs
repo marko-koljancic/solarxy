@@ -171,6 +171,7 @@ impl State {
             scene: None,
             engine: None,
             engine_scene: None,
+            selected_object: None,
             scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
             env,
             env_bounds,

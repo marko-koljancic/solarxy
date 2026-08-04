@@ -34,6 +34,7 @@ mod dock;
 mod keyboard_shortcuts_modal;
 mod material_inspector;
 mod menu;
+mod node_tree;
 mod outliner;
 mod overlays;
 mod pane_toolbar;
@@ -62,6 +63,7 @@ pub use renderer::EguiRenderer;
 pub use snapshot::SidebarChanges;
 
 pub(crate) use actions::{DividerInfo, MenuActions};
+pub(crate) use node_tree::{NodeTreeAction, NodeTreeEvents, NodeTreeSource};
 pub(crate) use outliner::{OutlinerAction, OutlinerEvents, OutlinerSource};
 pub(crate) use pane_toolbar::PaneToolbarData;
 pub(crate) use properties::{PropertiesEvents, ValidationView};
