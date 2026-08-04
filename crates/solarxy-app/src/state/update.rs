@@ -8,6 +8,14 @@ use std::sync::mpsc;
 
 use super::*;
 
+/// Wall-clock ceiling on one frame's cook.
+///
+/// Half a 60 Hz frame, so a cook that cannot finish leaves the rest of the
+/// budget for rendering and input rather than dropping the window to the
+/// engine's pace. Cooks are resumable, so the only cost of a low ceiling is
+/// that a heavy scene converges over more frames while staying interactive.
+const COOK_BUDGET: std::time::Duration = std::time::Duration::from_millis(8);
+
 impl State {
     pub(super) fn rebuild_light_bind_group(&mut self) {
         solarxy_host::rebuild_light_bind_group(
@@ -29,9 +37,6 @@ impl State {
     /// model leaves the pane cameras alive framing whatever is left. Framing
     /// a union is also what keeps a cooked object inside the shadow frustum
     /// and inside the Depth mode's fitted near/far range.
-    ///
-    /// Object transforms are not applied to the multi-object half yet, so an
-    /// engine-only scene frames its objects' local boxes about the origin.
     pub(super) fn scene_bounds(&self) -> solarxy_core::AABB {
         match (
             self.scene.as_ref().map(|s| s.model.bounds),
@@ -100,6 +105,7 @@ impl State {
     /// and the normal-arrow segments are drawn zipped against the frame's
     /// draw list, so leaving it installed would paint the closed model's
     /// arrows over whatever geometry remains.
+    ///
     /// The ground keeps the box it already had when nothing is left to fit
     /// to. The pane cameras deliberately survive a close, so they are still
     /// framing what was just closed; snapping the floor and the grid to a
@@ -220,7 +226,54 @@ impl State {
         );
     }
 
+    /// Advance the node engine one frame: clock, cook, then hand the
+    /// resulting geometry to the renderer.
+    ///
+    /// Runs immediately before the environment refit and immediately before
+    /// the frame's delta drain, so geometry cooked this frame is on screen
+    /// this frame rather than one behind.
+    ///
+    /// Cooking is bounded by wall clock rather than run to completion. A cook
+    /// is resumable, so a scene too heavy to finish inside the budget makes
+    /// progress every frame and stays interactive throughout, instead of
+    /// freezing the window until it converges.
+    ///
+    /// Jobs resolve inline. Asynchronous offloading exists for the browser,
+    /// which has an import worker; here the engine parses during the cook and
+    /// the drained queue is normally empty, so this loop is a safety net for
+    /// anything the cook chose to defer rather than the main path.
+    fn drive_engine(&mut self) {
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+
+        let batch = engine.tick();
+        let dirty = !batch.events.is_empty();
+
+        let deadline = Instant::now() + COOK_BUDGET;
+        let mut within_budget = || Instant::now() < deadline;
+        let cooked = engine.cook(&mut within_budget);
+
+        for (ctx, id, request) in engine.take_jobs() {
+            let result = engine.resolve_job(&request);
+            engine.submit_job_result(ctx, id, result);
+        }
+
+        if dirty || !cooked.is_empty() {
+            let delta = engine.take_scene_delta();
+            if !delta.ops.is_empty() {
+                self.pending_scene_deltas.push(delta);
+            }
+        }
+    }
+
     pub(super) fn spawn_load(&mut self, model_path: String) {
+        // The two roots are mutually exclusive, so a model arriving closes an
+        // open scene. The converse lives in `open_scene`.
+        if self.engine.is_some() {
+            self.close_scene();
+        }
+
         let filename = std::path::Path::new(&model_path)
             .file_name()
             .and_then(|f| f.to_str())
@@ -548,6 +601,8 @@ impl State {
             }
         }
 
+        self.drive_engine();
+        self.gui.set_scene_open(self.engine.is_some());
         self.sync_env_bounds();
 
         let now = Instant::now();
@@ -576,13 +631,42 @@ impl State {
             cam.update(&self.queue, self.dt);
         }
 
-        if !self.view.display.lights_locked
+        if !self.install_authored_lights()
+            && !self.view.display.lights_locked
             && let Some(cam0) = self.view.cameras[0].as_ref().map(|c| c.camera)
         {
             let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
             let bounds = self.scene_bounds();
             solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, &cam0, &bounds, ibl_avg);
         }
+    }
+
+    /// Install the scene's own lights, if it has any. Returns whether it did.
+    ///
+    /// Authored lights outrank both the synthesized viewer rig and Lock
+    /// Lights. A scene carrying lights is describing how it wants to look,
+    /// and a rig that followed the camera on top of that would light it
+    /// twice; Lock Lights is a control over the synthesized rig, so with
+    /// nothing synthesized there is nothing for it to freeze.
+    ///
+    /// Both rig-writing paths call this first - the per-frame one for the
+    /// primary pane, and the per-pane one for the rest - because either
+    /// alone would let the other overwrite the authored rig on the next
+    /// frame.
+    pub(super) fn install_authored_lights(&mut self) -> bool {
+        let Some(defs) = self.scene_objects.lights() else {
+            return false;
+        };
+        let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
+        let sphere_scale = self.scene_bounds().diagonal() * 0.04;
+        self.env.lights_uniform =
+            solarxy_renderer::light::LightsUniform::from_defs(defs, sphere_scale, ibl_avg);
+        self.queue.write_buffer(
+            &self.env.light_buffer,
+            0,
+            bytemuck::cast_slice(&[self.env.lights_uniform]),
+        );
+        true
     }
 }
 

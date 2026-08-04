@@ -14,6 +14,15 @@ solarxy-formats = { path = "../solarxy-formats" }
 solarxy-renderer = { path = "../solarxy-renderer" }
 # The shared host orchestration, also driving the web shell.
 solarxy-host = { path = "../solarxy-host" }
+# The node engine. This shell is its second host, after the web one; the
+# dependency belongs here rather than on solarxy-host, which stays free of
+# it so a crate beneath both shells cannot hand one an engine it has no
+# use for. The engine and the renderer still never see each other: they
+# meet at solarxy_core::scene::SceneDelta and nowhere else.
+solarxy-graph = { path = "../solarxy-graph" }
+# Reached directly for the scene file's view sidecar, which solarxy-graph
+# returns but does not re-export.
+solarxy-scenefile = { path = "../solarxy-scenefile" }
 winit = "0.30.12"
 wgpu = "27.0.1"
 egui = "0.33"

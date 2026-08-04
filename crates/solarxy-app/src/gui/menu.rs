@@ -176,7 +176,7 @@ fn draw_file_menu(
 ) {
     ui.menu_button("File", |ui| {
         if ui
-            .add(egui::Button::new("Open Model\u{2026}").shortcut_text(format!("{MOD}+O")))
+            .add(egui::Button::new("Open\u{2026}").shortcut_text(format!("{MOD}+O")))
             .clicked()
         {
             actions.open_model = true;
@@ -213,7 +213,7 @@ fn draw_file_menu(
         }
         ui.separator();
         if ui
-            .add_enabled(has_model, egui::Button::new("Close Model"))
+            .add_enabled(has_model, egui::Button::new("Close"))
             .clicked()
         {
             actions.close_model = true;

@@ -169,6 +169,7 @@ impl State {
             },
             gui,
             scene: None,
+            engine: None,
             scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
             env,
             env_bounds,

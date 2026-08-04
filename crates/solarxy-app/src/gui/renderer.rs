@@ -54,6 +54,10 @@ pub struct EguiRenderer {
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
+    /// Whether a node-engine scene is open. Separate from `model_info`,
+    /// which describes a file-loaded model: the two roots are mutually
+    /// exclusive, and File > Close acts on whichever is present.
+    pub(super) scene_open: bool,
 }
 
 /// Viewport-tab geometry from the previous egui frame, tagged with the
@@ -113,6 +117,7 @@ impl EguiRenderer {
             dock_state: default_dock_state(),
             last_viewport_rect: None,
             has_saved_layout: false,
+            scene_open: false,
         }
     }
 
@@ -288,6 +293,10 @@ impl EguiRenderer {
         self.dock_state = default_dock_state();
     }
 
+    pub fn set_scene_open(&mut self, open: bool) {
+        self.scene_open = open;
+    }
+
     pub fn set_has_saved_layout(&mut self, has: bool) {
         self.has_saved_layout = has;
     }
@@ -378,7 +387,7 @@ impl EguiRenderer {
         self.frame_times.push_back(frame_ms);
 
         let raw_input = self.winit_state.take_egui_input(window);
-        let has_model = self.model_info.is_some();
+        let has_model = self.model_info.is_some() || self.scene_open;
         let avg_ms = self.frame_times.iter().sum::<f32>() / self.frame_times.len().max(1) as f32;
         let fps = if avg_ms > 0.0 {
             (1000.0 / avg_ms) as u32

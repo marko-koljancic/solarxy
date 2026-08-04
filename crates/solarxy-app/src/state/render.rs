@@ -430,6 +430,9 @@ impl State {
     /// own viewpoint. No-op when lights are locked. Pane 0 keeps the rig
     /// `update()` set from slot 0's camera.
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
+        if self.install_authored_lights() {
+            return;
+        }
         if self.view.display.lights_locked {
             return;
         }

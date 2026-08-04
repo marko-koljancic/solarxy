@@ -104,10 +104,18 @@ pub struct State {
     pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
+    /// The node engine, when a scene file is open.
+    ///
+    /// A file model and an engine scene are mutually exclusive: opening
+    /// either closes the other, so `scene` and this are never both `Some`.
+    /// They could coexist, since the draw list already chains both sources
+    /// and framing already unions them, but one root at a time is what keeps
+    /// Close unambiguous and the inspection panels presenting one tree.
+    pub(super) engine: Option<Box<solarxy_graph::Engine>>,
     /// Multi-object dynamic scene drawn beside `scene`. Fed by
     /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
-    /// the top of each frame; the node engine becomes the producer in a
-    /// later milestone.
+    /// the top of each frame. The engine above is the producer once a scene
+    /// file is open; the developer harness is the only other one.
     pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
     /// Scene-level GPU state every pane draws through: the light rig, the
     /// shadow map, the identity instance buffer bound for scene-level draws,
