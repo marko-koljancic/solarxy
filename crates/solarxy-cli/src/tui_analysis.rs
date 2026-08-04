@@ -1,10 +1,10 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseEventKind};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Margin},
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, Tabs, Wrap},
-    DefaultTerminal, Frame,
 };
 use solarxy_core::format_number;
 
@@ -16,6 +16,7 @@ use solarxy_core::report::{AnalysisReport, Severity};
 use super::tui::caps::{Capabilities, Glyphs};
 use super::tui::scroll::{Extent, Scroll, rendered_rows};
 use super::tui::prefs::TuiPrefs;
+use super::tui::shell::{self, Flow, Input, Surface};
 use super::tui::theme::ThemeSet;
 use super::tui::{kv_line, section_header};
 use super::tui_theme::TuiTheme;
@@ -137,18 +138,7 @@ impl TerminalApp {
     }
 
     pub fn run(mut self) -> io::Result<()> {
-        let mut terminal = ratatui::init();
-        let result = self.run_inner(&mut terminal);
-        ratatui::restore();
-        result
-    }
-
-    fn run_inner(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        while !self.exit {
-            terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
-        }
-        Ok(())
+        shell::run(&mut self)
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -355,16 +345,6 @@ impl TerminalApp {
                 &mut scrollbar_state,
             );
         }
-    }
-
-    fn handle_events(&mut self) -> io::Result<()> {
-        match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
-        Ok(())
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -866,6 +846,42 @@ fn validation_status_line(
     }
 }
 
+/// The shipped analyze surface, driven by the shared terminal loop.
+///
+/// Routing this shell through the driver rather than leaving it on its own
+/// blocking read is what actually fixes the defect: a resize now reflows when
+/// it happens instead of waiting for the next keystroke, and the terminal
+/// comes back usable after a panic.
+impl Surface for TerminalApp {
+    fn draw(&mut self, frame: &mut Frame) {
+        TerminalApp::draw(self, frame);
+    }
+
+    fn handle(&mut self, input: Input) -> Flow {
+        match input {
+            Input::Key(key) => self.handle_key_event(key),
+            // A resize needs no state change: the next draw measures the new
+            // frame and re-clamps the scroll against it. The loop having
+            // noticed at all is the whole fix.
+            Input::Resize(..) | Input::Tick => {}
+            Input::Mouse(mouse) => {
+                let tab = self.active_tab.index();
+                let extent = self.extents[tab];
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.scrolls[tab].down(3, extent),
+                    MouseEventKind::ScrollUp => self.scrolls[tab].up(3),
+                    _ => {}
+                }
+            }
+        }
+        if self.exit {
+            Flow::Quit
+        } else {
+            Flow::Continue
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::Terminal;
@@ -1281,6 +1297,66 @@ mod tests {
             assert!(app.export_json_input.is_none(), "{opener:?}");
             assert!(!app.exit, "{opener:?} quit instead of cancelling");
         }
+    }
+
+    /// The loop stops when the surface says so and not before, which is what
+    /// makes quitting a property of the surface rather than of the loop.
+    #[test]
+    fn the_surface_asks_the_loop_to_stop_only_after_a_quit_key() {
+        let mut app = fixture();
+        assert_eq!(
+            app.handle(Input::Key(crate::tui::harness::key(KeyCode::Char('j')))),
+            Flow::Continue
+        );
+        assert_eq!(
+            app.handle(Input::Key(crate::tui::harness::key(KeyCode::Char('q')))),
+            Flow::Quit
+        );
+    }
+
+    /// A resize changes no state on purpose: the next draw measures the new
+    /// frame and re-clamps against it. What was missing before was anything
+    /// awake to notice the resize at all.
+    #[test]
+    fn a_resize_and_a_tick_change_nothing_and_do_not_stop_the_loop() {
+        let mut app = fixture();
+        draw_at(&mut app, 60, 8);
+        let before = app.scrolls[0].offset(app.extents[0]);
+
+        assert_eq!(app.handle(Input::Resize(80, 24)), Flow::Continue);
+        assert_eq!(app.handle(Input::Tick), Flow::Continue);
+        assert_eq!(app.scrolls[0].offset(app.extents[0]), before);
+        assert!(!app.exit);
+    }
+
+    /// The wheel is the one mouse action this shell has a use for, and it goes
+    /// through the same clamped scroll model the keys do.
+    #[test]
+    fn the_wheel_scrolls_within_the_measured_extent() {
+        let wheel = |kind| {
+            Input::Mouse(crossterm::event::MouseEvent {
+                kind,
+                column: 1,
+                row: 1,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            })
+        };
+
+        let mut app = fixture();
+        draw_at(&mut app, 60, 8);
+        let extent = app.extents[0];
+
+        app.handle(wheel(MouseEventKind::ScrollDown));
+        assert_eq!(app.scrolls[0].offset(extent), 3);
+        app.handle(wheel(MouseEventKind::ScrollUp));
+        assert_eq!(app.scrolls[0].offset(extent), 0);
+
+        // Clamped by the same model the keyboard uses, so the wheel cannot
+        // run past the end where `j` could not.
+        for _ in 0..50 {
+            app.handle(wheel(MouseEventKind::ScrollDown));
+        }
+        assert_eq!(app.scrolls[0].offset(extent), extent.max_offset());
     }
 
     /// The scroll defect, at the shell rather than at the model: a body whose

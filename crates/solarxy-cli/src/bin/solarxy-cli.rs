@@ -158,10 +158,29 @@ fn run_analyze(
     } else if *format == OutputFormat::Json || !io::stdout().is_terminal() {
         print!("{rendered}");
         Ok(())
+    } else if let Some(reason) = terminal_too_small() {
+        // Decided before the screen is taken, so the notice lands on the
+        // normal terminal rather than flashing on an alternate one that is
+        // about to be torn down.
+        eprintln!("{reason}");
+        print!("{rendered}");
+        Ok(())
     } else {
         TerminalApp::new(report, model_path, tui_theme).run()?;
         Ok(())
     }
+}
+
+/// Whether this terminal is below the size the analyze surface needs.
+///
+/// A terminal that will not report its own size is taken at its word rather
+/// than refused: the surface is the better experience when it fits, and
+/// guessing "too small" would deny it to anyone whose terminal is merely
+/// reticent.
+#[cfg(feature = "analyzer")]
+fn terminal_too_small() -> Option<String> {
+    let (width, height) = crossterm::terminal::size().ok()?;
+    solarxy_cli::terminal_floor_notice(width, height)
 }
 
 #[cfg(not(feature = "analyzer"))]

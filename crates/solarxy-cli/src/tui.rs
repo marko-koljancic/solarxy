@@ -24,6 +24,7 @@ pub(crate) mod layout;
 #[allow(dead_code)]
 pub(crate) mod prefs;
 pub(crate) mod scroll;
+pub(crate) mod shell;
 pub(crate) mod theme;
 
 /// The reference panel and the shared render-test machinery.

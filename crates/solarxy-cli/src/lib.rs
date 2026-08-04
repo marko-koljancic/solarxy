@@ -33,6 +33,16 @@ pub mod tui_analysis;
 pub fn print_theme_listing() {
     tui::theme::print_listing();
 }
+
+/// Why this terminal is too small for the analyze surface, if it is.
+///
+/// The second entry point the binary needs into the terminal module tree,
+/// asked before the screen is taken so the notice reaches the reader's own
+/// terminal rather than an alternate one about to disappear.
+#[cfg(feature = "tui")]
+pub fn terminal_floor_notice(width: u16, height: u16) -> Option<String> {
+    tui::shell::below_floor(width, height)
+}
 #[cfg(feature = "tui")]
 pub mod tui_theme;
 mod validators;
