@@ -577,7 +577,7 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
         image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
             .context("malformed pixel buffer")?
             .save_with_format(&path, image::ImageFormat::Png)?;
-        println!("GOLDEN wrote {path} (exit-criterion proof, not compared)");
+        println!("GOLDEN wrote {path} (multi-object draw path)");
     }
 
     // 0.8.0 goldens growth: the non-triangle topologies and vertex colors
@@ -750,7 +750,14 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
 /// once every branch in flight carries the capture, and it becomes a hard
 /// gate.
 fn grown_captures() -> &'static [&'static str] {
-    &["topology", "clay", "principled", "graded", "lit"]
+    &[
+        "topology",
+        "clay",
+        "principled",
+        "graded",
+        "lit",
+        "two_objects",
+    ]
 }
 
 /// Capture one mode through the **shared host pane path**.

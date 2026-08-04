@@ -84,10 +84,44 @@ impl AABB {
             Point3::new(mx.x, mx.y, mx.z),
         ]
     }
+
+    /// The smallest axis-aligned box containing this one after `transform`.
+    ///
+    /// Every corner is carried through and re-bounded, so rotation and
+    /// non-uniform scale are handled rather than translation alone. Under
+    /// rotation the result is looser than the exact bounds of the rotated
+    /// geometry, which is the same approximation every other bounds consumer
+    /// here already accepts: the callers are camera framing, the depth
+    /// range's fit and the shadow frustum's extent, and all three want a box
+    /// that certainly covers the object rather than the tightest one.
+    ///
+    /// The perspective row is ignored. These are object placements, which are
+    /// affine by construction.
+    #[must_use]
+    pub fn transformed(&self, transform: &cgmath::Matrix4<f32>) -> AABB {
+        let mut corners = self
+            .corners()
+            .into_iter()
+            .map(|c| Point3::from_homogeneous(transform * c.to_homogeneous()));
+        // `corners()` yields eight, so the first is always present and the
+        // accumulator needs no sentinel infinities.
+        let first = corners.next().unwrap_or(self.min);
+        let mut acc = AABB {
+            min: first,
+            max: first,
+        };
+        for c in corners {
+            acc.min = Point3::new(acc.min.x.min(c.x), acc.min.y.min(c.y), acc.min.z.min(c.z));
+            acc.max = Point3::new(acc.max.x.max(c.x), acc.max.y.max(c.y), acc.max.z.max(c.z));
+        }
+        acc
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use cgmath::SquareMatrix;
+
     use super::*;
 
     fn unit_cube() -> AABB {
@@ -152,6 +186,63 @@ mod tests {
         let c2 = aabb.corners();
         assert_eq!(c2[0], aabb.min);
         assert_eq!(c2[7], aabb.max);
+    }
+
+    #[test]
+    fn transformed_by_identity_is_unchanged() {
+        let a = AABB {
+            min: Point3::new(-3.0, -2.0, -1.0),
+            max: Point3::new(4.0, 5.0, 6.0),
+        };
+        let t = a.transformed(&cgmath::Matrix4::identity());
+        assert!((t.min - a.min).magnitude() < 1e-6);
+        assert!((t.max - a.max).magnitude() < 1e-6);
+    }
+
+    #[test]
+    fn transformed_carries_translation() {
+        // The case that made this necessary: a placed object used to report
+        // the box it would occupy at the origin, so framing, the depth fit
+        // and the shadow frustum all pointed at empty space.
+        let moved = unit_cube().transformed(&cgmath::Matrix4::from_translation(Vector3::new(
+            10.0, 0.0, -5.0,
+        )));
+        assert!((moved.min - Point3::new(10.0, 0.0, -5.0)).magnitude() < 1e-6);
+        assert!((moved.max - Point3::new(11.0, 1.0, -4.0)).magnitude() < 1e-6);
+    }
+
+    #[test]
+    fn transformed_handles_non_uniform_scale() {
+        let scaled =
+            unit_cube().transformed(&cgmath::Matrix4::from_nonuniform_scale(2.0, 3.0, 4.0));
+        assert!((scaled.min - Point3::new(0.0, 0.0, 0.0)).magnitude() < 1e-6);
+        assert!((scaled.max - Point3::new(2.0, 3.0, 4.0)).magnitude() < 1e-6);
+    }
+
+    #[test]
+    fn transformed_rotation_stays_axis_aligned_and_covering() {
+        // A 45-degree turn about Y widens the axis-aligned box to the
+        // diagonal. Looser than the exact bounds of the rotated geometry,
+        // which is the documented tradeoff; what must hold is that it still
+        // covers every corner.
+        let cube = AABB {
+            min: Point3::new(-1.0, -1.0, -1.0),
+            max: Point3::new(1.0, 1.0, 1.0),
+        };
+        let m = cgmath::Matrix4::from_angle_y(cgmath::Deg(45.0));
+        let r = cube.transformed(&m);
+        let half = 2.0_f32.sqrt();
+        assert!((r.max.x - half).abs() < 1e-5, "got {}", r.max.x);
+        assert!(
+            (r.max.y - 1.0).abs() < 1e-5,
+            "y is untouched by a Y rotation"
+        );
+        for corner in cube.corners() {
+            let p = Point3::from_homogeneous(m * corner.to_homogeneous());
+            assert!(p.x >= r.min.x - 1e-5 && p.x <= r.max.x + 1e-5);
+            assert!(p.y >= r.min.y - 1e-5 && p.y <= r.max.y + 1e-5);
+            assert!(p.z >= r.min.z - 1e-5 && p.z <= r.max.z + 1e-5);
+        }
     }
 
     #[test]

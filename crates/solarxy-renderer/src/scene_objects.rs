@@ -267,28 +267,22 @@ impl SceneObjects {
         self.cameras.as_deref()
     }
 
-    /// Union world-space-ish bounds over visible objects (object bounds
-    /// only; transforms are not applied in v1 — good enough for the
-    /// camera-framing and shadow-fit callers, refined with the engine).
+    /// Union world-space bounds over visible objects, each carried through
+    /// its own placement.
+    ///
+    /// The transform matters as soon as a scene is authored rather than
+    /// loaded from one file: three consumers read this, and all three are
+    /// wrong without it. Camera framing centres on empty space, the depth
+    /// range fits a box the geometry is not in, and the shadow frustum is
+    /// sized so a placed object falls outside it.
     #[must_use]
     pub fn visible_bounds(&self) -> Option<AABB> {
         let mut acc: Option<AABB> = None;
         for obj in self.objects.values().filter(|o| o.visible) {
-            let b = obj.model.bounds;
+            let b = obj.model.bounds.transformed(&obj.transform);
             acc = Some(match acc {
                 None => b,
-                Some(a) => AABB {
-                    min: cgmath::Point3::new(
-                        a.min.x.min(b.min.x),
-                        a.min.y.min(b.min.y),
-                        a.min.z.min(b.min.z),
-                    ),
-                    max: cgmath::Point3::new(
-                        a.max.x.max(b.max.x),
-                        a.max.y.max(b.max.y),
-                        a.max.z.max(b.max.z),
-                    ),
-                },
+                Some(a) => a.union(&b),
             });
         }
         acc
