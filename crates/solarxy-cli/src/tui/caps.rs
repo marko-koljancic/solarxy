@@ -193,6 +193,22 @@ impl ColorTier {
     pub fn paints_a_ground(self) -> bool {
         matches!(self, ColorTier::Ansi256 | ColorTier::TrueColor)
     }
+
+    /// Whether a theme file is consulted at all at this tier.
+    ///
+    /// The same boundary as [`Self::paints_a_ground`], seen from the other
+    /// side. One question underlies both: does this tier own the colour, or
+    /// does the terminal? Where the terminal owns it, an authored ground
+    /// cannot be painted and an authored ink cannot be trusted, so the theme
+    /// is not read rather than read and then partly ignored.
+    ///
+    /// They are written separately because they will not always agree. A
+    /// future tier that reads a theme for its hues while still leaving the
+    /// ground alone would split them, and a caller asking the wrong question
+    /// should not silently get the right answer today and the wrong one then.
+    pub fn reads_a_theme(self) -> bool {
+        matches!(self, ColorTier::Ansi256 | ColorTier::TrueColor)
+    }
 }
 
 /// Nearest xterm-256 entry to an RGB colour.

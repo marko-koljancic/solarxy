@@ -11,7 +11,9 @@ use ratatui::{
 use super::tui_theme::TuiTheme;
 
 pub(crate) mod caps;
+pub(crate) mod contrast;
 pub(crate) mod scroll;
+pub(crate) mod theme;
 
 /// The reference panel and the shared render-test machinery.
 ///

@@ -1,0 +1,28 @@
+# Maximum separation, for low vision and for projectors. Pure ground, pure
+# ink, and severities no colour deficiency collapses together.
+#
+# The panel ground is the ground: this theme has no elevation, because a
+# raised surface is a distinction that costs contrast and buys nothing when
+# separation is the whole point. Selection is the one concession, a neutral
+# band dark enough to leave white ink at 12.6:1.
+#
+# chart is not drawn in the design source and follows the default's
+# relationship: the accent plus one hue as far from it as the repertoire
+# allows.
+
+name = "solarxy-contrast"
+author = "Solarxy"
+
+[slots]
+ground = "#000000"
+panel_ground = "#000000"
+ink = "#ffffff"
+ink_dim = "#c8c8c8"
+border = "#ffffff"
+border_focus = "#ffff00"
+accent = "#ffff00"
+success = "#00ff00"
+warning = "#ff9500"
+error = "#ff3b30"
+selection = "#333333"
+chart = ["#ffff00", "#00ffff"]

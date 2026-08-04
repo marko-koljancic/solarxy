@@ -65,6 +65,17 @@ pub struct Args {
         help = "Exit-code policy: 'error' (fail on errors only), 'warning' (fail on either), 'never' (always exit 0)."
     )]
     pub fail_on: FailOn,
+    #[clap(
+        long = "tui-theme",
+        value_name = "NAME",
+        help = "Terminal theme for analyze mode; applies at 256-colour and truecolor terminals"
+    )]
+    pub tui_theme: Option<String>,
+    #[clap(
+        long = "list-tui-themes",
+        help = "List the terminal themes this build can find, with a swatch of each"
+    )]
+    pub list_tui_themes: bool,
     #[arg(long, help = "Print version and project info")]
     pub about: bool,
     #[arg(long, help = "Check for updates and self-update")]

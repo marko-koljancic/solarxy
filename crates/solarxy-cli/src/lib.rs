@@ -24,6 +24,15 @@ pub mod parser;
 pub(crate) mod tui;
 #[cfg(feature = "tui")]
 pub mod tui_analysis;
+
+/// Print every terminal theme this build can find, with a swatch of each.
+///
+/// The one entry point the binary needs into the terminal module tree, which
+/// is otherwise crate-private so the panels behind it stay free to move.
+#[cfg(feature = "tui")]
+pub fn print_theme_listing() {
+    tui::theme::print_listing();
+}
 #[cfg(feature = "tui")]
 pub mod tui_theme;
 mod validators;

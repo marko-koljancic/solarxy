@@ -1,0 +1,24 @@
+# For anyone who wants the terminal to sit back. Cooler ground, cyan accent,
+# the same structure and the same readability floor.
+#
+# panel_ground, selection and chart are not drawn in the design source, so
+# they follow the default's relationships: a panel ground one surface step off
+# the ground, a selection band that is a dark tint of the accent, and a chart
+# pair of the accent plus one hue far enough away to read apart from it.
+
+name = "solarxy-cool"
+author = "Solarxy"
+
+[slots]
+ground = "#161a24"
+panel_ground = "#1e2433"
+ink = "#cdd6f4"
+ink_dim = "#7b88a8"
+border = "#313a52"
+border_focus = "#6fb3d9"
+accent = "#6fb3d9"
+success = "#7fd6a4"
+warning = "#e0a458"
+error = "#e06c75"
+selection = "#2c3a4f"
+chart = ["#6fb3d9", "#b48ead"]

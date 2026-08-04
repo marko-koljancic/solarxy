@@ -15,6 +15,7 @@ use solarxy_core::report::{AnalysisReport, Severity};
 
 use super::tui::caps::{Capabilities, Glyphs};
 use super::tui::scroll::{Extent, Scroll, rendered_rows};
+use super::tui::theme::ThemeSet;
 use super::tui::{kv_line, section_header};
 use super::tui_theme::TuiTheme;
 
@@ -67,17 +68,26 @@ pub struct TerminalApp {
 }
 
 impl TerminalApp {
-    pub fn new(report: AnalysisReport, model_path: String) -> Self {
+    pub fn new(report: AnalysisReport, model_path: String, requested_theme: Option<&str>) -> Self {
         let caps = Capabilities::detect();
-        // Emitted before `ratatui::init` takes the screen, so it lands on
-        // the normal terminal rather than smearing the alternate one. This
-        // is how a user confirms an override did what they asked.
+        let (theme, notices) = ThemeSet::load().resolve(requested_theme, caps);
+
+        // All of this lands before `ratatui::init` takes the screen, so it
+        // reaches the normal terminal rather than smearing the alternate one.
+        // This is how a reader confirms an override did what they asked, and
+        // how a refused theme gets to say why.
         tracing::debug!(
-            "resolved terminal capabilities: color={:?} glyphs={:?}",
+            "resolved terminal capabilities: color={:?} glyphs={:?} theme={}",
             caps.color,
-            caps.glyphs
+            caps.glyphs,
+            theme.name
         );
+        for notice in notices {
+            tracing::warn!("{notice}");
+        }
+
         Self::with_capabilities_and_report(report, model_path, caps)
+            .with_theme(TuiTheme::from_theme(&theme))
     }
 
     fn with_capabilities_and_report(

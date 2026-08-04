@@ -112,6 +112,33 @@ impl TuiTheme {
         }
     }
 
+    /// Adapt a resolved theme onto this shell's nine-slot vocabulary.
+    ///
+    /// Hues only. This shell has no concept of a panel ground and paints
+    /// none, so `ground`, `panel_ground` and `selection` are dropped rather
+    /// than approximated: the tiled panels that own those slots arrive with
+    /// the workspace, and painting a ground here would fight the terminal for
+    /// no gain.
+    ///
+    /// `label` takes `ink_dim` rather than the success hue. The two were the
+    /// same colour before themes existed, which made every field label green
+    /// and left the label slot reachable only by empty-state text. A theme
+    /// that names the two separately is what makes the distinction available.
+    pub fn from_theme(theme: &super::tui::theme::Theme) -> Self {
+        let s = &theme.slots;
+        Self {
+            accent: s.accent,
+            heading: s.ink,
+            text: s.ink,
+            label: s.ink_dim,
+            muted: s.ink_dim,
+            border: s.border,
+            success: s.success,
+            warning: s.warning,
+            error: s.error,
+        }
+    }
+
     /// Map the shared palette onto ratatui, keeping the ink terminal-native.
     ///
     /// Pass `Palette::dark()`: its hues are the mid-tone set that carries on

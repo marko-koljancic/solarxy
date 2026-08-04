@@ -46,7 +46,7 @@ use ratatui::{Frame, Terminal};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::caps::{Capabilities, ColorTier, GlyphTier, Glyphs, PlotStyle};
-use crate::tui_theme::TuiTheme;
+use super::theme::{Slots, Theme, ThemeSet};
 
 /// The target terminal the specification names.
 pub(crate) const REFERENCE_WIDTH: u16 = 140;
@@ -97,52 +97,68 @@ pub(crate) fn lower_tiers() -> [Capabilities; 4] {
     ]
 }
 
-/// Draw the reference panel and read the cells back.
+/// Draw the reference panel through a theme's slots and read the cells back.
 ///
-/// The theme is degraded through the tier exactly as the shell degrades it,
-/// so a caller passing a light palette is asking what a light theme would
-/// actually paint at that tier rather than what it holds in memory.
-pub(crate) fn render_reference(caps: Capabilities, theme: TuiTheme) -> Buffer {
+/// Resolution runs through [`Theme::resolve`], the same door the shell uses,
+/// so a caller handing this a light theme is asking what that theme would
+/// actually paint at that tier rather than what its file holds.
+pub(crate) fn render_reference(caps: Capabilities, name: &str, slots: &Slots) -> Buffer {
     let mut terminal =
         Terminal::new(TestBackend::new(REFERENCE_WIDTH, REFERENCE_HEIGHT)).expect("test terminal");
-    let theme = theme.degraded(caps.color);
+    let theme = Theme::resolve(caps, name, slots);
     let glyphs = caps.glyphs();
     terminal
-        .draw(|frame| draw_reference(frame, frame.area(), &theme, &glyphs))
+        .draw(|frame| draw_reference(frame, frame.area(), &theme.slots, &glyphs))
         .expect("draw");
     terminal.backend().buffer().clone()
 }
 
-/// The reference panel as the shell would paint it on that terminal.
+/// The reference panel under a named bundled theme.
+pub(crate) fn render_bundled(caps: Capabilities, name: &str) -> Buffer {
+    let set = ThemeSet::bundled();
+    let slots = set
+        .slots_for(name)
+        .unwrap_or_else(|notice| panic!("{name}: {notice}"));
+    render_reference(caps, name, &slots)
+}
+
+/// The reference panel under the default theme.
 pub(crate) fn render_reference_at(caps: Capabilities) -> Buffer {
-    render_reference(caps, TuiTheme::resolve())
+    render_bundled(caps, super::theme::DEFAULT_THEME)
 }
 
 /// Every slot the theme carries, named, so a failing cell says which one.
-fn slots(theme: &TuiTheme) -> [(&'static str, Color); 9] {
+fn slot_rows(slots: &Slots) -> [(&'static str, Color); 9] {
     [
-        ("accent", theme.accent),
-        ("heading", theme.heading),
-        ("text", theme.text),
-        ("label", theme.label),
-        ("muted", theme.muted),
-        ("border", theme.border),
-        ("success", theme.success),
-        ("warning", theme.warning),
-        ("error", theme.error),
+        ("accent", slots.accent),
+        ("border_focus", slots.border_focus),
+        ("ink", slots.ink),
+        ("ink_dim", slots.ink_dim),
+        ("border", slots.border),
+        ("selection", slots.selection),
+        ("success", slots.success),
+        ("warning", slots.warning),
+        ("error", slots.error),
     ]
 }
 
-fn draw_reference(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) {
+fn draw_reference(frame: &mut Frame, area: Rect, theme: &Slots, glyphs: &Glyphs) {
+    // At the two lower tiers this ground resolves to `Color::Reset`, which is
+    // the terminal's own and indistinguishable from painting none. Above them
+    // it is the theme's, which is what a theme is for. Either way it is set in
+    // one place rather than decided per widget.
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.ground)),
+        area,
+    );
+
     let frame_block = Block::bordered()
         .title(Line::from(vec![
             Span::styled(glyphs.sun, Style::default().fg(theme.accent)),
             Span::raw(" "),
             Span::styled(
                 "Reference",
-                Style::default()
-                    .fg(theme.heading)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.ink).add_modifier(Modifier::BOLD),
             ),
         ]))
         .border_set(glyphs.border_focused)
@@ -170,8 +186,8 @@ fn draw_reference(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyp
 
 /// One row per slot, the slot's own name painted in it. Bold rides two of
 /// them, because bold is the only emphasis the monochrome tier keeps.
-fn draw_slots(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
-    let lines: Vec<Line> = slots(theme)
+fn draw_slots(frame: &mut Frame, area: Rect, theme: &Slots) {
+    let lines: Vec<Line> = slot_rows(theme)
         .into_iter()
         .map(|(name, color)| {
             let emphasised = matches!(name, "accent" | "heading");
@@ -182,7 +198,7 @@ fn draw_slots(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
             Line::from(vec![
                 Span::styled(format!("{name:<9}"), style),
                 Span::raw(" "),
-                Span::styled("the quick brown fox", Style::default().fg(theme.text)),
+                Span::styled("the quick brown fox", Style::default().fg(theme.ink)),
             ])
         })
         .collect();
@@ -191,7 +207,7 @@ fn draw_slots(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
 
 /// Every glyph, each beside the word it stands for, so a tier that drops one
 /// still leaves the meaning readable in the failure message.
-fn draw_glyphs(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) {
+fn draw_glyphs(frame: &mut Frame, area: Rect, theme: &Slots, glyphs: &Glyphs) {
     let mark = |glyph: &'static str, word: &'static str, color: Color| {
         vec![
             Span::styled(glyph.to_owned(), Style::default().fg(color)),
@@ -206,15 +222,18 @@ fn draw_glyphs(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs)
     let chrome = Line::from(vec![
         Span::styled(glyphs.caret.to_owned(), Style::default().fg(theme.accent)),
         Span::raw(" "),
-        Span::styled(glyphs.divider.to_owned(), Style::default().fg(theme.muted)),
+        Span::styled(
+            glyphs.divider.to_owned(),
+            Style::default().fg(theme.ink_dim),
+        ),
         Span::raw(" "),
         Span::styled(
             glyphs.scroll_up.to_owned(),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.ink_dim),
         ),
         Span::styled(
             glyphs.scroll_down.to_owned(),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.ink_dim),
         ),
         Span::raw("  "),
         Span::styled(glyphs.address(1), Style::default().fg(theme.accent)),
@@ -228,7 +247,7 @@ fn draw_glyphs(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs)
     );
 }
 
-fn draw_table(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
+fn draw_table(frame: &mut Frame, area: Rect, theme: &Slots) {
     let widths = [
         Constraint::Length(20),
         Constraint::Length(10),
@@ -242,13 +261,10 @@ fn draw_table(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
         widths,
     )
     .header(
-        Row::new(["name", "triangles", "uv"]).style(
-            Style::default()
-                .fg(theme.heading)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Row::new(["name", "triangles", "uv"])
+            .style(Style::default().fg(theme.ink).add_modifier(Modifier::BOLD)),
     )
-    .style(Style::default().fg(theme.text));
+    .style(Style::default().fg(theme.ink));
     frame.render_widget(table, area);
 }
 
@@ -258,7 +274,7 @@ fn draw_table(frame: &mut Frame, area: Rect, theme: &TuiTheme) {
 /// docs. The two glyphs are chosen here rather than carried on [`Glyphs`]
 /// because nothing ships a meter yet; the panel that does should move them
 /// there so every meter in the shell agrees.
-fn draw_meter(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) {
+fn draw_meter(frame: &mut Frame, area: Rect, theme: &Slots, glyphs: &Glyphs) {
     const CELLS: usize = 40;
     let (filled_glyph, empty_glyph) = match glyphs.tier {
         GlyphTier::Unicode => ("\u{2588}", "\u{2591}"),
@@ -273,19 +289,22 @@ fn draw_meter(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) 
         ),
         Span::styled(
             empty_glyph.repeat(CELLS - filled),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.ink_dim),
         ),
         Span::raw("  "),
-        Span::styled("62% of budget", Style::default().fg(theme.text)),
+        Span::styled("62% of budget", Style::default().fg(theme.ink)),
     ]);
     frame.render_widget(Paragraph::new(Text::from(vec![bar])), area);
 }
 
 /// The unfocused frame, so both border sets reach the buffer and focus by
 /// weight is asserted rather than assumed.
-fn draw_unfocused_specimen(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) {
+fn draw_unfocused_specimen(frame: &mut Frame, area: Rect, theme: &Slots, glyphs: &Glyphs) {
     let block = Block::bordered()
-        .title(Span::styled("unfocused", Style::default().fg(theme.muted)))
+        .title(Span::styled(
+            "unfocused",
+            Style::default().fg(theme.ink_dim),
+        ))
         .border_set(glyphs.border)
         .border_style(Style::default().fg(theme.border));
     frame.render_widget(block, area);
@@ -311,7 +330,7 @@ const PLOT_SAMPLES: [(f64, f64); 15] = [
     (0.36, 0.91),
 ];
 
-fn draw_plot(frame: &mut Frame, area: Rect, theme: &TuiTheme, glyphs: &Glyphs) {
+fn draw_plot(frame: &mut Frame, area: Rect, theme: &Slots, glyphs: &Glyphs) {
     match glyphs.plot {
         PlotStyle::Braille => {
             let canvas = Canvas::default()
@@ -364,7 +383,7 @@ pub(crate) fn assert_no_colour(buffer: &Buffer, context: &str) {
 /// are the semantic hues from the shared palette.
 pub(crate) fn assert_only_terminal_ink_or_palette_hues(
     buffer: &Buffer,
-    theme: &TuiTheme,
+    theme: &Slots,
     context: &str,
 ) {
     let allowed = [Color::Reset, Color::DarkGray];
@@ -491,18 +510,62 @@ mod tests {
     /// two tiers that ignore the theme and leave the ground to the terminal.
     #[test]
     fn the_lower_tiers_keep_the_shipped_colour_rules() {
-        let theme = TuiTheme::resolve();
-        for caps in lower_tiers() {
-            let context = format!("{caps:?}");
-            let buffer = render_reference(caps, theme);
-            assert_only_terminal_ink_or_palette_hues(
-                &buffer,
-                &theme.degraded(caps.color),
-                &context,
-            );
-            assert_body_text_is_terminal_ink(&buffer, &context);
-            assert_no_background(&buffer, &context);
+        let set = ThemeSet::bundled();
+        // Every shipped theme, not just the default: the rules hold because
+        // the tier refuses to read a file, so which file it refused to read
+        // must not matter.
+        for name in set.names() {
+            let slots = set.slots_for(name).expect("bundled themes load");
+            for caps in lower_tiers() {
+                let context = format!("{name} at {caps:?}");
+                let buffer = render_reference(caps, name, &slots);
+                let resolved = Theme::resolve(caps, name, &slots);
+                assert_only_terminal_ink_or_palette_hues(&buffer, &resolved.slots, &context);
+                assert_body_text_is_terminal_ink(&buffer, &context);
+                assert_no_background(&buffer, &context);
+            }
         }
+    }
+
+    /// Every shipped theme renders at both tiers that read one. The colour
+    /// rules above are deliberately not asserted here: painting its own ink on
+    /// its own ground is the whole point of a theme.
+    #[test]
+    fn every_bundled_theme_renders_at_the_upper_tiers() {
+        let set = ThemeSet::bundled();
+        for name in set.names() {
+            let slots = set.slots_for(name).expect("bundled themes load");
+            for color in [ColorTier::Ansi256, ColorTier::TrueColor] {
+                for glyphs in [GlyphTier::Unicode, GlyphTier::Ascii] {
+                    let caps = Capabilities { color, glyphs };
+                    let buffer = render_reference(caps, name, &slots);
+                    let painted = buffer
+                        .content()
+                        .iter()
+                        .filter(|cell| !cell.symbol().trim().is_empty())
+                        .count();
+                    assert!(painted > 200, "{name} at {caps:?} painted {painted} cells");
+                }
+            }
+        }
+    }
+
+    /// A theme owns the ground at the tiers that read it, and the reference
+    /// panel has to actually paint it or nothing downstream is guarding the
+    /// slot.
+    #[test]
+    fn the_upper_tiers_paint_the_themes_ground() {
+        let set = ThemeSet::bundled();
+        let slots = set.slots_for("solarxy-paper").expect("loads");
+        let caps = Capabilities {
+            color: ColorTier::TrueColor,
+            glyphs: GlyphTier::Unicode,
+        };
+        let buffer = render_reference(caps, "solarxy-paper", &slots);
+        assert!(
+            buffer.content().iter().any(|cell| cell.bg == slots.ground),
+            "the theme's ground never reached a cell"
+        );
     }
 
     /// The regression the maintainer caught in a real terminal: selecting the
@@ -515,24 +578,25 @@ mod tests {
     /// it also paints. Asserting this frame-wide would forbid the feature the
     /// theme system exists to provide.
     #[test]
-    fn a_light_palettes_ink_never_reaches_the_lower_tiers() {
+    fn a_light_themes_ink_never_reaches_the_lower_tiers() {
+        let set = ThemeSet::bundled();
+        let paper = set.slots_for("solarxy-paper").expect("loads");
         let light = Palette::light();
-        let inks: Vec<Color> = [
-            light.roles.ink_primary,
-            light.roles.ink_strong,
-            light.roles.ink_tertiary,
-        ]
-        .iter()
-        .map(|role| Color::Rgb(role.rgb.r, role.rgb.g, role.rgb.b))
-        .collect();
+        let ink = Color::Rgb(
+            light.roles.ink_primary.rgb.r,
+            light.roles.ink_primary.rgb.g,
+            light.roles.ink_primary.rgb.b,
+        );
+        assert_eq!(paper.ink, ink, "the shipped light theme is the fixture");
 
         for caps in lower_tiers() {
-            let buffer = render_reference(caps, TuiTheme::from_palette(&light));
+            let buffer = render_reference(caps, "solarxy-paper", &paper);
             for cell in buffer.content() {
-                assert!(
-                    !inks.contains(&cell.fg),
-                    "a light palette's ink was painted into a terminal at {caps:?}"
+                assert_ne!(
+                    cell.fg, ink,
+                    "a light theme's ink was painted into a terminal at {caps:?}"
                 );
+                assert_ne!(cell.bg, paper.ground, "its ground reached {caps:?} too");
             }
         }
     }
@@ -566,7 +630,10 @@ mod tests {
             color: ColorTier::TrueColor,
             glyphs: GlyphTier::Unicode,
         });
-        let accent = TuiTheme::resolve().accent;
+        let accent = ThemeSet::bundled()
+            .slots_for(super::super::theme::DEFAULT_THEME)
+            .expect("loads")
+            .accent;
         assert!(
             buffer.content().iter().any(|cell| cell.fg == accent),
             "the authored accent never reached a truecolor terminal"

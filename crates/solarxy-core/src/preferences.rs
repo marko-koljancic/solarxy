@@ -823,9 +823,24 @@ impl Default for RenderingPrefs {
     }
 }
 
+/// Solarxy's own directory under the platform's config root.
+///
+/// Exposed rather than kept private because more than one file lives here:
+/// the GUI's `config.toml` and, from the terminal shell, its own state and a
+/// user theme directory beside it. Each of those resolving its own path from
+/// `dirs` independently is how two of them end up disagreeing about where
+/// "the config directory" is.
+///
+/// `None` when the platform reports no config root, which is a real state on
+/// a bare container and never an error: every caller falls back to defaults.
+#[cfg(feature = "fs")]
+pub fn config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("solarxy"))
+}
+
 #[cfg(feature = "fs")]
 pub fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("solarxy").join("config.toml"))
+    config_dir().map(|d| d.join("config.toml"))
 }
 
 #[cfg(feature = "fs")]

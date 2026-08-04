@@ -1,0 +1,31 @@
+# For a light terminal. Values come from the Palette's light roles, which is
+# the case the 0.7.1 regression was actually about.
+#
+# `ink_dim` deviates from the design source, deliberately and by the smallest
+# amount that works. The designed value was the light palette's ink-tertiary,
+# #7a756a, which clears 4.5:1 against no light ground in the palette: 4.06:1
+# on this theme's own ground and 4.36:1 even on the lightest surface there is.
+# #716d63 is the same hue at 93% value and clears 4.57:1 here. The floor does
+# not move to accommodate a shipped theme.
+#
+# panel_ground, selection and chart are not drawn in the design source and
+# follow the default's relationships, resolved against the light palette:
+# panels lift off a light ground rather than recede into it, so panel_ground
+# is the raised surface rather than a darker one.
+
+name = "solarxy-paper"
+author = "Solarxy"
+
+[slots]
+ground = "#f4f1ea"
+panel_ground = "#fbf9f4"
+ink = "#11110e"
+ink_dim = "#716d63"
+border = "#d8d2c6"
+border_focus = "#9a4a2e"
+accent = "#9a4a2e"
+success = "#3aa76d"
+warning = "#b85c1e"
+error = "#d1373c"
+selection = "#e4d3c8"
+chart = ["#9a4a2e", "#1f6feb"]

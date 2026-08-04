@@ -4091,6 +4091,7 @@ dependencies = [
  "solarxy-core",
  "solarxy-formats",
  "solarxy-validate",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

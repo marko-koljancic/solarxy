@@ -43,6 +43,11 @@ fn main() -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
+    if args.list_tui_themes {
+        solarxy_cli::print_theme_listing();
+        return Ok(ExitCode::SUCCESS);
+    }
+
     if args.update {
         return run_update().map(|()| ExitCode::SUCCESS);
     }
@@ -74,6 +79,7 @@ fn main() -> anyhow::Result<ExitCode> {
                     &args.format,
                     args.output.as_deref(),
                     args.config.as_deref(),
+                    args.tui_theme.as_deref(),
                 )
                 .map(|()| ExitCode::SUCCESS)
             }
@@ -127,6 +133,7 @@ fn run_analyze(
     format: &OutputFormat,
     output: Option<&Path>,
     config: Option<&Path>,
+    tui_theme: Option<&str>,
 ) -> anyhow::Result<()> {
     let model_path =
         model_path.ok_or_else(|| anyhow::anyhow!("Model path required for analyze mode"))?;
@@ -152,7 +159,7 @@ fn run_analyze(
         print!("{rendered}");
         Ok(())
     } else {
-        TerminalApp::new(report, model_path).run()?;
+        TerminalApp::new(report, model_path, tui_theme).run()?;
         Ok(())
     }
 }
@@ -163,6 +170,7 @@ fn run_analyze(
     _format: &OutputFormat,
     _output: Option<&Path>,
     _config: Option<&Path>,
+    _tui_theme: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Analyzer not available: rebuild solarxy-cli with the 'analyzer' feature")
 }
