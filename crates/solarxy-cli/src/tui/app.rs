@@ -120,7 +120,14 @@ impl<'a> App<'a> {
             self.arranging = false;
             return;
         }
-        self.maximized = None;
+        if self.maximized.take().is_some() {
+            return;
+        }
+        // Nothing left to go back to, and the tabbed shell this replaced quit
+        // on this key. A reader who learned it there gets an answer instead of
+        // silence. This is a bridge for readers arriving from 0.8.1 and comes
+        // out again once they have arrived.
+        self.notice = Some("nothing to go back to; press q to quit".to_owned());
     }
 
     fn global(&mut self, command: Command) -> Flow {
@@ -918,6 +925,38 @@ mod tests {
         // And at the bottom of the chain it still does not quit.
         assert_eq!(app.handle(key(KeyCode::Esc)), Flow::Continue);
         assert!(!app.exit, "escape quit the application");
+    }
+
+    /// The tabbed shell quit on this key, so at the bottom of the chain the
+    /// reader is told which key does now. Only at the bottom: a press that
+    /// actually went back has already shown what it did.
+    #[test]
+    fn escape_with_nothing_left_names_the_key_that_quits() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+
+        app.handle(key(KeyCode::Esc));
+        assert!(
+            app.notice.as_deref().is_some_and(|n| n.contains("press q")),
+            "{:?}",
+            app.notice
+        );
+
+        // A press with a layer to unwind restores it and says nothing.
+        app.handle(key(KeyCode::Enter));
+        assert!(app.maximized.is_some());
+        app.handle(key(KeyCode::Esc));
+        assert!(app.maximized.is_none(), "maximize did not restore");
+        assert!(app.notice.is_none(), "{:?}", app.notice);
+
+        // The next one has nothing left, so the hint is back.
+        app.handle(key(KeyCode::Esc));
+        assert!(
+            app.notice.as_deref().is_some_and(|n| n.contains("press q")),
+            "{:?}",
+            app.notice
+        );
     }
 
     /// A text buffer takes the whole keyboard, or typing a path containing
