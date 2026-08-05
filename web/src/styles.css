@@ -2760,9 +2760,16 @@ body.reduce-motion .cook-arc {
 }
 
 /* The glyph centres on the BODY, not on the whole box: both silhouettes
- * raise a tab over the top 8px, so a box-centred glyph reads high. */
+ * raise a tab over the top 8px, so a box-centred glyph reads high. The
+ * cook arc and the display halo take the same shift, so the ring and the
+ * halo stay concentric with the glyph they belong to rather than sitting
+ * 4px above it. */
 .flow-node.role-container .node-chip,
-.flow-node.role-camera .node-chip {
+.flow-node.role-camera .node-chip,
+.flow-node.role-container .cook-arc,
+.flow-node.role-camera .cook-arc,
+.flow-node.role-container .display-halo,
+.flow-node.role-camera .display-halo {
   margin-top: 4px;
 }
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }

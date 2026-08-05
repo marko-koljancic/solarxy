@@ -61,7 +61,16 @@ function handleStyle(
   };
   if (side === "in") base.top = gather ? -22 : -14;
   else base.bottom = -14;
-  if (shape === "diamond") return { ...base, transform: "rotate(45deg)", borderRadius: 2 };
+  if (shape === "diamond")
+    return {
+      ...base,
+      // Compose with the library's centring translate: an inline transform
+      // replaces the stylesheet's wholesale, so a bare rotate() would
+      // un-centre the handle before rotating it.
+      transform:
+        side === "in" ? "translate(-50%, -50%) rotate(45deg)" : "translate(-50%, 50%) rotate(45deg)",
+      borderRadius: 2,
+    };
   if (shape === "square") return { ...base, borderRadius: 2 };
   if (shape === "hexagon")
     return {

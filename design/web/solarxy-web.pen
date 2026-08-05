@@ -55186,6 +55186,790 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "f4Grnl",
+      "x": 7000,
+      "y": 36900,
+      "name": "06-10 One geometric contract (0.8.2)",
+      "theme": {
+        "gen": "evo"
+      },
+      "fill": "$background-primary",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "HYt9S",
+          "name": "Sheet title",
+          "fill": "$text-primary",
+          "content": "One geometric contract (0.8.2)",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "ahYmm",
+          "name": "cap",
+          "fill": "$text-tertiary",
+          "textGrowth": "fixed-width",
+          "width": 940,
+          "content": "The canvas ships four body sizes, two silhouettes with a tab carved out of the box, and a hand-tuned offset that re-centres the glyph but not the ring around it. The resolution is one LAYOUT BOX, 112x32 for every role, with three rules. The visible body sits centred inside the box and may be smaller: size stays a meaning channel (light 96x28 the fixture, text 76x26 the quiet datablock, terminal the 28 donut), exactly the precedent the terminal component set. Risers ride ABOVE the box the way the gather dome always has: the container folder tab and the camera viewfinder bump move out of the box, restoring the full 32px body and killing the compensating offset by construction. And one origin: glyph, cook arc, display halo, terminal core and selection all centre on the box centre, which now equals the body centre for every role.",
+          "lineHeight": 1.5,
+          "fontFamily": "$font-ui",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "l04dE0",
+          "name": "New mothers",
+          "gap": 90,
+          "children": [
+            {
+              "type": "frame",
+              "id": "ac2KM",
+              "name": "Evo/Node/Container",
+              "reusable": true,
+              "width": 112,
+              "height": 32,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "cornerRadius": [
+                    4,
+                    3,
+                    0,
+                    0
+                  ],
+                  "id": "H1LrT",
+                  "x": 0,
+                  "y": -8,
+                  "name": "tab",
+                  "fill": "$node-cat-container",
+                  "width": 27,
+                  "height": 9,
+                  "stroke": "$geometry-node-border",
+                  "strokeWidth": {
+                    "top": 1,
+                    "right": 1,
+                    "left": 1
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 6,
+                  "id": "xDIKb",
+                  "x": 0,
+                  "y": 0,
+                  "name": "body",
+                  "fill": "$node-cat-container",
+                  "width": 112,
+                  "height": 32,
+                  "stroke": "$geometry-node-border",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 3,
+                  "id": "Z1YlE",
+                  "x": 46,
+                  "y": 6,
+                  "name": "chip",
+                  "fill": "$evo-chip",
+                  "width": 20,
+                  "height": 20
+                },
+                {
+                  "id": "bnMCj",
+                  "type": "ref",
+                  "ref": "ZunWR",
+                  "name": "glyph",
+                  "x": 48,
+                  "y": 8
+                },
+                {
+                  "type": "frame",
+                  "id": "tvVXJ",
+                  "x": 120,
+                  "y": 2,
+                  "name": "LabelBlock",
+                  "layout": "vertical",
+                  "gap": 1,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "c5gJEk",
+                      "name": "TypeLabel",
+                      "fill": "$evo-type-label",
+                      "content": "Geo",
+                      "fontFamily": "Inter",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c82hOH",
+                      "name": "Name",
+                      "fill": "$node-label",
+                      "content": "geo1",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "elw6n",
+              "name": "Evo/Node/Camera",
+              "reusable": true,
+              "width": 112,
+              "height": 32,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "cornerRadius": [
+                    3,
+                    3,
+                    0,
+                    0
+                  ],
+                  "id": "LWOg7",
+                  "x": 38,
+                  "y": -8,
+                  "name": "bump",
+                  "fill": "$node-background",
+                  "width": 36,
+                  "height": 9,
+                  "stroke": "$geometry-node-border",
+                  "strokeWidth": {
+                    "top": 1,
+                    "right": 1,
+                    "left": 1
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 6,
+                  "id": "I3Kqob",
+                  "x": 0,
+                  "y": 0,
+                  "name": "body",
+                  "fill": "$node-background",
+                  "width": 112,
+                  "height": 32,
+                  "stroke": "$geometry-node-border",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 3,
+                  "id": "ZnUxd",
+                  "x": 46,
+                  "y": 6,
+                  "name": "chip",
+                  "fill": "$evo-chip",
+                  "width": 20,
+                  "height": 20
+                },
+                {
+                  "type": "path",
+                  "id": "UWTqc",
+                  "x": 48,
+                  "y": 8,
+                  "name": "glyph",
+                  "geometry": "M2.5 5.5l7.5 0 0 7-7.5 0z m7.5 3.3l3.5-2.6 0 5.6-3.5-2.6",
+                  "viewBox": [
+                    0,
+                    0,
+                    16,
+                    16
+                  ],
+                  "width": 16,
+                  "height": 16,
+                  "stroke": "$evo-slot",
+                  "strokeWidth": 1.5,
+                  "strokeLinejoin": "round",
+                  "strokeLinecap": "round"
+                },
+                {
+                  "type": "frame",
+                  "id": "povNe",
+                  "x": 120,
+                  "y": 2,
+                  "name": "LabelBlock",
+                  "layout": "vertical",
+                  "gap": 1,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "e6vPE2",
+                      "name": "TypeLabel",
+                      "fill": "$evo-type-label",
+                      "content": "Camera",
+                      "fontFamily": "Inter",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "XmwRi",
+                      "name": "Name",
+                      "fill": "$node-label",
+                      "content": "camera1",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "KF8kA",
+              "name": "Evo/Node/Text",
+              "reusable": true,
+              "width": 112,
+              "height": 32,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "id": "Kp0bD",
+                  "x": 0,
+                  "y": 0,
+                  "name": "boxghost",
+                  "width": 112,
+                  "height": 32,
+                  "stroke": "#58A6FF26",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 6,
+                  "id": "fnhvH",
+                  "x": 18,
+                  "y": 3,
+                  "name": "body",
+                  "fill": "$node-cat-utility",
+                  "width": 76,
+                  "height": 26,
+                  "stroke": "$geometry-node-border",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 3,
+                  "id": "c9ze1",
+                  "x": 46,
+                  "y": 6,
+                  "name": "chip",
+                  "fill": "$evo-chip",
+                  "width": 20,
+                  "height": 20
+                },
+                {
+                  "type": "path",
+                  "id": "BbyKg",
+                  "x": 48,
+                  "y": 8,
+                  "name": "glyph",
+                  "geometry": "M4 5l8 0m-8 3l8 0m-8 3l5 0",
+                  "viewBox": [
+                    0,
+                    0,
+                    16,
+                    16
+                  ],
+                  "width": 16,
+                  "height": 16,
+                  "stroke": "$evo-slot",
+                  "strokeWidth": 1.5,
+                  "strokeLinejoin": "round",
+                  "strokeLinecap": "round"
+                },
+                {
+                  "type": "frame",
+                  "id": "W2B94",
+                  "x": 120,
+                  "y": 2,
+                  "name": "LabelBlock",
+                  "layout": "vertical",
+                  "gap": 1,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "n3FiDg",
+                      "name": "TypeLabel",
+                      "fill": "$evo-type-label",
+                      "content": "Text",
+                      "fontFamily": "Inter",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "E5Ay8A",
+                      "name": "Name",
+                      "fill": "$node-label",
+                      "content": "notes",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "jO8G9",
+          "name": "Resolutions",
+          "gap": 24,
+          "children": [
+            {
+              "type": "frame",
+              "id": "R0N4B",
+              "name": "Questions",
+              "width": 470,
+              "layout": "vertical",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "G4Lu2s",
+                  "name": "h",
+                  "fill": "$text-primary",
+                  "content": "The three open questions, resolved",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "RssXo",
+                  "name": "1  Body height",
+                  "width": "fill_container",
+                  "fill": "$background-secondary",
+                  "cornerRadius": 4,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MuMx1",
+                      "name": "qh",
+                      "fill": "$text-primary",
+                      "content": "1  Body height",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "PvU9w",
+                      "name": "qb",
+                      "fill": "$text-tertiary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Keep 112x32. The polish-pass decision already ratified the growth from 28 and redrew every shaped role against it; restoring 28 would be a density change across every canvas for the sake of a ratio the record already superseded. The design file is what catches up: the anatomy band, the round-2 decision text and every mother component move to 32 in the implementation pass, and the interaction specification's older 112x28 clause gains a superseded-by note.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10.5,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qkRvu",
+                  "name": "2  The raised tabs",
+                  "width": "fill_container",
+                  "fill": "$background-secondary",
+                  "cornerRadius": 4,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "C1cEt",
+                      "name": "qh",
+                      "fill": "$text-primary",
+                      "content": "2  The raised tabs",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "U5aYA",
+                      "name": "qb",
+                      "fill": "$text-tertiary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The container tab and the camera bump move ABOVE the layout box, the way the gather dome always rode above it. The body returns to the full 112x32, the glyph centres by construction, the compensating offset is deleted rather than extended, and the cook arc and display halo become concentric with the glyph without any per-role rule. Container stays the one deliberately asymmetric silhouette (the folder tab on the left); the camera bump is centred and symmetric, and the stale prose claiming otherwise is corrected.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10.5,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "c29BOj",
+                  "name": "3  Size as meaning",
+                  "width": "fill_container",
+                  "fill": "$background-secondary",
+                  "cornerRadius": 4,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EKoNc",
+                      "name": "qh",
+                      "fill": "$text-primary",
+                      "content": "3  Size as meaning",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "W8gtd",
+                      "name": "qb",
+                      "fill": "$text-tertiary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Size stays a channel, and it is formalized instead of fought: the visible body may be SMALLER than the box, never larger, and only to mean something. Light keeps its 96x28 fixture body, text keeps its 76x26 quiet datablock body, terminal keeps the 28 donut; each sits centred in the standard 112x32 layout box, exactly the precedent the terminal component set. Handles, wires, labels, selection and auto-layout all read the box, so the canvas aligns while the meaning survives.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10.5,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "t7sJTh",
+              "name": "Decision and surfaces",
+              "width": 470,
+              "layout": "vertical",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SAfkq",
+                  "name": "Decision D-26",
+                  "width": "fill_container",
+                  "fill": "$background-tertiary",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "tqPFp",
+                      "name": "head",
+                      "fill": "$text-primary",
+                      "content": "D-26  Box, body, riser",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "uu6KK",
+                      "name": "body",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Every canvas role occupies one 112x32 layout box. The visible body sits centred inside it and may be smaller when the size means something; a riser (dome, folder tab, viewfinder bump) rides above the box, never inside it. Glyph, cook arc, display halo, terminal core and selection share the box centre as their one origin. Handles keep the 3px air off the box edges; the diamond handle composes its rotation with the centring transform instead of replacing it. Silhouettes stay registry-derived; container remains the single asymmetric role. Amends D-4, D-10 and D-21; formalizes the sized-down bodies the polish pass left implicit.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10.5,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "zZkD5",
+                  "name": "Surfaces",
+                  "width": "fill_container",
+                  "fill": "$background-secondary",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JyG3r",
+                      "name": "h",
+                      "fill": "$text-primary",
+                      "content": "What moves, when it ships",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "aUu5D",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "fe0VF",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "w04dd2",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Stylesheet: per-role boxes unify at 112x32; sized bodies become explicit; the chip offset dies; overlay origins need no per-role rules.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Hdnjr",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "rdwxb",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "D1aCMf",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Shape module: riser paths redrawn above the box; the role table grows box plus body for all eleven roles so nothing is CSS-only; stale asymmetry prose corrected.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rPY1k",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "DUM8P",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "CJ8mR",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Glyph set: twenty-six glyphs recentred to the shared optical box; the three container glyphs pulled inside the envelope; camera and text glyphs join the set here.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "JtURr",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zrooN",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "pyDKC",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Auto-layout: the 120x60 phantom floors become the real box, with the spacing constants absorbing the air they provided.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "nJP2x",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "M7Wa14",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ECuhH",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Landing illustration: glyph moves to the body centre and the mock flows vertically like the app.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "m5DDT",
+                      "name": "r",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "EFhpn",
+                          "name": "m",
+                          "fill": "$text-tertiary",
+                          "content": "[]",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Qj2pT",
+                          "name": "b",
+                          "fill": "$text-tertiary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Records: this file's anatomy band, decision texts and mother components move to 32; the interaction specification gains the dated amendment; both in the implementation pass.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "bYmgZ",
+                  "name": "Precedent",
+                  "fill": "$canvas-background",
+                  "cornerRadius": 4,
+                  "gap": 16,
+                  "padding": [
+                    18,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "K9IYCK",
+                      "type": "ref",
+                      "ref": "GWOlI",
+                      "name": "terminal precedent",
+                      "x": 16,
+                      "y": 25,
+                      "descendants": {
+                        "U1G2v": {
+                          "enabled": false
+                        }
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "id": "pAtLZ",
+                      "name": "n",
+                      "fill": "$text-tertiary",
+                      "textGrowth": "fixed-width",
+                      "width": 200,
+                      "content": "The precedent: the terminal donut has always been a small mark centred in the full-width box.",
+                      "lineHeight": 1.4,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "themes": {
