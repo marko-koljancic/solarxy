@@ -20,12 +20,15 @@ use super::caps::{Capabilities, Glyphs};
 use super::geometry::ModelView;
 use super::arrange::{self, Toward};
 use super::keymap::{self, Command, Context};
-use super::layout::{Direction, Layout, LeafId, Preset};
-use super::overlay::{Confirm, Export, Overlay};
+use super::layout::{Direction, Layout, LeafId, PanelType, Preset};
+use super::overlay::{Catalogue, Confirm, Export, Overlay};
 use super::panels::{self, Action, Ctx, Panel};
 use super::shell::{Flow, Input, Surface};
 use super::theme::Theme;
 
+/// The analyze surface: the arrangement, one panel per leaf, and whatever
+/// modal state (overlay, filter, arrange mode, maximize) sits over it, all
+/// over one borrowed report.
 pub struct App<'a> {
     report: &'a AnalysisReport,
     model: &'a ModelView<'a>,
@@ -50,6 +53,8 @@ pub struct App<'a> {
 }
 
 impl<'a> App<'a> {
+    /// Build the surface over a report and its borrowed model arrays, with a
+    /// panel constructed for every leaf the layout names.
     pub fn new(
         report: &'a AnalysisReport,
         model: &'a ModelView<'a>,
@@ -219,7 +224,7 @@ impl<'a> App<'a> {
                 arrange::Command::Close
             }
             Command::Add => {
-                self.notice = Some("split to add a panel".to_owned());
+                self.overlay = Some(Overlay::Catalogue(Catalogue { selected: 0 }));
                 return;
             }
             _ => return,
@@ -296,6 +301,26 @@ impl<'a> App<'a> {
                     }
                 }
             }
+            Overlay::Catalogue(catalogue) => match key.code {
+                KeyCode::Up | KeyCode::Char('k' | 'K') => {
+                    let count = PanelType::CHOOSABLE.len();
+                    catalogue.selected = (catalogue.selected + count - 1) % count;
+                }
+                KeyCode::Down | KeyCode::Char('j' | 'J') => {
+                    catalogue.selected = (catalogue.selected + 1) % PanelType::CHOOSABLE.len();
+                }
+                KeyCode::Enter => {
+                    let kind = PanelType::CHOOSABLE[catalogue.selected];
+                    self.overlay = None;
+                    self.layout = self.layout.assign(kind);
+                    // The leaf keeps its id across the assignment, so the old
+                    // panel object has to go or `sync_panels` would keep
+                    // serving the previous type's state under the new name.
+                    self.panels.remove(&self.layout.focus());
+                    self.sync_panels();
+                }
+                _ => {}
+            },
         }
         Flow::Continue
     }
@@ -582,7 +607,7 @@ impl Surface for App<'_> {
 
         // Escape is answered before anything else, because it means back and
         // back is relative to what is open. The chain is the design's:
-        // an overlay, then arrange mode, then a filter, then maximize. It
+        // an overlay, then a filter, then arrange mode, then maximize. It
         // never quits; `q` alone does.
         if key.code == KeyCode::Esc {
             self.escape();
@@ -634,11 +659,6 @@ impl Surface for App<'_> {
     }
 }
 
-/// The terminal's size, for the one key that needs it between frames.
-///
-/// A jump address is resolved against the arrangement as last solved, and the
-/// solve needs a pane. Asking the terminal is cheaper and more honest than
-/// caching a size that a resize could have invalidated.
 /// Where an export lands unless the reader says otherwise.
 fn default_export_path(report: &AnalysisReport, json: bool) -> String {
     let stem = report
@@ -652,6 +672,11 @@ fn default_export_path(report: &AnalysisReport, json: bool) -> String {
     }
 }
 
+/// The terminal's size, for the one key that needs it between frames.
+///
+/// A jump address is resolved against the arrangement as last solved, and the
+/// solve needs a pane. Asking the terminal is cheaper and more honest than
+/// caching a size that a resize could have invalidated.
 fn current_size() -> Rect {
     let (width, height) = crossterm::terminal::size().unwrap_or((140, 45));
     Rect::new(0, 0, width, height)
@@ -888,6 +913,96 @@ mod tests {
         let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
         let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
         App::new(report, model, Preset::Survey.layout(), theme, CAPS)
+    }
+
+    /// The keymap's own words for arrange's `a` are "add a panel from the
+    /// catalogue", so a split's empty leaf must be fillable: split, move to
+    /// it, pick, and the leaf holds the panel.
+    #[test]
+    fn arrange_a_fills_the_new_leaf_from_the_catalogue() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+        app.arranging = true;
+        app.layout = Layout::single(PanelType::Meshes);
+        app.sync_panels();
+
+        app.handle(key(KeyCode::Char('v')));
+        let leaf = app
+            .layout
+            .leaves()
+            .into_iter()
+            .find(|(_, kind)| *kind == PanelType::Catalogue)
+            .map(|(id, _)| id)
+            .expect("the split left a catalogue leaf");
+        app.handle(key(KeyCode::Char('l')));
+        assert_eq!(
+            app.layout.focus(),
+            leaf,
+            "focus did not reach the catalogue leaf"
+        );
+
+        app.handle(key(KeyCode::Char('a')));
+        assert!(
+            matches!(app.overlay, Some(Overlay::Catalogue(_))),
+            "{:?}",
+            app.overlay
+        );
+        app.handle(key(KeyCode::Char('j')));
+        app.handle(key(KeyCode::Enter));
+
+        assert!(app.overlay.is_none(), "the pick did not close the overlay");
+        assert!(app.arranging, "picking a panel ended arrange mode");
+        assert_eq!(
+            app.layout.panel_of(leaf),
+            Some(PanelType::CHOOSABLE[1]),
+            "the pick did not reach the leaf"
+        );
+        assert!(
+            app.panels.contains_key(&leaf),
+            "the leaf has no panel object after the pick"
+        );
+    }
+
+    /// The pick draws through the whole surface path, titled, over the
+    /// dimmed grid, so a sizing mistake in its body fails here rather than
+    /// on a reader's terminal.
+    #[test]
+    fn the_catalogue_overlay_draws_over_the_grid() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+        app.overlay = Some(Overlay::Catalogue(Catalogue { selected: 0 }));
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        let text = screen(terminal.backend().buffer(), 140, 45);
+        assert!(text.contains("Add panel"), "the overlay title is missing");
+        assert!(text.contains("silhouette"), "the list is missing");
+    }
+
+    /// Escape keeps meaning back: it closes the pick without assigning, so a
+    /// reader who opened it by accident loses nothing.
+    #[test]
+    fn escape_closes_the_catalogue_without_assigning() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+        app.arranging = true;
+        app.layout = Layout::single(PanelType::Meshes);
+        app.sync_panels();
+
+        app.handle(key(KeyCode::Char('v')));
+        app.handle(key(KeyCode::Char('l')));
+        let leaf = app.layout.focus();
+
+        app.handle(key(KeyCode::Char('a')));
+        app.handle(key(KeyCode::Esc));
+        assert!(app.overlay.is_none());
+        assert_eq!(
+            app.layout.panel_of(leaf),
+            Some(PanelType::Catalogue),
+            "escape assigned a panel"
+        );
     }
 
     /// Escape means back, one layer at a time, in the design's order. It is

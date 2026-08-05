@@ -202,7 +202,6 @@ impl Layout {
     ///
     /// The starting point for a reader who closes their way down to one, and
     /// the fixture most layout tests build from.
-    #[allow(dead_code)]
     pub fn single(panel: PanelType) -> Self {
         Self {
             root: Node::Leaf {
@@ -290,9 +289,8 @@ impl Layout {
 
     /// Give the focused leaf a panel type.
     ///
-    /// Called when a reader picks from the catalogue, which is arrange mode's
-    /// `a` and therefore waits for the keymap.
-    #[allow(dead_code)]
+    /// Called when a reader picks from the catalogue, which is arrange
+    /// mode's `a`.
     #[must_use]
     pub fn assign(&self, panel: PanelType) -> Self {
         let mut next = self.clone();
@@ -579,7 +577,6 @@ pub enum Preset {
 impl Preset {
     /// Every preset, for the tests that assert all three parse and render.
     /// The cycle a reader walks uses [`Self::next`] instead.
-    #[allow(dead_code)]
     pub const ALL: [Preset; 3] = [Preset::Survey, Preset::Meshes, Preset::Validation];
 
     pub fn name(self) -> &'static str {

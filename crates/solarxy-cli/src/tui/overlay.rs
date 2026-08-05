@@ -1,4 +1,4 @@
-//! Three overlays, and the one thing that is deliberately not one.
+//! Four overlays, and the one thing that is deliberately not one.
 //!
 //! # Elevation is a border weight, not a shadow
 //!
@@ -26,6 +26,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::caps::{Capabilities, Glyphs};
 use super::keymap::{self, Context};
+use super::layout::PanelType;
 use super::theme::Slots;
 
 /// What is open over the grid, if anything.
@@ -34,6 +35,7 @@ pub enum Overlay {
     Help,
     Export(Export),
     Confirm(Confirm),
+    Catalogue(Catalogue),
 }
 
 /// The two prompts the shipped shell puts on its footer border, promoted to
@@ -55,12 +57,27 @@ pub struct Confirm {
     pub address: u8,
 }
 
+/// The panel pick, which is arrange mode's `a`.
+///
+/// A split leaves a leaf whose only content is "pick a panel", and this is
+/// the pick: every choosable type in catalogue order, one selected, return
+/// gives it to the focused leaf. It works on a leaf that already holds a
+/// panel too, because "give the focused leaf a panel type" is the whole
+/// operation and refusing the second case would invent a distinction the
+/// tree does not have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Catalogue {
+    /// Index into [`PanelType::CHOOSABLE`].
+    pub selected: usize,
+}
+
 impl Overlay {
     pub fn title(&self) -> &'static str {
         match self {
             Self::Help => "Keyboard",
             Self::Export(_) => "Export",
             Self::Confirm(_) => "Close panel",
+            Self::Catalogue(_) => "Add panel",
         }
     }
 }
@@ -91,6 +108,8 @@ fn window(area: Rect, want_width: u16, want_height: u16) -> Rect {
     )
 }
 
+/// Draw an overlay centred over the dimmed grid: the window, its double
+/// border, and the body the variant supplies.
 pub fn draw(
     frame: &mut Frame,
     area: Rect,
@@ -106,6 +125,7 @@ pub fn draw(
         Overlay::Help => help_lines(theme, glyphs, panel_menu),
         Overlay::Export(export) => export_lines(export, theme, glyphs),
         Overlay::Confirm(confirm) => confirm_lines(confirm, theme),
+        Overlay::Catalogue(catalogue) => catalogue_lines(catalogue, theme),
     };
     let want_width = body
         .iter()
@@ -279,6 +299,46 @@ fn confirm_lines(confirm: &Confirm, theme: &Slots) -> Vec<Line<'static>> {
     ]
 }
 
+/// The pick list: every choosable type, the selected one marked the way the
+/// export overlay marks its chosen format, so the language is already
+/// learned and survives monochrome.
+fn catalogue_lines(catalogue: &Catalogue, theme: &Slots) -> Vec<Line<'static>> {
+    let radio = |on: bool| if on { "(\u{2022})" } else { "( )" };
+    let mut lines = vec![Line::raw("")];
+    for (i, kind) in PanelType::CHOOSABLE.iter().enumerate() {
+        let chosen = i == catalogue.selected;
+        let style = if chosen {
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.ink)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", radio(chosen), kind.name()),
+            style,
+        )));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  \u{21b5}",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  add    ", Style::default().fg(theme.ink)),
+        Span::styled(
+            "j k",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  move", Style::default().fg(theme.ink)),
+    ]));
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +434,25 @@ mod tests {
         };
         assert!(text(true).contains("(\u{2022}) json"), "{}", text(true));
         assert!(text(false).contains("(\u{2022}) text"), "{}", text(false));
+    }
+
+    /// The pick lists every choosable type, or the overlay silently narrows
+    /// the catalogue it is named for.
+    #[test]
+    fn the_catalogue_lists_every_choosable_type_and_marks_the_pick() {
+        let theme = slots();
+        let text: String = catalogue_lines(&Catalogue { selected: 2 }, &theme)
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.to_string())
+            .collect();
+        for kind in PanelType::CHOOSABLE {
+            assert!(text.contains(kind.name()), "missing {}", kind.name());
+        }
+        assert!(
+            text.contains(&format!("(\u{2022}) {}", PanelType::CHOOSABLE[2].name())),
+            "{text}"
+        );
     }
 
     /// Confirm names what it is about to close and why it is asking, because
