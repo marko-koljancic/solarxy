@@ -15,7 +15,7 @@
 #     `plan` input carries cargo-dist's dist-manifest; the tag is read from
 #     `announcement_tag`.
 #   - `workflow_dispatch` — manual run against an existing release tag.
-name: Flathub bump
+name: "Release: Flathub manifest"
 
 on:
   workflow_call:

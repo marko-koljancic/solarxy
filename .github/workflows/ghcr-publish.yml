@@ -1,4 +1,4 @@
-name: GHCR Publish (solarxy-cli)
+name: "Release: CLI container image"
 
 # Builds and pushes a multi-arch Docker image of solarxy-cli to GitHub
 # Container Registry on each stable release.
