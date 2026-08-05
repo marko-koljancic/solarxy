@@ -4,7 +4,14 @@
  * no view switching; SECTIONS drives the nav table of contents so it can
  * never disagree with the section ids in the shell. */
 
-import { initRail, initReveals, initTheme, initYear, reducedMotion } from "../public/chrome";
+import {
+  initNavCollapse,
+  initRail,
+  initReveals,
+  initTheme,
+  initYear,
+  reducedMotion,
+} from "../public/chrome";
 import {
   ARCH_LAYERS,
   BACKLOG_WAVES,
@@ -70,6 +77,7 @@ initTheme();
 initReveals();
 refreshRail = initRail();
 initYear();
+const navCollapse = initNavCollapse();
 
 /* One delegated handler per accordion collection; the rendered heads are
  * buttons, so Enter and Space come free with click. */
@@ -102,7 +110,9 @@ if ("IntersectionObserver" in window) {
       for (const en of entries) {
         if (!en.isIntersecting) continue;
         for (const link of tocLinks.values()) link.classList.remove("active");
-        tocLinks.get(en.target.id)?.classList.add("active");
+        const link = tocLinks.get(en.target.id);
+        link?.classList.add("active");
+        navCollapse?.setActive(en.target.id, link?.textContent ?? "");
       }
     },
     { rootMargin: "-45% 0px -50% 0px" },
