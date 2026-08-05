@@ -18,6 +18,7 @@ use solarxy_core::report::MeshSummary;
 use super::super::widgets;
 use super::{Action, Ctx, Panel, Sort};
 
+/// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 6] = ["name", "tris", "verts", "nrm", "uv", "material"];
 
 #[derive(Default)]

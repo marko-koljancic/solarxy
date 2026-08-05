@@ -15,6 +15,7 @@ use solarxy_core::format_number;
 use super::super::widgets;
 use super::{Ctx, Panel};
 
+/// The headline geometry counts: meshes, vertices, indices, triangles.
 pub struct Geometry;
 
 /// Wide enough for the longest label the panel uses.

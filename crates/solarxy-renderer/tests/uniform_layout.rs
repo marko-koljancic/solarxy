@@ -22,6 +22,11 @@
 //!
 //! Adding a uniform: put it in `CASES` below. The cost is one line and it
 //! buys you the whole class of "the shader and the struct disagree".
+//!
+//! What it does NOT buy: field order. A same-size transposition passes both
+//! this guard and the Rust assert; that class is pinned by the golden
+//! captures instead, which is one of the reasons the principled scene is in
+//! the capture set.
 
 use wgpu::naga;
 

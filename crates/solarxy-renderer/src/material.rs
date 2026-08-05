@@ -1,4 +1,4 @@
-//! GPU-side PBR material: [`MaterialUniform`] (`#[repr(C)]`, 64 bytes) and
+//! GPU-side PBR material: [`MaterialUniform`] (`#[repr(C)]`, 160 bytes) and
 //! the bundle of textures + bind group consumed by the main shader.
 //!
 //! `MaterialUniform.alpha_mode` and `.shading_model` are `u32` for shader

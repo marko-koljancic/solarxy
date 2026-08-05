@@ -16,12 +16,13 @@
 //! refactoring every host twice. When a second *implementation* exists, it
 //! shapes the trait.
 //!
-//! **It does not depend on `solarxy-graph`.** A host crate sits under both
-//! shells, and the desktop shell has no engine yet, so an engine dependency
-//! here would arrive in `solarxy-app` a release early through the back door.
-//! Where the orchestration needs something the engine owns, the shell passes
-//! it in as plain data — see [`gizmo::GizmoPose`], which is the drag solver's
-//! whole view of its target.
+//! **It does not depend on `solarxy-graph`.** The engine and the renderer
+//! meet only at `solarxy_core::scene::SceneDelta`, and this crate sits on
+//! the renderer's side of that line. Both shells hold an engine now; what
+//! keeps the boundary real is that neither hands it to this crate. Where the
+//! orchestration needs something the engine owns, the shell passes it in as
+//! plain data — see [`gizmo::GizmoPose`], which is the drag solver's whole
+//! view of its target.
 //!
 //! # How the shared functions are shaped
 //!

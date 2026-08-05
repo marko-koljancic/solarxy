@@ -8,11 +8,16 @@
 //!
 //! The binary assembles the surface itself: it detects the terminal, loads
 //! preferences, resolves a theme, builds the app and runs it. That is a
-//! deliberate shape rather than a convenience. Everything above `panels`
-//! knows nothing about [`solarxy_core::report::AnalysisReport`], so a second
-//! consumer takes the capability model, the theme system, the split tree, the
-//! keymap and the rasteriser, and supplies its own panels. Wrapping that in
-//! one opaque entry point would hide the seam that makes the reuse cheap.
+//! deliberate shape rather than a convenience. The substrate is report-free
+//! and reusable as is: `shell`, `caps`, `contrast`, `theme`, `raster`,
+//! `scroll`, `widgets`, the `arrange` grammar and the `keymap` machinery
+//! know nothing about [`solarxy_core::report::AnalysisReport`]. The analyze
+//! half is `app` and `panels`, which hold the report, and `layout`, whose
+//! `PanelType` names this surface's ten panels, so a second surface supplies
+//! its own panel contract and vocabulary rather than merely its own panels;
+//! that genericization is the extraction a later release performs. Wrapping
+//! all of it in one opaque entry point would hide the seam that makes the
+//! reuse cheap.
 //!
 //! The cost is that these modules are part of this crate's public interface
 //! and cannot be reshaped without a version that says so.

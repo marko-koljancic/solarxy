@@ -14,6 +14,7 @@ use ratatui::widgets::Paragraph;
 use super::super::widgets;
 use super::{Ctx, Panel};
 
+/// The axis-aligned bounds panel: extents, centre, and the axis spans.
 pub struct Bounds;
 
 const LABEL: u16 = 9;

@@ -22,6 +22,7 @@ use solarxy_core::report::{AnalysisReport, MaterialSummary};
 use super::super::widgets;
 use super::{Action, Ctx, Panel, Sort};
 
+/// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 4] = ["name", "base colour", "tex", "used by"];
 
 #[derive(Default)]

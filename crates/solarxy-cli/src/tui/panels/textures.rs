@@ -20,6 +20,7 @@ use solarxy_core::report::TextureEntry;
 use super::super::widgets;
 use super::{Action, Ctx, Panel, Sort};
 
+/// The table's column headers, in sort-cycle order.
 pub const COLUMNS: [&str; 4] = ["slot", "file", "res", "ok"];
 
 #[derive(Default)]

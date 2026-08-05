@@ -45,8 +45,9 @@ version = "0.25.9"
 default-features = false
 features = ["png"]
 
-# Deliberately ABSENT: `solarxy-graph`. A host crate sitting under both shells
-# must not drag the engine into `solarxy-app`, which has no engine until the
-# desktop gains one. The gizmo's drag solver is graph-free for exactly this
-# reason: it reads a pose, and the shell that owns the document decides where
-# the result is addressed.
+# Deliberately ABSENT: `solarxy-graph`. The engine and the renderer meet only
+# at `solarxy_core::scene::SceneDelta`, and this crate sits on the renderer's
+# side of that line; both shells hold an engine now, and they hand this crate
+# plain data rather than the engine itself. The gizmo's drag solver is
+# graph-free for exactly this reason: it reads a pose, and the shell that owns
+# the document decides where the result is addressed.

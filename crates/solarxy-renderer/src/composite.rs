@@ -241,17 +241,6 @@ impl CompositeState {
     }
 }
 
-/// The composite pass's uniform. **Grown by appending only**, per the
-/// renderer's uniform rule, and `pub` so `tests/uniform_layout.rs` can
-/// compare its size against the naga span of the WGSL struct that declares
-/// it whole.
-///
-/// The three grade vectors sit at offsets 128, 144 and 160 with a scalar
-/// of padding behind each, because WGSL aligns a `vec3<f32>` to 16 bytes
-/// in the uniform address space while Rust aligns `[f32; 3]` to 4. Get
-/// that wrong and the Rust size assert still passes, the shader still
-/// compiles, and the viewport goes wrong at draw time. Same reasoning
-/// `MaterialUniform` records for its own appended blocks.
 /// Resolve one pane's look: the camera it is looking through, if any,
 /// otherwise the pane's own.
 ///
@@ -292,6 +281,17 @@ pub fn resolve_look(camera: Option<&CameraLook>, pane: &PaneLook) -> CompositeLo
     }
 }
 
+/// The composite pass's uniform. **Grown by appending only**, per the
+/// renderer's uniform rule, and `pub` so `tests/uniform_layout.rs` can
+/// compare its size against the naga span of the WGSL struct that declares
+/// it whole.
+///
+/// The three grade vectors sit at offsets 128, 144 and 160 with a scalar
+/// of padding behind each, because WGSL aligns a `vec3<f32>` to 16 bytes
+/// in the uniform address space while Rust aligns `[f32; 3]` to 4. Get
+/// that wrong and the Rust size assert still passes, the shader still
+/// compiles, and the viewport goes wrong at draw time. Same reasoning
+/// `MaterialUniform` records for its own appended blocks.
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CompositeParams {
