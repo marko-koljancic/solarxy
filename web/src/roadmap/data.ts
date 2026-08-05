@@ -160,7 +160,10 @@ export const ARCH_LAYERS: ArchLayer[] = [
         n: "solarxy-host",
         d: "The orchestration both GPU shells share: pane render loop, lighting chokepoint, view state, gizmo solver.",
       },
-      { n: "solarxy-cli", d: "clap args + the analyze TUI + analyzer." },
+      {
+        n: "solarxy-cli",
+        d: "clap args + analyzer + the analyze surface: a tiled terminal workspace over capability tiers, file-based themes, a split tree and a braille rasteriser.",
+      },
       {
         n: "web/ (React 19)",
         d: "Vite + @xyflow/react display mirror. Not a crate; the frontend.",
@@ -219,7 +222,7 @@ export const TIMELINE: TimelineEntry[] = [
   {
     date: "2026-04, Act I",
     h: "v0.2.0 Interactivity",
-    body: "Grid and gizmo, bounding box, turntable, bloom, background presets, settings persistence, and side-by-side compare, then a built-in docs TUI.",
+    body: "Grid and gizmo, bounding box, turntable, bloom, background presets, settings persistence, and side-by-side compare.",
   },
   {
     date: "2026-04, Act II",
@@ -308,7 +311,7 @@ export const RELEASES: ReleaseSummary[] = [
   {
     v: "v0.2.0",
     st: "Apr 2026",
-    p: "Interactivity. Grid and gizmo, bbox, turntable, bloom, background presets, settings persistence, compare, and a docs TUI.",
+    p: "Interactivity. Grid and gizmo, bbox, turntable, bloom, background presets, settings persistence, and side-by-side compare.",
   },
   {
     v: "v0.3.0",
@@ -796,13 +799,14 @@ export const RELEASE_PLAN: ReleasePlanEntry[] = [
     v: "v0.8.2",
     code: "Rendering foundations",
     kind: "next",
-    theme: "Five nameable gaps in the renderer, plus the desktop's first engine surface",
+    theme: "Five nameable gaps in the renderer, the desktop's first engine surface, and the terminal workspace",
     items: [
       "Principled surface parameters end to end (10.3): transmission, clearcoat, sheen and iridescence survive a glTF round trip instead of being dropped on import.",
       "The environment as scene data: a float image type and an environment node, so the HDRI you light with saves with the scene.",
       "Real geometry instancing: scatters carry transforms instead of baking copies, and the raster path issues instanced draws for the first time.",
       "LUT colour grading (11.4), two slots: a log-space transform before tone mapping and a look LUT after.",
       "The shared-host extraction, then the desktop shell's first engine surface: the desktop app opens and renders .slxy scenes.",
+      "The analyze terminal report becomes a tiled workspace: panels you arrange yourself instead of four tabs read one at a time, themes, a model silhouette and a UV occupancy map drawn in braille, and the budget, issue kinds and mesh names the analyzer used to compute and discard.",
     ],
   },
   {
@@ -899,7 +903,7 @@ export const PROGRAM: ProgramEntry[] = [
     code: "Rendering foundations",
     kind: "next",
     era: "pre",
-    theme: "Five renderer gaps, the shared host, and the desktop's first engine surface",
+    theme: "Five renderer gaps, the shared host, the desktop's first engine surface, and the terminal workspace",
     cards: ["10.3", "11.4", "18.1"],
     who: "Ingrid, Mara",
     note: "the engine-surface half of 18.1 only, not the canvas",
