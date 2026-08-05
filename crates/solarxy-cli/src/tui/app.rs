@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -31,7 +31,10 @@ use solarxy_core::report::AnalysisReport;
 
 use super::caps::{Capabilities, Glyphs};
 use super::geometry::ModelView;
-use super::layout::{Layout, LeafId, Preset};
+use super::arrange::{self, Toward};
+use super::keymap::{self, Command, Context};
+use super::layout::{Direction, Layout, LeafId, Preset};
+use super::overlay::{Confirm, Export, Overlay};
 use super::panels::{self, Action, Ctx, Panel};
 use super::shell::{Flow, Input, Surface};
 use super::theme::Theme;
@@ -63,6 +66,12 @@ pub struct App<'a> {
     caps: Capabilities,
     /// A refusal, shown in the focused panel's border until the next key.
     notice: Option<String>,
+    /// What is open over the grid, if anything.
+    overlay: Option<Overlay>,
+    /// Whether the reader is arranging rather than reading.
+    arranging: bool,
+    /// The live filter query, while one is being typed.
+    filtering: Option<String>,
     exit: bool,
 }
 
@@ -85,6 +94,9 @@ impl<'a> App<'a> {
             glyphs: caps.glyphs(),
             caps,
             notice: None,
+            overlay: None,
+            arranging: false,
+            filtering: None,
             exit: false,
         };
         app.sync_panels();
@@ -115,6 +127,254 @@ impl<'a> App<'a> {
             caps: self.caps,
             focused,
         }
+    }
+
+    /// Escape means back, and back is relative to what is open.
+    ///
+    /// One layer per press, in the design's order, and never a quit. A key
+    /// that sometimes leaves a dialog and sometimes ends the session is the
+    /// kind a reader stops trusting.
+    fn escape(&mut self) {
+        if self.overlay.take().is_some() {
+            return;
+        }
+        if self.filtering.take().is_some() {
+            self.apply_filter(None);
+            return;
+        }
+        if self.arranging {
+            self.arranging = false;
+            return;
+        }
+        self.maximized = None;
+    }
+
+    fn global(&mut self, command: Command) -> Flow {
+        match command {
+            Command::Quit => {
+                self.exit = true;
+                self.remember();
+                return Flow::Quit;
+            }
+            Command::FocusAddress(address) => {
+                self.layout = self
+                    .layout
+                    .with_focus_on_address(Self::pane(current_size()), address);
+            }
+            Command::CyclePreset => {
+                self.preset = self.preset.next();
+                self.layout = self.preset.layout();
+                self.maximized = None;
+                self.sync_panels();
+            }
+            Command::EnterArrange => self.arranging = true,
+            Command::SaveLayout => self.save_layout(),
+            Command::Help => self.overlay = Some(Overlay::Help),
+            _ => return Flow::Continue,
+        }
+        Flow::Continue
+    }
+
+    /// The focused-panel context. Returns whether the command was consumed
+    /// here rather than passed down to the panel itself.
+    fn focused(&mut self, command: Command) -> bool {
+        match command {
+            Command::Open if !self.panel_opens_rows() => {
+                self.maximized = Some(self.layout.focus());
+                true
+            }
+            Command::Filter => {
+                self.filtering = Some(String::new());
+                true
+            }
+            Command::Export => {
+                self.overlay = Some(Overlay::Export(Export {
+                    json: false,
+                    path: default_export_path(self.report, false),
+                }));
+                true
+            }
+            // Selection, sort and first-and-last are the panel's own business:
+            // only it knows how many rows it has.
+            _ => false,
+        }
+    }
+
+    /// Whether return on this panel opens a row rather than maximizing.
+    ///
+    /// The one panel with rows a reader can open is validation, whose groups
+    /// fold. Everywhere else return means maximize, which is what the table
+    /// row says: "maximize, or open the row".
+    fn panel_opens_rows(&self) -> bool {
+        self.layout.panel_of(self.layout.focus()) == Some(super::layout::PanelType::Validation)
+    }
+
+    fn arrange_key(&mut self, key: KeyEvent) {
+        let Some(command) = keymap::lookup(Context::Arrange, key) else {
+            return;
+        };
+        let pane = Self::pane(current_size());
+        let command = match command {
+            Command::LeaveArrange => {
+                self.arranging = false;
+                return;
+            }
+            Command::ArrangeLeft => arrange::Command::Focus(Toward::Left),
+            Command::ArrangeDown => arrange::Command::Focus(Toward::Down),
+            Command::ArrangeUp => arrange::Command::Focus(Toward::Up),
+            Command::ArrangeRight => arrange::Command::Focus(Toward::Right),
+            Command::SplitHorizontal => arrange::Command::Split(Direction::Horizontal),
+            Command::SplitVertical => arrange::Command::Split(Direction::Vertical),
+            Command::GrowDivider => arrange::Command::Grow,
+            Command::ShrinkDivider => arrange::Command::Shrink,
+            Command::Balance => arrange::Command::Balance,
+            Command::Close => {
+                // The one destructive thing in a read-only report, and the
+                // only thing that gets a confirmation.
+                if self.focused_panel_has_unsaved_view() {
+                    self.confirm_close();
+                    return;
+                }
+                arrange::Command::Close
+            }
+            Command::Add => {
+                self.notice = Some("split to add a panel".to_owned());
+                return;
+            }
+            _ => return,
+        };
+        match arrange::apply(&self.layout, pane, command) {
+            arrange::Outcome::Changed(layout) => {
+                self.layout = layout;
+                self.sync_panels();
+            }
+            arrange::Outcome::Refused(refusal) => self.notice = Some(refusal.to_string()),
+            arrange::Outcome::Left => self.arranging = false,
+        }
+    }
+
+    fn confirm_close(&mut self) {
+        let focus = self.layout.focus();
+        let name = self
+            .layout
+            .panel_of(focus)
+            .map_or("this panel", super::layout::PanelType::name);
+        let address = self
+            .layout
+            .solve(Self::pane(current_size()), None)
+            .into_iter()
+            .find(|p| p.id == focus)
+            .map_or(0, |p| p.address);
+        self.overlay = Some(Overlay::Confirm(Confirm {
+            panel: name.to_owned(),
+            address,
+        }));
+    }
+
+    /// Whether closing the focused panel would discard something.
+    fn focused_panel_has_unsaved_view(&self) -> bool {
+        self.filtering.is_some()
+    }
+
+    fn overlay_key(&mut self, key: KeyEvent) -> Flow {
+        let Some(overlay) = self.overlay.as_mut() else {
+            return Flow::Continue;
+        };
+        match overlay {
+            Overlay::Help => {
+                // Any key closes help, because a reader who opened it has read
+                // it and pressing something is how they say so.
+                self.overlay = None;
+            }
+            Overlay::Export(export) => match key.code {
+                KeyCode::Right | KeyCode::Left | KeyCode::Tab => {
+                    export.json = !export.json;
+                    export.path = default_export_path(self.report, export.json);
+                }
+                KeyCode::Char(c) => export.path.push(c),
+                KeyCode::Backspace => {
+                    export.path.pop();
+                }
+                KeyCode::Enter => {
+                    let done = self.write_export();
+                    self.notice = Some(done);
+                    self.overlay = None;
+                }
+                _ => {}
+            },
+            Overlay::Confirm(_) => {
+                if key.code == KeyCode::Enter {
+                    self.overlay = None;
+                    self.filtering = None;
+                    if let arrange::Outcome::Changed(layout) = arrange::apply(
+                        &self.layout,
+                        Self::pane(current_size()),
+                        arrange::Command::Close,
+                    ) {
+                        self.layout = layout;
+                        self.sync_panels();
+                    }
+                }
+            }
+        }
+        Flow::Continue
+    }
+
+    fn filter_key(&mut self, key: KeyEvent) {
+        let Some(query) = self.filtering.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Char(c) => query.push(c),
+            KeyCode::Backspace => {
+                query.pop();
+            }
+            KeyCode::Enter => {
+                // Return commits the filter and leaves the buffer, so the rows
+                // it selected can be moved through with the ordinary keys.
+                let query = query.clone();
+                self.filtering = None;
+                self.apply_filter(Some(query));
+                return;
+            }
+            _ => return,
+        }
+        let query = query.clone();
+        self.apply_filter(Some(query));
+    }
+
+    fn apply_filter(&mut self, query: Option<String>) {
+        let focus = self.layout.focus();
+        if let Some(panel) = self.panels.get_mut(&focus) {
+            panel.set_filter(query);
+        }
+    }
+
+    fn write_export(&mut self) -> String {
+        let Some(Overlay::Export(export)) = &self.overlay else {
+            return String::new();
+        };
+        let rendered = if export.json {
+            match solarxy_core::json::report_to_json(self.report) {
+                Ok(json) => json,
+                Err(error) => return format!("could not build json: {error}"),
+            }
+        } else {
+            self.report.to_string()
+        };
+        match std::fs::write(&export.path, rendered) {
+            Ok(()) => format!("saved to {}", export.path),
+            Err(error) => format!("could not save: {error}"),
+        }
+    }
+
+    fn save_layout(&mut self) {
+        let (mut prefs, _) = super::prefs::TuiPrefs::load();
+        prefs.saved_layout = Some(self.layout.encode());
+        self.notice = Some(match prefs.save() {
+            Ok(()) => "layout saved".to_owned(),
+            Err(error) => format!("could not save the layout: {error}"),
+        });
     }
 
     /// Move focus to the panel holding a subject and select it there.
@@ -194,7 +454,11 @@ impl Surface for App<'_> {
             } else {
                 self.glyphs.border
             };
-            let ink = ctx.chrome();
+            let ink = if self.arranging {
+                self.theme.slots.warning
+            } else {
+                ctx.chrome()
+            };
 
             let mut title = vec![
                 Span::styled(
@@ -207,17 +471,39 @@ impl Surface for App<'_> {
                 ),
             ];
             if placement.focused {
-                let menu = self
-                    .panels
-                    .get(&placement.id)
-                    .map_or(&[][..], |panel| panel.menu());
-                for word in menu {
+                // Typing after slash replaces the menu words with a live
+                // query. It belongs to the panel and never covers the rows it
+                // is filtering, which an overlay would.
+                if let Some(query) = &self.filtering {
                     title.push(Span::styled(
-                        format!(" {word} "),
-                        Style::default()
-                            .fg(self.theme.slots.accent)
-                            .add_modifier(Modifier::BOLD),
+                        " / ".to_owned(),
+                        Style::default().fg(self.theme.slots.accent),
                     ));
+                    title.push(Span::styled(
+                        query.clone(),
+                        Style::default().fg(self.theme.slots.ink),
+                    ));
+                    title.push(Span::styled(
+                        self.glyphs.caret.to_owned(),
+                        Style::default().fg(self.theme.slots.accent),
+                    ));
+                    title.push(Span::raw(" "));
+                } else {
+                    let menu = self
+                        .panels
+                        .get(&placement.id)
+                        .map_or(&[][..], |panel| panel.menu());
+                    for word in menu {
+                        title.push(Span::styled(
+                            format!(
+                                " {} {word} ",
+                                keymap::panel_key_label(word, self.glyphs.tier)
+                            ),
+                            Style::default()
+                                .fg(self.theme.slots.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
                 }
             }
 
@@ -237,6 +523,19 @@ impl Surface for App<'_> {
                             Style::default().fg(self.theme.slots.error),
                         ))
                         .centered(),
+                    );
+                } else if let Some(counts) = self
+                    .filtering
+                    .as_ref()
+                    .and_then(|_| self.panels.get(&placement.id))
+                    .and_then(|panel| panel.filter_counts(&self.context(true)))
+                {
+                    block = block.title_bottom(
+                        Line::from(Span::styled(
+                            format!(" {} of {} shown  esc clears ", counts.0, counts.1),
+                            Style::default().fg(self.theme.slots.ink_dim),
+                        ))
+                        .right_aligned(),
                     );
                 } else if let Some(status) = self
                     .panels
@@ -268,13 +567,31 @@ impl Surface for App<'_> {
             }
         }
 
+        let menu = self
+            .panels
+            .get(&self.layout.focus())
+            .map_or(&[][..], |panel| panel.menu());
         draw_footer(
             frame,
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
             self.report,
             &self.theme,
             &self.glyphs,
+            menu,
+            self.arranging,
         );
+
+        if let Some(overlay) = &self.overlay {
+            super::overlay::draw(
+                frame,
+                area,
+                overlay,
+                &self.theme.slots,
+                &self.glyphs,
+                self.caps,
+                menu,
+            );
+        }
     }
 
     fn handle(&mut self, input: Input) -> Flow {
@@ -283,44 +600,40 @@ impl Surface for App<'_> {
         };
         self.notice = None;
 
-        // Global keys first, then anything left goes to the focused panel.
-        // The full table and its contexts arrive with the chrome; this is the
-        // subset the panels need to be usable.
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('q'), _) => {
-                self.exit = true;
-                self.remember();
-                return Flow::Quit;
-            }
-            (KeyCode::Char(c @ '1'..='9'), _) => {
-                let address = c as u8 - b'0';
-                self.layout = self
-                    .layout
-                    .with_focus_on_address(Self::pane(current_size()), address);
-                return Flow::Continue;
-            }
-            (KeyCode::Char('p'), _) => {
-                self.preset = self.preset.next();
-                self.layout = self.preset.layout();
-                self.maximized = None;
-                self.sync_panels();
-                return Flow::Continue;
-            }
-            (KeyCode::Enter, _) => {
-                self.maximized = Some(self.layout.focus());
-                return Flow::Continue;
-            }
-            (KeyCode::Esc, _) => {
-                self.maximized = None;
-                return Flow::Continue;
-            }
-            (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
-                self.notice = Some("arrange mode arrives with the chrome".to_owned());
-                return Flow::Continue;
-            }
-            _ => {}
+        // Escape is answered before anything else, because it means back and
+        // back is relative to what is open. The chain is the design's:
+        // an overlay, then arrange mode, then a filter, then maximize. It
+        // never quits; `q` alone does.
+        if key.code == KeyCode::Esc {
+            self.escape();
+            return Flow::Continue;
         }
 
+        // A text buffer takes the whole keyboard while it is open. Without
+        // that, typing a path containing `q` would quit underneath the prompt.
+        if self.overlay.is_some() {
+            return self.overlay_key(key);
+        }
+        if self.filtering.is_some() {
+            self.filter_key(key);
+            return Flow::Continue;
+        }
+        if self.arranging {
+            self.arrange_key(key);
+            return Flow::Continue;
+        }
+
+        if let Some(command) = keymap::lookup(Context::Global, key) {
+            return self.global(command);
+        }
+        if let Some(command) = keymap::lookup(Context::Focused, key)
+            && self.focused(command)
+        {
+            return Flow::Continue;
+        }
+
+        // Anything the table did not claim is the panel's own, which is how
+        // its border words reach it.
         let focus = self.layout.focus();
         let ctx = Ctx {
             report: self.report,
@@ -346,47 +659,63 @@ impl Surface for App<'_> {
 /// A jump address is resolved against the arrangement as last solved, and the
 /// solve needs a pane. Asking the terminal is cheaper and more honest than
 /// caching a size that a resize could have invalidated.
+/// Where an export lands unless the reader says otherwise.
+fn default_export_path(report: &AnalysisReport, json: bool) -> String {
+    let stem = report
+        .model_name
+        .rsplit_once('.')
+        .map_or(report.model_name.as_str(), |(stem, _)| stem);
+    if json {
+        format!("{stem}.json")
+    } else {
+        format!("{stem}_report.txt")
+    }
+}
+
 fn current_size() -> Rect {
     let (width, height) = crossterm::terminal::size().unwrap_or((140, 45));
     Rect::new(0, 0, width, height)
 }
 
+/// The strip along the bottom, generated from the table.
+///
+/// Nothing here is written by hand, which is what stops it drifting from the
+/// help overlay and from what the keys actually do. Its right half changes
+/// with focus, because a border word without its key is a control a reader
+/// cannot use.
 fn draw_footer(
     frame: &mut Frame,
     area: Rect,
     report: &AnalysisReport,
     theme: &Theme,
     glyphs: &Glyphs,
+    panel_menu: &[&'static str],
+    arranging: bool,
 ) {
-    let key = |k: &str| {
+    let accent = |text: String| {
         Span::styled(
-            k.to_owned(),
+            text,
             Style::default()
                 .fg(theme.slots.accent)
                 .add_modifier(Modifier::BOLD),
         )
     };
-    let word = |w: &str| Span::styled(w.to_owned(), Style::default().fg(theme.slots.ink));
-
-    // The keys are named in the repertoire the terminal has, not in the one
-    // the design was drawn in. When the keymap table generates this strip it
-    // takes the same rule with it.
-    let select = format!("{}{}", glyphs.scroll_up, glyphs.scroll_down);
-    let enter = match glyphs.tier {
-        crate::tui::caps::GlyphTier::Unicode => "\u{21b5}",
-        crate::tui::caps::GlyphTier::Ascii => "ent",
-    };
+    let plain = |text: String| Span::styled(text, Style::default().fg(theme.slots.ink));
 
     let mut spans = Vec::new();
-    for (k, w) in [
-        ("1-9", " panel  "),
-        (select.as_str(), " select  "),
-        (enter, " max  "),
-        ("p", " preset  "),
-        ("q", " quit"),
-    ] {
-        spans.push(key(k));
-        spans.push(word(w));
+    if arranging {
+        // The mode says so rather than leaving a reader to infer it from the
+        // borders alone.
+        spans.push(accent("ARRANGE  ".to_owned()));
+        for binding in keymap::rows(Context::Arrange) {
+            spans.push(accent(keymap::label(binding, glyphs.tier)));
+            spans.push(plain(format!(" {}  ", short(binding.describes))));
+        }
+    } else {
+        for (label, describes) in keymap::footer(panel_menu, glyphs.tier) {
+            spans.push(accent(label));
+            spans.push(plain(format!(" {}  ", short(&describes))));
+        }
     }
     frame.render_widget(ratatui::widgets::Paragraph::new(Line::from(spans)), area);
 
@@ -406,6 +735,16 @@ fn draw_footer(
         .right_aligned(),
         area,
     );
+}
+
+/// The first word or two of a description, because the footer has one row and
+/// the help overlay has the whole sentence.
+fn short(describes: &str) -> String {
+    describes
+        .split([',', ' '])
+        .find(|word| !word.is_empty())
+        .unwrap_or(describes)
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -508,6 +847,19 @@ mod tests {
         println!("{}", screen(&buffer, 140, 45));
     }
 
+    /// Not an assertion: the help overlay over a dimmed grid.
+    #[test]
+    #[ignore]
+    fn preview_help() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+        app.overlay = Some(Overlay::Help);
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        println!("{}", screen(terminal.backend().buffer(), 140, 45));
+    }
+
     /// Not an assertion: the whole surface over a real model, which is the
     /// only way to judge the plots.
     #[test]
@@ -529,6 +881,117 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
         terminal.draw(|frame| app.draw(frame)).expect("draw");
         println!("{}", screen(terminal.backend().buffer(), 140, 45));
+    }
+
+    fn key(code: KeyCode) -> Input {
+        Input::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+        ))
+    }
+
+    fn app_over<'a>(report: &'a AnalysisReport, model: &'a ModelView<'a>) -> App<'a> {
+        let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
+        let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
+        App::new(report, model, Preset::Survey.layout(), theme, CAPS)
+    }
+
+    /// Escape means back, one layer at a time, in the design's order. It is
+    /// the criterion most easily broken by a later change, because every new
+    /// mode is a temptation to add another arm somewhere else.
+    #[test]
+    fn escape_unwinds_one_layer_at_a_time_and_never_quits() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+
+        // Build every layer up: maximized, then arranging, then a filter,
+        // then an overlay over all of it.
+        app.handle(key(KeyCode::Enter));
+        assert!(app.maximized.is_some());
+        app.arranging = true;
+        app.filtering = Some("gr".to_owned());
+        app.overlay = Some(Overlay::Help);
+
+        app.handle(key(KeyCode::Esc));
+        assert!(app.overlay.is_none(), "the overlay did not close first");
+        assert!(app.filtering.is_some(), "the filter closed too early");
+
+        app.handle(key(KeyCode::Esc));
+        assert!(app.filtering.is_none(), "the filter did not clear");
+        assert!(app.arranging, "arrange mode ended too early");
+
+        app.handle(key(KeyCode::Esc));
+        assert!(!app.arranging, "arrange mode did not end");
+        assert!(app.maximized.is_some(), "maximize restored too early");
+
+        app.handle(key(KeyCode::Esc));
+        assert!(app.maximized.is_none(), "maximize did not restore");
+
+        // And at the bottom of the chain it still does not quit.
+        assert_eq!(app.handle(key(KeyCode::Esc)), Flow::Continue);
+        assert!(!app.exit, "escape quit the application");
+    }
+
+    /// A text buffer takes the whole keyboard, or typing a path containing
+    /// `q` would quit underneath the prompt.
+    #[test]
+    fn an_open_overlay_swallows_the_global_keys() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+
+        app.overlay = Some(Overlay::Export(Export {
+            json: false,
+            path: String::new(),
+        }));
+        assert_eq!(app.handle(key(KeyCode::Char('q'))), Flow::Continue);
+        assert!(!app.exit, "a typed q quit the application");
+        let Some(Overlay::Export(export)) = &app.overlay else {
+            panic!("the overlay closed");
+        };
+        assert_eq!(export.path, "q");
+
+        // The same for the in-border filter.
+        let mut app = app_over(&report, &model);
+        app.filtering = Some(String::new());
+        app.handle(key(KeyCode::Char('q')));
+        assert!(!app.exit);
+        assert_eq!(app.filtering.as_deref(), Some("q"));
+    }
+
+    /// Help opens from the table's own key and closes on anything, because a
+    /// reader who pressed something has read it.
+    #[test]
+    fn help_opens_and_closes() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+
+        app.handle(key(KeyCode::Char('?')));
+        assert_eq!(app.overlay, Some(Overlay::Help));
+        app.handle(key(KeyCode::Char('x')));
+        assert!(app.overlay.is_none());
+    }
+
+    /// Arrange takes its prefix and every border tints, so the mode is never
+    /// ambiguous.
+    #[test]
+    fn arrange_mode_is_entered_by_its_prefix_and_left_by_escape() {
+        let report = report();
+        let model = ModelView::default();
+        let mut app = app_over(&report, &model);
+
+        app.handle(Input::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('w'),
+            crossterm::event::KeyModifiers::CONTROL,
+        )));
+        assert!(app.arranging);
+
+        // A plain w is not the prefix, so it cannot arrange by accident.
+        app.arranging = false;
+        app.handle(key(KeyCode::Char('w')));
+        assert!(!app.arranging);
     }
 
     /// Jump is the only action that crosses panels, so it is the only one

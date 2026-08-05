@@ -18,11 +18,13 @@ pub(crate) mod contrast;
 #[allow(dead_code)]
 pub(crate) mod arrange;
 pub(crate) mod geometry;
+pub(crate) mod keymap;
 pub(crate) mod layout;
 // Writing the file, and reading the arrangement back out of it, belong to
 // the quit path and the loop that owns it. Reading the theme already has a
 // caller. Removed with the allow above when the loop lands.
 #[allow(dead_code)]
+pub(crate) mod overlay;
 pub(crate) mod panels;
 pub(crate) mod prefs;
 pub(crate) mod raster;

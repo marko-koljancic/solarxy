@@ -110,6 +110,21 @@ pub trait Panel {
     fn reveal(&mut self, _row: usize) -> bool {
         false
     }
+
+    /// Take a filter query typed into this panel's own border.
+    ///
+    /// `None` clears it. A panel with nothing to filter ignores this, and its
+    /// border shows no filter word, so a reader is never offered a control
+    /// that does nothing.
+    fn set_filter(&mut self, _query: Option<String>) {}
+
+    /// How many rows the filter admits, out of how many there are.
+    ///
+    /// Shown live in the border while a query is being typed, which is what
+    /// makes filtering feel like narrowing rather than guessing.
+    fn filter_counts(&self, _ctx: &Ctx<'_>) -> Option<(usize, usize)> {
+        None
+    }
 }
 
 /// Build the panel for a type.

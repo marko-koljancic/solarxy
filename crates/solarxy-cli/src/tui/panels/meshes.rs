@@ -205,6 +205,14 @@ impl Panel for Meshes {
         }
     }
 
+    fn set_filter(&mut self, query: Option<String>) {
+        self.filter = query.filter(|q| !q.is_empty());
+    }
+
+    fn filter_counts(&self, ctx: &Ctx<'_>) -> Option<(usize, usize)> {
+        Some((self.rows(ctx).len(), ctx.report.meshes.len()))
+    }
+
     fn reveal(&mut self, row: usize) -> bool {
         self.state.select(Some(row));
         true
