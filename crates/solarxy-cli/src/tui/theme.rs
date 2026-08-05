@@ -422,7 +422,11 @@ impl ThemeSet {
         let mut colors: BTreeMap<String, Color> = BTreeMap::new();
         let mut chart: Option<Vec<Color>> = None;
         for layer in chain.iter().rev() {
-            let file = self.get(layer).expect("walked above");
+            // Every name in the chain resolved during the walk above, so a
+            // miss here is unreachable; skipping is the calm answer anyway.
+            let Some(file) = self.get(layer) else {
+                continue;
+            };
             for (slot, value) in &file.colors {
                 colors.insert(slot.clone(), *value);
             }
