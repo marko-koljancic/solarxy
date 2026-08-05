@@ -13,7 +13,6 @@ import {
   CONTRACTS,
   COVERAGE,
   COVERAGE_RELEASES,
-  DOCS,
   ENABLERS,
   FOOTER_META,
   HERO_CHIPS,
@@ -58,7 +57,6 @@ mount("coverageMatrix", render.coverageMatrix(COVERAGE_RELEASES, COVERAGE, JOURN
 mount("enablers", render.enablerCards(ENABLERS));
 mount("shortlist", render.shortlistList(SHORTLIST));
 mount("ordering", render.orderingList(ORDERING));
-mount("docList", render.docsList(DOCS));
 mount("footerMeta", render.footerMeta(FOOTER_META));
 
 /* The rail handler exists only after initRail below, but the explorer fires

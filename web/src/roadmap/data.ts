@@ -43,7 +43,6 @@ export const SECTIONS: Section[] = [
   { id: "workflows", label: "Workflows" },
   { id: "coverage", label: "Coverage" },
   { id: "explorer", label: "Explorer" },
-  { id: "documents", label: "Documents" },
 ];
 
 export interface Stat {
@@ -2421,77 +2420,5 @@ export const CARDS: Card[] = [
     why: "As the web app grows toward engine breadth, unit tests will not catch integration regressions across the boundary; e2e is the safety net for a solo maintainer shipping live.",
     dep: "Derisks every subsequent web feature.",
     risk: "WebGPU in CI runners limits visual assertions; scope to interaction / flow, not pixels.",
-  },
-];
-
-export interface DocEntry {
-  title: string;
-  status: string;
-  d: string;
-}
-
-/* The specification spine behind the program: every release is specified
- * before it is built. Titles and statuses only; the documents themselves are
- * internal working papers. */
-export const DOCS: DocEntry[] = [
-  {
-    title: "The living roadmap",
-    status: "Living",
-    d: "The full product and program document this page mirrors, kept current as releases ship.",
-  },
-  {
-    title: "The milestone program",
-    status: "Living",
-    d: "Every roadmap card assigned a disposition, and the thirteen-release ladder through v1.5.0.",
-  },
-  {
-    title: "Desktop parity",
-    status: "Living",
-    d: "Feasibility, sizing, and what each shell is for.",
-  },
-  {
-    title: "The 0.8.1 milestone specification",
-    status: "Shipped",
-    d: "Expressions, runtime, and publishing.",
-  },
-  {
-    title: "The 0.8.2 milestone specification",
-    status: "Build-ready",
-    d: "Rendering foundations.",
-  },
-  {
-    title: "The 0.9.0 milestone specification",
-    status: "Build-ready",
-    d: "Path-traced rendering.",
-  },
-  {
-    title: "The 0.9.5 milestone specification",
-    status: "Skeleton",
-    d: "The desktop node canvas.",
-  },
-  {
-    title: "The 0.10.0 milestone specification",
-    status: "Skeleton",
-    d: "Hard-surface modeling and the runtime's first consumers.",
-  },
-  {
-    title: "The 1.0.0 milestone specification",
-    status: "Skeleton",
-    d: "The Horizon: stable, documented, embeddable, publishable.",
-  },
-  {
-    title: "The node-system contract",
-    status: "Reference",
-    d: "Typed ports and coercion, per-node versioning and migration, the tiered catalog.",
-  },
-  {
-    title: "The UX specification",
-    status: "Reference",
-    d: "Personas, journeys, the interaction model, and the realtime UX contract.",
-  },
-  {
-    title: "The implementation log",
-    status: "Record",
-    d: "One dated entry per engineering wave: what landed, deviations, measurements.",
   },
 ];

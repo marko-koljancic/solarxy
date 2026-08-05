@@ -11,7 +11,6 @@ import type {
   ChangelogEntry,
   Commitment,
   Disposition,
-  DocEntry,
   Enabler,
   Journey,
   Persona,
@@ -287,19 +286,6 @@ export function shortlistList(items: ShortlistItem[]): string {
 export function orderingList(items: string[]): string {
   return items
     .map((o, i) => `<li><span class="dot">${i + 1}</span><span>${o}</span></li>`)
-    .join("");
-}
-
-export function docsList(docs: DocEntry[]): string {
-  return docs
-    .map((d) => {
-      const cls = d.status.toLowerCase().replace(/[^a-z]/g, "");
-      return `<div class="doc-row">
-      <span class="doc-title">${d.title}</span>
-      <span class="doc-status s-${cls}">${d.status}</span>
-      <p class="doc-d">${d.d}</p>
-    </div>`;
-    })
     .join("");
 }
 
