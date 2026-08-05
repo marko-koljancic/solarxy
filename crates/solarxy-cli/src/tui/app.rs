@@ -249,7 +249,6 @@ impl<'a> App<'a> {
                 self.sync_panels();
             }
             arrange::Outcome::Refused(refusal) => self.notice = Some(refusal.to_string()),
-            arrange::Outcome::Left => self.arranging = false,
         }
     }
 

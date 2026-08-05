@@ -33,8 +33,6 @@ pub enum Command {
     Shrink,
     /// Even every ratio out.
     Balance,
-    /// Leave arrange mode.
-    Exit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +51,10 @@ pub enum Toward {
 pub const RESIZE_STEP: f32 = 0.05;
 
 /// What happened, so the caller knows whether to redraw and what to say.
+///
+/// Leaving the mode is deliberately not one of these. The keymap owns which
+/// key ends arranging and the caller acts on it directly, so this enum stays
+/// about what happened to the arrangement rather than to the reader's mode.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     /// The arrangement changed.
@@ -60,8 +62,6 @@ pub enum Outcome {
     /// The command was refused; the arrangement is untouched and the reason
     /// belongs in the focused panel's border.
     Refused(Refusal),
-    /// Arrange mode should end.
-    Left,
 }
 
 /// Apply one command.
@@ -71,7 +71,6 @@ pub enum Outcome {
 /// the arrangement is actually being drawn at.
 pub fn apply(layout: &Layout, area: Rect, command: Command) -> Outcome {
     match command {
-        Command::Exit => Outcome::Left,
         Command::Focus(toward) => Outcome::Changed(focus_toward(layout, area, toward)),
         Command::Split(dir) => result(layout.split(area, dir)),
         Command::Close => result(layout.close()),
@@ -308,12 +307,6 @@ mod tests {
         for placement in balanced.solve(PANE, None) {
             assert!(super::super::layout::fits(placement.rect));
         }
-    }
-
-    #[test]
-    fn exit_leaves_the_mode_without_touching_the_arrangement() {
-        let layout = Preset::Survey.layout();
-        assert_eq!(apply(&layout, PANE, Command::Exit), Outcome::Left);
     }
 
     /// Whatever sequence a reader runs, the arrangement stays usable and

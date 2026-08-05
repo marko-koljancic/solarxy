@@ -11,19 +11,12 @@ use ratatui::{
 use super::tui_theme::TuiTheme;
 
 pub(crate) mod app;
+pub(crate) mod arrange;
 pub(crate) mod caps;
 pub(crate) mod contrast;
-// Arrange mode's grammar waits for the keymap that binds it; the tiled
-// surface consumes the tree already.
-#[allow(dead_code)]
-pub(crate) mod arrange;
 pub(crate) mod geometry;
 pub(crate) mod keymap;
 pub(crate) mod layout;
-// Writing the file, and reading the arrangement back out of it, belong to
-// the quit path and the loop that owns it. Reading the theme already has a
-// caller. Removed with the allow above when the loop lands.
-#[allow(dead_code)]
 pub(crate) mod overlay;
 pub(crate) mod panels;
 pub(crate) mod prefs;
