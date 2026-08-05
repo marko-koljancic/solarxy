@@ -2,12 +2,13 @@
 //!
 //! # The defect this type exists to make impossible
 //!
-//! The shipped analyze shell stores a content height in logical [`Line`]s and
-//! then hands that number to three separate consumers: the offset clamp, the
-//! position counter, and the scrollbar. A wrapping `Paragraph` turns one long
-//! line into several rows, so on a narrow terminal all three under-report by
-//! the same unknown amount, and jump-to-bottom stops short of the true last
-//! row because the clamp it is measured against is too small.
+//! The tabbed shell this one replaced stored a content height in logical
+//! `Line`s and then handed that number to three separate consumers: the
+//! offset clamp, the position counter, and the scrollbar. A wrapping
+//! `Paragraph` turns one long line into several rows, so on a narrow terminal
+//! all three under-reported by the same unknown amount, and jump-to-bottom
+//! stopped short of the true last row because the clamp it was measured
+//! against was too small.
 //!
 //! The interesting part is that no arithmetic here is wrong. Every site is
 //! individually correct and reads the same wrong number, which is why the

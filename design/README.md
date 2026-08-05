@@ -29,7 +29,7 @@ The split matters, because half of it is enforced by tests and half is not.
 `crates/solarxy-core/src/theme.rs` is the single colour source for all three shells:
 
 - `crates/solarxy-app/src/gui/theme.rs` maps it onto egui for the desktop GUI.
-- `crates/solarxy-cli/src/tui_theme.rs` maps it onto ratatui for the analyze TUI.
+- `crates/solarxy-cli/src/tui/theme.rs` maps it onto ratatui for the analyze TUI.
 - `crates/solarxy-core/examples/gen_tokens.rs` generates `web/src/styles/tokens.generated.css`
   for the web app.
 

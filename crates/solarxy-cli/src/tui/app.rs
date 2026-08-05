@@ -1,18 +1,5 @@
 //! The tiled surface: an arrangement of panels over one report.
 //!
-//! # Reachable, but not yet the default
-//!
-//! `SOLARXY_TUI=next` opens this instead of the shipped tabs. It exists
-//! because the two tasks after this one have verification no test can perform:
-//! whether a braille silhouette of a dense mesh reads as a form or as a solid
-//! rectangle is, in the design's own words, the one thing only rendering can
-//! settle. Building three panels on a rasteriser nobody has looked at is the
-//! avoidable version of that risk.
-//!
-//! The shipped tabs stay the default until every panel exists, because cutting
-//! over before then would ship a surface missing something readers have today.
-//! Both this switch and the shell it opens are removed in the same stage.
-//!
 //! # What lives here and what does not
 //!
 //! The app owns the arrangement, which panel holds each leaf, and the per-leaf
@@ -38,19 +25,6 @@ use super::overlay::{Confirm, Export, Overlay};
 use super::panels::{self, Action, Ctx, Panel};
 use super::shell::{Flow, Input, Surface};
 use super::theme::Theme;
-
-/// Opts into the tiled surface ahead of the cutover.
-pub const OPT_IN_ENV_VAR: &str = "SOLARXY_TUI";
-
-/// Whether the reader asked for the tiled surface.
-pub fn opted_in(lookup: impl Fn(&str) -> Option<String>) -> bool {
-    matches!(
-        lookup(OPT_IN_ENV_VAR)
-            .map(|raw| raw.trim().to_ascii_lowercase())
-            .as_deref(),
-        Some("next")
-    )
-}
 
 pub struct App<'a> {
     report: &'a AnalysisReport,
@@ -872,7 +846,21 @@ mod tests {
         let analyzer =
             crate::calc::analyze::ModelAnalyzer::new_with_config(&path, None).expect("loads");
         let report = analyzer.generate_report();
-        let model = crate::model_view(&analyzer);
+        // The same view the binary builds. A struct literal rather than a
+        // shared helper because the analyzer sits behind a feature this
+        // module does not have, and both sites break at compile time if a
+        // field is ever added.
+        let model = ModelView {
+            meshes: analyzer
+                .meshes
+                .iter()
+                .map(|mesh| crate::tui::geometry::MeshView {
+                    positions: &mesh.positions,
+                    texcoords: &mesh.texcoords,
+                    indices: &mesh.indices,
+                })
+                .collect(),
+        };
 
         let slots = ThemeSet::bundled().slots_for(DEFAULT_THEME).expect("loads");
         let theme = Theme::resolve(CAPS, DEFAULT_THEME, &slots);
@@ -1058,20 +1046,6 @@ mod tests {
             "{:?}",
             app.notice
         );
-    }
-
-    /// The opt-in reads like every other override this shell has.
-    #[test]
-    fn the_switch_is_off_unless_it_says_next() {
-        let env = |value: Option<&str>| {
-            let owned = value.map(str::to_owned);
-            move |key: &str| (key == OPT_IN_ENV_VAR).then(|| owned.clone()).flatten()
-        };
-        assert!(opted_in(env(Some("next"))));
-        assert!(opted_in(env(Some(" NEXT "))));
-        assert!(!opted_in(env(Some("1"))));
-        assert!(!opted_in(env(Some(""))));
-        assert!(!opted_in(env(None)));
     }
 
     /// Every fact the four panels are responsible for reaches the screen at

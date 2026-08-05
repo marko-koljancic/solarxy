@@ -114,6 +114,9 @@ impl Axis {
         }
     }
 
+    /// The next axis in the cycle. Returns rather than mutates, so a caller
+    /// that drops the result has cycled nothing.
+    #[must_use]
     pub fn next(self) -> Self {
         match self {
             Self::Front => Self::Side,

@@ -11,8 +11,6 @@ use solarxy_cli::parser::{Args, OperationMode, OutputFormat};
 #[cfg(feature = "analyzer")]
 use solarxy_cli::calc::analyze::ModelAnalyzer;
 #[cfg(feature = "analyzer")]
-use solarxy_cli::tui_analysis::TerminalApp;
-#[cfg(feature = "analyzer")]
 use solarxy_validate::{
     self as validate, ConfigSource, Output as ValidateOutput,
     adapter::{AdapterFormat, AdapterName, FailOn},
@@ -44,7 +42,7 @@ fn main() -> anyhow::Result<ExitCode> {
     }
 
     if args.list_tui_themes {
-        solarxy_cli::print_theme_listing();
+        solarxy_cli::tui::theme::print_listing();
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -165,12 +163,8 @@ fn run_analyze(
         eprintln!("{reason}");
         print!("{rendered}");
         Ok(())
-    } else if solarxy_cli::tiled_analyze_requested() {
-        let model = solarxy_cli::model_view(&analyzer);
-        solarxy_cli::run_tiled_analyze(&report, &model, tui_theme)?;
-        Ok(())
     } else {
-        TerminalApp::new(report, model_path, tui_theme).run()?;
+        run_analyze_surface(&report, &analyzer, tui_theme)?;
         Ok(())
     }
 }
@@ -184,7 +178,61 @@ fn run_analyze(
 #[cfg(feature = "analyzer")]
 fn terminal_too_small() -> Option<String> {
     let (width, height) = crossterm::terminal::size().ok()?;
-    solarxy_cli::terminal_floor_notice(width, height)
+    solarxy_cli::tui::shell::below_floor(width, height)
+}
+
+/// Assemble the analyze surface and hand it the terminal.
+///
+/// The assembly is here rather than behind a library entry point because the
+/// pieces are the reusable half of that module tree: a second surface takes
+/// the capability model, the theme system and the split tree and supplies its
+/// own panels. One opaque call would hide exactly the seam that makes it
+/// cheap.
+#[cfg(feature = "analyzer")]
+fn run_analyze_surface(
+    report: &solarxy_core::report::AnalysisReport,
+    analyzer: &ModelAnalyzer,
+    requested_theme: Option<&str>,
+) -> std::io::Result<()> {
+    use solarxy_cli::tui;
+    use tui::app::App;
+    use tui::caps::Capabilities;
+    use tui::geometry::{MeshView, ModelView};
+    use tui::layout::Preset;
+    use tui::prefs::TuiPrefs;
+    use tui::theme::ThemeSet;
+
+    let caps = Capabilities::detect();
+    let (prefs, notices) = TuiPrefs::load();
+    let wanted = requested_theme.or(prefs.theme.as_deref());
+    let (theme, theme_notices) = ThemeSet::load().resolve(wanted, caps);
+    for notice in notices {
+        tracing::warn!("{notice}");
+    }
+    for notice in theme_notices {
+        tracing::warn!("{notice}");
+    }
+
+    // A view, not a copy: the analyzer owns these arrays for the whole
+    // session, and copying them would throw away the reason the plots cost
+    // nothing to draw.
+    let model = ModelView {
+        meshes: analyzer
+            .meshes
+            .iter()
+            .map(|mesh| MeshView {
+                positions: &mesh.positions,
+                texcoords: &mesh.texcoords,
+                indices: &mesh.indices,
+            })
+            .collect(),
+    };
+
+    let layout = prefs
+        .opening_layout()
+        .unwrap_or_else(|| Preset::Survey.layout());
+    let mut app = App::new(report, &model, layout, theme, caps);
+    tui::shell::run(&mut app)
 }
 
 #[cfg(not(feature = "analyzer"))]

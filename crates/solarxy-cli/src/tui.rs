@@ -1,57 +1,43 @@
-//! Shared line builders for the analyze TUI.
+//! The analyze surface: a tiled workspace over one model's report.
 //!
-//! Every color arrives as a [`TuiTheme`] rather than being named here, so
-//! this shell stays a pure consumer of the palette in `solarxy_core::theme`.
+//! This file is the tree's root and nothing else. The two line builders that
+//! used to live here served the tabbed shell that this module replaced, and
+//! they left with it.
+//!
+//! # What is public, and why
+//!
+//! The binary assembles the surface itself: it detects the terminal, loads
+//! preferences, resolves a theme, builds the app and runs it. That is a
+//! deliberate shape rather than a convenience. Everything above `panels`
+//! knows nothing about [`solarxy_core::report::AnalysisReport`], so a second
+//! consumer takes the capability model, the theme system, the split tree, the
+//! keymap and the rasteriser, and supplies its own panels. Wrapping that in
+//! one opaque entry point would hide the seam that makes the reuse cheap.
+//!
+//! The cost is that these modules are part of this crate's public interface
+//! and cannot be reshaped without a version that says so.
 
-use ratatui::{
-    style::{Modifier, Style},
-    text::{Line, Span},
-};
-
-use super::tui_theme::TuiTheme;
-
-pub(crate) mod app;
-pub(crate) mod arrange;
-pub(crate) mod caps;
-pub(crate) mod contrast;
-pub(crate) mod geometry;
-pub(crate) mod keymap;
-pub(crate) mod layout;
-pub(crate) mod overlay;
-pub(crate) mod panels;
-pub(crate) mod prefs;
-pub(crate) mod raster;
-pub(crate) mod scroll;
-pub(crate) mod shell;
-pub(crate) mod theme;
-pub(crate) mod uv;
-pub(crate) mod widgets;
+pub mod app;
+pub mod arrange;
+pub mod caps;
+pub mod contrast;
+pub mod geometry;
+pub mod keymap;
+pub mod layout;
+pub mod overlay;
+pub mod panels;
+pub mod prefs;
+pub mod raster;
+pub mod scroll;
+pub mod shell;
+pub mod theme;
+pub mod uv;
+pub mod widgets;
 
 /// The reference panel and the shared render-test machinery.
 ///
-/// Test-only, and in the library rather than under `tests/` because this
-/// module tree is `pub(crate)`: an integration test cannot see it.
+/// Test-only, and in the library rather than under `tests/` because an
+/// integration test compiles against the crate from outside and would see
+/// none of the state these helpers assert against.
 #[cfg(test)]
 pub(crate) mod harness;
-
-pub(crate) fn section_header(text: &str, theme: &TuiTheme) -> Line<'static> {
-    Line::from(Span::styled(
-        text.to_string(),
-        Style::default()
-            .fg(theme.heading)
-            .add_modifier(Modifier::BOLD),
-    ))
-}
-
-pub(crate) fn kv_line(label: &str, value: &str, theme: &TuiTheme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            format!("{}:", label),
-            Style::default()
-                .fg(theme.success)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled(value.to_string(), Style::default().fg(theme.text)),
-    ])
-}

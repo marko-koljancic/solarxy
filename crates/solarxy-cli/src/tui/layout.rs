@@ -613,7 +613,9 @@ impl Preset {
             .unwrap_or_else(|e| panic!("the {} preset does not parse: {e}", self.name()))
     }
 
-    /// The next preset in the cycle.
+    /// The next preset in the cycle. Returns rather than mutates, so a caller
+    /// that drops the result has cycled nothing.
+    #[must_use]
     pub fn next(self) -> Self {
         match self {
             Self::Survey => Self::Meshes,
