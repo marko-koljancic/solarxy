@@ -20,9 +20,9 @@ export const SHELL_COUNT = 3;
 export const VALIDATION_KIND_COUNT = 11;
 export const CARD_COUNT = 72;
 export const PROGRAM_RELEASE_COUNT = 13;
-export const RELEASES_TO_1_0 = 5;
+export const RELEASES_TO_1_0 = 4;
 export const JOURNEY_COUNT = 16;
-export const LIVE_VERSION = "v0.8.1";
+export const LIVE_VERSION = "v0.8.2";
 
 export interface Section {
   id: string;
@@ -76,7 +76,7 @@ export const HERO_CHIPS: string[] = [
 ];
 
 export const FOOTER_META: string[] = [
-  "Updated July 2026",
+  "Updated August 2026",
   `${LIVE_VERSION}, live on solarxy.koljam.com`,
   `${NODE_TYPE_COUNT} node types, ${CRATE_COUNT} crates`,
 ];
@@ -293,6 +293,11 @@ export const TIMELINE: TimelineEntry[] = [
     h: "v0.8.1 Expressions, Runtime and Publishing",
     body: "Expressions and the runtime ship together. Any numeric parameter can hold a formula: arithmetic, around thirty builtins, ch() references to another node, and geometry queries against its own inputs, with cycles refused at set time and a rename that rewrites every referring expression inside the rename's own undo step. That needed a naming model the codebase never had, so nodes now mint graph-unique auto-numbered names. The attribute wrangle runs the same language per point or primitive through one parser switched by a Scope trait, not a second grammar. A scene clock makes both move, with one tick per frame so $T is exactly $F / $FPS, dirtying only the nodes that read time. The File menu's Export web bundle writes a self-contained archive that carries the engine rather than a recording. And rect_area_light stops approximating, shading through linearly transformed cosines. Registry 74 to 76; the schema stays frozen at 1. All of it web-only: the desktop shell is still unwired from the node engine.",
   },
+  {
+    date: "2026-07-29 to 08-06",
+    h: "v0.8.2 Rendering foundations",
+    body: "The renderer closes five nameable gaps and the desktop gains its first engine surface. Principled surface parameters run end to end: transmission, clearcoat, sheen, iridescence and anisotropy import from glTF, shade in the viewport through one uber-shader with uniform branching, and export back with the extensions preserved. The environment becomes scene data: a float image type, HDR and EXR decode, and an environment node so the HDRI you light with saves inside the scene. Instancing becomes real: scatters and arrays carry transforms instead of baking copies, the raster path issues instanced draws, and every geometry node either carries placements or bakes them deliberately, never silently. The camera owns the look: exposure, lift, gamma and gain plus two LUT slots, one log-space before tone mapping and one after, travelling with the camera through save and load; light intensity moves to physical units with a migration that keeps old scenes looking identical. Under it all, the pane orchestration both shells had duplicated collapses into one shared host crate, verified by zero changed golden pixels, and on top of it the desktop opens .slxy scenes, renders them with no file loaded, and lists the graph in a read-only Node Tree. The analyze terminal report becomes a tiled workspace: panels you arrange yourself, four colour tiers, file-based themes, a braille model silhouette and UV occupancy map, and the triangle budget, issue kinds and mesh names the analyzer used to discard. The node canvas lands on one geometric contract: one layout box for every role, root nodes as fixture pills told apart by pastel, glyph and label, and the validation report becomes deterministic. Registry 76 to 77; the schema stays frozen at 1.",
+  },
 ];
 
 export interface ReleaseSummary {
@@ -354,8 +359,13 @@ export const RELEASES: ReleaseSummary[] = [
   },
   {
     v: "v0.8.1",
+    st: "Jul 2026",
+    p: "Expressions, Runtime and Publishing. Expressions on any numeric parameter with ch() cross-node references and geometry queries, the attribute wrangle, a scene clock with a Playbar, standalone web export, and physically based rect-area lights through linearly transformed cosines. Registry 74 to 76.",
+  },
+  {
+    v: "v0.8.2",
     st: "live",
-    p: "Expressions, Runtime and Publishing. Expressions on any numeric parameter with ch() cross-node references and geometry queries, the attribute wrangle, a scene clock with a Playbar, standalone web export, and physically based rect-area lights through linearly transformed cosines. Registry 74 to 76. The current release on solarxy.koljam.com.",
+    p: "Rendering foundations. Principled surfaces end to end, the environment as scene data, real geometry instancing, two-slot LUT grading with a camera-owned look and physical light intensity, the shared host extraction, the desktop's first engine surface, and the analyze report reborn as a tiled terminal workspace. Registry 76 to 77. The current release on solarxy.koljam.com.",
   },
 ];
 
@@ -382,6 +392,109 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    v: "v0.8.2",
+    code: "Rendering foundations",
+    date: "August 2026",
+    status: "live",
+    statusLabel: "Released",
+    open: true,
+    summary:
+      "Five nameable gaps in the renderer close in one release, the desktop gains its first engine surface on a newly shared host, and the analyze terminal report becomes a tiled workspace. The theme is foundations: the material model, the environment, instancing and the look pipeline are exactly what the path tracer consumes next release, laid down here so it renders scenes rather than approximations.",
+    groups: [
+      {
+        h: "Principled surfaces",
+        items: [
+          {
+            lead: "The extended material model runs end to end.",
+            text: "Transmission, clearcoat, sheen, iridescence and anisotropy import from glTF, shade in the viewport, and export back with their extensions preserved, so a vendor file loses nothing on a round trip. One uber-shader with uniform branching keeps the pipeline count at one.",
+          },
+          {
+            lead: "Texture maps for the new properties round-trip without shading.",
+            text: "The core WebGPU sampled-texture budget is spent; the maps survive import and export and the parameter help says exactly that. The path tracer consumes the same data next release.",
+          },
+        ],
+      },
+      {
+        h: "The scene owns its light",
+        items: [
+          {
+            lead: "An environment node.",
+            text: "The HDRI you light with becomes scene data: a float image type, Radiance and OpenEXR decode, and an environment node whose image saves inside the .slxy archive, so a scene reloads lit exactly as it was authored.",
+          },
+          {
+            lead: "Physical light intensity.",
+            text: "Light nodes move to physical units with a versioned migration and a matched viewer-rig rescale, proven by golden captures that did not change by a pixel.",
+          },
+        ],
+      },
+      {
+        h: "Real instancing",
+        items: [
+          {
+            lead: "Scatters carry transforms instead of baking copies.",
+            text: "A ten-thousand-copy scatter stays interactive and issues instanced draws; Bake mode still collapses to real geometry when a downstream edit needs it, and old scenes pin to Bake so nothing changes behind their back.",
+          },
+          {
+            lead: "Every node is on one side of a contract.",
+            text: "A geometry node either carries placements through or bakes them first with a warning naming the count. Losing every copy but one silently is no longer a reachable state, and the export path bakes exactly where it encodes.",
+          },
+        ],
+      },
+      {
+        h: "The camera owns the look",
+        items: [
+          {
+            lead: "Colour grading travels with the camera.",
+            text: "Exposure, lift, gamma and gain plus two LUT slots for .cube tables, one log-space before tone mapping and one display-referred after, all saved on the camera node so a graded scene reloads graded.",
+          },
+        ],
+      },
+      {
+        h: "One host, two shells",
+        items: [
+          {
+            lead: "The duplicated pane orchestration collapses.",
+            text: "The per-pane render loop, lighting chokepoint, camera lifecycle and gizmo drag solver both shells carried now exist once in a shared host crate, and the golden harness renders through the same path it gates. Verified by zero changed pixels across every capture.",
+          },
+          {
+            lead: "The desktop opens scenes.",
+            text: "The desktop app opens a .slxy authored on the web, from the dialog or the launch argument, renders it identically with the engine cooking, lists the graph in a read-only Node Tree, and sources its Properties and Outliner panels from the engine scene. The editing canvas is the release after next.",
+          },
+        ],
+      },
+      {
+        h: "The terminal workspace",
+        items: [
+          {
+            lead: "The analyze report becomes a dashboard.",
+            text: "Ten panel types tile the terminal: presets, free arrangement, maximize, per-panel selection and scrolling. Four colour tiers degrade gracefully to plain ASCII, themes come from files with a contrast floor, and a braille rasteriser draws the model silhouette and UV occupancy in the terminal.",
+          },
+          {
+            lead: "The discarded facts surface.",
+            text: "The triangle budget, per-kind issue counts, real mesh names and degenerate-face lists the analyzer always computed now reach the workspace and the plain text report.",
+          },
+        ],
+      },
+      {
+        h: "One geometric contract",
+        items: [
+          {
+            lead: "The node canvas simplifies.",
+            text: "Every role occupies one layout box, so handles, wires and auto-layout align across silhouettes; root nodes render as fixture pills told apart by pastel, glyph and label; glyphs ink directly on the body. The public roadmap page stopped advertising unreachable documents and works on a phone.",
+          },
+          {
+            lead: "The validation report becomes deterministic.",
+            text: "The same build validating the same file now names the same issues in the same order, which the CI golden gate had quietly depended on all along.",
+          },
+        ],
+      },
+    ],
+    meta: [
+      ["Registry", "76 to 77"],
+      ["Schema", "stays 1"],
+    ],
+  },
   {
     v: "v0.8.1",
     code: "Expressions, Runtime and Publishing",
@@ -789,28 +902,15 @@ export interface ReleasePlanEntry {
   items: string[];
 }
 
-/* The five remaining rungs to 1.0. The full thirteen-release program lives in
+/* The four remaining rungs to 1.0. The full thirteen-release program lives in
  * PROGRAM below; this is deliberately the same data at a shorter zoom. 1.0 is
  * a maturity bar, not a feature bar: stable, documented, embeddable,
  * publishable, explicitly not complete. */
 export const RELEASE_PLAN: ReleasePlanEntry[] = [
   {
-    v: "v0.8.2",
-    code: "Rendering foundations",
-    kind: "next",
-    theme: "Five nameable gaps in the renderer, the desktop's first engine surface, and the terminal workspace",
-    items: [
-      "Principled surface parameters end to end (10.3): transmission, clearcoat, sheen and iridescence survive a glTF round trip instead of being dropped on import.",
-      "The environment as scene data: a float image type and an environment node, so the HDRI you light with saves with the scene.",
-      "Real geometry instancing: scatters carry transforms instead of baking copies, and the raster path issues instanced draws for the first time.",
-      "LUT colour grading (11.4), two slots: a log-space transform before tone mapping and a look LUT after.",
-      "The shared-host extraction, then the desktop shell's first engine surface: the desktop app opens and renders .slxy scenes.",
-      "The analyze terminal report becomes a tiled workspace: panels you arrange yourself instead of four tabs read one at a time, themes, a model silhouette and a UV occupancy map drawn in braille, and the budget, issue kinds and mesh names the analyzer used to compute and discard.",
-    ],
-  },
-  {
     v: "v0.9.0",
     code: "Path-traced rendering",
+    kind: "next",
     theme: "A physically based GPU path tracer, and the CLI as a render surface",
     items: [
       "A compute path tracer on core WebGPU (12.5): global illumination, soft area-light shadows, optical depth of field, unbounded light count.",
@@ -900,7 +1000,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.8.2",
     code: "Rendering foundations",
-    kind: "next",
+    kind: "shipped",
     era: "pre",
     theme: "Five renderer gaps, the shared host, the desktop's first engine surface, and the terminal workspace",
     cards: ["10.3", "11.4", "18.1"],
@@ -910,7 +1010,7 @@ export const PROGRAM: ProgramEntry[] = [
   {
     v: "0.9.0",
     code: "Path-traced rendering",
-    kind: "planned",
+    kind: "next",
     era: "pre",
     theme: "A GPU path tracer, and the CLI as a render surface",
     cards: ["12.5", "17.3"],
@@ -1002,14 +1102,14 @@ export const DISPOSITIONS: Disposition[] = [
   {
     key: "shipped",
     label: "Shipped",
-    n: 12,
-    blurb: "Already released, including the scene clock whose transport bar shipped in 0.8.1.",
+    n: 14,
+    blurb: "Already released, most recently the 0.8.2 rendering foundations, including the scene clock whose transport bar shipped in 0.8.1.",
   },
   {
     key: "scheduled",
     label: "Scheduled",
-    n: 33,
-    blurb: "Assigned to a named release between v0.8.2 and v1.5.0.",
+    n: 31,
+    blurb: "Assigned to a named release between v0.9.0 and v1.5.0.",
   },
   {
     key: "backlog",
@@ -1243,7 +1343,6 @@ export const JOURNEYS: Journey[] = [
 ];
 
 export const COVERAGE_RELEASES: string[] = [
-  "0.8.2",
   "0.9.0",
   "0.9.5",
   "0.10.0",
@@ -1256,22 +1355,22 @@ export const COVERAGE_RELEASES: string[] = [
 ];
 
 export const COVERAGE: Record<string, number[]> = {
-  J1: [0, 0, 1, 1, 0, 0, 1, 0, 0, 1],
-  J2: [1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-  J3: [1, 1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J4: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-  J5: [1, 0, 1, 0, 1, 0, 0, 0, 0, 1],
-  J6: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-  J7: [0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
-  J8: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-  J9: [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-  J10: [0, 0, 1, 0, 0, 0, 0, 1, 0, 1],
-  J11: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-  J12: [0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
-  J13: [1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-  J14: [1, 1, 0, 0, 0, 1, 0, 0, 0, 0],
-  J15: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-  J16: [0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+  J1: [0, 1, 1, 0, 0, 1, 0, 0, 1],
+  J2: [0, 0, 1, 0, 0, 0, 0, 0, 0],
+  J3: [1, 0, 0, 0, 1, 0, 0, 0, 0],
+  J4: [0, 0, 0, 1, 0, 0, 0, 0, 0],
+  J5: [0, 1, 0, 1, 0, 0, 0, 0, 1],
+  J6: [0, 1, 0, 0, 0, 1, 0, 0, 0],
+  J7: [0, 1, 0, 0, 0, 0, 0, 0, 1],
+  J8: [0, 0, 0, 0, 0, 1, 0, 0, 0],
+  J9: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+  J10: [0, 1, 0, 0, 0, 0, 1, 0, 1],
+  J11: [1, 0, 0, 0, 0, 0, 0, 0, 0],
+  J12: [1, 0, 0, 1, 0, 0, 0, 0, 0],
+  J13: [0, 1, 0, 0, 0, 0, 0, 0, 0],
+  J14: [1, 0, 0, 0, 1, 0, 0, 0, 0],
+  J15: [0, 0, 1, 0, 0, 0, 1, 0, 0],
+  J16: [0, 0, 1, 0, 0, 0, 0, 1, 0],
 };
 
 export const UX_CONTRACT: string[] = [
