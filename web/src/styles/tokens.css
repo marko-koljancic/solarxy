@@ -66,8 +66,10 @@ body.dark-theme {
   --display-halo: var(--display);
   --status-error-bg: rgba(255, 68, 68, 0.1);
 
-  /* Node anatomy: the glyph draws directly on the body fill; the wing
-   * hovers tint the state hue they act on. */
+  /* Node anatomy: the glyph sits on a light chip plate at the box centre
+   * (deliberately one value for both themes, so the glyph ink reads the
+   * same everywhere); the wing hovers tint the state hue they act on. */
+  --node-chip: rgba(255, 255, 255, 0.85);
   --wing-bypass-hover: color-mix(in srgb, var(--state-attention) 45%, transparent);
   --wing-display-hover: color-mix(in srgb, var(--display) 45%, transparent);
 

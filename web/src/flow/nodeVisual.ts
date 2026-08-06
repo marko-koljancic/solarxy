@@ -5,9 +5,12 @@
 // (the zero-frontend-change contract). Glyph art is transplanted verbatim
 // from the design source (solarxy/design/web/solarxy-web.pen, the
 // Evo/Glyph set); every glyph is a 16x16 stroke path (round caps and
-// joins, 1.5 width). Shaped bodies are generated 112x32 outlines:
-// left-right symmetric vertex lists run through the corner-rounding
-// helper below.
+// joins, 1.5 width). Every role occupies the one 112x32 layout box; the
+// visible body may be smaller than the box when the size means something
+// (light, text, terminal), and a riser (folder tab, viewfinder bump)
+// rides above the box rather than inside it. Shaped outlines are
+// authored in box coordinates, risers at negative y, and run through the
+// corner-rounding helper below.
 
 import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
 
@@ -241,23 +244,47 @@ export function roundedPolygonPath(points: RoundedVertex[]): string {
   return parts.join(" ");
 }
 
-/** A shaped role body: the outline plus the box it is authored in.
+/** The one layout box every canvas role occupies. Handles, wires, labels,
+ * selection and auto-layout all read this box; the visible body inside it
+ * is the role's own affair. */
+export const NODE_BOX = { w: 112, h: 32 } as const;
+
+/** The visible body's size per role, centred inside `NODE_BOX`. A body may
+ * be SMALLER than the box, never larger, and only to mean something: the
+ * light is a fixture you place (not a stage in a chain), the text node is
+ * a quiet datablock, the terminal is the small donut the precedent set.
+ * The note node is the one exception to the box itself: its size is
+ * param-driven (`NoteNode`), so its entry is the default only.
  *
- * The box is also the node's CSS size, so a role that wants to be smaller
- * than the 112x32 default says so here and `ShapedBody` emits a matching
- * `viewBox`. Scaling one path into a different box instead would stretch
- * the 1px stroke along with it. */
+ * The matching CSS (`styles.css`, the Evo node system section) must agree
+ * with this table; `nodeVisual.test.ts` scans the stylesheet to hold the
+ * two together. */
+export const ROLE_BODY_SIZE: Record<NodeRole, { w: number; h: number }> = {
+  standard: { w: 112, h: 32 },
+  container: { w: 112, h: 32 },
+  gather: { w: 112, h: 32 },
+  branch: { w: 112, h: 32 },
+  terminal: { w: 28, h: 28 },
+  analyzer: { w: 112, h: 32 },
+  imageSource: { w: 112, h: 32 },
+  light: { w: 96, h: 28 },
+  camera: { w: 112, h: 32 },
+  text: { w: 76, h: 26 },
+  note: { w: 112, h: 32 },
+};
+
+/** A shaped role body: the outline, authored in `NODE_BOX` coordinates,
+ * plus how far its riser rides above the box (0 when none). A riser
+ * (folder tab, viewfinder bump) lives at negative y, so the box itself is
+ * never consumed and everything centred on the box stays centred on the
+ * body by construction. */
 export interface RoleBody {
   path: string;
-  w: number;
-  h: number;
+  riser: number;
 }
 
-/** The default body box every role uses unless it declares otherwise. */
-const BODY_W = 112;
-const BODY_H = 32;
-
-/** Shaped body outlines. Roles absent here render as plain CSS rectangles.
+/** Shaped body outlines. Roles absent here render as plain CSS rectangles
+ * sized by `ROLE_BODY_SIZE`.
  *
  * Most silhouettes are left-right symmetric, and `nodeVisual.test.ts` holds
  * them to it. One is deliberately not: `container` carries a folder tab on
@@ -275,8 +302,7 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [94, 32, 4],
       [18, 32, 4],
     ]),
-    w: BODY_W,
-    h: BODY_H,
+    riser: 0,
   },
   // Wide intake, narrowed readout: a symmetric trapezoid.
   analyzer: {
@@ -286,8 +312,7 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [102, 32, 4],
       [10, 32, 4],
     ]),
-    w: BODY_W,
-    h: BODY_H,
+    riser: 0,
   },
   // A file ticket with both top corners chamfered (the old single-fold
   // motif was asymmetric).
@@ -300,60 +325,56 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [0, 32, 4],
       [0, 14, 3],
     ]),
-    w: BODY_W,
-    h: BODY_H,
+    riser: 0,
   },
-  // A lamp dome: heavy top rounding, and softened at the bottom too. Sized
-  // down from the standard body because a light is a fixture you place, not
-  // a stage in a chain, and at full width it dominated the graph around it.
+  // A lamp dome: heavy top rounding, and softened at the bottom too. The
+  // 96x28 fixture body sits centred inside the standard box, so the wires
+  // and handles align with every neighbour while the smaller body keeps
+  // saying "a thing you place, not a stage in a chain".
   light: {
     path: roundedPolygonPath([
-      [0, 0, 12],
-      [96, 0, 12],
-      [96, 28, 10],
-      [0, 28, 10],
+      [8, 2, 12],
+      [104, 2, 12],
+      [104, 30, 10],
+      [8, 30, 10],
     ]),
-    w: 96,
-    h: 28,
+    riser: 0,
   },
-  // A camera: a body with a CENTRED bump, reading as a viewfinder.
+  // A camera: a full body with a CENTRED bump riding above it, reading as
+  // a viewfinder.
   //
-  // Shares the raised-tab motif with `container` below, and is told apart
-  // from it by position alone -- centred here, left there. That pairing is
+  // Shares the riser motif with `container` below, and is told apart from
+  // it by position alone -- centred here, left there. That pairing is
   // deliberate: both are things you place in the root graph rather than
   // stages in a chain, so they should look related without looking alike.
   // Symmetric, unlike the container, and held to the symmetry rule.
   camera: {
     path: roundedPolygonPath([
-      [0, 8, 4],
-      [38, 8, 3],
-      [45, 0, 3],
-      [67, 0, 3],
-      [74, 8, 3],
-      [112, 8, 4],
-      [112, 32, 4],
-      [0, 32, 4],
+      [0, 0, 6],
+      [38, 0, 2],
+      [38, -8, 3],
+      [74, -8, 3],
+      [74, 0, 2],
+      [112, 0, 6],
+      [112, 32, 6],
+      [0, 32, 6],
     ]),
-    w: BODY_W,
-    h: BODY_H,
+    riser: 8,
   },
   // A folder: the one silhouette that has to say "there is more inside".
-  // The tab is the universal motif for it, and it survives zooming out in a
-  // way an inset second border does not.
-  //
-  // Same 112x32 box as every other root-graph node, so a container no
-  // longer stands out by SIZE among the lights and cameras it sits beside;
-  // the tab is what carries the meaning.
+  // The tab is the universal motif for it, and it survives zooming out in
+  // a way an inset second border does not. It rides ABOVE the box (the way
+  // the gather dome always has), so the body keeps the full box height and
+  // the glyph centres by construction rather than by offset.
   container: {
     path: roundedPolygonPath([
-      [0, 0, 4],
-      [20, 0, 3],
-      [27, 8, 2],
-      [112, 8, 4],
-      [112, 32, 4],
-      [0, 32, 4],
+      [0, -8, 4],
+      [27, -8, 3],
+      [27, 0, 2],
+      [112, 0, 6],
+      [112, 32, 6],
+      [0, 32, 6],
     ]),
-    w: BODY_W,
-    h: BODY_H,
+    riser: 8,
   },
 };

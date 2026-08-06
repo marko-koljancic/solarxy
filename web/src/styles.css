@@ -364,12 +364,18 @@ body.precision-drag-active {
 }
 
 /* ---- The Evo node system ----
- * A 3.5:1 instrument body, category pastel fill (as --cat-fill, consumed
- * by the CSS rect bodies AND the shaped SVG bodies), a glyph inked
- * directly on the body (the chip plate and the segmentation seams are
- * retired), wings on rect bodies, the display halo, and the label
- * stack to the right. The .flow-node wrapper is transparent; all paint
- * happens on .node-body and its layers. */
+ * One geometric contract: every role occupies the 112x32 layout box
+ * (`NODE_BOX` / `ROLE_BODY_SIZE` in nodeVisual.ts are the numeric source;
+ * the test suite scans this file to keep the two in step). The visible
+ * body may sit smaller inside the box when the size means something
+ * (light, text, terminal), risers (folder tab, viewfinder bump, gather
+ * dome) ride above the box, and the glyph on its light chip, the cook
+ * arc, the display halo and the terminal core all centre on the box
+ * centre with no per-role offsets. Category pastel fill (as --cat-fill,
+ * consumed by the CSS rect bodies AND the shaped SVG bodies), wings on
+ * the full-width bodies, and the label stack to the right. The .flow-node
+ * wrapper is transparent; all paint happens on .node-body and its
+ * layers. */
 .flow-node {
   position: relative;
   width: 112px;
@@ -377,25 +383,27 @@ body.precision-drag-active {
   color: var(--node-text);
 }
 
-/* Per-role body boxes. These must match the `w`/`h` on the matching entry
- * in `ROLE_BODIES` (nodeVisual.ts), which is what the SVG viewBox uses:
- * disagree and the silhouette stretches. */
-.flow-node.role-terminal {
-  width: 28px;
-  height: 28px;
-}
-
-/* A light is a fixture you place, not a stage in a chain; at the full
- * 112x32 it out-weighed the operators around it. */
-.flow-node.role-light {
-  width: 96px;
-  height: 28px;
-}
-
+/* The visible body. Default: the whole box. The sized-down roles inset it
+ * (their dimensions mirror `ROLE_BODY_SIZE`), which recentres everything
+ * anchored to it -- wings, hatch, selection -- with no per-role offsets. */
 .node-body {
   position: absolute;
   inset: 0;
   border-radius: 6px;
+}
+
+/* The light's fixture body: 96x28 centred in the box. The dome itself is
+ * the SVG silhouette; this layer mirrors it so the selection ring and the
+ * wings hug the visible dome rather than the empty box corners. */
+.flow-node.role-light .node-body {
+  inset: 2px 8px;
+  border-radius: 12px;
+}
+
+/* The text datablock: quiet by 76x26 size inside the standard box, so a
+ * script library does not read as graph structure. */
+.flow-node.role-text .node-body {
+  inset: 3px 18px;
 }
 
 /* Rect bodies (standard, gather, text): fill + border + the top-down sheen
@@ -452,9 +460,12 @@ body.precision-drag-active {
   stroke: rgba(212, 175, 87, 0.55);
 }
 
-/* Terminal (null): the donut. The pastel ring with the ink core; the
- * body ring doubles as the selection target. */
+/* Terminal (null): the 28px donut centred in the full-width box -- the
+ * precedent for a small mark carrying meaning inside the standard box.
+ * The pastel ring with the ink core; the ring doubles as the selection
+ * target. */
 .flow-node.role-terminal .node-body {
+  inset: 2px 42px;
   border-radius: 50%;
   border: 7px solid var(--cat-fill, var(--geometry-node-background));
   background: transparent;
@@ -485,8 +496,9 @@ body.precision-drag-active {
   pointer-events: none;
 }
 
-/* The glyph slot: type identity at any zoom. The plate is gone;
- * the glyph inks directly on the body in a darkened category tone. */
+/* The glyph chip: type identity at any zoom. The light plate returned
+ * with the one-contract pass: a 20x20 rounded plate at the box centre
+ * carrying the 16x16 glyph, the same value in both themes. */
 .node-chip {
   position: absolute;
   left: 50%;
@@ -494,6 +506,8 @@ body.precision-drag-active {
   transform: translate(-50%, -50%);
   width: 20px;
   height: 20px;
+  border-radius: 3px;
+  background: var(--node-chip);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -570,16 +584,33 @@ body.precision-drag-active {
   border-radius: 6px 0 0 6px;
 }
 
-.wing-display {
+.wing-display,
+.wing-visibility {
   right: 0;
   border-radius: 0 6px 6px 0;
+}
+
+/* Wing corners follow the body they sit on: the container's top-left
+ * corner runs straight up into the folder tab, and the light's dome
+ * carries its own heavier rounding. */
+.flow-node.role-container .wing-bypass {
+  border-radius: 0 0 0 6px;
+}
+
+.flow-node.role-light .wing-bypass {
+  border-radius: 12px 0 0 10px;
+}
+
+.flow-node.role-light .wing-visibility {
+  border-radius: 0 12px 10px 0;
 }
 
 .wing-bypass:hover {
   background: var(--wing-bypass-hover);
 }
 
-.wing-display:hover {
+.wing-display:hover,
+.wing-visibility:hover {
   background: var(--wing-display-hover);
 }
 
@@ -589,6 +620,18 @@ body.precision-drag-active {
 
 .wing-display.on {
   background: var(--display);
+}
+
+/* The root visibility wing shows its dot at rest (the retired floating
+ * eye's language): filled display-blue when visible, hollow when hidden. */
+.wing-visibility .vis-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.wing-visibility.off .vis-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--node-label);
 }
 
 /* The display halo: the across-the-graph cue behind the display
@@ -681,21 +724,21 @@ body.precision-drag-active {
    of the node face (top-left is the stale tag's, top-right the cook
    error's, bottom-right the validation badge's). A filled display-blue
    dot when visible; hollow and dimmed when hidden. */
+/* The visibility toggle in the LIST view rows. On the canvas the same
+ * fact lives on the right-hand visibility wing; the list keeps this
+ * compact eye chrome. */
 .visibility-eye {
-  position: absolute;
-  bottom: -0.5rem;
-  left: -0.5rem;
   width: 1.4rem;
   height: 1.4rem;
   border-radius: 50%;
   border: 1px solid var(--border-primary);
   background: var(--background-tertiary);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  vertical-align: middle;
   cursor: pointer;
   padding: 0;
-  z-index: 2;
 }
 
 .vis-dot {
@@ -716,9 +759,6 @@ body.precision-drag-active {
 }
 
 .visibility-eye.list {
-  position: static;
-  display: inline-flex;
-  vertical-align: middle;
   margin-right: 0.4rem;
 }
 
@@ -2759,19 +2799,6 @@ body.reduce-motion .cook-arc {
   stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
 }
 
-/* The glyph centres on the BODY, not on the whole box: both silhouettes
- * raise a tab over the top 8px, so a box-centred glyph reads high. The
- * cook arc and the display halo take the same shift, so the ring and the
- * halo stay concentric with the glyph they belong to rather than sitting
- * 4px above it. */
-.flow-node.role-container .node-chip,
-.flow-node.role-camera .node-chip,
-.flow-node.role-container .cook-arc,
-.flow-node.role-camera .cook-arc,
-.flow-node.role-container .display-halo,
-.flow-node.role-camera .display-halo {
-  margin-top: 4px;
-}
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
 .flow-node.cat-tex_composite { --cat-fill: var(--node-cat-tex_composite); }
@@ -5386,9 +5413,3 @@ body.light-theme {
   line-height: 1.5;
 }
 
-/* The text datablock node: quiet by size, so a script library does not read
- * as graph structure. Uses the plain rect body. */
-.flow-node.role-text {
-  width: 76px;
-  height: 26px;
-}

@@ -3,9 +3,12 @@
 
 import { describe, expect, it } from "vitest";
 import type { GraphMirror } from "../engine/types";
+import { NODE_BOX } from "./nodeVisual";
 import { computeDagreLayout, computeElkLayout, layoutInputs } from "./layout";
 
-const DIMS = { width: 120, height: 60 };
+// The real layout box: the old 120x60 phantom floors are gone, so the
+// injected measure mirrors what the DOM measurer now returns.
+const DIMS = { width: NODE_BOX.w, height: NODE_BOX.h };
 const measure = () => DIMS;
 
 function chainGraph(): GraphMirror {
@@ -42,9 +45,11 @@ describe("computeDagreLayout", () => {
     const a = byId.get(1);
     const b = byId.get(2);
     if (!a || !b) throw new Error("missing move");
-    // Same column (TB flow), child exactly one rank below its parent.
+    // Same column (TB flow), child exactly one rank below its parent:
+    // the box height plus the retuned 128px ranksep (the old 100 plus the
+    // 28px the phantom floor used to pad into every rank).
     expect(a[0]).toBe(b[0]);
-    expect(b[1] - a[1]).toBe(DIMS.height + 100);
+    expect(b[1] - a[1]).toBe(DIMS.height + 128);
     // Dagre centers converted to top-left: coordinates land on the origin
     // column, so x is never negative for a single-column chain.
     expect(a[0]).toBeGreaterThanOrEqual(0);

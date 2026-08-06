@@ -3,11 +3,16 @@
 // stays a few KB so the marketing page paints instantly.
 //
 // The node stage reuses the app's node visual language as a lightweight SVG
-// mock (NOT a live @xyflow graph): 112x32 rounded bodies in the category
-// pastel fills, typed handle dots, and bezier edges colored by the source
-// type, drawing themselves in dependency order as if someone were building a
-// subflow. Colors are copied from web/src/styles/tokens.css (category
-// pastels, light set) and web/src/registry/datatypes.ts (DATA_TYPE_COLOR).
+// mock (NOT a live @xyflow graph), mirroring what the canvas renders:
+// 112x32 rounded bodies in the category pastel fills with the light glyph
+// chip at the body centre, faint label lines OUTSIDE the body to the right
+// (the app's label stack), typed handle dots on the top/bottom handle axis,
+// and bezier edges colored by the source type flowing top-to-bottom in
+// dependency order, as if someone were building a subflow. The geometry
+// mirrors flow/nodeVisual.ts (NODE_BOX and the chip) by hand -- this entry
+// must stay React-free and a few KB, so it cannot import from the app --
+// and colors are copied from web/src/styles/tokens.css (category pastels,
+// light set; the chip plate) and registry/datatypes.ts (DATA_TYPE_COLOR).
 
 const CATEGORY_FILLS = ["#dcebfb", "#d9f3e4", "#eae0f7", "#f7e6d7", "#fff7de"];
 const WIRE_COLORS = ["#5aa0ff", "#5aa0ff", "#5aa0ff", "#7fd962", "#e879c8"];
@@ -50,28 +55,40 @@ function makeNode(x: number, y: number, fill: string, rnd: () => number): SVGGEl
   body.setAttribute("fill", fill);
   g.appendChild(body);
 
-  // The glyph mark: a small ink shape on the body, like the app's glyphs.
+  // The glyph chip at the body centre, exactly like the app: the light
+  // 20x20 plate (--node-chip in tokens.css) with a small ink mark on it.
+  const chip = document.createElementNS(svgNS, "rect");
+  chip.setAttribute("class", "n-chip");
+  chip.setAttribute("x", String(NODE_W / 2 - 10));
+  chip.setAttribute("y", String(NODE_H / 2 - 10));
+  chip.setAttribute("width", "20");
+  chip.setAttribute("height", "20");
+  chip.setAttribute("rx", "3");
+  chip.setAttribute("fill", "rgba(255, 255, 255, 0.85)");
+  g.appendChild(chip);
+
   const glyph = document.createElementNS(svgNS, rnd() < 0.5 ? "circle" : "rect");
   glyph.setAttribute("class", "n-glyph");
   if (glyph.tagName === "circle") {
-    glyph.setAttribute("cx", "20");
+    glyph.setAttribute("cx", String(NODE_W / 2));
     glyph.setAttribute("cy", String(NODE_H / 2));
-    glyph.setAttribute("r", "6");
+    glyph.setAttribute("r", "5");
   } else {
-    glyph.setAttribute("x", "14");
-    glyph.setAttribute("y", String(NODE_H / 2 - 6));
-    glyph.setAttribute("width", "12");
-    glyph.setAttribute("height", "12");
-    glyph.setAttribute("rx", "3");
+    glyph.setAttribute("x", String(NODE_W / 2 - 5));
+    glyph.setAttribute("y", String(NODE_H / 2 - 5));
+    glyph.setAttribute("width", "10");
+    glyph.setAttribute("height", "10");
+    glyph.setAttribute("rx", "2");
   }
   g.appendChild(glyph);
 
-  // A few faint "param" lines where the label would sit.
+  // Faint label lines OUTSIDE the body to the right, where the app's
+  // label stack sits.
   for (let i = 0; i < 2; i++) {
     const line = document.createElementNS(svgNS, "rect");
-    line.setAttribute("x", "36");
-    line.setAttribute("y", String(10 + i * 8));
-    line.setAttribute("width", String(30 + rnd() * 34));
+    line.setAttribute("x", String(NODE_W + 10));
+    line.setAttribute("y", String(9 + i * 8));
+    line.setAttribute("width", String(26 + rnd() * 30));
     line.setAttribute("height", "3");
     line.setAttribute("rx", "1.5");
     line.setAttribute("fill", "#1f2937");
@@ -91,15 +108,17 @@ function makeHandle(cx: number, cy: number, color: string): SVGCircleElement {
   return c;
 }
 
+/** A wire from a node's bottom handle to its target's top handle: the
+ * canvas flows top-to-bottom, and so does the mock. */
 function makeEdge(from: StageNode, to: StageNode, color: string): SVGPathElement {
-  const x1 = from.x + NODE_W;
-  const y1 = from.y + NODE_H / 2;
-  const x2 = to.x;
-  const y2 = to.y + NODE_H / 2;
-  const dx = Math.max(40, (x2 - x1) * 0.5);
+  const x1 = from.x + NODE_W / 2;
+  const y1 = from.y + NODE_H;
+  const x2 = to.x + NODE_W / 2;
+  const y2 = to.y;
+  const dy = Math.max(40, (y2 - y1) * 0.5);
   const p = document.createElementNS(svgNS, "path");
   p.setAttribute("class", "n-edge");
-  p.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+  p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`);
   p.setAttribute("stroke", color);
   return p;
 }
@@ -113,33 +132,34 @@ function buildNetwork(stage: SVGSVGElement, seed: number): Promise<void> {
   const h = stage.clientHeight || 700;
   stage.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
-  // Columns like a subflow: sources feeding modifiers feeding a gather.
-  const cols = w < 700 ? 3 : 4;
-  const perCol = w < 700 ? 2 : 3;
+  // Rows flowing downward like a subflow: sources feeding modifiers
+  // feeding a gather, the way the app's canvas lays a graph out.
+  const rows = h < 500 ? 3 : 4;
+  const perRow = w < 700 ? 2 : 3;
   const nodes: StageNode[] = [];
-  for (let c = 0; c < cols; c++) {
-    const count = c === cols - 1 ? 1 : 1 + Math.floor(rnd() * perCol);
+  for (let r = 0; r < rows; r++) {
+    const count = r === rows - 1 ? 1 : 1 + Math.floor(rnd() * perRow);
     for (let i = 0; i < count; i++) {
-      const x = (w / (cols + 1)) * (c + 0.7) + (rnd() - 0.5) * 60;
-      const y = (h / (count + 1)) * (i + 1) + (rnd() - 0.5) * 80 - NODE_H / 2;
+      const x = (w / (count + 1)) * (i + 1) + (rnd() - 0.5) * 120 - NODE_W / 2;
+      const y = (h / (rows + 1)) * (r + 0.85) + (rnd() - 0.5) * 40 - NODE_H / 2;
       const fill = CATEGORY_FILLS[Math.floor(rnd() * CATEGORY_FILLS.length)];
       const el = makeNode(x, y, fill, rnd);
-      nodes.push({ x, y, col: c, fill, el });
+      nodes.push({ x, y, col: r, fill, el });
     }
   }
 
-  // Wire every node to one target in the next column (a DAG by construction).
+  // Wire every node to one target in the next row (a DAG by construction).
   const edges: { from: StageNode; to: StageNode; color: string; el: SVGPathElement }[] = [];
   for (const n of nodes) {
-    if (n.col === cols - 1) continue;
+    if (n.col === rows - 1) continue;
     const targets = nodes.filter((t) => t.col === n.col + 1);
     if (targets.length === 0) continue;
     const to = targets[Math.floor(rnd() * targets.length)];
     const color = WIRE_COLORS[Math.floor(rnd() * WIRE_COLORS.length)];
     const el = makeEdge(n, to, color);
     edges.push({ from: n, to, color, el });
-    n.el.appendChild(makeHandle(NODE_W, NODE_H / 2, color));
-    to.el.appendChild(makeHandle(0, NODE_H / 2, color));
+    n.el.appendChild(makeHandle(NODE_W / 2, NODE_H, color));
+    to.el.appendChild(makeHandle(NODE_W / 2, 0, color));
   }
 
   // Edges under nodes.

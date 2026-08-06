@@ -1,19 +1,22 @@
 // The one generic node component: every node type renders through it, its
 // ports, fill, glyph, and silhouette derived from the registry snapshot (so
-// a node added in Rust needs no new component). Evo anatomy (revamp R2,
-// a
-// 3.5:1 instrument body with the category pastel fill, a per-type glyph
-// inked directly on the body in a darkened category tone, symmetric
-// rounded role silhouettes (rect, container square, gather dome, branch
-// hexagon, terminal donut, analyzer trapezoid, imageSource ticket, light
-// dome), bypass and display wings on rect bodies (hover previews the
-// wing's state color and glyph), the display halo behind the display-flag
-// holder, and a label stack to the right (type label, name, status row,
-// param preview, authored description) with zoom-responsive LOD. Rings
-// mean selection only: stale is a tag plus body wash, cooking is the arc
-// around the glyph. The UX-spec systems survive the restyle: typed
-// handles (color by DataType family plus the shape channel), cook /
-// stale / error / validation feedback, and bypass hatching.
+// a node added in Rust needs no new component). Evo anatomy on the one
+// geometric contract: every role occupies the 112x32 layout box; the
+// visible body may sit smaller inside it (light fixture, text datablock,
+// terminal donut) and risers (folder tab, viewfinder bump, gather dome)
+// ride above the box, so the glyph on its light chip, the cook arc, the
+// display halo and the terminal core all share the box centre with no
+// per-role offsets. The category pastel fills the body, silhouettes stay
+// registry-derived, and the label stack rides to the right (type label,
+// name, status row, param preview, authored description) with
+// zoom-responsive LOD. Wings sit on the full-width bodies: bypass on the
+// left; on the right, display in subflows and root visibility at root
+// (both registry-gated), so the two affordances stay symmetric in every
+// context. Rings mean selection only: stale is a tag plus body wash,
+// cooking is the arc around the glyph. The UX-spec systems survive the
+// restyle: typed handles (color by DataType family plus the shape
+// channel), cook / stale / error / validation feedback, and bypass
+// hatching.
 
 import { useEffect, useRef, useState } from "react";
 import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
@@ -28,7 +31,7 @@ import { useUi } from "../store/ui";
 import { IconBypass, IconDisplay } from "../icons";
 import { nodeInfoLine } from "./infoLine";
 import { nodeLabel } from "./nodeLabel";
-import { glyphPath, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
+import { glyphPath, NODE_BOX, nodeRole, ROLE_BODIES, type RoleBody } from "./nodeVisual";
 import { hasVisibleParam, nodeVisible } from "./visibility";
 
 /** Hover dwell before the radial opens (drag-safe dead time). */
@@ -45,21 +48,17 @@ function handleLeft(index: number, count: number): string {
   return `${((index + 1) / (count + 1)) * 100}%`;
 }
 
-/** Handles float clear of the body: 11px dot, ~3px air gap; gather
- * inputs sit above the dome. */
-function handleStyle(
-  color: string,
-  shape: string,
-  side: "in" | "out",
-  gather: boolean,
-): React.CSSProperties {
+/** Handles float clear of the layout box: 11px dot, ~3px air gap off the
+ * box edge. One axis for every silhouette, so the wire endpoints are the
+ * same whatever the body inside the box looks like. */
+function handleStyle(color: string, shape: string, side: "in" | "out"): React.CSSProperties {
   const base: React.CSSProperties = {
     width: 11,
     height: 11,
     background: color,
     border: "2px solid var(--handle-border)",
   };
-  if (side === "in") base.top = gather ? -22 : -14;
+  if (side === "in") base.top = -14;
   else base.bottom = -14;
   if (shape === "diamond")
     return {
@@ -97,12 +96,12 @@ function authoredDescription(node: NodeMirror): string | null {
 /** Shaped silhouette body as inline SVG (crisp 1px stroke, which CSS
  * clip-path cannot give).
  *
- * The viewBox comes from the role rather than being fixed at 112x32, so a
- * role with its own body box (light, container) renders at its authored
- * proportions instead of being stretched into someone else's. */
+ * Every shaped body is authored in `NODE_BOX` coordinates, so one viewBox
+ * serves all of them; a riser at negative y paints through the SVG's
+ * visible overflow rather than consuming the box. */
 function ShapedBody({ body }: { body: RoleBody }) {
   return (
-    <svg className="node-body-svg" viewBox={`0 0 ${body.w} ${body.h}`} aria-hidden>
+    <svg className="node-body-svg" viewBox={`0 0 ${NODE_BOX.w} ${NODE_BOX.h}`} aria-hidden>
       <path d={body.path} className="body-fill" />
       <path d={body.path} className="body-stroke" />
     </svg>
@@ -163,14 +162,25 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   // cook arc as "cooking".
   const loading = status?.state === "cooking" || status?.state === "pending";
 
-  // Wings live on rect bodies only (standard, gather); shaped
-  // silhouettes keep bypass and display reachable through the radial and
-  // keyboard. The display wing is a subflow affordance (the root uses the
-  // additive visibility eye instead).
-  const hasWings = role === "standard" || role === "gather";
+  // Wings live on the full-width bodies (the subflow rects plus the
+  // root-graph silhouettes); the narrow subflow silhouettes (branch,
+  // analyzer, imageSource, terminal, text) keep bypass and display
+  // reachable through the radial and keyboard. Both wings are
+  // registry-gated facts: bypass renders when the type is bypassable, and
+  // the right wing carries the display flag in subflows and the additive
+  // `visible` param at root, so the pair stays symmetric in every context
+  // and a node without the fact simply has no wing for it.
+  const hasWings =
+    role === "standard" ||
+    role === "gather" ||
+    role === "container" ||
+    role === "camera" ||
+    role === "light";
   const bypassable = desc?.bypass.mode !== "notBypassable";
   const showBypassWing = hasWings && bypassable;
   const showDisplayWing = hasWings && ctx !== "root";
+  const showVisibilityWing = hasWings && ctx === "root" && hasVisibleParam(desc);
+  const visible = nodeVisible(node);
 
   // The single sub-row's text, by priority. Cook time is suppressed while
   // the clock runs: a figure that changes sixty times a second is unreadable
@@ -243,31 +253,6 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
           graph; the wing (or radial) is the click target. */}
       {isDisplay && <span className="display-halo" aria-hidden />}
 
-      {ctx === "root" && hasVisibleParam(desc) && (
- // Root visibility lamp: registry-gated
-        // (note declares no `visible`, so it gets no lamp), distinct from
-        // the subflow display flag. A filled display-blue dot when
-        // visible, hollow and dimmed when hidden. An ordinary setParam,
-        // so it undoes like any edit.
-        <button
-          className={`visibility-eye nodrag${nodeVisible(node) ? "" : " off"}`}
-          title={nodeVisible(node) ? "Hide (stays cooked)" : "Show"}
-          onClick={(e) => {
-            e.stopPropagation();
-            dispatch({
-              type: "setParam",
-              ctx,
-              node: node.id,
-              key: "visible",
-              value: { kind: "literal", type: "bool", value: !nodeVisible(node) },
-            });
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <span className="vis-dot" aria-hidden />
-        </button>
-      )}
-
       {inputs.map((p: PortSnapshot, i: number) => (
         <Popover
           key={`in-${p.key}`}
@@ -279,12 +264,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             position={Position.Top}
             id={p.key}
             style={{
-              ...handleStyle(
-                DATA_TYPE_COLOR[p.dataType],
-                dataTypeShape(p.dataType),
-                "in",
-                role === "gather",
-              ),
+              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType), "in"),
               left: handleLeft(i, inputs.length),
             }}
             isConnectable
@@ -320,6 +300,31 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             onDoubleClick={(e) => e.stopPropagation()}
           >
             <IconDisplay size={9} />
+          </button>
+        )}
+        {showVisibilityWing && (
+          // The root visibility wing: the right-wing slot carries the
+          // additive `visible` param at root (note declares no `visible`,
+          // so it gets no wing). The dot is always shown -- filled
+          // display-blue when visible, hollow when hidden -- so the wing
+          // reads at rest the way the retired floating eye did. An
+          // ordinary setParam, so it undoes like any edit.
+          <button
+            className={`node-wing wing-visibility nodrag${visible ? "" : " off"}`}
+            title={visible ? "Hide (stays cooked)" : "Show"}
+            onClick={(e) => {
+              e.stopPropagation();
+              dispatch({
+                type: "setParam",
+                ctx,
+                node: node.id,
+                key: "visible",
+                value: { kind: "literal", type: "bool", value: !visible },
+              });
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <span className="vis-dot" aria-hidden />
           </button>
         )}
 
@@ -412,7 +417,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             position={Position.Bottom}
             id={p.key}
             style={{
-              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType), "out", false),
+              ...handleStyle(DATA_TYPE_COLOR[p.dataType], dataTypeShape(p.dataType), "out"),
               left: handleLeft(i, outputs.length),
             }}
             isConnectable
