@@ -55,6 +55,18 @@ fn with_headroom(bytes: u64) -> u64 {
 /// The composition order matters. The placement is object-local (where a
 /// copy sits within the scatter) and the transform is where the object
 /// sits in the world, so the object transform applies last.
+///
+/// **The row list is never empty**, and that is a GPU requirement rather
+/// than tidiness: the buffer built from these rows is bound whole by eight
+/// per-object passes, each of them above its mesh loop, and wgpu panics on
+/// a zero-length buffer slice. Two inputs would otherwise produce no rows
+/// at all. An object with no meshes has nothing to iterate, which is what
+/// an import node with no file staged cooks to. And an object whose every
+/// mesh carries an empty placement list contributes nothing per mesh,
+/// which is what copying onto a point cloud that came out empty produces.
+/// Both get the single identity row that this function returned for every
+/// object before placements existed; the ranges stay whatever they were,
+/// so no mesh draws it.
 fn instance_raws(
     transform: Matrix4<f32>,
     placements: &[Option<Arc<Vec<InstanceXform>>>],
@@ -71,6 +83,9 @@ fn instance_raws(
             None => rows.push(InstanceRaw::from_matrix(transform)),
         }
         ranges.push(start..rows.len() as u32);
+    }
+    if rows.is_empty() {
+        rows.push(InstanceRaw::from_matrix(transform));
     }
     (rows, ranges)
 }
@@ -1243,6 +1258,54 @@ mod tests {
         let (rows, ranges) = instance_raws(Matrix4::identity(), &[None, None]);
         assert_eq!(rows.len(), 2);
         assert_eq!(ranges, vec![0..1, 1..2]);
+    }
+
+    /// The two inputs that would otherwise yield no rows at all. An empty
+    /// row list is not a harmless no-op: the buffer built from it is bound
+    /// whole, above the mesh loop, by every per-object pass, and wgpu
+    /// panics on a zero-length slice rather than binding nothing.
+    #[test]
+    fn instance_rows_are_never_empty() {
+        // An object with no meshes: nothing to iterate. What an import
+        // node with no file staged cooks to.
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[]);
+        assert_eq!(rows.len(), 1, "a mesh-less object still needs one row");
+        assert!(ranges.is_empty(), "no mesh, so no mesh points at it");
+
+        // Meshes present, every placement list empty: copying onto a point
+        // cloud that came out empty.
+        let empty: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> =
+            Some(Arc::new(Vec::new()));
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[empty.clone(), empty]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            ranges,
+            vec![0..0, 0..0],
+            "every mesh draws nothing, and the spare row belongs to none of them"
+        );
+    }
+
+    /// Why the draw path returns before binding when a mesh has no copies:
+    /// a trailing empty placement list points at exactly the end of the
+    /// buffer, and slicing a buffer from its end is a wgpu panic, not an
+    /// empty slice. Reachable by merging a copy onto a populated point
+    /// cloud with a copy onto an empty one.
+    #[test]
+    fn a_trailing_empty_placement_list_points_at_the_end_of_the_buffer() {
+        let placed: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> = Some(Arc::new(vec![
+                solarxy_core::scene::InstanceXform::IDENTITY;
+                2
+            ]));
+        let empty: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> =
+            Some(Arc::new(Vec::new()));
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[placed, empty]);
+        assert_eq!(rows.len(), 2, "the guard does not fire, there are rows");
+        assert_eq!(ranges, vec![0..2, 2..2]);
+        assert_eq!(
+            u64::from(ranges[1].start) * INSTANCE_ROW_BYTES,
+            rows.len() as u64 * INSTANCE_ROW_BYTES,
+            "the second mesh's offset is the buffer's length, so its slice would be empty"
+        );
     }
 
     #[test]

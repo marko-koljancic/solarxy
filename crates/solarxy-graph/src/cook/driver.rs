@@ -308,9 +308,6 @@ impl CookEngine {
         report
     }
 
-    /// The nodes eligible to cook in a context: a subflow gates to the
-    /// active display cone; the root cooks everything dirty (additive
-    /// display, lights cook independently).
     /// Whether the context still has dirty work inside its display cone
     /// (or anywhere, when it has no display output). The engine's pass
     /// scheduler consults this to defer a context whose referenced
@@ -321,6 +318,9 @@ impl CookEngine {
         !self.work_set(graph).is_empty()
     }
 
+    /// The nodes eligible to cook in a context: a subflow gates to the
+    /// active display cone; the root cooks everything dirty (additive
+    /// display, lights cook independently).
     fn work_set(&self, graph: &Graph) -> BTreeSet<NodeId> {
         let dirty: BTreeSet<NodeId> = graph
             .nodes()

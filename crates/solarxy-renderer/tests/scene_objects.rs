@@ -385,3 +385,91 @@ fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
     assert_eq!(plain_draw.model.meshes[0].instance_count, 1);
     assert_eq!(plain_draw.model.meshes[0].instance_offset, 0);
 }
+
+/// The crash this guards against, end to end. An import node with no file
+/// staged cooks to a geometry with no meshes, whose instance buffer was
+/// created straight from an empty row list and so came out zero bytes long.
+/// Every per-object pass binds that buffer whole, above its mesh loop, so
+/// the first pass reached panicked inside wgpu with "buffer slices can not
+/// be empty" and the shell needed a reload to recover.
+#[test]
+fn a_geometry_with_no_meshes_has_a_sliceable_instance_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let nothing = CookedGeometry {
+        meshes: Vec::new(),
+        materials: Vec::new(),
+        bounds: tri(1.0).bounds,
+    };
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, nothing))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert!(obj.model.meshes.is_empty(), "there is nothing to draw");
+    assert!(
+        obj.instance_buffer.size() > 0,
+        "a zero-length buffer is the one thing wgpu refuses to slice"
+    );
+    // What every pass does before its mesh loop. It panics rather than
+    // returning an error, so reaching the next statement is the assertion.
+    let _ = obj.instance_buffer.slice(..);
+}
+
+/// The same zero-row state reached a different way, and the way the
+/// reported reproduction does not cover: copying onto a point cloud that
+/// came out empty leaves every mesh carrying a placement list with nothing
+/// in it. The meshes are real; their copies are not.
+#[test]
+fn a_geometry_whose_placements_are_all_empty_has_a_sliceable_instance_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let mut geometry = tri(1.0);
+    geometry.meshes[0].instances = Some(Arc::new(Vec::new()));
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, geometry))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert_eq!(obj.model.meshes.len(), 1, "the mesh survives");
+    assert_eq!(
+        obj.model.meshes[0].instance_count, 0,
+        "and draws none of itself"
+    );
+    assert!(obj.instance_buffer.size() > 0);
+    let _ = obj.instance_buffer.slice(..);
+}
+
+/// A mesh with no copies sitting last points at exactly the end of the
+/// object's buffer, so binding from its offset would slice nothing. The
+/// draw path returns on a zero instance count before it binds, which is
+/// what keeps that offset harmless.
+#[test]
+fn a_trailing_mesh_with_no_copies_sits_at_the_end_of_the_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let base = tri(1.0);
+    let mut placed = base.meshes[0].clone();
+    placed.name = "placed".to_string();
+    placed.instances = Some(Arc::new(vec![InstanceXform::IDENTITY; 2]));
+    let mut bare = base.meshes[0].clone();
+    bare.name = "bare".to_string();
+    bare.instances = Some(Arc::new(Vec::new()));
+    let geometry = CookedGeometry {
+        meshes: vec![placed, bare],
+        materials: Vec::new(),
+        bounds: base.bounds,
+    };
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, geometry))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert_eq!(obj.model.meshes[0].instance_count, 2);
+    assert_eq!(obj.model.meshes[1].instance_count, 0);
+    assert_eq!(
+        obj.model.meshes[1].instance_offset,
+        obj.instance_buffer.size(),
+        "the trailing mesh's offset is the whole buffer, so its slice is empty"
+    );
+}

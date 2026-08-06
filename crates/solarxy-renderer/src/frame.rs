@@ -330,7 +330,17 @@ impl<'a> DrawObject<'a> {
     /// The caller still binds vertex buffer 0 and its own bind groups:
     /// those genuinely differ per pass. The index buffer and the draw do
     /// not, so they live here.
+    ///
+    /// A mesh with no placements draws nothing, and returning before the
+    /// bind is what makes that safe rather than merely pointless: its
+    /// offset is the end of the object's buffer whenever it is the last
+    /// mesh, and slicing a buffer from its end is a wgpu panic, not an
+    /// empty slice. Reachable by merging a copy onto a populated point
+    /// cloud with a copy onto an empty one.
     pub fn draw_mesh(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        if mesh.instance_count == 0 {
+            return;
+        }
         pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
         pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..mesh.num_elements, 0, 0..mesh.instance_count);
@@ -342,6 +352,9 @@ impl<'a> DrawObject<'a> {
     /// than being indexed, so they take their own call; the instance
     /// range is the same question and gets the same answer.
     pub fn draw_points(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        if mesh.instance_count == 0 {
+            return;
+        }
         pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
         pass.draw(0..mesh.num_vertices * 6, 0..mesh.instance_count);
     }
