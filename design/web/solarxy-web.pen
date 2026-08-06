@@ -28723,7 +28723,7 @@
               "y": 30,
               "name": "n",
               "fill": "$text-tertiary",
-              "content": "BODY  112 x 32, the one layout box (D-26).\nSilhouette by role (D-10), fill = category.\nGlyph 16px on the 20px light chip at the\nbox centre; risers ride above the box.",
+              "content": "BODY  112 x 32, the one layout box (D-26/D-27).\nSilhouette by role (D-10), fill = category;\nthe root roles are one 96x28 pill. Glyph 16px\ninked directly at the box centre, no plate.",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 9,
@@ -28788,7 +28788,7 @@
               "y": 270,
               "name": "n",
               "fill": "$text-tertiary",
-              "content": "HANDLES float clear of the box (3px gap),\nkeeping DataType colour + shape. One axis\nfor every silhouette (D-26): risers (dome,\ntab, bump) ride above the box and inputs\ncross them. Nothing but the glyph chip and\nwings ever sits ON the body.",
+              "content": "HANDLES float clear of the box (3px gap),\nkeeping DataType colour + shape. One axis\nfor every silhouette (D-26/D-27); only the\ngather dome rides above the box, and its\ninputs cross it. Nothing but the glyph and\nwings ever sits ON the body.",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 9,
@@ -28819,7 +28819,7 @@
           "id": "e7yk33",
           "name": "d4",
           "fill": "$text-tertiary",
-          "content": "REVISED 2026-08-06 (D-26): every role sits on the one 112x32 box; the container and camera risers ride above it. Wings ride every full-width silhouette - bypass left, display (subflow) or visibility (root) right, registry-gated - and the floating root eye is retired. Note stays the sticky (D-8).",
+          "content": "REVISED 2026-08-06 (D-26/D-27): every role sits on the one 112x32 box; geo, matnet, texnet and camera are one 96x28 fixture pill inside it, pastel + glyph + label carrying the differentiation. Wings ride the bodies, revealed on hover - bypass left, display (subflow) or visibility (root) right, registry-gated - and the floating root eye is retired. Note stays the sticky (D-8).",
           "fontFamily": "$font-mono",
           "fontSize": 10,
           "fontWeight": "normal"
@@ -34529,7 +34529,7 @@
               "fill": "$text-tertiary",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Body 112 x 28 (4:1, the Houdini ratio) for every silhouette; a fixed layout box keeps the handle axis and the wires invariant across shapes. Glyph 16px on a 20px light chip at the body centre, on the handle axis. Wings: visual 10px, hit area 18x54. Handles float clear of the body (3px gap) and keep DataType colour + shape - Houdini's plain grey dots would destroy that ratified channel. Terminal, branch and light carry no wings. REVISED 2026-08-06 (06-10, D-26): the box is 112 x 32 since the polish pass, and it is a true layout box: every role occupies it, a sized-down body centres inside it, and risers ride above it. Wings ride every full-width silhouette, bypass left; the right wing carries display in subflows and the visible param at root, and the floating root eye is retired. Each wing renders only where the registry declares its fact.",
+              "content": "Body 112 x 28 (4:1, the Houdini ratio) for every silhouette; a fixed layout box keeps the handle axis and the wires invariant across shapes. Glyph 16px on a 20px light chip at the body centre, on the handle axis. Wings: visual 10px, hit area 18x54. Handles float clear of the body (3px gap) and keep DataType colour + shape - Houdini's plain grey dots would destroy that ratified channel. Terminal, branch and light carry no wings. REVISED 2026-08-06 (06-10, D-26/D-27): the box is 112 x 32 and it is a true layout box: every role occupies it, a sized-down body centres inside it (the root roles are one 96x28 fixture pill), and only the gather dome rides above it. The glyph inks directly on the body, no plate. Wings ride the bodies, revealed on hover, bypass left; the right wing carries display in subflows and the visible param at root, the floating root eye is retired, and each wing renders only where the registry declares its fact.",
               "lineHeight": 1.45,
               "fontFamily": "Inter",
               "fontSize": 11,
@@ -55372,7 +55372,7 @@
           "fill": "$text-tertiary",
           "textGrowth": "fixed-width",
           "width": 940,
-          "content": "The canvas ships four body sizes, two silhouettes with a tab carved out of the box, and a hand-tuned offset that re-centres the glyph but not the ring around it. The resolution is one LAYOUT BOX, 112x32 for every role, with three rules. The visible body sits centred inside the box and may be smaller: size stays a meaning channel (light 96x28 the fixture, text 76x26 the quiet datablock, terminal the 28 donut), exactly the precedent the terminal component set. Risers ride ABOVE the box the way the gather dome always has: the container folder tab and the camera viewfinder bump move out of the box, restoring the full 32px body and killing the compensating offset by construction. And one origin: glyph, cook arc, display halo, terminal core and selection all centre on the box centre, which now equals the body centre for every role.",
+          "content": "The canvas ships four body sizes, two silhouettes with a tab carved out of the box, and a hand-tuned offset that re-centres the glyph but not the ring around it. The resolution is one LAYOUT BOX, 112x32 for every role, with three rules. The visible body sits centred inside the box and may be smaller: size stays a meaning channel (light 96x28 the fixture, text 76x26 the quiet datablock, terminal the 28 donut), exactly the precedent the terminal component set. Risers ride ABOVE the box the way the gather dome always has: the container folder tab and the camera viewfinder bump move out of the box, restoring the full 32px body and killing the compensating offset by construction. And one origin: glyph, cook arc, display halo, terminal core and selection all centre on the box centre, which now equals the body centre for every role. QA REVISION (D-27, below): the tab and bump were withdrawn in the maintainer's QA round; the root roles ship as the 96x28 fixture pill, glyphs ink directly on the body, and the mothers beside this caption show the shipped state.",
           "lineHeight": 1.5,
           "fontFamily": "$font-ui",
           "fontSize": 11,
@@ -55395,49 +55395,16 @@
               "children": [
                 {
                   "type": "rectangle",
-                  "cornerRadius": [
-                    4,
-                    3,
-                    0,
-                    0
-                  ],
-                  "id": "H1LrT",
-                  "x": 0,
-                  "y": -8,
-                  "name": "tab",
-                  "fill": "$node-cat-container",
-                  "width": 27,
-                  "height": 9,
-                  "stroke": "$geometry-node-border",
-                  "strokeWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "left": 1
-                  }
-                },
-                {
-                  "type": "rectangle",
-                  "cornerRadius": 6,
+                  "cornerRadius": 12,
                   "id": "xDIKb",
-                  "x": 0,
-                  "y": 0,
+                  "x": 8,
+                  "y": 2,
                   "name": "body",
                   "fill": "$node-cat-container",
-                  "width": 112,
-                  "height": 32,
+                  "width": 96,
+                  "height": 28,
                   "stroke": "$geometry-node-border",
                   "strokeWidth": 1
-                },
-                {
-                  "type": "rectangle",
-                  "cornerRadius": 3,
-                  "id": "Z1YlE",
-                  "x": 46,
-                  "y": 6,
-                  "name": "chip",
-                  "fill": "$evo-chip",
-                  "width": 20,
-                  "height": 20
                 },
                 {
                   "id": "bnMCj",
@@ -55491,49 +55458,16 @@
               "children": [
                 {
                   "type": "rectangle",
-                  "cornerRadius": [
-                    3,
-                    3,
-                    0,
-                    0
-                  ],
-                  "id": "LWOg7",
-                  "x": 38,
-                  "y": -8,
-                  "name": "bump",
-                  "fill": "$node-background",
-                  "width": 36,
-                  "height": 9,
-                  "stroke": "$geometry-node-border",
-                  "strokeWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "left": 1
-                  }
-                },
-                {
-                  "type": "rectangle",
-                  "cornerRadius": 6,
+                  "cornerRadius": 12,
                   "id": "I3Kqob",
-                  "x": 0,
-                  "y": 0,
+                  "x": 8,
+                  "y": 2,
                   "name": "body",
                   "fill": "$node-background",
-                  "width": 112,
-                  "height": 32,
+                  "width": 96,
+                  "height": 28,
                   "stroke": "$geometry-node-border",
                   "strokeWidth": 1
-                },
-                {
-                  "type": "rectangle",
-                  "cornerRadius": 3,
-                  "id": "ZnUxd",
-                  "x": 46,
-                  "y": 6,
-                  "name": "chip",
-                  "fill": "$evo-chip",
-                  "width": 20,
-                  "height": 20
                 },
                 {
                   "id": "z4rLh",
@@ -55610,17 +55544,6 @@
                   "height": 26,
                   "stroke": "$geometry-node-border",
                   "strokeWidth": 1
-                },
-                {
-                  "type": "rectangle",
-                  "cornerRadius": 3,
-                  "id": "c9ze1",
-                  "x": 46,
-                  "y": 6,
-                  "name": "chip",
-                  "fill": "$evo-chip",
-                  "width": 20,
-                  "height": 20
                 },
                 {
                   "id": "D9ZWq",
@@ -56095,6 +56018,41 @@
                       "lineHeight": 1.4,
                       "fontFamily": "$font-ui",
                       "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Pc5tb",
+                  "name": "Decision D-27",
+                  "width": "fill_container",
+                  "fill": "$background-tertiary",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "W7rDf",
+                      "name": "head",
+                      "fill": "$text-primary",
+                      "content": "D-27  Plain pills at root, ink-only glyphs",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "I5aMW",
+                      "name": "body",
+                      "fill": "$text-secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Maintainer QA revision of D-26, 2026-08-06. The riser treatment is withdrawn: geo, matnet, texnet and camera render as the light's 96x28 fixture pill centred in the box, told apart by pastel, glyph and label alone; the gather dome stays, marking variadic inputs rather than containment. The glyph chip plate is withdrawn everywhere, app and landing mock: the glyph inks directly on the body. The root visibility wing carries no chrome at rest; the dot reveals on hover like the bypass icon, and a hidden node reads as a slight dim plus the hollow dot. The one-box contract, the shared box-centre origin, the single handle axis, the layout retune and the landing flow direction all stand. Amends D-26; the mother components on this sheet show the shipped state.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10.5,
                       "fontWeight": "normal"
                     }
                   ]
