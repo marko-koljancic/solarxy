@@ -372,20 +372,25 @@ section[id] {
  * list opens as a panel under the bar. Pages that never opt in, and any
  * visitor without JavaScript, keep the static row above. */
 
+/* The trigger speaks the link row's own language: borderless mono
+ * uppercase, the active-link background when open. A bordered pill here
+ * read as a control bolted onto a bar whose whole vocabulary is bare
+ * text, sitting beside a differently shaped bordered theme button. */
 .nav-sections {
   display: none;
   align-items: center;
   gap: 0.35rem;
+  height: 2.3rem;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: 0.68rem;
   color: var(--ink-secondary);
-  border: 1px solid var(--hairline);
-  border-radius: var(--pill);
-  padding: 0.4rem 0.75rem;
+  border: none;
+  border-radius: var(--r);
+  padding: 0 0.65rem;
   white-space: nowrap;
-  transition: color 0.16s, border-color 0.16s;
+  transition: color 0.16s, background 0.16s;
 }
 
 .nav-sections svg {
@@ -400,7 +405,7 @@ section[id] {
 
 .nav-sections[aria-expanded="true"] {
   color: var(--ink);
-  border-color: var(--focus);
+  background: var(--hairline-ink);
 }
 
 .nav-sections[aria-expanded="true"] svg {
@@ -410,8 +415,9 @@ section[id] {
 .nav-panel {
   position: absolute;
   top: calc(100% + 0.5rem);
-  left: 0.75rem;
-  right: 0.75rem;
+  /* Aligned to the bar's own content edges, not a fixed inset. */
+  left: var(--pad);
+  right: var(--pad);
   display: flex;
   flex-direction: column;
   padding: 0.35rem;
@@ -445,16 +451,18 @@ section[id] {
 }
 
 @media (max-width: 860px) {
-  .nav--collapsible .nav-inner {
-    justify-content: space-between;
-  }
-
   .nav--collapsible .nav-links {
     display: none;
   }
 
   .nav--collapsible .nav-sections {
     display: inline-flex;
+  }
+
+  /* Wordmark and section read as one left-hand group; the theme toggle
+   * keeps the right edge. */
+  .nav--collapsible .theme-btn {
+    margin-left: auto;
   }
 }
 

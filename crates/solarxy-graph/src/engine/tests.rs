@@ -7785,3 +7785,93 @@ fn only_the_first_environment_node_wins() {
         "the first node in document order wins"
     );
 }
+
+/// A budgeted cook must never evaluate a cross-network reference before
+/// the network it references has drained. The driver's forward-progress
+/// rule cooks a context's first eligible node without consulting the
+/// budget, so without the engine's deferral gate an interrupted pass
+/// cooked a tex_ref ahead of its source, and the resulting
+/// unresolved-reference error was terminal: nothing re-dirtied the node,
+/// and the scene wedged. Driven at a budget of one extra node per pass,
+/// the worst case.
+#[test]
+fn budgeted_cook_defers_cross_network_references() {
+    let mut e = engine();
+
+    let tex = add(&mut e, GraphContext::Root, "texnet");
+    let t = GraphContext::Subflow(tex);
+    let noise = add(&mut e, t, "noise");
+    e.apply(Command::SetActiveOutput {
+        ctx: t,
+        node: Some(noise),
+    })
+    .expect("display");
+
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let g = GraphContext::Subflow(geo);
+    let plane = add(&mut e, g, "plane");
+    let tex_ref = add(&mut e, g, "tex_ref");
+    e.apply(Command::SetParam {
+        ctx: g,
+        node: tex_ref,
+        key: "texture_path".into(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(tex))),
+    })
+    .expect("reference");
+    let sample = add(&mut e, g, "attribute_from_image");
+    e.apply(Command::Connect {
+        ctx: g,
+        from: PortRefDto {
+            node: plane,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: sample,
+            port: "geometry".into(),
+        },
+    })
+    .expect("wire geometry");
+    e.apply(Command::Connect {
+        ctx: g,
+        from: PortRefDto {
+            node: tex_ref,
+            port: "image".into(),
+        },
+        to: PortRefDto {
+            node: sample,
+            port: "image".into(),
+        },
+    })
+    .expect("wire image");
+    e.apply(Command::SetActiveOutput {
+        ctx: g,
+        node: Some(sample),
+    })
+    .expect("display");
+
+    // One free node plus one budgeted node per pass: the harshest
+    // interruption the scheduler can face.
+    let mut errored = Vec::new();
+    for _ in 0..40 {
+        let mut n = 0;
+        for ev in e.cook(&mut || {
+            n += 1;
+            n < 2
+        }) {
+            if let EngineEvent::CookStatus { node, status } = ev
+                && matches!(status, CookStatus::Error { .. })
+            {
+                errored.push(node);
+            }
+        }
+    }
+    assert!(
+        errored.is_empty(),
+        "a budgeted cook errored nodes {errored:?}; the reference ran \
+         ahead of its source network"
+    );
+    assert!(
+        e.geometry_output(sample).is_some(),
+        "the reference-consuming display cooked to geometry"
+    );
+}

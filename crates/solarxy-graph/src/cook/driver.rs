@@ -311,6 +311,16 @@ impl CookEngine {
     /// The nodes eligible to cook in a context: a subflow gates to the
     /// active display cone; the root cooks everything dirty (additive
     /// display, lights cook independently).
+    /// Whether the context still has dirty work inside its display cone
+    /// (or anywhere, when it has no display output). The engine's pass
+    /// scheduler consults this to defer a context whose referenced
+    /// networks have not drained: without the gate, a budget interruption
+    /// could cook a cross-network reference ahead of its source and wedge
+    /// it in a false unresolved-reference error.
+    pub fn has_display_cone_work(&self, graph: &Graph) -> bool {
+        !self.work_set(graph).is_empty()
+    }
+
     fn work_set(&self, graph: &Graph) -> BTreeSet<NodeId> {
         let dirty: BTreeSet<NodeId> = graph
             .nodes()

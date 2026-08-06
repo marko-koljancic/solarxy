@@ -13,11 +13,13 @@
 // says so and sends you to the node, instead of editing a value the pane
 // is not compositing with.
 
+import { Fragment } from "react";
 import { setPaneLook } from "../engine/session";
 import type { PaneLook } from "../engine/types";
 import { useViewState } from "../store/viewState";
 import { Modal } from "./Modal";
-import { Row } from "./DialogRow";
+import { Row, Section } from "./DialogRow";
+import { Popover, renderDoc } from "./Popover";
 import { Select } from "./Select";
 
 export const TONE_MODES: [PaneLook["toneMode"], string][] = [
@@ -38,49 +40,35 @@ export const NEUTRAL: PaneLook = {
   gain: [1, 1, 1],
 };
 
-const CHANNELS: [number, string][] = [
-  [0, "R"],
-  [1, "G"],
-  [2, "B"],
-];
-
-/** Three numeric fields for one grade vector, editable per channel. */
-function Triple({
-  value,
-  step,
-  min,
-  onChange,
-}: {
-  value: [number, number, number];
+/** The three grade vectors as grid rows: key, label, doc, step, floor. */
+const GRADE_ROWS: {
+  key: "lift" | "gamma" | "gain";
+  label: string;
+  doc: string;
   step: number;
   min?: number;
-  onChange: (next: [number, number, number]) => void;
-}) {
-  return (
-    <>
-      {CHANNELS.map(([i, label]) => (
-        <span key={label} className="look-channel">
-          <span className="look-channel-label">{label}</span>
-          <input
-            className="input-field"
-            type="number"
-            aria-label={label}
-            step={step}
-            min={min}
-            value={value[i]}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              const next: [number, number, number] = [...value];
-              next[i] = n;
-              onChange(next);
-            }}
-          />
-        </span>
-      ))}
-    </>
-  );
-}
+}[] = [
+  {
+    key: "lift",
+    label: "Lift",
+    doc: "Raises or lowers the darkest part of the image, per channel, after tone mapping. Positive lifts the blacks towards grey for a faded base; negative crushes them. It is an addition, so it moves shadows far more than highlights.",
+    step: 0.01,
+  },
+  {
+    key: "gamma",
+    label: "Gamma",
+    doc: "Bends the midtones per channel without moving black or white: above 1 brightens, below 1 darkens. The control for an image whose ends are right and whose middle is not. 1 is neutral.",
+    step: 0.05,
+    min: 0.01,
+  },
+  {
+    key: "gain",
+    label: "Gain",
+    doc: "Multiplies each channel, which moves the highlights most and leaves black at black. Use it to set the white point, or to warm and cool an image by pushing red and blue apart. 1 is neutral.",
+    step: 0.05,
+    min: 0,
+  },
+];
 
 export function PaneLookModal({ pane, onClose }: { pane: number; onClose: () => void }) {
   const view = useViewState((s) => s.view);
@@ -89,66 +77,88 @@ export function PaneLookModal({ pane, onClose }: { pane: number; onClose: () => 
 
   const patch = (p: Partial<PaneLook>) => setPaneLook(pane, { ...look, ...p });
 
+  // No size memory and no resize handle: the dialog's content is fixed, so
+  // it always sizes to it. The remembered drag-size the shared shell offers
+  // is what used to leave a dead area under the buttons.
   return (
-    <Modal id="pane-look" title={`Look: pane ${pane + 1}`} onClose={onClose}>
+    <Modal title={`Look: pane ${pane + 1}`} onClose={onClose} resizable={false} className="modal-look">
       {throughCamera && (
-        <p className="env-hint">
+        <p className="look-note">
           This pane is looking through a camera, so it composites with that
           camera&apos;s look. Edit it on the camera node, where it also saves with
           the scene and carries the two LUT slots. The values below apply when the
           pane goes back to a free view.
         </p>
       )}
-      <Row
-        label="Exposure"
-        doc="Linear multiplier on the whole image before tone mapping, so 2 is one stop brighter and 0.5 one stop darker. Reach for this before changing light intensities: it moves the exposure of the shot rather than the lighting of the scene."
-      >
-        <input
-          className="input-field"
-          type="number"
-          step={0.1}
-          min={0.01}
-          max={64}
-          value={look.exposure}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (Number.isFinite(n)) patch({ exposure: n });
-          }}
-        />
-      </Row>
-      <Row
-        label="Tone map"
-        doc="How high dynamic range is brought down to what a screen can show. **ACES Filmic** is the filmic default; **Reinhard** is gentler and flatter; **Linear** and **None** both clip, and are for judging raw values rather than for looking at."
-      >
-        <Select
-          ariaLabel="Tone map"
-          value={look.toneMode}
-          options={TONE_MODES.map(([v, label]) => ({ value: v, label }))}
-          onChange={(v) => patch({ toneMode: v as PaneLook["toneMode"] })}
-        />
-      </Row>
-      <Row
-        label="Lift"
-        doc="Raises or lowers the darkest part of the image, per channel, after tone mapping. Positive lifts the blacks towards grey for a faded base; negative crushes them. It is an addition, so it moves shadows far more than highlights."
-      >
-        <Triple value={look.lift} step={0.01} onChange={(lift) => patch({ lift })} />
-      </Row>
-      <Row
-        label="Gamma"
-        doc="Bends the midtones per channel without moving black or white: above 1 brightens, below 1 darkens. The control for an image whose ends are right and whose middle is not. 1 is neutral."
-      >
-        <Triple value={look.gamma} step={0.05} min={0.01} onChange={(gamma) => patch({ gamma })} />
-      </Row>
-      <Row
-        label="Gain"
-        doc="Multiplies each channel, which moves the highlights most and leaves black at black. Use it to set the white point, or to warm and cool an image by pushing red and blue apart. 1 is neutral."
-      >
-        <Triple value={look.gain} step={0.05} min={0} onChange={(gain) => patch({ gain })} />
-      </Row>
-      <p className="env-hint">
-        LUT slots live on the camera node: a table is part of the document, so it
-        travels with the scene rather than with the viewport.
-      </p>
+      <Section title="Exposure and tone">
+        <Row
+          label="Exposure"
+          doc="Linear multiplier on the whole image before tone mapping, so 2 is one stop brighter and 0.5 one stop darker. Reach for this before changing light intensities: it moves the exposure of the shot rather than the lighting of the scene."
+        >
+          <input
+            className="input-field look-field"
+            type="number"
+            step={0.1}
+            min={0.01}
+            max={64}
+            value={look.exposure}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) patch({ exposure: n });
+            }}
+          />
+        </Row>
+        <Row
+          label="Tone map"
+          doc="How high dynamic range is brought down to what a screen can show. **ACES Filmic** is the filmic default; **Reinhard** is gentler and flatter; **Linear** and **None** both clip, and are for judging raw values rather than for looking at."
+        >
+          <Select
+            ariaLabel="Tone map"
+            value={look.toneMode}
+            options={TONE_MODES.map(([v, label]) => ({ value: v, label }))}
+            onChange={(v) => patch({ toneMode: v as PaneLook["toneMode"] })}
+          />
+        </Row>
+      </Section>
+      <Section title="Grade">
+        <div className="look-grade" role="group" aria-label="Lift, gamma and gain per channel">
+          <span aria-hidden />
+          {["R", "G", "B"].map((ch) => (
+            <span key={ch} className="look-grade-ch" aria-hidden>
+              {ch}
+            </span>
+          ))}
+          {GRADE_ROWS.map((row) => (
+            <Fragment key={row.key}>
+              <Popover title={row.label} content={renderDoc(row.doc)}>
+                <span className="prefs-label has-doc">{row.label}</span>
+              </Popover>
+              {[0, 1, 2].map((i) => (
+                <input
+                  key={`${row.key}-${i}`}
+                  className="input-field look-field"
+                  type="number"
+                  aria-label={`${row.label} ${["red", "green", "blue"][i]}`}
+                  step={row.step}
+                  min={row.min}
+                  value={look[row.key][i]}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) return;
+                    const next: [number, number, number] = [...look[row.key]];
+                    next[i] = n;
+                    patch({ [row.key]: next });
+                  }}
+                />
+              ))}
+            </Fragment>
+          ))}
+        </div>
+        <p className="look-note">
+          The two LUT slots live on the camera node: a table is part of the
+          document, so it travels with the scene rather than with the viewport.
+        </p>
+      </Section>
       <div className="modal-actions">
         <button className="btn" onClick={() => setPaneLook(pane, NEUTRAL)}>
           Reset

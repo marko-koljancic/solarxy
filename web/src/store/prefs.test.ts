@@ -90,6 +90,11 @@ describe("defaults", () => {
       labelBackground: "chip",
       labelOpacity: 1,
       labelDecimals: 2,
+      // On by default, matching the desktop's shipped preferences; the web
+      // host booted both hard-off for six releases, which left AO Preview
+      // a white screen in every browser.
+      ssaoEnabled: true,
+      bloomEnabled: true,
     });
   });
 });

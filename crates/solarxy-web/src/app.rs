@@ -560,8 +560,12 @@ impl SolarxyApp {
             // `Light` default, so the same scene drew different wireframes in
             // the two shells out of the box.
             wireframe_line_width: solarxy_core::preferences::LineWeight::default().width_px(),
-            bloom_enabled: false,
-            ssao_enabled: false,
+            // Match the desktop's shipped defaults. Both stayed hard false
+            // for six releases, which left the AO Preview mode a white
+            // screen and bloom inert in every browser; the preference
+            // toggles arrive through `set_display_defaults` below.
+            bloom_enabled: true,
+            ssao_enabled: true,
             tone_mode: ToneMode::AcesFilmic,
             exposure: 1.0,
             ibl_mode: IblMode::Full,
@@ -963,12 +967,20 @@ impl SolarxyApp {
     /// both flags; a mid-session preference save sets only the flags for
     /// fields that actually changed, so per-pane Display-menu overrides
     /// survive unrelated preference edits.
+    ///
+    /// The boundary mirrors the TypeScript preference bundle field for
+    /// field, which is why the argument list is long and bool-heavy: a
+    /// struct here would drag serde through the wasm boundary for a plain
+    /// setter.
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
     pub fn set_display_defaults(
         &mut self,
         wireframe_weight: &str,
         background: &str,
         turntable_rpm: f32,
         point_size: f32,
+        ssao_enabled: bool,
+        bloom_enabled: bool,
         apply_wireframe: bool,
         apply_background: bool,
     ) {
@@ -976,6 +988,11 @@ impl SolarxyApp {
             line_weight: display_defaults::parse_line_weight(wireframe_weight),
             background: display_defaults::parse_background(background),
         };
+        // Renderer-global post effects, applied on every push: the write is
+        // idempotent and the next frame picks it up, so a preference toggle
+        // needs no reload and no host event.
+        self.renderer.post.ssao_enabled = ssao_enabled;
+        self.renderer.post.bloom_enabled = bloom_enabled;
         self.view.display.turntable_rpm = if turntable_rpm.is_finite() {
             turntable_rpm.clamp(1.0, 60.0)
         } else {

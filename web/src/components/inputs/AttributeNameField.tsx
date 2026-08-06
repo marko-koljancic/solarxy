@@ -2,9 +2,10 @@
 // attribute lanes present on the node's upstream geometry. Free text stays
 // first-class (reserved names and forward references are legal); the
 // completions are a courtesy fetched ON OPEN from the engine's attribute
-// summary, never polled. Reuses the Select dropdown's list styling; like
-// Select, deliberately not a portal (the panel scrolls and clips
-// predictably).
+// summary, never polled. Reuses the Select dropdown's list styling and,
+// like Select, renders the open list through the shared dropdown layer so
+// a picker near the bottom of the Properties panel flips upward instead
+// of clipping into the panel's scroll overflow.
 //
 // TYPING IS DRAFTED, like every other text-like field: an attributeName is
 // stored as plain Text, so committing per keystroke made a five-character
@@ -21,7 +22,7 @@
 // Typing a name manually never touches Type; there is no batched
 // SetParam, so a pick is two undo steps by design.
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { dispatch, getClient } from "../../engine/session";
 import type {
   AttrLane,
@@ -33,6 +34,7 @@ import type {
 import { IconChevronDown } from "../../icons";
 import { descriptorFor } from "../../registry/datatypes";
 import { selectGraph, useMirror } from "../../store/mirror";
+import { DropdownPortal } from "../DropdownPortal";
 import { useDraftCommit } from "./draftCommit";
 
 /** The enum param a lane pick should retype: key `type`, the SAME group
@@ -98,22 +100,6 @@ export function AttributeNameField({
     setOpen(true);
   };
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (!(e.target instanceof Node) || !rootRef.current?.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
-
   return (
     <div ref={rootRef} className="select attr-name-field">
       <input
@@ -151,7 +137,8 @@ export function AttributeNameField({
         <IconChevronDown size={11} />
       </button>
       {open && (
-        <div className="select-list attr-name-list" role="listbox">
+        <DropdownPortal anchorRef={rootRef} onClose={() => setOpen(false)}>
+          <div className="select-list attr-name-list portaled" role="listbox">
           {lanes.length === 0 && (
             <div className="attr-name-empty">No upstream attributes.</div>
           )}
@@ -190,7 +177,8 @@ export function AttributeNameField({
               <span className="select-option-hint">{lane.ty}</span>
             </button>
           ))}
-        </div>
+          </div>
+        </DropdownPortal>
       )}
     </div>
   );

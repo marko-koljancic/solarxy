@@ -3014,7 +3014,32 @@ impl Engine {
         let mut events = Vec::new();
         let mut remaining = 0usize;
         let contexts = self.ordered_contexts();
+        let deps = self.context_ref_deps();
+        // Containers whose networks did not fully drain their display cone
+        // this pass. A context referencing one is deferred to a later pass
+        // rather than cooked: the driver's forward-progress rule cooks a
+        // context's first eligible node without consulting the budget, so
+        // without this gate an interrupted pass could cook a tex_ref or
+        // material reference before its source network finished, and the
+        // resulting unresolved-reference error is terminal until something
+        // re-dirties the node, which nothing does. Deferral costs one pass;
+        // the false error wedged the scene for good.
+        let mut undrained: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
         for ctx in contexts {
+            if let GraphContext::Subflow(owner) = ctx
+                && deps
+                    .get(&owner)
+                    .is_some_and(|d| d.iter().any(|t| undrained.contains(t)))
+            {
+                undrained.insert(owner);
+                if let Ok(graph) = self.doc.graph(ctx) {
+                    remaining += graph
+                        .nodes()
+                        .filter(|n| self.cook.state(n.id) == CookState::Dirty)
+                        .count();
+                }
+                continue;
+            }
             let report = self.cook.cook_until(
                 &self.doc,
                 &self.registry,
@@ -3043,6 +3068,12 @@ impl Engine {
             // dispatch (tagged with their context for `submit_job_result`).
             for (job, request) in report.jobs {
                 self.pending_jobs.push((ctx, job, request));
+            }
+            if let GraphContext::Subflow(owner) = ctx
+                && let Ok(graph) = self.doc.graph(ctx)
+                && self.cook.has_display_cone_work(graph)
+            {
+                undrained.insert(owner);
             }
         }
         // A manual cook stays armed until the stale set fully drains.
@@ -3819,26 +3850,41 @@ impl Engine {
     /// refuses cycles, reachable only through a hand-crafted paste) simply
     /// appends the remainder in id order and converges over passes on
     /// last-committed values.
-    fn ordered_contexts(&self) -> Vec<GraphContext> {
+    /// owner -> the sibling containers its network references through any
+    /// node's `NodeRef` params. The same edges `ordered_contexts` sorts
+    /// by, and the edges the cook pass uses to defer a context whose
+    /// referenced networks have not drained.
+    fn context_ref_deps(
+        &self,
+    ) -> std::collections::BTreeMap<NodeId, std::collections::BTreeSet<NodeId>> {
         use std::collections::{BTreeMap, BTreeSet};
         let owners: Vec<NodeId> = self.doc.subflow_owners().collect();
         let owner_set: BTreeSet<NodeId> = owners.iter().copied().collect();
-        // dependents[t] = owners whose networks reference container t.
-        let mut dependents: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
-        let mut in_degree: BTreeMap<NodeId, usize> = owners.iter().map(|o| (*o, 0)).collect();
+        let mut deps: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
         for &owner in &owners {
             let Ok(graph) = self.doc.graph(GraphContext::Subflow(owner)) else {
                 continue;
             };
-            let mut deps: BTreeSet<NodeId> = BTreeSet::new();
+            let entry = deps.entry(owner).or_default();
             for n in graph.nodes() {
                 for t in Self::node_ref_targets(n) {
                     if owner_set.contains(&t) && t != owner {
-                        deps.insert(t);
+                        entry.insert(t);
                     }
                 }
             }
-            for t in deps {
+        }
+        deps
+    }
+
+    fn ordered_contexts(&self) -> Vec<GraphContext> {
+        use std::collections::{BTreeMap, BTreeSet};
+        let owners: Vec<NodeId> = self.doc.subflow_owners().collect();
+        // dependents[t] = owners whose networks reference container t.
+        let mut dependents: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+        let mut in_degree: BTreeMap<NodeId, usize> = owners.iter().map(|o| (*o, 0)).collect();
+        for (owner, targets) in self.context_ref_deps() {
+            for t in targets {
                 if dependents.entry(t).or_default().insert(owner) {
                     *in_degree.entry(owner).or_default() += 1;
                 }

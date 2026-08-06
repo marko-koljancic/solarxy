@@ -504,7 +504,7 @@ export function pushLabelColors(): void {
 }
 
 /** Pushes the display defaults (wireframe weight, background, turntable
- * rpm) into the host. At boot both pane-seeded fields apply to every pane
+ * rpm, point size, the post-processing toggles) into the host. At boot both pane-seeded fields apply to every pane
  * (before any scene load, so a restored scene's saved panes still win); a
  * mid-session preference save applies only the fields that changed, so
  * per-pane Display-menu overrides survive unrelated edits. The changed

@@ -220,6 +220,8 @@ export class SolarxyClient {
       d.background,
       d.turntableRpm,
       d.pointSize,
+      d.ssaoEnabled,
+      d.bloomEnabled,
       applyWireframe,
       applyBackground,
     );

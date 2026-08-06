@@ -257,3 +257,132 @@ fn the_animated_sample_lights_at_the_rescaled_brightness() {
         fill.intensity
     );
 }
+
+/// The flagship sample's look switch must actually switch. Its index is
+/// an expression on the frame, so the shaded scene (with its instanced
+/// belt) shows before frame 121 and the extracted-edge schematic after;
+/// the schematic path bakes, so the placement count is the sharp signal.
+#[test]
+fn the_orrery_switch_flips_with_the_frame() {
+    let path = samples_dir().join("the-orrery.slxy");
+    if !path.is_file() {
+        eprintln!("skipping: no the-orrery.slxy at {}", path.display());
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("the-orrery loads");
+
+    fn max_instances(engine: &mut Engine) -> usize {
+        for _ in 0..8 {
+            if engine.cook(&mut || true).is_empty() {
+                break;
+            }
+        }
+        engine
+            .display_geometries()
+            .iter()
+            .flat_map(|(_, set, _)| set.meshes.iter())
+            .map(solarxy_kernel::KernelMesh::instance_count)
+            .max()
+            .unwrap_or(0)
+    }
+
+    let full = max_instances(&mut engine);
+    assert!(
+        full > 300,
+        "at frame 1 the belt reaches the display as placements ({full})"
+    );
+    engine
+        .apply(solarxy_graph::engine::Command::SetFrame { frame: 130 })
+        .expect("seek");
+    let schematic = max_instances(&mut engine);
+    assert!(
+        schematic <= 1,
+        "past frame 121 the switch shows the baked edge schematic, so no \
+         placements survive (saw {schematic}); the index expression is gone"
+    );
+}
+
+/// The orbits are clock-driven: the planets' horizontal spread changes
+/// between two frames of the full look, and frame 1 is reproducible.
+#[test]
+fn the_orrery_orbits_move_with_the_clock() {
+    let path = samples_dir().join("the-orrery.slxy");
+    if !path.is_file() {
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("the-orrery loads");
+
+    fn spread(engine: &mut Engine) -> f64 {
+        for _ in 0..8 {
+            if engine.cook(&mut || true).is_empty() {
+                break;
+            }
+        }
+        engine
+            .display_geometries()
+            .iter()
+            .flat_map(|(_, set, _)| set.meshes.iter())
+            .flat_map(|m| m.positions.iter())
+            .map(|p| f64::from(p[0]).abs() + f64::from(p[2]).abs())
+            .sum()
+    }
+
+    let at_start = spread(&mut engine);
+    engine
+        .apply(solarxy_graph::engine::Command::SetFrame { frame: 60 })
+        .expect("seek");
+    let later = spread(&mut engine);
+    assert!(
+        (at_start - later).abs() > 1e-3,
+        "the planets did not move between frame 1 and frame 60 \
+         ({at_start} vs {later})"
+    );
+    engine
+        .apply(solarxy_graph::engine::Command::SetFrame { frame: 1 })
+        .expect("seek back");
+    let back = spread(&mut engine);
+    assert!(
+        (at_start - back).abs() < 1e-6,
+        "frame 1 is not reproducible ({at_start} vs {back})"
+    );
+}
+
+/// The belt wrangle writes the colour lane, and it must reach the display:
+/// vertex colour is the sample's proof that a wrangle ran at all.
+#[test]
+fn the_orrery_paints_the_belt() {
+    use solarxy_kernel::AttributeDomain;
+
+    let path = samples_dir().join("the-orrery.slxy");
+    if !path.is_file() {
+        return;
+    }
+    let bytes = std::fs::read(&path).expect("sample readable");
+    let mut engine = Engine::new().expect("builtin registry");
+    engine.load_slxy(&bytes).expect("the-orrery loads");
+    for _ in 0..8 {
+        if engine.cook(&mut || true).is_empty() {
+            break;
+        }
+    }
+
+    // The wrangle's @Cd is sugar for the engine's canonical "color" lane,
+    // which is what the viewport displays and what must reach the output.
+    let displayed = engine.display_geometries();
+    let painted = displayed
+        .iter()
+        .flat_map(|(_, set, _)| set.meshes.iter())
+        .any(|m| {
+            m.domain_attributes(AttributeDomain::Point)
+                .get("color")
+                .is_some()
+        });
+    assert!(
+        painted,
+        "no displayed mesh carries the colour lane the ring wrangle writes"
+    );
+}
