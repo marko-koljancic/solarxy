@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   EXPRESSION_TYPES,
   acceptsExpression,
+  clearParkedExpressions,
+  discardParkedExpression,
   formatResolved,
+  parkExpression,
+  parkedExpression,
   paramExpression,
   seedExpression,
 } from "./expressionLane";
@@ -99,6 +103,49 @@ describe("seeding a freshly opened field", () => {
     expect(seedExpression(Number.NaN)).toBe("0");
     expect(seedExpression(Number.POSITIVE_INFINITY)).toBe("0");
     expect(seedExpression("nonsense")).toBe("0");
+  });
+});
+
+describe("parking an expression while the row shows its value", () => {
+  beforeEach(clearParkedExpressions);
+
+  it("hands back exactly what was parked, whitespace and all", () => {
+    // The whole point: switching off used to replace the expression with
+    // the number it resolved to, and switching back seeded a new one from
+    // that number, so `$F < 121 ? 0 : 1` became a dead `0`.
+    parkExpression("root", 4, "index", "$F < 121 ? 0 : 1");
+    expect(parkedExpression("root", 4, "index")).toBe("$F < 121 ? 0 : 1");
+
+    parkExpression("root", 4, "index", "  ch('../ctrl/size')  ");
+    expect(parkedExpression("root", 4, "index")).toBe("  ch('../ctrl/size')  ");
+  });
+
+  it("reports nothing for a parameter that never had one switched off", () => {
+    expect(parkedExpression("root", 4, "index")).toBeNull();
+  });
+
+  it("keys on the context as well as the node, since ids repeat per context", () => {
+    parkExpression("root", 4, "index", "$F");
+    expect(parkedExpression({ subflow: 1 }, 4, "index")).toBeNull();
+    expect(parkedExpression("root", 5, "index")).toBeNull();
+    expect(parkedExpression("root", 4, "other")).toBeNull();
+    expect(parkedExpression("root", 4, "index")).toBe("$F");
+  });
+
+  it("forgets the expression when the clear control discards it", () => {
+    parkExpression("root", 4, "index", "$F");
+    discardParkedExpression("root", 4, "index");
+    expect(parkedExpression("root", 4, "index")).toBeNull();
+  });
+
+  it("forgets everything when a document loads", () => {
+    // Node ids are reused across documents, so without this an unrelated
+    // node in the incoming scene inherits the outgoing scene's expression.
+    parkExpression("root", 4, "index", "$F");
+    parkExpression({ subflow: 9 }, 9, "scale", "$T * 2");
+    clearParkedExpressions();
+    expect(parkedExpression("root", 4, "index")).toBeNull();
+    expect(parkedExpression({ subflow: 9 }, 9, "scale")).toBeNull();
   });
 });
 

@@ -12,6 +12,7 @@ import {
   saveToFile,
   writeAutosave,
 } from "../persistence/opfs";
+import { clearParkedExpressions } from "../components/inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { syncCanvasSize } from "./canvas";
@@ -861,6 +862,11 @@ export async function explicitSave(): Promise<void> {
  * camera is restored Rust-side. */
 function applyLoadedScene(bytes: Uint8Array): void {
   const result = getClient().loadSlxy(bytes);
+  // Node ids are reused across documents, so an expression parked off a
+  // node in the outgoing scene would be handed to whatever holds that id
+  // in the incoming one. New Scene needs no equivalent: it reloads the
+  // page, which takes the whole map with it.
+  clearParkedExpressions();
   applyToMirror(result.batch);
   useMirror.getState().setCurrent("root");
   useMirror.getState().setDirty(false);
