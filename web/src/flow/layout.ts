@@ -64,7 +64,7 @@ export function computeDagreLayout(
   // explicitly): nodesep 58 keeps the old 8px-padded sibling distance and
   // clears the label stack's start; ranksep 128 keeps the old rank
   // distance (100 between 60px-tall phantoms) so wires clear the handle
-  // overhang and the 8px risers.
+  // overhang and the gather dome.
   g.setGraph({ rankdir: "TB", align: "UL", nodesep: 58, edgesep: 10, ranksep: 128 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes) g.setNode(String(n.id), { width: n.width, height: n.height });

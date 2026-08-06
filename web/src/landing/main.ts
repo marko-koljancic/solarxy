@@ -4,15 +4,16 @@
 //
 // The node stage reuses the app's node visual language as a lightweight SVG
 // mock (NOT a live @xyflow graph), mirroring what the canvas renders:
-// 112x32 rounded bodies in the category pastel fills with the light glyph
-// chip at the body centre, faint label lines OUTSIDE the body to the right
-// (the app's label stack), typed handle dots on the top/bottom handle axis,
-// and bezier edges colored by the source type flowing top-to-bottom in
-// dependency order, as if someone were building a subflow. The geometry
-// mirrors flow/nodeVisual.ts (NODE_BOX and the chip) by hand -- this entry
-// must stay React-free and a few KB, so it cannot import from the app --
-// and colors are copied from web/src/styles/tokens.css (category pastels,
-// light set; the chip plate) and registry/datatypes.ts (DATA_TYPE_COLOR).
+// 112x32 rounded bodies in the category pastel fills with a small ink
+// glyph mark at the body centre, faint label lines OUTSIDE the body to
+// the right (the app's label stack), typed handle dots on the top/bottom
+// handle axis, and bezier edges colored by the source type flowing
+// top-to-bottom in dependency order, as if someone were building a
+// subflow. The geometry mirrors flow/nodeVisual.ts (NODE_BOX) by hand --
+// this entry must stay React-free and a few KB, so it cannot import from
+// the app -- and colors are copied from web/src/styles/tokens.css
+// (category pastels, light set) and registry/datatypes.ts
+// (DATA_TYPE_COLOR).
 
 const CATEGORY_FILLS = ["#dcebfb", "#d9f3e4", "#eae0f7", "#f7e6d7", "#fff7de"];
 const WIRE_COLORS = ["#5aa0ff", "#5aa0ff", "#5aa0ff", "#7fd962", "#e879c8"];
@@ -55,18 +56,8 @@ function makeNode(x: number, y: number, fill: string, rnd: () => number): SVGGEl
   body.setAttribute("fill", fill);
   g.appendChild(body);
 
-  // The glyph chip at the body centre, exactly like the app: the light
-  // 20x20 plate (--node-chip in tokens.css) with a small ink mark on it.
-  const chip = document.createElementNS(svgNS, "rect");
-  chip.setAttribute("class", "n-chip");
-  chip.setAttribute("x", String(NODE_W / 2 - 10));
-  chip.setAttribute("y", String(NODE_H / 2 - 10));
-  chip.setAttribute("width", "20");
-  chip.setAttribute("height", "20");
-  chip.setAttribute("rx", "3");
-  chip.setAttribute("fill", "rgba(255, 255, 255, 0.85)");
-  g.appendChild(chip);
-
+  // The glyph mark at the body centre, exactly like the app: a small ink
+  // shape directly on the body, no plate.
   const glyph = document.createElementNS(svgNS, rnd() < 0.5 ? "circle" : "rect");
   glyph.setAttribute("class", "n-glyph");
   if (glyph.tagName === "circle") {

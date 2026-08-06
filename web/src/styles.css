@@ -367,13 +367,14 @@ body.precision-drag-active {
  * One geometric contract: every role occupies the 112x32 layout box
  * (`NODE_BOX` / `ROLE_BODY_SIZE` in nodeVisual.ts are the numeric source;
  * the test suite scans this file to keep the two in step). The visible
- * body may sit smaller inside the box when the size means something
- * (light, text, terminal), risers (folder tab, viewfinder bump, gather
- * dome) ride above the box, and the glyph on its light chip, the cook
- * arc, the display halo and the terminal core all centre on the box
+ * body may sit smaller inside the box when the size means something: the
+ * root-placeable roles (container, camera, light) are one 96x28 fixture
+ * pill told apart by pastel, glyph and label, the text datablock and the
+ * terminal donut smaller still. The glyph inks directly on the body, and
+ * glyph, cook arc, display halo and terminal core all centre on the box
  * centre with no per-role offsets. Category pastel fill (as --cat-fill,
- * consumed by the CSS rect bodies AND the shaped SVG bodies), wings on
- * the full-width bodies, and the label stack to the right. The .flow-node
+ * consumed by the CSS bodies AND the shaped SVG bodies), hover-revealed
+ * wings on the bodies, and the label stack to the right. The .flow-node
  * wrapper is transparent; all paint happens on .node-body and its
  * layers. */
 .flow-node {
@@ -392,9 +393,11 @@ body.precision-drag-active {
   border-radius: 6px;
 }
 
-/* The light's fixture body: 96x28 centred in the box. The dome itself is
- * the SVG silhouette; this layer mirrors it so the selection ring and the
- * wings hug the visible dome rather than the empty box corners. */
+/* The root fixture pill: container, camera and light share one 96x28
+ * rounded body centred in the box. Things you place, not stages in a
+ * chain; the pastel, the glyph and the label carry the differentiation. */
+.flow-node.role-container .node-body,
+.flow-node.role-camera .node-body,
 .flow-node.role-light .node-body {
   inset: 2px 8px;
   border-radius: 12px;
@@ -406,12 +409,15 @@ body.precision-drag-active {
   inset: 3px 18px;
 }
 
-/* Rect bodies (standard, gather, text): fill + border + the top-down sheen
- * in CSS. Shaped roles draw an SVG body instead and keep this layer bare.
- * Container left this list in 0.8.1 when it gained a folder silhouette. */
+/* CSS-painted bodies (standard, gather, text, and the root fixture
+ * pills): fill + border + the top-down sheen. The three shaped subflow
+ * roles draw an SVG body instead and keep this layer bare. */
 .flow-node.role-standard .node-body,
 .flow-node.role-text .node-body,
-.flow-node.role-gather .node-body {
+.flow-node.role-gather .node-body,
+.flow-node.role-container .node-body,
+.flow-node.role-camera .node-body,
+.flow-node.role-light .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
@@ -420,11 +426,23 @@ body.precision-drag-active {
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
 }
 
+/* The container's border carries its per-network accent (teal for the
+ * texture network, pink for the material network) where one is set. */
+.flow-node.role-container .node-body {
+  border-color: var(--cat-accent, var(--geometry-node-border));
+}
+
 .flow-node:hover .role-hover,
 .flow-node.role-standard:hover .node-body,
 .flow-node.role-text:hover .node-body,
-.flow-node.role-gather:hover .node-body {
+.flow-node.role-gather:hover .node-body,
+.flow-node.role-camera:hover .node-body,
+.flow-node.role-light:hover .node-body {
   border-color: var(--geometry-node-border-hover);
+}
+
+.flow-node.role-container:hover .node-body {
+  border-color: var(--cat-accent-hover, var(--geometry-node-border-hover));
 }
 
 /* A light-category node on a rect body keeps the gold border cue. */
@@ -432,8 +450,8 @@ body.precision-drag-active {
   border-color: rgba(212, 175, 55, 0.55);
 }
 
-/* Shaped silhouettes (branch, analyzer, imageSource, light, camera,
- * container): the SVG body. */
+/* Shaped subflow silhouettes (branch, analyzer, imageSource): the SVG
+ * body. */
 .node-body-svg {
   position: absolute;
   inset: 0;
@@ -456,9 +474,6 @@ body.precision-drag-active {
   stroke: var(--geometry-node-border-hover);
 }
 
-.flow-node.role-light .node-body-svg .body-stroke {
-  stroke: rgba(212, 175, 87, 0.55);
-}
 
 /* Terminal (null): the 28px donut centred in the full-width box -- the
  * precedent for a small mark carrying meaning inside the standard box.
@@ -496,9 +511,8 @@ body.precision-drag-active {
   pointer-events: none;
 }
 
-/* The glyph chip: type identity at any zoom. The light plate returned
- * with the one-contract pass: a 20x20 rounded plate at the box centre
- * carrying the 16x16 glyph, the same value in both themes. */
+/* The glyph slot: type identity at any zoom, at the box centre. No plate:
+ * the glyph inks directly on the body in a darkened category tone. */
 .node-chip {
   position: absolute;
   left: 50%;
@@ -506,8 +520,6 @@ body.precision-drag-active {
   transform: translate(-50%, -50%);
   width: 20px;
   height: 20px;
-  border-radius: 3px;
-  background: var(--node-chip);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -590,19 +602,18 @@ body.precision-drag-active {
   border-radius: 0 6px 6px 0;
 }
 
-/* Wing corners follow the body they sit on: the container's top-left
- * corner runs straight up into the folder tab, and the light's dome
- * carries its own heavier rounding. */
-.flow-node.role-container .wing-bypass {
-  border-radius: 0 0 0 6px;
-}
-
+/* Wing corners follow the body they sit on: the root fixture pills carry
+ * the pill's heavier rounding. */
+.flow-node.role-container .wing-bypass,
+.flow-node.role-camera .wing-bypass,
 .flow-node.role-light .wing-bypass {
-  border-radius: 12px 0 0 10px;
+  border-radius: 12px 0 0 12px;
 }
 
+.flow-node.role-container .wing-visibility,
+.flow-node.role-camera .wing-visibility,
 .flow-node.role-light .wing-visibility {
-  border-radius: 0 12px 10px 0;
+  border-radius: 0 12px 12px 0;
 }
 
 .wing-bypass:hover {
@@ -622,16 +633,30 @@ body.precision-drag-active {
   background: var(--display);
 }
 
-/* The root visibility wing shows its dot at rest (the retired floating
- * eye's language): filled display-blue when visible, hollow when hidden. */
+/* The root visibility wing carries no chrome at rest on a visible node:
+ * the dot reveals on hover like the bypass icon. While the node is
+ * hidden, the hollow dot stays visible so the abnormal state reads from
+ * the canvas. */
 .wing-visibility .vis-dot {
   width: 7px;
   height: 7px;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 90ms) ease-out;
+}
+
+.wing-visibility:hover .vis-dot {
+  opacity: 1;
 }
 
 .wing-visibility.off .vis-dot {
+  opacity: 1;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--node-label);
+}
+
+/* A hidden root object: slightly dimmed, quieter than bypass. */
+.flow-node.obj-hidden {
+  opacity: 0.75;
 }
 
 /* The display halo: the across-the-graph cue behind the display
@@ -2792,12 +2817,6 @@ body.reduce-motion .cook-arc {
 }
 /* The context tint now rides the SVG stroke rather than a CSS border, since
  * the container body became a folder silhouette. */
-.flow-node.role-container .node-body-svg .body-stroke {
-  stroke: var(--cat-accent, var(--geometry-node-border));
-}
-.flow-node.role-container:hover .node-body-svg .body-stroke {
-  stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
-}
 
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }

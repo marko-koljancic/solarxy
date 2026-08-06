@@ -5,12 +5,13 @@
 // (the zero-frontend-change contract). Glyph art is transplanted verbatim
 // from the design source (solarxy/design/web/solarxy-web.pen, the
 // Evo/Glyph set); every glyph is a 16x16 stroke path (round caps and
-// joins, 1.5 width). Every role occupies the one 112x32 layout box; the
-// visible body may be smaller than the box when the size means something
-// (light, text, terminal), and a riser (folder tab, viewfinder bump)
-// rides above the box rather than inside it. Shaped outlines are
-// authored in box coordinates, risers at negative y, and run through the
-// corner-rounding helper below.
+// joins, 1.5 width), inked directly on the body. Every role occupies the
+// one 112x32 layout box; the visible body may be smaller than the box
+// when the size means something: the root-placeable roles (container,
+// camera, light) are 96x28 fixture pills told apart by pastel, glyph and
+// label, the text datablock and terminal donut are smaller still. Only
+// the three subflow silhouettes below carry shaped outlines, authored in
+// box coordinates through the corner-rounding helper.
 
 import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
 
@@ -251,46 +252,40 @@ export const NODE_BOX = { w: 112, h: 32 } as const;
 
 /** The visible body's size per role, centred inside `NODE_BOX`. A body may
  * be SMALLER than the box, never larger, and only to mean something: the
- * light is a fixture you place (not a stage in a chain), the text node is
- * a quiet datablock, the terminal is the small donut the precedent set.
- * The note node is the one exception to the box itself: its size is
- * param-driven (`NoteNode`), so its entry is the default only.
+ * root-placeable roles (container, camera, light) share the 96x28 fixture
+ * pill because they are things you place, not stages in a chain, and they
+ * are told apart by pastel, glyph and label rather than silhouette; the
+ * text node is a quiet datablock, the terminal the small donut the
+ * precedent set. The note node is the one exception to the box itself:
+ * its size is param-driven (`NoteNode`), so its entry is the default only.
  *
  * The matching CSS (`styles.css`, the Evo node system section) must agree
  * with this table; `nodeVisual.test.ts` scans the stylesheet to hold the
  * two together. */
 export const ROLE_BODY_SIZE: Record<NodeRole, { w: number; h: number }> = {
   standard: { w: 112, h: 32 },
-  container: { w: 112, h: 32 },
+  container: { w: 96, h: 28 },
   gather: { w: 112, h: 32 },
   branch: { w: 112, h: 32 },
   terminal: { w: 28, h: 28 },
   analyzer: { w: 112, h: 32 },
   imageSource: { w: 112, h: 32 },
   light: { w: 96, h: 28 },
-  camera: { w: 112, h: 32 },
+  camera: { w: 96, h: 28 },
   text: { w: 76, h: 26 },
   note: { w: 112, h: 32 },
 };
 
-/** A shaped role body: the outline, authored in `NODE_BOX` coordinates,
- * plus how far its riser rides above the box (0 when none). A riser
- * (folder tab, viewfinder bump) lives at negative y, so the box itself is
- * never consumed and everything centred on the box stays centred on the
- * body by construction. */
+/** A shaped role body: the outline, authored in `NODE_BOX` coordinates. */
 export interface RoleBody {
   path: string;
-  riser: number;
 }
 
-/** Shaped body outlines. Roles absent here render as plain CSS rectangles
- * sized by `ROLE_BODY_SIZE`.
+/** Shaped body outlines, subflow silhouettes only. Roles absent here
+ * render as plain CSS bodies sized by `ROLE_BODY_SIZE`.
  *
- * Most silhouettes are left-right symmetric, and `nodeVisual.test.ts` holds
- * them to it. One is deliberately not: `container` carries a folder tab on
- * the left, and that asymmetry carries meaning. The camera's viewfinder
- * bump is centred, so it stays under the symmetry rule like everything
- * else. */
+ * Every silhouette is left-right symmetric, and `nodeVisual.test.ts`
+ * holds them to it. */
 export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
   // The two-way junction: a symmetric hexagon.
   branch: {
@@ -302,7 +297,6 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [94, 32, 4],
       [18, 32, 4],
     ]),
-    riser: 0,
   },
   // Wide intake, narrowed readout: a symmetric trapezoid.
   analyzer: {
@@ -312,7 +306,6 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [102, 32, 4],
       [10, 32, 4],
     ]),
-    riser: 0,
   },
   // A file ticket with both top corners chamfered (the old single-fold
   // motif was asymmetric).
@@ -325,56 +318,5 @@ export const ROLE_BODIES: Partial<Record<NodeRole, RoleBody>> = {
       [0, 32, 4],
       [0, 14, 3],
     ]),
-    riser: 0,
-  },
-  // A lamp dome: heavy top rounding, and softened at the bottom too. The
-  // 96x28 fixture body sits centred inside the standard box, so the wires
-  // and handles align with every neighbour while the smaller body keeps
-  // saying "a thing you place, not a stage in a chain".
-  light: {
-    path: roundedPolygonPath([
-      [8, 2, 12],
-      [104, 2, 12],
-      [104, 30, 10],
-      [8, 30, 10],
-    ]),
-    riser: 0,
-  },
-  // A camera: a full body with a CENTRED bump riding above it, reading as
-  // a viewfinder.
-  //
-  // Shares the riser motif with `container` below, and is told apart from
-  // it by position alone -- centred here, left there. That pairing is
-  // deliberate: both are things you place in the root graph rather than
-  // stages in a chain, so they should look related without looking alike.
-  // Symmetric, unlike the container, and held to the symmetry rule.
-  camera: {
-    path: roundedPolygonPath([
-      [0, 0, 6],
-      [38, 0, 2],
-      [38, -8, 3],
-      [74, -8, 3],
-      [74, 0, 2],
-      [112, 0, 6],
-      [112, 32, 6],
-      [0, 32, 6],
-    ]),
-    riser: 8,
-  },
-  // A folder: the one silhouette that has to say "there is more inside".
-  // The tab is the universal motif for it, and it survives zooming out in
-  // a way an inset second border does not. It rides ABOVE the box (the way
-  // the gather dome always has), so the body keeps the full box height and
-  // the glyph centres by construction rather than by offset.
-  container: {
-    path: roundedPolygonPath([
-      [0, -8, 4],
-      [27, -8, 3],
-      [27, 0, 2],
-      [112, 0, 6],
-      [112, 32, 6],
-      [0, 32, 6],
-    ]),
-    riser: 8,
   },
 };

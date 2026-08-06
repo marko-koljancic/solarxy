@@ -24758,7 +24758,7 @@
           "id": "e42NA",
           "name": "title",
           "fill": "$text-primary",
-          "content": "Node-type glyphs (33)",
+          "content": "Node-type glyphs (35)",
           "fontFamily": "Inter",
           "fontSize": 18,
           "fontWeight": "600"
@@ -27358,6 +27358,160 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "rZV2x",
+                  "name": "cell camera",
+                  "width": 96,
+                  "layout": "vertical",
+                  "gap": 5,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Q8xgG",
+                      "name": "chip",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$geometry-node-background",
+                      "cornerRadius": 4,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "path",
+                          "id": "xVgTP",
+                          "x": 6,
+                          "y": 6,
+                          "name": "Evo/Glyph/camera",
+                          "reusable": true,
+                          "geometry": "M2.5 5.5h2.8l1.2-1.8h3l1.2 1.8h2.8v7h-11z m7.7 3.5a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 1 1 4.4 0",
+                          "viewBox": [
+                            0,
+                            0,
+                            16,
+                            16
+                          ],
+                          "width": 16,
+                          "height": 16,
+                          "stroke": "$node-text",
+                          "strokeWidth": 1.5,
+                          "strokeLinejoin": "round",
+                          "strokeLinecap": "round"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "cjYdy",
+                      "name": "chipS",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "$geometry-node-background",
+                      "cornerRadius": 2,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "id": "OzN7o",
+                          "type": "ref",
+                          "ref": "xVgTP",
+                          "name": "s",
+                          "width": 8,
+                          "height": 8,
+                          "x": 4,
+                          "y": 4
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "axfde",
+                      "name": "l",
+                      "fill": "$text-tertiary",
+                      "content": "camera",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 8,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mIviI",
+                  "name": "cell text",
+                  "width": 96,
+                  "layout": "vertical",
+                  "gap": 5,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "vpsYX",
+                      "name": "chip",
+                      "width": 28,
+                      "height": 28,
+                      "fill": "$geometry-node-background",
+                      "cornerRadius": 4,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "path",
+                          "id": "LmDfl",
+                          "x": 6,
+                          "y": 6,
+                          "name": "Evo/Glyph/text",
+                          "reusable": true,
+                          "geometry": "M3.5 2.5h9v11h-9z m2 3h5m-5 2.5h5m-5 2.5h3",
+                          "viewBox": [
+                            0,
+                            0,
+                            16,
+                            16
+                          ],
+                          "width": 16,
+                          "height": 16,
+                          "stroke": "$node-text",
+                          "strokeWidth": 1.5,
+                          "strokeLinejoin": "round",
+                          "strokeLinecap": "round"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "cTIwU",
+                      "name": "chipS",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "$geometry-node-background",
+                      "cornerRadius": 2,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "id": "Ih3uv",
+                          "type": "ref",
+                          "ref": "LmDfl",
+                          "name": "s",
+                          "width": 8,
+                          "height": 8,
+                          "x": 4,
+                          "y": 4
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "NjWZc",
+                      "name": "l",
+                      "fill": "$text-tertiary",
+                      "content": "text",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 8,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             }
@@ -28569,7 +28723,7 @@
               "y": 30,
               "name": "n",
               "fill": "$text-tertiary",
-              "content": "BODY  112 x 28 (4:1, the Houdini ratio).\nSilhouette by role (D-10), fill = category.\nInstrument treatment (D-12): segmentation\nslots, icon on a light chip, top-down shading.",
+              "content": "BODY  112 x 32, the one layout box (D-26).\nSilhouette by role (D-10), fill = category.\nGlyph 16px on the 20px light chip at the\nbox centre; risers ride above the box.",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 9,
@@ -28634,7 +28788,7 @@
               "y": 270,
               "name": "n",
               "fill": "$text-tertiary",
-              "content": "HANDLES float clear of the body (3px gap),\nkeeping DataType colour + shape. Variadic\nnodes wear the dome, and their inputs sit\nabove it. Nothing but the glyph and wings\never sits ON the body.",
+              "content": "HANDLES float clear of the box (3px gap),\nkeeping DataType colour + shape. One axis\nfor every silhouette (D-26): risers (dome,\ntab, bump) ride above the box and inputs\ncross them. Nothing but the glyph chip and\nwings ever sits ON the body.",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 9,
@@ -28665,7 +28819,7 @@
           "id": "e7yk33",
           "name": "d4",
           "fill": "$text-tertiary",
-          "content": "Container (geo) keeps its 48x48 square. Note stays the sticky (D-8). Terminal donut, branch hexagon and the light lamp carry no wings: null and the lights use the halo and the root eye instead.",
+          "content": "REVISED 2026-08-06 (D-26): every role sits on the one 112x32 box; the container and camera risers ride above it. Wings ride every full-width silhouette - bypass left, display (subflow) or visibility (root) right, registry-gated - and the floating root eye is retired. Note stays the sticky (D-8).",
           "fontFamily": "$font-mono",
           "fontSize": 10,
           "fontWeight": "normal"
@@ -34375,7 +34529,7 @@
               "fill": "$text-tertiary",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Body 112 x 28 (4:1, the Houdini ratio) for every silhouette; a fixed layout box keeps the handle axis and the wires invariant across shapes. Glyph 16px on a 20px light chip at the body centre, on the handle axis. Wings: visual 10px, hit area 18x54. Handles float clear of the body (3px gap) and keep DataType colour + shape - Houdini's plain grey dots would destroy that ratified channel. Terminal, branch and light carry no wings.",
+              "content": "Body 112 x 28 (4:1, the Houdini ratio) for every silhouette; a fixed layout box keeps the handle axis and the wires invariant across shapes. Glyph 16px on a 20px light chip at the body centre, on the handle axis. Wings: visual 10px, hit area 18x54. Handles float clear of the body (3px gap) and keep DataType colour + shape - Houdini's plain grey dots would destroy that ratified channel. Terminal, branch and light carry no wings. REVISED 2026-08-06 (06-10, D-26): the box is 112 x 32 since the polish pass, and it is a true layout box: every role occupies it, a sized-down body centres inside it, and risers ride above it. Wings ride every full-width silhouette, bypass left; the right wing carries display in subflows and the visible param at root, and the floating root eye is retired. Each wing renders only where the registry declares its fact.",
               "lineHeight": 1.45,
               "fontFamily": "Inter",
               "fontSize": 11,
@@ -55382,24 +55536,14 @@
                   "height": 20
                 },
                 {
-                  "type": "path",
-                  "id": "UWTqc",
+                  "id": "z4rLh",
+                  "type": "ref",
+                  "ref": "xVgTP",
+                  "name": "glyph",
                   "x": 48,
                   "y": 8,
-                  "name": "glyph",
-                  "geometry": "M2.5 5.5l7.5 0 0 7-7.5 0z m7.5 3.3l3.5-2.6 0 5.6-3.5-2.6",
-                  "viewBox": [
-                    0,
-                    0,
-                    16,
-                    16
-                  ],
                   "width": 16,
-                  "height": 16,
-                  "stroke": "$evo-slot",
-                  "strokeWidth": 1.5,
-                  "strokeLinejoin": "round",
-                  "strokeLinecap": "round"
+                  "height": 16
                 },
                 {
                   "type": "frame",
@@ -55479,24 +55623,14 @@
                   "height": 20
                 },
                 {
-                  "type": "path",
-                  "id": "BbyKg",
+                  "id": "D9ZWq",
+                  "type": "ref",
+                  "ref": "LmDfl",
+                  "name": "glyph",
                   "x": 48,
                   "y": 8,
-                  "name": "glyph",
-                  "geometry": "M4 5l8 0m-8 3l8 0m-8 3l5 0",
-                  "viewBox": [
-                    0,
-                    0,
-                    16,
-                    16
-                  ],
                   "width": 16,
-                  "height": 16,
-                  "stroke": "$evo-slot",
-                  "strokeWidth": 1.5,
-                  "strokeLinejoin": "round",
-                  "strokeLinecap": "round"
+                  "height": 16
                 },
                 {
                   "type": "frame",
@@ -55702,7 +55836,7 @@
                       "fill": "$text-secondary",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "Every canvas role occupies one 112x32 layout box. The visible body sits centred inside it and may be smaller when the size means something; a riser (dome, folder tab, viewfinder bump) rides above the box, never inside it. Glyph, cook arc, display halo, terminal core and selection share the box centre as their one origin. Handles keep the 3px air off the box edges; the diamond handle composes its rotation with the centring transform instead of replacing it. Silhouettes stay registry-derived; container remains the single asymmetric role. Amends D-4, D-10 and D-21; formalizes the sized-down bodies the polish pass left implicit.",
+                      "content": "Every canvas role occupies one 112x32 layout box. The visible body sits centred inside it and may be smaller when the size means something; a riser (dome, folder tab, viewfinder bump) rides above the box, never inside it. Glyph, cook arc, display halo, terminal core and selection share the box centre as their one origin. Handles keep the 3px air off the box edges; the diamond handle composes its rotation with the centring transform instead of replacing it. Silhouettes stay registry-derived; container remains the single asymmetric role. Amends D-4, D-10 and D-21; formalizes the sized-down bodies the polish pass left implicit. Implementation ruling 2026-08-06: the right wing carries the root visible param and the floating eye retires, so the wing pair is symmetric in every context, each side rendered only where the registry declares its fact.",
                       "lineHeight": 1.45,
                       "fontFamily": "$font-ui",
                       "fontSize": 10.5,

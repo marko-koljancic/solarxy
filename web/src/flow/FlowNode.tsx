@@ -2,21 +2,21 @@
 // ports, fill, glyph, and silhouette derived from the registry snapshot (so
 // a node added in Rust needs no new component). Evo anatomy on the one
 // geometric contract: every role occupies the 112x32 layout box; the
-// visible body may sit smaller inside it (light fixture, text datablock,
-// terminal donut) and risers (folder tab, viewfinder bump, gather dome)
-// ride above the box, so the glyph on its light chip, the cook arc, the
-// display halo and the terminal core all share the box centre with no
-// per-role offsets. The category pastel fills the body, silhouettes stay
+// visible body may sit smaller inside it (the root-placeable pills for
+// container, camera and light, the text datablock, the terminal donut),
+// so the glyph inked directly on the body, the cook arc, the display halo
+// and the terminal core all share the box centre with no per-role
+// offsets. The category pastel fills the body, silhouettes stay
 // registry-derived, and the label stack rides to the right (type label,
 // name, status row, param preview, authored description) with
-// zoom-responsive LOD. Wings sit on the full-width bodies: bypass on the
-// left; on the right, display in subflows and root visibility at root
-// (both registry-gated), so the two affordances stay symmetric in every
-// context. Rings mean selection only: stale is a tag plus body wash,
-// cooking is the arc around the glyph. The UX-spec systems survive the
-// restyle: typed handles (color by DataType family plus the shape
-// channel), cook / stale / error / validation feedback, and bypass
-// hatching.
+// zoom-responsive LOD. Wings sit on the bodies, revealed on hover: bypass
+// on the left; on the right, display in subflows and root visibility at
+// root (both registry-gated), so the two affordances stay symmetric in
+// every context; a hidden root node dims and keeps a hollow dot. Rings
+// mean selection only: stale is a tag plus body wash, cooking is the arc
+// around the glyph. The UX-spec systems survive the restyle: typed
+// handles (color by DataType family plus the shape channel), cook /
+// stale / error / validation feedback, and bypass hatching.
 
 import { useEffect, useRef, useState } from "react";
 import { Handle, Position, useStore, type NodeProps } from "@xyflow/react";
@@ -94,11 +94,8 @@ function authoredDescription(node: NodeMirror): string | null {
 }
 
 /** Shaped silhouette body as inline SVG (crisp 1px stroke, which CSS
- * clip-path cannot give).
- *
- * Every shaped body is authored in `NODE_BOX` coordinates, so one viewBox
- * serves all of them; a riser at negative y paints through the SVG's
- * visible overflow rather than consuming the box. */
+ * clip-path cannot give). Every shaped body is authored in `NODE_BOX`
+ * coordinates, so one viewBox serves all of them. */
 function ShapedBody({ body }: { body: RoleBody }) {
   return (
     <svg className="node-body-svg" viewBox={`0 0 ${NODE_BOX.w} ${NODE_BOX.h}`} aria-hidden>
@@ -181,6 +178,9 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   const showDisplayWing = hasWings && ctx !== "root";
   const showVisibilityWing = hasWings && ctx === "root" && hasVisibleParam(desc);
   const visible = nodeVisible(node);
+  // A hidden root object reads from the canvas as a slight dim plus the
+  // wing's hollow dot; a visible one carries no at-rest visibility chrome.
+  const objHidden = showVisibilityWing && !visible;
 
   // The single sub-row's text, by priority. Cook time is suppressed while
   // the clock runs: a figure that changes sixty times a second is unreadable
@@ -244,7 +244,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
   return (
     <div
       ref={rootRef}
-      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${isDisplay ? " is-display" : ""}`}
+      className={`flow-node role-${role}${desc ? ` cat-${desc.category} nt-${desc.typeId}` : ""}${selected ? " selected" : ""}${node.bypassed ? " bypassed" : ""}${stale ? " stale" : ""}${pending ? " pending" : ""}${loading ? " cooking" : ""}${isDisplay ? " is-display" : ""}${objHidden ? " obj-hidden" : ""}`}
       onPointerEnter={armRadial}
       onPointerDown={cancelRadialTimer}
       onPointerLeave={cancelRadialTimer}
@@ -305,10 +305,11 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
         {showVisibilityWing && (
           // The root visibility wing: the right-wing slot carries the
           // additive `visible` param at root (note declares no `visible`,
-          // so it gets no wing). The dot is always shown -- filled
-          // display-blue when visible, hollow when hidden -- so the wing
-          // reads at rest the way the retired floating eye did. An
-          // ordinary setParam, so it undoes like any edit.
+          // so it gets no wing). Nothing shows at rest on a visible node;
+          // the dot reveals on hover like the bypass icon, and stays
+          // visible hollow while the node is hidden so the abnormal state
+          // reads from the canvas. An ordinary setParam, so it undoes
+          // like any edit.
           <button
             className={`node-wing wing-visibility nodrag${visible ? "" : " off"}`}
             title={visible ? "Hide (stays cooked)" : "Show"}

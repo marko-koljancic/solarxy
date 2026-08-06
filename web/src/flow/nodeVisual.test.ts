@@ -102,60 +102,23 @@ describe("category fallback totality (the 15-category taxonomy)", () => {
 describe("ROLE_BODIES", () => {
   const entries = Object.entries(ROLE_BODIES) as [string, RoleBody][];
 
-  /** Roles whose silhouette is deliberately NOT left-right symmetric,
-   * each with the meaning the asymmetry carries. Everything else is held
-   * to the symmetry rule below, so an accidental lopsided path still
-   * fails. */
-  const ASYMMETRIC: Record<string, string> = {
-    container: "carries a folder tab on the left",
-  };
-
-  it("covers the six shaped roles", () => {
-    expect(entries.map(([k]) => k).sort()).toEqual([
-      "analyzer",
-      "branch",
-      "camera",
-      "container",
-      "imageSource",
-      "light",
-    ]);
+  it("covers the three shaped subflow roles (the root roles are CSS pills)", () => {
+    expect(entries.map(([k]) => k).sort()).toEqual(["analyzer", "branch", "imageSource"]);
   });
 
-  it("stays inside the box plus its declared riser (risers above, never inside)", () => {
-    // The one-contract rule: the box is never consumed. A riser (folder
-    // tab, viewfinder bump) is authored at negative y, up to the declared
-    // overhang; the body proper spans the full box, which is what makes a
-    // box-centred glyph a body-centred glyph with no compensating offset.
+  it("stays inside the one layout box", () => {
     for (const [role, body] of entries) {
       for (const [x, y] of pathPoints(body.path)) {
         expect(x, `${role} x`).toBeGreaterThanOrEqual(0);
         expect(x, `${role} x`).toBeLessThanOrEqual(NODE_BOX.w);
-        expect(y, `${role} y`).toBeGreaterThanOrEqual(-body.riser);
+        expect(y, `${role} y`).toBeGreaterThanOrEqual(0);
         expect(y, `${role} y`).toBeLessThanOrEqual(NODE_BOX.h);
       }
     }
   });
 
-  it("a role without a riser has no negative-y vertex", () => {
+  it("is left-right symmetric (no shaped role carries asymmetry any more)", () => {
     for (const [role, body] of entries) {
-      if (body.riser > 0) continue;
-      for (const [, y] of pathPoints(body.path)) {
-        expect(y, `${role}: riser 0 but the path rises above the box`).toBeGreaterThanOrEqual(0);
-      }
-    }
-  });
-
-  it("a declared riser is real (the declaration is not stale)", () => {
-    for (const [role, body] of entries) {
-      if (body.riser === 0) continue;
-      const rises = pathPoints(body.path).some(([, y]) => y < 0);
-      expect(rises, `${role}: declares riser ${body.riser} but never rises`).toBe(true);
-    }
-  });
-
-  it("is left-right symmetric except where the asymmetry means something", () => {
-    for (const [role, body] of entries) {
-      if (role in ASYMMETRIC) continue;
       const pts = pathPoints(body.path);
       for (const [x, y] of pts) {
         const mirrored = pts.some(
@@ -163,18 +126,6 @@ describe("ROLE_BODIES", () => {
         );
         expect(mirrored, `${role}: (${x}, ${y}) has no mirror twin`).toBe(true);
       }
-    }
-  });
-
-  it("the asymmetric roles really are asymmetric (the exemption is not stale)", () => {
-    for (const role of Object.keys(ASYMMETRIC)) {
-      const body = ROLE_BODIES[role as keyof typeof ROLE_BODIES];
-      expect(body, role).toBeDefined();
-      const pts = pathPoints(body!.path);
-      const symmetric = pts.every(([x, y]) =>
-        pts.some(([mx, my]) => Math.abs(mx - (NODE_BOX.w - x)) < 0.01 && Math.abs(my - y) < 0.01),
-      );
-      expect(symmetric, `${role} is symmetric now, so drop its exemption`).toBe(false);
     }
   });
 });
@@ -247,18 +198,39 @@ describe("the one geometric contract (box, body, riser)", () => {
 
   it("the stylesheet's sized bodies mirror ROLE_BODY_SIZE", () => {
     // The inset shorthand is derived from the table, so a size change in
-    // either place breaks this pin until both move together.
-    for (const role of ["light", "text", "terminal"] as const) {
+    // either place breaks this pin until both move together. The sizing
+    // rule for a role may live in a grouped selector (the root pills
+    // share one), so the finder matches any block whose selector list
+    // contains the role's .node-body selector and whose body sets an
+    // inset.
+    for (const role of ["container", "camera", "light", "text", "terminal"] as const) {
       const body = ROLE_BODY_SIZE[role];
       const inset = `inset: ${(NODE_BOX.h - body.h) / 2}px ${(NODE_BOX.w - body.w) / 2}px;`;
       const block = css.split("}").find((b) => {
         const brace = b.lastIndexOf("{");
         if (brace === -1) return false;
-        const selector = (b.slice(0, brace).split("*/").pop() ?? "").trim();
-        return selector === `.flow-node.role-${role} .node-body`;
+        const selectors = (b.slice(0, brace).split("*/").pop() ?? "")
+          .split(",")
+          .map((s) => s.trim());
+        return (
+          selectors.includes(`.flow-node.role-${role} .node-body`) && b.includes("inset:")
+        );
       });
-      expect(block, `.flow-node.role-${role} .node-body block`).toBeDefined();
+      expect(block, `.flow-node.role-${role} .node-body sizing block`).toBeDefined();
       expect(block, `${role} body inset`).toContain(inset);
     }
+  });
+
+  it("the glyph inks directly on the body (the chip slot paints no plate)", () => {
+    // The maintainer's ruling: transparent glyph backgrounds on every
+    // node. The chip element survives as a centring slot only, so its
+    // block must not declare a background.
+    const block = css.split("}").find((b) => {
+      const brace = b.lastIndexOf("{");
+      if (brace === -1) return false;
+      return (b.slice(0, brace).split("*/").pop() ?? "").trim() === ".node-chip";
+    });
+    expect(block, ".node-chip block").toBeDefined();
+    expect(block, "chip plate").not.toMatch(/background/);
   });
 });
