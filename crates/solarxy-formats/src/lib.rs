@@ -34,11 +34,13 @@
 
 pub mod export;
 pub mod gltf;
+pub mod hdr;
+pub mod lut;
 pub mod obj;
 pub mod ply;
 pub mod stl;
 
-pub use solarxy_core::{RawImageData, RawMaterialData, RawMeshData, RawModelData};
+pub use solarxy_core::{LutCube, RawImageData, RawImageHdr, RawMaterialData, RawMeshData, RawModelData};
 
 /// Errors produced by the format loaders.
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +78,14 @@ pub enum FormatsError {
          file; import or place it alongside the model"
     )]
     MissingAsset(String),
+    /// A `.cube` colour lookup table that read as text but is not a usable
+    /// table. The line is 1-based and counts the file as written, blank
+    /// lines and comments included, so the number matches what an editor
+    /// shows. Separate from [`Self::Invalid`] because a grading LUT is
+    /// hand-edited far more often than a mesh is, and "line 4108" is the
+    /// difference between a fixable file and a mysterious one.
+    #[error("LUT parse error at line {line}: {message}")]
+    Lut { line: usize, message: String },
     /// Structurally valid file with unusable content (no geometry, missing
     /// required elements).
     #[error("{0}")]
@@ -206,4 +216,27 @@ pub(crate) fn read_file(path: &str) -> Result<Vec<u8>, FormatsError> {
         path: path.to_string(),
         source,
     })
+}
+
+/// The pixel dimensions of an image file, without decoding it.
+///
+/// Reads the header and stops. A four thousand pixel texture is a few
+/// megabytes to decode and a few hundred bytes to measure, and every caller of
+/// this wants the number rather than the pixels: a report saying an asset ships
+/// a 4096 normal map where the budget says 1024 does not need the normal map.
+///
+/// `None` when the file cannot be read, is not an image, or is in a format this
+/// build was not compiled with. All three are the same answer to the only
+/// question being asked, which is whether the resolution is knowable.
+///
+/// The path is joined by the caller rather than here, because the callers that
+/// have one have already resolved it against a base they trust.
+#[cfg(feature = "std-fs")]
+pub fn image_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
+    image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
 }

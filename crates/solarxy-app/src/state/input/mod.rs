@@ -21,7 +21,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::KeyCode;
 
 use solarxy_renderer::camera_state::CameraState;
-use crate::gui::{OutlinerAction, ToastSeverity, ViewportContextMenu};
+use crate::gui::{NodeTreeAction, OutlinerAction, ToastSeverity, ViewportContextMenu};
 use solarxy_renderer::ibl::IblState;
 use solarxy_renderer::input::{CameraKey, PointerButton};
 use solarxy_core::preferences::{
@@ -29,8 +29,11 @@ use solarxy_core::preferences::{
     NormalsMode, PaneMode, ProjectionMode, UvMode, ViewMode,
 };
 use solarxy_renderer::validation::{material_meshes_aabb, resolve_issue_aabb};
+use solarxy_core::scene::SceneObjectId;
+use solarxy_graph::document::{GraphContext, NodeId};
+use solarxy_graph::params::{ParamSource, ParamValue};
 
-use super::{BackgroundModeExt, BoundsMode, State, ViewLayout};
+use super::{BackgroundModeExt, BoundsMode, CompositeLook, State, ViewLayout};
 
 /// winit-to-renderer input mapping: the renderer is windowing-agnostic and
 /// consumes its own [`CameraKey`] / [`PointerButton`] enums.
@@ -104,10 +107,8 @@ impl State {
                 } else if self.input.modifiers.alt_key() {
                     self.show_all_meshes();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| cam.reset_to_bounds(&bounds));
                 }
             }
             KeyCode::Slash => {
@@ -117,29 +118,25 @@ impl State {
                 if self.input.modifiers.shift_key() {
                     self.toggle_tone_mode();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                cgmath::Vector3::unit_y(),
-                                -cgmath::Vector3::unit_z(),
-                            );
-                        });
-                    }
-                }
-            }
-            KeyCode::KeyF => {
-                let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                if let Some(bounds) = bounds {
+                    let bounds = self.scene_bounds();
                     self.for_each_target_cam(|cam| {
                         cam.reset_to_bounds_axis(
                             &bounds,
-                            cgmath::Vector3::unit_z(),
                             cgmath::Vector3::unit_y(),
+                            -cgmath::Vector3::unit_z(),
                         );
                     });
                 }
+            }
+            KeyCode::KeyF => {
+                let bounds = self.scene_bounds();
+                self.for_each_target_cam(|cam| {
+                    cam.reset_to_bounds_axis(
+                        &bounds,
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Vector3::unit_y(),
+                    );
+                });
             }
             KeyCode::KeyL => {
                 let cmd_or_ctrl = if cfg!(target_os = "macos") {
@@ -166,32 +163,28 @@ impl State {
                     };
                     self.gui.set_toast(msg, ToastSeverity::Success);
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                -cgmath::Vector3::unit_x(),
-                                cgmath::Vector3::unit_y(),
-                            );
-                        });
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            -cgmath::Vector3::unit_x(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyR => {
                 if self.input.modifiers.shift_key() {
                     self.toggle_review_mode();
                 } else {
-                    let bounds = self.scene.as_ref().map(|s| s.model.bounds);
-                    if let Some(bounds) = bounds {
-                        self.for_each_target_cam(|cam| {
-                            cam.reset_to_bounds_axis(
-                                &bounds,
-                                cgmath::Vector3::unit_x(),
-                                cgmath::Vector3::unit_y(),
-                            );
-                        });
-                    }
+                    let bounds = self.scene_bounds();
+                    self.for_each_target_cam(|cam| {
+                        cam.reset_to_bounds_axis(
+                            &bounds,
+                            cgmath::Vector3::unit_x(),
+                            cgmath::Vector3::unit_y(),
+                        );
+                    });
                 }
             }
             KeyCode::KeyP => {
@@ -427,6 +420,11 @@ impl State {
             // (the multi-object render harness; see state/dev.rs).
             #[cfg(debug_assertions)]
             KeyCode::F9 => self.toggle_dev_objects(),
+            // Debug-build-only: toggle a synthesized environment through
+            // the real SetEnvironment op, which nothing else on the
+            // desktop emits until the shell gains the node engine.
+            #[cfg(debug_assertions)]
+            KeyCode::F10 => self.toggle_dev_environment(),
             _ => {
                 if let Some(key) = to_camera_key(code) {
                     self.for_each_target_cam(|cam| {
@@ -443,8 +441,8 @@ impl State {
             &self.queue,
             self.renderer.post.bloom_enabled,
             self.renderer.post.ssao_enabled,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             active_inspection,
         );
     }
@@ -536,6 +534,7 @@ impl State {
             .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
     }
 
@@ -578,6 +577,11 @@ impl State {
             .sky_colors();
         self.renderer.ibl_res.ibl =
             IblState::from_sky_colors(&self.device, &self.queue, top, bottom);
+        // The IBL just moved without the scene contract knowing, so forget
+        // what the tracker thinks is installed. Otherwise re-selecting the
+        // same HDRI through an environment node would match the stale hash
+        // and be skipped, leaving the procedural sky in place.
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
         self.gui.clear_hdri_info();
         self.gui.set_toast("HDRI cleared", ToastSeverity::Success);
@@ -587,16 +591,41 @@ impl State {
     /// lives on (Properties → Validation row click) and enable that
     /// pane's per-face validation overlay so the defect is visible.
     pub(super) fn fly_to_validation_issue(&mut self, idx: usize) {
-        let aabb = self.scene.as_ref().and_then(|scene| {
-            scene.validation.issues.get(idx).and_then(|issue| {
+        let aabb = match &self.scene {
+            Some(scene) => scene.validation.issues.get(idx).and_then(|issue| {
                 resolve_issue_aabb(&issue.scope, &scene.model, &scene.validation_raw_to_gpu)
-            })
-        });
+            }),
+            None => self.scene_issue_aabb(idx),
+        };
         let Some(aabb) = aabb else {
             return;
         };
         self.view.pane_settings[self.view.active_pane].show_validation = true;
         self.frame_active_pane(aabb);
+    }
+
+    /// World-space bounds of the geometry behind one row of the **merged**
+    /// validation list.
+    ///
+    /// The list is N objects' reports concatenated, so the row index alone
+    /// is ambiguous and has to be resolved through the owner recorded when
+    /// they were merged. Re-deriving that owner here would create a second
+    /// ordering that must agree with the first forever, and a disagreement
+    /// would fly the camera to a different object's mesh, which looks
+    /// entirely plausible on screen and so would not be caught by looking.
+    fn scene_issue_aabb(&self, idx: usize) -> Option<solarxy_core::AABB> {
+        let info = self.engine_scene.as_ref()?;
+        let (id, local) = info.validation.owners.get(idx).copied()?;
+        let object = self.scene_objects.get(id)?;
+        let issue = self
+            .scene_objects
+            .validation(id)?
+            .report
+            .issues
+            .get(local)?;
+        let raw_to_gpu = self.scene_objects.raw_to_gpu(id)?;
+        resolve_issue_aabb(&issue.scope, &object.model, raw_to_gpu)
+            .map(|b| b.transformed(&object.transform))
     }
 
     /// Smoothly fly the active pane's camera to frame `bounds`.
@@ -692,6 +721,106 @@ impl State {
                     self.frame_active_pane(aabb);
                 }
             }
+            OutlinerAction::FrameObject(id) => {
+                // The object's own bounds are in its local space; the
+                // transform is what places it in the world, and framing the
+                // untransformed box would send the camera to the origin for
+                // anything the scene has moved.
+                let aabb = self
+                    .scene_objects
+                    .get(id)
+                    .map(|o| o.model.bounds.transformed(&o.transform));
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::FrameObjectMesh(id, mesh) => {
+                let aabb = self.scene_objects.get(id).and_then(|o| {
+                    o.model
+                        .mesh_bounds
+                        .get(mesh)
+                        .map(|b| b.transformed(&o.transform))
+                });
+                if let Some(aabb) = aabb {
+                    self.frame_active_pane(aabb);
+                }
+            }
+            OutlinerAction::ToggleObject(id) => self.toggle_scene_object(id),
+        }
+    }
+
+    /// Apply a Node Tree row click: select the node engine-side, and
+    /// outline its object if it has one.
+    ///
+    /// **Only a root-context selection can outline anything.** The scene
+    /// delta names a geo container's object `SceneObjectId(geo.0)`, so a
+    /// root node id maps straight onto one; a node inside a container owns
+    /// no object of its own. Selecting one still selects it in the engine
+    /// and still highlights the row, it just leaves the viewport alone —
+    /// the same behaviour the web shell has for the same gesture.
+    ///
+    /// Unlike [`Self::toggle_scene_object`], no delta is taken: selection
+    /// is neither a render flag nor a cook input, and the engine emits no
+    /// scene ops for it.
+    pub(super) fn handle_node_tree_action(&mut self, action: NodeTreeAction) {
+        let NodeTreeAction::Select(ctx, node) = action;
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        if let Err(e) = engine.apply(solarxy_graph::Command::SetSelection {
+            ctx,
+            ids: vec![node],
+        }) {
+            tracing::warn!("Could not select node: {e}");
+            return;
+        }
+        self.selected_object = match ctx {
+            GraphContext::Root => {
+                let id = SceneObjectId(node.0);
+                // Absent or hidden objects are filtered out of the draw
+                // list entirely, so pointing at one would outline nothing
+                // while claiming a selection is showing.
+                self.scene_objects.get(id).filter(|o| o.visible).map(|_| id)
+            }
+            GraphContext::Subflow(_) => None,
+        };
+    }
+
+    /// Flip a scene object's visibility through the engine.
+    ///
+    /// Writing the renderer's copy directly would look identical for one
+    /// frame and then be undone: the scene delta re-emits every object's
+    /// render flags from its owning node on each cook, so the parameter is
+    /// the only durable place to put this. Routing it through the engine
+    /// also puts the toggle in the undo stack for free.
+    fn toggle_scene_object(&mut self, id: SceneObjectId) {
+        let Some(visible) = self.scene_objects.get(id).map(|o| o.visible) else {
+            return;
+        };
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        let command = solarxy_graph::Command::SetParam {
+            ctx: GraphContext::Root,
+            node: NodeId(id.0),
+            key: "visible".to_string(),
+            value: ParamSource::Literal(ParamValue::Bool(!visible)),
+        };
+        match engine.apply(command) {
+            Ok(_) => {
+                // Take the delta here rather than leaving it to the frame
+                // loop. `visible` is a render flag, not a cook input, so the
+                // next cook can legitimately produce nothing, and the frame
+                // loop only drains a delta when something ticked or cooked.
+                // A delta is a full rebuild from the document, so taking one
+                // now is what carries the flag to the renderer; the upserts
+                // it repeats are deduped by attribute identity.
+                let delta = engine.take_scene_delta();
+                if !delta.ops.is_empty() {
+                    self.pending_scene_deltas.push(delta);
+                }
+            }
+            Err(e) => tracing::warn!("Could not toggle object visibility: {e}"),
         }
     }
 

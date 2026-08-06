@@ -108,6 +108,9 @@ pub struct PostProcessing {
     pub ssao: SsaoState,
     pub ssao_enabled: bool,
     pub composite: CompositeState,
+    /// The colour-grading tables the composite pass samples. They live
+    /// beside `composite` because it is their only consumer.
+    pub luts: crate::lut::LutSlots,
     pub tone_mode: ToneMode,
     pub exposure: f32,
 }
@@ -278,7 +281,7 @@ pub struct ValidationColorResources {
 /// Per-object validation overlay GPU resources: the per-mesh issue
 /// category (index into [`ValidationColorResources`]) and the
 /// non-manifold edge index buffers, both parallel to the object's
-/// `model.meshes`. Built by `ModelScene::new` on desktop and by
+/// `model.meshes`. Built by `LoadedModel::load` on desktop and by
 /// `SceneObjects` from `SceneOp::SetValidation` on the web.
 pub struct ObjectValidationGpu {
     pub mesh_cat: Vec<Option<usize>>,
@@ -306,6 +309,55 @@ pub struct DrawObject<'a> {
     /// participation; which light owns the map is the light-side
     /// exclusive-caster rule). Desktop passes `true`.
     pub cast_shadow: bool,
+}
+
+impl<'a> DrawObject<'a> {
+    /// Draw one of this object's meshes across every placement it carries.
+    ///
+    /// **Every per-object indexed draw in every pass goes through here.**
+    /// The instance range used to be a literal `0..1` written out ten
+    /// times across the shadow, gbuffer, main, outline, wireframe,
+    /// selection and validation passes. Threading a count through ten
+    /// literals means a scatter that draws but casts no shadow, or one
+    /// the validation overlay cannot see, is one forgotten edit away.
+    /// Here it is one edit, or none.
+    ///
+    /// Placements are per mesh, so this binds instance buffer slot 1 from
+    /// the mesh's own offset. The passes that deliberately draw a single
+    /// copy (UV layout, overlap counting, the ghosted fill) bind the whole
+    /// buffer themselves and draw `0..1` from row zero.
+    ///
+    /// The caller still binds vertex buffer 0 and its own bind groups:
+    /// those genuinely differ per pass. The index buffer and the draw do
+    /// not, so they live here.
+    ///
+    /// A mesh with no placements draws nothing, and returning before the
+    /// bind is what makes that safe rather than merely pointless: its
+    /// offset is the end of the object's buffer whenever it is the last
+    /// mesh, and slicing a buffer from its end is a wgpu panic, not an
+    /// empty slice. Reachable by merging a copy onto a populated point
+    /// cloud with a copy onto an empty one.
+    pub fn draw_mesh(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        if mesh.instance_count == 0 {
+            return;
+        }
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..mesh.num_elements, 0, 0..mesh.instance_count);
+    }
+
+    /// Draw one of this object's point meshes across every instance.
+    ///
+    /// Points expand to six quad corners each in the vertex shader rather
+    /// than being indexed, so they take their own call; the instance
+    /// range is the same question and gets the same answer.
+    pub fn draw_points(&self, pass: &mut wgpu::RenderPass<'a>, mesh: &'a crate::model::Mesh) {
+        if mesh.instance_count == 0 {
+            return;
+        }
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(mesh.instance_offset..));
+        pass.draw(0..mesh.num_vertices * 6, 0..mesh.instance_count);
+    }
 }
 
 pub struct Renderer {
@@ -511,12 +563,15 @@ impl Renderer {
             height,
         );
 
+        let luts = crate::lut::LutSlots::new(device, queue, &shared_samplers.linear_clamp);
+
         let composite = CompositeState::new(
             device,
             &layouts,
             &hdr_resolve_view,
             &bloom.ping_view,
             &bloom.sampler,
+            &luts,
             init.bloom_enabled,
             init.ssao_enabled,
             init.tone_mode,
@@ -656,6 +711,7 @@ impl Renderer {
                 ssao,
                 ssao_enabled: init.ssao_enabled,
                 composite,
+                luts,
                 tone_mode: init.tone_mode,
                 exposure: init.exposure,
             },
@@ -828,8 +884,7 @@ impl Renderer {
                     continue;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(&mut pass, mesh);
             }
         }
     }
@@ -944,6 +999,11 @@ impl Renderer {
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1012,8 +1072,7 @@ impl Renderer {
                 }
                 pass.set_bind_group(1, &material.bind_group, &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(&mut pass, mesh);
             }
         }
     }
@@ -1296,6 +1355,37 @@ impl Renderer {
         self.light_helper_count = u32::try_from(lines.len()).unwrap_or(0);
     }
 
+    /// Points a colour-grading slot at a table, or clears it with `None`.
+    ///
+    /// **The single chokepoint**, in the same spirit as the app's
+    /// `rebuild_light_bind_group`: a bind group captures the texture views
+    /// it was built from, so changing which table a slot binds without
+    /// rebuilding leaves the previous one on screen. Uploading and
+    /// rebuilding therefore happen here together rather than being two
+    /// things a host has to remember to pair.
+    ///
+    /// Deduped on the table's content hash, so a host may call this every
+    /// frame with the same table (which the scene delta encourages, since
+    /// it replaces the whole camera list) for the cost of a comparison.
+    pub fn set_lut(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: crate::lut::LutSlot,
+        cube: Option<&solarxy_core::LutCube>,
+    ) {
+        if self.post.luts.set(device, queue, slot, cube) {
+            self.post.composite.rebuild_bind_group(
+                device,
+                &self.layouts,
+                &self.targets.hdr_resolve_view,
+                &self.post.bloom.ping_view,
+                &self.post.bloom.sampler,
+                &self.post.luts,
+            );
+        }
+    }
+
     /// Sets (or clears) the manipulator for this frame. Pull-based, like every
     /// other overlay: the host decides, the renderer draws.
     pub fn set_manipulator(&mut self, state: Option<crate::manipulator::ManipulatorState>) {
@@ -1389,6 +1479,11 @@ impl Renderer {
                     }
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1431,7 +1526,7 @@ impl Renderer {
                             continue;
                         };
                         pass.set_bind_group(2, &edge.bind_group, &[]);
-                        pass.draw(0..mesh.num_vertices * 6, 0..1);
+                        obj.draw_points(&mut pass, mesh);
                     }
                 }
             }
@@ -1556,8 +1651,7 @@ impl Renderer {
                     continue;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(pass, mesh);
             }
         }
     }
@@ -1700,8 +1794,7 @@ impl Renderer {
                 if let Some(colors) = &mesh.color_buffer {
                     pass.set_vertex_buffer(2, colors.slice(..));
                 }
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                obj.draw_mesh(pass, mesh);
             }
         }
 
@@ -1722,7 +1815,7 @@ impl Renderer {
                 }
                 pass.set_bind_group(2, &edge.bind_group, &[]);
                 pass.set_vertex_buffer(0, obj.instance_buffer.slice(..));
-                pass.draw(0..mesh.num_vertices * 6, 0..1);
+                obj.draw_points(pass, mesh);
             }
         }
     }
@@ -1851,6 +1944,11 @@ impl Renderer {
                     pass.set_bind_group(1, &self.validation_colors.bind_groups[cat_idx], &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -1945,6 +2043,10 @@ impl Renderer {
             }
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            // The UV passes draw the prototype's layout, never its
+            // placements: a UV map has one copy however many times the
+            // geometry is placed in the world, and the overlap counter
+            // would multiply every count by the instance number.
             pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
         }
     }
@@ -2031,6 +2133,11 @@ impl Renderer {
                     pass.set_bind_group(1, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    // The UV passes draw the prototype's layout, never its
+                    // placements: a UV map has one copy however many times
+                    // the geometry is placed in the world, and the overlap
+                    // counter would multiply every count by the instance
+                    // number if this drew them all.
                     pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
                 }
             }
@@ -2078,9 +2185,11 @@ impl Renderer {
             return;
         }
         // The normal-arrow segments are parallel to the drawn objects'
-        // meshes FLATTENED in draw order (desktop passes one object, so
-        // this is exactly its mesh list; the web host aggregates every
-        // displayed object in the same order). Visibility flags gate the
+        // meshes FLATTENED in draw order. The desktop builds them from its
+        // file-loaded model, which it always draws first, so the segments
+        // line up with the head of the list and any cooked objects behind
+        // it simply run past the end; the web host aggregates every
+        // displayed object in the same order. Visibility flags gate the
         // per-mesh draws.
         let flat_meshes = || objects.iter().flat_map(|o| o.model.meshes.iter());
         pass.set_pipeline(&self.pipelines.overlay.normals);

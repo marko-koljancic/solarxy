@@ -22,6 +22,30 @@ use crate::array::MAX_OUTPUT_PRIMITIVES;
 use crate::rng;
 use crate::set::{AttributeData, AttributeMap, GeometrySet, KernelMesh, reserved};
 
+/// Whether copies become real geometry or placements of one prototype.
+///
+/// The distinction Houdini draws between a copy and an instance, and it
+/// is a representation choice rather than a rendering one: both modes
+/// produce the same image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CopyMode {
+    /// One prototype plus a transform per placement. The renderer issues
+    /// one instanced draw, so ten thousand copies of a five-thousand
+    /// triangle rock cost five thousand triangles of memory rather than
+    /// fifty million.
+    ///
+    /// The cost is that downstream operations see the prototype and the
+    /// placements, never the individual copies: there is nothing to
+    /// select, wrangle, or delete per copy, because the copies do not
+    /// exist as geometry.
+    #[default]
+    Instance,
+    /// Every copy baked into real vertices. What you choose when you need
+    /// to edit the copies afterwards, and the only mode that existed
+    /// before instancing.
+    Bake,
+}
+
 /// How each copy orients at its target point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CopyOrient {
@@ -49,6 +73,7 @@ pub fn copy_to_points(
     scale: f32,
     scale_variance: f32,
     seed: u32,
+    mode: CopyMode,
 ) -> Result<GeometrySet, String> {
     let targets = gather_targets(points);
     if targets.is_empty() || template.meshes.is_empty() {
@@ -61,14 +86,17 @@ pub fn copy_to_points(
         .map(KernelMesh::primitive_count)
         .sum();
     let template_verts: usize = template.meshes.iter().map(KernelMesh::vertex_count).sum();
-    let projected = template_prims
-        .max(template_verts)
-        .saturating_mul(targets.len());
+    let per_copy = template_prims.max(template_verts);
+    // The ceiling counts what the mode actually allocates: baked output in
+    // Bake, the prototype once in Instance. So the same scatter that
+    // refuses to bake places happily as instances, which is the whole
+    // point of having the modes.
+    let projected = match mode {
+        CopyMode::Bake => per_copy.saturating_mul(targets.len()),
+        CopyMode::Instance => per_copy,
+    };
     if projected > MAX_OUTPUT_PRIMITIVES {
-        return Err(format!(
-            "copy_to_points would produce {projected} primitives (over the \
-             {MAX_OUTPUT_PRIMITIVES} ceiling); lower the point count or simplify the template"
-        ));
+        return Err(ceiling_message("copy_to_points", projected, mode));
     }
 
     // Per-point placement, shared by every template mesh so a multi-mesh
@@ -96,12 +124,44 @@ pub fn copy_to_points(
         })
         .collect();
 
-    let meshes = template
-        .meshes
-        .iter()
-        .map(|mesh| flatten_copies(mesh, &placements))
-        .collect();
-    Ok(GeometrySet::from_parts(meshes, template.materials.clone()))
+    match mode {
+        CopyMode::Bake => {
+            let meshes = template
+                .meshes
+                .iter()
+                .map(|mesh| flatten_copies(mesh, &placements))
+                .collect();
+            Ok(GeometrySet::from_parts(meshes, template.materials.clone()))
+        }
+        // The prototype travels untouched and the placements become
+        // matrices. Note what is absent: `flatten_copies` never runs, so
+        // no vertex is allocated per copy at all.
+        CopyMode::Instance => Ok(GeometrySet::from_parts_instanced(
+            template.meshes.clone(),
+            template.materials.clone(),
+            placements.iter().map(Placement::to_instance).collect(),
+        )),
+    }
+}
+
+/// The over-the-ceiling message, naming the active mode and the way out.
+///
+/// "Lower the point count" is the wrong advice when switching modes would
+/// have solved it, so the message says which mode is running and what the
+/// other one would do.
+pub(crate) fn ceiling_message(op: &str, projected: usize, mode: CopyMode) -> String {
+    match mode {
+        CopyMode::Bake => format!(
+            "{op} in Bake mode would produce {projected} primitives (over the \
+             {MAX_OUTPUT_PRIMITIVES} ceiling). Switch the node to Instance mode to place \
+             the same copies without allocating them, or lower the count."
+        ),
+        CopyMode::Instance => format!(
+            "{op} in Instance mode would produce {projected} primitives (over the \
+             {MAX_OUTPUT_PRIMITIVES} ceiling). Instance mode already allocates the \
+             prototype only once, so the prototype itself is too heavy: simplify it."
+        ),
+    }
 }
 
 struct Target {
@@ -116,6 +176,24 @@ struct Placement {
     translate: [f32; 3],
     rotation: Matrix3<f32>,
     scale: f32,
+}
+
+impl Placement {
+    /// This placement as a column-major model matrix.
+    ///
+    /// The same composition `flatten_copies` applies vertex by vertex
+    /// (scale, then rotate, then translate), so Instance mode and Bake
+    /// mode put every copy in exactly the same place. A kernel test
+    /// asserts that rather than trusting it.
+    fn to_instance(&self) -> solarxy_core::scene::InstanceXform {
+        let r = self.rotation * self.scale;
+        solarxy_core::scene::InstanceXform([
+            [r.x.x, r.x.y, r.x.z, 0.0],
+            [r.y.x, r.y.y, r.y.z, 0.0],
+            [r.z.x, r.z.y, r.z.z, 0.0],
+            [self.translate[0], self.translate[1], self.translate[2], 1.0],
+        ])
+    }
 }
 
 /// Every vertex of every mesh in the points input, with its normal from
@@ -198,6 +276,8 @@ fn flatten_copies(mesh: &KernelMesh, placements: &[Placement]) -> KernelMesh {
         topology: mesh.topology,
         attributes: tile_lanes(&mesh.attributes, n),
         primitive_attributes: tile_lanes(&mesh.primitive_attributes, n),
+        // Baked output IS the copies, so it carries no placements.
+        instances: None,
     }
 }
 
@@ -264,8 +344,16 @@ mod tests {
     #[test]
     fn copies_flatten_into_one_mesh_per_template_mesh() {
         let template = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 1, 1, 1));
-        let out =
-            copy_to_points(&template, &three_points(), CopyOrient::None, 1.0, 0.0, 0).unwrap();
+        let out = copy_to_points(
+            &template,
+            &three_points(),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_eq!(out.mesh_count(), 1, "one draw object, not one per point");
         let mesh = &out.meshes[0];
         assert_eq!(mesh.primitive_count(), 12 * 3);
@@ -310,6 +398,7 @@ mod tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .unwrap();
         let normals = out.meshes[0]
@@ -334,6 +423,7 @@ mod tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .unwrap();
         for n in out.meshes[0].normals.as_ref().unwrap().iter() {
@@ -356,6 +446,7 @@ mod tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .unwrap();
         for n in out.meshes[0].normals.as_ref().unwrap().iter() {
@@ -367,10 +458,37 @@ mod tests {
     fn scale_variance_is_seeded_and_deterministic() {
         let template = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 1, 1, 1));
         let points = three_points();
-        let a = copy_to_points(&template, &points, CopyOrient::None, 1.0, 0.5, 9).unwrap();
-        let b = copy_to_points(&template, &points, CopyOrient::None, 1.0, 0.5, 9).unwrap();
+        let a = copy_to_points(
+            &template,
+            &points,
+            CopyOrient::None,
+            1.0,
+            0.5,
+            9,
+            CopyMode::Bake,
+        )
+        .unwrap();
+        let b = copy_to_points(
+            &template,
+            &points,
+            CopyOrient::None,
+            1.0,
+            0.5,
+            9,
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_eq!(a.meshes[0].positions, b.meshes[0].positions);
-        let c = copy_to_points(&template, &points, CopyOrient::None, 1.0, 0.5, 10).unwrap();
+        let c = copy_to_points(
+            &template,
+            &points,
+            CopyOrient::None,
+            1.0,
+            0.5,
+            10,
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_ne!(a.meshes[0].positions, c.meshes[0].positions);
         // Variance actually varies: the three copies span different sizes.
         let vcount = template.meshes[0].vertex_count();
@@ -387,7 +505,16 @@ mod tests {
     fn the_ceiling_errors_before_allocating() {
         let template = GeometrySet::from_mesh(generate_box(1.0, 1.0, 1.0, 1, 1, 1));
         let cloud = GeometrySet::from_mesh(KernelMesh::points("big", vec![[0.0; 3]; 1_000_000]));
-        let err = copy_to_points(&template, &cloud, CopyOrient::None, 1.0, 0.0, 0).unwrap_err();
+        let err = copy_to_points(
+            &template,
+            &cloud,
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Bake,
+        )
+        .unwrap_err();
         assert!(err.contains("ceiling"), "got: {err}");
     }
 
@@ -406,8 +533,16 @@ mod tests {
             ..Default::default()
         })];
 
-        let out =
-            copy_to_points(&template, &three_points(), CopyOrient::None, 1.0, 0.0, 0).unwrap();
+        let out = copy_to_points(
+            &template,
+            &three_points(),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Bake,
+        )
+        .unwrap();
         let mesh = &out.meshes[0];
         let Some(AttributeData::Vec4(colors)) = mesh.attributes.get(reserved::COLOR) else {
             panic!("color lane rides");
@@ -426,7 +561,16 @@ mod tests {
             vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
             vec![0, 1, 2],
         ));
-        let out = copy_to_points(&template, &tri, CopyOrient::None, 1.0, 0.0, 0).unwrap();
+        let out = copy_to_points(
+            &template,
+            &tri,
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_eq!(out.meshes[0].primitive_count(), 12 * 3);
 
         let empty = copy_to_points(
@@ -436,6 +580,7 @@ mod tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .unwrap();
         assert!(empty.is_renderable_empty());
@@ -449,7 +594,16 @@ mod tests {
         let surface = GeometrySet::from_mesh(generate_plane(4.0, 4.0, 1, 1));
         let cloud = scatter(&surface, 50, 7);
         let template = GeometrySet::from_mesh(generate_box(0.2, 0.2, 0.2, 1, 1, 1));
-        let out = copy_to_points(&template, &cloud, CopyOrient::Normal, 1.0, 0.25, 7).unwrap();
+        let out = copy_to_points(
+            &template,
+            &cloud,
+            CopyOrient::Normal,
+            1.0,
+            0.25,
+            7,
+            CopyMode::Bake,
+        )
+        .unwrap();
         assert_eq!(out.meshes[0].primitive_count(), 12 * 50);
         assert!(!out.is_renderable_empty());
     }
@@ -496,6 +650,7 @@ mod pscale_tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         let a = copy_width(&out, 0);
@@ -515,6 +670,7 @@ mod pscale_tests {
             3.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         let plain = copy_to_points(
@@ -524,6 +680,7 @@ mod pscale_tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         assert!((copy_width(&out, 0) - copy_width(&plain, 0) * 3.0).abs() < 1e-4);
@@ -539,6 +696,7 @@ mod pscale_tests {
             2.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         let without = copy_to_points(
@@ -548,6 +706,7 @@ mod pscale_tests {
             2.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         assert!((copy_width(&with, 0) - copy_width(&without, 0)).abs() < 1e-5);
@@ -562,8 +721,206 @@ mod pscale_tests {
             1.0,
             0.0,
             0,
+            CopyMode::Bake,
         )
         .expect("copies");
         assert!(copy_width(&out, 1) < 1e-5, "collapsed, not inside out");
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+
+    fn template() -> GeometrySet {
+        GeometrySet::from_mesh(KernelMesh::new(
+            "t",
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+        ))
+    }
+
+    fn points(at: &[[f32; 3]]) -> GeometrySet {
+        GeometrySet::from_mesh(KernelMesh::points("p", at.to_vec()))
+    }
+
+    /// Every vertex the Bake path produces, in order.
+    fn baked_positions(set: &GeometrySet) -> Vec<[f32; 3]> {
+        set.meshes
+            .iter()
+            .flat_map(|m| m.positions.to_vec())
+            .collect()
+    }
+
+    #[test]
+    fn instance_mode_carries_the_transforms_bake_would_have_applied() {
+        // The parity that makes the two modes the same picture. Applying
+        // each instance matrix to the prototype's vertices must reproduce
+        // Bake's output vertex for vertex, or switching modes moves the
+        // geometry and the choice stops being free.
+        let targets = [[0.0, 0.0, 0.0], [4.0, 1.0, -2.0], [-3.0, 0.0, 5.0]];
+        let pts = points(&targets);
+
+        let baked = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::None,
+            2.0,
+            0.0,
+            7,
+            CopyMode::Bake,
+        )
+        .expect("bake");
+        let instanced = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::None,
+            2.0,
+            0.0,
+            7,
+            CopyMode::Instance,
+        )
+        .expect("instance");
+
+        let placements = instanced.meshes[0].instances.as_ref().expect("placements");
+        assert_eq!(placements.len(), targets.len());
+        // The prototype is untouched: one triangle, not three copies of one.
+        assert_eq!(instanced.meshes[0].positions.len(), 3);
+
+        let proto = &instanced.meshes[0].positions;
+        let want = baked_positions(&baked);
+        let mut got = Vec::new();
+        for placement in placements.iter() {
+            for p in proto.iter() {
+                got.push(placement.apply(*p));
+            }
+        }
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(want.iter()) {
+            for axis in 0..3 {
+                assert!((g[axis] - w[axis]).abs() < 1e-4, "{g:?} vs {w:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn instance_mode_carries_orientation_and_per_point_scale_too() {
+        // Not just translation: the rotation onto the point normal and the
+        // seeded scale variance both have to ride the matrix, or oriented
+        // scatters differ between the modes.
+        let mut pts = KernelMesh::points("p", vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+        pts.attributes.insert(
+            reserved::NORMAL.to_string(),
+            AttributeData::Vec3(Arc::new(vec![[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])),
+        );
+        let pts = GeometrySet::from_mesh(pts);
+
+        let baked = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::Normal,
+            1.5,
+            0.4,
+            42,
+            CopyMode::Bake,
+        )
+        .expect("bake");
+        let instanced = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::Normal,
+            1.5,
+            0.4,
+            42,
+            CopyMode::Instance,
+        )
+        .expect("instance");
+
+        let placements = instanced.meshes[0].instances.as_ref().expect("placements");
+        let proto = &instanced.meshes[0].positions;
+        let want = baked_positions(&baked);
+        let mut got = Vec::new();
+        for placement in placements.iter() {
+            for p in proto.iter() {
+                got.push(placement.apply(*p));
+            }
+        }
+        for (g, w) in got.iter().zip(want.iter()) {
+            for axis in 0..3 {
+                assert!((g[axis] - w[axis]).abs() < 1e-4, "{g:?} vs {w:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn instance_mode_allocates_the_prototype_once_however_many_points() {
+        // The whole reason the mode exists. Ten thousand copies of a
+        // triangle is one triangle plus ten thousand matrices.
+        let many: Vec<[f32; 3]> = (0..10_000).map(|i| [i as f32, 0.0, 0.0]).collect();
+        let out = copy_to_points(
+            &template(),
+            &points(&many),
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Instance,
+        )
+        .expect("instance");
+        assert_eq!(out.meshes[0].positions.len(), 3);
+        assert_eq!(out.instance_count(), 10_000);
+    }
+
+    #[test]
+    fn the_ceiling_counts_per_mode_and_the_message_names_the_way_out() {
+        // A scatter that cannot bake can still instance, so the ceiling
+        // has to be a per-mode question and the error has to say so
+        // rather than telling the user to lower a count that is fine.
+        let heavy: Vec<[f32; 3]> = (0..4_000_000).map(|i| [i as f32, 0.0, 0.0]).collect();
+        let pts = points(&heavy);
+
+        let err = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Bake,
+        )
+        .expect_err("over the ceiling in Bake");
+        assert!(err.contains("Bake mode"), "{err}");
+        assert!(err.contains("Instance mode"), "{err}");
+
+        // The same scatter places fine, because the prototype is counted
+        // once.
+        let ok = copy_to_points(
+            &template(),
+            &pts,
+            CopyOrient::None,
+            1.0,
+            0.0,
+            0,
+            CopyMode::Instance,
+        );
+        assert!(ok.is_ok(), "instancing the same scatter must succeed");
+    }
+
+    #[test]
+    fn an_empty_input_is_empty_in_both_modes() {
+        for mode in [CopyMode::Bake, CopyMode::Instance] {
+            let out = copy_to_points(
+                &template(),
+                &GeometrySet::empty(),
+                CopyOrient::None,
+                1.0,
+                0.0,
+                0,
+                mode,
+            )
+            .expect("empty");
+            assert!(out.meshes.is_empty(), "{mode:?}");
+            assert!(!out.is_instanced(), "{mode:?}");
+        }
     }
 }

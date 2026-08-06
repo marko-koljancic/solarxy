@@ -514,3 +514,124 @@ fn obj_colors_survive_the_byte_api_identically() {
     let bytes = obj::load_obj_bytes(&fixture_bytes("colored_tri.obj"), &mut resolver).unwrap();
     assert_eq!(path.meshes[0].colors, bytes.meshes[0].colors);
 }
+
+// ---- Principled surface extensions ----
+//
+// The fixture is hand-authored against the KHR specifications rather than
+// produced by our own exporter, so these tests prove we read the JSON shape
+// the specifications define and not merely that we agree with ourselves.
+// The exporter's own round trip is covered in `export.rs`.
+
+#[test]
+fn gltf_principled_extensions_import_with_values_intact() {
+    let raw = gltf::load_gltf(&fixture("principled_extensions.gltf")).unwrap();
+    let mat = raw
+        .materials
+        .iter()
+        .find(|m| m.name == "principled_full")
+        .expect("the full material");
+
+    // The five the crate exposes through typed accessors.
+    assert!((mat.ior - 1.7).abs() < 1e-6, "ior");
+    assert!((mat.transmission - 0.9).abs() < 1e-6, "transmission");
+    assert!((mat.thickness - 2.5).abs() < 1e-6, "thickness");
+    assert!((mat.attenuation_distance - 3.0).abs() < 1e-6, "attenuation");
+    assert_eq!(mat.attenuation_color, [0.8, 0.2, 0.1]);
+    assert!((mat.specular_intensity - 0.6).abs() < 1e-6, "specular");
+    assert_eq!(mat.specular_color, [0.9, 0.8, 0.7]);
+    assert!((mat.emissive_strength - 4.0).abs() < 1e-6, "emissive");
+
+    // The four read through the raw extension map.
+    assert!((mat.clearcoat - 0.75).abs() < 1e-6, "clearcoat");
+    assert!(
+        (mat.clearcoat_roughness - 0.25).abs() < 1e-6,
+        "clearcoat roughness"
+    );
+    assert_eq!(mat.sheen_color, [0.4, 0.5, 0.6]);
+    assert!((mat.sheen_roughness - 0.35).abs() < 1e-6, "sheen roughness");
+    assert!((mat.iridescence - 0.5).abs() < 1e-6, "iridescence");
+    assert!((mat.iridescence_ior - 1.8).abs() < 1e-6, "iridescence ior");
+    assert!(
+        (mat.iridescence_thickness_min - 200.0).abs() < 1e-6,
+        "iridescence thickness min"
+    );
+    assert!(
+        (mat.iridescence_thickness_max - 600.0).abs() < 1e-6,
+        "iridescence thickness max"
+    );
+    assert!((mat.anisotropy - 0.65).abs() < 1e-6, "anisotropy");
+    assert!(
+        (mat.anisotropy_rotation - 1.2).abs() < 1e-6,
+        "anisotropy rotation"
+    );
+
+    // Extension texture references resolve through the same path as the
+    // five original slots, one from a typed accessor and one from the raw
+    // map, and the two indices are distinct images.
+    let transmission = mat
+        .transmission_texture_data
+        .as_ref()
+        .expect("transmission map");
+    let thickness = mat.thickness_texture_data.as_ref().expect("thickness map");
+    assert_ne!(transmission.hash, thickness.hash, "distinct images");
+    assert!(mat.clearcoat_texture_data.is_some(), "clearcoat map");
+}
+
+#[test]
+fn gltf_malformed_extensions_degrade_without_failing_the_import() {
+    // Every malformed payload in the broken material must be ignored with a
+    // diagnostic, leaving the extension's default in place and the ordinary
+    // metallic-roughness data untouched. Nothing here may panic, because a
+    // vendor file is untrusted input and these four extensions carry no
+    // crate-level validation at all.
+    let raw = gltf::load_gltf(&fixture("principled_extensions.gltf")).unwrap();
+    let mat = raw
+        .materials
+        .iter()
+        .find(|m| m.name == "principled_broken")
+        .expect("the broken material");
+
+    // A factor that is a string keeps the extension default...
+    assert!((mat.clearcoat - 0.0).abs() < 1e-6, "string factor ignored");
+    // ...while its well-formed neighbour in the same block still lands.
+    assert!(
+        (mat.clearcoat_roughness - 0.5).abs() < 1e-6,
+        "neighbour survives"
+    );
+    // An out-of-range texture index yields no texture, and the factor
+    // beside it in the same block still reads.
+    assert!(
+        mat.clearcoat_normal_texture_data.is_none(),
+        "out-of-range index"
+    );
+    // A two-component colour is malformed, not a partial value.
+    assert_eq!(mat.sheen_color, [0.0, 0.0, 0.0]);
+    // A texture reference carrying no index at all.
+    assert!(mat.iridescence_texture_data.is_none(), "index-less texture");
+    assert!((mat.iridescence - 0.5).abs() < 1e-6, "factor beside it");
+    // An extension whose value is an array is skipped whole.
+    assert!((mat.anisotropy - 0.0).abs() < 1e-6, "array extension");
+
+    // And the material is otherwise entirely intact.
+    assert_eq!(mat.base_color_factor, [0.25, 0.5, 0.75, 1.0]);
+    assert!((mat.roughness_factor - 0.6).abs() < 1e-6, "roughness");
+}
+
+#[test]
+fn a_file_without_extensions_imports_exactly_as_before() {
+    // The regression that matters most: every material default must be the
+    // identity of its effect, so an ordinary file is unchanged by the
+    // fields existing at all.
+    let raw = gltf::load_gltf(&fixture("textured_embedded.gltf")).unwrap();
+    let mat = &raw.materials[0];
+    assert!((mat.ior - 1.5).abs() < 1e-6);
+    assert!((mat.specular_intensity - 1.0).abs() < 1e-6);
+    assert_eq!(mat.specular_color, [1.0, 1.0, 1.0]);
+    assert!((mat.emissive_strength - 1.0).abs() < 1e-6);
+    assert_eq!(mat.attenuation_color, [1.0, 1.0, 1.0]);
+    assert!((mat.transmission - 0.0).abs() < 1e-6);
+    assert!((mat.clearcoat - 0.0).abs() < 1e-6);
+    assert_eq!(mat.sheen_color, [0.0, 0.0, 0.0]);
+    assert!((mat.iridescence - 0.0).abs() < 1e-6);
+    assert!((mat.anisotropy - 0.0).abs() < 1e-6);
+}

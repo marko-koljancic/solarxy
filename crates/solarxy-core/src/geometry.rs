@@ -123,19 +123,231 @@ impl RawImageData {
     /// texture-identity key.
     #[must_use]
     pub fn content_hash(pixels: &[u8], width: u32, height: u32) -> u64 {
-        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = OFFSET;
-        let mut eat = |bytes: &[u8]| {
-            for &b in bytes {
-                h ^= u64::from(b);
-                h = h.wrapping_mul(PRIME);
-            }
-        };
-        eat(&width.to_le_bytes());
-        eat(&height.to_le_bytes());
-        eat(pixels);
+        let mut h = Fnv1a::over_dimensions(width, height);
+        h.eat(pixels);
+        h.finish()
+    }
+}
+
+/// FNV-1a 64, the content-hash primitive shared by [`RawImageData`] and
+/// [`RawImageHdr`]. Stable across platforms and runs (unlike
+/// `DefaultHasher`), which is what makes it usable as a texture-identity
+/// and dedup key rather than only as a within-process hash.
+struct Fnv1a(u64);
+
+impl Fnv1a {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    /// Seed with the image dimensions, so two buffers with identical bytes
+    /// but different shapes do not collide.
+    fn over_dimensions(width: u32, height: u32) -> Self {
+        let mut h = Self(Self::OFFSET);
+        h.eat(&width.to_le_bytes());
+        h.eat(&height.to_le_bytes());
         h
+    }
+
+    fn eat(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    fn finish(self) -> u64 {
+        self.0
+    }
+}
+
+/// Decoded high-dynamic-range image pixels plus dimensions.
+///
+/// **Three `f32` per pixel, row-major, linear RGB, no alpha**, so a pixel
+/// at `(x, y)` occupies `pixels[(y * width + x) * 3 ..][..3]` and
+/// `pixels.len() == width * height * 3`. The flat layout is what the
+/// decoders produce natively and what GPU upload and the CPU-side
+/// convolutions read through a cast, so nothing on the path copies to
+/// reshape it.
+///
+/// The float sibling of [`RawImageData`], carrying the same content hash
+/// stamped once at construction and the same immutability expectation:
+/// instances are shared behind `Arc`, and a mutated pixel buffer would
+/// silently invalidate the hash. `f32` rather than `f16` because CPU-side
+/// consumers want the precision and the GPU upload converts once.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawImageHdr {
+    pub pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+    /// FNV-1a over dimensions and pixel bits; see [`Self::new`].
+    pub hash: u64,
+}
+
+impl RawImageHdr {
+    /// Build an image and stamp its content hash.
+    #[must_use]
+    pub fn new(pixels: Vec<f32>, width: u32, height: u32) -> Self {
+        debug_assert_eq!(
+            pixels.len() as u64,
+            u64::from(width) * u64::from(height) * 3,
+            "RawImageHdr is three floats per pixel"
+        );
+        let hash = Self::content_hash(&pixels, width, height);
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// Rebuild an image whose hash was computed earlier and traveled with
+    /// the samples; callers must pass the hash exactly as [`Self::new`]
+    /// produced it.
+    #[must_use]
+    pub fn from_parts(pixels: Vec<f32>, width: u32, height: u32, hash: u64) -> Self {
+        Self {
+            pixels,
+            width,
+            height,
+            hash,
+        }
+    }
+
+    /// FNV-1a 64 over `width`, `height`, then each sample's IEEE-754 bit
+    /// pattern little-endian. Hashing the bits rather than the bytes of the
+    /// backing allocation keeps the result identical on a big-endian target,
+    /// which matters because this hash is a cache key that outlives the
+    /// process that produced it.
+    #[must_use]
+    pub fn content_hash(pixels: &[f32], width: u32, height: u32) -> u64 {
+        let mut h = Fnv1a::over_dimensions(width, height);
+        for sample in pixels {
+            h.eat(&sample.to_bits().to_le_bytes());
+        }
+        h.finish()
+    }
+}
+
+/// The smallest cube edge a lookup table may declare. Two is the degenerate
+/// useful case: one entry per corner, which trilinear filtering turns into a
+/// pure linear remap, and which is exactly what an identity slot needs.
+pub const LUT_MIN_SIZE: u32 = 2;
+
+/// The largest cube edge a lookup table may declare. Well inside core
+/// WebGPU's `max_texture_dimension_3d` of 2048; the cap exists because the
+/// table is `size.pow(3)` entries and a typo in a text file should not turn
+/// into a gigabyte of allocation. 64 cubed is 262,144 entries, comfortably
+/// past the 33 and 65 that grading suites actually export.
+pub const LUT_MAX_SIZE: u32 = 64;
+
+/// The darkest stop the pre-tone-map LUT slot's log encoding reaches.
+///
+/// A three-dimensional table is sampled on 0 to 1, but the value reaching
+/// the pre-tone-map slot is unbounded linear scene light, so something has
+/// to map one onto the other. A log encoding is that something, and it is
+/// also why a table authored for that slot is called a log LUT: a linear
+/// normalization would spend almost all of its resolution on highlights
+/// and leave the shadows banded.
+///
+/// This window, `-10` to `+6.5` stops around mid grey, is the contract a
+/// table in that slot is authored against, and it is stated here rather
+/// than in a shader literal so the renderer and the parameter help that
+/// documents it cannot drift apart.
+pub const LUT_LOG_MIN_STOP: f32 = -10.0;
+
+/// The brightest stop the pre-tone-map LUT slot's log encoding reaches.
+/// See [`LUT_LOG_MIN_STOP`].
+pub const LUT_LOG_MAX_STOP: f32 = 6.5;
+
+/// A decoded three-dimensional colour lookup table.
+///
+/// **Three `f32` per entry, red varying fastest**, so the entry at grid
+/// position `(r, g, b)` occupies `data[((b * size + g) * size + r) * 3 ..][..3]`
+/// and `data.len() == size.pow(3) * 3`. That is the `.cube` format's own
+/// ordering, so the decoder writes the table straight through and the GPU
+/// upload reads it through a cast; nothing on the path copies to reshape it.
+///
+/// `domain_min` and `domain_max` are the input range the table covers, per
+/// the file's `DOMAIN_MIN` / `DOMAIN_MAX` lines, defaulting to 0 and 1. A
+/// sampler normalizes into that window before the lookup, which is the one
+/// place the two LUT slots differ: the pre-tone-map slot log-encodes first,
+/// the display-referred slot does not.
+///
+/// The sibling of [`RawImageHdr`] in every other respect, including the
+/// content hash stamped once at construction: instances are shared behind
+/// `Arc` and deduped on `hash`, so a mutated table would silently keep a
+/// stale GPU upload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LutCube {
+    /// The cube edge, in [`LUT_MIN_SIZE`]`..=`[`LUT_MAX_SIZE`].
+    pub size: u32,
+    pub data: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+    /// FNV-1a over the size, the domain, and the entry bits; see [`Self::new`].
+    pub hash: u64,
+}
+
+impl LutCube {
+    /// Build a table and stamp its content hash.
+    #[must_use]
+    pub fn new(size: u32, data: Vec<f32>, domain_min: [f32; 3], domain_max: [f32; 3]) -> Self {
+        debug_assert_eq!(
+            data.len() as u64,
+            u64::from(size).pow(3) * 3,
+            "LutCube is three floats per entry over a size-cubed grid"
+        );
+        let hash = Self::content_hash(size, &data, domain_min, domain_max);
+        Self {
+            size,
+            data,
+            domain_min,
+            domain_max,
+            hash,
+        }
+    }
+
+    /// The table that changes nothing: every entry is its own coordinate.
+    /// Used for the no-op test and for the texture bound to an empty slot,
+    /// so the shader's bindings are always satisfied and a disabled slot
+    /// needs no pipeline permutation.
+    #[must_use]
+    pub fn identity(size: u32) -> Self {
+        let n = size.clamp(LUT_MIN_SIZE, LUT_MAX_SIZE);
+        let last = (n - 1) as f32;
+        let mut data = Vec::with_capacity((n as usize).pow(3) * 3);
+        for b in 0..n {
+            for g in 0..n {
+                for r in 0..n {
+                    data.push(r as f32 / last);
+                    data.push(g as f32 / last);
+                    data.push(b as f32 / last);
+                }
+            }
+        }
+        Self::new(n, data, [0.0; 3], [1.0; 3])
+    }
+
+    /// FNV-1a 64 over the size, then the domain bounds, then each entry's
+    /// IEEE-754 bit pattern little-endian. Hashing bits rather than the
+    /// backing allocation's bytes keeps the result identical on a big-endian
+    /// target, which matters because this hash is a GPU-cache key.
+    #[must_use]
+    pub fn content_hash(
+        size: u32,
+        data: &[f32],
+        domain_min: [f32; 3],
+        domain_max: [f32; 3],
+    ) -> u64 {
+        let mut h = Fnv1a::over_dimensions(size, size);
+        for bound in domain_min.iter().chain(domain_max.iter()) {
+            h.eat(&bound.to_bits().to_le_bytes());
+        }
+        for sample in data {
+            h.eat(&sample.to_bits().to_le_bytes());
+        }
+        h.finish()
     }
 }
 
@@ -262,6 +474,152 @@ pub struct RawMaterialData {
     /// Toon band count (only read when `shading_model` is `Toon`).
     #[cfg_attr(feature = "serde", serde(default = "default_toon_steps"))]
     pub toon_steps: f32,
+
+    // ---- Principled surface properties ----
+    //
+    // The properties beyond metallic-roughness that every principled surface
+    // model carries: Blender's Principled BSDF, Houdini's Principled Shader,
+    // Autodesk Standard Surface and glTF's KHR material extensions describe
+    // the same physical family under different names, and these are its
+    // parameters. Defaults are the identity of each effect, so a material
+    // that never sets them shades exactly as it did before they existed.
+    //
+    // Every field below carries a serde default: they are absent from every
+    // document and transfer blob written before this release.
+    /// Index of refraction of the base dielectric, which sets its normal
+    /// incidence reflectance. 1.5 is the default and the value the previous
+    /// hardcoded 0.04 reflectance corresponds to.
+    #[cfg_attr(feature = "serde", serde(default = "default_ior"))]
+    pub ior: f32,
+    /// How much light passes through the surface rather than reflecting
+    /// diffusely. 0.0 is opaque.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub transmission: f32,
+    /// Distance light travels through the volume, in local units. 0.0 means
+    /// the surface is thin-walled and has no interior.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub thickness: f32,
+    /// The colour light becomes after travelling [`Self::attenuation_distance`]
+    /// through the volume. White is no tint.
+    #[cfg_attr(feature = "serde", serde(default = "white_rgb"))]
+    pub attenuation_color: [f32; 3],
+    /// Distance at which transmitted light reaches
+    /// [`Self::attenuation_color`]. **0.0 means no attenuation**, standing in
+    /// for the specification's infinite default: the value is serialized as
+    /// JSON, where a non-finite float becomes `null` and fails to load back.
+    /// The specification's own domain is strictly positive, so zero is free
+    /// to carry this meaning.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attenuation_distance: f32,
+    /// Strength of the clear-coat layer over the base surface. 0.0 is no
+    /// coat.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat: f32,
+    /// Roughness of the clear-coat layer, independent of the base roughness.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_roughness: f32,
+    /// Colour of the retroreflective sheen lobe that gives fabric its rim.
+    /// Black is no sheen, which is why the default is not white here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_color: [f32; 3],
+    /// Roughness of the sheen lobe.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_roughness: f32,
+    /// Strength of the thin-film interference effect. 0.0 is none.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence: f32,
+    /// Index of refraction of the thin film itself.
+    #[cfg_attr(feature = "serde", serde(default = "default_iridescence_ior"))]
+    pub iridescence_ior: f32,
+    /// Thin-film thickness in nanometres at the low end of the range a
+    /// thickness map addresses. Without a map only the maximum is used.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "default_iridescence_thickness_min")
+    )]
+    pub iridescence_thickness_min: f32,
+    /// Thin-film thickness in nanometres at the high end of the range, and
+    /// the thickness used when no thickness map is present.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "default_iridescence_thickness_max")
+    )]
+    pub iridescence_thickness_max: f32,
+    /// Scales the dielectric normal-incidence reflectance derived from
+    /// [`Self::ior`]. 1.0 leaves it alone.
+    #[cfg_attr(feature = "serde", serde(default = "one_f32"))]
+    pub specular_intensity: f32,
+    /// Tints the dielectric reflectance at normal incidence. White is
+    /// untinted.
+    #[cfg_attr(feature = "serde", serde(default = "white_rgb"))]
+    pub specular_color: [f32; 3],
+    /// How much the specular highlight stretches along the tangent
+    /// direction. 0.0 is isotropic.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy: f32,
+    /// Rotation of the anisotropy direction within the tangent plane, in
+    /// radians.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy_rotation: f32,
+    /// Multiplies [`Self::emissive_factor`], letting emission exceed the
+    /// unit range a colour can express. 1.0 is no change.
+    #[cfg_attr(feature = "serde", serde(default = "one_f32"))]
+    pub emissive_strength: f32,
+
+    // ---- Principled surface texture slots ----
+    //
+    // Same path-plus-data shape as the five slots above. These round-trip
+    // through import and export; the raster path does not sample them,
+    // because the fragment stage is at 10 of the 16 sampled textures core
+    // WebGPU guarantees and these twelve do not fit in the remainder.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub transmission_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub transmission_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub thickness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub thickness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_roughness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_roughness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub clearcoat_normal_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clearcoat_normal_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_color_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub sheen_color_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sheen_roughness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub sheen_roughness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub iridescence_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub iridescence_thickness_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub iridescence_thickness_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub specular_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub specular_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub specular_color_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub specular_color_texture_data: Option<std::sync::Arc<RawImageData>>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub anisotropy_texture_path: Option<PathBuf>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub anisotropy_texture_data: Option<std::sync::Arc<RawImageData>>,
 }
 
 fn default_toon_steps() -> f32 {
@@ -270,6 +628,32 @@ fn default_toon_steps() -> f32 {
 
 fn white_rgba() -> [f32; 4] {
     [1.0, 1.0, 1.0, 1.0]
+}
+
+fn white_rgb() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+/// The multiplicative identity, shared by every principled factor whose
+/// "leave it alone" value is one rather than zero.
+fn one_f32() -> f32 {
+    1.0
+}
+
+fn default_ior() -> f32 {
+    1.5
+}
+
+fn default_iridescence_ior() -> f32 {
+    1.3
+}
+
+fn default_iridescence_thickness_min() -> f32 {
+    100.0
+}
+
+fn default_iridescence_thickness_max() -> f32 {
+    400.0
 }
 
 #[cfg(feature = "serde")]
@@ -316,6 +700,48 @@ impl Default for RawMaterialData {
             normal_texture_name: None,
             shininess_texture_name: None,
             dissolve_texture_name: None,
+            ior: default_ior(),
+            transmission: 0.0,
+            thickness: 0.0,
+            attenuation_color: white_rgb(),
+            attenuation_distance: 0.0,
+            clearcoat: 0.0,
+            clearcoat_roughness: 0.0,
+            sheen_color: [0.0; 3],
+            sheen_roughness: 0.0,
+            iridescence: 0.0,
+            iridescence_ior: default_iridescence_ior(),
+            iridescence_thickness_min: default_iridescence_thickness_min(),
+            iridescence_thickness_max: default_iridescence_thickness_max(),
+            specular_intensity: one_f32(),
+            specular_color: white_rgb(),
+            anisotropy: 0.0,
+            anisotropy_rotation: 0.0,
+            emissive_strength: one_f32(),
+            transmission_texture_path: None,
+            transmission_texture_data: None,
+            thickness_texture_path: None,
+            thickness_texture_data: None,
+            clearcoat_texture_path: None,
+            clearcoat_texture_data: None,
+            clearcoat_roughness_texture_path: None,
+            clearcoat_roughness_texture_data: None,
+            clearcoat_normal_texture_path: None,
+            clearcoat_normal_texture_data: None,
+            sheen_color_texture_path: None,
+            sheen_color_texture_data: None,
+            sheen_roughness_texture_path: None,
+            sheen_roughness_texture_data: None,
+            iridescence_texture_path: None,
+            iridescence_texture_data: None,
+            iridescence_thickness_texture_path: None,
+            iridescence_thickness_texture_data: None,
+            specular_texture_path: None,
+            specular_texture_data: None,
+            specular_color_texture_path: None,
+            specular_color_texture_data: None,
+            anisotropy_texture_path: None,
+            anisotropy_texture_data: None,
         }
     }
 }
@@ -483,6 +909,85 @@ pub fn extract_edges(indices: &[u32]) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A material serialized before the principled properties existed must
+    /// load with every one of them at the identity of its effect, or every
+    /// document and transfer blob written before this release renders
+    /// differently after it.
+    ///
+    /// The fixture is the raw stored shape, keys and all, rather than a
+    /// struct round trip: a round trip would serialize the new fields and
+    /// so could never observe them being absent, which is exactly the
+    /// mistake the geo rotate-order migration's tests made.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_material_stored_before_the_principled_properties_loads_neutral() {
+        let stored = r#"{
+            "name": "old",
+            "diffuse_texture_path": null,
+            "normal_texture_path": null,
+            "metallic_roughness_texture_path": null,
+            "occlusion_texture_path": null,
+            "emissive_texture_path": null,
+            "roughness_factor": 0.5,
+            "metallic_factor": 0.0,
+            "emissive_factor": [0.0, 0.0, 0.0],
+            "alpha_mode": "Opaque",
+            "alpha_cutoff": 0.5,
+            "ambient": null,
+            "diffuse": null,
+            "specular": null,
+            "shininess": null,
+            "dissolve": null,
+            "optical_density": null,
+            "ambient_texture_name": null,
+            "diffuse_texture_name": null,
+            "specular_texture_name": null,
+            "normal_texture_name": null,
+            "shininess_texture_name": null,
+            "dissolve_texture_name": null
+        }"#;
+        let mat: RawMaterialData = serde_json::from_str(stored).expect("old blob still loads");
+
+        assert_eq!(mat.name, "old");
+        // The identities that are one, not zero. A zero default on any of
+        // these would darken or flatten every pre-existing material.
+        assert!((mat.ior - 1.5).abs() < 1e-6, "ior");
+        assert!((mat.specular_intensity - 1.0).abs() < 1e-6, "specular");
+        assert_eq!(mat.specular_color, [1.0, 1.0, 1.0]);
+        assert!((mat.emissive_strength - 1.0).abs() < 1e-6, "emissive");
+        assert_eq!(mat.attenuation_color, [1.0, 1.0, 1.0]);
+        assert!((mat.iridescence_ior - 1.3).abs() < 1e-6, "iridescence ior");
+        // The identities that are zero, meaning the effect is off.
+        assert!((mat.transmission - 0.0).abs() < 1e-6, "transmission");
+        assert!((mat.thickness - 0.0).abs() < 1e-6, "thickness");
+        assert!((mat.attenuation_distance - 0.0).abs() < 1e-6, "attenuation");
+        assert!((mat.clearcoat - 0.0).abs() < 1e-6, "clearcoat");
+        assert_eq!(mat.sheen_color, [0.0, 0.0, 0.0]);
+        assert!((mat.iridescence - 0.0).abs() < 1e-6, "iridescence");
+        assert!((mat.anisotropy - 0.0).abs() < 1e-6, "anisotropy");
+        // And no texture slot invented itself.
+        assert!(mat.clearcoat_texture_path.is_none());
+        assert!(mat.anisotropy_texture_path.is_none());
+    }
+
+    /// `attenuation_distance` carries "no attenuation" as zero rather than
+    /// as the specification's infinity, because JSON is the storage format
+    /// and a non-finite float does not survive it. This pins that choice:
+    /// if anyone restores the infinite default, the value silently becomes
+    /// null on write and fails on read.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn every_material_default_survives_a_json_round_trip() {
+        let mat = RawMaterialData::default();
+        let text = serde_json::to_string(&mat).expect("serialize");
+        assert!(
+            !text.contains("null,\"attenuation") && !text.contains("\"attenuation_distance\":null"),
+            "a non-finite float would serialize as null: {text}"
+        );
+        let back: RawMaterialData = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back, mat);
+    }
 
     /// Locks `AlphaMode` discriminants to the GPU wire format
     /// (`MaterialUniform.alpha_mode: u32` and the WGSL shaders).
@@ -713,5 +1218,101 @@ mod tests {
             compute_tangent_basis(&positions, &normals, &tex_coords, &indices);
         assert_eq!(tangents.len(), 3);
         assert_eq!(bitangents.len(), 3);
+    }
+
+    fn hdr_2x1() -> Vec<f32> {
+        vec![1.0, 0.5, 0.25, 8.0, 4.0, 2.0]
+    }
+
+    #[test]
+    fn raw_image_hdr_stamps_its_content_hash() {
+        let img = RawImageHdr::new(hdr_2x1(), 2, 1);
+        assert_eq!(img.hash, RawImageHdr::content_hash(&hdr_2x1(), 2, 1));
+        assert_eq!(img.pixels.len(), 6);
+    }
+
+    #[test]
+    fn raw_image_hdr_from_parts_keeps_the_hash_it_was_given() {
+        // The transfer path recomputes nothing: a hash that traveled with
+        // the samples is taken on trust, exactly as the 8-bit type does.
+        let img = RawImageHdr::from_parts(hdr_2x1(), 2, 1, 0xdead_beef);
+        assert_eq!(img.hash, 0xdead_beef);
+    }
+
+    #[test]
+    fn raw_image_hdr_hash_separates_shape_from_samples() {
+        // Same six samples, transposed dimensions. Seeding the accumulator
+        // with the dimensions is what keeps these apart.
+        let wide = RawImageHdr::content_hash(&hdr_2x1(), 2, 1);
+        let tall = RawImageHdr::content_hash(&hdr_2x1(), 1, 2);
+        assert_ne!(wide, tall);
+
+        let mut altered = hdr_2x1();
+        altered[4] = 4.5;
+        assert_ne!(wide, RawImageHdr::content_hash(&altered, 2, 1));
+    }
+
+    #[test]
+    fn raw_image_hashes_stay_pinned_to_their_published_values() {
+        // Both hashes are cache keys that outlive the process that made
+        // them, so a refactor of the shared accumulator must not move
+        // them. These literals are the values produced before the two
+        // types began sharing one FNV-1a implementation.
+        assert_eq!(
+            RawImageData::content_hash(&[1u8, 2, 3, 4], 1, 1),
+            0xef73_dc3a_80c8_da6d
+        );
+        assert_eq!(
+            RawImageHdr::content_hash(&[1.0f32, 0.5, 0.25], 1, 1),
+            0xc739_37a6_695b_27eb
+        );
+    }
+
+    #[test]
+    fn lut_identity_maps_every_entry_to_its_own_coordinate() {
+        // 33 is what grading suites export, so exercise the real shape
+        // rather than only the degenerate 2.
+        let lut = LutCube::identity(33);
+        assert_eq!(lut.size, 33);
+        assert_eq!(lut.data.len(), 33 * 33 * 33 * 3);
+        let last = 32.0f32;
+        for b in 0..33usize {
+            for g in 0..33usize {
+                for r in 0..33usize {
+                    let at = ((b * 33 + g) * 33 + r) * 3;
+                    assert_eq!(
+                        &lut.data[at..at + 3],
+                        &[r as f32 / last, g as f32 / last, b as f32 / last],
+                        "entry ({r}, {g}, {b})"
+                    );
+                }
+            }
+        }
+        // The corners are the ones a sampler reaches at the domain ends.
+        assert_eq!(&lut.data[..3], &[0.0, 0.0, 0.0]);
+        assert_eq!(&lut.data[lut.data.len() - 3..], &[1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn lut_identity_clamps_a_size_it_cannot_build() {
+        assert_eq!(LutCube::identity(0).size, LUT_MIN_SIZE);
+        assert_eq!(LutCube::identity(1).size, LUT_MIN_SIZE);
+        assert_eq!(LutCube::identity(9_999).size, LUT_MAX_SIZE);
+    }
+
+    #[test]
+    fn lut_hash_separates_the_domain_from_the_entries() {
+        // Two tables with identical entries and different domains are
+        // different transforms, and the hash is a GPU-cache key: if it
+        // ignored the domain, changing DOMAIN_MAX would leave the old
+        // upload on screen.
+        let entries = LutCube::identity(2).data;
+        let unit = LutCube::new(2, entries.clone(), [0.0; 3], [1.0; 3]);
+        let wide = LutCube::new(2, entries.clone(), [0.0; 3], [4.0; 3]);
+        assert_ne!(unit.hash, wide.hash);
+
+        let mut altered = entries;
+        altered[0] = 0.5;
+        assert_ne!(unit.hash, LutCube::new(2, altered, [0.0; 3], [1.0; 3]).hash);
     }
 }

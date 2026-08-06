@@ -14,7 +14,7 @@ impl State {
             self.screenshot_expand_review = false;
         }
         if actions.close_model {
-            self.close_model();
+            self.close_document();
         }
         if actions.save_preferences || actions.save_view_defaults {
             self.save_preferences();

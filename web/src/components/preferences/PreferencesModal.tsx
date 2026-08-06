@@ -146,6 +146,26 @@ function DisplayTab({ draft, patch }: TabProps) {
         />
         <span className="prefs-unit">rpm</span>
       </Row>
+      <Row
+        label="Ambient occlusion"
+        doc="Screen-space ambient occlusion: darkens creases and contact areas in shaded views, and is what the AO Preview inspection mode shows. Applies immediately, renderer-wide."
+      >
+        <input
+          type="checkbox"
+          checked={d.ssaoEnabled}
+          onChange={(e) => setD({ ssaoEnabled: e.target.checked })}
+        />
+      </Row>
+      <Row
+        label="Bloom"
+        doc="Glow on emissive and very bright surfaces. Applies immediately, renderer-wide."
+      >
+        <input
+          type="checkbox"
+          checked={d.bloomEnabled}
+          onChange={(e) => setD({ bloomEnabled: e.target.checked })}
+        />
+      </Row>
       </Section>
       <Section title="Points and labels">
       <Row

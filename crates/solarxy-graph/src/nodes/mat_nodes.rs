@@ -116,7 +116,12 @@ pub fn principled_descriptor() -> NodeTypeDescriptor {
     }
     NodeTypeDescriptor {
         type_id: "principled",
-        version: 1,
+        // v2: the principled surface properties, which arrive here because
+        // this node shares `factor_params` and `MAP_PORTS` with the
+        // geo-side `material` node. Sharing them is the point: the two
+        // cannot describe the same surface differently. Pure additions
+        // filling from registry defaults, so no migration hook.
+        version: 2,
         display_name: "Principled",
         category: Category::Shaders,
         contexts: ContextSet::MAT,
@@ -553,6 +558,53 @@ fn cook_mix_material(
             lerp(a.emissive_factor[2], b.emissive_factor[2]),
         ],
         toon_steps: lerp(a.toon_steps, b.toon_steps),
+        // The principled surface properties lerp with everything else. The
+        // alternative is that they fall to the struct default, which would
+        // turn a mix of two glass materials into two solids without saying
+        // so. Their texture slots follow the dominant side, like the five
+        // above them.
+        ior: lerp(a.ior, b.ior),
+        transmission: lerp(a.transmission, b.transmission),
+        thickness: lerp(a.thickness, b.thickness),
+        attenuation_color: [
+            lerp(a.attenuation_color[0], b.attenuation_color[0]),
+            lerp(a.attenuation_color[1], b.attenuation_color[1]),
+            lerp(a.attenuation_color[2], b.attenuation_color[2]),
+        ],
+        attenuation_distance: lerp(a.attenuation_distance, b.attenuation_distance),
+        clearcoat: lerp(a.clearcoat, b.clearcoat),
+        clearcoat_roughness: lerp(a.clearcoat_roughness, b.clearcoat_roughness),
+        sheen_color: [
+            lerp(a.sheen_color[0], b.sheen_color[0]),
+            lerp(a.sheen_color[1], b.sheen_color[1]),
+            lerp(a.sheen_color[2], b.sheen_color[2]),
+        ],
+        sheen_roughness: lerp(a.sheen_roughness, b.sheen_roughness),
+        iridescence: lerp(a.iridescence, b.iridescence),
+        iridescence_ior: lerp(a.iridescence_ior, b.iridescence_ior),
+        iridescence_thickness_min: lerp(a.iridescence_thickness_min, b.iridescence_thickness_min),
+        iridescence_thickness_max: lerp(a.iridescence_thickness_max, b.iridescence_thickness_max),
+        specular_intensity: lerp(a.specular_intensity, b.specular_intensity),
+        specular_color: [
+            lerp(a.specular_color[0], b.specular_color[0]),
+            lerp(a.specular_color[1], b.specular_color[1]),
+            lerp(a.specular_color[2], b.specular_color[2]),
+        ],
+        anisotropy: lerp(a.anisotropy, b.anisotropy),
+        anisotropy_rotation: lerp(a.anisotropy_rotation, b.anisotropy_rotation),
+        emissive_strength: lerp(a.emissive_strength, b.emissive_strength),
+        transmission_texture_data: dominant.transmission_texture_data.clone(),
+        thickness_texture_data: dominant.thickness_texture_data.clone(),
+        clearcoat_texture_data: dominant.clearcoat_texture_data.clone(),
+        clearcoat_roughness_texture_data: dominant.clearcoat_roughness_texture_data.clone(),
+        clearcoat_normal_texture_data: dominant.clearcoat_normal_texture_data.clone(),
+        sheen_color_texture_data: dominant.sheen_color_texture_data.clone(),
+        sheen_roughness_texture_data: dominant.sheen_roughness_texture_data.clone(),
+        iridescence_texture_data: dominant.iridescence_texture_data.clone(),
+        iridescence_thickness_texture_data: dominant.iridescence_thickness_texture_data.clone(),
+        specular_texture_data: dominant.specular_texture_data.clone(),
+        specular_color_texture_data: dominant.specular_color_texture_data.clone(),
+        anisotropy_texture_data: dominant.anisotropy_texture_data.clone(),
         diffuse_texture_data: dominant.diffuse_texture_data.clone(),
         normal_texture_data: dominant.normal_texture_data.clone(),
         metallic_roughness_texture_data: dominant.metallic_roughness_texture_data.clone(),
@@ -653,5 +705,113 @@ fn cook_tex_ref(
         None => Err(CookError::Failed {
             message: format!("texture reference to node {} does not resolve", target.0),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cook::InputSlot;
+    use std::collections::BTreeMap;
+
+    fn resolved(factor: f64) -> ResolvedParams {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "factor".to_string(),
+            crate::params::ParamSource::Literal(ParamValue::Float(factor)),
+        );
+        crate::registry::resolve::resolve_params(&stored, &mix_material_descriptor().params)
+            .unwrap()
+    }
+
+    fn slot(key: &str, mat: RawMaterialData) -> (String, InputSlot) {
+        (
+            key.to_string(),
+            InputSlot::Single(Value::Material(Arc::new(mat))),
+        )
+    }
+
+    fn mix(a: RawMaterialData, b: RawMaterialData, factor: f64) -> Arc<RawMaterialData> {
+        let params = resolved(factor);
+        let assets = crate::assets::AssetTable::default();
+        let mut cx = CookCtx::new(&assets, false);
+        let inputs = Inputs::new(vec![slot("a", a), slot("b", b)].into_iter().collect());
+        let CookOutcome::Done(outputs) = cook_mix_material(&params, &inputs, &mut cx).unwrap()
+        else {
+            panic!("mix cook is synchronous");
+        };
+        Arc::clone(outputs.get("material").unwrap().as_material().unwrap())
+    }
+
+    /// Mixing two glass materials must produce glass. Before the principled
+    /// properties were added to the lerp list they fell through to the
+    /// struct default, so a mix silently turned two panes of glass into two
+    /// solids with nothing reported anywhere.
+    #[test]
+    fn mixing_carries_the_principled_properties_rather_than_zeroing_them() {
+        let glass = |transmission: f32| RawMaterialData {
+            name: "glass".to_string(),
+            transmission,
+            ior: 1.5,
+            clearcoat: 1.0,
+            sheen_color: [0.2, 0.2, 0.2],
+            specular_intensity: 0.5,
+            anisotropy: 0.4,
+            emissive_strength: 2.0,
+            ..RawMaterialData::default()
+        };
+
+        let m = mix(glass(1.0), glass(0.8), 0.5);
+        assert!((m.transmission - 0.9).abs() < 1e-6, "lerped, not dropped");
+        assert!((m.ior - 1.5).abs() < 1e-6, "ior");
+        assert!((m.clearcoat - 1.0).abs() < 1e-6, "clearcoat");
+        assert_eq!(m.sheen_color, [0.2, 0.2, 0.2]);
+        assert!((m.specular_intensity - 0.5).abs() < 1e-6, "specular");
+        assert!((m.anisotropy - 0.4).abs() < 1e-6, "anisotropy");
+        assert!((m.emissive_strength - 2.0).abs() < 1e-6, "emissive");
+    }
+
+    /// The endpoints, which is where a wrong lerp direction shows up.
+    #[test]
+    fn mixing_at_the_endpoints_reproduces_each_side() {
+        let a = RawMaterialData {
+            transmission: 1.0,
+            iridescence: 0.25,
+            ..RawMaterialData::default()
+        };
+        let b = RawMaterialData {
+            transmission: 0.0,
+            iridescence: 0.75,
+            ..RawMaterialData::default()
+        };
+
+        let at_a = mix(a.clone(), b.clone(), 0.0);
+        assert!((at_a.transmission - 1.0).abs() < 1e-6);
+        assert!((at_a.iridescence - 0.25).abs() < 1e-6);
+
+        let at_b = mix(a, b, 1.0);
+        assert!((at_b.transmission - 0.0).abs() < 1e-6);
+        assert!((at_b.iridescence - 0.75).abs() < 1e-6);
+    }
+
+    /// Two materials differing only in a principled property are two
+    /// materials. The merge dedup confirms equality inside a hash bucket, so
+    /// this holds whether or not the hash covers the field, but a hash that
+    /// ignored them would degrade the bucket to a linear scan.
+    #[test]
+    fn materials_differing_only_in_a_principled_property_do_not_dedup() {
+        let base = RawMaterialData {
+            name: "glass".to_string(),
+            ..RawMaterialData::default()
+        };
+        let coated = RawMaterialData {
+            clearcoat: 1.0,
+            ..base.clone()
+        };
+        assert_ne!(base, coated);
+        assert_ne!(
+            solarxy_kernel::merge::material_content_hash(&base),
+            solarxy_kernel::merge::material_content_hash(&coated),
+        );
     }
 }

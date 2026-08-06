@@ -133,6 +133,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+    let input = &super::common::baked_input(input, cx)?;
 
     let mode = match p.enum_key("mode") {
         "normal" => DeleteMode::Normal {

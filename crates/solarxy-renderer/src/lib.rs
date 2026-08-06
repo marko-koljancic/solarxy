@@ -69,6 +69,7 @@ pub mod input;
 pub mod labels;
 pub mod light;
 pub mod ltc;
+pub mod lut;
 pub mod manipulator;
 pub mod material;
 pub mod mipmap;

@@ -22,6 +22,11 @@
 //!
 //! Adding a uniform: put it in `CASES` below. The cost is one line and it
 //! buys you the whole class of "the shader and the struct disagree".
+//!
+//! What it does NOT buy: field order. A same-size transposition passes both
+//! this guard and the Rust assert; that class is pinned by the golden
+//! captures instead, which is one of the reasons the principled scene is in
+//! the capture set.
 
 use wgpu::naga;
 
@@ -44,12 +49,51 @@ struct Case {
 /// binding, not shape), and several shaders rely on that. Those are not
 /// listed here, because a prefix is legitimately smaller. Only structs that
 /// declare the WHOLE CPU struct belong in this table.
-const CASES: &[Case] = &[Case {
-    shader: "label.wgsl",
-    struct_name: "LabelParams",
-    rust_size: solarxy_renderer::labels::LABEL_PARAMS_SIZE,
-    rust_type: "solarxy_renderer::labels::LabelParams",
-}];
+const CASES: &[Case] = &[
+    Case {
+        shader: "label.wgsl",
+        struct_name: "LabelParams",
+        rust_size: solarxy_renderer::labels::LABEL_PARAMS_SIZE,
+        rust_type: "solarxy_renderer::labels::LabelParams",
+    },
+    // `shader.wgsl` declares this one whole, including its trailing
+    // scalar, so it belongs here. It earned its place when that trailing
+    // slot stopped being padding and became the environment's IBL
+    // intensity: a rename on one side and not the other would put a real
+    // value where the shader expected nothing, and the Rust-side size
+    // assert cannot see the shader.
+    Case {
+        shader: "shader.wgsl",
+        struct_name: "LightsUniform",
+        rust_size: std::mem::size_of::<solarxy_renderer::light::LightsUniform>(),
+        rust_type: "solarxy_renderer::light::LightsUniform",
+    },
+    // `shader.wgsl` declares this one whole too. It earned its place when
+    // the principled surface properties appended six vec4-shaped blocks:
+    // three of them carry a `vec3`, which WGSL aligns to 16 bytes in the
+    // uniform address space while Rust aligns `[f32; 3]` to 4. Get the
+    // pairing wrong and the Rust-side size assert still passes, the shader
+    // still compiles, and the viewport goes black at draw time. Nothing
+    // else in the build compares the two sides.
+    Case {
+        shader: "shader.wgsl",
+        struct_name: "MaterialUniform",
+        rust_size: std::mem::size_of::<solarxy_renderer::material::MaterialUniform>(),
+        rust_type: "solarxy_renderer::material::MaterialUniform",
+    },
+    // `composite.wgsl` declares this one whole. It was absent while the
+    // struct was eight scalars and nothing could misalign; the colour
+    // grade appended seven `vec3`-carrying blocks and made it exactly the
+    // shape the two entries above are here for. The composite pass is also
+    // the worst place to get this wrong: it is the last pass in every
+    // pane's encoder, so a rejected binding discards the whole frame.
+    Case {
+        shader: "composite.wgsl",
+        struct_name: "CompositeParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::composite::CompositeParams>(),
+        rust_type: "solarxy_renderer::composite::CompositeParams",
+    },
+];
 
 fn shader_source(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -4037,7 +4037,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -4049,7 +4049,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-app"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4066,7 +4066,10 @@ dependencies = [
  "serde_json",
  "solarxy-core",
  "solarxy-formats",
+ "solarxy-graph",
+ "solarxy-host",
  "solarxy-renderer",
+ "solarxy-scenefile",
  "time",
  "tracing",
  "tracing-subscriber",
@@ -4077,7 +4080,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-cli"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "axoupdater",
@@ -4088,13 +4091,14 @@ dependencies = [
  "solarxy-core",
  "solarxy-formats",
  "solarxy-validate",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "solarxy-core"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "cgmath",
@@ -4113,10 +4117,11 @@ dependencies = [
 
 [[package]]
 name = "solarxy-formats"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "base64 0.22.1",
  "cgmath",
+ "exr",
  "gltf",
  "image",
  "ply-rs-bw",
@@ -4131,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-graph"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "cgmath",
  "serde",
@@ -4147,8 +4152,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-host"
+version = "0.8.2"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cgmath",
+ "image",
+ "pollster",
+ "serde",
+ "serde_json",
+ "solarxy-core",
+ "solarxy-formats",
+ "solarxy-kernel",
+ "solarxy-renderer",
+ "wgpu",
+]
+
+[[package]]
 name = "solarxy-imaging"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "solarxy-core",
  "thiserror 2.0.17",
@@ -4156,7 +4179,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-kernel"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "bytemuck",
  "cgmath",
@@ -4167,13 +4190,12 @@ dependencies = [
 
 [[package]]
 name = "solarxy-renderer"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "ab_glyph",
  "anyhow",
  "bytemuck",
  "cgmath",
- "exr",
  "half",
  "image",
  "pollster",
@@ -4186,7 +4208,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-scenefile"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "schemars",
  "serde",
@@ -4198,7 +4220,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-validate"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "clap",
  "glob",
@@ -4217,7 +4239,7 @@ dependencies = [
 
 [[package]]
 name = "solarxy-web"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "bytemuck",
  "cgmath",
@@ -4229,6 +4251,7 @@ dependencies = [
  "serde_json",
  "solarxy-core",
  "solarxy-graph",
+ "solarxy-host",
  "solarxy-kernel",
  "solarxy-renderer",
  "solarxy-scenefile",

@@ -366,6 +366,106 @@ section[id] {
   flex: 1;
 }
 
+/* The collapsed nav. A page opts in through initNavCollapse, which sets
+ * nav--collapsible; below the breakpoint the link row yields to one
+ * disclosure control labelled by the section in view, and the full section
+ * list opens as a panel under the bar. Pages that never opt in, and any
+ * visitor without JavaScript, keep the static row above. */
+
+/* The trigger speaks the link row's own language: borderless mono
+ * uppercase, the active-link background when open. A bordered pill here
+ * read as a control bolted onto a bar whose whole vocabulary is bare
+ * text, sitting beside a differently shaped bordered theme button. */
+.nav-sections {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.3rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+  color: var(--ink-secondary);
+  border: none;
+  border-radius: var(--r);
+  padding: 0 0.65rem;
+  white-space: nowrap;
+  transition: color 0.16s, background 0.16s;
+}
+
+.nav-sections svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  transition: transform 0.16s;
+}
+
+.nav-sections:hover {
+  color: var(--accent-ink);
+}
+
+.nav-sections[aria-expanded="true"] {
+  color: var(--ink);
+  background: var(--hairline-ink);
+}
+
+.nav-sections[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.nav-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  /* Aligned to the bar's own content edges, not a fixed inset. */
+  left: var(--pad);
+  right: var(--pad);
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem;
+  background: var(--paper-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lift);
+}
+
+.nav-panel[hidden] {
+  display: none;
+}
+
+.nav-panel a {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+  color: var(--ink-secondary);
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--r);
+}
+
+.nav-panel a:hover {
+  color: var(--accent-ink);
+}
+
+.nav-panel a.active {
+  color: var(--ink);
+  background: var(--hairline-ink);
+}
+
+@media (max-width: 860px) {
+  .nav--collapsible .nav-links {
+    display: none;
+  }
+
+  .nav--collapsible .nav-sections {
+    display: inline-flex;
+  }
+
+  /* Wordmark and section read as one left-hand group; the theme toggle
+   * keeps the right edge. */
+  .nav--collapsible .theme-btn {
+    margin-left: auto;
+  }
+}
+
 .theme-btn {
   flex-shrink: 0;
   width: 2.3rem;

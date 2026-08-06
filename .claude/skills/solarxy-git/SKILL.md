@@ -120,6 +120,11 @@ match for the literal `[golden-accept]`. So the token works in the subject, the 
 footer, or the pull request title, and it is case-sensitive. Put it in the footer, and justify
 the diff in the pull request body.
 
+Because the match is a fixed string, a message that merely writes about the token carries it:
+"this commit needs no [golden-accept]" arms the bypass the moment that commit sits at a pull
+request tip. When referring to the token without meaning it, write golden-accept with no
+brackets.
+
 ## Branches
 
 `main` is always releasable. Everything else is short-lived.

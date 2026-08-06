@@ -126,6 +126,20 @@ pub enum AssetCategory {
     Default,
 }
 
+/// The category as a report reads it. `Default` is a real answer, not a
+/// missing one: it means the filename matched no rule, which is why the
+/// analyzer distinguishes it from having classified nothing at all.
+impl std::fmt::Display for AssetCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AssetCategory::Hero => "Hero",
+            AssetCategory::Prop => "Prop",
+            AssetCategory::Environment => "Environment",
+            AssetCategory::Default => "Default",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schemars-gen", derive(schemars::JsonSchema))]

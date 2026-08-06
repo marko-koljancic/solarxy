@@ -51,6 +51,7 @@ pub(crate) struct GuiSnapshot {
     pub roughness_scale: f32,
     pub metallic_scale: f32,
     pub hdri_rotation: f32,
+    pub hdri_intensity: f32,
     pub bloom_enabled: bool,
     pub ssao_enabled: bool,
     pub tone_mode: ToneMode,
@@ -95,6 +96,7 @@ impl GuiSnapshot {
             roughness_scale: display.roughness_scale,
             metallic_scale: display.metallic_scale,
             hdri_rotation: display.hdri_rotation,
+            hdri_intensity: display.hdri_intensity,
             bloom_enabled: post.bloom_enabled,
             ssao_enabled: post.ssao_enabled,
             tone_mode: post.tone_mode,
@@ -116,7 +118,18 @@ impl GuiSnapshot {
                 || self.ssao_enabled != prev.ssao_enabled
                 || self.tone_mode != prev.tone_mode
                 || (self.exposure - prev.exposure).abs() > f32::EPSILON,
-            ibl_changed: self.ibl_mode != prev.ibl_mode,
+            // Intensity joins the mode here because both are
+            // IBL-derived uniforms and both reach the GPU only
+            // through `rebuild_light_bind_group`; unlike rotation,
+            // which rides the per-pane camera uniform written every
+            // frame, a dragged intensity would otherwise not show up
+            // until something else happened to touch the chokepoint.
+            ibl_changed: self.ibl_mode != prev.ibl_mode
+                // Exact inequality is right here: this asks whether
+                // the slider moved, not whether two computed floats
+                // agree. A tolerance would swallow the smallest drag
+                // the widget can produce.
+                || (self.hdri_intensity - prev.hdri_intensity) != 0.0,
         }
     }
 
@@ -162,6 +175,7 @@ impl GuiSnapshot {
         display.roughness_scale = self.roughness_scale;
         display.metallic_scale = self.metallic_scale;
         display.hdri_rotation = self.hdri_rotation;
+        display.hdri_intensity = self.hdri_intensity;
 
         post.bloom_enabled = self.bloom_enabled;
         post.ssao_enabled = self.ssao_enabled;
@@ -214,6 +228,7 @@ mod tests {
             roughness_scale: 1.0,
             metallic_scale: 1.0,
             hdri_rotation: 0.0,
+            hdri_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
             bloom_enabled: false,
             ssao_enabled: false,
             tone_mode: ToneMode::Reinhard,

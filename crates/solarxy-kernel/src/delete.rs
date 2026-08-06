@@ -198,6 +198,7 @@ fn filter_mesh(mesh: &KernelMesh, mode: DeleteMode, invert: bool) -> (Option<Ker
             topology: mesh.topology,
             attributes,
             primitive_attributes: mesh.primitive_attributes.clone(),
+            instances: None,
         }),
         removed,
     )

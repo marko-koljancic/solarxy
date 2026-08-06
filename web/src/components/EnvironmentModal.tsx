@@ -30,6 +30,7 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
 
   const rotationDeg = view ? (view.display.hdriRotation * 180) / Math.PI : 0;
+  const intensity = view ? view.display.hdriIntensity : 1;
 
   const pick = async (file: File) => {
     setBusy(true);
@@ -92,6 +93,25 @@ export function EnvironmentModal({ onClose }: { onClose: () => void }) {
             }}
           />
           <span className="prefs-unit">degrees</span>
+        </Row>
+        <Row
+          label="Intensity"
+          doc="Scales how much light the environment casts, leaving the visible sky alone. Use it to keep a backdrop readable while dialling the key it throws up or down; 1 is the image as it was authored."
+        >
+          <input
+            className="input-field"
+            type="number"
+            step={0.1}
+            min={0}
+            max={8}
+            value={intensity}
+            onChange={(e) => {
+              if (!view) return;
+              const next = Number(e.target.value);
+              if (!Number.isFinite(next)) return;
+              setDisplaySettings({ ...view.display, hdriIntensity: next });
+            }}
+          />
         </Row>
         <p className="env-hint">
           Show the HDRI as a pane background via the pane toolbar's background select (Sky).

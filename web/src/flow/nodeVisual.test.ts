@@ -1,12 +1,18 @@
-// The silhouette generator: rounded-corner polygon paths and the
-// left-right symmetry commitment for every shaped role body, plus the
-// category fallback totality (every taxonomy id must resolve to real art).
+// The silhouette generator: rounded-corner polygon paths, the one-box
+// geometric contract (every role occupies NODE_BOX; risers ride above it,
+// never inside; sized-down bodies stay inside it), the left-right
+// symmetry commitment for every shaped role body, the stylesheet's
+// agreement with the geometry tables, and the category fallback totality
+// (every taxonomy id must resolve to real art).
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { NodeTypeSnapshot } from "../engine/types";
+import type { NodeRole, NodeTypeSnapshot } from "../engine/types";
 import {
   GLYPH_PATHS,
+  NODE_BOX,
   ROLE_BODIES,
+  ROLE_BODY_SIZE,
   glyphPath,
   nodeRole,
   roundedPolygonPath,
@@ -96,65 +102,135 @@ describe("category fallback totality (the 15-category taxonomy)", () => {
 describe("ROLE_BODIES", () => {
   const entries = Object.entries(ROLE_BODIES) as [string, RoleBody][];
 
-  /** Roles whose silhouette is deliberately NOT left-right symmetric,
-   * each with the meaning the asymmetry carries. Everything else is held
-   * to the symmetry rule below, so an accidental lopsided path still
-   * fails. */
-  const ASYMMETRIC: Record<string, string> = {
-    container: "carries a folder tab on the left",
-  };
-
-  it("covers the six shaped roles", () => {
-    expect(entries.map(([k]) => k).sort()).toEqual([
-      "analyzer",
-      "branch",
-      "camera",
-      "container",
-      "imageSource",
-      "light",
-    ]);
+  it("covers the three shaped subflow roles (the root roles are CSS pills)", () => {
+    expect(entries.map(([k]) => k).sort()).toEqual(["analyzer", "branch", "imageSource"]);
   });
 
-  it("stays inside its own declared body box", () => {
+  it("stays inside the one layout box", () => {
     for (const [role, body] of entries) {
       for (const [x, y] of pathPoints(body.path)) {
         expect(x, `${role} x`).toBeGreaterThanOrEqual(0);
-        expect(x, `${role} x`).toBeLessThanOrEqual(body.w);
+        expect(x, `${role} x`).toBeLessThanOrEqual(NODE_BOX.w);
         expect(y, `${role} y`).toBeGreaterThanOrEqual(0);
-        expect(y, `${role} y`).toBeLessThanOrEqual(body.h);
+        expect(y, `${role} y`).toBeLessThanOrEqual(NODE_BOX.h);
       }
     }
   });
 
-  it("declares a positive body box (the SVG viewBox is built from it)", () => {
+  it("is left-right symmetric (no shaped role carries asymmetry any more)", () => {
     for (const [role, body] of entries) {
-      expect(body.w, `${role} w`).toBeGreaterThan(0);
-      expect(body.h, `${role} h`).toBeGreaterThan(0);
-    }
-  });
-
-  it("is left-right symmetric except where the asymmetry means something", () => {
-    for (const [role, body] of entries) {
-      if (role in ASYMMETRIC) continue;
       const pts = pathPoints(body.path);
       for (const [x, y] of pts) {
         const mirrored = pts.some(
-          ([mx, my]) => Math.abs(mx - (body.w - x)) < 0.01 && Math.abs(my - y) < 0.01,
+          ([mx, my]) => Math.abs(mx - (NODE_BOX.w - x)) < 0.01 && Math.abs(my - y) < 0.01,
         );
         expect(mirrored, `${role}: (${x}, ${y}) has no mirror twin`).toBe(true);
       }
     }
   });
+});
 
-  it("the asymmetric roles really are asymmetric (the exemption is not stale)", () => {
-    for (const role of Object.keys(ASYMMETRIC)) {
-      const body = ROLE_BODIES[role as keyof typeof ROLE_BODIES];
+describe("the one geometric contract (box, body, riser)", () => {
+  const ALL_ROLES: NodeRole[] = [
+    "standard",
+    "container",
+    "gather",
+    "branch",
+    "terminal",
+    "analyzer",
+    "imageSource",
+    "light",
+    "camera",
+    "text",
+    "note",
+  ];
+
+  it("every role declares a visible body no larger than the one box", () => {
+    for (const role of ALL_ROLES) {
+      const body = ROLE_BODY_SIZE[role];
       expect(body, role).toBeDefined();
-      const pts = pathPoints(body!.path);
-      const symmetric = pts.every(([x, y]) =>
-        pts.some(([mx, my]) => Math.abs(mx - (body!.w - x)) < 0.01 && Math.abs(my - y) < 0.01),
-      );
-      expect(symmetric, `${role} is symmetric now, so drop its exemption`).toBe(false);
+      expect(body.w, `${role} w`).toBeGreaterThan(0);
+      expect(body.w, `${role} w`).toBeLessThanOrEqual(NODE_BOX.w);
+      expect(body.h, `${role} h`).toBeGreaterThan(0);
+      expect(body.h, `${role} h`).toBeLessThanOrEqual(NODE_BOX.h);
     }
+  });
+
+  it("a sized-down body sits centred in the box on whole pixels", () => {
+    // The CSS insets are (box - body) / 2 per axis; a half-pixel inset
+    // would blur the 1px strokes, so the size difference must stay even.
+    for (const role of ALL_ROLES) {
+      const body = ROLE_BODY_SIZE[role];
+      expect((NODE_BOX.w - body.w) % 2, `${role} horizontal inset`).toBe(0);
+      expect((NODE_BOX.h - body.h) % 2, `${role} vertical inset`).toBe(0);
+    }
+  });
+
+  const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+  it("the stylesheet carries no compensating offset on the centred overlays", () => {
+    // The acceptance criterion is the ABSENCE of the old per-role
+    // recentring rules: any role-scoped block that positions the chip,
+    // the cook arc, the display halo or the terminal core must not shift
+    // it with margins or insets. Overlays centre at 50%/50% of the box
+    // and per-role geometry is carried by the body, never by an offset.
+    for (const block of css.split("}")) {
+      const [selector] = block.split("{");
+      if (!selector || !selector.includes(".role-")) continue;
+      if (!/\.node-chip|\.cook-arc|\.display-halo|\.terminal-core/.test(selector)) continue;
+      expect(block, `offset rule in: ${selector.trim()}`).not.toMatch(/margin|top:|left:/);
+    }
+  });
+
+  it("the stylesheet never overrides the layout box per role", () => {
+    // One box for every role: a bare `.flow-node.role-*` selector must
+    // not set width or height (the sized-down bodies size .node-body,
+    // not the box).
+    for (const block of css.split("}")) {
+      const [selector, body] = block.split("{");
+      if (!selector || !body) continue;
+      const selectors = selector.split(",").map((s) => s.trim());
+      const allBareRole = selectors.every((s) => /^\.flow-node\.role-[a-zA-Z]+$/.test(s));
+      if (!allBareRole || selectors.length === 0) continue;
+      expect(body, `box override in: ${selector.trim()}`).not.toMatch(/width:|height:/);
+    }
+  });
+
+  it("the stylesheet's sized bodies mirror ROLE_BODY_SIZE", () => {
+    // The inset shorthand is derived from the table, so a size change in
+    // either place breaks this pin until both move together. The sizing
+    // rule for a role may live in a grouped selector (the root pills
+    // share one), so the finder matches any block whose selector list
+    // contains the role's .node-body selector and whose body sets an
+    // inset.
+    for (const role of ["container", "camera", "light", "text", "terminal"] as const) {
+      const body = ROLE_BODY_SIZE[role];
+      const inset = `inset: ${(NODE_BOX.h - body.h) / 2}px ${(NODE_BOX.w - body.w) / 2}px;`;
+      const block = css.split("}").find((b) => {
+        const brace = b.lastIndexOf("{");
+        if (brace === -1) return false;
+        const selectors = (b.slice(0, brace).split("*/").pop() ?? "")
+          .split(",")
+          .map((s) => s.trim());
+        return (
+          selectors.includes(`.flow-node.role-${role} .node-body`) && b.includes("inset:")
+        );
+      });
+      expect(block, `.flow-node.role-${role} .node-body sizing block`).toBeDefined();
+      expect(block, `${role} body inset`).toContain(inset);
+    }
+  });
+
+  it("the glyph inks directly on the body (the chip slot paints no plate)", () => {
+    // The maintainer's ruling: transparent glyph backgrounds on every
+    // node. The chip element survives as a centring slot only, so its
+    // block must not declare a background.
+    const block = css.split("}").find((b) => {
+      const brace = b.lastIndexOf("{");
+      if (brace === -1) return false;
+      return (b.slice(0, brace).split("*/").pop() ?? "").trim() === ".node-chip";
+    });
+    expect(block, ".node-chip block").toBeDefined();
+    expect(block, "chip plate").not.toMatch(/background/);
   });
 });

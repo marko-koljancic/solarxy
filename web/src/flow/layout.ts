@@ -9,17 +9,23 @@ import dagre from "@dagrejs/dagre";
 import { dispatch } from "../engine/session";
 import type { GraphContext, GraphMirror } from "../engine/types";
 import { selectGraph, useMirror } from "../store/mirror";
+import { NODE_BOX } from "./nodeVisual";
 
 export type LayoutAlgorithm = "dagre" | "elk";
 
-const DEFAULT_W = 120;
-const DEFAULT_H = 60;
-
+/** An unmeasured node (not yet in the DOM) is assumed to be the layout
+ * box. This is a FALLBACK, not a floor: a measured size is used as-is, so
+ * a role's real box drives the layout instead of a phantom minimum. */
 function nodeDims(id: number): { width: number; height: number } {
   const el = document.querySelector(`[data-id="${id}"]`);
-  if (!el) return { width: DEFAULT_W, height: DEFAULT_H };
-  const r = el.getBoundingClientRect();
-  return { width: Math.max(DEFAULT_W, r.width), height: Math.max(DEFAULT_H, r.height) };
+  if (!(el instanceof HTMLElement)) return { width: NODE_BOX.w, height: NODE_BOX.h };
+  // offsetWidth/offsetHeight are layout pixels, untouched by the canvas
+  // zoom transform; getBoundingClientRect() shrinks with zoom-out, which
+  // made the result depend on how far out the user happened to be.
+  return {
+    width: el.offsetWidth || NODE_BOX.w,
+    height: el.offsetHeight || NODE_BOX.h,
+  };
 }
 
 export interface LayoutNode {
@@ -53,7 +59,13 @@ export function computeDagreLayout(
   edges: [number, number][],
 ): [number, [number, number]][] {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", align: "UL", nodesep: 50, edgesep: 10, ranksep: 100 });
+  // Spacing retuned for the real 112x32 box (the old values were tuned
+  // against 120x60 phantom floors, whose padding the constants now carry
+  // explicitly): nodesep 58 keeps the old 8px-padded sibling distance and
+  // clears the label stack's start; ranksep 128 keeps the old rank
+  // distance (100 between 60px-tall phantoms) so wires clear the handle
+  // overhang and the gather dome.
+  g.setGraph({ rankdir: "TB", align: "UL", nodesep: 58, edgesep: 10, ranksep: 128 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes) g.setNode(String(n.id), { width: n.width, height: n.height });
   for (const [from, to] of edges) g.setEdge(String(from), String(to));
@@ -83,8 +95,10 @@ export async function computeElkLayout(
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.spacing.nodeNode": "80",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "100",
+      // Retuned like the dagre constants above: +8 sibling / +28 layer
+      // spacing absorbs the padding the 120x60 phantom floors used to add.
+      "elk.spacing.nodeNode": "88",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "128",
       "elk.layered.spacing.edgeNodeBetweenLayers": "50",
       "elk.layered.nodePlacement.strategy": "SIMPLE",
     },

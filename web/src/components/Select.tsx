@@ -12,17 +12,19 @@
 // control needs beyond a menu -- typeahead, Home/End, and arrow keys that move
 // a highlight without committing until Enter.
 //
-// Inline by default, NOT a portal (unlike Popover): these sit inside modals
-// and the parameter panel, both of which scroll and clip predictably, and an
-// absolute child avoids the reposition-on-scroll problem a portal would
-// introduce.
+// Portaled by default: the list renders into the shared dropdown layer,
+// which positions against the trigger, flips upward at the viewport edge,
+// and paints above every panel and modal (the dropdown layer sits above
+// the modal layer). The inline mode this component started with clipped
+// against every scrolling host: a dropdown on the last row of the
+// Properties panel opened into the panel's scroll overflow and had to be
+// scrolled to. DropdownPortal owns positioning and the whole dismiss
+// contract in this mode.
 //
-// `portal` opts into the escape hatch for the hosts where that reasoning does
-// not hold: a bar that is itself a scroll container, or one flush against the
-// bottom of the window. Both describe the transport bar, where an inline list
-// was clipped to a 31px strip and forced a scrollbar that shoved every other
-// control sideways. DropdownPortal owns positioning (including the upward
-// flip), the dropdown z-layer, and the whole dismiss contract.
+// `portal={false}` opts back into the inline absolute list for the one
+// host shape the portal cannot serve: a Select nested inside another
+// portaled panel, where the child list rendering outside the parent's
+// DOM would read as an outside click and dismiss the parent.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "../icons";
@@ -52,8 +54,10 @@ interface SelectProps<T extends string> {
   width?: number | string;
   disabled?: boolean;
   id?: string;
-  /** Render the list into the shared dropdown layer instead of inline.
-   * For hosts that clip (a scroll container) or sit at the window edge. */
+  /** Render the list into the shared dropdown layer (the default). Pass
+   * false only when this Select nests inside another portaled panel,
+   * whose dismiss contract would treat the portaled child list as an
+   * outside click. */
   portal?: boolean;
 }
 
@@ -65,7 +69,7 @@ export function Select<T extends string>({
   width,
   disabled,
   id,
-  portal = false,
+  portal = true,
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);

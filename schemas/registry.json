@@ -82,7 +82,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "visible",
@@ -147,7 +147,7 @@
     },
     {
       "typeId": "array",
-      "version": 1,
+      "version": 2,
       "displayName": "Array",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
@@ -232,7 +232,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "How the copies are placed. Linear steps each one along a fixed offset, for fence posts and stair treads. Radial revolves them about an axis, for spokes and bolt circles, and turns each copy to follow the revolution. The mode decides which of the parameters below apply; the rest hide."
+          "doc": "How the copies are placed. Linear steps each one along a fixed offset, for fence posts and stair treads. Radial revolves them about an axis, for spokes and bolt circles, and turns each copy to follow the revolution. The mode decides which of the placement parameters below apply; the rest hide."
         },
         {
           "key": "count",
@@ -376,19 +376,44 @@
             }
           ],
           "doc": "The total angle the copies span. Each copy steps by sweep/count, so a full 360 tiles evenly without doubling up at the seam."
+        },
+        {
+          "key": "copy_mode",
+          "label": "Copy Mode",
+          "group": "array",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "instance",
+              "Instance"
+            ],
+            [
+              "bake",
+              "Bake"
+            ]
+          ],
+          "accept": [],
+          "default": "instance",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the copies are real geometry or placements of one prototype.\n\nInstance keeps the input once and carries a transform per copy. Ten thousand copies of a five-thousand-triangle rock cost five thousand triangles rather than fifty million, so the copy count stops being the number you budget against.\n\nWhat it costs is what the rest of the graph can see. Downstream nodes are handed the prototype and the placements, never the individual copies, so there is no per-copy attribute edit, no boolean against one copy, and no deleting the third one from the left: those copies do not exist as geometry. This is the difference between copying and instancing rather than a fast path and a slow one.\n\nBake makes every copy real, which is what you choose when the copies have to be edited afterwards. It is no harder to author, and it answers a different question rather than an outdated one."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "geometry"
       },
-      "doc": "Duplicates the input Count times, counting the original, either stepping each copy linearly along an offset or revolving it about an axis. Every copy is a real baked transform of the input concatenated as though you had merged them yourself, and identical materials collapse to one table entry rather than one per copy.\n\nIt replaces the branch you would otherwise wire by hand: a `transform` and a `merge` for every copy. Put it after whatever makes the single unit, a primitive or a small assembly you have already merged, and then change one number instead of rewiring.\n\nCount includes the original, so 1 is a no-op rather than one extra copy. The radial step is Sweep divided by Count rather than by Count minus 1, which is what lets a full 360 tile evenly instead of stacking a copy on the original at the seam. And Radius defaults to 0, which leaves every radial copy sitting on the axis spinning in place: give it a radius to get a ring.",
+      "doc": "Duplicates the input Count times, counting the original, either stepping each copy linearly along an offset or revolving it about an axis.\n\nCopy Mode decides what a copy is. Instance, the default, keeps the input once and carries a placement matrix per copy, so a long fence costs one post. Bake makes every copy a real baked transform of the input, concatenated as though you had merged them yourself, with identical materials collapsing to one table entry rather than one per copy.\n\nIt replaces the branch you would otherwise wire by hand: a `transform` and a `merge` for every copy. Put it after whatever makes the single unit, a primitive or a small assembly you have already merged, and then change one number instead of rewiring.\n\nCount includes the original, so 1 is a no-op rather than one extra copy. The radial step is Sweep divided by Count rather than by Count minus 1, which is what lets a full 360 tile evenly instead of stacking a copy on the original at the seam. And Radius defaults to 0, which leaves every radial copy sitting on the axis spinning in place: give it a radius to get a ring.",
       "searchAliases": [
         "duplicate",
         "repeat",
         "clone",
         "radial",
-        "grid"
+        "grid",
+        "instance"
       ],
       "glyph": "array",
       "role": "standard"
@@ -2376,7 +2401,7 @@
     },
     {
       "typeId": "camera",
-      "version": 1,
+      "version": 2,
       "displayName": "Camera",
       "category": "cameras",
       "categoryLabel": "Cameras",
@@ -2698,6 +2723,217 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "How big the wireframe frustum is drawn, in world metres. Purely cosmetic: it has no effect on what the camera sees or renders. Raise it when the gizmo is lost in a large scene, lower it when it swamps a small one."
+        },
+        {
+          "key": "exposure",
+          "label": "Exposure",
+          "group": "look",
+          "subgroup": "Tone",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.01,
+            64.0
+          ],
+          "soft": [
+            0.1,
+            8.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Linear multiplier on the whole image before tone mapping, so 2 is one stop brighter and 0.5 one stop darker. This is the first control to reach for when a render is broadly too dark or too bright, ahead of touching light intensities, because it moves the exposure of the shot rather than the lighting of the scene."
+        },
+        {
+          "key": "tone",
+          "label": "Tone Map",
+          "group": "look",
+          "subgroup": "Tone",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "inherit",
+              "Inherit from pane"
+            ],
+            [
+              "none",
+              "None (clip)"
+            ],
+            [
+              "linear",
+              "Linear"
+            ],
+            [
+              "reinhard",
+              "Reinhard"
+            ],
+            [
+              "aces",
+              "ACES Filmic"
+            ]
+          ],
+          "accept": [],
+          "default": "inherit",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How high dynamic range is brought down to what a screen can show. Inherit leaves the pane's own choice alone, which is the default so that adding a camera never silently restyles a scene. Set it to None when the Pre-Tonemap LUT below carries a full tone transform such as ACES or AgX, because applying both would tone map the image twice."
+        },
+        {
+          "key": "lift",
+          "label": "Lift",
+          "group": "look",
+          "subgroup": "Grade",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "hard": [
+            -1.0,
+            1.0
+          ],
+          "soft": [
+            -0.25,
+            0.25
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Raises or lowers the darkest part of the image, per channel, after tone mapping. Positive values lift the blacks towards grey for a faded or filmic base; negative values crush them. Because it is an addition rather than a multiplication it moves the shadows far more than the highlights, which is what separates it from Gain."
+        },
+        {
+          "key": "gamma",
+          "label": "Gamma",
+          "group": "look",
+          "subgroup": "Grade",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": [
+            0.01,
+            10.0
+          ],
+          "soft": [
+            0.4,
+            2.5
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Bends the midtones per channel without moving black or white: above 1 brightens them, below 1 darkens them. This is the control for an image whose ends are right and whose middle is not, and the one to reach for when a colour cast sits in the midtones rather than across the whole frame. 1 is neutral."
+        },
+        {
+          "key": "gain",
+          "label": "Gain",
+          "group": "look",
+          "subgroup": "Grade",
+          "paramType": "vec3",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": [
+            0.0,
+            10.0
+          ],
+          "soft": [
+            0.0,
+            3.0
+          ],
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Multiplies each channel, which moves the highlights most and leaves black at black. Use it to set the white point or to warm and cool an image by pushing the red and blue channels apart. 1 is neutral on every channel."
+        },
+        {
+          "key": "lut_a",
+          "label": "Pre-Tonemap LUT",
+          "group": "look",
+          "subgroup": "Lookup tables",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".cube"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A `.cube` table applied BEFORE tone mapping, on log-encoded scene light. This is the slot for a full tone transform such as ACES or AgX, which replaces the tone mapper rather than decorating it, so set Tone Map to None when you load one here. An ordinary look LUT belongs in the slot below and will look wrong in this one."
+        },
+        {
+          "key": "lut_a_strength",
+          "label": "Pre-Tonemap Amount",
+          "group": "look",
+          "subgroup": "Lookup tables",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far to blend towards the pre-tonemap table, from 0 for none of it to 1 for all of it. Mostly useful for checking what the table is doing by sliding it off and on; a tone transform is usually wanted at full strength."
+        },
+        {
+          "key": "lut_b",
+          "label": "Look LUT",
+          "group": "look",
+          "subgroup": "Lookup tables",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".cube"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A `.cube` table applied AFTER tone mapping, on the finished image. This is the slot for the look LUTs people already own from a grading suite, which are authored against a display-referred picture. A tone transform belongs in the slot above and will look wrong in this one."
+        },
+        {
+          "key": "lut_b_strength",
+          "label": "Look Amount",
+          "group": "look",
+          "subgroup": "Lookup tables",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How far to blend towards the look table, from 0 for none of it to 1 for all of it. Unlike the pre-tonemap slot this one is routinely dialled back: a look at half strength is a common way to keep its character without its full contrast."
         }
       ],
       "bypass": {
@@ -3414,7 +3650,7 @@
     },
     {
       "typeId": "copy_to_points",
-      "version": 1,
+      "version": 2,
       "displayName": "Copy to Points",
       "category": "copy",
       "categoryLabel": "Copy & Instance",
@@ -3573,13 +3809,37 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "Selects which per-copy size jitter you get when Scale Variance is above zero. The same seed always cooks the same sizes."
+        },
+        {
+          "key": "copy_mode",
+          "label": "Copy Mode",
+          "group": "copy",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "instance",
+              "Instance"
+            ],
+            [
+              "bake",
+              "Bake"
+            ]
+          ],
+          "accept": [],
+          "default": "instance",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the copies are real geometry or placements of one prototype.\n\nInstance keeps the input once and carries a transform per copy. Ten thousand copies of a five-thousand-triangle rock cost five thousand triangles rather than fifty million, so the copy count stops being the number you budget against.\n\nWhat it costs is what the rest of the graph can see. Downstream nodes are handed the prototype and the placements, never the individual copies, so there is no per-copy attribute edit, no boolean against one copy, and no deleting the third one from the left: those copies do not exist as geometry. This is the difference between copying and instancing rather than a fast path and a slow one.\n\nBake makes every copy real, which is what you choose when the copies have to be edited afterwards. It is no harder to author, and it answers a different question rather than an outdated one."
         }
       ],
       "bypass": {
         "mode": "passThrough",
         "input": "points"
       },
-      "doc": "Stamps the Template input onto every point of the Points input: scatter a surface, wire the cloud in here, and a forest, a crowd, or a debris field is one node instead of a hand-wired branch per copy. Every vertex of the points input is a target whatever its topology, so mesh vertices work as well as scattered clouds.\n\nOrient turns each copy's up axis onto its point's normal (what scatter writes), so copies stand on the surface rather than all facing the same way; Scale sizes every copy and Scale Variance adds seeded per-copy jitter for a natural, unrepeated look.\n\nThe copies of each template mesh flatten into one concatenated mesh, keeping the viewport responsive at thousands of copies, and the template's materials ride along shared, not duplicated. A copy count whose output would exceed the eight-million primitive ceiling fails the cook with a clear message before anything is allocated.",
+      "doc": "Stamps the Template input onto every point of the Points input: scatter a surface, wire the cloud in here, and a forest, a crowd, or a debris field is one node instead of a hand-wired branch per copy. Every vertex of the points input is a target whatever its topology, so mesh vertices work as well as scattered clouds.\n\nOrient turns each copy's up axis onto its point's normal (what scatter writes), so copies stand on the surface rather than all facing the same way; Scale sizes every copy and Scale Variance adds seeded per-copy jitter for a natural, unrepeated look.\n\nCopy Mode decides what a copy is. Instance, the default, keeps the template once and carries a transform per point, so ten thousand cones cost one cone. Bake makes every copy real geometry you can edit downstream, flattening the copies of each template mesh into one concatenated mesh so even thousands of them stay a handful of draw objects. Either way the template's materials ride along shared rather than duplicated, and a copy count whose output would exceed the eight-million primitive ceiling fails the cook before anything is allocated, with a message naming the running mode and the way out.",
       "searchAliases": [
         "instance",
         "stamp",
@@ -3988,7 +4248,7 @@
     },
     {
       "typeId": "directional_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Directional Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -4094,19 +4354,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "cast_shadow",
@@ -4539,6 +4799,136 @@
       ],
       "glyph": "edges_to_geo",
       "role": "standard"
+    },
+    {
+      "typeId": "environment",
+      "version": 1,
+      "displayName": "Environment",
+      "category": "lights",
+      "categoryLabel": "Lights",
+      "contexts": [
+        "obj"
+      ],
+      "opens": null,
+      "inputs": [],
+      "outputs": [],
+      "params": [
+        {
+          "key": "name",
+          "label": "Name",
+          "group": "general",
+          "paramType": "text",
+          "enumVariants": [],
+          "accept": [],
+          "default": "Environment",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The node's title on the canvas."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "group": "general",
+          "paramType": "multilineText",
+          "enumVariants": [],
+          "accept": [],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Free-text notes shown as the node subtitle."
+        },
+        {
+          "key": "hdri",
+          "label": "HDRI",
+          "group": "environment",
+          "paramType": "assetRef",
+          "enumVariants": [],
+          "accept": [
+            ".hdr",
+            ".exr"
+          ],
+          "default": "",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The high-dynamic-range image that lights the scene: a Radiance `.hdr` or an `OpenEXR` `.exr`. It supplies both the ambient light and the reflections, so loading one changes the look of every material at once. Identity is the bytes' SHA-256 rather than the path, so a saved scene embeds a copy and still opens once the original file is gone. With no file staged the node asserts no environment at all, which leaves whatever background and procedural sky the viewport already had rather than going black."
+        },
+        {
+          "key": "rotation",
+          "label": "Rotation",
+          "group": "environment",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Spins the environment around the vertical axis, in degrees. Moves the visible sky and the lighting it casts together, so it is how you place a highlight without moving a light."
+        },
+        {
+          "key": "intensity",
+          "label": "Intensity",
+          "group": "environment",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Scales how much light the environment casts, leaving the visible sky alone. Use it to keep a backdrop readable while dialling the key it throws up or down. 1 is the image as it was authored."
+        },
+        {
+          "key": "background",
+          "label": "Background",
+          "group": "environment",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "keep",
+              "Keep"
+            ],
+            [
+              "hdri_sky",
+              "HDRI Sky"
+            ]
+          ],
+          "accept": [],
+          "default": "keep",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Whether the environment also claims the backdrop. **Keep** lights from the HDRI but leaves each viewport's own background alone, which is what you want for a product shot on white. **HDRI Sky** draws the image itself behind the scene. Solid and gradient backdrops stay per-viewport, so this never fights the background control on the pane toolbar."
+        }
+      ],
+      "bypass": {
+        "mode": "mute"
+      },
+      "doc": "Makes the lighting environment part of the scene rather than part of the application, so the HDRI you light with is saved in the file and comes back when you reopen it.\n\nDrop it in the root graph beside your `geo` containers. It takes no wires: the scene builder reads it straight off the node, the same way it reads the light and camera nodes. Point it at a `.hdr` or `.exr`, then use Rotation to place the highlights and Intensity to balance the environment against your lights.\n\nThere is exactly one environment, so if a graph holds more than one of these the first in document order wins and the rest are ignored. An environment set here also takes precedence over one loaded through the viewport's own HDRI control, which stays available for scenes that have no environment node.",
+      "searchAliases": [
+        "hdri",
+        "ibl",
+        "sky",
+        "lighting",
+        "environment"
+      ],
+      "glyph": "hemisphere",
+      "role": "light"
     },
     {
       "typeId": "gamma",
@@ -5415,7 +5805,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "visible",
@@ -6941,7 +7331,7 @@
     },
     {
       "typeId": "material",
-      "version": 2,
+      "version": 3,
       "displayName": "Material",
       "category": "shaders",
       "categoryLabel": "Shaders",
@@ -7057,7 +7447,8 @@
         {
           "key": "mode",
           "label": "Mode",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "enum",
           "enumVariants": [
             [
@@ -7081,7 +7472,8 @@
         {
           "key": "material_path",
           "label": "Material Network",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "nodePath",
           "enumVariants": [],
           "accept": [],
@@ -7109,7 +7501,8 @@
         {
           "key": "target",
           "label": "Target Meshes",
-          "group": "material",
+          "group": "base",
+          "subgroup": "Assignment",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -7124,7 +7517,7 @@
         {
           "key": "base_color",
           "label": "Base Color",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -7153,7 +7546,7 @@
         {
           "key": "metallic",
           "label": "Metallic",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -7183,7 +7576,7 @@
         {
           "key": "roughness",
           "label": "Roughness",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -7213,7 +7606,7 @@
         {
           "key": "emissive",
           "label": "Emissive",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -7240,9 +7633,39 @@
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
+          "key": "emissive_strength",
+          "label": "Emissive Strength",
+          "group": "base",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            100.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Multiplies Emissive, so emission can exceed the unit range a colour can express. 1 is no change. Reach for it when a surface should read as a light source rather than as a bright material: past about 1 the tone mapper starts rolling it off, which is what makes it bloom rather than clip."
+        },
+        {
           "key": "material_name",
           "label": "Material Name",
-          "group": "material",
+          "group": "base",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -7253,6 +7676,575 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "What the material is called wherever it is listed. It has no effect on the shading. Empty falls back to `material`. The geo-side `material` node keeps this visible in Reference mode but ignores it there: a referenced network's material carries its own name."
+        },
+        {
+          "key": "clearcoat",
+          "label": "Clearcoat",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+        },
+        {
+          "key": "clearcoat_roughness",
+          "label": "Clearcoat Roughness",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "clearcoat",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How polished the coat is, independent of the surface beneath it. This is the point of a separate coat: a rough, worn base under a mirror-smooth lacquer is a combination one roughness value cannot express."
+        },
+        {
+          "key": "sheen_color",
+          "label": "Sheen Color",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "sheen_roughness",
+          "label": "Sheen Roughness",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How wide the sheen band is. Low keeps it a tight rim at the silhouette; high spreads it across the whole surface for a dusty, powdery look."
+        },
+        {
+          "key": "iridescence",
+          "label": "Iridescence",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "iridescence_ior",
+          "label": "Film IOR",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.3,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Index of refraction of the film itself, not of the surface under it. It sets how strongly the film bends light and so how saturated the interference colours are."
+        },
+        {
+          "key": "iridescence_thickness_min",
+          "label": "Film Thickness Min",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 100.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The low end of the film thickness range, in nanometres. It only matters once a thickness map varies the film across the surface; with no map the maximum is used everywhere."
+        },
+        {
+          "key": "iridescence_thickness_max",
+          "label": "Film Thickness Max",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 400.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The high end of the film thickness range, in nanometres, and the thickness used everywhere when no thickness map is present. This is the dial that chooses which colours appear: a few hundred nanometres is where visible light interferes, and sweeping it walks the whole rainbow."
+        },
+        {
+          "key": "specular_intensity",
+          "label": "Specular",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Scales the reflectance a dielectric has when you look straight at it, the value IOR derives. 1 leaves it alone. Lower it to dull a surface's reflections without making it rougher, which roughness alone cannot do. It has no effect on metals, whose reflectance is the base colour."
+        },
+        {
+          "key": "specular_color",
+          "label": "Specular Color",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Tints that same head-on reflectance. White is untinted and is what almost every real dielectric wants; this exists for the ones that do not, and for matching a reference that was authored with it."
+        },
+        {
+          "key": "anisotropy",
+          "label": "Anisotropy",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+        },
+        {
+          "key": "anisotropy_rotation",
+          "label": "Anisotropy Rotation",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            -360.0,
+            360.0
+          ],
+          "soft": [
+            0.0,
+            360.0
+          ],
+          "step": 1.0,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "anisotropy",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Turns the stretch direction within the surface, for when the brushing runs across the UVs rather than along them."
+        },
+        {
+          "key": "transmission",
+          "label": "Transmission",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+        },
+        {
+          "key": "ior",
+          "label": "IOR",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "Index of refraction: how strongly the material bends light, and with it how much reflects at a glancing angle. 1.5 is window glass and the default every surface used before this was exposed. Water is about 1.33, diamond about 2.42. It drives reflectance whether or not the surface transmits."
+        },
+        {
+          "key": "thickness",
+          "label": "Thickness",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "How far light travels through the interior, in world units. 0 means the surface is thin-walled, a bubble or a pane with no volume behind it. It only matters alongside Attenuation Distance, which is what turns distance travelled into colour."
+        },
+        {
+          "key": "attenuation_color",
+          "label": "Attenuation Color",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The colour light becomes after travelling Attenuation Distance through the interior. White is no tint. This is why thick green glass is green at its edge and clear at its face: the colour is a property of the distance travelled, not of the surface."
+        },
+        {
+          "key": "attenuation_distance",
+          "label": "Attenuation Distance",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            },
+            {
+              "param": "mode",
+              "pred": {
+                "kind": "eq",
+                "value": "inline"
+              }
+            }
+          ],
+          "doc": "The distance over which light reaches Attenuation Color. Shorter absorbs faster, so a small value tints even thin glass strongly. 0 disables absorption entirely and is the default, which is why a transmissive surface starts out water-clear."
         }
       ],
       "bypass": {
@@ -8509,7 +9501,7 @@
     },
     {
       "typeId": "point_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Point Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -8596,19 +9588,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "range",
@@ -8894,7 +9886,7 @@
     },
     {
       "typeId": "principled",
-      "version": 1,
+      "version": 2,
       "displayName": "Principled",
       "category": "shaders",
       "categoryLabel": "Shaders",
@@ -9000,7 +9992,7 @@
         {
           "key": "base_color",
           "label": "Base Color",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -9020,7 +10012,7 @@
         {
           "key": "metallic",
           "label": "Metallic",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -9041,7 +10033,7 @@
         {
           "key": "roughness",
           "label": "Roughness",
-          "group": "material",
+          "group": "base",
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
@@ -9062,7 +10054,7 @@
         {
           "key": "emissive",
           "label": "Emissive",
-          "group": "material",
+          "group": "base",
           "paramType": "color",
           "enumVariants": [],
           "accept": [],
@@ -9080,9 +10072,30 @@
           "doc": "Light the surface emits on its own, added on top of the lit result, so an emissive surface stays visible in shadow. Black (the default) is no emission. It lights nothing else: there is no emissive bounce, so a glowing panel does not brighten the wall behind it."
         },
         {
+          "key": "emissive_strength",
+          "label": "Emissive Strength",
+          "group": "base",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            100.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Multiplies Emissive, so emission can exceed the unit range a colour can express. 1 is no change. Reach for it when a surface should read as a light source rather than as a bright material: past about 1 the tone mapper starts rolling it off, which is what makes it bloom rather than clip."
+        },
+        {
           "key": "material_name",
           "label": "Material Name",
-          "group": "material",
+          "group": "base",
           "paramType": "text",
           "enumVariants": [],
           "accept": [],
@@ -9093,6 +10106,438 @@
           "unit": "none",
           "drivenByPort": null,
           "doc": "What the material is called wherever it is listed. It has no effect on the shading. Empty falls back to `material`. The geo-side `material` node keeps this visible in Reference mode but ignores it there: a referenced network's material carries its own name."
+        },
+        {
+          "key": "clearcoat",
+          "label": "Clearcoat",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "A thin glossy layer over the surface, the lacquer on a car panel or the varnish on wood. 0 is no coat. The coat adds its own reflection and dims what is under it by whatever it reflects away, so a coated surface reads slightly darker as well as shinier. It is an analytic approximation in the interactive viewport rather than a simulated layer."
+        },
+        {
+          "key": "clearcoat_roughness",
+          "label": "Clearcoat Roughness",
+          "group": "surface",
+          "subgroup": "Clearcoat",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "clearcoat",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How polished the coat is, independent of the surface beneath it. This is the point of a separate coat: a rough, worn base under a mirror-smooth lacquer is a combination one roughness value cannot express."
+        },
+        {
+          "key": "sheen_color",
+          "label": "Sheen Color",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "The colour of the soft retroreflective rim that fabric has, brightest where the surface turns away from you. Black, the default, is no sheen, which is why this one starts at black rather than white. Velvet, satin and brushed cloth are what it is for. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "sheen_roughness",
+          "label": "Sheen Roughness",
+          "group": "surface",
+          "subgroup": "Sheen",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How wide the sheen band is. Low keeps it a tight rim at the silhouette; high spreads it across the whole surface for a dusty, powdery look."
+        },
+        {
+          "key": "iridescence",
+          "label": "Iridescence",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Thin-film interference: the shifting colours of a soap bubble, an oil slick or anodized metal. 0 is none. The hue depends on viewing angle and on the film's thickness, so it moves as the camera moves, which is the whole effect. It is an analytic approximation in the interactive viewport."
+        },
+        {
+          "key": "iridescence_ior",
+          "label": "Film IOR",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.3,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "Index of refraction of the film itself, not of the surface under it. It sets how strongly the film bends light and so how saturated the interference colours are."
+        },
+        {
+          "key": "iridescence_thickness_min",
+          "label": "Film Thickness Min",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 100.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The low end of the film thickness range, in nanometres. It only matters once a thickness map varies the film across the surface; with no map the maximum is used everywhere."
+        },
+        {
+          "key": "iridescence_thickness_max",
+          "label": "Film Thickness Max",
+          "group": "surface",
+          "subgroup": "Iridescence",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 400.0,
+          "hard": [
+            0.0,
+            2000.0
+          ],
+          "soft": [
+            0.0,
+            1000.0
+          ],
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "iridescence",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The high end of the film thickness range, in nanometres, and the thickness used everywhere when no thickness map is present. This is the dial that chooses which colours appear: a few hundred nanometres is where visible light interferes, and sweeping it walks the whole rainbow."
+        },
+        {
+          "key": "specular_intensity",
+          "label": "Specular",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Scales the reflectance a dielectric has when you look straight at it, the value IOR derives. 1 leaves it alone. Lower it to dull a surface's reflections without making it rougher, which roughness alone cannot do. It has no effect on metals, whose reflectance is the base colour."
+        },
+        {
+          "key": "specular_color",
+          "label": "Specular Color",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Tints that same head-on reflectance. White is untinted and is what almost every real dielectric wants; this exists for the ones that do not, and for matching a reference that was authored with it."
+        },
+        {
+          "key": "anisotropy",
+          "label": "Anisotropy",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Stretches the specular highlight along one direction instead of leaving it round: brushed metal, hair, the bottom of a saucepan. 0 is isotropic. It follows the surface's tangents, so it needs UVs to point anywhere meaningful."
+        },
+        {
+          "key": "anisotropy_rotation",
+          "label": "Anisotropy Rotation",
+          "group": "surface",
+          "subgroup": "Specular and anisotropy",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            -360.0,
+            360.0
+          ],
+          "soft": [
+            0.0,
+            360.0
+          ],
+          "step": 1.0,
+          "unit": "degrees",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "anisotropy",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "Turns the stretch direction within the surface, for when the brushing runs across the UVs rather than along them."
+        },
+        {
+          "key": "transmission",
+          "label": "Transmission",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1.0
+          ],
+          "soft": [
+            0.0,
+            1.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How much light passes through the surface instead of scattering back off it: glass, water, a thin plastic. 0 is opaque. This is not the same as alpha, which makes a surface partly absent; transmission keeps the surface and its reflections and lets light through it.\n\nIn the interactive viewport it refracts the environment, not the objects behind the surface. Glass reads correctly against an environment and shows nothing of what is behind it."
+        },
+        {
+          "key": "ior",
+          "label": "IOR",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 1.5,
+          "hard": [
+            1.0,
+            3.0
+          ],
+          "soft": [
+            1.0,
+            2.5
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Index of refraction: how strongly the material bends light, and with it how much reflects at a glancing angle. 1.5 is window glass and the default every surface used before this was exposed. Water is about 1.33, diamond about 2.42. It drives reflectance whether or not the surface transmits."
+        },
+        {
+          "key": "thickness",
+          "label": "Thickness",
+          "group": "volume",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "How far light travels through the interior, in world units. 0 means the surface is thin-walled, a bubble or a pane with no volume behind it. It only matters alongside Attenuation Distance, which is what turns distance travelled into colour."
+        },
+        {
+          "key": "attenuation_color",
+          "label": "Attenuation Color",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "color",
+          "enumVariants": [],
+          "accept": [],
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The colour light becomes after travelling Attenuation Distance through the interior. White is no tint. This is why thick green glass is green at its edge and clear at its face: the colour is a property of the distance travelled, not of the surface."
+        },
+        {
+          "key": "attenuation_distance",
+          "label": "Attenuation Distance",
+          "group": "volume",
+          "subgroup": "Absorption",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            10.0
+          ],
+          "step": 0.01,
+          "unit": "none",
+          "drivenByPort": null,
+          "showIf": [
+            {
+              "param": "transmission",
+              "pred": {
+                "kind": "truthy"
+              }
+            }
+          ],
+          "doc": "The distance over which light reaches Attenuation Color. Shorter absorbs faster, so a small value tints even thin glass strongly. 0 disables absorption entirely and is the default, which is why a transmissive surface starts out water-clear."
         }
       ],
       "bypass": {
@@ -9286,7 +10731,7 @@
     },
     {
       "typeId": "rect_area_light",
-      "version": 3,
+      "version": 4,
       "displayName": "Rect Area Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -9373,19 +10818,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "width",
@@ -10008,7 +11453,7 @@
     },
     {
       "typeId": "spot_light",
-      "version": 1,
+      "version": 2,
       "displayName": "Spot Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -10114,19 +11559,19 @@
           "paramType": "float",
           "enumVariants": [],
           "accept": [],
-          "default": 1.5,
+          "default": 4.5,
           "hard": [
             0.0,
             1000.0
           ],
           "soft": [
             0.0,
-            10.0
+            30.0
           ],
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Linear multiplier on this light's contribution. 0 turns it off without removing it from the scene, which is the quick way to A/B a light you want to keep. The scale is arbitrary rather than photometric -- there are no lumens or watts behind it -- so match lights against each other by eye, not against real-world figures."
+          "doc": "Linear multiplier on this light's contribution, and linear means what it says: doubling this doubles the light, and two lights an octave apart in this number are an octave apart on screen. 0 turns the light off without removing it from the scene, which is the quick way to A/B one you want to keep. There are still no lumens or watts behind the number, so it is not calibrated against the physical world, but it is consistent within a scene and against a value authored anywhere else: nothing is scaled behind your back on the way to the shader."
         },
         {
           "key": "range",

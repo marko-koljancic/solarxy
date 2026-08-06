@@ -396,6 +396,12 @@ export interface ParamSnapshot {
   key: string;
   label: string;
   group: string;
+  /** A labelled division inside the group, rendered as a heading above the
+   * run of params that share it. A group is a tab and the tab strip is a
+   * single non-wrapping row, so a node with many related families needs a
+   * level below the tab rather than a tab each. Absent on params that
+   * declare none. */
+  subgroup?: string;
   paramType: string;
   enumVariants: [string, string][];
   accept: string[];
@@ -546,11 +552,25 @@ export interface ImageJob {
   name: string;
 }
 
+/** A drained HDRI-decode job. Same shape as an ImageJob; it routes to the
+ * worker's HDRI entry point instead, because no browser codec reads
+ * Radiance or OpenEXR. */
+export interface HdriJob {
+  ctx: GraphContext;
+  jobId: number;
+  hash: string;
+  name: string;
+}
+
 /** The host's environment state (the Environment panel's mirror). */
 export interface EnvironmentState {
   iblMode: string;
   hdriHash: string | null;
   hdriName: string | null;
+  /** Whether the document holds an environment node. When it does, the
+   * node is authoritative and the scene file's own environment section is
+   * not restored: the section is the fallback for pre-node documents. */
+  fromNode: boolean;
 }
 
 /** One stashed geometry-validation job for the worker (the validate node
@@ -669,6 +689,24 @@ export interface PaneDisplaySettings {
   turntableActive: boolean;
 }
 
+/** A free pane's own rendering intent, pinned to
+ * `solarxy_core::view_config::PaneLook`.
+ *
+ * The scalar half of the look only. Lookup-table slots live on the camera
+ * node, because a table is a staged document asset and a pane is not a
+ * document object; a pane looking through a camera composites with that
+ * camera's look instead of this one. */
+export interface PaneLook {
+  exposure: number;
+  toneMode: "None" | "Linear" | "Reinhard" | "AcesFilmic";
+  /** Added after tone mapping; neutral [0, 0, 0]. */
+  lift: [number, number, number];
+  /** Applied as a power; neutral [1, 1, 1]. */
+  gamma: [number, number, number];
+  /** Multiplied first; neutral [1, 1, 1]. */
+  gain: [number, number, number];
+}
+
 export interface DisplaySettingsDto {
   turntableActive: boolean;
   turntableRpm: number;
@@ -678,6 +716,7 @@ export interface DisplaySettingsDto {
   roughnessScale: number;
   metallicScale: number;
   hdriRotation: number;
+  hdriIntensity: number;
 }
 
 export interface PaneRectDto {
@@ -693,6 +732,8 @@ export interface ViewStateDto {
   activePane: number;
   camerasLinked: boolean;
   paneSettings: PaneDisplaySettings[];
+  /** Each pane's own look, used when the pane is a free view. */
+  paneLooks: PaneLook[];
   display: DisplaySettingsDto;
   paneProjections: ("perspective" | "orthographic")[];
   paneRects: PaneRectDto[];

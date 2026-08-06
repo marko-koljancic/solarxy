@@ -1,0 +1,24 @@
+# The default, and the one theme whose identity is not free.
+#
+# Every value here is a role from `solarxy_core::theme::Palette`'s dark set,
+# and `default_theme_matches_the_palette` pins the accent and the severity
+# trio to it by test. That is what keeps the shipped terminal look from
+# drifting away from the desktop shell and the web app now that the mechanism
+# is a file rather than a mapping function.
+
+name = "solarxy-amber"
+author = "Solarxy"
+
+[slots]
+ground = "#1e1e1e"
+panel_ground = "#242424"
+ink = "#e0e0e0"
+ink_dim = "#888888"
+border = "#4a4a4a"
+border_focus = "#e6b450"
+accent = "#e6b450"
+success = "#55dd99"
+warning = "#e07a3f"
+error = "#e5484d"
+selection = "#504632"
+chart = ["#e6b450", "#58a6ff"]

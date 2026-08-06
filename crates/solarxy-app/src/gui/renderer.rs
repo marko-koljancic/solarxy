@@ -13,6 +13,7 @@ use super::actions::{DividerInfo, MenuActions, MenuBarVisibility};
 use super::dock::{SolarxyTab, SolarxyTabViewer, default_dock_state, tab_present, toggle_tab};
 use super::keyboard_shortcuts_modal::{KeyboardShortcutsModalState, draw_keyboard_shortcuts_modal};
 use super::material_inspector::MaterialInspectorState;
+use super::node_tree::{NodeTreeEvents, NodeTreeSource, NodeTreeState};
 use super::menu::draw_menu_bar;
 use super::outliner::OutlinerEvents;
 use super::overlays::{HudCtx, Toast, ToastSeverity, draw_hud_overlays, overlay_frame};
@@ -44,6 +45,7 @@ pub struct EguiRenderer {
     shortcuts_modal: KeyboardShortcutsModalState,
     screenshot_modal: ScreenshotModal,
     material_inspector: MaterialInspectorState,
+    node_tree: NodeTreeState,
     toasts: VecDeque<Toast>,
     next_toast_id: u64,
     loading_message: Option<String>,
@@ -54,6 +56,10 @@ pub struct EguiRenderer {
     pub(super) dock_state: DockState<SolarxyTab>,
     pub last_viewport_rect: Option<CachedViewportRect>,
     pub(super) has_saved_layout: bool,
+    /// Whether a node-engine scene is open. Separate from `model_info`,
+    /// which describes a file-loaded model: the two roots are mutually
+    /// exclusive, and File > Close acts on whichever is present.
+    pub(super) scene_open: bool,
 }
 
 /// Viewport-tab geometry from the previous egui frame, tagged with the
@@ -103,6 +109,7 @@ impl EguiRenderer {
             shortcuts_modal: KeyboardShortcutsModalState::default(),
             screenshot_modal: ScreenshotModal::default(),
             material_inspector: MaterialInspectorState::default(),
+            node_tree: NodeTreeState::default(),
             toasts: VecDeque::with_capacity(Self::TOAST_QUEUE_CAP),
             next_toast_id: 0,
             loading_message: None,
@@ -113,6 +120,7 @@ impl EguiRenderer {
             dock_state: default_dock_state(),
             last_viewport_rect: None,
             has_saved_layout: false,
+            scene_open: false,
         }
     }
 
@@ -258,6 +266,23 @@ impl EguiRenderer {
         tab_present(&self.dock_state, SolarxyTab::Viewport)
     }
 
+    /// `true` iff the Node Tree tab is currently mounted in the dock. The
+    /// state layer gates the tree fold on this, so a closed panel costs
+    /// nothing per frame. Read before the egui pass, so opening the tab
+    /// from the Window menu populates it on the following frame — a
+    /// latency no one can see.
+    #[must_use]
+    pub fn node_tree_tab_present(&self) -> bool {
+        tab_present(&self.dock_state, SolarxyTab::NodeTree)
+    }
+
+    /// Return the Node Tree to the root context with everything unfolded.
+    /// Called whenever the open document is replaced: both halves of that
+    /// panel's state address nodes the new document need not contain.
+    pub fn reset_node_tree(&mut self) {
+        self.node_tree.reset();
+    }
+
     /// Apply a JSON-serialized dock layout. Returns `true` if the JSON
     /// deserialized into a valid `DockState`; on failure, the existing
     /// layout is preserved and a debug line is logged.
@@ -286,6 +311,10 @@ impl EguiRenderer {
     /// by the crate-private `default_dock_state` constructor.
     pub fn reset_dock_layout(&mut self) {
         self.dock_state = default_dock_state();
+    }
+
+    pub fn set_scene_open(&mut self, open: bool) {
+        self.scene_open = open;
     }
 
     pub fn set_has_saved_layout(&mut self, has: bool) {
@@ -333,6 +362,42 @@ impl EguiRenderer {
             stats: *stats,
             bounds_size,
             has_uvs,
+            scene: None,
+        });
+    }
+
+    /// The scene equivalent of [`Self::update_model_info`]: the same panel
+    /// slot, filled from summed object counters rather than from one
+    /// loaded file.
+    ///
+    /// Called on every drained scene delta, not once at open, because a
+    /// cook changes the counts.
+    pub(crate) fn update_scene_info(
+        &mut self,
+        filename: &str,
+        path: &str,
+        file_size: u64,
+        counts: crate::state::engine_scene::SceneGeometryCounts,
+        bounds_size: [f32; 3],
+    ) {
+        self.model_info = Some(ModelInfo {
+            filename: filename.to_string(),
+            file_path: path.to_string(),
+            file_size,
+            format: "SLXY".to_string(),
+            mesh_count: counts.meshes,
+            material_count: counts.materials,
+            // Drawn totals. `polys` has no meaning for cooked geometry, so
+            // it stays zero and the panel drops its row rather than
+            // printing the triangle count twice.
+            stats: ModelStats {
+                polys: 0,
+                tris: counts.drawn_tris,
+                verts: counts.drawn_verts,
+            },
+            bounds_size,
+            has_uvs: counts.has_uvs,
+            scene: Some(counts),
         });
     }
 
@@ -351,7 +416,7 @@ impl EguiRenderer {
         &mut self,
         mut snap: GuiSnapshot,
         hud: &HudInfo,
-        validation_report: Option<&solarxy_core::validation::ValidationReport>,
+        validation: super::properties::ValidationView<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -364,10 +429,18 @@ impl EguiRenderer {
         review_panes: &[super::ReviewPaneOverlay],
         recent_files: &[String],
         review: &mut crate::state::review::ReviewState,
+        // The file-loaded model, when one is open. Still separate from
+        // `outliner_source` because the Material Inspector and the review
+        // overlay are file-model surfaces and stay that way.
         model: Option<&solarxy_renderer::model::Model>,
+        outliner_source: super::outliner::OutlinerSource<'_>,
+        // The open document, when the Node Tree tab is mounted. The state
+        // layer passes `Empty` for a closed tab so the fold is skipped.
+        node_tree_source: NodeTreeSource<'_>,
         pane_toolbar: super::pane_toolbar::PaneToolbarData<'_>,
         properties_events: &mut PropertiesEvents,
         outliner_events: &mut OutlinerEvents,
+        node_tree_events: &mut NodeTreeEvents,
         viewport_context_menu: &mut Option<ViewportContextMenu>,
         force_expand_review: bool,
         suppress_screenshot_modal: bool,
@@ -378,7 +451,7 @@ impl EguiRenderer {
         self.frame_times.push_back(frame_ms);
 
         let raw_input = self.winit_state.take_egui_input(window);
-        let has_model = self.model_info.is_some();
+        let has_model = self.model_info.is_some() || self.scene_open;
         let avg_ms = self.frame_times.iter().sum::<f32>() / self.frame_times.len().max(1) as f32;
         let fps = if avg_ms > 0.0 {
             (1000.0 / avg_ms) as u32
@@ -392,8 +465,9 @@ impl EguiRenderer {
         let hdri_info = &self.hdri_info;
         let pane_label = &hud.pane_label;
         let cameras_linked = hud.cameras_linked;
-        let validation_counts =
-            validation_report.map_or((0, 0), |r| (r.error_count(), r.warning_count()));
+        let validation_counts = validation
+            .report
+            .map_or((0, 0), |r| (r.error_count(), r.warning_count()));
 
         let mut actions = MenuActions::default();
 
@@ -406,6 +480,7 @@ impl EguiRenderer {
         let mut menu_vis = MenuBarVisibility {
             sidebar_visible: present_at_start.contains(&SolarxyTab::Sidebar),
             outliner_visible: present_at_start.contains(&SolarxyTab::Outliner),
+            node_tree_visible: present_at_start.contains(&SolarxyTab::NodeTree),
             menu_bar_visible: self.menu_bar_visible,
             properties_visible: present_at_start.contains(&SolarxyTab::Properties),
             status_bar_visible: self.status_bar_visible,
@@ -424,6 +499,7 @@ impl EguiRenderer {
         let screenshot_modal = &mut self.screenshot_modal;
         let shortcuts_modal = &mut self.shortcuts_modal;
         let material_inspector = &mut self.material_inspector;
+        let node_tree_state = &mut self.node_tree;
         let dock_state = &mut self.dock_state;
         let theme = self.theme;
         // Destructured here so the egui closure (an `FnMut`) captures the
@@ -490,9 +566,13 @@ impl EguiRenderer {
                 review,
                 console,
                 model,
+                outliner_source,
                 model_info: model_info.as_ref(),
                 hdri_info: hdri_info.as_ref(),
-                validation_report,
+                validation,
+                node_tree_source,
+                node_tree_state,
+                node_tree_events,
                 properties_events,
                 outliner_events,
                 material_inspector,
@@ -721,7 +801,12 @@ impl EguiRenderer {
         self.menu_bar_visible = menu_vis.menu_bar_visible;
         self.status_bar_visible = menu_vis.status_bar_visible;
 
-        let menu_intents: [(SolarxyTab, bool, bool); 7] = [
+        let menu_intents: [(SolarxyTab, bool, bool); 8] = [
+            (
+                SolarxyTab::NodeTree,
+                menu_vis_before.node_tree_visible,
+                menu_vis.node_tree_visible,
+            ),
             (
                 SolarxyTab::Viewport,
                 menu_vis_before.viewport_visible,

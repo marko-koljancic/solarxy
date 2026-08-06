@@ -11,7 +11,10 @@
 //!   inconsistent winding, modeler error).
 //!
 //! Output is capped at [`PER_MESH_EDGE_LIMIT`] edges per mesh; an extra
-//! summary issue records the truncation count.
+//! summary issue records the truncation count. Edges are reported in
+//! ascending vertex-pair order, and the cap applies to that order, so the
+//! same mesh always reports the same issues: a report is something people
+//! diff between runs and gate pipelines on.
 
 use std::collections::HashMap;
 
@@ -39,19 +42,33 @@ pub(super) fn check_non_manifold_edges(
         }
     }
 
-    let mut issues = Vec::new();
-    let mut emitted = 0;
-    let mut truncated = 0;
-    for ((u, v), count) in edges {
-        let emit = match count {
+    // Select the offending edges, then ORDER them before the cap applies.
+    //
+    // Iterating the map directly decided both the order and, once the cap
+    // bit, the selection: a hash map's iteration order is seeded per
+    // instance, so the same build validating the same file reported a
+    // different thousand edges every run. That reached the analyze output,
+    // the Properties panel, the browser's validation pane, and the JSON a
+    // pipeline gates on.
+    //
+    // The sort is deliberately here rather than in the accumulation above.
+    // A healthy mesh has no offenders and pays nothing, whereas an ordered
+    // map would pay on every edge of every mesh to fix a problem that only
+    // exists at the reporting end.
+    let mut offenders: Vec<((u32, u32), u32)> = edges
+        .into_iter()
+        .filter(|&(_, count)| match count {
             1 => !allow_open_mesh,
             2 => false,
             _ => true,
-        };
-        if !emit {
-            continue;
-        }
-        if emitted >= PER_MESH_EDGE_LIMIT {
+        })
+        .collect();
+    offenders.sort_unstable();
+
+    let mut issues = Vec::new();
+    let mut truncated = 0;
+    for ((u, v), count) in offenders {
+        if issues.len() >= PER_MESH_EDGE_LIMIT {
             truncated += 1;
             continue;
         }
@@ -69,7 +86,6 @@ pub(super) fn check_non_manifold_edges(
             kind: IssueKind::NonManifoldEdge,
             message: format!("{label} ({u}-{v}, {count} face(s))"),
         });
-        emitted += 1;
     }
 
     if truncated > 0 {
@@ -205,9 +221,65 @@ mod tests {
         }
     }
 
+    /// A mesh past the cap must report the SAME edges every time.
+    ///
+    /// The check accumulates into a hash map, whose iteration order is
+    /// seeded per instance, so two calls in one process see different
+    /// orders. Before the sort that meant a different thousand edges
+    /// survived truncation on every run, and nothing anywhere said so: the
+    /// counts matched, the severities matched, and only the identities
+    /// moved.
     #[test]
-    fn truncation_emits_summary() {
-        let count = PER_MESH_EDGE_LIMIT + 50;
+    fn a_capped_report_is_the_same_report_every_time() {
+        let mesh = boundary_storm(PER_MESH_EDGE_LIMIT + 500);
+        let first = check_non_manifold_edges(0, &mesh, false);
+        let second = check_non_manifold_edges(0, &mesh, false);
+
+        assert!(
+            first.len() > PER_MESH_EDGE_LIMIT,
+            "the fixture has to exceed the cap for this to test anything"
+        );
+        let edges = |issues: &[ValidationIssue]| -> Vec<[u32; 2]> {
+            issues
+                .iter()
+                .filter_map(|i| match i.scope {
+                    IssueScope::Edge { vertices, .. } => Some(vertices),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            edges(&first),
+            edges(&second),
+            "the same mesh reported a different set of edges on a second run"
+        );
+        assert_eq!(
+            first.iter().map(|i| &i.message).collect::<Vec<_>>(),
+            second.iter().map(|i| &i.message).collect::<Vec<_>>(),
+        );
+    }
+
+    /// And the order is the documented one, so a reader (or a diff) can
+    /// rely on it rather than on whatever the map happened to yield.
+    #[test]
+    fn edges_report_in_ascending_vertex_order() {
+        let mesh = boundary_storm(40);
+        let issues = check_non_manifold_edges(0, &mesh, false);
+        let edges: Vec<[u32; 2]> = issues
+            .iter()
+            .filter_map(|i| match i.scope {
+                IssueScope::Edge { vertices, .. } => Some(vertices),
+                _ => None,
+            })
+            .collect();
+        let mut sorted = edges.clone();
+        sorted.sort_unstable();
+        assert_eq!(edges, sorted, "edges are not in ascending order");
+    }
+
+    /// `count` disconnected triangles, so every edge is a boundary edge:
+    /// `3 * count` offenders from one cheap fixture.
+    fn boundary_storm(count: usize) -> RawMeshData {
         let mut positions = Vec::with_capacity(count * 3);
         let mut indices = Vec::with_capacity(count * 3);
         for i in 0..count {
@@ -219,7 +291,7 @@ mod tests {
             indices.push(base + 1);
             indices.push(base + 2);
         }
-        let mesh = RawMeshData {
+        RawMeshData {
             name: "boundary_storm".into(),
             positions,
             indices,
@@ -228,7 +300,12 @@ mod tests {
             material_index: None,
             topology: MeshTopology::Triangles,
             colors: None,
-        };
+        }
+    }
+
+    #[test]
+    fn truncation_emits_summary() {
+        let mesh = boundary_storm(PER_MESH_EDGE_LIMIT + 50);
         let issues = check_non_manifold_edges(0, &mesh, false);
         let summary: Vec<_> = issues
             .iter()

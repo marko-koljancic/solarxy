@@ -1,11 +1,12 @@
 //! [`ModelScene`]: per-loaded-model GPU state — the model, its stats and
-//! validation resources, and the shared [`SceneEnvironment`] (lights,
-//! shadow, instance buffer, visualization). Plus the
-//! [`lights_from_camera`] and [`create_light_bind_group`] /
-//! [`create_light_bind_group_selective`] helpers used by both
-//! construction and the per-frame update.
+//! validation resources. The scene-level [`SceneEnvironment`] is owned by
+//! the shell, not by this type, so a shell renders with or without a file
+//! model; [`LoadedModel::load`] builds one alongside the model and returns
+//! the pair. Plus the [`lights_from_camera`] and [`create_light_bind_group`]
+//! / [`create_light_bind_group_selective`] helpers used by both construction
+//! and the per-frame update.
 
-// Imports used only by the std-fs-gated `ModelScene::new` are gated with
+// Imports used only by the std-fs-gated `LoadedModel::load` are gated with
 // it so the no-std-fs (wasm) build stays warning-free.
 use solarxy_core::preferences::{BgKind, ResolvedBackground};
 use solarxy_core::validation::ValidationReport;
@@ -81,11 +82,23 @@ impl BackgroundModeExt for ResolvedBackground {
     }
 }
 
+/// A freshly loaded file model and the scene environment built around its
+/// bounds.
+///
+/// The two arrive together because the environment's heavy half is derived
+/// from the model: [`crate::visualization::VisualizationState`] builds the
+/// normal-arrow line buffers, whose size tracks the triangle count (tens of
+/// megabytes for a dense scan). Building both inside [`LoadedModel::load`]
+/// keeps that work on whatever thread the caller loads on, which for the
+/// desktop shell is the loader worker, and leaves the frame loop with two
+/// owned values to move into place.
+pub struct LoadedModel {
+    pub scene: ModelScene,
+    pub env: SceneEnvironment,
+}
+
 pub struct ModelScene {
     pub model: Model,
-    /// Scene-level GPU state (lights, shadow, instance buffer, vis) —
-    /// extracted so shells without a file-loaded model share the type.
-    pub env: SceneEnvironment,
     #[allow(dead_code)]
     pub model_path: String,
     pub stats: ModelStats,
@@ -102,25 +115,41 @@ pub struct ModelScene {
 
 impl ModelScene {
     /// This scene's geometry as one [`crate::frame::DrawObject`] — the
-    /// single-model path's contribution to the multi-object draw loop.
+    /// file-loaded model's contribution to the multi-object draw loop.
+    ///
+    /// The instance buffer is a parameter rather than a field read because
+    /// the scene environment is not part of this type: the shell owns one
+    /// environment for the whole viewport and hands its identity instance
+    /// buffer in here.
     #[must_use]
-    pub fn draw_object(&self) -> crate::frame::DrawObject<'_> {
+    pub fn draw_object<'a>(
+        &'a self,
+        instance_buffer: &'a wgpu::Buffer,
+    ) -> crate::frame::DrawObject<'a> {
         crate::frame::DrawObject {
             model: &self.model,
-            instance_buffer: &self.env.instance_buffer,
+            instance_buffer,
             validation: Some(&self.validation_gpu),
             selected: false,
             cast_shadow: true,
         }
     }
+}
 
-    /// Load a model file from disk and build its full GPU scene state.
+#[cfg(feature = "std-fs")]
+impl LoadedModel {
+    /// Load a model file from disk and build its full GPU scene state,
+    /// together with the scene environment fitted to its bounds.
     /// Path-based by nature; a byte-fed scene assembles the same public
     /// fields from `resources::upload_model` output (multi-object scenes
     /// replace this).
-    #[cfg(feature = "std-fs")]
+    ///
+    /// The environment is built here, on the caller's thread, because its
+    /// visualization half is sized by the model's triangle count. The
+    /// desktop shell loads on a worker precisely so that build never lands
+    /// on the frame loop.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn load(
         model_path: String,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -130,7 +159,7 @@ impl ModelScene {
         brdf_lut: &BrdfLut,
         ltc: &LtcLuts,
         shadow_map_size: u32,
-    ) -> Result<Self, crate::error::RendererError> {
+    ) -> Result<LoadedModel, crate::error::RendererError> {
         let (model, normals_geo, stats, viewer_validation) = resources::load_model_any(
             &model_path,
             device,
@@ -181,17 +210,19 @@ impl ModelScene {
             })
             .collect();
 
-        Ok(ModelScene {
-            model,
-            env,
-            model_path,
-            stats,
-            validation: viewer_validation.report,
-            validation_gpu: ObjectValidationGpu {
-                mesh_cat: validation_mesh_cat,
-                edge_buffers: validation_edge_buffers,
+        Ok(LoadedModel {
+            scene: ModelScene {
+                model,
+                model_path,
+                stats,
+                validation: viewer_validation.report,
+                validation_gpu: ObjectValidationGpu {
+                    mesh_cat: validation_mesh_cat,
+                    edge_buffers: validation_edge_buffers,
+                },
+                validation_raw_to_gpu: viewer_validation.raw_to_gpu,
             },
-            validation_raw_to_gpu: viewer_validation.raw_to_gpu,
+            env,
         })
     }
 }
@@ -310,10 +341,18 @@ pub fn lights_from_camera(
         }
     };
 
+    // Key, fill, rim. These were 2.0 / 1.0 / 0.8 while the shader
+    // multiplied every light by three; they are the same three lights at
+    // the same three brightnesses, now stated in the units the shader
+    // actually uses. **This is what makes dropping that multiplier
+    // golden-neutral**: the golden scenes carry no light node, so they
+    // render entirely on this path, and moving the shader without moving
+    // these would darken every capture by two thirds while looking like an
+    // ordinary re-baseline.
     let mut lights = [LightEntry::disabled(); crate::light::MAX_LIGHTS];
-    lights[0] = rig(key, [1.0, 0.98, 0.95], 2.0, 1.0);
-    lights[1] = rig(fill, [0.90, 0.93, 1.00], 1.0, 0.0);
-    lights[2] = rig(rim, [1.0, 1.00, 1.00], 0.8, 0.0);
+    lights[0] = rig(key, [1.0, 0.98, 0.95], 6.0, 1.0);
+    lights[1] = rig(fill, [0.90, 0.93, 1.00], 3.0, 0.0);
+    lights[2] = rig(rim, [1.0, 1.00, 1.00], 2.4, 0.0);
 
     LightsUniform {
         lights,
@@ -328,6 +367,6 @@ pub fn lights_from_camera(
         hemi_ground_r: 0.0,
         hemi_ground_g: 0.0,
         hemi_ground_b: 0.0,
-        _pad_tail: 0.0,
+        ibl_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
     }
 }

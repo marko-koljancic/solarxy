@@ -9,8 +9,8 @@ Paths below are relative to the repository root, matching the convention used th
 | Surface | File | State |
 |---|---|---|
 | Web app and public pages | `design/web/solarxy-web.pen` | Populated. Fifteen design bands and a numbered decision series. |
-| Desktop GUI (egui) | `design/desktop/solarxy-desktop.pen` | Reserved. Created and intentionally empty. |
-| Analyze TUI (ratatui) | `design/tui/solarxy-tui.pen` | Reserved. Created and intentionally empty. |
+| Desktop GUI (egui) | `design/desktop/solarxy-desktop.pen` | Populated. Fourteen bands and a decision series, split into two regions. **AS-IS** captures the shipped shell: tokens in both themes, typography, the widget state matrix, source-read metrics, the menu bar, status bar, pane toolbar, shell composition and the five viewport layouts, all seven dock panels, the modals, and the overlay and review surfaces. **PROPOSED** holds forward-looking work, currently the three panel changes the 0.8.2 desktop engine surface introduces. |
+| Analyze TUI (ratatui) | `design/tui/solarxy-tui.pen` | Populated. Eighteen bands and a decision series, split into two regions. **AS-IS** captures the shipped shell: the terminal cell model and metrics, the colour and glyph inventory, the shell chrome, the four tabs, and the interaction map with its four named defects. **PROPOSED** holds the tiled terminal workspace the 0.8.2 F10 work introduces: capability tiers and the theme system, panel anatomy and in-border chrome, the tiling model, the ten panels, the presets at both sizes, arrange mode and the keymap, the overlays, the shipped themes, and the decisions. |
 
 ## Opening these files
 
@@ -29,13 +29,30 @@ The split matters, because half of it is enforced by tests and half is not.
 `crates/solarxy-core/src/theme.rs` is the single colour source for all three shells:
 
 - `crates/solarxy-app/src/gui/theme.rs` maps it onto egui for the desktop GUI.
-- `crates/solarxy-cli/src/tui_theme.rs` maps it onto ratatui for the analyze TUI.
+- `crates/solarxy-cli/src/tui/theme.rs` maps it onto ratatui for the analyze TUI.
 - `crates/solarxy-core/examples/gen_tokens.rs` generates `web/src/styles/tokens.generated.css`
   for the web app.
 
 So a design file never invents a colour. Changing a colour means editing the palette in
 `solarxy-core` and regenerating the web tokens with
 `cargo run -p solarxy-core --example gen_tokens > web/src/styles/tokens.generated.css`.
+
+**One stated exception, the analyze TUI.** From 0.8.2's F10 the TUI reads a theme file rather than
+mapping the palette directly, because a terminal application is expected to be themeable and
+because the terminal is the one surface whose ground Solarxy does not control. That makes the
+sentence above untrue for one of the three shells, and it is recorded here rather than left as a
+rule anyone can see is violated. The exception is deliberately narrow:
+
+- The **default** theme's `accent`, `success`, `warning` and `error` slots are pinned to
+  `Palette`'s roles by `default_theme_matches_the_palette`, so the shipped identity still comes
+  from the palette and cannot drift from the desktop shell or the web app.
+- Alternate and user themes are a user-facing feature layered on top, not a second opinion about
+  what Solarxy looks like.
+- At the 16-colour and monochrome tiers the theme is ignored entirely and the TUI behaves exactly
+  as it did before 0.8.2.
+
+The design file still invents no colour. See `Docs/SOLARXY-TUI-SPEC.md` section 7 and 0.8.2's
+decision G-37.
 
 This is enforced. `crates/solarxy-core/tests/tokens_drift.rs` carries
 `generated_tokens_match_disk`, `hand_authored_css_does_not_redefine_generated_tokens`,

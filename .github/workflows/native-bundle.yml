@@ -1,4 +1,4 @@
-name: Native Bundle
+name: "Release: native bundles (DMG, AppImage)"
 
 # Builds DMG (macOS) and AppImage (x86_64 Linux), then uploads them to a
 # GitHub Release. Linux GUI is also published to Flathub via a separate

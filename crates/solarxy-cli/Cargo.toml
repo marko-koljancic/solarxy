@@ -15,7 +15,7 @@ required-features = ["tui"]
 
 [features]
 default = ["tui", "analyzer", "updater"]
-tui = ["dep:ratatui", "dep:crossterm"]
+tui = ["dep:ratatui", "dep:crossterm", "dep:toml"]
 analyzer = ["dep:solarxy-formats", "dep:solarxy-validate"]
 updater = ["dep:axoupdater"]
 
@@ -28,8 +28,15 @@ clap = { version = "4.5.53", features = ["derive"] }
 anyhow = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ratatui = { version = "0.29.0", optional = true }
+ratatui = { version = "0.29.0", optional = true, features = [
+    "unstable-rendered-line-info",
+] }
 crossterm = { version = "0.28.1", optional = true }
+# The same version solarxy-core already pins behind `fs`, so no package
+# enters the lockfile and no transitive tree comes with it: the only change
+# there is one edge naming this crate as a consumer. Declared directly rather
+# than reached through solarxy-core because the theme files are this crate's.
+toml = { version = "0.8", optional = true }
 axoupdater = { version = "0.10", features = ["blocking"], optional = true }
 
 [package.metadata.dist]

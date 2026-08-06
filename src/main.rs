@@ -21,10 +21,13 @@ use tracing_subscriber::prelude::*;
 #[derive(Parser, Debug)]
 #[command(version, about = "Solarxy 3D model viewer", long_about = None)]
 struct GuiArgs {
+    // Keeps its name: `--model` is a published surface, and renaming it
+    // would break existing invocations and shell aliases to describe the
+    // same thing more precisely. The help text carries the widened scope.
     #[arg(
         short = 'm',
         long = "model",
-        help = "Path to the model file to open at launch"
+        help = "Path to the scene, model, or environment file to open at launch"
     )]
     model: Option<PathBuf>,
     #[arg(
@@ -71,7 +74,7 @@ fn main() -> anyhow::Result<()> {
     let model_path = args
         .model
         .map(|p| -> anyhow::Result<String> {
-            let canonical = fs::canonicalize(&p).context("Failed to canonicalize model path")?;
+            let canonical = fs::canonicalize(&p).context("Failed to canonicalize the file path")?;
             Ok(canonical.to_string_lossy().to_string())
         })
         .transpose()?;

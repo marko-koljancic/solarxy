@@ -464,6 +464,7 @@ mod tests {
             aspect: 16.0 / 9.0,
             show_gizmo: true,
             gizmo_size: 1.0,
+            look: solarxy_core::scene::CameraLook::default(),
         }
     }
 

@@ -1,4 +1,4 @@
-name: Web Release
+name: "Release: web bundle"
 
 # Builds the Solarxy Web bundle and attaches it to the GitHub Release as
 # `solarxy-web-<tag>.tar.gz` (plus a `.sha256`). The VPS pulls that artifact --

@@ -7,15 +7,14 @@
 //! drives any expensive recomputations (background, wireframe, composite,
 //! IBL).
 
-use solarxy_renderer::camera::{Camera, CameraUniform};
-use solarxy_renderer::visualization::GridUniform;
+use solarxy_renderer::camera::Camera;
 use solarxy_core::preferences::{
     InspectionMode, MaterialOverride, PaneMode, ResolvedBackground, UvMapBackground,
 };
 
 use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{BackgroundModeExt, GradientUniform, Pane, State, WireframeParams, lights_from_camera};
+use super::{GradientUniform, Pane, State, WireframeParams};
 
 impl State {
     /// Resolve a pane's background choice against the user
@@ -67,7 +66,13 @@ impl State {
                 ) {
                     tracing::error!("Scene delta apply failed: {e}");
                 }
+                self.apply_scene_environment(&delta);
             }
+            // The panels read summed counters and one merged validation
+            // report. Both are derived from what just landed, so they are
+            // rebuilt here rather than per frame: a delta is the only thing
+            // that can change either.
+            self.refresh_engine_scene_info();
         }
 
         let viewport_present = self.gui.viewport_tab_present();
@@ -147,7 +152,7 @@ impl State {
         let Some(cam_data) = cam_data else {
             self.renderer
                 .render_empty_pass(&mut encoder, self.resolve_background(&pds));
-            self.composite_and_submit(encoder, surface_view, i, pane, is_split, false, false);
+            self.composite_and_submit(encoder, surface_view, i, pane, false, false);
             return;
         };
 
@@ -167,85 +172,133 @@ impl State {
             self.write_3d_pane_uniforms(i, &pds);
 
             if pds.inspection_mode == InspectionMode::Overdraw {
-                self.render_overdraw_pane(&mut encoder, i, pane, is_split);
+                self.render_overdraw_pane(&mut encoder, i, *pane, is_split);
             } else {
                 self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
             }
         }
 
-        self.composite_and_submit(encoder, surface_view, i, pane, is_split, is_uv_map, true);
+        self.composite_and_submit(
+            encoder,
+            surface_view,
+            i,
+            pane,
+            is_uv_map,
+            self.scene_present(),
+        );
     }
 
     fn render_overdraw_pane(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         i: usize,
-        pane: &Pane,
+        pane: Pane,
         is_split: bool,
     ) {
-        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
-        let Some(scene) = &self.scene else {
+        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             return;
         };
-        let Some(cam_bg) = cam_bg else {
-            return;
-        };
-        let pane_viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
-        let objects = self.draw_objects(scene);
-        self.renderer
-            .render_overdraw_passes(encoder, &objects, cam_bg, pane_viewport);
+        // No scene guard: the count target is cleared by the pass itself and
+        // the show pass writes the zero-count colour, so a pane with nothing
+        // in it reads black — which is what overdraw already shows wherever
+        // geometry does not cover.
+        let objects = self.draw_objects();
+        solarxy_host::render_overdraw_pane(
+            &self.renderer,
+            encoder,
+            &objects,
+            cam_bg,
+            pane,
+            is_split,
+        );
     }
 
-    /// The frame's draw list: the loaded model plus every visible
-    /// multi-object entry, in that order.
-    fn draw_objects<'a>(
-        &'a self,
-        scene: &'a solarxy_renderer::scene::ModelScene,
-    ) -> Vec<solarxy_renderer::frame::DrawObject<'a>> {
-        let mut objects = vec![scene.draw_object()];
+    /// The frame's draw list: the file-loaded model when one is open, then
+    /// every visible multi-object entry, with the Node Tree's selection
+    /// flagged so the main pass and the outline pass can find it.
+    ///
+    /// Order is load-bearing, not incidental. Overdraw counts fragments in
+    /// submission order, and the depth-equal overlays (edge wireframe,
+    /// validation lines) resolve against whatever landed first, so the file
+    /// model stays ahead of the delta-fed objects exactly as it did when it
+    /// was the only entry that could come first.
+    ///
+    /// An empty list is a legitimate frame. The background, grid, floor and
+    /// axes come from the environment, not from this list.
+    fn draw_objects(&self) -> Vec<solarxy_renderer::frame::DrawObject<'_>> {
+        let mut objects =
+            Vec::with_capacity(usize::from(self.scene.is_some()) + self.scene_objects.len());
+        if let Some(scene) = &self.scene {
+            objects.push(scene.draw_object(&self.env.instance_buffer));
+        }
         objects.extend(self.scene_objects.draw_objects());
+        // `SceneObjects` hands out its draw objects unselected, so the
+        // flag is set here by matching on model identity — the same
+        // approach the web host takes, and the reason the lookup filters
+        // hidden objects: a hidden one is not in this list at all.
+        if let Some(id) = self.selected_object
+            && let Some(selected) = self.scene_objects.draw_object(id)
+        {
+            for object in &mut objects {
+                if std::ptr::eq(object.model, selected.model) {
+                    object.selected = true;
+                }
+            }
+        }
         objects
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Whether this frame has scene content: a file-loaded model, or at least
+    /// one visible object in the multi-object scene.
+    ///
+    /// The composite pass folds in the bloom and ambient-occlusion textures
+    /// only when this is true. It deliberately is not "does the pane have a
+    /// camera": a pane with a camera and nothing in it renders the
+    /// background, the grid and the floor, and blooming that would put a glow
+    /// on a bare viewport nobody asked for.
+    fn scene_present(&self) -> bool {
+        self.scene.is_some() || self.scene_objects.draw_objects().next().is_some()
+    }
+
     fn composite_and_submit(
         &self,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: wgpu::CommandEncoder,
         surface_view: &wgpu::TextureView,
         i: usize,
         pane: &Pane,
-        is_split: bool,
         is_uv_map: bool,
         scene_present: bool,
     ) {
-        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
-        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
-        let pane_inspection = self.view.pane_settings[i].inspection_mode;
-        self.renderer.post.composite.write_params(
+        // This shell has no camera nodes yet, so every pane is a free view and
+        // resolves to its own look. Equal field for field to the
+        // `CompositeLook::from_tone` this used to build, which is what makes
+        // adopting the shared path golden-neutral here.
+        let look = solarxy_renderer::composite::resolve_look(
+            None,
+            &solarxy_core::view_config::PaneLook::from_tone(
+                self.renderer.post.tone_mode,
+                self.renderer.post.exposure,
+            ),
+        );
+        solarxy_host::composite_and_submit(
             &self.queue,
-            pane_bloom,
-            pane_ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
-            pane_inspection,
-        );
-
-        let _ = is_split;
-        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
-        self.renderer.post.composite.render(
-            &mut encoder,
-            &self.renderer.pipelines,
+            &self.renderer,
+            encoder,
             surface_view,
-            pane_ssao,
-            &self.renderer.post.ssao,
-            viewport,
-            i == 0,
+            &solarxy_host::PaneComposite {
+                index: i,
+                rect: *pane,
+                look,
+                inspection: self.view.pane_settings[i].inspection_mode,
+                is_uv_map,
+                scene_present,
+                // Must agree with `PaneScene.selected` above: that switches
+                // the rim's offscreen stages on, this blits the result. A
+                // blit with no mask behind it paints nothing, but it is a
+                // pass submitted for no reason.
+                outline: self.selected_object.is_some(),
+            },
         );
-        self.queue.submit(std::iter::once(encoder.finish()));
     }
 
     fn render_uv_map_pane(
@@ -256,7 +309,7 @@ impl State {
     ) {
         if let Some(scene) = &self.scene {
             if scene.model.has_uvs {
-                let uv_object = scene.draw_object();
+                let uv_object = scene.draw_object(&self.env.instance_buffer);
                 self.renderer
                     .uv_cam
                     .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
@@ -337,60 +390,24 @@ impl State {
     }
 
     fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
-        self.write_wireframe_params_for(pds);
-        self.write_gradient_colors_for(pds);
-        if let Some(scene) = &self.scene {
-            let color = self.resolve_background(pds).grid_color();
-            self.queue.write_buffer(
-                &scene.env.vis.grid_uniform_buf,
-                GridUniform::COLOR_OFFSET,
-                bytemuck::cast_slice(&color),
-            );
-        }
-
-        let cam_buf = self.view.cameras[i].as_ref().map(|c| &c.buffer);
-        let depth_bounds = self.view.cameras[i]
-            .as_ref()
-            .zip(self.scene.as_ref())
-            .map(|(c, s)| Self::compute_depth_bounds(&c.camera, &s.model.bounds));
-        if let Some(buf) = cam_buf {
-            let (depth_near, depth_far) = depth_bounds.unwrap_or((0.01, 100.0));
-            let data: [u32; 8] = [
-                pds.inspection_mode.as_u32(),
-                pds.texel_density_target.to_bits(),
-                pds.material_override.as_u32(),
-                depth_near.to_bits(),
-                depth_far.to_bits(),
-                self.view.display.roughness_scale.to_bits(),
-                self.view.display.metallic_scale.to_bits(),
-                self.view.display.hdri_rotation.to_bits(),
-            ];
-            self.queue.write_buffer(
-                buf,
-                CameraUniform::INSPECTION_OFFSET,
-                bytemuck::cast_slice(&data),
-            );
-        }
-    }
-
-    fn compute_depth_bounds(
-        camera: &solarxy_renderer::camera::Camera,
-        bounds: &solarxy_core::AABB,
-    ) -> (f32, f32) {
-        let view = camera.build_view_matrix();
-        let mut z_min = f32::INFINITY;
-        let mut z_max = f32::NEG_INFINITY;
-        for corner in &bounds.corners() {
-            let vp = view * corner.to_homogeneous();
-            let z = -vp.z;
-            z_min = z_min.min(z);
-            z_max = z_max.max(z);
-        }
-        z_min = z_min.max(0.001);
-        if z_max <= z_min {
-            z_max = z_min + 1.0;
-        }
-        (z_min, z_max)
+        // Bound locally: `PaneUniforms` holds a borrow, so an inline
+        // `Some(&self.scene_bounds())` would not outlive the statement.
+        let bounds = self.scene_bounds();
+        solarxy_host::write_pane_uniforms(
+            &self.queue,
+            &self.renderer,
+            &solarxy_host::PaneUniforms {
+                background: self.resolve_background(pds),
+                pds,
+                display: &self.view.display,
+                camera: self.view.cameras[i].as_ref(),
+                env: &self.env,
+                bounds: Some(&bounds),
+                // This shell does not steer the grid plane from the camera, so
+                // the plane offset is left exactly as it was initialised.
+                grid_plane: None,
+            },
+        );
     }
 
     fn render_3d_passes(
@@ -400,49 +417,37 @@ impl State {
         cam_data: &Camera,
         pds: &PaneDisplaySettings,
     ) {
-        if (i == 0 || !self.view.display.lights_locked)
-            && let Some(scene) = &self.scene
-        {
-            let objects = self.draw_objects(scene);
-            self.renderer
-                .render_shadow_pass(encoder, &scene.env, &objects);
-        }
-
-        let cam_bg = self.view.cameras[i].as_ref().map(|c| &c.bind_group);
-        if let (Some(scene), Some(cam_bg)) = (&self.scene, cam_bg) {
-            let objects = self.draw_objects(scene);
-            if self.renderer.post.ssao_enabled {
-                self.renderer.render_gbuffer_pass(encoder, &objects, cam_bg);
-            }
-            self.renderer.render_main_pass(
-                encoder,
-                &scene.env,
-                &objects,
+        let background = self.resolve_background(pds);
+        // The camera is what binds this chain to a viewpoint, so without one
+        // there is nothing sensible to encode. A pane in that state has
+        // already been sent to the empty path by `render_pane`; the guard
+        // stays because the invariant belongs next to the code that needs it.
+        // The scene is a different matter: an empty draw list still renders
+        // the background, grid, floor and axes off the environment.
+        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
+            self.renderer.render_empty_pass(encoder, background);
+            return;
+        };
+        let objects = self.draw_objects();
+        // Asked of the list rather than of `selected_object`, because a
+        // selection that resolves to nothing drawable must not switch on
+        // the mask and jump-flood stages for an empty silhouette.
+        let selected = objects.iter().any(|o| o.selected);
+        solarxy_host::render_3d_passes(
+            &self.renderer,
+            &self.queue,
+            encoder,
+            &solarxy_host::PaneScene {
+                objects: &objects,
+                env: &self.env,
                 cam_bg,
                 cam_data,
                 pds,
-                self.resolve_background(pds),
-            );
-        } else {
-            self.renderer
-                .render_empty_pass(encoder, self.resolve_background(pds));
-        }
-
-        if self.renderer.post.ssao_enabled
-            && let Some(cam_bg) = cam_bg
-        {
-            self.renderer.render_ssao_passes(encoder, cam_bg);
-        }
-
-        if self.renderer.post.bloom_enabled {
-            self.renderer.post.bloom.render(
-                encoder,
-                &self.renderer.pipelines,
-                &self.queue,
-                self.renderer.target_width,
-                self.renderer.target_height,
-            );
-        }
+                background,
+                shadow: i == 0 || !self.view.display.lights_locked,
+                selected,
+            },
+        );
     }
 
     /// Recompute the camera-relative light rig for a non-primary pane
@@ -450,25 +455,18 @@ impl State {
     /// own viewpoint. No-op when lights are locked. Pane 0 keeps the rig
     /// `update()` set from slot 0's camera.
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
-        if !self.view.display.lights_locked {
-            let ibl_avg = self.active_ibl().irradiance_average;
-            if let Some(scene) = &mut self.scene {
-                scene.env.lights_uniform =
-                    lights_from_camera(cam_data, &scene.model.bounds, ibl_avg);
-                self.queue.write_buffer(
-                    &scene.env.light_buffer,
-                    0,
-                    bytemuck::cast_slice(&[scene.env.lights_uniform]),
-                );
-                let key_pos = scene.env.lights_uniform.lights[0].position;
-                scene.env.shadow.update_light_vp(
-                    &self.queue,
-                    cgmath::Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-                    scene.model.bounds.center(),
-                    scene.model.bounds.diagonal() / 2.0,
-                );
-            }
+        if self.install_authored_lights() {
+            return;
         }
+        if self.view.display.lights_locked {
+            return;
+        }
+        let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
+        // Bound before the mutable borrow of the environment: the accessor
+        // reads the whole of `self`, and the result is owned, so the shared
+        // borrow ends here.
+        let bounds = self.scene_bounds();
+        solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, cam_data, &bounds, ibl_avg);
     }
 
     fn render_gui_overlay(
@@ -533,6 +531,7 @@ impl State {
         let mut projection_change = None;
         let mut properties_events = crate::gui::PropertiesEvents::default();
         let mut outliner_events = crate::gui::OutlinerEvents::default();
+        let mut node_tree_events = crate::gui::NodeTreeEvents::default();
 
         let ap = self.view.active_pane;
         let pds = &self.view.pane_settings[ap];
@@ -584,7 +583,45 @@ impl State {
             overdraw_active: active_inspection == InspectionMode::Overdraw
                 && active_pane_mode == PaneMode::Scene3D,
         };
-        let validation_report = self.scene.as_ref().map(|s| &s.validation);
+        // Whichever root is open supplies the panels. The two are mutually
+        // exclusive, so this is a choice rather than a merge; a file model
+        // wins the tie only because it cannot occur.
+        let validation = match (&self.scene, &self.engine_scene) {
+            (Some(scene), _) => crate::gui::ValidationView {
+                report: Some(&scene.validation),
+                owners: &[],
+            },
+            (None, Some(info)) => crate::gui::ValidationView {
+                report: Some(&info.validation.report),
+                owners: &info.validation.labels,
+            },
+            (None, None) => crate::gui::ValidationView::default(),
+        };
+        let outliner_source = match (&self.scene, &self.engine_scene) {
+            (Some(scene), _) => crate::gui::OutlinerSource::Model(&scene.model),
+            (None, Some(info)) => crate::gui::OutlinerSource::Scene {
+                objects: &self.scene_objects,
+                names: &info.object_names,
+            },
+            (None, None) => crate::gui::OutlinerSource::Empty,
+        };
+        // Folded fresh each frame rather than cached on a delta, because
+        // selection is part of what the tree draws and selection changes
+        // without a delta. Skipped outright when the tab is closed, which
+        // is the only case where the cost would be paid for nothing.
+        let node_tree_source = match &self.engine {
+            _ if !self.gui.node_tree_tab_present() => crate::gui::NodeTreeSource::Empty,
+            Some(engine) => crate::gui::NodeTreeSource::Scene {
+                doc: engine.document(),
+                registry: engine.registry(),
+            },
+            // A model file is open, or nothing is. The panel distinguishes
+            // the two: "no graph" and "nothing open" are different facts,
+            // and a panel that conflates them reads as broken while the
+            // viewport is plainly full of geometry.
+            None if self.scene.is_some() => crate::gui::NodeTreeSource::ModelFile,
+            None => crate::gui::NodeTreeSource::Empty,
+        };
 
         let recent_files = self.preferences.history.recent_files.clone();
         let model = self.scene.as_ref().map(|s| &s.model);
@@ -611,7 +648,7 @@ impl State {
         let (snap_after, actions) = self.gui.render_ui(
             snap_before,
             &hud,
-            validation_report,
+            validation,
             &self.device,
             &self.queue,
             &mut encoder,
@@ -625,9 +662,12 @@ impl State {
             &recent_files,
             &mut self.review,
             model,
+            outliner_source,
+            node_tree_source,
             pane_toolbar,
             &mut properties_events,
             &mut outliner_events,
+            &mut node_tree_events,
             &mut self.viewport_context_menu,
             force_expand_review,
             suppress_screenshot_modal,
@@ -676,6 +716,11 @@ impl State {
         // Outliner events: mesh / material visibility + camera framing.
         if let Some(action) = outliner_events.action {
             self.handle_outliner_action(action);
+        }
+
+        // Node Tree events: selection, engine-side and in the viewport.
+        if let Some(action) = node_tree_events.action {
+            self.handle_node_tree_action(action);
         }
 
         // Review panel: clicking a note row flies the camera to its anchor.

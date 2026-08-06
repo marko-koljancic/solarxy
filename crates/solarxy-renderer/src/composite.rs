@@ -3,12 +3,99 @@
 
 use crate::bind_groups::BindGroupLayouts;
 use crate::bloom::BLOOM_STRENGTH;
+use crate::lut::{LutSlot, LutSlots};
 use crate::pipelines::Pipelines;
 use crate::ssao::SsaoState;
 use solarxy_core::preferences::{InspectionMode, ToneMode};
+use solarxy_core::scene::CameraLook;
+use solarxy_core::view_config::PaneLook;
+use solarxy_core::{LUT_LOG_MAX_STOP, LUT_LOG_MIN_STOP};
 use wgpu::util::DeviceExt;
 
 const SSAO_STRENGTH: f32 = 0.8;
+
+/// The shot's rendering intent, resolved for one pane.
+///
+/// Everything here is what a colourist would call the look, as opposed to
+/// what the scene is: it changes the picture without changing the
+/// geometry, the materials or the lights. From 0.8.2 the look is owned by
+/// the camera when a pane looks through one, and by the pane otherwise, so
+/// this struct is what the two resolve *into* rather than where either
+/// stores it.
+///
+/// [`Default`] is the neutral look, and neutral means bit-identical
+/// output: exposure 1, no grade, no table. That is load-bearing, because
+/// it is what lets the grading feature ship without moving a single golden
+/// capture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompositeLook {
+    pub tone_mode: ToneMode,
+    pub exposure: f32,
+    /// Added after the tone map: raises or lowers the floor. Neutral 0.
+    pub lift: [f32; 3],
+    /// Applied as a power after lift and gain. Neutral 1.
+    pub gamma: [f32; 3],
+    /// Multiplied before lift: scales the ceiling. Neutral 1.
+    pub gain: [f32; 3],
+    /// How much of the pre-tone-map table to blend in, 0 to 1.
+    ///
+    /// **Defaults to zero, unlike the camera parameter it comes from.**
+    /// The slots are renderer-global while this struct is per pane, so a
+    /// table bound for a graded viewport is still bound when the asset
+    /// preview, a screenshot of a different pane, or the golden harness
+    /// composites. Defaulting the contribution to nothing means only a
+    /// path that deliberately asks for a table gets one.
+    pub lut_a_strength: f32,
+    /// How much of the display-referred table to blend in, 0 to 1. Zero by
+    /// default for the reason above.
+    pub lut_b_strength: f32,
+}
+
+impl Default for CompositeLook {
+    fn default() -> Self {
+        Self {
+            tone_mode: ToneMode::default(),
+            exposure: 1.0,
+            lift: [0.0; 3],
+            gamma: [1.0; 3],
+            gain: [1.0; 3],
+            lut_a_strength: 0.0,
+            lut_b_strength: 0.0,
+        }
+    }
+}
+
+impl CompositeLook {
+    /// The look a host with no per-pane model yet resolves: the global
+    /// tone mapper and exposure it already had, and a neutral grade.
+    #[must_use]
+    pub fn from_tone(tone_mode: ToneMode, exposure: f32) -> Self {
+        Self {
+            tone_mode,
+            exposure,
+            ..Self::default()
+        }
+    }
+
+    /// Whether the grade would change the image.
+    ///
+    /// This gates the grade in the shader, and it has to: `pow(x, 1.0)`
+    /// compiles to `exp2(1.0 * log2(x))` and is **not** bit-identical to
+    /// `x`. An always-on grade at neutral values would therefore move
+    /// every golden capture by a unit of last place, for a feature that is
+    /// meant to be inert until someone reaches for it. Skipping it is what
+    /// keeps neutral meaning neutral.
+    #[must_use]
+    // Exact comparison is the point rather than an oversight. The question
+    // is not "is this grade close to neutral" but "is it the untouched
+    // default", because that is what decides whether the shader runs a
+    // transform at all. An epsilon here would silently discard a grade
+    // somebody dialled in just below it.
+    #[allow(clippy::float_cmp)]
+    pub fn grade_is_neutral(&self) -> bool {
+        self.lift == [0.0; 3] && self.gamma == [1.0; 3] && self.gain == [1.0; 3]
+    }
+}
 
 pub struct CompositeState {
     params_buffer: wgpu::Buffer,
@@ -24,6 +111,7 @@ impl CompositeState {
         hdr_resolve_view: &wgpu::TextureView,
         bloom_ping_view: &wgpu::TextureView,
         bloom_sampler: &wgpu::Sampler,
+        luts: &LutSlots,
         bloom_enabled: bool,
         ssao_enabled: bool,
         tone_mode: ToneMode,
@@ -32,8 +120,8 @@ impl CompositeState {
         let params_data = build_params(
             bloom_enabled,
             ssao_enabled,
-            tone_mode,
-            exposure,
+            &CompositeLook::from_tone(tone_mode, exposure),
+            luts,
             InspectionMode::Shaded,
         );
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -55,6 +143,7 @@ impl CompositeState {
             hdr_resolve_view,
             bloom_ping_view,
             bloom_sampler,
+            luts,
         );
 
         Self {
@@ -64,13 +153,17 @@ impl CompositeState {
         }
     }
 
-    pub fn resize(
+    /// Rebuild the group. Called on surface resize, when the HDR target's
+    /// views are recreated, **and** whenever a LUT slot's bound texture
+    /// changes, because a bind group captures the views it was built from.
+    pub fn rebuild_bind_group(
         &mut self,
         device: &wgpu::Device,
         layouts: &BindGroupLayouts,
         hdr_resolve_view: &wgpu::TextureView,
         bloom_ping_view: &wgpu::TextureView,
         bloom_sampler: &wgpu::Sampler,
+        luts: &LutSlots,
     ) {
         self.bind_group = create_bind_group(
             device,
@@ -78,6 +171,7 @@ impl CompositeState {
             hdr_resolve_view,
             bloom_ping_view,
             bloom_sampler,
+            luts,
         );
     }
 
@@ -127,58 +221,176 @@ impl CompositeState {
         pass.draw(0..3, 0..1);
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Write the pane's composite uniform.
+    ///
+    /// Takes the resolved [`CompositeLook`] rather than a tone mode and an
+    /// exposure, because the look is now nine values rather than two and a
+    /// ninth positional argument is how the wrong pane's grade gets
+    /// written.
     pub fn write_params(
         &self,
         queue: &wgpu::Queue,
         bloom_enabled: bool,
         ssao_enabled: bool,
-        tone_mode: ToneMode,
-        exposure: f32,
+        look: &CompositeLook,
+        luts: &LutSlots,
         inspection_mode: InspectionMode,
     ) {
-        let params = build_params(
-            bloom_enabled,
-            ssao_enabled,
-            tone_mode,
-            exposure,
-            inspection_mode,
-        );
+        let params = build_params(bloom_enabled, ssao_enabled, look, luts, inspection_mode);
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
     }
 }
 
+/// Resolve one pane's look: the camera it is looking through, if any,
+/// otherwise the pane's own.
+///
+/// The whole precedence rule in one place, because it is the sort of thing
+/// that otherwise gets written slightly differently in each host and then
+/// disagrees between the viewport and a screenshot. A camera's tone of
+/// `None` means inherit, so a camera can own an exposure and a grade while
+/// leaving the tone mapper to the pane.
+///
+/// Free-standing rather than a method because both hosts and the golden
+/// harness call it, and it is the shape the shared host crate will lift as
+/// is.
+#[must_use]
+pub fn resolve_look(camera: Option<&CameraLook>, pane: &PaneLook) -> CompositeLook {
+    match camera {
+        Some(look) => CompositeLook {
+            tone_mode: look.tone.map_or(pane.tone_mode, ToneMode::from),
+            exposure: look.exposure,
+            lift: look.lift,
+            gamma: look.gamma,
+            gain: look.gain,
+            lut_a_strength: look.lut_a_strength,
+            lut_b_strength: look.lut_b_strength,
+        },
+        None => CompositeLook {
+            tone_mode: pane.tone_mode,
+            exposure: pane.exposure,
+            lift: pane.lift,
+            gamma: pane.gamma,
+            gain: pane.gain,
+            // A table is a document asset and a free pane is not a document
+            // object, so it reaches neither slot. The strengths are moot
+            // with nothing bound, and the composite gates on `is_loaded`
+            // regardless.
+            lut_a_strength: 0.0,
+            lut_b_strength: 0.0,
+        },
+    }
+}
+
+/// The composite pass's uniform. **Grown by appending only**, per the
+/// renderer's uniform rule, and `pub` so `tests/uniform_layout.rs` can
+/// compare its size against the naga span of the WGSL struct that declares
+/// it whole.
+///
+/// The three grade vectors sit at offsets 128, 144 and 160 with a scalar
+/// of padding behind each, because WGSL aligns a `vec3<f32>` to 16 bytes
+/// in the uniform address space while Rust aligns `[f32; 3]` to 4. Get
+/// that wrong and the Rust size assert still passes, the shader still
+/// compiles, and the viewport goes wrong at draw time. Same reasoning
+/// `MaterialUniform` records for its own appended blocks.
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CompositeParams {
+pub struct CompositeParams {
     bloom_strength: f32,
     bloom_enabled: u32,
     ssao_enabled: u32,
     ssao_strength: f32,
+
     tone_mode: u32,
     exposure: f32,
     inspection_mode: u32,
     _pad: u32,
+
+    lut_a_enabled: u32,
+    lut_a_strength: f32,
+    lut_b_enabled: u32,
+    lut_b_strength: f32,
+
+    /// The pre-tone-map slot's log window, in stops. Carried rather than
+    /// baked into the shader so Rust owns the number the parameter help
+    /// documents.
+    log_lo: f32,
+    log_hi: f32,
+    /// Zero whenever the grade is neutral, which skips it in the shader.
+    /// See [`CompositeLook::grade_is_neutral`] for why that is not merely
+    /// an optimization.
+    grade_enabled: u32,
+    _pad_grade: f32,
+
+    lut_a_scale: [f32; 3],
+    _pad_a_scale: f32,
+    lut_a_bias: [f32; 3],
+    _pad_a_bias: f32,
+    lut_b_scale: [f32; 3],
+    _pad_b_scale: f32,
+    lut_b_bias: [f32; 3],
+    _pad_b_bias: f32,
+
+    lift: [f32; 3],
+    _pad_lift: f32,
+    gamma: [f32; 3],
+    _pad_gamma: f32,
+    gain: [f32; 3],
+    _pad_gain: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<CompositeParams>() == 32);
+const _: () = assert!(std::mem::size_of::<CompositeParams>() == 176);
 
 fn build_params(
     bloom_enabled: bool,
     ssao_enabled: bool,
-    tone_mode: ToneMode,
-    exposure: f32,
+    look: &CompositeLook,
+    luts: &LutSlots,
     inspection_mode: InspectionMode,
 ) -> CompositeParams {
+    // A slot is on only when it holds a real table: a strength left turned
+    // up on an empty slot must not blend towards the identity texture that
+    // stands in for it, because that would read as the table quietly
+    // failing to load rather than as no table at all.
+    let a_on = luts.is_loaded(LutSlot::A) && look.lut_a_strength > 0.0;
+    let b_on = luts.is_loaded(LutSlot::B) && look.lut_b_strength > 0.0;
+    let a = luts.sampling(LutSlot::A);
+    let b = luts.sampling(LutSlot::B);
     CompositeParams {
         bloom_strength: BLOOM_STRENGTH,
         bloom_enabled: u32::from(bloom_enabled),
         ssao_enabled: u32::from(ssao_enabled),
         ssao_strength: SSAO_STRENGTH,
-        tone_mode: tone_mode.as_u32(),
-        exposure,
+
+        tone_mode: look.tone_mode.as_u32(),
+        exposure: look.exposure,
         inspection_mode: inspection_mode.as_u32(),
         _pad: 0,
+
+        lut_a_enabled: u32::from(a_on),
+        lut_a_strength: look.lut_a_strength.clamp(0.0, 1.0),
+        lut_b_enabled: u32::from(b_on),
+        lut_b_strength: look.lut_b_strength.clamp(0.0, 1.0),
+
+        log_lo: LUT_LOG_MIN_STOP,
+        log_hi: LUT_LOG_MAX_STOP,
+        grade_enabled: u32::from(!look.grade_is_neutral()),
+        _pad_grade: 0.0,
+
+        lut_a_scale: a.scale,
+        _pad_a_scale: 0.0,
+        lut_a_bias: a.bias,
+        _pad_a_bias: 0.0,
+        lut_b_scale: b.scale,
+        _pad_b_scale: 0.0,
+        lut_b_bias: b.bias,
+        _pad_b_bias: 0.0,
+
+        lift: look.lift,
+        _pad_lift: 0.0,
+        gamma: look.gamma,
+        _pad_gamma: 0.0,
+        gain: look.gain,
+        _pad_gain: 0.0,
     }
 }
 
@@ -188,6 +400,7 @@ fn create_bind_group(
     scene_view: &wgpu::TextureView,
     bloom_view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
+    luts: &LutSlots,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Composite Bind Group"),
@@ -205,6 +418,101 @@ fn create_bind_group(
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(luts.view(LutSlot::A)),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(luts.view(LutSlot::B)),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(luts.sampler()),
+            },
         ],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Neutral has to mean bit-identical, not merely close: it is what
+    /// lets grading ship without moving a golden capture. Asserted on the
+    /// values rather than on a render, because the render is what the
+    /// golden gate checks.
+    #[test]
+    fn the_default_look_is_neutral() {
+        let look = CompositeLook::default();
+        assert!(look.grade_is_neutral());
+        assert_eq!(look.exposure, 1.0);
+        assert_eq!(look.tone_mode, ToneMode::default());
+        assert!(CompositeLook::from_tone(ToneMode::Reinhard, 2.0).grade_is_neutral());
+    }
+
+    #[test]
+    fn a_free_pane_resolves_to_its_own_look() {
+        let pane = PaneLook {
+            exposure: 2.0,
+            tone_mode: ToneMode::Reinhard,
+            gain: [1.5; 3],
+            ..PaneLook::default()
+        };
+        let got = resolve_look(None, &pane);
+        assert_eq!(got.exposure, 2.0);
+        assert_eq!(got.tone_mode, ToneMode::Reinhard);
+        assert_eq!(got.gain, [1.5; 3]);
+        // A table is a document asset; a free pane reaches neither slot.
+        assert_eq!(got.lut_a_strength, 0.0);
+        assert_eq!(got.lut_b_strength, 0.0);
+    }
+
+    #[test]
+    fn a_look_through_pane_takes_the_cameras_look() {
+        let pane = PaneLook {
+            exposure: 2.0,
+            tone_mode: ToneMode::Reinhard,
+            ..PaneLook::default()
+        };
+        let camera = CameraLook {
+            exposure: 0.5,
+            lift: [0.1, 0.0, 0.0],
+            ..CameraLook::default()
+        };
+        let got = resolve_look(Some(&camera), &pane);
+        assert_eq!(got.exposure, 0.5, "the camera's exposure wins");
+        assert_eq!(got.lift, [0.1, 0.0, 0.0]);
+        assert_eq!(
+            got.tone_mode,
+            ToneMode::Reinhard,
+            "an inheriting camera leaves the pane's tone mapper alone, which is \
+             what stops adding a camera from restyling an existing scene"
+        );
+    }
+
+    #[test]
+    fn a_camera_that_states_a_tone_curve_overrides_the_pane() {
+        let pane = PaneLook {
+            tone_mode: ToneMode::Reinhard,
+            ..PaneLook::default()
+        };
+        let camera = CameraLook {
+            tone: Some(solarxy_core::scene::ToneCurve::None),
+            ..CameraLook::default()
+        };
+        assert_eq!(resolve_look(Some(&camera), &pane).tone_mode, ToneMode::None);
+    }
+
+    /// The default camera and the default pane must resolve to the same
+    /// neutral look, or placing a camera would change the image.
+    #[test]
+    fn the_two_defaults_resolve_identically() {
+        let pane = PaneLook::default();
+        let through = resolve_look(Some(&CameraLook::default()), &pane);
+        let free = resolve_look(None, &pane);
+        assert_eq!(through.tone_mode, free.tone_mode);
+        assert_eq!(through.exposure, free.exposure);
+        assert!(through.grade_is_neutral() && free.grade_is_neutral());
+    }
 }

@@ -11,17 +11,15 @@ pub enum RendererError {
         #[source]
         source: std::io::Error,
     },
-    /// LDR/HDR image decode failed (`image` crate).
+    /// LDR texture decode failed (`image` crate). High-dynamic-range
+    /// decode failures arrive as `Formats` instead: `.hdr` and `.exr` are
+    /// read by `solarxy-formats`, not here.
     #[error("image decode error: {0}")]
     Image(#[from] image::ImageError),
-    /// EXR decode failed.
-    #[error("EXR decode error: {0}")]
-    Exr(#[from] exr::error::Error),
-    /// Model parsing failed in `solarxy-formats`.
+    /// Model or HDRI parsing failed in `solarxy-formats`.
     #[error(transparent)]
     Formats(#[from] solarxy_formats::FormatsError),
-    /// Unsupported input (e.g. an HDRI extension that is neither .hdr nor
-    /// .exr).
+    /// Unsupported input (e.g. a malformed prepared-HDRI worker blob).
     #[error("{0}")]
     Unsupported(String),
 }

@@ -112,6 +112,11 @@ fn subdivide_mesh_once(mesh: &KernelMesh) -> KernelMesh {
         topology: mesh.topology,
         attributes,
         primitive_attributes: mesh.primitive_attributes.clone(),
+        // Placements ride along: subdividing the prototype subdivides every
+        // copy, and an affine placement commutes with linear subdivision,
+        // so this equals subdividing after baking and costs one mesh
+        // instead of ten thousand.
+        instances: mesh.instances.clone(),
     }
 }
 

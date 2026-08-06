@@ -194,9 +194,28 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
     // an `Arc`, the driver retains it for the passthrough commit, and the
     // result arrives through the same generation-guarded job protocol as
     // imports.
-    if cx.async_jobs && input.triangle_count() > ASYNC_TRIANGLE_THRESHOLD {
+    // Validation walks real triangles, so an instanced input is baked for
+    // the ANALYSIS only. The geometry port still passes the original
+    // through: this node is a tap, and baking what flows out of it would
+    // silently un-instance everything downstream of a validated scatter.
+    let analyzed: Arc<solarxy_kernel::GeometrySet> = if input.is_instanced() {
+        let count = input.instance_count();
+        let baked = input
+            .baked()
+            .map_err(|message| CookError::Failed { message })?;
+        cx.warn(format!(
+            "validation reads real triangles, so this checked the {count} \
+             placements as baked copies; the geometry passes through still \
+             instanced"
+        ));
+        Arc::new(baked.into_owned())
+    } else {
+        Arc::clone(input)
+    };
+
+    if cx.async_jobs && analyzed.triangle_count() > ASYNC_TRIANGLE_THRESHOLD {
         return Ok(CookOutcome::Pending(JobRequest::ValidateGeometry {
-            geometry: Arc::clone(input),
+            geometry: analyzed,
             config,
             budget,
         }));
@@ -204,7 +223,7 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
 
     // The GeometrySet -> RawModelData adapter (round-trip tested in the
     // kernel), then the existing pipeline.
-    let raw = input.to_raw();
+    let raw = analyzed.to_raw();
     let thresholds = ValidationThresholds::default();
     let result = validate_raw_model_with_config(&raw, "", &config, &thresholds, budget);
     let report = Arc::new(result.report.clone());

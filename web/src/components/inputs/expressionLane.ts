@@ -2,7 +2,14 @@
 // is testable without a renderer (the house convention: every web test is
 // pure logic, there is no jsdom).
 
-import type { NodeMirror, ParamSnapshot, ParamValue } from "../../engine/types";
+import { ctxKey } from "../../engine/types";
+import type {
+  GraphContext,
+  NodeId,
+  NodeMirror,
+  ParamSnapshot,
+  ParamValue,
+} from "../../engine/types";
 
 /** The param types an expression may drive.
  *
@@ -49,6 +56,64 @@ export function seedExpression(value: unknown): string {
   // a constant true is spelled.
   if (typeof value === "boolean") return value ? "1 > 0" : "0 > 1";
   return num(value);
+}
+
+/** Parked expression text, keyed by the parameter it came off.
+ *
+ * The `=` affordance is a round trip, not a delete: switching a parameter
+ * back to its literal keeps the expression here so switching forward
+ * restores exactly what was written, rather than reseeding from the value
+ * it happened to resolve to. Only the field's clear control discards.
+ *
+ * Session scoped, deliberately. The natural home is the parameter itself,
+ * but the scene schema is frozen for this release, so parking in the
+ * document is not available and the text is lost on reload. Worth
+ * revisiting when the schema can move again. */
+const parked = new Map<string, string>();
+
+/** The park key. Node ids are only unique within a context, so the context
+ * has to be part of it. */
+function parkKey(ctx: GraphContext, node: NodeId, paramKey: string): string {
+  return `${ctxKey(ctx)} ${node} ${paramKey}`;
+}
+
+export function parkExpression(
+  ctx: GraphContext,
+  node: NodeId,
+  paramKey: string,
+  expr: string,
+): void {
+  parked.set(parkKey(ctx, node, paramKey), expr);
+}
+
+/** The parked text, or `null` when this parameter has never had one
+ * switched off in this session. */
+export function parkedExpression(
+  ctx: GraphContext,
+  node: NodeId,
+  paramKey: string,
+): string | null {
+  return parked.get(parkKey(ctx, node, paramKey)) ?? null;
+}
+
+export function discardParkedExpression(
+  ctx: GraphContext,
+  node: NodeId,
+  paramKey: string,
+): void {
+  parked.delete(parkKey(ctx, node, paramKey));
+}
+
+/** Drops every parked expression. Called when a document is loaded.
+ *
+ * Not defensive tidying: node ids are reused across documents, so without
+ * this an unrelated node in the newly loaded scene inherits the previous
+ * scene's expression the first time someone clicks its `=`. The frontend
+ * mirror already carries one recorded case of state outliving a load and
+ * attaching itself to the wrong node; this is the same mistake, and it is
+ * not being made twice. */
+export function clearParkedExpressions(): void {
+  parked.clear();
 }
 
 /** Formats a resolved value for the readout under the field. */

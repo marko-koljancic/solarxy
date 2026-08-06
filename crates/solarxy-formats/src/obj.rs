@@ -118,21 +118,11 @@ fn parse_obj(
             normal_texture_path: normal_path,
             diffuse_texture_data: diffuse_data,
             normal_texture_data: normal_data,
-            metallic_roughness_texture_path: None,
-            metallic_roughness_texture_data: None,
-            occlusion_texture_path: None,
-            occlusion_texture_data: None,
-            emissive_texture_path: None,
-            emissive_texture_data: None,
             roughness_factor,
             metallic_factor,
-            occlusion_strength: 1.0,
-            emissive_factor: [0.0, 0.0, 0.0],
             base_color_factor: [kd[0], kd[1], kd[2], base_alpha],
             alpha_mode,
             alpha_cutoff,
-            shading_model: solarxy_core::geometry::ShadingModel::default(),
-            toon_steps: 3.0,
             ambient: m.ambient,
             diffuse: m.diffuse,
             specular: m.specular,
@@ -145,6 +135,7 @@ fn parse_obj(
             normal_texture_name: m.normal_texture.clone(),
             shininess_texture_name: m.shininess_texture.clone(),
             dissolve_texture_name: m.dissolve_texture.clone(),
+            ..RawMaterialData::default()
         });
     }
 

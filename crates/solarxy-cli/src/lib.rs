@@ -21,11 +21,7 @@
 pub mod calc;
 pub mod parser;
 #[cfg(feature = "tui")]
-pub(crate) mod tui;
-#[cfg(feature = "tui")]
-pub mod tui_analysis;
-#[cfg(feature = "tui")]
-pub mod tui_theme;
+pub mod tui;
 mod validators;
 
 // Re-export the validation orchestration library so existing call sites

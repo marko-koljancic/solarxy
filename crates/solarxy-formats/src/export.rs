@@ -194,7 +194,16 @@ pub fn write_obj_mtl_bytes(
         if let Some(d) = mat.dissolve {
             let _ = writeln!(mtl, "d {d}");
         }
-        if let Some(ni) = mat.optical_density {
+        // MTL's Ni is an index of refraction, and two fields now describe
+        // one. The principled `ior` wins when it has been moved off its
+        // default, because that is a deliberate authoring act; otherwise the
+        // legacy MTL value round-trips as it always has.
+        let ni = if (mat.ior - 1.5).abs() > f32::EPSILON {
+            Some(mat.ior)
+        } else {
+            mat.optical_density
+        };
+        if let Some(ni) = ni {
             let _ = writeln!(mtl, "Ni {ni}");
         }
         let _ = writeln!(mtl, "Pr {}", mat.roughness_factor);
@@ -408,6 +417,265 @@ impl TextureTable {
     }
 }
 
+/// Whether a colour has been moved off the extension's default.
+///
+/// The question is exact equality, but comparing float arrays that way is a
+/// lint, and at these magnitudes an epsilon answers the same question.
+fn rgb_differs(value: [f32; 3], default: [f32; 3]) -> bool {
+    value
+        .iter()
+        .zip(default)
+        .any(|(a, b)| (a - b).abs() > f32::EPSILON)
+}
+
+/// Assemble the `extensions` object for one material.
+///
+/// Registers whatever textures the extensions reference, and records each
+/// extension name it wrote into `used`, which becomes `extensionsUsed` at
+/// the root. Every extension here is optional-fallback: a reader that
+/// ignores all of them still gets a valid metallic-roughness material, so
+/// `extensionsRequired` is deliberately never written.
+///
+/// A factor is written only when it differs from the extension's own
+/// default, and an extension block is written only when it carries
+/// something, so a plain material exports byte-identically to before.
+fn material_extensions(
+    mat: &RawMaterialData,
+    table: &mut TextureTable,
+    bin: &mut Vec<u8>,
+    buffer_views: &mut Vec<serde_json::Value>,
+    used: &mut std::collections::BTreeSet<&'static str>,
+) -> Result<serde_json::Map<String, serde_json::Value>, FormatsError> {
+    let mut extensions = serde_json::Map::new();
+
+    // Registers a texture and inserts `{"index": n}` under `key`.
+    macro_rules! tex {
+        ($block:expr, $key:literal, $data:expr) => {
+            if let Some(t) = table.texture_for(bin, buffer_views, $data.as_ref())? {
+                $block.insert($key.into(), serde_json::json!({ "index": t }));
+            }
+        };
+    }
+
+    if mat.shading_model == solarxy_core::geometry::ShadingModel::Unlit {
+        used.insert("KHR_materials_unlit");
+        extensions.insert("KHR_materials_unlit".into(), serde_json::json!({}));
+    }
+
+    if (mat.ior - 1.5).abs() > f32::EPSILON {
+        used.insert("KHR_materials_ior");
+        extensions.insert(
+            "KHR_materials_ior".into(),
+            serde_json::json!({ "ior": mat.ior }),
+        );
+    }
+
+    if (mat.emissive_strength - 1.0).abs() > f32::EPSILON {
+        used.insert("KHR_materials_emissive_strength");
+        extensions.insert(
+            "KHR_materials_emissive_strength".into(),
+            serde_json::json!({ "emissiveStrength": mat.emissive_strength }),
+        );
+    }
+
+    let mut transmission = serde_json::Map::new();
+    if mat.transmission != 0.0 {
+        transmission.insert(
+            "transmissionFactor".into(),
+            serde_json::json!(mat.transmission),
+        );
+    }
+    tex!(
+        transmission,
+        "transmissionTexture",
+        mat.transmission_texture_data
+    );
+    if !transmission.is_empty() {
+        used.insert("KHR_materials_transmission");
+        extensions.insert(
+            "KHR_materials_transmission".into(),
+            serde_json::Value::Object(transmission),
+        );
+    }
+
+    let mut volume = serde_json::Map::new();
+    if mat.thickness != 0.0 {
+        volume.insert("thicknessFactor".into(), serde_json::json!(mat.thickness));
+    }
+    if rgb_differs(mat.attenuation_color, [1.0, 1.0, 1.0]) {
+        volume.insert(
+            "attenuationColor".into(),
+            serde_json::json!(mat.attenuation_color),
+        );
+    }
+    // Zero is this type's "no attenuation"; the specification expresses the
+    // same thing by omitting the key, whose default is infinite.
+    if mat.attenuation_distance > 0.0 {
+        volume.insert(
+            "attenuationDistance".into(),
+            serde_json::json!(mat.attenuation_distance),
+        );
+    }
+    tex!(volume, "thicknessTexture", mat.thickness_texture_data);
+    if !volume.is_empty() {
+        used.insert("KHR_materials_volume");
+        extensions.insert(
+            "KHR_materials_volume".into(),
+            serde_json::Value::Object(volume),
+        );
+    }
+
+    let mut specular = serde_json::Map::new();
+    if (mat.specular_intensity - 1.0).abs() > f32::EPSILON {
+        specular.insert(
+            "specularFactor".into(),
+            serde_json::json!(mat.specular_intensity),
+        );
+    }
+    if rgb_differs(mat.specular_color, [1.0, 1.0, 1.0]) {
+        specular.insert(
+            "specularColorFactor".into(),
+            serde_json::json!(mat.specular_color),
+        );
+    }
+    tex!(specular, "specularTexture", mat.specular_texture_data);
+    tex!(
+        specular,
+        "specularColorTexture",
+        mat.specular_color_texture_data
+    );
+    if !specular.is_empty() {
+        used.insert("KHR_materials_specular");
+        extensions.insert(
+            "KHR_materials_specular".into(),
+            serde_json::Value::Object(specular),
+        );
+    }
+
+    let mut clearcoat = serde_json::Map::new();
+    if mat.clearcoat != 0.0 {
+        clearcoat.insert("clearcoatFactor".into(), serde_json::json!(mat.clearcoat));
+    }
+    if mat.clearcoat_roughness != 0.0 {
+        clearcoat.insert(
+            "clearcoatRoughnessFactor".into(),
+            serde_json::json!(mat.clearcoat_roughness),
+        );
+    }
+    tex!(clearcoat, "clearcoatTexture", mat.clearcoat_texture_data);
+    tex!(
+        clearcoat,
+        "clearcoatRoughnessTexture",
+        mat.clearcoat_roughness_texture_data
+    );
+    tex!(
+        clearcoat,
+        "clearcoatNormalTexture",
+        mat.clearcoat_normal_texture_data
+    );
+    if !clearcoat.is_empty() {
+        used.insert("KHR_materials_clearcoat");
+        extensions.insert(
+            "KHR_materials_clearcoat".into(),
+            serde_json::Value::Object(clearcoat),
+        );
+    }
+
+    let mut sheen = serde_json::Map::new();
+    if rgb_differs(mat.sheen_color, [0.0, 0.0, 0.0]) {
+        sheen.insert(
+            "sheenColorFactor".into(),
+            serde_json::json!(mat.sheen_color),
+        );
+    }
+    if mat.sheen_roughness != 0.0 {
+        sheen.insert(
+            "sheenRoughnessFactor".into(),
+            serde_json::json!(mat.sheen_roughness),
+        );
+    }
+    tex!(sheen, "sheenColorTexture", mat.sheen_color_texture_data);
+    tex!(
+        sheen,
+        "sheenRoughnessTexture",
+        mat.sheen_roughness_texture_data
+    );
+    if !sheen.is_empty() {
+        used.insert("KHR_materials_sheen");
+        extensions.insert(
+            "KHR_materials_sheen".into(),
+            serde_json::Value::Object(sheen),
+        );
+    }
+
+    let mut iridescence = serde_json::Map::new();
+    if mat.iridescence != 0.0 {
+        iridescence.insert(
+            "iridescenceFactor".into(),
+            serde_json::json!(mat.iridescence),
+        );
+    }
+    if (mat.iridescence_ior - 1.3).abs() > f32::EPSILON {
+        iridescence.insert(
+            "iridescenceIor".into(),
+            serde_json::json!(mat.iridescence_ior),
+        );
+    }
+    if (mat.iridescence_thickness_min - 100.0).abs() > f32::EPSILON {
+        iridescence.insert(
+            "iridescenceThicknessMinimum".into(),
+            serde_json::json!(mat.iridescence_thickness_min),
+        );
+    }
+    if (mat.iridescence_thickness_max - 400.0).abs() > f32::EPSILON {
+        iridescence.insert(
+            "iridescenceThicknessMaximum".into(),
+            serde_json::json!(mat.iridescence_thickness_max),
+        );
+    }
+    tex!(
+        iridescence,
+        "iridescenceTexture",
+        mat.iridescence_texture_data
+    );
+    tex!(
+        iridescence,
+        "iridescenceThicknessTexture",
+        mat.iridescence_thickness_texture_data
+    );
+    if !iridescence.is_empty() {
+        used.insert("KHR_materials_iridescence");
+        extensions.insert(
+            "KHR_materials_iridescence".into(),
+            serde_json::Value::Object(iridescence),
+        );
+    }
+
+    let mut anisotropy = serde_json::Map::new();
+    if mat.anisotropy != 0.0 {
+        anisotropy.insert(
+            "anisotropyStrength".into(),
+            serde_json::json!(mat.anisotropy),
+        );
+    }
+    if mat.anisotropy_rotation != 0.0 {
+        anisotropy.insert(
+            "anisotropyRotation".into(),
+            serde_json::json!(mat.anisotropy_rotation),
+        );
+    }
+    tex!(anisotropy, "anisotropyTexture", mat.anisotropy_texture_data);
+    if !anisotropy.is_empty() {
+        used.insert("KHR_materials_anisotropy");
+        extensions.insert(
+            "KHR_materials_anisotropy".into(),
+            serde_json::Value::Object(anisotropy),
+        );
+    }
+
+    Ok(extensions)
+}
+
 /// Binary glTF (GLB): one buffer, interleaved-free accessors, one node
 /// per mesh. Hand-built JSON + BIN container; the format is small enough
 /// that the typed builder buys nothing.
@@ -436,7 +704,8 @@ pub fn write_glb_bytes(
         textures: Vec::new(),
     };
 
-    let mut any_unlit = false;
+    let mut extensions_used: std::collections::BTreeSet<&'static str> =
+        std::collections::BTreeSet::new();
     let mut json_materials = Vec::new();
     for mat in materials {
         let mut pbr = serde_json::Map::new();
@@ -514,12 +783,15 @@ pub fn write_glb_bytes(
                 entry.insert("alphaMode".into(), serde_json::json!("BLEND"));
             }
         }
-        if mat.shading_model == solarxy_core::geometry::ShadingModel::Unlit {
-            any_unlit = true;
-            entry.insert(
-                "extensions".into(),
-                serde_json::json!({ "KHR_materials_unlit": {} }),
-            );
+        let extensions = material_extensions(
+            mat,
+            &mut table,
+            &mut bin,
+            &mut buffer_views,
+            &mut extensions_used,
+        )?;
+        if !extensions.is_empty() {
+            entry.insert("extensions".into(), serde_json::Value::Object(extensions));
         }
         json_materials.push(serde_json::Value::Object(entry));
     }
@@ -636,10 +908,13 @@ pub fn write_glb_bytes(
             root.insert("images".into(), serde_json::Value::Array(table.images));
             root.insert("textures".into(), serde_json::Value::Array(table.textures));
         }
-        if any_unlit {
+        // Sorted and deduplicated by the set, so the array is stable across
+        // runs and a round-trip test can assert on it directly. Every one is
+        // optional-fallback, so `extensionsRequired` stays absent.
+        if !extensions_used.is_empty() {
             root.insert(
                 "extensionsUsed".into(),
-                serde_json::json!(["KHR_materials_unlit"]),
+                serde_json::json!(extensions_used.iter().collect::<Vec<_>>()),
             );
         }
     }
@@ -1017,6 +1292,161 @@ mod tests {
         let bytes = write_glb_bytes(&[mesh], &[material]).expect("write");
         let model = crate::gltf::load_gltf_bytes(&bytes, &mut crate::NoAssets).expect("reimport");
         assert_eq!(model.materials[0].shading_model, ShadingModel::Unlit);
+    }
+
+    #[test]
+    fn glb_principled_extensions_round_trip() {
+        // Every principled property survives a write and a re-read, and the
+        // extension names land in extensionsUsed. This is the export half of
+        // the promise; the import half is proved against a hand-authored
+        // fixture in tests/loaders.rs, because a round trip through our own
+        // writer only shows we agree with ourselves.
+        let material = Arc::new(RawMaterialData {
+            name: "glass".to_string(),
+            ior: 1.7,
+            transmission: 0.9,
+            thickness: 2.5,
+            attenuation_color: [0.8, 0.2, 0.1],
+            attenuation_distance: 3.0,
+            clearcoat: 0.75,
+            clearcoat_roughness: 0.25,
+            sheen_color: [0.4, 0.5, 0.6],
+            sheen_roughness: 0.35,
+            iridescence: 0.5,
+            iridescence_ior: 1.8,
+            iridescence_thickness_min: 200.0,
+            iridescence_thickness_max: 600.0,
+            specular_intensity: 0.6,
+            specular_color: [0.9, 0.8, 0.7],
+            anisotropy: 0.65,
+            anisotropy_rotation: 1.2,
+            emissive_strength: 4.0,
+            ..Default::default()
+        });
+        let d = quad();
+        let mut mesh = export_quad(&d);
+        mesh.material_index = Some(0);
+        let bytes = write_glb_bytes(&[mesh], &[material]).expect("write");
+        let model = crate::gltf::load_gltf_bytes(&bytes, &mut crate::NoAssets).expect("reimport");
+        let m = &model.materials[0];
+
+        assert!((m.ior - 1.7).abs() < 1e-6, "ior");
+        assert!((m.transmission - 0.9).abs() < 1e-6, "transmission");
+        assert!((m.thickness - 2.5).abs() < 1e-6, "thickness");
+        assert_eq!(m.attenuation_color, [0.8, 0.2, 0.1]);
+        assert!((m.attenuation_distance - 3.0).abs() < 1e-6, "attenuation");
+        assert!((m.clearcoat - 0.75).abs() < 1e-6, "clearcoat");
+        assert!(
+            (m.clearcoat_roughness - 0.25).abs() < 1e-6,
+            "coat roughness"
+        );
+        assert_eq!(m.sheen_color, [0.4, 0.5, 0.6]);
+        assert!((m.sheen_roughness - 0.35).abs() < 1e-6, "sheen roughness");
+        assert!((m.iridescence - 0.5).abs() < 1e-6, "iridescence");
+        assert!((m.iridescence_ior - 1.8).abs() < 1e-6, "iridescence ior");
+        assert!(
+            (m.iridescence_thickness_min - 200.0).abs() < 1e-6,
+            "thickness min"
+        );
+        assert!(
+            (m.iridescence_thickness_max - 600.0).abs() < 1e-6,
+            "thickness max"
+        );
+        assert!((m.specular_intensity - 0.6).abs() < 1e-6, "specular");
+        assert_eq!(m.specular_color, [0.9, 0.8, 0.7]);
+        assert!((m.anisotropy - 0.65).abs() < 1e-6, "anisotropy");
+        assert!((m.anisotropy_rotation - 1.2).abs() < 1e-6, "rotation");
+        assert!(
+            (m.emissive_strength - 4.0).abs() < 1e-6,
+            "emissive strength"
+        );
+
+        // The container half: read the JSON chunk back and confirm every
+        // extension was declared, sorted and deduplicated.
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes[20..20 + json_len]).expect("json chunk");
+        let used: Vec<&str> = json["extensionsUsed"]
+            .as_array()
+            .expect("extensionsUsed")
+            .iter()
+            .map(|v| v.as_str().expect("name"))
+            .collect();
+        assert_eq!(
+            used,
+            [
+                "KHR_materials_anisotropy",
+                "KHR_materials_clearcoat",
+                "KHR_materials_emissive_strength",
+                "KHR_materials_ior",
+                "KHR_materials_iridescence",
+                "KHR_materials_sheen",
+                "KHR_materials_specular",
+                "KHR_materials_transmission",
+                "KHR_materials_volume",
+            ]
+        );
+        // Optional-fallback, every one of them, so nothing is required.
+        assert!(json.get("extensionsRequired").is_none());
+    }
+
+    #[test]
+    fn a_plain_material_declares_no_extensions() {
+        // The neutrality check that keeps the promise cheap: a material that
+        // touches none of these properties must export exactly as it did
+        // before they existed, with no extensions object and no
+        // extensionsUsed array at all.
+        let material = Arc::new(RawMaterialData {
+            name: "plain".to_string(),
+            roughness_factor: 0.5,
+            ..Default::default()
+        });
+        let d = quad();
+        let mut mesh = export_quad(&d);
+        mesh.material_index = Some(0);
+        let bytes = write_glb_bytes(&[mesh], &[material]).expect("write");
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes[20..20 + json_len]).expect("json chunk");
+        assert!(json.get("extensionsUsed").is_none());
+        assert!(json["materials"][0].get("extensions").is_none());
+    }
+
+    #[test]
+    fn glb_extension_textures_round_trip_and_deduplicate() {
+        // An extension texture travels out and back, and an image shared
+        // between an original slot and an extension slot still embeds once,
+        // because the texture table keys on content hash and knows nothing
+        // about roles.
+        let shared = Arc::new(RawImageData::new(vec![9, 9, 9, 255], 1, 1));
+        let material = Arc::new(RawMaterialData {
+            name: "coated".to_string(),
+            clearcoat: 0.5,
+            diffuse_texture_data: Some(Arc::clone(&shared)),
+            clearcoat_texture_data: Some(Arc::clone(&shared)),
+            transmission: 0.5,
+            transmission_texture_data: Some(Arc::new(RawImageData::new(vec![1, 2, 3, 255], 1, 1))),
+            ..Default::default()
+        });
+        let d = quad();
+        let mut mesh = export_quad(&d);
+        mesh.material_index = Some(0);
+        let bytes = write_glb_bytes(&[mesh], &[material]).expect("write");
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes[20..20 + json_len]).expect("json chunk");
+        // Two distinct images for three references.
+        assert_eq!(json["images"].as_array().unwrap().len(), 2);
+
+        let model = crate::gltf::load_gltf_bytes(&bytes, &mut crate::NoAssets).expect("reimport");
+        let m = &model.materials[0];
+        assert!(m.clearcoat_texture_data.is_some(), "clearcoat map");
+        assert!(m.transmission_texture_data.is_some(), "transmission map");
+        assert_eq!(
+            m.clearcoat_texture_data.as_ref().unwrap().hash,
+            m.diffuse_texture_data.as_ref().unwrap().hash,
+            "the shared image stayed one image"
+        );
     }
 
     #[test]

@@ -1,12 +1,15 @@
 //! The `array` modifier. Duplicates
 //! the input `count` times (the original included), either stepping linearly by
-//! an offset or revolving radially about an axis. The kernel op composes the
-//! existing transform bake and merge, so materials survive duplication and
-//! dedup to a single entry.
+//! an offset or revolving radially about an axis.
+//!
+//! Copy Mode decides what a copy is. Instance, the default, keeps the input
+//! once and carries a placement matrix per copy. Bake composes the existing
+//! transform bake and merge, so materials survive duplication and dedup to a
+//! single entry.
 
 use solarxy_kernel::array::{ArrayMode, Axis, array};
 
-use super::common::{geometry_output, params_with};
+use super::common::{copy_mode_from_key, copy_mode_param, geometry_output, params_with};
 use crate::cook::{CookCtx, CookError, CookOutcome, Inputs, Outputs};
 use crate::params::ParamValue;
 use crate::registry::coerce::DataType;
@@ -18,7 +21,7 @@ use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDe
 pub fn descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "array",
-        version: 1,
+        version: 2,
         display_name: "Array",
         category: Category::Copy,
         contexts: ContextSet::GEO,
@@ -48,8 +51,8 @@ pub fn descriptor() -> NodeTypeDescriptor {
                     "How the copies are placed. Linear steps each one along a fixed \
                      offset, for fence posts and stair treads. Radial revolves them \
                      about an axis, for spokes and bolt circles, and turns each copy to \
-                     follow the revolution. The mode decides which of the parameters \
-                     below apply; the rest hide.",
+                     follow the revolution. The mode decides which of the placement \
+                     parameters below apply; the rest hide.",
                 ),
                 ParamSpec::new(
                     "count",
@@ -114,6 +117,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
                      sweep/count, so a full 360 tiles evenly without doubling up \
                      at the seam.",
                 ),
+                copy_mode_param("array"),
             ],
         ),
         bypass: BypassBehavior::PassThrough {
@@ -121,10 +125,13 @@ pub fn descriptor() -> NodeTypeDescriptor {
         },
         doc: "Duplicates the input Count times, counting the original, either \
               stepping each copy linearly along an offset or revolving it \
-              about an axis. Every copy is a real baked transform of the input \
-              concatenated as though you had merged them yourself, and \
-              identical materials collapse to one table entry rather than one \
-              per copy.\n\n\
+              about an axis.\n\n\
+              Copy Mode decides what a copy is. Instance, the default, keeps \
+              the input once and carries a placement matrix per copy, so a \
+              long fence costs one post. Bake makes every copy a real baked \
+              transform of the input, concatenated as though you had merged \
+              them yourself, with identical materials collapsing to one table \
+              entry rather than one per copy.\n\n\
               It replaces the branch you would otherwise wire by hand: a \
               `transform` and a `merge` for every copy. Put it after whatever \
               makes the single unit, a primitive or a small assembly you have \
@@ -136,20 +143,26 @@ pub fn descriptor() -> NodeTypeDescriptor {
               instead of stacking a copy on the original at the seam. And \
               Radius defaults to 0, which leaves every radial copy sitting on \
               the axis spinning in place: give it a radius to get a ring.",
-        search_aliases: &["duplicate", "repeat", "clone", "radial", "grid"],
+        search_aliases: &["duplicate", "repeat", "clone", "radial", "grid", "instance"],
         glyph: "array",
         role: NodeRole::Standard,
         cook,
-        migrate: None,
+        migrate: Some(super::common::migrate_pin_copy_mode_to_bake),
     }
 }
 
-fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
+
+    // An already-instanced input bakes first. Both branches of the kernel
+    // op replace each mesh's placement list (Instance writes the new one,
+    // Bake transforms the prototype), so an array of a scatter would
+    // otherwise keep the array's copies and silently drop the scatter's.
+    let input = &super::common::baked_input(input, cx)?;
 
     let count = p.u32("count");
     let mode = match p.enum_key("mode") {
@@ -163,7 +176,12 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOu
         },
     };
 
-    match array(input, count, mode) {
+    match array(
+        input,
+        count,
+        mode,
+        copy_mode_from_key(p.enum_key("copy_mode")),
+    ) {
         Ok(set) => Ok(CookOutcome::Done(Outputs::geometry(set))),
         Err(message) => Err(CookError::Failed { message }),
     }
@@ -214,16 +232,82 @@ mod tests {
         set
     }
 
+    /// Stored params pinned to Bake. Instance became the descriptor default
+    /// in 0.8.2, so a test whose subject is real concatenated geometry has to
+    /// say which mode it means rather than inherit one.
+    fn bake() -> BTreeMap<String, ParamSource> {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "copy_mode".to_string(),
+            ParamSource::Literal(ParamValue::Enum("bake".into())),
+        );
+        stored
+    }
+
     #[test]
     fn cooks_at_defaults() {
         let out = run(BTreeMap::new());
-        // Default: linear, count 3, offset (1,0,0).
-        assert_eq!(set_of(&out).mesh_count(), 3);
+        let set = set_of(&out);
+        // Default: linear, count 3, offset (1,0,0), Instance. One prototype
+        // and three placements, not three meshes.
+        assert_eq!(set.mesh_count(), 1);
+        assert_eq!(set.meshes[0].instances.as_ref().map(|i| i.len()), Some(3));
+    }
+
+    #[test]
+    fn bake_mode_still_concatenates_real_copies() {
+        let out = run(bake());
+        let set = set_of(&out);
+        assert_eq!(set.mesh_count(), 3);
+        assert!(
+            !set.is_instanced(),
+            "baked output carries no placement list; the copies ARE the geometry"
+        );
+    }
+
+    /// The two modes describe the same arrangement, which is the property
+    /// that makes Instance a representation choice rather than a different
+    /// result. Bounds are the cheapest observable both modes share: the
+    /// instanced set derives them from the placements.
+    #[test]
+    fn instance_and_bake_agree_on_where_the_copies_are() {
+        let mut stored = bake();
+        stored.insert(
+            "count".to_string(),
+            ParamSource::Literal(ParamValue::Int(4)),
+        );
+        stored.insert(
+            "offset".to_string(),
+            ParamSource::Literal(ParamValue::Vec3([3.0, 0.0, 0.0])),
+        );
+        let baked = run(stored.clone());
+        stored.remove("copy_mode");
+        let instanced = run(stored);
+        assert_bounds_agree(set_of(&baked), set_of(&instanced));
+    }
+
+    /// `AABB` carries no `PartialEq`, and the two modes reach the same box by
+    /// different arithmetic (transformed corners against transformed points),
+    /// so the comparison is per-component and tolerant.
+    fn assert_bounds_agree(a: &GeometrySet, b: &GeometrySet) {
+        for (x, y) in [
+            (a.bounds.min.x, b.bounds.min.x),
+            (a.bounds.min.y, b.bounds.min.y),
+            (a.bounds.min.z, b.bounds.min.z),
+            (a.bounds.max.x, b.bounds.max.x),
+            (a.bounds.max.y, b.bounds.max.y),
+            (a.bounds.max.z, b.bounds.max.z),
+        ] {
+            assert!(
+                (x - y).abs() < 1e-4,
+                "the modes disagree on where the copies are: {x} vs {y}"
+            );
+        }
     }
 
     #[test]
     fn linear_places_copies_along_the_offset() {
-        let mut stored = BTreeMap::new();
+        let mut stored = bake();
         stored.insert(
             "count".to_string(),
             ParamSource::Literal(ParamValue::Int(4)),
@@ -241,7 +325,7 @@ mod tests {
 
     #[test]
     fn radial_reads_its_own_params_and_revolves() {
-        let mut stored = BTreeMap::new();
+        let mut stored = bake();
         stored.insert(
             "mode".to_string(),
             ParamSource::Literal(ParamValue::Enum("radial".into())),
@@ -264,7 +348,10 @@ mod tests {
 
     #[test]
     fn an_over_ceiling_count_is_a_cook_error_not_a_panic() {
-        let mut stored = BTreeMap::new();
+        // Bake is the mode that allocates per copy, so it is the mode with a
+        // count-driven ceiling at all: Instance counts the input once and
+        // this same graph places happily, which is the point of the modes.
+        let mut stored = bake();
         // The hard range caps count at 512; 512 copies of a 12-triangle box is
         // fine, so drive the ceiling with a dense box instead.
         stored.insert(
@@ -288,6 +375,35 @@ mod tests {
             panic!("expected a Failed cook error");
         };
         assert!(message.contains("ceiling"), "got: {message}");
+    }
+
+    /// The same graph that cannot bake places without complaint, which is
+    /// what the ceiling message tells the user to try.
+    #[test]
+    fn the_count_that_cannot_bake_still_instances() {
+        let mut stored = BTreeMap::new();
+        stored.insert(
+            "count".to_string(),
+            ParamSource::Literal(ParamValue::Int(512)),
+        );
+        let resolved =
+            crate::registry::resolve::resolve_params(&stored, &descriptor().params).unwrap();
+        let mut slots = BTreeMap::new();
+        slots.insert(
+            "geometry".to_string(),
+            InputSlot::Single(Value::Geometry(Arc::new(GeometrySet::from_mesh(
+                generate_box(1.0, 1.0, 1.0, 100, 100, 100),
+            )))),
+        );
+        let inputs = Inputs::new(slots);
+        let assets = crate::assets::AssetTable::new();
+        let mut cx = CookCtx::new(&assets, false);
+        let CookOutcome::Done(out) = cook(&resolved, &inputs, &mut cx).unwrap() else {
+            panic!("array cooks synchronously");
+        };
+        let set = set_of(&out);
+        assert_eq!(set.mesh_count(), 1);
+        assert_eq!(set.meshes[0].instances.as_ref().map(|i| i.len()), Some(512));
     }
 
     #[test]

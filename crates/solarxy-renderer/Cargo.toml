@@ -10,7 +10,7 @@ description = "wgpu-based PBR renderer for Solarxy"
 
 [features]
 # Path-based entry points (load_model_any, load_texture, load_binary,
-# ModelScene::new, IblState::from_hdri). Off for wasm builds; the byte-fed
+# LoadedModel::load, IblState::from_hdri). Off for wasm builds; the byte-fed
 # APIs (upload_model, from_hdr_bytes/from_exr_bytes, Texture::from_bytes)
 # are always available.
 default = ["std-fs"]
@@ -25,19 +25,22 @@ wgpu        = "27.0.1"
 cgmath      = { workspace = true }
 bytemuck    = { version = "1.24", features = ["derive"] }
 half        = "2.0"
-exr         = "1.0"
 tracing     = "0.1"
 thiserror   = { workspace = true }
 
 [dev-dependencies]
+# Blocking device setup in the integration tests. The golden-capture harness
+# used this too before it moved to `solarxy-host`; the tests still need it.
 pollster = "0.4.0"
-# Binary-style error handling for the golden-capture example only.
+# Binary-style error handling for the two generator examples below.
 anyhow = { workspace = true }
 # Rasterizes the label glyph atlas in the gen_glyph_atlas example only;
 # examples never compile into the wasm cdylib, so no runtime font dep.
 ab_glyph = "0.2.31"
 
+# LDR texture decode only. Radiance `hdr` and the `exr` crate moved to
+# solarxy-formats with the HDRI decoders; nothing here reads them now.
 [dependencies.image]
 version          = "0.25.9"
 default-features = false
-features         = ["png", "jpeg", "webp", "hdr"]
+features         = ["png", "jpeg", "webp"]

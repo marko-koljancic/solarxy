@@ -233,6 +233,10 @@ fn box_project_mesh(
         topology: mesh.topology,
         attributes,
         primitive_attributes: mesh.primitive_attributes.clone(),
+        // Placements ride along: the projection is in the mesh's own space,
+        // so every copy resolves the same UVs and baking first would only
+        // compute the identical layout ten thousand times.
+        instances: mesh.instances.clone(),
     }
 }
 

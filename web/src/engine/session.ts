@@ -12,6 +12,7 @@ import {
   saveToFile,
   writeAutosave,
 } from "../persistence/opfs";
+import { clearParkedExpressions } from "../components/inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
 import { descriptorFor } from "../registry/datatypes";
 import { syncCanvasSize } from "./canvas";
@@ -37,6 +38,7 @@ import type {
   ImportOptions,
   NodeId,
   PaneDisplaySettings,
+  PaneLook,
   ParamSource,
   PickDetail,
   ReviewAnchor,
@@ -248,7 +250,14 @@ function pumpImportJobs(): void {
   const jobs = getClient().takeImportJobs();
   const validateJobs = getClient().takeValidateJobs();
   const imageJobs = getClient().takeImageJobs();
-  if (jobs.length === 0 && validateJobs.length === 0 && imageJobs.length === 0) return;
+  const hdriJobs = getClient().takeHdriJobs();
+  if (
+    jobs.length === 0 &&
+    validateJobs.length === 0 &&
+    imageJobs.length === 0 &&
+    hdriJobs.length === 0
+  )
+    return;
   const worker = ensureImportWorker();
   for (const job of jobs) {
     const files: { name: string; bytes: Uint8Array }[] = [];
@@ -297,6 +306,31 @@ function pumpImportJobs(): void {
       { kind: "decodeImage", jobId: job.jobId, ctx: job.ctx, name: job.name, bytes },
       [bytes.buffer],
     );
+  }
+  for (const job of hdriJobs) {
+    const bytes = getClient().assetBytes(job.hash);
+    if (!bytes) {
+      applyToMirror(getClient().submitHdriError(job.ctx, job.jobId, "asset bytes not staged"));
+      continue;
+    }
+    // Reuses the worker's existing HDRI entry point, which decodes AND
+    // runs the CPU lighting stages. A lean decode would leave the
+    // irradiance convolution on the main thread, where it is a visible
+    // stall on a large equirect.
+    const ext = job.name.includes(".") ? extOf(job.name) : "";
+    prepareHdriInWorker(bytes, ext)
+      .then((prepared) =>
+        applyToMirror(getClient().submitDecodedHdri(job.ctx, job.jobId, prepared)),
+      )
+      .catch((err) =>
+        applyToMirror(
+          getClient().submitHdriError(
+            job.ctx,
+            job.jobId,
+            err instanceof Error ? err.message : String(err),
+          ),
+        ),
+      );
   }
 }
 
@@ -471,7 +505,7 @@ export function pushLabelColors(): void {
 }
 
 /** Pushes the display defaults (wireframe weight, background, turntable
- * rpm) into the host. At boot both pane-seeded fields apply to every pane
+ * rpm, point size, the post-processing toggles) into the host. At boot both pane-seeded fields apply to every pane
  * (before any scene load, so a restored scene's saved panes still win); a
  * mid-session preference save applies only the fields that changed, so
  * per-pane Display-menu overrides survive unrelated edits. The changed
@@ -579,6 +613,13 @@ export function setActivePane(pane: number): void {
 
 export function setPaneSettings(pane: number, settings: PaneDisplaySettings): void {
   useViewState.getState().setView(getClient().setPaneSettings(pane, settings));
+}
+
+/** Replace one pane's own look. Only meaningful for a free pane: a pane
+ * looking through a camera composites with that camera's look, which is a
+ * document value edited by setting the node's parameters. */
+export function setPaneLook(pane: number, look: PaneLook): void {
+  useViewState.getState().setView(getClient().setPaneLook(pane, look));
 }
 
 export function setDisplaySettings(settings: DisplaySettingsDto): void {
@@ -821,13 +862,24 @@ export async function explicitSave(): Promise<void> {
  * camera is restored Rust-side. */
 function applyLoadedScene(bytes: Uint8Array): void {
   const result = getClient().loadSlxy(bytes);
+  // Node ids are reused across documents, so an expression parked off a
+  // node in the outgoing scene would be handed to whatever holds that id
+  // in the incoming one. New Scene needs no equivalent: it reloads the
+  // page, which takes the whole map with it.
+  clearParkedExpressions();
   applyToMirror(result.batch);
   useMirror.getState().setCurrent("root");
   useMirror.getState().setDirty(false);
   refreshStale();
   refreshViewState();
   syncSceneSelection();
-  void restoreEnvironment(result.environment.hdriHash);
+  // The node wins: when the document carries an environment node, its
+  // cook emits the environment and restoring the scene file's own section
+  // as well would race it, with whichever finished last taking the
+  // viewport. The section stays the fallback for pre-node documents.
+  if (!result.environment.fromNode) {
+    void restoreEnvironment(result.environment.hdriHash);
+  }
   if (result.warnings.length > 0) {
     pushToast(`Scene loaded with ${result.warnings.length} warning(s).`, "warn");
   }

@@ -20,17 +20,16 @@ crate-type = ["cdylib", "rlib"]
 solarxy-graph = { path = "../solarxy-graph" }
 solarxy-core = { path = "../solarxy-core", default-features = false, features = ["serde"] }
 # The renderer builds natively (the desktop shell depends on it), so it can sit
-# here rather than behind the wasm cfg. That is what lets `gizmo.rs` -- pure
-# hit-test and drag math over the renderer's manipulator types -- be compiled and
-# TESTED by native CI instead of only by a wasm build.
+# here rather than behind the wasm cfg.
 solarxy-renderer = { path = "../solarxy-renderer", default-features = false }
-# Likewise pure CPU math: the gizmo's rotate drag composes and decomposes Euler
-# rotations through the kernel, so the kernel has to be reachable natively too.
+# The shared host orchestration: the pane uniform writes, the lighting
+# chokepoint, the per-pane camera lifecycle, the view-state model, and the
+# gizmo drag solver. Native-visible, which is what keeps its tests in native CI.
+solarxy-host = { path = "../solarxy-host" }
+# Likewise pure CPU math: the gizmo drag's rotate result is decomposed back into
+# Euler angles through the kernel at the point this shell commits it.
 solarxy-kernel = { path = "../solarxy-kernel" }
 cgmath = { workspace = true }
-# Native-visible for the same reason as the renderer: `attr_viz.rs` (the
-# attribute-visualization state + ramp math) derives its boundary serde
-# shapes and is tested by native CI.
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

@@ -364,12 +364,19 @@ body.precision-drag-active {
 }
 
 /* ---- The Evo node system ----
- * A 3.5:1 instrument body, category pastel fill (as --cat-fill, consumed
- * by the CSS rect bodies AND the shaped SVG bodies), a glyph inked
- * directly on the body (the chip plate and the segmentation seams are
- * retired), wings on rect bodies, the display halo, and the label
- * stack to the right. The .flow-node wrapper is transparent; all paint
- * happens on .node-body and its layers. */
+ * One geometric contract: every role occupies the 112x32 layout box
+ * (`NODE_BOX` / `ROLE_BODY_SIZE` in nodeVisual.ts are the numeric source;
+ * the test suite scans this file to keep the two in step). The visible
+ * body may sit smaller inside the box when the size means something: the
+ * root-placeable roles (container, camera, light) are one 96x28 fixture
+ * pill told apart by pastel, glyph and label, the text datablock and the
+ * terminal donut smaller still. The glyph inks directly on the body, and
+ * glyph, cook arc, display halo and terminal core all centre on the box
+ * centre with no per-role offsets. Category pastel fill (as --cat-fill,
+ * consumed by the CSS bodies AND the shaped SVG bodies), hover-revealed
+ * wings on the bodies, and the label stack to the right. The .flow-node
+ * wrapper is transparent; all paint happens on .node-body and its
+ * layers. */
 .flow-node {
   position: relative;
   width: 112px;
@@ -377,33 +384,40 @@ body.precision-drag-active {
   color: var(--node-text);
 }
 
-/* Per-role body boxes. These must match the `w`/`h` on the matching entry
- * in `ROLE_BODIES` (nodeVisual.ts), which is what the SVG viewBox uses:
- * disagree and the silhouette stretches. */
-.flow-node.role-terminal {
-  width: 28px;
-  height: 28px;
-}
-
-/* A light is a fixture you place, not a stage in a chain; at the full
- * 112x32 it out-weighed the operators around it. */
-.flow-node.role-light {
-  width: 96px;
-  height: 28px;
-}
-
+/* The visible body. Default: the whole box. The sized-down roles inset it
+ * (their dimensions mirror `ROLE_BODY_SIZE`), which recentres everything
+ * anchored to it -- wings, hatch, selection -- with no per-role offsets. */
 .node-body {
   position: absolute;
   inset: 0;
   border-radius: 6px;
 }
 
-/* Rect bodies (standard, gather, text): fill + border + the top-down sheen
- * in CSS. Shaped roles draw an SVG body instead and keep this layer bare.
- * Container left this list in 0.8.1 when it gained a folder silhouette. */
+/* The root fixture pill: container, camera and light share one 96x28
+ * rounded body centred in the box. Things you place, not stages in a
+ * chain; the pastel, the glyph and the label carry the differentiation. */
+.flow-node.role-container .node-body,
+.flow-node.role-camera .node-body,
+.flow-node.role-light .node-body {
+  inset: 2px 8px;
+  border-radius: 12px;
+}
+
+/* The text datablock: quiet by 76x26 size inside the standard box, so a
+ * script library does not read as graph structure. */
+.flow-node.role-text .node-body {
+  inset: 3px 18px;
+}
+
+/* CSS-painted bodies (standard, gather, text, and the root fixture
+ * pills): fill + border + the top-down sheen. The three shaped subflow
+ * roles draw an SVG body instead and keep this layer bare. */
 .flow-node.role-standard .node-body,
 .flow-node.role-text .node-body,
-.flow-node.role-gather .node-body {
+.flow-node.role-gather .node-body,
+.flow-node.role-container .node-body,
+.flow-node.role-camera .node-body,
+.flow-node.role-light .node-body {
   background-color: var(--cat-fill, var(--geometry-node-background));
   border: 1px solid var(--geometry-node-border);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.05));
@@ -412,11 +426,23 @@ body.precision-drag-active {
     0 0.1rem 0.2rem rgba(0, 0, 0, 0.1);
 }
 
+/* The container's border carries its per-network accent (teal for the
+ * texture network, pink for the material network) where one is set. */
+.flow-node.role-container .node-body {
+  border-color: var(--cat-accent, var(--geometry-node-border));
+}
+
 .flow-node:hover .role-hover,
 .flow-node.role-standard:hover .node-body,
 .flow-node.role-text:hover .node-body,
-.flow-node.role-gather:hover .node-body {
+.flow-node.role-gather:hover .node-body,
+.flow-node.role-camera:hover .node-body,
+.flow-node.role-light:hover .node-body {
   border-color: var(--geometry-node-border-hover);
+}
+
+.flow-node.role-container:hover .node-body {
+  border-color: var(--cat-accent-hover, var(--geometry-node-border-hover));
 }
 
 /* A light-category node on a rect body keeps the gold border cue. */
@@ -424,8 +450,8 @@ body.precision-drag-active {
   border-color: rgba(212, 175, 55, 0.55);
 }
 
-/* Shaped silhouettes (branch, analyzer, imageSource, light, camera,
- * container): the SVG body. */
+/* Shaped subflow silhouettes (branch, analyzer, imageSource): the SVG
+ * body. */
 .node-body-svg {
   position: absolute;
   inset: 0;
@@ -448,13 +474,13 @@ body.precision-drag-active {
   stroke: var(--geometry-node-border-hover);
 }
 
-.flow-node.role-light .node-body-svg .body-stroke {
-  stroke: rgba(212, 175, 87, 0.55);
-}
 
-/* Terminal (null): the donut. The pastel ring with the ink core; the
- * body ring doubles as the selection target. */
+/* Terminal (null): the 28px donut centred in the full-width box -- the
+ * precedent for a small mark carrying meaning inside the standard box.
+ * The pastel ring with the ink core; the ring doubles as the selection
+ * target. */
 .flow-node.role-terminal .node-body {
+  inset: 2px 42px;
   border-radius: 50%;
   border: 7px solid var(--cat-fill, var(--geometry-node-background));
   background: transparent;
@@ -485,7 +511,7 @@ body.precision-drag-active {
   pointer-events: none;
 }
 
-/* The glyph slot: type identity at any zoom. The plate is gone;
+/* The glyph slot: type identity at any zoom, at the box centre. No plate:
  * the glyph inks directly on the body in a darkened category tone. */
 .node-chip {
   position: absolute;
@@ -570,16 +596,32 @@ body.precision-drag-active {
   border-radius: 6px 0 0 6px;
 }
 
-.wing-display {
+.wing-display,
+.wing-visibility {
   right: 0;
   border-radius: 0 6px 6px 0;
+}
+
+/* Wing corners follow the body they sit on: the root fixture pills carry
+ * the pill's heavier rounding. */
+.flow-node.role-container .wing-bypass,
+.flow-node.role-camera .wing-bypass,
+.flow-node.role-light .wing-bypass {
+  border-radius: 12px 0 0 12px;
+}
+
+.flow-node.role-container .wing-visibility,
+.flow-node.role-camera .wing-visibility,
+.flow-node.role-light .wing-visibility {
+  border-radius: 0 12px 12px 0;
 }
 
 .wing-bypass:hover {
   background: var(--wing-bypass-hover);
 }
 
-.wing-display:hover {
+.wing-display:hover,
+.wing-visibility:hover {
   background: var(--wing-display-hover);
 }
 
@@ -589,6 +631,32 @@ body.precision-drag-active {
 
 .wing-display.on {
   background: var(--display);
+}
+
+/* The root visibility wing carries no chrome at rest on a visible node:
+ * the dot reveals on hover like the bypass icon. While the node is
+ * hidden, the hollow dot stays visible so the abnormal state reads from
+ * the canvas. */
+.wing-visibility .vis-dot {
+  width: 7px;
+  height: 7px;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 90ms) ease-out;
+}
+
+.wing-visibility:hover .vis-dot {
+  opacity: 1;
+}
+
+.wing-visibility.off .vis-dot {
+  opacity: 1;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--node-label);
+}
+
+/* A hidden root object: slightly dimmed, quieter than bypass. */
+.flow-node.obj-hidden {
+  opacity: 0.75;
 }
 
 /* The display halo: the across-the-graph cue behind the display
@@ -681,21 +749,21 @@ body.precision-drag-active {
    of the node face (top-left is the stale tag's, top-right the cook
    error's, bottom-right the validation badge's). A filled display-blue
    dot when visible; hollow and dimmed when hidden. */
+/* The visibility toggle in the LIST view rows. On the canvas the same
+ * fact lives on the right-hand visibility wing; the list keeps this
+ * compact eye chrome. */
 .visibility-eye {
-  position: absolute;
-  bottom: -0.5rem;
-  left: -0.5rem;
   width: 1.4rem;
   height: 1.4rem;
   border-radius: 50%;
   border: 1px solid var(--border-primary);
   background: var(--background-tertiary);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  vertical-align: middle;
   cursor: pointer;
   padding: 0;
-  z-index: 2;
 }
 
 .vis-dot {
@@ -716,9 +784,6 @@ body.precision-drag-active {
 }
 
 .visibility-eye.list {
-  position: static;
-  display: inline-flex;
-  vertical-align: middle;
   margin-right: 0.4rem;
 }
 
@@ -1239,24 +1304,41 @@ body.precision-drag-active {
   min-width: 0;
 }
 
+/* The soft-range scrubber. The input is given a comfortable hit height
+ * and painted transparent; the visible 4px track is drawn by the track
+ * pseudo-elements, so the 12px thumb can be centred on it explicitly
+ * (webkit does not centre a thumb taller than the track on its own). */
 .range-slider {
   flex: 1;
   min-width: 0;
-  height: 0.4rem;
+  height: 16px;
   appearance: none;
-  background: var(--border-secondary);
-  border-radius: 0.2rem;
+  background: transparent;
   outline: none;
   cursor: pointer;
+}
+
+.range-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-secondary);
 }
 
 .range-slider::-webkit-slider-thumb {
   appearance: none;
   width: 12px;
   height: 12px;
+  /* (track 4px - thumb 12px) / 2: rides the runnable track's top edge. */
+  margin-top: -4px;
   border-radius: 50%;
   background: var(--accent-primary);
   box-shadow: 0 0 4px color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
+.range-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-secondary);
 }
 
 .range-slider::-moz-range-thumb {
@@ -1289,100 +1371,14 @@ body.precision-drag-active {
   text-align: center;
 }
 
-.vector-component /* Expression lane (0.8.1). A numeric row is either its normal widget or
- * an expression; the `=` affordance swaps between them. The toggle sits
- * inside the right-aligned label so it reads as part of the row's identity
- * rather than as another control competing with the value. */
-.param-expr-toggle {
-  margin-left: 0.4rem;
-  padding: 0 0.3rem;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: none;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 1.1rem;
-  line-height: 1.4;
-  cursor: pointer;
-  /* Invisible until the row is hovered: every numeric param carries one,
-   * and 20 always-on glyphs would read as clutter. */
-  opacity: 0;
-  transition: var(--theme-transition);
-}
-
-.param-row:hover .param-expr-toggle,
-.param-expr-toggle:focus-visible,
-.param-expr-toggle.active {
-  opacity: 1;
-}
-
-.param-expr-toggle:hover {
-  color: var(--accent-primary);
-  border-color: var(--input-border-hover);
-}
-
-.param-expr-toggle.active {
-  color: var(--accent-primary);
-  border-color: var(--accent-primary);
-}
-
-.param-expr {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    "input clear"
-    "readout readout";
-  align-items: center;
-  gap: 0.2rem 0.4rem;
-  min-width: 0;
-}
-
-.param-expr-input {
-  grid-area: input;
-  width: 100%;
-  min-width: 0;
-  font-family: var(--font-mono);
-}
-
-.param-expr-input.has-error {
-  border-color: var(--error-border);
-  background-color: var(--error-background);
-}
-
-/* The resolved value, or the parser's message. Always present so the row
- * does not change height as an expression goes in and out of error. */
-.param-expr-readout {
-  grid-area: readout;
-  min-height: 1.4rem;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.param-expr-readout.has-error {
-  color: var(--error-text);
-}
-
-.param-expr-clear {
-  grid-area: clear;
-  padding: 0 0.3rem;
-  border: none;
-  background: none;
-  color: var(--text-tertiary);
-  font-size: 1.2rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.param-expr-clear:hover {
-  color: var(--accent-primary);
-}
-
-.number-field {
+/* A vector component's field flex-fills its third of the row; the fixed
+ * 72px scalar width above does not apply here. This rule predates the
+ * expression lane, whose 0.8.1 insertion accidentally pasted a duplicate
+ * of the whole lane block through the middle of it, fusing this selector
+ * onto a comment: the orphaned `width: 100%` then applied to EVERY number
+ * field, and a scalar slider row's track (flex: 1 against a 100% field)
+ * collapsed to nothing, leaving the drag thumb floating as a lone dot. */
+.vector-component .number-field {
   width: 100%;
   min-width: 0;
 }
@@ -1973,6 +1969,60 @@ body.row-resizing .viewport-divider {
 .env-hint {
   color: var(--text-secondary);
   font-size: 1.1rem;
+}
+
+/* One channel of a grade vector in the pane Look dialog: a tight R/G/B
+ * caption against its own number field, so three of them read as one
+ * control rather than as three unrelated inputs. */
+/* The Look dialog. A fixed-content dialog: no resize, no size memory, so
+ * it always sits tight on its content. */
+.modal-look {
+  width: 42rem;
+}
+
+/* The grade as one grid: a header row naming the channels, then one row
+ * per vector (lift, gamma, gain), labels in the same column the dialog's
+ * other rows use so everything above and below stays aligned. */
+.look-grade {
+  display: grid;
+  grid-template-columns: 12rem repeat(3, 1fr);
+  gap: 0.5rem 0.8rem;
+  align-items: center;
+}
+
+.look-grade .prefs-label {
+  width: auto;
+}
+
+.look-grade-ch {
+  text-align: center;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+}
+
+/* Every numeric field in the dialog: full column width, right-aligned
+ * tabular figures, like the parameter panel's number fields. */
+.look-field {
+  width: 100%;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dialog's asides (the camera passthrough warning, the LUT pointer):
+ * a quiet framed note rather than a floating paragraph. */
+.look-note {
+  margin: 0.2rem 0 0.4rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 2px solid var(--border-secondary);
+  border-radius: 0 0.4rem 0.4rem 0;
+  background: var(--background-tertiary);
+  color: var(--text-tertiary);
+  font-size: 1.05rem;
+  line-height: 1.5;
 }
 
 /* ---- Review: marker overlay, popup editor, side panel ---- */
@@ -2733,19 +2783,7 @@ body.reduce-motion .cook-arc {
 }
 /* The context tint now rides the SVG stroke rather than a CSS border, since
  * the container body became a folder silhouette. */
-.flow-node.role-container .node-body-svg .body-stroke {
-  stroke: var(--cat-accent, var(--geometry-node-border));
-}
-.flow-node.role-container:hover .node-body-svg .body-stroke {
-  stroke: var(--cat-accent-hover, var(--geometry-node-border-hover));
-}
 
-/* The glyph centres on the BODY, not on the whole box: both silhouettes
- * raise a tab over the top 8px, so a box-centred glyph reads high. */
-.flow-node.role-container .node-chip,
-.flow-node.role-camera .node-chip {
-  margin-top: 4px;
-}
 .flow-node.cat-tex_generate { --cat-fill: var(--node-cat-tex_generate); }
 .flow-node.cat-tex_adjust { --cat-fill: var(--node-cat-tex_adjust); }
 .flow-node.cat-tex_composite { --cat-fill: var(--node-cat-tex_composite); }
@@ -3291,6 +3329,26 @@ body.reduce-motion .cook-arc {
 }
 .param-tab-body {
   padding-top: 8px;
+}
+
+/* A labelled division inside a tab. The tab strip is a single
+ * non-wrapping row, so a node with many related families (the material
+ * node's five principled ones) needs a level below the tab rather than a
+ * tab each. Styled as a quiet heading, not a second tier of chrome: the
+ * point is to say where a family starts, not to compete with the tab. */
+.param-subgroup {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 4px 0 2px;
+}
+
+/* The first section in a tab needs no separating space; every later one
+ * reads as a break. */
+.param-section + .param-section {
+  margin-top: 10px;
 }
 
 /* ---- Ghost-text viewport controls ---- */
@@ -5340,9 +5398,3 @@ body.light-theme {
   line-height: 1.5;
 }
 
-/* The text datablock node: quiet by size, so a script library does not read
- * as graph structure. Uses the plain rect body. */
-.flow-node.role-text {
-  width: 76px;
-  height: 26px;
-}

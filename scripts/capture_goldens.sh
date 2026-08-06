@@ -23,10 +23,10 @@ mkdir -p "$OUT"
 
 FROG="res/models/frog/ooz3d-export-model-20260329-181053.obj"
 
-cargo run --release -p solarxy-renderer --example golden -- \
+cargo run --release -p solarxy-host --example golden -- \
     capture --model res/models/xyzrgb_dragon.obj --out "$OUT/dragon"
 
-cargo run --release -p solarxy-renderer --example golden -- \
+cargo run --release -p solarxy-host --example golden -- \
     capture --model "$FROG" --out "$OUT/frog"
 
 echo "captured goldens into $OUT (dragon, frog)"

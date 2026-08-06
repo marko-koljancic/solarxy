@@ -227,22 +227,8 @@ impl IblState {
         queue: &wgpu::Queue,
         path: &Path,
     ) -> Result<Self, RendererError> {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-
-        let (width, height, pixels) = match ext.as_str() {
-            "hdr" => load_hdr(path)?,
-            "exr" => load_exr(path)?,
-            _ => {
-                return Err(RendererError::Unsupported(format!(
-                    "Unsupported IBL format: .{ext}"
-                )));
-            }
-        };
-        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+        let image = solarxy_formats::hdr::load_hdr_image(path)?;
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Build IBL state from in-memory Radiance `.hdr` bytes.
@@ -251,8 +237,8 @@ impl IblState {
         queue: &wgpu::Queue,
         bytes: &[u8],
     ) -> Result<Self, RendererError> {
-        let (width, height, pixels) = decode_hdr_bytes(bytes)?;
-        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+        let image = solarxy_formats::hdr::decode_hdr_bytes(bytes)?;
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Build IBL state from in-memory `OpenEXR` bytes.
@@ -261,23 +247,27 @@ impl IblState {
         queue: &wgpu::Queue,
         bytes: &[u8],
     ) -> Result<Self, RendererError> {
-        let (width, height, pixels) = decode_exr_bytes(bytes)?;
-        Ok(Self::from_hdr_pixels(device, queue, width, height, pixels))
+        let image = solarxy_formats::hdr::decode_exr_bytes(bytes)?;
+        Ok(Self::from_hdr_image(device, queue, &image))
     }
 
     /// Shared HDRI-construction core: sanitize, convolve, prefilter, and
     /// assemble. Every HDRI entry point funnels through here so the
     /// IBL-derived CPU data stays consistent across constructors.
-    fn from_hdr_pixels(
+    ///
+    /// Takes the image by reference because it arrives from the scene
+    /// contract behind an `Arc`, shared with the engine, and cannot be
+    /// mutated in place. This module's `sanitized` helper avoids copying
+    /// it in the common case where there is nothing to sanitize.
+    pub fn from_hdr_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        width: u32,
-        height: u32,
-        mut pixels: Vec<[f32; 3]>,
+        image: &solarxy_formats::RawImageHdr,
     ) -> Self {
-        sanitize_hdr_pixels(&mut pixels);
+        let (width, height) = (image.width, image.height);
+        let pixels = sanitized(&image.pixels);
 
-        let irradiance_faces = convolve_equirect(width, height, &pixels);
+        let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
         Self::from_prepared(
             device,
@@ -285,7 +275,7 @@ impl IblState {
             &PreparedHdri {
                 width,
                 height,
-                pixels,
+                pixels: pixels.into_owned(),
                 irradiance_faces,
                 irradiance_average,
             },
@@ -309,14 +299,14 @@ impl IblState {
             queue,
             prepared.width,
             prepared.height,
-            &prepared.pixels,
+            rgb(&prepared.pixels),
         );
         let equirect = EquirectTexture::from_hdr_pixels(
             device,
             queue,
             prepared.width,
             prepared.height,
-            &prepared.pixels,
+            rgb(&prepared.pixels),
         );
 
         Self::from_parts(
@@ -389,8 +379,11 @@ impl IblState {
 pub struct PreparedHdri {
     pub width: u32,
     pub height: u32,
-    /// Sanitized linear-RGB equirect pixels, row-major.
-    pub pixels: Vec<[f32; 3]>,
+    /// Sanitized linear-RGB equirect pixels, row-major, three floats per
+    /// pixel: the same flat layout `solarxy_formats::RawImageHdr` decodes
+    /// into, so nothing on this path copies to reshape it. This module's
+    /// `rgb` helper views it as triples without copying.
+    pub pixels: Vec<f32>,
     /// The 32x32 convolved irradiance cubemap faces.
     pub irradiance_faces: [Vec<[f32; 3]>; 6],
     pub irradiance_average: [f32; 3],
@@ -406,29 +399,13 @@ impl PreparedHdri {
     /// of the supported HDRI formats.
     pub fn prepare(bytes: &[u8], format: &str) -> Result<Self, RendererError> {
         // An empty format sniffs the container magic (the `.slxy` reload
-        // path only retains the content-addressed bytes).
-        let format = if format.is_empty() {
-            if bytes.starts_with(b"#?") {
-                "hdr"
-            } else if bytes.starts_with(&[0x76, 0x2f, 0x31, 0x01]) {
-                "exr"
-            } else {
-                ""
-            }
-        } else {
-            format
-        };
-        let (width, height, mut pixels) = match format {
-            "hdr" => decode_hdr_bytes(bytes)?,
-            "exr" => decode_exr_bytes(bytes)?,
-            other => {
-                return Err(RendererError::Unsupported(format!(
-                    "Unsupported IBL format: .{other}"
-                )));
-            }
-        };
+        // path only retains the content-addressed bytes); the dispatch and
+        // the sniff both live in `solarxy_formats::hdr`.
+        let image = solarxy_formats::hdr::decode_hdr_image_bytes(bytes, format)?;
+        let (width, height) = (image.width, image.height);
+        let mut pixels = image.pixels;
         sanitize_hdr_pixels(&mut pixels);
-        let irradiance_faces = convolve_equirect(width, height, &pixels);
+        let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
         Ok(Self {
             width,
@@ -445,7 +422,7 @@ impl PreparedHdri {
     #[must_use]
     pub fn pack(&self) -> Vec<u8> {
         let face_len: usize = self.irradiance_faces.iter().map(Vec::len).sum();
-        let mut out = Vec::with_capacity(8 + 12 + face_len * 12 + self.pixels.len() * 12);
+        let mut out = Vec::with_capacity(8 + 12 + face_len * 12 + self.pixels.len() * 4);
         out.extend_from_slice(&self.width.to_le_bytes());
         out.extend_from_slice(&self.height.to_le_bytes());
         for c in self.irradiance_average {
@@ -459,10 +436,11 @@ impl PreparedHdri {
                 }
             }
         }
-        for px in &self.pixels {
-            for c in px {
-                out.extend_from_slice(&c.to_le_bytes());
-            }
+        // The pixel run is the same byte sequence a `[f32; 3]` buffer
+        // produced: components in order, little-endian. Flattening the CPU
+        // representation did not move the wire format.
+        for c in &self.pixels {
+            out.extend_from_slice(&c.to_le_bytes());
         }
         out
     }
@@ -507,20 +485,12 @@ impl PreparedHdri {
         }
         let irradiance_faces: [Vec<[f32; 3]>; 6] = faces.try_into().map_err(|_| bad())?;
 
-        let pixel_count = (width as usize)
+        let sample_count = (width as usize)
             .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(3))
             .ok_or_else(bad)?;
-        let data = take(pixel_count.checked_mul(12).ok_or_else(bad)?)?;
-        let pixels = data
-            .chunks_exact(12)
-            .map(|px| {
-                [
-                    read_f32(&px[0..4]),
-                    read_f32(&px[4..8]),
-                    read_f32(&px[8..12]),
-                ]
-            })
-            .collect();
+        let data = take(sample_count.checked_mul(4).ok_or_else(bad)?)?;
+        let pixels = data.chunks_exact(4).map(read_f32).collect();
 
         Ok(Self {
             width,
@@ -998,65 +968,15 @@ fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits as f32 * 2.328_306_4e-10
 }
 
-#[cfg(feature = "std-fs")]
-fn load_hdr(path: &Path) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
-    let bytes = std::fs::read(path).map_err(|source| RendererError::Io {
-        path: path.display().to_string(),
-        source,
-    })?;
-    decode_hdr_bytes(&bytes)
-}
-
-#[cfg(feature = "std-fs")]
-fn load_exr(path: &Path) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
-    let bytes = std::fs::read(path).map_err(|source| RendererError::Io {
-        path: path.display().to_string(),
-        source,
-    })?;
-    decode_exr_bytes(&bytes)
-}
-
-fn decode_hdr_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
-    let img = image::load_from_memory(bytes)?;
-    let rgb32f = img.to_rgb32f();
-    let w = rgb32f.width();
-    let h = rgb32f.height();
-    let pixels: Vec<[f32; 3]> = rgb32f.pixels().map(|p| [p[0], p[1], p[2]]).collect();
-    Ok((w, h, pixels))
-}
-
-fn decode_exr_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), RendererError> {
-    use exr::prelude::{ReadChannels, ReadLayers};
-
-    // The set-pixel closure only receives the absolute pixel position, so
-    // the row stride (image width) is carried in the pixel-storage tuple.
-    // `Vec2::width()` aliases `.x()` in the `exr` crate — indexing the
-    // buffer with it instead of the real width scrambles every row but the
-    // first, which is the historical "broken EXR background" bug.
-    // This is the same reader chain as the crate's
-    // `read_first_rgba_layer_from_file` convenience, fed from a buffer.
-    let image = exr::prelude::read()
-        .no_deep_data()
-        .largest_resolution_level()
-        .rgba_channels(
-            |resolution, _| {
-                let width = resolution.width();
-                (width, vec![[0.0_f32; 3]; width * resolution.height()])
-            },
-            |(width, pixels): &mut (usize, Vec<[f32; 3]>),
-             pos,
-             (r, g, b, _a): (f32, f32, f32, f32)| {
-                pixels[pos.y() * *width + pos.x()] = [r, g, b];
-            },
-        )
-        .first_valid_layer()
-        .all_attributes()
-        .from_buffered(std::io::Cursor::new(bytes))?;
-
-    let w = image.layer_data.size.width() as u32;
-    let h = image.layer_data.size.height() as u32;
-    let (_, pixels) = image.layer_data.channel_data.pixels;
-    Ok((w, h, pixels))
+/// View a flat three-floats-per-pixel buffer as RGB triples.
+///
+/// `[f32; 3]` has the same alignment as `f32`, so this is a reinterpret
+/// rather than a copy. Truncating to a whole number of triples first makes
+/// the cast infallible, which keeps this off the panic path even though
+/// every producer already upholds the invariant.
+fn rgb(pixels: &[f32]) -> &[[f32; 3]] {
+    let usable = pixels.len() - pixels.len() % 3;
+    bytemuck::cast_slice(&pixels[..usable])
 }
 
 /// Replace non-finite samples with `0` and clamp negative radiance to `0`.
@@ -1064,11 +984,32 @@ fn decode_exr_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), RendererE
 /// and the IBL convolution + f16 skybox upload downstream assume finite,
 /// non-negative input — an `Inf` here becomes an f16 infinity that bloom
 /// amplifies into sparkle.
-fn sanitize_hdr_pixels(pixels: &mut [[f32; 3]]) {
-    for px in pixels {
-        for c in px {
-            *c = if c.is_finite() { c.max(0.0) } else { 0.0 };
-        }
+fn sanitize_hdr_pixels(pixels: &mut [f32]) {
+    for c in pixels {
+        *c = clean_sample(*c);
+    }
+}
+
+/// The single per-sample rule both sanitize paths apply, so the in-place
+/// one and the borrowed one cannot drift.
+fn clean_sample(c: f32) -> f32 {
+    if c.is_finite() { c.max(0.0) } else { 0.0 }
+}
+
+/// Borrowed-input sanitize: returns the input untouched when it is already
+/// clean, and a corrected copy only when it is not.
+///
+/// An HDRI arriving through the scene contract is shared behind an `Arc`
+/// with the engine, so it cannot be fixed in place. Copying every one
+/// unconditionally would mean a second full-resolution allocation per
+/// install (about 100 MB for a 4K equirect) to fix samples that almost
+/// never need fixing. Scanning first is one cheap read pass, and the clean
+/// case (nearly all of them) then costs nothing at all.
+fn sanitized(pixels: &[f32]) -> std::borrow::Cow<'_, [f32]> {
+    if pixels.iter().all(|c| c.is_finite() && *c >= 0.0) {
+        std::borrow::Cow::Borrowed(pixels)
+    } else {
+        std::borrow::Cow::Owned(pixels.iter().map(|c| clean_sample(*c)).collect())
     }
 }
 
@@ -1129,41 +1070,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_exr_preserves_row_layout() {
-        // A 4x3 EXR where each pixel encodes its own coordinates. A
-        // mis-strided decode (the historical `pos.width()` bug) scrambles
-        // every row but the first, so this catches a regression.
-        let path = std::env::temp_dir().join("solarxy_load_exr_roundtrip.exr");
-        let (w, h) = (4usize, 3usize);
-        exr::prelude::write_rgba_file(&path, w, h, |x, y| (x as f32, y as f32, 0.5_f32, 1.0_f32))
-            .expect("write test exr");
-
-        let decoded = load_exr(&path);
-        let _ = std::fs::remove_file(&path);
-        let (dw, dh, pixels) = decoded.expect("decode test exr");
-
-        assert_eq!((dw, dh), (w as u32, h as u32));
-        assert_eq!(pixels.len(), w * h);
-        for y in 0..h {
-            for x in 0..w {
-                let px = pixels[y * w + x];
-                assert!((px[0] - x as f32).abs() < 1e-3, "x mismatch at ({x},{y})");
-                assert!((px[1] - y as f32).abs() < 1e-3, "y mismatch at ({x},{y})");
-            }
+    fn sanitize_hdr_pixels_drops_non_finite_and_negative() {
+        let mut pixels = [f32::INFINITY, -1.0, 2.0, f32::NAN, 0.5, f32::NEG_INFINITY];
+        sanitize_hdr_pixels(&mut pixels);
+        let expect = [0.0_f32, 0.0, 2.0, 0.0, 0.5, 0.0];
+        for (got, want) in pixels.iter().zip(expect.iter()) {
+            assert!((got - want).abs() < 1e-6, "got {got}, want {want}");
         }
     }
 
     #[test]
-    fn sanitize_hdr_pixels_drops_non_finite_and_negative() {
-        let mut pixels = [
-            [f32::INFINITY, -1.0, 2.0],
-            [f32::NAN, 0.5, f32::NEG_INFINITY],
-        ];
-        sanitize_hdr_pixels(&mut pixels);
-        let expect = [[0.0_f32, 0.0, 2.0], [0.0, 0.5, 0.0]];
-        for (got, want) in pixels.iter().flatten().zip(expect.iter().flatten()) {
-            assert!((got - want).abs() < 1e-6, "got {got}, want {want}");
-        }
+    fn rgb_views_a_flat_buffer_without_copying() {
+        let flat = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let triples = rgb(&flat);
+        assert_eq!(triples, &[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+        assert_eq!(triples.as_ptr().cast::<f32>(), flat.as_ptr());
+    }
+
+    #[test]
+    fn rgb_truncates_a_partial_trailing_pixel_rather_than_panicking() {
+        // No producer in the tree can emit this, but the cast would panic
+        // on it, and a panic in the lighting path is worse than a dropped
+        // trailing sample.
+        assert_eq!(rgb(&[1.0, 2.0, 3.0, 4.0]), &[[1.0, 2.0, 3.0]]);
+        assert!(rgb(&[1.0, 2.0]).is_empty());
+        assert!(rgb(&[]).is_empty());
     }
 }
 
@@ -1195,9 +1126,11 @@ mod prepared_tests {
         let bytes = tiny_hdr();
         let prepared = PreparedHdri::prepare(&bytes, "hdr").expect("prepare");
 
-        let (w, h, mut pixels) = decode_hdr_bytes(&bytes).expect("decode");
+        let image = solarxy_formats::hdr::decode_hdr_bytes(&bytes).expect("decode");
+        let (w, h) = (image.width, image.height);
+        let mut pixels = image.pixels;
         sanitize_hdr_pixels(&mut pixels);
-        let faces = convolve_equirect(w, h, &pixels);
+        let faces = convolve_equirect(w, h, rgb(&pixels));
         let avg = compute_irradiance_average(&faces);
 
         assert_eq!((prepared.width, prepared.height), (w, h));

@@ -57,6 +57,12 @@ pub fn merge(inputs: &[Arc<GeometrySet>]) -> GeometrySet {
                 topology: mesh.topology,
                 attributes: mesh.attributes.clone(),
                 primitive_attributes: mesh.primitive_attributes.clone(),
+                // Placements ride along per mesh, which is the whole reason
+                // they live there: merging a scatter's prototype with the
+                // surface it was scattered over keeps the prototype
+                // instanced and leaves the surface alone. A single list for
+                // the set could not say that, and merge would have to bake.
+                instances: mesh.instances.clone(),
             });
         }
     }
@@ -106,6 +112,62 @@ pub fn material_content_hash(mat: &RawMaterialData) -> u64 {
     mat.shininess_texture_name.hash(h);
     mat.dissolve_texture_name.hash(h);
 
+    // The principled surface properties. Two materials differing only here
+    // still compare unequal and stay separate, because the dedup above
+    // confirms equality inside the bucket rather than trusting the hash, so
+    // omitting one of these would cost a collision and not a wrong merge.
+    // They are hashed anyway: a scene of glass variants is exactly the case
+    // that would otherwise degrade to a linear scan.
+    hash_f32(mat.ior, h);
+    hash_f32(mat.transmission, h);
+    hash_f32(mat.thickness, h);
+    for c in mat.attenuation_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.attenuation_distance, h);
+    hash_f32(mat.clearcoat, h);
+    hash_f32(mat.clearcoat_roughness, h);
+    for c in mat.sheen_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.sheen_roughness, h);
+    hash_f32(mat.iridescence, h);
+    hash_f32(mat.iridescence_ior, h);
+    hash_f32(mat.iridescence_thickness_min, h);
+    hash_f32(mat.iridescence_thickness_max, h);
+    hash_f32(mat.specular_intensity, h);
+    for c in mat.specular_color {
+        hash_f32(c, h);
+    }
+    hash_f32(mat.anisotropy, h);
+    hash_f32(mat.anisotropy_rotation, h);
+    hash_f32(mat.emissive_strength, h);
+
+    mat.transmission_texture_path.hash(h);
+    hash_opt_image(mat.transmission_texture_data.as_deref(), h);
+    mat.thickness_texture_path.hash(h);
+    hash_opt_image(mat.thickness_texture_data.as_deref(), h);
+    mat.clearcoat_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_texture_data.as_deref(), h);
+    mat.clearcoat_roughness_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_roughness_texture_data.as_deref(), h);
+    mat.clearcoat_normal_texture_path.hash(h);
+    hash_opt_image(mat.clearcoat_normal_texture_data.as_deref(), h);
+    mat.sheen_color_texture_path.hash(h);
+    hash_opt_image(mat.sheen_color_texture_data.as_deref(), h);
+    mat.sheen_roughness_texture_path.hash(h);
+    hash_opt_image(mat.sheen_roughness_texture_data.as_deref(), h);
+    mat.iridescence_texture_path.hash(h);
+    hash_opt_image(mat.iridescence_texture_data.as_deref(), h);
+    mat.iridescence_thickness_texture_path.hash(h);
+    hash_opt_image(mat.iridescence_thickness_texture_data.as_deref(), h);
+    mat.specular_texture_path.hash(h);
+    hash_opt_image(mat.specular_texture_data.as_deref(), h);
+    mat.specular_color_texture_path.hash(h);
+    hash_opt_image(mat.specular_color_texture_data.as_deref(), h);
+    mat.anisotropy_texture_path.hash(h);
+    hash_opt_image(mat.anisotropy_texture_data.as_deref(), h);
+
     hasher.finish()
 }
 
@@ -149,41 +211,14 @@ fn hash_opt_image<H: Hasher>(v: Option<&RawImageData>, h: &mut H) {
 mod tests {
     use super::*;
     use crate::primitives::{generate_box, generate_plane};
+    use solarxy_core::scene::InstanceXform;
 
     fn material(name: &str, roughness: f32) -> RawMaterialData {
         RawMaterialData {
             name: name.to_string(),
-            diffuse_texture_path: None,
-            normal_texture_path: None,
-            diffuse_texture_data: None,
-            normal_texture_data: None,
-            metallic_roughness_texture_path: None,
-            metallic_roughness_texture_data: None,
-            occlusion_texture_path: None,
-            occlusion_texture_data: None,
-            emissive_texture_path: None,
-            emissive_texture_data: None,
             roughness_factor: roughness,
-            metallic_factor: 0.0,
-            occlusion_strength: 1.0,
-            emissive_factor: [0.0; 3],
-            base_color_factor: [1.0, 1.0, 1.0, 1.0],
-            alpha_mode: solarxy_core::geometry::AlphaMode::Opaque,
             alpha_cutoff: 0.5,
-            shading_model: solarxy_core::geometry::ShadingModel::default(),
-            toon_steps: 3.0,
-            ambient: None,
-            diffuse: None,
-            specular: None,
-            shininess: None,
-            dissolve: None,
-            optical_density: None,
-            ambient_texture_name: None,
-            diffuse_texture_name: None,
-            specular_texture_name: None,
-            normal_texture_name: None,
-            shininess_texture_name: None,
-            dissolve_texture_name: None,
+            ..RawMaterialData::default()
         }
     }
 
@@ -298,5 +333,96 @@ mod tests {
         let out = merge(&[near, Arc::new(far_mesh)]);
         assert!((out.bounds.min.x + 0.5).abs() < 1e-5);
         assert!((out.bounds.max.x - 100.5).abs() < 1e-5);
+    }
+
+    /// The reason placements live on the mesh rather than on the set.
+    ///
+    /// Merging a scatter's instanced prototype with the surface it was
+    /// scattered over is the commonest graph there is, and a single list
+    /// for the whole set could not express the result: it would replicate
+    /// the surface too. So merge would have had to bake, and the most
+    /// reached-for downstream node would be the one place instancing
+    /// could never survive.
+    #[test]
+    fn merging_an_instanced_set_with_a_plain_one_keeps_both_as_they_were() {
+        let mut prototype = generate_box(1.0, 1.0, 1.0, 1, 1, 1);
+        prototype.name = "prototype".to_string();
+        let places = vec![
+            InstanceXform::IDENTITY,
+            InstanceXform([
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [9.0, 0.0, 0.0, 1.0],
+            ]),
+        ];
+        let scattered = Arc::new(GeometrySet::from_parts_instanced(
+            vec![prototype],
+            Vec::new(),
+            places.clone(),
+        ));
+        let mut ground = generate_plane(1.0, 1.0, 1, 1);
+        ground.name = "ground".to_string();
+        let surface = Arc::new(GeometrySet::from_mesh(ground));
+
+        let out = merge(&[Arc::clone(&scattered), Arc::clone(&surface)]);
+        assert_eq!(out.mesh_count(), 2);
+
+        let proto = out.meshes.iter().find(|m| m.name == "prototype").unwrap();
+        let plain = out.meshes.iter().find(|m| m.name == "ground").unwrap();
+        assert_eq!(
+            proto.instances.as_ref().map(|i| i.to_vec()),
+            Some(places),
+            "the prototype keeps its placements through the merge"
+        );
+        assert!(
+            plain.instances.is_none(),
+            "the surface is placed once and must not inherit the scatter"
+        );
+        // And the bounds see the far copy, so a camera frames the scatter
+        // rather than the prototype sitting at the origin.
+        assert!(out.bounds.max.x > 9.0, "{:?}", out.bounds);
+    }
+
+    /// Merge is the operation that would otherwise have to bake, so its
+    /// output must equal what baking first would have produced.
+    #[test]
+    fn a_merged_instanced_set_bakes_to_the_same_geometry() {
+        let places = vec![
+            InstanceXform::IDENTITY,
+            InstanceXform([
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [9.0, 0.0, 0.0, 1.0],
+            ]),
+        ];
+        let scattered = Arc::new(GeometrySet::from_parts_instanced(
+            vec![generate_box(1.0, 1.0, 1.0, 1, 1, 1)],
+            Vec::new(),
+            places,
+        ));
+        let surface = Arc::new(GeometrySet::from_mesh(generate_plane(1.0, 1.0, 1, 1)));
+
+        // Bake first, then merge; against merge first, then bake.
+        let baked_first = merge(&[
+            Arc::new(scattered.baked().expect("bake").into_owned()),
+            Arc::clone(&surface),
+        ]);
+        let merged_first = merge(&[scattered, surface])
+            .baked()
+            .expect("bake")
+            .into_owned();
+
+        let positions = |set: &GeometrySet| -> Vec<[f32; 3]> {
+            let mut all: Vec<[f32; 3]> = set
+                .meshes
+                .iter()
+                .flat_map(|m| m.positions.iter().copied())
+                .collect();
+            all.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            all
+        };
+        assert_eq!(positions(&baked_first), positions(&merged_first));
     }
 }

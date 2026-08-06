@@ -246,6 +246,11 @@ function VizSettings({ viz }: { viz: AttrVizState }) {
                   options={RAMP_PRESETS}
                   onChange={(rampPreset) => patch({ rampPreset })}
                   width="100%"
+                  // Inline on purpose: this Select lives inside the viz
+                  // settings DropdownPortal, whose outside-pointerdown
+                  // dismiss would treat a portaled child list as an
+                  // outside click and close the whole panel.
+                  portal={false}
                 />
               </div>
             )}

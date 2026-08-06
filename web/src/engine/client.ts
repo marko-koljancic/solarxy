@@ -21,12 +21,14 @@ import type {
   EventBatch,
   GraphContext,
   HostEvent,
+  HdriJob,
   ImageJob,
   ImportJob,
   MarkerScreen,
   NodeId,
   NodeReport,
   PaneDisplaySettings,
+  PaneLook,
   PaneRectDto,
   ParamSource,
   PickDetail,
@@ -218,6 +220,8 @@ export class SolarxyClient {
       d.background,
       d.turntableRpm,
       d.pointSize,
+      d.ssaoEnabled,
+      d.bloomEnabled,
       applyWireframe,
       applyBackground,
     );
@@ -341,6 +345,10 @@ export class SolarxyClient {
 
   setPaneSettings(pane: number, settings: PaneDisplaySettings): ViewStateDto {
     return this.app.set_pane_settings(pane, settings) as ViewStateDto;
+  }
+
+  setPaneLook(pane: number, look: PaneLook): ViewStateDto {
+    return this.app.set_pane_look(pane, look) as ViewStateDto;
   }
 
   setDisplaySettings(settings: DisplaySettingsDto): ViewStateDto {
@@ -485,6 +493,24 @@ export class SolarxyClient {
   /** Reports a worker image-decode failure (the node badges the error). */
   submitImageError(ctx: GraphContext, jobId: number, message: string): EventBatch {
     return this.app.submit_image_error(ctx, jobId, message) as EventBatch;
+  }
+
+  /** Drains the stashed HDRI-decode jobs (call after `takeImportJobs`,
+   * which performs the engine drain). */
+  takeHdriJobs(): HdriJob[] {
+    return this.app.take_hdri_jobs() as HdriJob[];
+  }
+
+  /** Commits a worker-prepared HDRI: installs the IBL from the already
+   * convolved result and hands the image to the engine under the
+   * generation guard. */
+  submitDecodedHdri(ctx: GraphContext, jobId: number, prepared: Uint8Array): EventBatch {
+    return this.app.submit_decoded_hdri(ctx, jobId, prepared) as EventBatch;
+  }
+
+  /** Reports a worker HDRI-decode failure (the node badges the error). */
+  submitHdriError(ctx: GraphContext, jobId: number, message: string): EventBatch {
+    return this.app.submit_hdri_error(ctx, jobId, message) as EventBatch;
   }
 
   /** Commits a worker validation result (JSON `ValidationResult`). */

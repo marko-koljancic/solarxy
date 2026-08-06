@@ -240,6 +240,10 @@ pub struct ParamSnapshot {
     pub key: String,
     pub label: String,
     pub group: String,
+    /// A labelled division inside the group; absent on params that do not
+    /// declare one, so pre-existing param shapes are byte-unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subgroup: Option<String>,
     pub param_type: String,
     pub enum_variants: Vec<(String, String)>,
     pub accept: Vec<String>,
@@ -367,6 +371,7 @@ impl From<&ParamSpec> for ParamSnapshot {
             key: p.key.clone(),
             label: p.label.clone(),
             group: p.group.clone(),
+            subgroup: p.subgroup.clone(),
             param_type: param_type.to_string(),
             enum_variants,
             accept,

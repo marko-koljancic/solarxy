@@ -269,3 +269,309 @@ fn a_frame_with_labels_submits_without_validation_errors() {
          viewport rather than an error. See tests/uniform_layout.rs."
     );
 }
+
+/// The colour-grading slots, rendered rather than reasoned about.
+///
+/// Three things are asserted, and the third is the one worth having:
+///
+/// 1. An identity table in the display-referred slot is a no-op. That is
+///    the slot's whole contract.
+/// 2. A slot at zero strength is a no-op whatever it holds, because a
+///    grade nobody asked for must not cost a pixel.
+/// 3. **The two slots are not symmetric.** An identity table in the
+///    pre-tone-map slot is NOT a no-op, and that is by design rather than
+///    by accident: that slot is fed log-encoded light and its output is
+///    taken as the tone curve's result, so the identity table returns the
+///    log encoding itself. The table that would be a no-op there is the
+///    shaper's inverse, not a coordinate ramp. Pinned here because it
+///    reads like a bug to anyone who meets it without this note.
+#[test]
+fn the_two_grading_slots_behave_as_specified() {
+    use solarxy_core::LutCube;
+    use solarxy_core::preferences::{
+        BackgroundMode, InspectionMode, LineWeight, MaterialOverride, NormalsMode, PaneMode,
+        UvMapBackground, UvMode, ViewMode,
+    };
+    use solarxy_core::view_config::{BoundsMode, PaneDisplaySettings};
+    use solarxy_core::AABB;
+    use solarxy_renderer::camera_state::CameraState;
+    use solarxy_renderer::composite::CompositeLook;
+    use solarxy_renderer::environment::SceneEnvironment;
+    use solarxy_renderer::frame::{Renderer, RendererInit};
+    use solarxy_renderer::lut::LutSlot;
+    use solarxy_renderer::visualization::VisualizationState;
+
+    const W: u32 = 64;
+    const H: u32 = 64;
+
+    let Some((device, queue, mut config)) = try_get_device() else {
+        return;
+    };
+    config.width = W;
+    config.height = H;
+
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+    let init = RendererInit {
+        msaa_sample_count: 4,
+        // A gradient background gives the composite pass a wide, smooth
+        // range of values to transform, which is what makes an identity
+        // table's no-op claim worth anything: a flat colour would pass
+        // through almost any table unchanged.
+        gradient_top: [0.9, 0.5, 0.2, 1.0],
+        gradient_bottom: [0.02, 0.05, 0.3, 1.0],
+        sky_top: [0.4, 0.5, 0.7],
+        sky_bottom: [0.2, 0.2, 0.25],
+        wireframe_color: [1.0, 1.0, 1.0, 1.0],
+        wireframe_line_width: 1.0,
+        bloom_enabled: false,
+        ssao_enabled: false,
+        tone_mode: solarxy_core::preferences::ToneMode::AcesFilmic,
+        exposure: 1.0,
+        ibl_mode: solarxy_core::preferences::IblMode::Full,
+        uv_checker_png: include_bytes!("../../../res/textures/uv-checker_1k.png"),
+    };
+    let mut renderer = Renderer::new(&device, &queue, &config, &init).expect("headless renderer");
+
+    let bounds = AABB {
+        min: cgmath::Point3::new(-1.0, -1.0, -1.0),
+        max: cgmath::Point3::new(1.0, 1.0, 1.0),
+    };
+    let vis = VisualizationState::new_from_parts(
+        &device,
+        &renderer.layouts,
+        &bounds,
+        &[],
+        None,
+        [0.3, 0.3, 0.3],
+    );
+    let env = SceneEnvironment::new(
+        &device,
+        &queue,
+        &renderer.layouts,
+        &bounds,
+        1.0,
+        &renderer.ibl_res.brdf_lut,
+        &renderer.ibl_res.ltc,
+        1024,
+        vis,
+    );
+    let mut cam = CameraState::new(&device, &renderer.layouts.camera, &bounds, 1.0);
+    cam.update(&queue, 1.0 / 60.0);
+
+    let pds = PaneDisplaySettings {
+        view_mode: ViewMode::Shaded,
+        prev_non_ghosted_mode: ViewMode::Shaded,
+        ghosted_wireframe: false,
+        normals_mode: NormalsMode::Off,
+        background_mode: BackgroundMode::GRADIENT,
+        uv_mode: UvMode::Off,
+        bounds_mode: BoundsMode::Off,
+        line_weight: LineWeight::Medium,
+        show_grid: false,
+        show_axis_gizmo: false,
+        show_local_axes: false,
+        inspection_mode: InspectionMode::Shaded,
+        material_override: MaterialOverride::None,
+        texel_density_target: 1.0,
+        pane_mode: PaneMode::Scene3D,
+        uv_bg: UvMapBackground::Dark,
+        uv_offset: [0.0, 0.0],
+        uv_zoom: 1.0,
+        show_uv_overlap: false,
+        show_validation: false,
+        turntable_active: false,
+    };
+
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("grading target"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let padded = solarxy_renderer::capture::padded_row_bytes(W);
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("grading readback"),
+        size: u64::from(padded) * u64::from(H),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    // Render the scene once into the HDR target, then composite it as many
+    // times as there are looks to try. The main pass is deliberately
+    // outside the loop: it is the constant, and every difference below has
+    // to come from the composite pass.
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("grading main"),
+    });
+    renderer.render_main_pass(
+        &mut encoder,
+        &env,
+        &[],
+        &cam.bind_group,
+        &cam.camera,
+        &pds,
+        BackgroundMode::GRADIENT.resolve(&[]),
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let composite_to_bytes = |renderer: &Renderer, look: &CompositeLook| -> Vec<u8> {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("grading composite"),
+        });
+        renderer.post.composite.write_params(
+            &queue,
+            false,
+            false,
+            look,
+            &renderer.post.luts,
+            InspectionMode::Shaded,
+        );
+        renderer.post.composite.render(
+            &mut encoder,
+            &renderer.pipelines,
+            &target_view,
+            false,
+            &renderer.post.ssao,
+            Some([0.0, 0.0, W as f32, H as f32]),
+            true,
+        );
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(H),
+                },
+            },
+            wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        let bytes = slice.get_mapped_range().to_vec();
+        readback.unmap();
+        bytes
+    };
+
+    /// The number of bytes differing by more than `tolerance`.
+    fn differing(a: &[u8], b: &[u8], tolerance: u8) -> usize {
+        a.iter()
+            .zip(b)
+            .filter(|(x, y)| x.abs_diff(**y) > tolerance)
+            .count()
+    }
+
+    // Strengths are explicit: a resolved look defaults to contributing no
+    // table at all (see `CompositeLook`), so a test that wants one has to
+    // ask, exactly as the camera path does.
+    let neutral = CompositeLook::default();
+    let full = CompositeLook {
+        lut_a_strength: 1.0,
+        lut_b_strength: 1.0,
+        ..neutral
+    };
+    let plain = composite_to_bytes(&renderer, &neutral);
+    assert!(
+        plain.iter().any(|&b| b != 0),
+        "the composite pass produced an entirely black frame, so nothing below is a test of anything"
+    );
+
+    let identity = LutCube::identity(33);
+
+    // 1. The display-referred slot with an identity table is a no-op.
+    //    Tolerance one, not zero: the table is stored at half precision
+    //    and interpolated, so a sample can land a unit of last place off
+    //    before the 8-bit swapchain quantizes it.
+    renderer.set_lut(&device, &queue, LutSlot::B, Some(&identity));
+    let through_b = composite_to_bytes(&renderer, &full);
+    let diff_b = differing(&plain, &through_b, 1);
+    assert_eq!(
+        diff_b,
+        0,
+        "an identity table in the display-referred slot changed {diff_b} of {} bytes",
+        plain.len()
+    );
+
+    // 2. Zero strength is a no-op no matter what the slot holds.
+    let silent = CompositeLook {
+        lut_b_strength: 0.0,
+        ..full
+    };
+    let through_silent = composite_to_bytes(&renderer, &silent);
+    assert_eq!(
+        differing(&plain, &through_silent, 0),
+        0,
+        "a slot at zero strength still changed the image"
+    );
+    renderer.set_lut(&device, &queue, LutSlot::B, None);
+
+    // 3. The pre-tone-map slot is NOT symmetric with it. See this test's
+    //    doc comment: an identity table there returns the log encoding,
+    //    which is a large, obvious change rather than a subtle one.
+    renderer.set_lut(&device, &queue, LutSlot::A, Some(&identity));
+    let through_a = composite_to_bytes(&renderer, &full);
+    let diff_a = differing(&plain, &through_a, 1);
+    assert!(
+        diff_a > plain.len() / 10,
+        "an identity table in the pre-tone-map slot changed only {diff_a} of {} bytes; \
+         it is fed log-encoded light and should return the log encoding, so a near-no-op \
+         here means the shaper is not being applied",
+        plain.len()
+    );
+    renderer.set_lut(&device, &queue, LutSlot::A, None);
+
+    // 4. A table bound for one pane must not leak into a path that did not
+    //    ask for one. The slots are renderer-global and the look is per
+    //    pane, so this is what keeps a graded viewport out of the asset
+    //    preview and out of every golden capture.
+    renderer.set_lut(&device, &queue, LutSlot::B, Some(&identity));
+    let unasked = composite_to_bytes(&renderer, &neutral);
+    assert_eq!(
+        differing(&plain, &unasked, 0),
+        0,
+        "a bound table applied to a look that requested none"
+    );
+    renderer.set_lut(&device, &queue, LutSlot::B, None);
+
+    // 5. Clearing both slots returns exactly the original frame, which is
+    //    what makes the grade safe to leave wired up.
+    let cleared = composite_to_bytes(&renderer, &neutral);
+    assert_eq!(
+        differing(&plain, &cleared, 0),
+        0,
+        "clearing the grading slots did not restore the original frame"
+    );
+
+    let error = pollster::block_on(device.pop_error_scope());
+    assert!(
+        error.is_none(),
+        "the grading composite raised a wgpu validation error: {error:?}"
+    );
+}

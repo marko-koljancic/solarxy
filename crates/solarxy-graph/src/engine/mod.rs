@@ -12,11 +12,11 @@
 pub mod attr_table;
 pub mod snapshot;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cgmath::{Matrix3, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use serde::{Deserialize, Serialize};
-use solarxy_core::scene::SceneDelta;
+use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_kernel::transform::{RotateOrder, rotation_matrix};
 
 use crate::GraphError;
@@ -722,6 +722,15 @@ pub struct Engine {
     /// path, never written to the document or the undo stack.
     previews: BTreeMap<(NodeId, String), ParamSource>,
     scene: SceneDelta,
+    /// The object ids the renderer is holding, as of the last
+    /// `take_scene_delta`. Diffed against each rebuild so ids that stopped
+    /// existing become `SceneOp::Remove`; without it a deleted geo node's
+    /// GPU object stays resident and drawn.
+    scene_objects: BTreeSet<SceneObjectId>,
+    /// Set when the whole document is replaced. The renderer's objects all
+    /// belong to a document that no longer exists, so the next delta opens
+    /// with `SceneOp::Clear` rather than a removal per id.
+    scene_clear_pending: bool,
     undo: UndoStack,
     /// Async jobs spawned by the last cook, awaiting dispatch by the host
     /// (each tagged with the context it was spawned in, for `submit`).
@@ -777,6 +786,8 @@ impl Engine {
             revision: 0,
             previews: BTreeMap::new(),
             scene: SceneDelta::default(),
+            scene_objects: BTreeSet::new(),
+            scene_clear_pending: false,
             undo: UndoStack::default(),
             pending_jobs: Vec::new(),
             review_stale: BTreeMap::new(),
@@ -2226,6 +2237,14 @@ impl Engine {
                         key: key.to_string(),
                         reason: "nothing cooked to export yet".to_string(),
                     })?;
+                // A file has no notion of a placement list, so instanced
+                // geometry bakes on the way out. Skipping this would write
+                // one copy of a ten-thousand-copy scatter and call it a
+                // successful export.
+                let set = set.baked().map_err(|reason| EngineError::InvalidParam {
+                    key: key.to_string(),
+                    reason,
+                })?;
                 let meshes: Vec<solarxy_formats::export::ExportMesh<'_>> = set
                     .meshes
                     .iter()
@@ -2995,7 +3014,32 @@ impl Engine {
         let mut events = Vec::new();
         let mut remaining = 0usize;
         let contexts = self.ordered_contexts();
+        let deps = self.context_ref_deps();
+        // Containers whose networks did not fully drain their display cone
+        // this pass. A context referencing one is deferred to a later pass
+        // rather than cooked: the driver's forward-progress rule cooks a
+        // context's first eligible node without consulting the budget, so
+        // without this gate an interrupted pass could cook a tex_ref or
+        // material reference before its source network finished, and the
+        // resulting unresolved-reference error is terminal until something
+        // re-dirties the node, which nothing does. Deferral costs one pass;
+        // the false error wedged the scene for good.
+        let mut undrained: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
         for ctx in contexts {
+            if let GraphContext::Subflow(owner) = ctx
+                && deps
+                    .get(&owner)
+                    .is_some_and(|d| d.iter().any(|t| undrained.contains(t)))
+            {
+                undrained.insert(owner);
+                if let Ok(graph) = self.doc.graph(ctx) {
+                    remaining += graph
+                        .nodes()
+                        .filter(|n| self.cook.state(n.id) == CookState::Dirty)
+                        .count();
+                }
+                continue;
+            }
             let report = self.cook.cook_until(
                 &self.doc,
                 &self.registry,
@@ -3024,6 +3068,12 @@ impl Engine {
             // dispatch (tagged with their context for `submit_job_result`).
             for (job, request) in report.jobs {
                 self.pending_jobs.push((ctx, job, request));
+            }
+            if let GraphContext::Subflow(owner) = ctx
+                && let Ok(graph) = self.doc.graph(ctx)
+                && self.cook.has_display_cone_work(graph)
+            {
+                undrained.insert(owner);
             }
         }
         // A manual cook stays armed until the stale set fully drains.
@@ -3215,6 +3265,24 @@ impl Engine {
                         .map_err(|e| e.to_string()),
                 )
             }
+            JobRequest::DecodeHdrImage { asset } => {
+                let Some(entry) = self.assets.get(asset) else {
+                    return JobResult::HdrImage(Err("asset not staged".to_string()));
+                };
+                // The extension is empty for a scene-file reload, which
+                // keeps only content-addressed bytes; the decoder sniffs
+                // the container magic in that case.
+                let ext = std::path::Path::new(&entry.name)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                JobResult::HdrImage(
+                    solarxy_formats::hdr::decode_hdr_image_bytes(&entry.bytes, &ext)
+                        .map(std::sync::Arc::new)
+                        .map_err(|e| e.to_string()),
+                )
+            }
         }
     }
 
@@ -3252,10 +3320,34 @@ impl Engine {
     }
 
     /// Drains the accumulated scene delta for the renderer, rebuilding it
-    /// from the current committed display outputs and light nodes.
+    /// from the current committed display outputs and light nodes, and
+    /// closing it with the removals the rebuild cannot express.
+    ///
+    /// A rebuild only ever says what exists. Objects that stopped existing,
+    /// because their geo node was deleted or its display flag cleared, are
+    /// invisible to it, so their ids are diffed out of the previous set and
+    /// emitted as `SceneOp::Remove`. A replaced document skips the diff and
+    /// opens with `SceneOp::Clear` instead, since nothing the renderer holds
+    /// belongs to the new document.
     pub fn take_scene_delta(&mut self) -> SceneDelta {
-        self.scene =
+        let (mut delta, present) =
             scene::build_scene_delta(&self.doc, &self.registry, &self.cook, &self.previews);
+
+        if self.scene_clear_pending {
+            self.scene_clear_pending = false;
+            self.scene_objects.clear();
+            let mut cleared = SceneDelta::default();
+            cleared.push(SceneOp::Clear);
+            cleared.ops.append(&mut delta.ops);
+            delta = cleared;
+        } else {
+            for id in self.scene_objects.difference(&present) {
+                delta.push(SceneOp::Remove { id: *id });
+            }
+        }
+
+        self.scene_objects = present;
+        self.scene = delta;
         std::mem::take(&mut self.scene)
     }
 
@@ -3335,6 +3427,10 @@ impl Engine {
         // old one, so it is rebuilt from scratch rather than migrated.
         self.rebuild_expr_index();
         self.scene = SceneDelta::default();
+        // Every object the renderer holds belongs to the document just
+        // discarded, so the next delta opens by clearing them rather than
+        // naming each one.
+        self.scene_clear_pending = true;
         // Fresh document: staleness re-derives after the first cook (until
         // then nothing is displayed, so no annotation is flagged).
         self.review_stale.clear();
@@ -3364,6 +3460,20 @@ impl Engine {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Whether the root graph holds an `environment` node.
+    ///
+    /// The host asks on load to settle which environment wins: a node
+    /// authored one supersedes the scene file's own environment section,
+    /// which remains the fallback for documents written before the node
+    /// existed. Without this the two would race on every open of a
+    /// node-authored scene.
+    #[must_use]
+    pub fn has_environment_node(&self) -> bool {
+        self.doc
+            .graph(GraphContext::Root)
+            .is_ok_and(|g| g.nodes().any(|n| n.type_id == "environment"))
     }
 
     /// The cook state of a node (test/inspection helper).
@@ -3740,26 +3850,41 @@ impl Engine {
     /// refuses cycles, reachable only through a hand-crafted paste) simply
     /// appends the remainder in id order and converges over passes on
     /// last-committed values.
-    fn ordered_contexts(&self) -> Vec<GraphContext> {
+    /// owner -> the sibling containers its network references through any
+    /// node's `NodeRef` params. The same edges `ordered_contexts` sorts
+    /// by, and the edges the cook pass uses to defer a context whose
+    /// referenced networks have not drained.
+    fn context_ref_deps(
+        &self,
+    ) -> std::collections::BTreeMap<NodeId, std::collections::BTreeSet<NodeId>> {
         use std::collections::{BTreeMap, BTreeSet};
         let owners: Vec<NodeId> = self.doc.subflow_owners().collect();
         let owner_set: BTreeSet<NodeId> = owners.iter().copied().collect();
-        // dependents[t] = owners whose networks reference container t.
-        let mut dependents: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
-        let mut in_degree: BTreeMap<NodeId, usize> = owners.iter().map(|o| (*o, 0)).collect();
+        let mut deps: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
         for &owner in &owners {
             let Ok(graph) = self.doc.graph(GraphContext::Subflow(owner)) else {
                 continue;
             };
-            let mut deps: BTreeSet<NodeId> = BTreeSet::new();
+            let entry = deps.entry(owner).or_default();
             for n in graph.nodes() {
                 for t in Self::node_ref_targets(n) {
                     if owner_set.contains(&t) && t != owner {
-                        deps.insert(t);
+                        entry.insert(t);
                     }
                 }
             }
-            for t in deps {
+        }
+        deps
+    }
+
+    fn ordered_contexts(&self) -> Vec<GraphContext> {
+        use std::collections::{BTreeMap, BTreeSet};
+        let owners: Vec<NodeId> = self.doc.subflow_owners().collect();
+        // dependents[t] = owners whose networks reference container t.
+        let mut dependents: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+        let mut in_degree: BTreeMap<NodeId, usize> = owners.iter().map(|o| (*o, 0)).collect();
+        for (owner, targets) in self.context_ref_deps() {
+            for t in targets {
                 if dependents.entry(t).or_default().insert(owner) {
                     *in_degree.entry(owner).or_default() += 1;
                 }

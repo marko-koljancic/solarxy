@@ -78,6 +78,7 @@ fn vertices_cloud(mesh: &KernelMesh) -> KernelMesh {
         topology: MeshTopology::Points,
         attributes,
         primitive_attributes: AttributeMap::new(),
+        instances: None,
     }
 }
 

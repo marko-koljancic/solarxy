@@ -152,6 +152,14 @@ impl BindGroupLayouts {
                 bgl_texture_entry(0),
                 bgl_texture_entry(1),
                 bgl_sampler_entry(2),
+                // The two colour-grading LUT slots and the sampler both are
+                // read with. They join this group rather than taking one of
+                // their own because the composite pipeline is the only
+                // consumer, and a fourth group would be a pipeline-layout
+                // change for a pass nothing else shares.
+                bgl_texture_entry_3d(3),
+                bgl_texture_entry_3d(4),
+                bgl_sampler_entry(5),
             ],
         });
         let composite_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -335,6 +343,24 @@ fn bgl_texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         ty: wgpu::BindingType::Texture {
             multisampled: false,
             view_dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        },
+        count: None,
+    }
+}
+
+/// A filterable 3D float texture entry, for the colour-grading LUTs.
+/// Filterable is the whole point (a 33-cubed table is interpolated between
+/// entries, not stepped), which is what pins the LUT format to
+/// `Rgba16Float`: `Rgba32Float` needs the `float32-filterable` feature and
+/// this renderer holds itself to core WebGPU. See `crate::lut`.
+fn bgl_texture_entry_3d(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D3,
             sample_type: wgpu::TextureSampleType::Float { filterable: true },
         },
         count: None,

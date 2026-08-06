@@ -36,7 +36,7 @@ describe("dock layout persistence", () => {
   it("round-trips a stored layout", () => {
     const layout = {
       grid: { root: {}, width: 100, height: 100, orientation: "HORIZONTAL" },
-      panels: {},
+      panels: { viewport: { id: "viewport" } },
     };
     stubStorage({ "solarxy.ui.dockLayout": JSON.stringify(layout) });
     expect(loadDockLayout()).toEqual(layout);
@@ -49,6 +49,38 @@ describe("dock layout persistence", () => {
     expect(loadDockLayout()).toBeNull();
 
     stubStorage({ "solarxy.ui.dockLayout": JSON.stringify({ nope: true }) });
+    expect(loadDockLayout()).toBeNull();
+  });
+
+  it("drops a rejected blob so it is not re-read on every future load", () => {
+    // The fallback arrangement is built before the dock subscribes to its own
+    // layout-change events, so nothing else clears a blob we refuse.
+    stubStorage({ "solarxy.ui.dockLayout": "{not json" });
+    expect(loadDockLayout()).toBeNull();
+    expect(localStorage.getItem("solarxy.ui.dockLayout")).toBeNull();
+  });
+
+  it("discards a well-formed layout that has no viewport panel", () => {
+    // The one fromJSON accepts happily and that used to leave the app dead:
+    // the engine booted from the viewport panel's effect, so a layout without
+    // it meant boot never started, with no error and nothing logged.
+    const layout = {
+      grid: { root: {}, width: 100, height: 100, orientation: "HORIZONTAL" },
+      panels: { nodes: { id: "nodes" }, properties: { id: "properties" } },
+    };
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify(layout) });
+    expect(loadDockLayout()).toBeNull();
+  });
+
+  it("discards a layout whose panels key is missing or not an object", () => {
+    const grid = { root: {}, width: 100, height: 100, orientation: "HORIZONTAL" };
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify({ grid }) });
+    expect(loadDockLayout()).toBeNull();
+
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify({ grid, panels: "viewport" }) });
+    expect(loadDockLayout()).toBeNull();
+
+    stubStorage({ "solarxy.ui.dockLayout": JSON.stringify({ grid, panels: null }) });
     expect(loadDockLayout()).toBeNull();
   });
 });

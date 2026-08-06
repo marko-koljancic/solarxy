@@ -481,6 +481,14 @@ impl Registry {
                         ));
                     }
                 }
+                // A declared subgroup carries a label. An empty one would
+                // render as a blank divider, which reads as a layout bug
+                // rather than as a heading.
+                if let Some(subgroup) = &p.subgroup
+                    && subgroup.trim().is_empty()
+                {
+                    violations.push(format!("'{id}': param '{}' has an empty subgroup", p.key));
+                }
                 // Every driven_by_port names an existing input port (the
                 // panel's dim-while-connected predicate must be real).
                 if let Some(port) = &p.driven_by_port

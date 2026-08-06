@@ -26,6 +26,7 @@ import {
   setPaneSettings,
   setSplitRatio,
 } from "../engine/session";
+import { PaneLookModal } from "./PaneLookModal";
 import { TURNTABLE_SPEEDS, turntableSpeedLabel } from "./turntableSpeeds";
 import type {
   NodeMirror,
@@ -282,6 +283,7 @@ function PaneControls({ pane, settings, projection, active }: {
   // The global display settings: the turntable-speed submenu writes the
   // scene-wide rpm (per-pane is only the on/off toggle).
   const display = useViewState((s) => s.view?.display);
+  const [lookOpen, setLookOpen] = useState(false);
   const patch = (p: Partial<PaneDisplaySettings>) => {
     setActivePane(pane);
     setPaneSettings(pane, { ...settings, ...p });
@@ -470,6 +472,13 @@ function PaneControls({ pane, settings, projection, active }: {
       </GhostMenu>
       <GhostMenu label="Display">
         <GhostItem
+          label="Look..."
+          onPick={() => {
+            setActivePane(pane);
+            setLookOpen(true);
+          }}
+        />
+        <GhostItem
           label="Grid"
           checked={settings.showGrid}
           sticky
@@ -559,6 +568,7 @@ function PaneControls({ pane, settings, projection, active }: {
         </GhostSubmenu>
         <GhostItem label="UV Layout (3)" onPick={() => patch({ paneMode: "UvMap" })} />
       </GhostMenu>
+      {lookOpen && <PaneLookModal pane={pane} onClose={() => setLookOpen(false)} />}
     </div>
   );
 }

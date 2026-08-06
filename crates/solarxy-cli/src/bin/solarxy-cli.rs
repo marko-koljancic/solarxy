@@ -11,8 +11,6 @@ use solarxy_cli::parser::{Args, OperationMode, OutputFormat};
 #[cfg(feature = "analyzer")]
 use solarxy_cli::calc::analyze::ModelAnalyzer;
 #[cfg(feature = "analyzer")]
-use solarxy_cli::tui_analysis::TerminalApp;
-#[cfg(feature = "analyzer")]
 use solarxy_validate::{
     self as validate, ConfigSource, Output as ValidateOutput,
     adapter::{AdapterFormat, AdapterName, FailOn},
@@ -40,6 +38,11 @@ fn main() -> anyhow::Result<ExitCode> {
         println!("Repository   {repository}");
         println!("License      {license}");
         println!("Contact      https://koljam.com");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if args.list_tui_themes {
+        solarxy_cli::tui::theme::print_listing();
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -74,6 +77,7 @@ fn main() -> anyhow::Result<ExitCode> {
                     &args.format,
                     args.output.as_deref(),
                     args.config.as_deref(),
+                    args.tui_theme.as_deref(),
                 )
                 .map(|()| ExitCode::SUCCESS)
             }
@@ -127,6 +131,7 @@ fn run_analyze(
     format: &OutputFormat,
     output: Option<&Path>,
     config: Option<&Path>,
+    tui_theme: Option<&str>,
 ) -> anyhow::Result<()> {
     let model_path =
         model_path.ok_or_else(|| anyhow::anyhow!("Model path required for analyze mode"))?;
@@ -151,10 +156,83 @@ fn run_analyze(
     } else if *format == OutputFormat::Json || !io::stdout().is_terminal() {
         print!("{rendered}");
         Ok(())
+    } else if let Some(reason) = terminal_too_small() {
+        // Decided before the screen is taken, so the notice lands on the
+        // normal terminal rather than flashing on an alternate one that is
+        // about to be torn down.
+        eprintln!("{reason}");
+        print!("{rendered}");
+        Ok(())
     } else {
-        TerminalApp::new(report, model_path).run()?;
+        run_analyze_surface(&report, &analyzer, tui_theme)?;
         Ok(())
     }
+}
+
+/// Whether this terminal is below the size the analyze surface needs.
+///
+/// A terminal that will not report its own size is taken at its word rather
+/// than refused: the surface is the better experience when it fits, and
+/// guessing "too small" would deny it to anyone whose terminal is merely
+/// reticent.
+#[cfg(feature = "analyzer")]
+fn terminal_too_small() -> Option<String> {
+    let (width, height) = crossterm::terminal::size().ok()?;
+    solarxy_cli::tui::shell::below_floor(width, height)
+}
+
+/// Assemble the analyze surface and hand it the terminal.
+///
+/// The assembly is here rather than behind a library entry point because the
+/// pieces are the reusable half of that module tree: a second surface takes
+/// the capability model, the theme system and the split tree and supplies its
+/// own panels. One opaque call would hide exactly the seam that makes it
+/// cheap.
+#[cfg(feature = "analyzer")]
+fn run_analyze_surface(
+    report: &solarxy_core::report::AnalysisReport,
+    analyzer: &ModelAnalyzer,
+    requested_theme: Option<&str>,
+) -> std::io::Result<()> {
+    use solarxy_cli::tui;
+    use tui::app::App;
+    use tui::caps::Capabilities;
+    use tui::geometry::{MeshView, ModelView};
+    use tui::layout::Preset;
+    use tui::prefs::TuiPrefs;
+    use tui::theme::ThemeSet;
+
+    let caps = Capabilities::detect();
+    let (prefs, notices) = TuiPrefs::load();
+    let wanted = requested_theme.or(prefs.theme.as_deref());
+    let (theme, theme_notices) = ThemeSet::load().resolve(wanted, caps);
+    for notice in notices {
+        tracing::warn!("{notice}");
+    }
+    for notice in theme_notices {
+        tracing::warn!("{notice}");
+    }
+
+    // A view, not a copy: the analyzer owns these arrays for the whole
+    // session, and copying them would throw away the reason the plots cost
+    // nothing to draw.
+    let model = ModelView {
+        meshes: analyzer
+            .meshes
+            .iter()
+            .map(|mesh| MeshView {
+                positions: &mesh.positions,
+                texcoords: &mesh.texcoords,
+                indices: &mesh.indices,
+            })
+            .collect(),
+    };
+
+    let layout = prefs
+        .opening_layout()
+        .unwrap_or_else(|| Preset::Survey.layout());
+    let mut app = App::new(report, &model, layout, theme, caps);
+    tui::shell::run(&mut app)
 }
 
 #[cfg(not(feature = "analyzer"))]
@@ -163,6 +241,7 @@ fn run_analyze(
     _format: &OutputFormat,
     _output: Option<&Path>,
     _config: Option<&Path>,
+    _tui_theme: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Analyzer not available: rebuild solarxy-cli with the 'analyzer' feature")
 }

@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use crate::aabb::AABB;
-use crate::geometry::{MeshTopology, RawMaterialData};
+use crate::geometry::{LutCube, MeshTopology, RawImageHdr, RawMaterialData};
 use crate::validation::ValidationResult;
 
 /// Stable identity of one renderable object in the scene, minted by the
@@ -41,6 +41,36 @@ pub struct CookedMesh {
     /// Per-vertex linear RGBA colors (the kernel's reserved `color` lane);
     /// `None` renders as white. Always position-count length when present.
     pub colors: Option<Arc<Vec<[f32; 4]>>>,
+    /// Per-instance placements for this mesh, or `None` for the ordinary
+    /// single-placement case.
+    ///
+    /// **`None` preserves the pre-instancing meaning exactly**: one implicit
+    /// identity placement. Every producer and consumer that predates
+    /// instancing is unaffected, which is what makes this additive rather
+    /// than breaking.
+    ///
+    /// On the mesh rather than on [`CookedGeometry`] because a set can hold
+    /// meshes with different placements: merging a scatter's prototype with
+    /// the surface it was scattered over is one set holding one instanced
+    /// mesh and one plain one, and a single list for the whole set cannot
+    /// say that. The copy operations keep a multi-mesh prototype rigid
+    /// within each copy by handing every one of its meshes the same shared
+    /// list, so the level costs nothing there.
+    pub instances: Option<Arc<Vec<InstanceXform>>>,
+}
+
+impl CookedMesh {
+    /// How many placements this mesh draws: the placement count, or 1 for
+    /// the implicit identity.
+    ///
+    /// The single place that turns "no list" into "one draw", so no caller
+    /// has to remember which absence means what.
+    #[must_use]
+    pub fn instance_count(&self) -> u32 {
+        self.instances
+            .as_ref()
+            .map_or(1, |i| u32::try_from(i.len()).unwrap_or(u32::MAX))
+    }
 }
 
 /// The cooked output of one displayed node: an ordered list of meshes plus
@@ -49,8 +79,44 @@ pub struct CookedMesh {
 pub struct CookedGeometry {
     pub meshes: Vec<CookedMesh>,
     pub materials: Vec<Arc<RawMaterialData>>,
-    /// Union bounds over all meshes (object space).
+    /// Union bounds over all meshes, **including every placement** (object
+    /// space), so camera framing and culling see the scatter rather than
+    /// the prototype sitting at the origin.
     pub bounds: AABB,
+}
+
+/// One instance placement: a column-major 4x4 model matrix, the same
+/// convention [`SceneOp::SetTransform`] uses.
+///
+/// The renderer derives each instance's normal matrix from this, so a
+/// mirrored or non-uniformly scaled placement shades correctly rather
+/// than inside out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InstanceXform(pub [[f32; 4]; 4]);
+
+impl InstanceXform {
+    /// The identity placement, which is what `instances: None` means.
+    pub const IDENTITY: Self = Self([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]);
+
+    /// Transform a point by this placement.
+    #[must_use]
+    pub fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        let m = &self.0;
+        std::array::from_fn(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r])
+    }
+}
+
+impl CookedGeometry {
+    /// Whether any mesh carries placements.
+    #[must_use]
+    pub fn is_instanced(&self) -> bool {
+        self.meshes.iter().any(|m| m.instances.is_some())
+    }
 }
 
 /// Light variety, mirroring the six light node types.
@@ -86,6 +152,15 @@ pub struct LightDef {
     /// Linear RGB. Hemisphere uses `color` as the sky color and
     /// `ground_color` for the lower hemisphere.
     pub color: [f32; 3],
+    /// A plain linear scale on this light's contribution: the renderer
+    /// multiplies by exactly this and nothing else.
+    ///
+    /// Worth stating because it was not always true. Until 0.8.2 the
+    /// raster path multiplied every slot-consuming light by a hardcoded
+    /// three, so no authored value could be matched against a reference
+    /// and the node's own help called its scale arbitrary. It is still not
+    /// calibrated in lumens or watts, but it is consistent: two lights an
+    /// octave apart in this number are an octave apart on screen.
     pub intensity: f32,
     /// Point / Spot cutoff distance; `0` means unlimited.
     pub range: f32,
@@ -183,6 +258,116 @@ pub enum CameraKind {
     Physical,
 }
 
+/// The tone-mapping transform the composite pass ends on.
+///
+/// Duplicates the variant set of `preferences::ToneMode`, and does so
+/// deliberately: `CameraDef` names a tone curve, `scene` is ungated, and
+/// `preferences` sits behind the `serde` feature, so the scene contract
+/// cannot reach the one with the serde derives on it. This copy owns the
+/// numbering the shader switches on; `ToneMode` keeps the user-facing
+/// labels, the config-file serialization and the `Shift+T` cycle, and
+/// converts to and from this. A drift test pins the two together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToneCurve {
+    /// Clip to the displayable range and nothing else.
+    None,
+    /// Also a clip; distinct from [`Self::None`] only in name and in what
+    /// a user reads it to mean.
+    Linear,
+    Reinhard,
+    #[default]
+    AcesFilmic,
+}
+
+impl ToneCurve {
+    /// The discriminant `composite.wgsl` switches on. **This function is
+    /// the numbering**; anything else that needs it converts to here
+    /// first, so there is one place a new curve has to be added.
+    #[must_use]
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Linear => 1,
+            Self::Reinhard => 2,
+            Self::AcesFilmic => 3,
+        }
+    }
+}
+
+/// A shot's rendering intent: everything that changes the picture without
+/// changing the scene.
+///
+/// Owned by the camera, which is the point rather than an implementation
+/// detail. A grade that lives in application state is lost the moment the
+/// tab closes and cannot be reviewed by anyone else; a grade that lives on
+/// the camera node saves in the `.slxy`, travels with the shot, and is
+/// visible in the graph beside the framing it belongs to.
+///
+/// [`Default`] is the neutral look, and neutral means **bit-identical**
+/// output rather than merely similar: `tone: None` inherits whatever the
+/// pane was already doing, and the renderer skips the grade entirely at
+/// these values rather than multiplying by one.
+#[derive(Debug, Clone)]
+pub struct CameraLook {
+    /// Linear multiplier applied before tone mapping. 1.0 is as rendered.
+    pub exposure: f32,
+    /// The tone curve to use, or `None` to inherit the pane's own choice.
+    /// Inheriting is the default so that adding a camera to an existing
+    /// scene does not silently restyle it.
+    pub tone: Option<ToneCurve>,
+    /// Added after the tone map: raises or lowers the floor. Neutral 0.
+    pub lift: [f32; 3],
+    /// Applied as a power last. Neutral 1.
+    pub gamma: [f32; 3],
+    /// Multiplied first: scales the ceiling. Neutral 1.
+    pub gain: [f32; 3],
+    /// The pre-tone-map table, sampled on log-encoded light. This is where
+    /// a tone transform goes.
+    pub lut_a: Option<Arc<LutCube>>,
+    pub lut_a_strength: f32,
+    /// The display-referred table, sampled after tone mapping. This is
+    /// where an ordinary look LUT goes.
+    pub lut_b: Option<Arc<LutCube>>,
+    pub lut_b_strength: f32,
+}
+
+impl Default for CameraLook {
+    fn default() -> Self {
+        Self {
+            exposure: 1.0,
+            tone: None,
+            lift: [0.0; 3],
+            gamma: [1.0; 3],
+            gain: [1.0; 3],
+            lut_a: None,
+            lut_a_strength: 1.0,
+            lut_b: None,
+            lut_b_strength: 1.0,
+        }
+    }
+}
+
+/// Compares tables by content hash rather than by contents.
+///
+/// Hand-written because the derived form would compare two 33-cubed
+/// `Vec<f32>` element by element, and `CameraDef` equality is reached once
+/// per camera per delta. The hash is what identity means for a table
+/// everywhere else in the pipeline, including the renderer's upload dedupe.
+impl PartialEq for CameraLook {
+    fn eq(&self, other: &Self) -> bool {
+        let table = |t: &Option<Arc<LutCube>>| t.as_ref().map(|c| c.hash);
+        self.exposure == other.exposure
+            && self.tone == other.tone
+            && self.lift == other.lift
+            && self.gamma == other.gamma
+            && self.gain == other.gain
+            && self.lut_a_strength == other.lut_a_strength
+            && self.lut_b_strength == other.lut_b_strength
+            && table(&self.lut_a) == table(&other.lut_a)
+            && table(&self.lut_b) == table(&other.lut_b)
+    }
+}
+
 /// One camera node's resolved runtime description. Lowered from a `camera`
 /// root node the same way [`LightDef`] is lowered from a light node, and read
 /// back by the host to drive a pane's look-through camera and its wireframe
@@ -209,6 +394,9 @@ pub struct CameraDef {
     pub show_gizmo: bool,
     /// The gizmo's world-space size, in meters.
     pub gizmo_size: f32,
+    /// The shot's rendering intent. A pane looking through this camera
+    /// composites with it; a free pane uses its own.
+    pub look: CameraLook,
 }
 
 /// One scene mutation. Transforms are column-major world matrices; a
@@ -259,8 +447,45 @@ pub enum SceneOp {
     SetCameras {
         cameras: Vec<CameraDef>,
     },
+    /// Replace the whole lighting environment, following the `SetLights` and
+    /// `SetCameras` precedent for the same reason: there is exactly one, so
+    /// diffing buys nothing and costs a reconciliation bug surface.
+    ///
+    /// `hdri: None` means **no environment**, which is deliberately distinct
+    /// from a black one: the host keeps whatever background and procedural
+    /// sky it had, rather than going dark. Rebuilding image-based lighting
+    /// is expensive, so a host is expected to dedupe on
+    /// [`RawImageHdr::hash`](crate::RawImageHdr) and do nothing when the
+    /// same environment arrives twice.
+    SetEnvironment {
+        hdri: Option<Arc<RawImageHdr>>,
+        /// Yaw applied to both the visible sky and the lighting it
+        /// derives, in radians.
+        rotation: f32,
+        /// Multiplier on the lighting contribution; `1.0` is as authored.
+        intensity: f32,
+        background: BackgroundKind,
+    },
     /// Remove every object and light (document replaced).
     Clear,
+}
+
+/// What the environment asks the background to be.
+///
+/// Deliberately not a full background enum. Solid and gradient backdrops
+/// are per-pane host state (`preferences::BackgroundMode`), and a scene-wide
+/// op that could also set them would make two systems authoritative over one
+/// pixel. This says only whether the environment claims the backdrop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackgroundKind {
+    /// Leave the background alone: each pane keeps its own. The default,
+    /// and the state every scene authored before the environment node
+    /// existed is in.
+    #[default]
+    Keep,
+    /// Draw the HDRI itself as the backdrop. Meaningless without an `hdri`,
+    /// and a host receiving it with `hdri: None` keeps its own background.
+    HdriSky,
 }
 
 /// An ordered batch of scene mutations, drained by the renderer once per

@@ -63,7 +63,15 @@ fn color_param(key: &str, label: &str, default: [f32; 4], doc: &str) -> ParamSpe
     .doc(doc)
 }
 
-fn intensity(default: f64) -> ParamSpec {
+/// `soft_max` is the slider's comfortable ceiling, passed per light rather
+/// than shared because the six no longer sit on one scale. The four that
+/// entered the raster loop had their defaults tripled when the hidden
+/// multiplier left the shader; ambient and hemisphere never did. Passing
+/// one number for all six would either squash their sliders into the
+/// bottom sixth or leave the others unable to reach a useful value, so
+/// each keeps the same range *relative to its own default* that it had
+/// before.
+fn intensity(default: f64, soft_max: f64) -> ParamSpec {
     ParamSpec::new(
         "intensity",
         "Intensity",
@@ -72,13 +80,17 @@ fn intensity(default: f64) -> ParamSpec {
         ParamValue::Float(default),
     )
     .hard(0.0, 1000.0)
-    .soft(0.0, 10.0)
+    .soft(0.0, soft_max)
     .doc(
-        "Linear multiplier on this light's contribution. 0 turns it off \
-         without removing it from the scene, which is the quick way to A/B a \
-         light you want to keep. The scale is arbitrary rather than \
-         photometric -- there are no lumens or watts behind it -- so match \
-         lights against each other by eye, not against real-world figures.",
+        "Linear multiplier on this light's contribution, and linear means \
+         what it says: doubling this doubles the light, and two lights an \
+         octave apart in this number are an octave apart on screen. 0 turns \
+         the light off without removing it from the scene, which is the \
+         quick way to A/B one you want to keep. There are still no lumens or \
+         watts behind the number, so it is not calibrated against the \
+         physical world, but it is consistent within a scene and against a \
+         value authored anywhere else: nothing is scaled behind your back on \
+         the way to the shader.",
     )
 }
 
@@ -227,7 +239,7 @@ fn assemble(
 
 #[must_use]
 pub fn point_descriptor() -> NodeTypeDescriptor {
-    assemble(
+    let mut desc = assemble(
         "point_light",
         "Point Light",
         "An omnidirectional light: it emits from Position equally in every \
@@ -270,7 +282,7 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
                  surface does not reflect. Alpha is ignored. Tint this \
                  rather than Intensity when you want warmth, not brightness.",
             ),
-            intensity(1.5),
+            intensity(4.5, 30.0),
             range_param(),
             decay_param(),
             cast_shadow_param(),
@@ -285,12 +297,20 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
              cosmetic -- it has no effect on the light itself. Raise it when \
              the helper is lost in a large scene.",
         ),
-    )
+    );
+    // v2 rescales the stored intensity: the raster path stopped multiplying
+    // every light's contribution by three, so a value saved before that has
+    // to move by the same factor to mean what it did. Ambient and
+    // hemisphere deliberately do NOT bump, because they fold into the
+    // hemisphere rows of the light uniform and never entered that loop.
+    desc.version = 2;
+    desc.migrate = Some(super::common::migrate_scale_intensity);
+    desc
 }
 
 #[must_use]
 pub fn directional_descriptor() -> NodeTypeDescriptor {
-    assemble(
+    let mut desc = assemble(
         "directional_light",
         "Directional Light",
         "A parallel light, like the sun: every ray travels the same \
@@ -351,7 +371,7 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
                  sun against a cool `hemisphere_light` fill is the cheapest \
                  believable daylight there is.",
             ),
-            intensity(1.5),
+            intensity(4.5, 30.0),
             cast_shadow_param(),
             map_size_param("2048"),
             bias_param(0.0001),
@@ -364,12 +384,20 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
             "How long the helper arrow is drawn, in world metres. Purely \
              cosmetic -- it has no effect on the light.",
         ),
-    )
+    );
+    // v2 rescales the stored intensity: the raster path stopped multiplying
+    // every light's contribution by three, so a value saved before that has
+    // to move by the same factor to mean what it did. Ambient and
+    // hemisphere deliberately do NOT bump, because they fold into the
+    // hemisphere rows of the light uniform and never entered that loop.
+    desc.version = 2;
+    desc.migrate = Some(super::common::migrate_scale_intensity);
+    desc
 }
 
 #[must_use]
 pub fn spot_descriptor() -> NodeTypeDescriptor {
-    assemble(
+    let mut desc = assemble(
         "spot_light",
         "Spot Light",
         "A cone of light from Position toward Target: full intensity in the \
@@ -424,7 +452,7 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                  color, so a saturated light cannot put back a hue the \
                  surface does not reflect. Alpha is ignored.",
             ),
-            intensity(1.5),
+            intensity(4.5, 30.0),
             range_param(),
             decay_param(),
             ParamSpec::new(
@@ -473,7 +501,15 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
              Range is set the cone is drawn out to Range instead and this \
              does nothing. Cosmetic either way.",
         ),
-    )
+    );
+    // v2 rescales the stored intensity: the raster path stopped multiplying
+    // every light's contribution by three, so a value saved before that has
+    // to move by the same factor to mean what it did. Ambient and
+    // hemisphere deliberately do NOT bump, because they fold into the
+    // hemisphere rows of the light uniform and never entered that loop.
+    desc.version = 2;
+    desc.migrate = Some(super::common::migrate_scale_intensity);
+    desc
 }
 
 #[must_use]
@@ -509,7 +545,7 @@ pub fn ambient_descriptor() -> NodeTypeDescriptor {
                  -- a bright neutral ambient is what makes a render look \
                  washed out and unlit. Alpha is ignored.",
             ),
-            intensity(0.5),
+            intensity(0.5, 10.0),
         ],
         (
             "This control does nothing on an ambient light. An ambient light \
@@ -564,7 +600,7 @@ pub fn hemisphere_descriptor() -> NodeTypeDescriptor {
                  Sky Color makes this light exactly an `ambient_light`. \
                  Alpha is ignored.",
             ),
-            intensity(1.0),
+            intensity(1.0, 10.0),
         ],
         (
             "Draw a wireframe dome, in Sky Color, at the WORLD ORIGIN -- a \
@@ -627,7 +663,7 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
                  multiplies the surface color like any other light. Alpha is \
                  ignored.",
             ),
-            intensity(1.5),
+            intensity(4.5, 30.0),
             ParamSpec::new(
                 "width",
                 "Width",
@@ -700,10 +736,15 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
              rectangle takes its size from Width and Height instead.",
         ),
     );
-    desc.version = 3;
-    // The migration is unchanged from v2 on purpose. It strips a v1
-    // document's `rotate`, `scale` and `uniform_scale`, and v3 must keep
-    // stripping them: a v1 `rotate` was authored against a light that
+    // v4 rescales the stored intensity, the same change the other three
+    // slot-consuming lights take at v2. This one is at a different number
+    // only because it had already bumped twice for unrelated reasons,
+    // which is why the rescale could not be one shared hook on the
+    // descriptor builder the way the specification assumed.
+    desc.version = 4;
+    // The v1 arm is unchanged on purpose. It strips a v1 document's
+    // `rotate`, `scale` and `uniform_scale`, and every later version must
+    // keep stripping them: a v1 `rotate` was authored against a light that
     // ignored it, so carrying it forward would silently re-aim panels in
     // old scenes. v3's own `rotate` and `two_sided` need no arm at all --
     // an unset param resolves to its spec default, which is the

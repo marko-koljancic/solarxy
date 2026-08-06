@@ -29,7 +29,7 @@ use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
 use solarxy_core::validation::{
     ValidationConfig, ValidationResult, ValidationThresholds, validate_raw_model_with_config,
 };
-use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, ViewLayout};
+use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings, PaneLook, ViewLayout};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::AABB;
 use solarxy_graph::assets::AssetTable;
@@ -41,11 +41,14 @@ use solarxy_graph::{Command, Engine, EventBatch};
 use solarxy_kernel::transfer;
 use solarxy_renderer::manipulator::{self, ManipulatorState};
 
-use crate::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
-use crate::display_defaults::{self, DisplayDefaults};
-use crate::gizmo::{self, GizmoState, ToolMode};
-use solarxy_renderer::camera::{turntable_up, Camera, CameraUniform};
+use solarxy_host::HostViewState;
+use solarxy_host::attr_viz::{AttrColorMode, AttrVizState, ramp_color};
+use solarxy_host::display_defaults::{self, DisplayDefaults};
+use solarxy_host::gizmo::{self, GizmoPose, GizmoState, ToolMode};
+use solarxy_renderer::camera::{turntable_up, Camera};
 use solarxy_renderer::camera_state::CameraState;
+use solarxy_renderer::composite::CompositeLook;
+use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
 use solarxy_renderer::geometry::build_normals_geometry;
@@ -93,10 +96,7 @@ fn log(msg: &str) {
 
 /// Placeholder scene bounds before anything cooks (frames the grid).
 fn default_bounds() -> AABB {
-    AABB {
-        min: Point3::new(-2.0, -2.0, -2.0),
-        max: Point3::new(2.0, 2.0, 2.0),
-    }
+    solarxy_renderer::environment::placeholder_bounds()
 }
 
 /// The pane display defaults every pane starts from (desktop parity:
@@ -144,28 +144,27 @@ fn default_display_settings() -> DisplaySettings {
         roughness_scale: 1.0,
         metallic_scale: 1.0,
         hdri_rotation: 0.0,
+        hdri_intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
         point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
     }
 }
 
-/// Host-owned view state: the web mirror of the desktop `ViewState`.
-struct WebViewState {
-    display: DisplaySettings,
-    active_pane: usize,
-    cameras_linked: bool,
-    cameras: [Option<CameraState>; 4],
-    pane_settings: [PaneDisplaySettings; 4],
-    /// Which `camera` node each pane looks through (`None` = free view).
-    look_through: [Option<NodeId>; 4],
-    /// Whether a look-through pane is locked so navigation reframes the camera
-    /// node (Blender's Lock-Camera-to-View). Only meaningful when the same
-    /// slot's `look_through` is `Some`.
-    camera_locked: [bool; 4],
-    /// Transient: a locked look-through pane is mid-navigation, so the
-    /// node-to-pane follow is suppressed until the gesture commits (avoids the
-    /// follow fighting live navigation). Not persisted.
-    camera_editing: [bool; 4],
-}
+/// The key a pane's look rides under inside `PaneJson::display`.
+///
+/// That field is declared opaque and round-tripped uninterpreted by the
+/// scene file, which makes it the right place for pane state the schema
+/// does not name: persisting here costs no `schema_version` bump and no
+/// `min_reader` gate, and a scene written before this existed simply has
+/// no such key.
+const PANE_LOOK_KEY: &str = "look";
+
+// This shell's view state is `solarxy_host::HostViewState` plus four fields
+// held directly on `SolarxyApp`: `pane_looks`, `look_through`, `camera_locked`
+// and `camera_editing`. Those four describe panes looking through `camera`
+// nodes, and the desktop shell has no camera nodes until it gains an engine,
+// so they stay here rather than sitting on the shared type as fields one
+// consumer sets and the other never reads. Same judgement the shared crate
+// makes about a renderer trait: one consumer is not yet something to share.
 
 /// Async happenings the frontend drains once per frame.
 #[derive(Serialize)]
@@ -268,9 +267,28 @@ pub struct SolarxyApp {
     renderer: Renderer,
     scene_objects: SceneObjects,
     env: SceneEnvironment,
+    /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
+    /// whole environment on every rebuild and installing one convolves an
+    /// irradiance cubemap, so this remembers what is already on the GPU.
+    /// Invalidated by `set_environment_prepared` and `clear_environment`,
+    /// which move the IBL behind the scene contract's back.
+    environment: solarxy_renderer::environment::EnvironmentTracker,
     /// The bounds `env` was last built for (grid/floor/shadow fit).
     env_bounds: AABB,
-    view: WebViewState,
+    view: HostViewState,
+    /// Each pane's own rendering intent, used when the pane is a free view. A
+    /// pane looking through a camera composites with that camera's look
+    /// instead; see `SolarxyApp::pane_look`.
+    pane_looks: [PaneLook; 4],
+    /// Which `camera` node each pane looks through (`None` = free view).
+    look_through: [Option<NodeId>; 4],
+    /// Whether a look-through pane is locked so navigation reframes the camera
+    /// node. Only meaningful when the same slot's `look_through` is `Some`.
+    camera_locked: [bool; 4],
+    /// Transient: a locked look-through pane is mid-navigation, so the
+    /// node-to-pane follow is suppressed until the gesture commits (it would
+    /// otherwise fight live navigation). Not persisted.
+    camera_editing: [bool; 4],
     engine: Engine,
     host_events: Vec<HostEvent>,
     last_pane_rects: Vec<RectDto>,
@@ -281,6 +299,14 @@ pub struct SolarxyApp {
     /// The viewport tool, plus any hover highlight and drag in flight. The drag
     /// loop runs entirely host-side; JS only ever calls `set_tool`.
     gizmo: GizmoState,
+    /// Where the in-flight drag's result is addressed.
+    ///
+    /// Parallel to `gizmo.drag` rather than inside it. The drag solver lives in
+    /// `solarxy-host`, which deliberately knows nothing about documents, so it
+    /// solves a *pose* and this shell remembers which node the answer belongs
+    /// to. The two are only ever ended together, through `take_gizmo_drag`, so
+    /// they cannot drift apart into a drag that commits to nowhere.
+    gizmo_addr: Option<GizmoAddr>,
     /// The live drag's delta text, rebuilt each pointer move and polled once per
     /// frame by the shell. `None` whenever nothing is being dragged.
     gizmo_readout: Option<String>,
@@ -292,6 +318,7 @@ pub struct SolarxyApp {
     /// `take_validate_jobs` moves plain bytes.
     pending_validate: Vec<PendingValidateJob>,
     pending_image: Vec<PendingImageJob>,
+    pending_hdri: Vec<PendingHdriJob>,
     /// The graph context the node canvas currently shows (React mirrors it
     /// via `set_current_context`); the UV pane's selected-node source
     /// resolves against it.
@@ -355,6 +382,46 @@ pub struct SolarxyApp {
     display_defaults: DisplayDefaults,
 }
 
+/// Where a gizmo drag's result is written: the engine half of a drag, which
+/// the pose-only solver in `solarxy-host` does not carry.
+#[derive(Clone, Copy)]
+struct GizmoAddr {
+    ctx: GraphContext,
+    node: NodeId,
+}
+
+/// The solver's view of an engine gizmo target: the pose, without the
+/// addressing or the append bookkeeping.
+fn gizmo_pose(t: &GizmoTarget) -> GizmoPose {
+    GizmoPose {
+        translate: t.translate,
+        rotate: t.rotate,
+        rotate_order: t.rotate_order,
+        scale: t.scale,
+        uniform_scale: t.uniform_scale,
+        anchor: t.anchor,
+        basis: t.basis,
+        parent_basis: t.parent_basis,
+        parent: t.parent,
+    }
+}
+
+/// Lower a solved drag value into the param source a `SetParam` carries.
+///
+/// Lives here rather than on `DragValue` because `ParamSource` is an engine
+/// type and the solver's crate has no engine dependency.
+fn drag_param_source(value: gizmo::DragValue) -> ParamSource {
+    let v = match value {
+        gizmo::DragValue::Translate(v)
+        | gizmo::DragValue::Rotate(v)
+        | gizmo::DragValue::Scale(v) => {
+            ParamValue::Vec3([f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
+        }
+        gizmo::DragValue::UniformScale(f) => ParamValue::Float(f64::from(f)),
+    };
+    ParamSource::Literal(v)
+}
+
 /// Identity of the loaded HDRI (its bytes live in the engine asset table).
 #[derive(Clone)]
 struct HdriMeta {
@@ -379,6 +446,17 @@ struct PendingValidateJob {
 /// the frontend pulls the encoded bytes by hash (like the parse pump) and
 /// decodes them in the import worker via `createImageBitmap`.
 struct PendingImageJob {
+    ctx: GraphContext,
+    job_id: u64,
+    hash: String,
+    name: String,
+}
+
+/// A drained `DecodeHdrImage` job awaiting [`SolarxyApp::take_hdri_jobs`].
+/// Same shape as an image job; it exists separately because the frontend
+/// routes it to a different worker entry point (no browser codec reads
+/// Radiance or `OpenEXR`, so the Rust decoder runs in the worker).
+struct PendingHdriJob {
     ctx: GraphContext,
     job_id: u64,
     hash: String,
@@ -482,8 +560,12 @@ impl SolarxyApp {
             // `Light` default, so the same scene drew different wireframes in
             // the two shells out of the box.
             wireframe_line_width: solarxy_core::preferences::LineWeight::default().width_px(),
-            bloom_enabled: false,
-            ssao_enabled: false,
+            // Match the desktop's shipped defaults. Both stayed hard false
+            // for six releases, which left the AO Preview mode a white
+            // screen and bloom inert in every browser; the preference
+            // toggles arrive through `set_display_defaults` below.
+            bloom_enabled: true,
+            ssao_enabled: true,
             tone_mode: ToneMode::AcesFilmic,
             exposure: 1.0,
             ibl_mode: IblMode::Full,
@@ -545,17 +627,19 @@ impl SolarxyApp {
             preview: None,
             scene_objects: SceneObjects::new(),
             env,
+            environment: solarxy_renderer::environment::EnvironmentTracker::default(),
             env_bounds: bounds,
-            view: WebViewState {
+            view: HostViewState {
+                pane_settings: [default_pane_settings(); 4],
                 display: default_display_settings(),
+                cameras: [None, None, None, None],
                 active_pane: 0,
                 cameras_linked: false,
-                cameras: [None, None, None, None],
-                pane_settings: [default_pane_settings(); 4],
-                look_through: [None; 4],
-                camera_locked: [false; 4],
-                camera_editing: [false; 4],
             },
+            pane_looks: [PaneLook::default(); 4],
+            look_through: [None; 4],
+            camera_locked: [false; 4],
+            camera_editing: [false; 4],
             engine,
             host_events: Vec::new(),
             player_mode: false,
@@ -565,6 +649,7 @@ impl SolarxyApp {
             selected_object: None,
             pending_validate: Vec::new(),
             pending_image: Vec::new(),
+            pending_hdri: Vec::new(),
             current_ctx: GraphContext::Root,
             uv_scene: SceneObjects::new(),
             uv_use_preview: false,
@@ -584,6 +669,7 @@ impl SolarxyApp {
             attr_dirty: false,
             display_defaults: DisplayDefaults::default(),
             gizmo: GizmoState::default(),
+            gizmo_addr: None,
             gizmo_readout: None,
         })
     }
@@ -646,6 +732,7 @@ impl SolarxyApp {
             {
                 log(&format!("scene delta apply failed: {e}"));
             }
+            self.apply_scene_environment(&delta);
         }
 
         // The manipulator is pull-based: recompute what it should be, every
@@ -661,7 +748,7 @@ impl SolarxyApp {
                 .gizmo_target(self.current_ctx)
                 .and_then(|target| {
                     self.gizmo
-                        .manipulator(&target, cgmath::Vector3::unit_z(), 1.0)
+                        .manipulator(&gizmo_pose(&target), cgmath::Vector3::unit_z(), 1.0)
                 })
         };
         self.renderer.set_manipulator(manip);
@@ -793,8 +880,8 @@ impl SolarxyApp {
         // Switching tools mid-drag abandons the drag. Rolling it back rather
         // than dropping it is what keeps the preview lane from stranding a value
         // the document never agreed to.
-        let rollback = match self.gizmo.drag.take() {
-            Some(drag) => self.rollback_gizmo_drag(&drag)?,
+        let rollback = match self.take_gizmo_drag() {
+            Some((drag, addr)) => self.rollback_gizmo_drag(&drag, addr)?,
             None => JsValue::NULL,
         };
         self.gizmo.tool = next;
@@ -880,12 +967,20 @@ impl SolarxyApp {
     /// both flags; a mid-session preference save sets only the flags for
     /// fields that actually changed, so per-pane Display-menu overrides
     /// survive unrelated preference edits.
+    ///
+    /// The boundary mirrors the TypeScript preference bundle field for
+    /// field, which is why the argument list is long and bool-heavy: a
+    /// struct here would drag serde through the wasm boundary for a plain
+    /// setter.
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
     pub fn set_display_defaults(
         &mut self,
         wireframe_weight: &str,
         background: &str,
         turntable_rpm: f32,
         point_size: f32,
+        ssao_enabled: bool,
+        bloom_enabled: bool,
         apply_wireframe: bool,
         apply_background: bool,
     ) {
@@ -893,6 +988,11 @@ impl SolarxyApp {
             line_weight: display_defaults::parse_line_weight(wireframe_weight),
             background: display_defaults::parse_background(background),
         };
+        // Renderer-global post effects, applied on every push: the write is
+        // idempotent and the next frame picks it up, so a preference toggle
+        // needs no reload and no host event.
+        self.renderer.post.ssao_enabled = ssao_enabled;
+        self.renderer.post.bloom_enabled = bloom_enabled;
         self.view.display.turntable_rpm = if turntable_rpm.is_finite() {
             turntable_rpm.clamp(1.0, 60.0)
         } else {
@@ -964,7 +1064,7 @@ impl SolarxyApp {
         // On a locked look-through pane, this drag reframes the bound camera, so
         // suppress the node-to-pane follow for the duration of the gesture.
         if self.is_locked_look_through(active) {
-            self.view.camera_editing[active] = true;
+            self.camera_editing[active] = true;
         }
         Ok(JsValue::NULL)
     }
@@ -1040,8 +1140,8 @@ impl SolarxyApp {
         // A locked look-through reframe ends when the last button lifts: commit
         // the new camera pose to the node (one undo step) and let the follow
         // resume. The batch flows back so the parameter panel reflects the pose.
-        if self.pointer_buttons_down == 0 && self.view.camera_editing[active] {
-            self.view.camera_editing[active] = false;
+        if self.pointer_buttons_down == 0 && self.camera_editing[active] {
+            self.camera_editing[active] = false;
             if let Some(batch) = self.commit_pane_camera_to_node(active) {
                 return to_js(&batch);
             }
@@ -1053,10 +1153,10 @@ impl SolarxyApp {
     /// the object snaps back. Returns the rollback `EventBatch`, or `null` when
     /// no drag was in flight.
     pub fn cancel_gizmo_drag(&mut self) -> Result<JsValue, JsError> {
-        let Some(drag) = self.gizmo.drag.take() else {
+        let Some((drag, addr)) = self.take_gizmo_drag() else {
             return Ok(JsValue::NULL);
         };
-        self.rollback_gizmo_drag(&drag)
+        self.rollback_gizmo_drag(&drag, addr)
     }
 
     /// Wheel zoom on the active pane; positive zooms in.
@@ -1527,12 +1627,16 @@ impl SolarxyApp {
         // cleared (unlike the per-pane path, which clears only pane 0).
         let bloom = self.renderer.post.bloom_enabled && !is_uv && scene_present;
         let ssao = self.renderer.post.ssao_enabled && !is_uv && scene_present;
+        // A capture runs outside the frame loop, so the slots still hold
+        // whatever the last pane drawn happened to bind. Without this, a
+        // screenshot of one camera could carry another camera's tables.
+        self.bind_pane_luts(pane_idx);
         self.renderer.post.composite.write_params(
             &self.queue,
             bloom,
             ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &self.pane_look(pane_idx),
+            &self.renderer.post.luts,
             pds.inspection_mode,
         );
         self.renderer.post.composite.render(
@@ -1573,7 +1677,7 @@ impl SolarxyApp {
             .get(pane)
             .and_then(|c| c.as_ref())
             .map(|c| c.camera)?;
-        if let Some(node) = self.view.look_through.get(pane).copied().flatten()
+        if let Some(node) = self.look_through.get(pane).copied().flatten()
             && let Some(def) = self
                 .scene_objects
                 .cameras()
@@ -1722,15 +1826,15 @@ impl SolarxyApp {
     /// free view when `camera` is negative / non-finite. Returns the view state.
     pub fn set_pane_camera(&mut self, pane: usize, camera: f64) -> Result<JsValue, JsError> {
         if pane < 4 {
-            self.view.look_through[pane] = if camera.is_finite() && camera >= 0.0 {
+            self.look_through[pane] = if camera.is_finite() && camera >= 0.0 {
                 Some(NodeId(camera as u64))
             } else {
                 None
             };
-            if self.view.look_through[pane].is_none() {
-                self.view.camera_locked[pane] = false;
+            if self.look_through[pane].is_none() {
+                self.camera_locked[pane] = false;
             }
-            self.view.camera_editing[pane] = false;
+            self.camera_editing[pane] = false;
         }
         self.view_state()
     }
@@ -1738,9 +1842,9 @@ impl SolarxyApp {
     /// Toggles lock-camera-to-view for a look-through pane (Blender semantics:
     /// navigation reframes the bound camera). No effect on a free view.
     pub fn set_pane_camera_lock(&mut self, pane: usize, locked: bool) -> Result<JsValue, JsError> {
-        if pane < 4 && self.view.look_through[pane].is_some() {
-            self.view.camera_locked[pane] = locked;
-            self.view.camera_editing[pane] = false;
+        if pane < 4 && self.look_through[pane].is_some() {
+            self.camera_locked[pane] = locked;
+            self.camera_editing[pane] = false;
         }
         self.view_state()
     }
@@ -1841,6 +1945,23 @@ impl SolarxyApp {
 
     /// Replaces the global display settings (layout, split, turntable,
     /// lights lock, material scales, HDRI rotation).
+    /// Replace one pane's own look: exposure, tone mapper, and the
+    /// lift/gamma/gain grade.
+    ///
+    /// Only reaches a pane that is a free view. A pane looking through a
+    /// camera composites with that camera's look, which is a document
+    /// value and is edited by setting the node's parameters like any
+    /// other. Carries no lookup-table slots for the same reason: a table
+    /// is a staged document asset, and a pane is not a document object.
+    pub fn set_pane_look(&mut self, pane: usize, look: JsValue) -> Result<JsValue, JsError> {
+        let look: PaneLook = serde_wasm_bindgen::from_value(look)
+            .map_err(|e| JsError::new(&format!("bad pane look: {e}")))?;
+        if let Some(slot) = self.pane_looks.get_mut(pane) {
+            *slot = look;
+        }
+        self.view_state()
+    }
+
     pub fn set_display_settings(&mut self, settings: JsValue) -> Result<JsValue, JsError> {
         let settings: DisplaySettings = serde_wasm_bindgen::from_value(settings)
             .map_err(|e| JsError::new(&format!("bad display settings: {e}")))?;
@@ -2035,6 +2156,19 @@ impl SolarxyApp {
                     });
                     continue;
                 }
+                JobRequest::DecodeHdrImage { asset } => {
+                    let name = manifest
+                        .iter()
+                        .find(|(h, _)| *h == asset.0)
+                        .map_or_else(String::new, |(_, n)| n.clone());
+                    self.pending_hdri.push(PendingHdriJob {
+                        ctx,
+                        job_id: job.0,
+                        hash: asset.0,
+                        name,
+                    });
+                    continue;
+                }
             };
             let name = manifest
                 .iter()
@@ -2120,6 +2254,99 @@ impl SolarxyApp {
             out.push(&o);
         }
         Ok(out.into())
+    }
+
+    /// Drains the stashed HDRI-decode jobs into a JS array of
+    /// `{ ctx, jobId, hash, name }`. The frontend pulls the encoded bytes
+    /// by hash and posts them to the worker's HDRI path, returning the
+    /// prepared result through `submit_decoded_hdri` / `submit_hdri_error`.
+    /// Call after `take_import_jobs` (which performs the drain from the
+    /// engine).
+    pub fn take_hdri_jobs(&mut self) -> Result<JsValue, JsError> {
+        let out = js_sys::Array::new();
+        for job in self.pending_hdri.drain(..) {
+            let o = js_sys::Object::new();
+            let set = |key: &str, value: &JsValue| {
+                js_sys::Reflect::set(&o, &JsValue::from_str(key), value)
+                    .map_err(|_| JsError::new("take_hdri_jobs: reflect set failed"))
+                    .map(|_| ())
+            };
+            set("ctx", &to_js(&job.ctx)?)?;
+            set("jobId", &JsValue::from_f64(job.job_id as f64))?;
+            set("hash", &JsValue::from_str(&job.hash))?;
+            set("name", &JsValue::from_str(&job.name))?;
+            out.push(&o);
+        }
+        Ok(out.into())
+    }
+
+    /// Commits a worker-decoded HDRI under the per-node generation guard.
+    ///
+    /// Takes the packed `PreparedHdri` the worker already produces, which
+    /// carries the CPU lighting stages alongside the pixels. That is why
+    /// the environment node reuses the existing worker entry point rather
+    /// than a lean decode: the irradiance convolution stays off the main
+    /// thread, and this call installs the result directly instead of
+    /// making the tracker convolve it again on the next delta.
+    pub fn submit_decoded_hdri(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        prepared: Vec<u8>,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let prepared = solarxy_renderer::ibl::PreparedHdri::unpack(&prepared)
+            .map_err(|e| JsError::new(&format!("bad prepared HDRI: {e}")))?;
+
+        // Install on the GPU now, while the convolved faces are in hand.
+        self.renderer.ibl_res.ibl =
+            solarxy_renderer::ibl::IblState::from_prepared(&self.device, &self.queue, &prepared);
+
+        // Hand the engine the image itself, so the scene delta can carry
+        // it and a save can embed it. The hash is stamped here, Rust-side,
+        // by the same constructor the native path uses.
+        let image = std::sync::Arc::new(solarxy_core::RawImageHdr::new(
+            prepared.pixels,
+            prepared.width,
+            prepared.height,
+        ));
+        // Tell the tracker this hash is already live, so the delta that
+        // follows sees `Unchanged` rather than convolving it a second time
+        // on the main thread.
+        self.environment.note_installed(image.hash);
+        self.rebuild_light_bind_group();
+
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::HdrImage(Ok(image)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
+    }
+
+    /// Reports a worker HDRI-decode failure: the `environment` node badges
+    /// the error and the viewport keeps the environment it had.
+    pub fn submit_hdri_error(
+        &mut self,
+        ctx: JsValue,
+        job_id: f64,
+        message: String,
+    ) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let events = self.engine.submit_job_result(
+            ctx,
+            JobId(job_id as u64),
+            JobResult::HdrImage(Err(message)),
+        );
+        to_js(&EventBatch {
+            revision: self.engine.revision(),
+            events,
+        })
     }
 
     /// Commits a worker-decoded image (raw RGBA8 plus dimensions) under
@@ -2294,6 +2521,7 @@ impl SolarxyApp {
         self.renderer.ibl_res.ibl =
             solarxy_renderer::ibl::IblState::from_prepared(&self.device, &self.queue, &prepared);
         self.hdri = Some(HdriMeta { hash, name });
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
         Ok(())
     }
@@ -2311,6 +2539,7 @@ impl SolarxyApp {
             bottom,
         );
         self.hdri = None;
+        self.environment.invalidate();
         self.rebuild_light_bind_group();
     }
 
@@ -2336,6 +2565,7 @@ impl SolarxyApp {
             .to_string(),
             hdri_hash: self.hdri.as_ref().map(|h| h.hash.clone()),
             hdri_name: self.hdri.as_ref().map(|h| h.name.clone()),
+            from_node: self.engine.has_environment_node(),
         })
     }
 
@@ -2387,10 +2617,18 @@ impl SolarxyApp {
             self.view.display.hdri_rotation = rotation as f32;
         }
         self.hdri = None;
+        let from_node = self.engine.has_environment_node();
+        // A node-authored environment supersedes the sidecar, so forget
+        // whatever the tracker holds and let the node's first delta
+        // install afresh.
+        if from_node {
+            self.environment.invalidate();
+        }
         let environment = EnvironmentDto {
             ibl_mode: env.ibl_mode.clone(),
             hdri_hash: env.hdri_asset.clone(),
             hdri_name: None,
+            from_node,
         };
         let result = LoadResultDto {
             batch: loaded.batch,
@@ -2439,7 +2677,9 @@ impl SolarxyApp {
     ) -> Option<(GizmoTarget, ManipulatorState, Camera, Ray, f32)> {
         let target = self.engine.gizmo_target(self.current_ctx)?;
         let (_, pane, cam, ray) = self.pane_ray(p)?;
-        let mut state = self.gizmo.manipulator(&target, cam.forward(), 1.0)?;
+        let mut state = self
+            .gizmo
+            .manipulator(&gizmo_pose(&target), cam.forward(), 1.0)?;
         // CSS px, not physical: `GIZMO_PX` and `HIT_PX` are the sizes the USER
         // sees, and pane rects are physical. Divide by the dpr or the gizmo comes
         // out half-size on a retina display (it did).
@@ -2509,14 +2749,29 @@ impl SolarxyApp {
             target = fresh;
         }
 
-        let Some(drag) = gizmo::begin_drag(&ray, &state, target, handle) else {
+        let Some(drag) = gizmo::begin_drag(&ray, &state, gizmo_pose(&target), handle) else {
             return Ok(None);
         };
         self.gizmo.drag = Some(drag);
+        self.gizmo_addr = Some(GizmoAddr {
+            ctx: target.ctx,
+            node: target.node,
+        });
         self.gizmo.hovered = Some(handle);
 
         let revision = self.engine.revision();
         Ok(Some(to_js(&EventBatch { revision, events })?))
+    }
+
+    /// End the in-flight drag, yielding both halves at once.
+    ///
+    /// The only way a drag ends. Taking the pose and the address together is
+    /// what keeps them from drifting into a drag that has a solved value and
+    /// nowhere to write it.
+    fn take_gizmo_drag(&mut self) -> Option<(gizmo::Drag, GizmoAddr)> {
+        let drag = self.gizmo.drag.take()?;
+        let addr = self.gizmo_addr.take()?;
+        Some((drag, addr))
     }
 
     /// The manipulator as the LIVE drag sees it: rebuilt at the drag's stored
@@ -2569,19 +2824,21 @@ impl SolarxyApp {
         self.gizmo.drag = Some(drag);
         self.gizmo_readout = value.readout(drag.start);
 
-        self.engine.preview_param(
-            drag.target.ctx,
-            drag.target.node,
-            drag.param.key(),
-            value.to_param_source(),
-        );
+        if let Some(addr) = self.gizmo_addr {
+            self.engine.preview_param(
+                addr.ctx,
+                addr.node,
+                drag.param.key(),
+                drag_param_source(value),
+            );
+        }
     }
 
     /// Release: commit the dragged value as ONE authoritative `SetParam` inside the
     /// open transaction, then close it. That is the whole "one undo step per
     /// drag" contract -- the `SetParam` also clears the preview.
     fn commit_gizmo_drag(&mut self) -> Result<JsValue, JsError> {
-        let Some(drag) = self.gizmo.drag.take() else {
+        let Some((drag, addr)) = self.take_gizmo_drag() else {
             return Ok(JsValue::NULL);
         };
         self.gizmo_readout = None;
@@ -2592,24 +2849,24 @@ impl SolarxyApp {
         // different param than the drag wrote.
         let final_value = self
             .engine
-            .gizmo_target(drag.target.ctx)
-            .map_or(drag.start, |t| drag.param.read(&t));
+            .gizmo_target(addr.ctx)
+            .map_or(drag.start, |t| drag.param.read(&gizmo_pose(&t)));
 
         // A click on a handle that never moved is not an edit. Committing it
         // would push an undo step that visibly does nothing (and, on the append
         // path, would leave a transform node behind for a click). Roll it back
         // instead, which is exactly what Escape does.
         if !final_value.differs_from(drag.start) {
-            return self.rollback_gizmo_drag(&drag);
+            return self.rollback_gizmo_drag(&drag, addr);
         }
 
         let set = self
             .engine
             .apply(Command::SetParam {
-                ctx: drag.target.ctx,
-                node: drag.target.node,
+                ctx: addr.ctx,
+                node: addr.node,
                 key: drag.param.key().to_string(),
-                value: final_value.to_param_source(),
+                value: drag_param_source(final_value),
             })
             .map_err(|e| JsError::new(&format!("{e}")))?;
         events.extend(set.events);
@@ -2633,10 +2890,14 @@ impl SolarxyApp {
     /// would keep asserting the dragged pose forever, disagreeing with the
     /// parameter panel. The key comes from the drag's own `DragParam`, so a
     /// rotate cancel can never clear a translate.
-    fn rollback_gizmo_drag(&mut self, drag: &gizmo::Drag) -> Result<JsValue, JsError> {
+    fn rollback_gizmo_drag(
+        &mut self,
+        drag: &gizmo::Drag,
+        addr: GizmoAddr,
+    ) -> Result<JsValue, JsError> {
         self.gizmo_readout = None;
         self.engine
-            .clear_preview(drag.target.ctx, drag.target.node, drag.param.key());
+            .clear_preview(addr.ctx, addr.node, drag.param.key());
         let batch = self
             .engine
             .apply(Command::CancelTransaction)
@@ -2681,50 +2942,75 @@ impl SolarxyApp {
     /// group per the IBL mode (full / diffuse-only / fallback), and pushes
     /// the IBL-derived ambient average so clay modes update instantly.
     fn rebuild_light_bind_group(&mut self) {
-        self.renderer.skybox_bind_group = self.renderer.ibl_res.ibl.equirect.as_ref().map(|eq| {
-            solarxy_renderer::skybox::create_skybox_bind_group(
-                &self.device,
-                &self.renderer.layouts.skybox,
-                eq,
-            )
-        });
-
-        let ibl_avg = self.active_ibl().irradiance_average;
-        self.env.light_bind_group = match self.renderer.ibl_res.ibl_mode {
-            IblMode::Off => create_light_bind_group(
-                &self.device,
-                &self.renderer.layouts,
-                &self.env.light_buffer,
-                &self.renderer.ibl_res.ibl_fallback,
-                &self.renderer.ibl_res.brdf_lut,
-                &self.renderer.ibl_res.ltc,
-            ),
-            IblMode::Diffuse => solarxy_renderer::scene::create_light_bind_group_selective(
-                &self.device,
-                &self.renderer.layouts,
-                &self.env.light_buffer,
-                &self.renderer.ibl_res.ibl,
-                &self.renderer.ibl_res.ibl_fallback,
-                &self.renderer.ibl_res.brdf_lut,
-                &self.renderer.ibl_res.ltc,
-            ),
-            IblMode::Full => create_light_bind_group(
-                &self.device,
-                &self.renderer.layouts,
-                &self.env.light_buffer,
-                &self.renderer.ibl_res.ibl,
-                &self.renderer.ibl_res.brdf_lut,
-                &self.renderer.ibl_res.ltc,
-            ),
-        };
-        self.env.lights_uniform.ibl_avg_r = ibl_avg[0];
-        self.env.lights_uniform.ibl_avg_g = ibl_avg[1];
-        self.env.lights_uniform.ibl_avg_b = ibl_avg[2];
-        self.queue.write_buffer(
-            &self.env.light_buffer,
-            0,
-            bytemuck::bytes_of(&self.env.lights_uniform),
+        solarxy_host::rebuild_light_bind_group(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            &mut self.env,
+            self.view.display.hdri_intensity,
         );
+    }
+
+    /// Apply any `SceneOp::SetEnvironment` in the frame's delta.
+    ///
+    /// Separate from `SceneObjects::apply` because the environment is the
+    /// IBL and the skybox, which that type cannot reach. The desktop shell
+    /// runs the same tracker over the same op.
+    fn apply_scene_environment(&mut self, delta: &solarxy_core::scene::SceneDelta) {
+        use solarxy_core::scene::{BackgroundKind, SceneOp};
+        use solarxy_renderer::environment::EnvironmentOutcome;
+
+        for op in &delta.ops {
+            let SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } = op
+            else {
+                continue;
+            };
+
+            // Rotation and intensity write through to the display settings
+            // the Environment modal's sliders read, so the node and the
+            // sliders show one value rather than fighting over two.
+            self.view.display.hdri_rotation = *rotation;
+            self.view.display.hdri_intensity = *intensity;
+
+            let outcome = self.environment.apply(
+                &self.device,
+                &self.queue,
+                &mut self.renderer.ibl_res,
+                hdri.as_ref(),
+            );
+            match outcome {
+                // Still rebuild: rotation or intensity may have moved even
+                // when the HDRI did not.
+                EnvironmentOutcome::Unchanged => {}
+                EnvironmentOutcome::HdriInstalled => {
+                    if *background == BackgroundKind::HdriSky {
+                        self.view.pane_settings[0].background_mode =
+                            solarxy_core::preferences::BackgroundMode::HDRI_SKY;
+                    }
+                }
+                // "No environment" is not "a black environment": fall back
+                // to the procedural sky, exactly as `clear_environment`
+                // does for the host-driven route.
+                EnvironmentOutcome::Cleared => {
+                    let (top, bottom) = self
+                        .resolve_background(&self.view.pane_settings[0])
+                        .sky_colors();
+                    self.renderer.ibl_res.ibl = solarxy_renderer::ibl::IblState::from_sky_colors(
+                        &self.device,
+                        &self.queue,
+                        top,
+                        bottom,
+                    );
+                }
+            }
+            self.rebuild_light_bind_group();
+            self.host_events.push(HostEvent::ViewChanged);
+        }
     }
 
     /// The `.slxy` environment section from the host state. The scene-wide
@@ -2753,13 +3039,6 @@ impl SolarxyApp {
         self.scene_objects
             .visible_bounds()
             .unwrap_or(self.env_bounds)
-    }
-
-    fn active_ibl(&self) -> &solarxy_renderer::ibl::IblState {
-        match self.renderer.ibl_res.ibl_mode {
-            IblMode::Off => &self.renderer.ibl_res.ibl_fallback,
-            IblMode::Diffuse | IblMode::Full => &self.renderer.ibl_res.ibl,
-        }
     }
 
     /// Keeps the UV pane's source current: the selected node's committed
@@ -3015,7 +3294,8 @@ impl SolarxyApp {
         let cap = self.attr_viz.effective_cap(total);
         let stride = total.div_ceil(cap).max(1);
 
-        let mut candidates: Vec<crate::attr_labels::LabelCandidate> = Vec::with_capacity(cap);
+        let mut candidates: Vec<solarxy_host::attr_labels::LabelCandidate> =
+            Vec::with_capacity(cap);
         let mut global = 0usize;
         for (_node, set, m) in &geos {
             let matrix = Matrix4::from(*m);
@@ -3029,7 +3309,7 @@ impl SolarxyApp {
                 while g < global + len {
                     let i = g - global;
                     let tp = matrix.transform_point(Point3::from(mesh.positions[i]));
-                    candidates.push(crate::attr_labels::LabelCandidate {
+                    candidates.push(solarxy_host::attr_labels::LabelCandidate {
                         world: [tp.x, tp.y, tp.z],
                         ptnum: ptnum + i as u64,
                         value: values.map(|l| l.components(i).unwrap_or_default()),
@@ -3040,7 +3320,7 @@ impl SolarxyApp {
                 global += len;
             }
         }
-        let (instances, words) = crate::attr_labels::build_labels(
+        let (instances, words) = solarxy_host::attr_labels::build_labels(
             &candidates,
             self.attr_viz.labels,
             self.attr_viz.points,
@@ -3285,7 +3565,7 @@ impl SolarxyApp {
             &self.device,
             &self.renderer.layouts,
             &env.light_buffer,
-            self.active_ibl(),
+            solarxy_host::active_ibl(&self.renderer),
             &self.renderer.ibl_res.brdf_lut,
             &self.renderer.ibl_res.ltc,
         );
@@ -3311,10 +3591,10 @@ impl SolarxyApp {
             };
             (0..4)
                 .filter_map(|i| {
-                    let node = self.view.look_through[i]?;
+                    let node = self.look_through[i]?;
                     // Suppressed while navigating, or while a turntable spins
                     // this pane's scratch camera.
-                    if self.view.camera_editing[i] || self.view.pane_settings[i].turntable_active {
+                    if self.camera_editing[i] || self.view.pane_settings[i].turntable_active {
                         return None;
                     }
                     cams.iter()
@@ -3333,14 +3613,14 @@ impl SolarxyApp {
     /// Whether pane `pane` is a locked look-through pane (navigation reframes
     /// its bound camera node).
     fn is_locked_look_through(&self, pane: usize) -> bool {
-        pane < 4 && self.view.look_through[pane].is_some() && self.view.camera_locked[pane]
+        pane < 4 && self.look_through[pane].is_some() && self.camera_locked[pane]
     }
 
     /// Writes a locked look-through pane's current camera pose back to its bound
     /// `camera` node as one undo step, returning the merged event batch so the
     /// frontend mirror reflects the new params (position + target).
     fn commit_pane_camera_to_node(&mut self, pane: usize) -> Option<EventBatch> {
-        let node = self.view.look_through.get(pane).copied().flatten()?;
+        let node = self.look_through.get(pane).copied().flatten()?;
         let (eye, target) = {
             let cam = self.view.cameras[pane].as_ref()?;
             (cam.camera.eye, cam.camera.target)
@@ -3386,7 +3666,7 @@ impl SolarxyApp {
     /// looking through. Cloned first so the `scene_objects` borrow ends before
     /// the mutable renderer write.
     fn write_pane_camera_helpers(&mut self, i: usize) {
-        let skip = self.view.look_through[i].map(|n| SceneObjectId(n.0));
+        let skip = self.look_through[i].map(|n| SceneObjectId(n.0));
         let cams: Vec<solarxy_core::scene::CameraDef> = self
             .scene_objects
             .cameras()
@@ -3400,27 +3680,18 @@ impl SolarxyApp {
     /// then reset to Top / Front / Left).
     fn ensure_pane_cameras(&mut self) {
         let bounds = self.scene_bounds();
-        let count = self.view.display.layout.pane_count();
         let aspect = self.renderer.target_width as f32 / self.renderer.target_height.max(1) as f32;
-        for i in 0..count {
-            if self.view.cameras[i].is_some() {
-                continue;
-            }
-            let mut cam = if i == 0 {
-                CameraState::new(&self.device, &self.renderer.layouts.camera, &bounds, aspect)
-            } else if let Some(src) = self.view.cameras[0].as_ref() {
-                src.clone_with_new_resources(&self.device, &self.renderer.layouts.camera)
-            } else {
-                continue;
-            };
-            match i {
-                0 => {}
-                1 => cam.reset_to_bounds_axis(&bounds, Vector3::unit_y(), -Vector3::unit_z()),
-                2 => cam.reset_to_bounds_axis(&bounds, Vector3::unit_z(), Vector3::unit_y()),
-                _ => cam.reset_to_bounds_axis(&bounds, -Vector3::unit_x(), Vector3::unit_y()),
-            }
-            self.view.cameras[i] = Some(cam);
-        }
+        solarxy_host::ensure_pane_cameras(
+            &self.device,
+            &self.renderer.layouts.camera,
+            &mut self.view.cameras,
+            &bounds,
+            aspect,
+            self.view.display.layout.pane_count(),
+            // This shell has no startup projection preference; slot 0 keeps the
+            // camera's own default.
+            None,
+        );
     }
 
     /// Per-frame lighting: engine light nodes (root additive lights) drive
@@ -3428,7 +3699,7 @@ impl SolarxyApp {
     /// follows the primary camera (desktop parity).
     fn update_lights(&mut self) {
         let bounds = self.scene_bounds();
-        let ibl_avg = self.active_ibl().irradiance_average;
+        let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
 
         // The helpers ride the same light list the shading does, so a helper can
         // never describe a light the renderer is not actually using. Sized in
@@ -3529,12 +3800,13 @@ impl SolarxyApp {
             width,
             height,
         );
-        self.renderer.post.composite.resize(
+        self.renderer.post.composite.rebuild_bind_group(
             &self.device,
             &self.renderer.layouts,
             &self.renderer.targets.hdr_resolve_view,
             &self.renderer.post.bloom.ping_view,
             &self.renderer.post.bloom.sampler,
+            &self.renderer.post.luts,
         );
         let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
         self.renderer.uv_overlap.count_texture = ct;
@@ -3586,6 +3858,8 @@ impl SolarxyApp {
         let pane_aspect = pane.width / pane.height.max(1.0);
         let pds = self.view.pane_settings[i];
         let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
+        // Before any of the three exits below, all of which composite.
+        self.bind_pane_luts(i);
 
         let Some(cam_data) = cam_data else {
             self.renderer
@@ -3622,51 +3896,77 @@ impl SolarxyApp {
         self.composite_and_submit(encoder, surface_view, i, pane, false, true);
     }
 
+    /// The look of the `camera` node a pane is looking through, if any.
+    ///
+    /// Reads the lowered `CameraDef` rather than the document, so it sees
+    /// exactly what the last delta carried, including the tables the
+    /// camera's cook decoded.
+    fn pane_camera_look(&self, pane: usize) -> Option<&solarxy_core::scene::CameraLook> {
+        let node = (*self.look_through.get(pane)?)?;
+        self.scene_objects
+            .cameras()?
+            .iter()
+            .find(|c| c.id == solarxy_core::scene::SceneObjectId(node.0))
+            .map(|c| &c.look)
+    }
+
+    /// The resolved look a pane composites with.
+    fn pane_look(&self, pane: usize) -> CompositeLook {
+        let fallback = self.pane_looks.get(pane).copied().unwrap_or_default();
+        solarxy_renderer::composite::resolve_look(self.pane_camera_look(pane), &fallback)
+    }
+
+    /// Bind the grading tables a pane's camera carries, before that pane
+    /// composites.
+    ///
+    /// There is one pair of table textures for the whole renderer while a
+    /// look is per pane, so the pair has to follow whichever pane is about
+    /// to composite. `set_lut` dedupes on content hash, so the common case
+    /// (no tables, or every pane through the same camera) costs two
+    /// comparisons and rebuilds nothing. The case that does cost something
+    /// is several panes through several cameras with *different* tables,
+    /// which rebuilds the composite bind group once per pane per frame;
+    /// that is a known cost of one shared pair, and caching a bind group
+    /// per distinct pair is the fix if it ever shows up in a profile.
+    fn bind_pane_luts(&mut self, pane: usize) {
+        let (a, b) = self
+            .pane_camera_look(pane)
+            .map_or((None, None), |l| (l.lut_a.clone(), l.lut_b.clone()));
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::A, a.as_deref());
+        self.renderer
+            .set_lut(&self.device, &self.queue, LutSlot::B, b.as_deref());
+    }
+
     fn composite_and_submit(
         &self,
-        mut encoder: wgpu::CommandEncoder,
+        encoder: wgpu::CommandEncoder,
         surface_view: &wgpu::TextureView,
         i: usize,
         pane: PaneRect,
         is_uv_map: bool,
         scene_present: bool,
     ) {
-        let pane_bloom = self.renderer.post.bloom_enabled && !is_uv_map && scene_present;
-        let pane_ssao = self.renderer.post.ssao_enabled && !is_uv_map && scene_present;
-        let pane_inspection = self.view.pane_settings[i].inspection_mode;
-        self.renderer.post.composite.write_params(
-            &self.queue,
-            pane_bloom,
-            pane_ssao,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
-            pane_inspection,
-        );
-        let viewport = Some([pane.x, pane.y, pane.width, pane.height]);
-        self.renderer.post.composite.render(
-            &mut encoder,
-            &self.renderer.pipelines,
-            surface_view,
-            pane_ssao,
-            &self.renderer.post.ssao,
-            viewport,
-            i == 0,
-        );
-        // The selection-outline rim lands after tone mapping,
-        // so it never blooms and AO never darkens it.
-        if scene_present
-            && !is_uv_map
-            && self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
-            && self.selected_object.is_some()
+        let outline = self.renderer.selection_style
+            == solarxy_renderer::frame::SelectionStyle::Outline
             && self
                 .selected_object
-                .is_some_and(|id| self.scene_objects.draw_object(id).is_some())
-            && self.view.pane_settings[i].inspection_mode != InspectionMode::Overdraw
-        {
-            self.renderer
-                .composite_selection_outline(&mut encoder, surface_view, viewport);
-        }
-        self.queue.submit(std::iter::once(encoder.finish()));
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+        solarxy_host::composite_and_submit(
+            &self.queue,
+            &self.renderer,
+            encoder,
+            surface_view,
+            &solarxy_host::PaneComposite {
+                index: i,
+                rect: pane,
+                look: self.pane_look(i),
+                inspection: self.view.pane_settings[i].inspection_mode,
+                is_uv_map,
+                scene_present,
+                outline,
+            },
+        );
     }
 
     fn render_overdraw_pane(
@@ -3679,14 +3979,15 @@ impl SolarxyApp {
         let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
             return;
         };
-        let pane_viewport = if is_split {
-            Some([pane.x, pane.y, pane.width, pane.height])
-        } else {
-            None
-        };
         let objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        self.renderer
-            .render_overdraw_passes(encoder, &objects, cam_bg, pane_viewport);
+        solarxy_host::render_overdraw_pane(
+            &self.renderer,
+            encoder,
+            &objects,
+            cam_bg,
+            pane,
+            is_split,
+        );
     }
 
     fn render_3d_passes(
@@ -3697,8 +3998,8 @@ impl SolarxyApp {
         pds: &PaneDisplaySettings,
     ) {
         let mut objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        // The picking-sync selection highlight: flag the
-        // selected node's object so the main pass draws its accent tint.
+        // The picking-sync selection highlight: flag the selected node's object
+        // so the main pass draws its accent tint.
         if let Some(id) = self.selected_object
             && let Some(selected) = self.scene_objects.draw_object(id)
         {
@@ -3709,149 +4010,68 @@ impl SolarxyApp {
             }
         }
 
-        if i == 0 || !self.view.display.lights_locked {
-            self.renderer
-                .render_shadow_pass(encoder, &self.env, &objects);
-        }
-
+        let background = self.resolve_background(pds);
         let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            self.renderer
-                .render_empty_pass(encoder, self.resolve_background(pds));
+            self.renderer.render_empty_pass(encoder, background);
             return;
         };
-
-        if self.renderer.post.ssao_enabled {
-            self.renderer.render_gbuffer_pass(encoder, &objects, cam_bg);
-        }
-        self.renderer.render_main_pass(
+        let selected = objects.iter().any(|o| o.selected);
+        solarxy_host::render_3d_passes(
+            &self.renderer,
+            &self.queue,
             encoder,
-            &self.env,
-            &objects,
-            cam_bg,
-            cam_data,
-            pds,
-            self.resolve_background(pds),
+            &solarxy_host::PaneScene {
+                objects: &objects,
+                env: &self.env,
+                cam_bg,
+                cam_data,
+                pds,
+                background,
+                shadow: i == 0 || !self.view.display.lights_locked,
+                selected,
+            },
         );
-
-        // Selection outline: the offscreen mask + jump-flood
-        // stages run here; the rim blits onto the swapchain after the
-        // composite pass (composite_and_submit reads has_selection).
-        if self.renderer.selection_style == solarxy_renderer::frame::SelectionStyle::Outline
-            && objects.iter().any(|o| o.selected)
-        {
-            self.renderer
-                .render_selection_outline(encoder, &objects, cam_bg);
-        }
-
-        if self.renderer.post.ssao_enabled {
-            self.renderer.render_ssao_passes(encoder, cam_bg);
-        }
-        if self.renderer.post.bloom_enabled {
-            self.renderer.post.bloom.render(
-                encoder,
-                &self.renderer.pipelines,
-                &self.queue,
-                self.renderer.target_width,
-                self.renderer.target_height,
-            );
-        }
     }
 
     /// Recomputes the camera-relative light rig for a non-primary pane
     /// (only meaningful for the synthesized viewer rig; engine light nodes
     /// are world-fixed).
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
+        // Engine light nodes are world-fixed and owe nothing to a camera, so
+        // the synthesized viewer rig is the only thing this applies to.
         if self.view.display.lights_locked || self.scene_objects.lights().is_some() {
             return;
         }
         let bounds = self.scene_bounds();
-        let ibl_avg = self.active_ibl().irradiance_average;
-        self.env.lights_uniform = lights_from_camera(cam_data, &bounds, ibl_avg);
-        self.queue.write_buffer(
-            &self.env.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.env.lights_uniform]),
-        );
-        let key_pos = self.env.lights_uniform.lights[0].position;
-        self.env.shadow.update_light_vp(
-            &self.queue,
-            Point3::new(key_pos[0], key_pos[1], key_pos[2]),
-            bounds.center(),
-            bounds.diagonal() / 2.0,
-        );
+        let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
+        solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, cam_data, &bounds, ibl_avg);
     }
 
     /// Per-pane uniform writes ahead of the 3D passes: grid color,
     /// wireframe params, gradient colors, and the camera inspection block.
     fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
-        let background = self.resolve_background(pds);
-
-        let wire = WireframeParams {
-            color: background.wireframe_color(),
-            line_width: pds.line_weight.width_px(),
-            screen_width: self.renderer.target_width as f32,
-            screen_height: self.renderer.target_height as f32,
-            point_size: self.view.display.point_size,
-        };
-        self.queue.write_buffer(
-            &self.renderer.wire.wireframe_params_buffer,
-            0,
-            bytemuck::bytes_of(&wire),
-        );
-
-        let (top, bottom) = background.sky_colors();
-        let gradient = GradientUniform {
-            top_color: [top[0], top[1], top[2], 1.0],
-            bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
-            uv_y_offset: 0.0,
-            uv_y_scale: 1.0,
-            _pad: [0.0; 2],
-        };
-        self.queue.write_buffer(
-            &self.renderer.wire._gradient_buffer,
-            0,
-            bytemuck::bytes_of(&gradient),
-        );
-
-        let grid = background.grid_color();
-        self.queue.write_buffer(
-            &self.env.vis.grid_uniform_buf,
-            solarxy_renderer::visualization::GridUniform::COLOR_OFFSET,
-            bytemuck::cast_slice(&grid),
-        );
         // The grid plane follows the pane camera: perspective keeps the XZ
         // ground; an orthographic axis elevation (front/side) gets a view-plane
         // grid so it is not seen edge-on. Keyed off the transition destination
         // so a view-preset animation switches plane once, at click time, not
-        // partway through the lerp. Shared buffer, written per pane before
-        // that pane's grid pass, exactly like the color above.
-        let plane: u32 = self.view.cameras[i]
+        // partway through the lerp.
+        let grid_plane = self.view.cameras[i]
             .as_ref()
-            .map_or(0, |c| grid_plane_for(&c.destination_camera()));
-        self.queue.write_buffer(
-            &self.env.vis.grid_uniform_buf,
-            solarxy_renderer::visualization::GridUniform::PLANE_OFFSET,
-            bytemuck::bytes_of(&plane),
+            .map(|c| grid_plane_for(&c.destination_camera()));
+        let bounds = self.scene_bounds();
+        solarxy_host::write_pane_uniforms(
+            &self.queue,
+            &self.renderer,
+            &solarxy_host::PaneUniforms {
+                background: self.resolve_background(pds),
+                pds,
+                display: &self.view.display,
+                camera: self.view.cameras[i].as_ref(),
+                env: &self.env,
+                bounds: Some(&bounds),
+                grid_plane,
+            },
         );
-
-        if let Some(cam) = self.view.cameras[i].as_ref() {
-            let (near, far) = compute_depth_bounds(&cam.camera, &self.scene_bounds());
-            let data: [u32; 8] = [
-                pds.inspection_mode.as_u32(),
-                pds.texel_density_target.to_bits(),
-                pds.material_override.as_u32(),
-                near.to_bits(),
-                far.to_bits(),
-                self.view.display.roughness_scale.to_bits(),
-                self.view.display.metallic_scale.to_bits(),
-                self.view.display.hdri_rotation.to_bits(),
-            ];
-            self.queue.write_buffer(
-                &cam.buffer,
-                CameraUniform::INSPECTION_OFFSET,
-                bytemuck::cast_slice(&data),
-            );
-        }
     }
 
     fn view_state_dto(&self) -> ViewStateDto {
@@ -3865,10 +4085,9 @@ impl SolarxyApp {
             .to_string()
         });
         let cams = self.scene_objects.cameras();
-        let pane_look_through =
-            std::array::from_fn(|i| self.view.look_through[i].map(|n| n.0 as f64));
+        let pane_look_through = std::array::from_fn(|i| self.look_through[i].map(|n| n.0 as f64));
         let pane_gate_aspect = std::array::from_fn(|i| {
-            let node = self.view.look_through[i]?;
+            let node = self.look_through[i]?;
             cams?
                 .iter()
                 .find(|c| c.id == SceneObjectId(node.0))
@@ -3883,8 +4102,9 @@ impl SolarxyApp {
             display: self.view.display,
             pane_projections: projections,
             pane_rects: self.pane_rects_css(),
+            pane_looks: self.pane_looks,
             pane_look_through,
-            pane_camera_locked: self.view.camera_locked,
+            pane_camera_locked: self.camera_locked,
             pane_gate_aspect,
             attr_viz: self.attr_viz.clone(),
         }
@@ -3904,10 +4124,19 @@ impl SolarxyApp {
                     .map_or_else(solarxy_scenefile::CameraJson::default, |c| {
                         camera_to_json(&c.camera)
                     });
+                // The pane's look rides inside the display blob rather than
+                // taking a schema field of its own. `PaneJson::display` is
+                // declared opaque and round-tripped uninterpreted, and
+                // `PaneDisplaySettings` ignores keys it does not know, so
+                // this persists a free pane's exposure and grade with no
+                // scene-schema change and no reader-version gate.
                 let display = serde_json::to_value(self.view.pane_settings[i])
                     .ok()
                     .and_then(|v| {
-                        if let serde_json::Value::Object(map) = v {
+                        if let serde_json::Value::Object(mut map) = v {
+                            if let Ok(look) = serde_json::to_value(self.pane_looks[i]) {
+                                map.insert(PANE_LOOK_KEY.to_string(), look);
+                            }
                             Some(map.into_iter().collect())
                         } else {
                             None
@@ -3917,8 +4146,8 @@ impl SolarxyApp {
                 solarxy_scenefile::PaneJson {
                     camera,
                     display,
-                    look_through: self.view.look_through[i].map(|n| n.0),
-                    camera_locked: self.view.camera_locked[i],
+                    look_through: self.look_through[i].map(|n| n.0),
+                    camera_locked: self.camera_locked[i],
                     ..solarxy_scenefile::PaneJson::default()
                 }
             })
@@ -3944,6 +4173,13 @@ impl SolarxyApp {
         for (i, pane) in view.panes.iter().take(4).enumerate() {
             if !pane.display.is_empty() {
                 let value = serde_json::Value::Object(pane.display.clone().into_iter().collect());
+                // Absent on any scene saved before the look existed, which
+                // is the whole reason it defaults rather than failing.
+                self.pane_looks[i] = pane
+                    .display
+                    .get(PANE_LOOK_KEY)
+                    .and_then(|v| serde_json::from_value::<PaneLook>(v.clone()).ok())
+                    .unwrap_or_default();
                 if let Ok(mut settings) = serde_json::from_value::<PaneDisplaySettings>(value) {
                     // Viewport shading overrides and the turntable spin are
                     // session-temporary (items 7, 9): never restored from a
@@ -3964,9 +4200,9 @@ impl SolarxyApp {
             }
             // Restore the look-through binding + lock. The follow will
             // drive the pane from the node once it cooks.
-            self.view.look_through[i] = pane.look_through.map(NodeId);
-            self.view.camera_locked[i] = pane.camera_locked;
-            self.view.camera_editing[i] = false;
+            self.look_through[i] = pane.look_through.map(NodeId);
+            self.camera_locked[i] = pane.camera_locked;
+            self.camera_editing[i] = false;
         }
         self.ensure_pane_cameras();
     }
@@ -4193,8 +4429,8 @@ impl SolarxyApp {
             &self.queue,
             false,
             false,
-            self.renderer.post.tone_mode,
-            self.renderer.post.exposure,
+            &CompositeLook::from_tone(self.renderer.post.tone_mode, self.renderer.post.exposure),
+            &self.renderer.post.luts,
             pds.inspection_mode,
         );
         self.renderer.post.composite.render(
@@ -4235,24 +4471,6 @@ fn projection_name(mode: ProjectionMode) -> &'static str {
         ProjectionMode::Perspective => "perspective",
         ProjectionMode::Orthographic => "orthographic",
     }
-}
-
-/// Same math as the desktop `compute_depth_bounds`.
-fn compute_depth_bounds(camera: &Camera, bounds: &AABB) -> (f32, f32) {
-    let view = camera.build_view_matrix();
-    let mut z_min = f32::INFINITY;
-    let mut z_max = f32::NEG_INFINITY;
-    for corner in &bounds.corners() {
-        let vp = view * corner.to_homogeneous();
-        let z = -vp.z;
-        z_min = z_min.min(z);
-        z_max = z_max.max(z);
-    }
-    z_min = z_min.max(0.001);
-    if z_max <= z_min {
-        z_max = z_min + 1.0;
-    }
-    (z_min, z_max)
 }
 
 /// Bridges the renderer camera to the `.slxy` orbit shape (target + yaw /
@@ -4450,6 +4668,10 @@ struct ViewStateDto {
     active_pane: usize,
     cameras_linked: bool,
     pane_settings: [PaneDisplaySettings; 4],
+    /// Each pane's own look, which the Look dialog edits. A pane looking
+    /// through a camera shows that camera's look instead and edits it on
+    /// the node.
+    pane_looks: [PaneLook; 4],
     display: DisplaySettings,
     pane_projections: [String; 4],
     pane_rects: Vec<RectDto>,
@@ -4535,6 +4757,15 @@ struct EnvironmentDto {
     ibl_mode: String,
     hdri_hash: Option<String>,
     hdri_name: Option<String>,
+    /// Whether the loaded document holds an `environment` node.
+    ///
+    /// When it does, the node wins and the frontend must not restore the
+    /// scene file's own environment section: the node's cook emits
+    /// `SceneOp::SetEnvironment` and installing the sidecar's HDRI too
+    /// would race it, with whichever finished last taking the viewport.
+    /// The section stays the fallback for documents authored before the
+    /// node existed, which is the whole point of keeping it.
+    from_node: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]

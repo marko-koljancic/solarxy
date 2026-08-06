@@ -21,6 +21,7 @@
 mod capture;
 #[cfg(debug_assertions)]
 mod dev;
+pub(crate) mod engine_scene;
 pub(crate) mod hdri_info;
 mod init;
 mod input;
@@ -34,12 +35,12 @@ pub(crate) mod view_state;
 
 pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
+pub(super) use solarxy_renderer::composite::CompositeLook;
 pub(super) use solarxy_renderer::frame::{
     GradientUniform, Renderer, UvOverlapResources, WireframeParams,
 };
 pub(super) use solarxy_renderer::scene::{
-    BackgroundModeExt, ModelScene, create_light_bind_group, create_light_bind_group_selective,
-    lights_from_camera,
+    BackgroundModeExt, LoadedModel, ModelScene, create_light_bind_group,
 };
 
 pub(super) use crate::gui::{EguiRenderer, ToastSeverity, ViewportContextMenu};
@@ -47,9 +48,7 @@ pub(super) use solarxy_core::preferences::{
     self, IblMode, InspectionMode, MaterialOverride, PaneMode, Preferences, UvMapBackground,
     ViewMode,
 };
-pub(super) use solarxy_renderer::camera_state::CameraState;
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
-pub(super) use solarxy_renderer::light::LightsUniform;
 pub(super) use solarxy_renderer::texture;
 
 use std::sync::{Arc, mpsc};
@@ -61,7 +60,7 @@ use winit::{keyboard::ModifiersState, window::Window};
 pub(super) use solarxy_renderer::panes::{PaneRect as Pane, compute_target_dimensions, hit_test_pane};
 
 pub(super) struct PendingLoad {
-    pub(super) receiver: mpsc::Receiver<anyhow::Result<ModelScene>>,
+    pub(super) receiver: mpsc::Receiver<anyhow::Result<LoadedModel>>,
     pub(super) filename: String,
     pub(super) path: String,
 }
@@ -106,12 +105,54 @@ pub struct State {
     pub(super) renderer: Renderer,
     pub(super) gui: EguiRenderer,
     pub(super) scene: Option<ModelScene>,
+    /// The node engine, when a scene file is open.
+    ///
+    /// A file model and an engine scene are mutually exclusive: opening
+    /// either closes the other, so `scene` and this are never both `Some`.
+    /// They could coexist, since the draw list already chains both sources
+    /// and framing already unions them, but one root at a time is what keeps
+    /// Close unambiguous and the inspection panels presenting one tree.
+    pub(super) engine: Option<Box<solarxy_graph::Engine>>,
+    /// What the inspection panels read about the open scene: its file
+    /// identity, per-object names, summed geometry counters, and every
+    /// object's validation merged into one report.
+    ///
+    /// `Some` exactly when `engine` is. Rebuilt on each drained scene
+    /// delta rather than per frame, because deltas are the only thing that
+    /// changes it and the merged issue order has to be stable.
+    pub(super) engine_scene: Option<engine_scene::EngineSceneInfo>,
+    /// The scene object the viewport outlines, set by a Node Tree
+    /// selection.
+    ///
+    /// Only a **root-context** selection lands here, because only a root
+    /// geo node owns a scene object (the delta names it
+    /// `SceneObjectId(geo.0)`). Selecting a node inside a container
+    /// selects engine-side and leaves the viewport alone, which is what
+    /// the web shell does with the same gesture.
+    pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
     /// Multi-object dynamic scene drawn beside `scene`. Fed by
     /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
-    /// the top of each frame; the node engine becomes the producer in a
-    /// later milestone.
+    /// the top of each frame. The engine above is the producer once a scene
+    /// file is open; the developer harness is the only other one.
     pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
+    /// Scene-level GPU state every pane draws through: the light rig, the
+    /// shadow map, the identity instance buffer bound for scene-level draws,
+    /// and the grid/floor/axes buffers. Owned here rather than by `scene`, so
+    /// the viewport keeps its full pass chain with no file model loaded.
+    pub(super) env: solarxy_renderer::environment::SceneEnvironment,
+    /// The bounds `env` was last built around (grid, floor and shadow fit).
+    pub(super) env_bounds: solarxy_core::AABB,
     pub(super) pending_scene_deltas: Vec<solarxy_core::scene::SceneDelta>,
+    /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
+    /// whole environment on every rebuild, and installing one convolves an
+    /// irradiance cubemap, so this remembers what is already on the GPU.
+    /// Invalidated whenever the sidebar or the HDRI dialog replaces the
+    /// IBL behind the scene contract's back.
+    pub(super) environment: solarxy_renderer::environment::EnvironmentTracker,
+    /// Whether the `F10` developer harness has a synthetic environment
+    /// installed. Debug builds only; see `state/dev.rs`.
+    #[cfg(debug_assertions)]
+    pub(super) dev_environment_on: bool,
     pub(super) view: ViewState,
     pub(super) input: InputState,
     pub(super) review: review::ReviewState,

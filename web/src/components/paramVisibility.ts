@@ -15,10 +15,22 @@ export function tabLabel(group: string): string {
 }
 
 /** Tab order: general first, the rest in declaration order, plus the
- * Validation tab when a report exists. */
-export function paramTabs(params: ParamSnapshot[], hasReport: boolean): string[] {
+ * Validation tab when a report exists.
+ *
+ * A group contributes a tab only while at least one of its params is
+ * currently visible. Without that test a node whose whole group hides
+ * behind a showIf shows an empty tab, which the material node made
+ * reachable: switching it to Reference mode hides every surface factor,
+ * and the tabs holding them would otherwise stay in the strip with
+ * nothing under them. Pass no `visible` predicate to keep every group. */
+export function paramTabs(
+  params: ParamSnapshot[],
+  hasReport: boolean,
+  visible?: (p: ParamSnapshot) => boolean,
+): string[] {
   const names: string[] = [];
   for (const p of params) {
+    if (visible && !visible(p)) continue;
     if (!names.includes(p.group)) names.push(p.group);
   }
   const ordered = [
@@ -26,6 +38,26 @@ export function paramTabs(params: ParamSnapshot[], hasReport: boolean): string[]
     ...names.filter((g) => g.toLowerCase() !== "general"),
   ];
   return hasReport ? [...ordered, VALIDATION_TAB] : ordered;
+}
+
+/** Splits a tab's params into subgroup runs, in declaration order.
+ *
+ * Params that declare no subgroup collect under an undefined heading, so a
+ * group can mix loose rows and labelled sections and a node that uses no
+ * subgroups at all renders exactly as it did before the level existed.
+ * Consecutive runs sharing a name merge; a name reused after a different
+ * one in between opens a second section, because declaration order is the
+ * author's stated intent. */
+export function paramSections(
+  params: ParamSnapshot[],
+): { subgroup?: string; params: ParamSnapshot[] }[] {
+  const sections: { subgroup?: string; params: ParamSnapshot[] }[] = [];
+  for (const p of params) {
+    const last = sections[sections.length - 1];
+    if (last && last.subgroup === p.subgroup) last.params.push(p);
+    else sections.push({ subgroup: p.subgroup, params: [p] });
+  }
+  return sections;
 }
 
 /** The stored tab when the node still has it, else the first tab (the

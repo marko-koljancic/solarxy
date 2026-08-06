@@ -27,7 +27,7 @@
 #     `on: release: published` does not apply. The `plan` input carries
 #     cargo-dist's dist-manifest; the tag is read from `announcement_tag`.
 #   - `workflow_dispatch` — manual run against an existing release tag.
-name: Homebrew bump
+name: "Release: Homebrew tap"
 
 on:
   workflow_call:

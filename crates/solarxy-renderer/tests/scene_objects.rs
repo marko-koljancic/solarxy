@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use solarxy_core::scene::{CookedGeometry, LightDef, LightKind, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{
+    CookedGeometry, InstanceXform, LightDef, LightKind, SceneDelta, SceneObjectId, SceneOp,
+};
 use solarxy_renderer::bind_groups::BindGroupLayouts;
 use solarxy_renderer::scene_objects::{SceneObjects, cooked_from_parts};
 
@@ -298,4 +300,176 @@ fn iteration_order_is_deterministic_by_id() {
     }
     let order: Vec<u64> = scene.iter().map(|(id, _)| id.0).collect();
     assert_eq!(order, vec![1, 3, 5]);
+}
+
+/// An instanced upsert must reach the draw path as N instances, not one.
+///
+/// This is the renderer half of the Bake-versus-Instance parity promise.
+/// The kernel proves the matrices are right; this proves the count
+/// survives the trip through `SceneObjects` into `DrawObject`, which is
+/// what every pass reads to size its draw.
+#[test]
+fn an_instanced_object_reports_its_instance_count_to_the_draw_path() {
+    let Gpu {
+        device,
+        queue,
+        layouts,
+    } = require_gpu!();
+    let mut objects = SceneObjects::new();
+
+    let mut cooked = cooked_from_parts(
+        "proto",
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        vec![0, 1, 2],
+        None,
+    );
+    cooked.meshes[0].instances = Some(std::sync::Arc::new(vec![
+        InstanceXform::IDENTITY,
+        InstanceXform([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [5.0, 0.0, 0.0, 1.0],
+        ]),
+        InstanceXform([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 5.0, 0.0, 1.0],
+        ]),
+    ]));
+
+    let id = SceneObjectId(1);
+    objects
+        .apply(
+            &device,
+            &queue,
+            &layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::UpsertGeometry {
+                    id,
+                    geometry: std::sync::Arc::new(cooked),
+                }],
+            },
+        )
+        .expect("apply");
+
+    let draw = objects.draw_object(id).expect("visible");
+    // The count is per mesh now, and so is the buffer offset: the prototype
+    // mesh draws its three placements starting at row zero.
+    assert_eq!(draw.model.meshes[0].instance_count, 3);
+    assert_eq!(draw.model.meshes[0].instance_offset, 0);
+
+    // And a plain object still reports one, so nothing that existed
+    // before this feature changed its draw count.
+    let plain = SceneObjectId(2);
+    objects
+        .apply(
+            &device,
+            &queue,
+            &layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::UpsertGeometry {
+                    id: plain,
+                    geometry: std::sync::Arc::new(cooked_from_parts(
+                        "plain",
+                        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        vec![0, 1, 2],
+                        None,
+                    )),
+                }],
+            },
+        )
+        .expect("apply");
+    let plain_draw = objects.draw_object(plain).expect("visible");
+    assert_eq!(plain_draw.model.meshes[0].instance_count, 1);
+    assert_eq!(plain_draw.model.meshes[0].instance_offset, 0);
+}
+
+/// The crash this guards against, end to end. An import node with no file
+/// staged cooks to a geometry with no meshes, whose instance buffer was
+/// created straight from an empty row list and so came out zero bytes long.
+/// Every per-object pass binds that buffer whole, above its mesh loop, so
+/// the first pass reached panicked inside wgpu with "buffer slices can not
+/// be empty" and the shell needed a reload to recover.
+#[test]
+fn a_geometry_with_no_meshes_has_a_sliceable_instance_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let nothing = CookedGeometry {
+        meshes: Vec::new(),
+        materials: Vec::new(),
+        bounds: tri(1.0).bounds,
+    };
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, nothing))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert!(obj.model.meshes.is_empty(), "there is nothing to draw");
+    assert!(
+        obj.instance_buffer.size() > 0,
+        "a zero-length buffer is the one thing wgpu refuses to slice"
+    );
+    // What every pass does before its mesh loop. It panics rather than
+    // returning an error, so reaching the next statement is the assertion.
+    let _ = obj.instance_buffer.slice(..);
+}
+
+/// The same zero-row state reached a different way, and the way the
+/// reported reproduction does not cover: copying onto a point cloud that
+/// came out empty leaves every mesh carrying a placement list with nothing
+/// in it. The meshes are real; their copies are not.
+#[test]
+fn a_geometry_whose_placements_are_all_empty_has_a_sliceable_instance_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let mut geometry = tri(1.0);
+    geometry.meshes[0].instances = Some(Arc::new(Vec::new()));
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, geometry))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert_eq!(obj.model.meshes.len(), 1, "the mesh survives");
+    assert_eq!(
+        obj.model.meshes[0].instance_count, 0,
+        "and draws none of itself"
+    );
+    assert!(obj.instance_buffer.size() > 0);
+    let _ = obj.instance_buffer.slice(..);
+}
+
+/// A mesh with no copies sitting last points at exactly the end of the
+/// object's buffer, so binding from its offset would slice nothing. The
+/// draw path returns on a zero instance count before it binds, which is
+/// what keeps that offset harmless.
+#[test]
+fn a_trailing_mesh_with_no_copies_sits_at_the_end_of_the_buffer() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    let base = tri(1.0);
+    let mut placed = base.meshes[0].clone();
+    placed.name = "placed".to_string();
+    placed.instances = Some(Arc::new(vec![InstanceXform::IDENTITY; 2]));
+    let mut bare = base.meshes[0].clone();
+    bare.name = "bare".to_string();
+    bare.instances = Some(Arc::new(Vec::new()));
+    let geometry = CookedGeometry {
+        meshes: vec![placed, bare],
+        materials: Vec::new(),
+        bounds: base.bounds,
+    };
+    scene
+        .apply(&g.device, &g.queue, &g.layouts, &upsert(1, geometry))
+        .expect("apply");
+
+    let obj = scene.get(SceneObjectId(1)).expect("object exists");
+    assert_eq!(obj.model.meshes[0].instance_count, 2);
+    assert_eq!(obj.model.meshes[1].instance_count, 0);
+    assert_eq!(
+        obj.model.meshes[1].instance_offset,
+        obj.instance_buffer.size(),
+        "the trailing mesh's offset is the whole buffer, so its slice is empty"
+    );
 }

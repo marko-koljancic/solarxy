@@ -19,7 +19,8 @@ import { NodeInfoModal } from "./components/NodeInfoModal";
 import { FloatingProperties } from "./components/FloatingProperties";
 import { Tour } from "./components/tour/Tour";
 import { MissingSidecarsModal } from "./components/MissingSidecarsModal";
-import { importDroppedFiles } from "./engine/session";
+import { bootSession, importDroppedFiles } from "./engine/session";
+import { viewportCanvas } from "./engine/canvas";
 import { collectDroppedFiles } from "./persistence/dropEntries";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useMirror } from "./store/mirror";
@@ -57,6 +58,30 @@ export function App() {
       if (files.length > 0) void importDroppedFiles(files);
     });
   };
+
+  // Boot the engine from the shell, not from the viewport panel.
+  //
+  // It used to start inside that panel's effect, which quietly made booting
+  // conditional on a restored layout still containing the panel. One that did
+  // not left the app on the spinner forever with nothing logged, because
+  // nothing had failed: boot simply never began. The canvas is a module
+  // singleton the panel merely adopts (engine/canvas.ts), so the surface does
+  // not belong to the component and starting the engine never needed it.
+  //
+  // `bootSession` is idempotent, so the viewport panel awaiting the same
+  // promise to start its render loop costs nothing.
+  useEffect(() => {
+    // The smallest phones get the friendly message INSTEAD of the app, and
+    // must not pay for a WebGPU/wasm boot. The gate re-evaluates on rotation,
+    // hence the dependency: turning a phone sideways can unblock it, and this
+    // effect is what starts the engine when it does.
+    if (gate === "blocked") return;
+    bootSession(viewportCanvas()).catch((err: unknown) => {
+      // WebGPU unavailable or wasm init failed; the boot overlay renders the
+      // message (the full unsupported-browser page is separate).
+      useUi.getState().setBootError(err instanceof Error ? err.message : String(err));
+    });
+  }, [gate]);
 
   // Warn before leaving with unsaved changes (the autosave still runs).
   useEffect(() => {

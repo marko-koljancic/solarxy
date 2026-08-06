@@ -35,12 +35,16 @@ import { descriptorFor } from "../registry/datatypes";
 import { ExpressionField } from "./inputs/ExpressionField";
 import {
   acceptsExpression,
+  discardParkedExpression,
+  parkExpression,
+  parkedExpression,
   paramExpression,
   seedExpression,
 } from "./inputs/expressionLane";
 import { nodeLabel } from "../flow/nodeLabel";
 import { nodePathOf } from "../flow/nodeActions";
 import {
+  paramSections,
   paramTabs,
   paramVisible,
   resolveActiveTab,
@@ -99,9 +103,14 @@ function Field({ ctx, node, spec }: FieldProps) {
       <div className="param-row">
         <label className="param-label">
           {spec.label}
+          {/* Parks the text on the way out, so the same click brings it
+              back. The field's clear control is the one that discards. */}
           <ExprToggle
             active
-            onClick={() => revertToLiteral(ctx, node, spec)}
+            onClick={() => {
+              parkExpression(ctx, node.id, spec.key, expr);
+              revertToLiteral(ctx, node, spec);
+            }}
           />
         </label>
         <ExpressionField
@@ -110,7 +119,10 @@ function Field({ ctx, node, spec }: FieldProps) {
           paramKey={spec.key}
           expr={expr}
           revision={revision}
-          onRevert={() => revertToLiteral(ctx, node, spec)}
+          onRevert={() => {
+            discardParkedExpression(ctx, node.id, spec.key);
+            revertToLiteral(ctx, node, spec);
+          }}
         />
       </div>
     );
@@ -120,14 +132,25 @@ function Field({ ctx, node, spec }: FieldProps) {
   );
 }
 
-/** The small `=` affordance that swaps a row into its expression lane. */
+/** The small `=` affordance that swaps a row between its expression lane
+ * and its value widget.
+ *
+ * It reads as a mode switch and now behaves as one: switching away keeps
+ * the expression, switching back restores it. Discarding is the field's
+ * clear control, which is the only place that says "remove". The two used
+ * to perform the identical destructive action, so an expression could be
+ * lost to the control that looked reversible. */
 function ExprToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       className={`param-expr-toggle${active ? " active" : ""}`}
-      title={active ? "Remove the expression" : "Drive this with an expression"}
-      aria-label={active ? "Remove the expression" : "Add an expression"}
+      title={
+        active
+          ? "Show the value instead, keeping the expression"
+          : "Drive this with an expression"
+      }
+      aria-label={active ? "Switch to the value" : "Switch to an expression"}
       aria-pressed={active}
       onClick={onClick}
     >
@@ -198,10 +221,16 @@ function LiteralField({
                 ctx,
                 node: node.id,
                 key: spec.key,
-                // Seeded with the current value, so the field opens on
-                // something that already resolves rather than on a blank
-                // that immediately badges the node.
-                value: { kind: "expression", expr: seedExpression(value) },
+                // An expression switched off earlier in this session comes
+                // back verbatim. Otherwise seed from the current value, so
+                // the field opens on something that already resolves
+                // rather than on a blank that immediately badges the node.
+                value: {
+                  kind: "expression",
+                  expr:
+                    parkedExpression(ctx, node.id, spec.key) ??
+                    seedExpression(value),
+                },
               })
             }
           />
@@ -645,7 +674,8 @@ export function ParameterPanel({
   // Tabs (Minimystix underline pattern, D1): general first, the
   // rest in declaration order, plus a Validation tab when a report exists.
   const report = reports[node.id];
-  const tabs = paramTabs(desc?.params ?? [], Boolean(report));
+  const isVisible = (p: ParamSnapshot) => paramVisible(p, desc?.params ?? [], node.params);
+  const tabs = paramTabs(desc?.params ?? [], Boolean(report), isVisible);
   const active = resolveActiveTab(tabs, tab);
 
   return (
@@ -695,26 +725,31 @@ export function ParameterPanel({
       <div className="param-body">
         {active !== undefined && active !== VALIDATION_TAB && (
           <div className="param-tab-body" role="tabpanel">
-            {(groups.get(active) ?? [])
-              .filter((p) => paramVisible(p, desc?.params ?? [], node.params))
-              .map((p) => {
-              // Registry-driven map-overrides-factor indicator: a param
-              // declaring drivenByPort dims while that input port is
-              // connected (the map fully drives the channel; the factor
-              // value is preserved for when the map disconnects).
-              const driven =
-                p.drivenByPort != null &&
-                graph.edges.some((e) => e.to === node.id && e.toPort === p.drivenByPort);
-              if (!driven) {
-                return <Field key={p.key} ctx={current} node={node} spec={p} />;
-              }
-              return (
-                <div key={p.key} className="param-driven" title="Driven by the connected input">
-                  <Field ctx={current} node={node} spec={p} />
-                  <div className="param-driven-hint">Driven by connected input</div>
-                </div>
-              );
-            })}
+            {paramSections((groups.get(active) ?? []).filter(isVisible)).map((section, i) => (
+              <div key={section.subgroup ?? `_${i}`} className="param-section">
+                {section.subgroup !== undefined && (
+                  <div className="param-subgroup">{section.subgroup}</div>
+                )}
+                {section.params.map((p) => {
+                  // Registry-driven map-overrides-factor indicator: a param
+                  // declaring drivenByPort dims while that input port is
+                  // connected (the map fully drives the channel; the factor
+                  // value is preserved for when the map disconnects).
+                  const driven =
+                    p.drivenByPort != null &&
+                    graph.edges.some((e) => e.to === node.id && e.toPort === p.drivenByPort);
+                  if (!driven) {
+                    return <Field key={p.key} ctx={current} node={node} spec={p} />;
+                  }
+                  return (
+                    <div key={p.key} className="param-driven" title="Driven by the connected input">
+                      <Field ctx={current} node={node} spec={p} />
+                      <div className="param-driven-hint">Driven by connected input</div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
         {active === VALIDATION_TAB && report && (

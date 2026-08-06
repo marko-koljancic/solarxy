@@ -30,22 +30,12 @@
 #[cfg(target_arch = "wasm32")]
 mod app;
 
-// Deliberately NOT wasm-gated: the gizmo's hit-testing and drag solving are pure
-// math with no browser dependency, so keeping them native-visible means native
-// CI runs their tests instead of leaving them to a wasm-only build.
-pub mod gizmo;
-
-// Same convention: the attribute-viz state and its ramp/clamp math are
-// pure data, tested natively.
-pub mod attr_viz;
-
-// Same convention: label text assembly and glyph packing are pure string
-// and bit math, with the DOM-parity cases pinned as native tests.
-pub mod attr_labels;
-
-// Same convention again: the display-defaults parsing is pure string
-// matching, drift-guarded against the enums' serde names by native tests.
-pub mod display_defaults;
+// The gizmo drag solver, the attribute-visualization state, the label packing
+// and the display-defaults parsing used to live here, outside the wasm cfg, so
+// that native CI would run their tests rather than leaving them to a wasm-only
+// build. They now live in `solarxy-host` for the same reason and one more: the
+// desktop shell needs them too, and a module in a crate named for the web was
+// never going to be where it reached for them.
 
 #[cfg(target_arch = "wasm32")]
 pub use app::SolarxyApp;

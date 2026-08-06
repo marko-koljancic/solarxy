@@ -120,7 +120,6 @@ column, change the right one in the same pass.
 | A persona added or changed | `PERSONAS` |
 | A journey added or changed | `JOURNEYS` and `COVERAGE` |
 | A load-bearing commitment | `COMMITMENTS` |
-| A new milestone spec written | `DOCS` |
 | Node-type, crate, or release counts | `STATS`, the hero chips, and the footer, which have disagreed with each other before; also the landing stats band in `web/index.html` |
 
 ## Before declaring anything done

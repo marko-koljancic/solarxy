@@ -52,6 +52,8 @@ const SAMPLE_SCENES: { label: string; file: string }[] = [
   { label: "Lights, Camera, Review", file: "lights-camera-review.slxy" },
   { label: "Animated Field", file: "animated-field.slxy" },
   { label: "Procedural Look-dev", file: "procedural-lookdev.slxy" },
+  // The flagship: everything above composed into one scene.
+  { label: "The Orrery", file: "the-orrery.slxy" },
 ];
 
 export function MenuBar() {

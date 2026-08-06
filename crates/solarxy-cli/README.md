@@ -10,13 +10,13 @@ This crate provides the command-line interface layer: argument parsing via [clap
 |--------|-------------|
 | `parser` | clap-derived `Args` struct with `OperationMode` and `OutputFormat` enums |
 | `calc::analyze` | Model analysis (counts, AABB, validation, per-mesh / per-material breakdowns) |
-| `tui_analysis` | Interactive analysis report TUI (4-tab layout: Overview, Meshes, Materials, Validation) |
+| `tui` | The analyze surface: a tiled terminal workspace of ten panel types, three presets and free arrangement, over a capability model, a file-based theme system, a split tree, one keymap table and a braille rasteriser |
 
 ## Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `tui` | Yes | Enables the ratatui/crossterm `tui_analysis` TUI |
+| `tui` | Yes | Enables the ratatui/crossterm analyze surface (`tui`). The `solarxy-cli` binary requires it |
 | `analyzer` | Yes | Enables `calc::analyze` (depends on `solarxy-formats`) |
 | `updater` | Yes | Enables `--update` self-update via `axoupdater` |
 

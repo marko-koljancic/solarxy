@@ -2000,12 +2000,14 @@ fn granting_cast_shadow_releases_every_other_root_light_in_one_step() {
 
 #[test]
 fn take_scene_delta_is_empty_without_geo_or_lights() {
-    // Root holds no geo/light/camera nodes yet, so only the two list ops
-    // (empty light list, empty camera list) are emitted.
+    // Root holds no geo/light/camera/environment nodes yet, so only the
+    // three whole-value ops are emitted: an empty light list, an empty
+    // camera list, and an environment asserting nothing. All three are
+    // unconditional, because absence has to be communicated too.
     use solarxy_core::scene::SceneOp;
     let mut e = engine();
     let delta = e.take_scene_delta();
-    assert_eq!(delta.ops.len(), 2);
+    assert_eq!(delta.ops.len(), 3);
     assert!(matches!(
         delta.ops[0],
         SceneOp::SetLights { ref lights } if lights.is_empty()
@@ -2044,6 +2046,377 @@ fn scene_delta_lowers_a_camera_node() {
     assert_eq!(def.kind, CameraKind::Orthographic);
 }
 
+/// Light intensity means the same thing before and after the rescale.
+///
+/// Not by comparing a stored number, which the migration unit tests
+/// already do, but by comparing the two things a user would call "the same
+/// light": one saved before the multiplier left the shader, and one placed
+/// fresh afterwards. Both must reach the renderer as the same `LightDef`
+/// intensity, because the shader no longer multiplies and the two would
+/// otherwise differ by a factor of three with nothing on screen to say why.
+#[test]
+fn a_light_saved_before_the_rescale_matches_one_placed_after_it() {
+    use solarxy_core::scene::SceneOp;
+
+    fn lowered_intensity(e: &mut Engine) -> f32 {
+        e.take_scene_delta()
+            .ops
+            .into_iter()
+            .find_map(|op| match op {
+                SceneOp::SetLights { lights } => lights.into_iter().next(),
+                _ => None,
+            })
+            .expect("a light in the delta")
+            .intensity
+    }
+
+    // (type id, the version a pre-rescale document stored it at)
+    for (type_id, stored_version) in [
+        ("point_light", 1),
+        ("directional_light", 1),
+        ("spot_light", 1),
+        ("rect_area_light", 3),
+    ] {
+        // The reference: a light placed today, untouched.
+        let mut fresh = engine();
+        add(&mut fresh, GraphContext::Root, type_id);
+        let want = lowered_intensity(&mut fresh);
+
+        // The same light as a pre-rescale document holds it: the old
+        // default written out explicitly, at the old version.
+        let mut before = engine();
+        let light = add(&mut before, GraphContext::Root, type_id);
+        before
+            .apply(Command::SetParam {
+                ctx: GraphContext::Root,
+                node: light,
+                key: "intensity".to_string(),
+                value: ParamSource::Literal(ParamValue::Float(1.5)),
+            })
+            .unwrap();
+        let mut scene = crate::engine::scenefile::document_to_scene(
+            &before.doc.to_data(),
+            before.cook_mode,
+            &crate::runtime::RuntimeSettings::default(),
+            &SceneSidecar::default(),
+            Vec::new(),
+        );
+        let mut aged = 0;
+        for node in &mut scene.graph.nodes {
+            if node.type_id == type_id {
+                node.type_version = stored_version;
+                aged += 1;
+            }
+        }
+        assert_eq!(aged, 1, "{type_id}: the light was found and aged");
+
+        let (document, warnings) =
+            crate::engine::scenefile::scene_to_document(&scene, &before.registry);
+        assert!(
+            warnings.is_empty(),
+            "{type_id}: a clean rescale must not warn: {warnings:?}"
+        );
+        let mut reopened = engine();
+        reopened.load_document(&DocumentFile {
+            format_version: 1,
+            document,
+            cook_mode: before.cook_mode,
+        });
+        reopened.cook(&mut || true);
+
+        assert!(
+            (lowered_intensity(&mut reopened) - want).abs() < 1e-6,
+            "{type_id}: a document saved before the rescale reaches the \
+             renderer at a different brightness than a light placed after it"
+        );
+        assert!(
+            (want - 4.5).abs() < 1e-6,
+            "{type_id}: the new default should be the old 1.5 times the \
+             multiplier that left the shader"
+        );
+    }
+}
+
+/// The look reaches the scene contract, and the tone override means
+/// "inherit" until it is set.
+#[test]
+fn scene_delta_lowers_the_cameras_look() {
+    use solarxy_core::scene::{SceneOp, ToneCurve};
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+
+    let look_of = |e: &mut Engine| {
+        e.take_scene_delta()
+            .ops
+            .into_iter()
+            .find_map(|op| match op {
+                SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+                _ => None,
+            })
+            .expect("a camera in the delta")
+            .look
+    };
+
+    // Fresh out of the palette: neutral, and inheriting.
+    let fresh = look_of(&mut e);
+    assert_eq!(fresh.exposure, 1.0);
+    assert_eq!(fresh.tone, None, "a new camera must not restyle the scene");
+    assert_eq!(fresh.lift, [0.0; 3]);
+    assert_eq!(fresh.gamma, [1.0; 3]);
+    assert_eq!(fresh.gain, [1.0; 3]);
+    assert!(fresh.lut_a.is_none() && fresh.lut_b.is_none());
+
+    for (key, value) in [
+        ("exposure", ParamValue::Float(2.5)),
+        ("tone", ParamValue::Enum("reinhard".to_string())),
+        ("lift", ParamValue::Vec3([0.1, 0.0, -0.05])),
+        ("gamma", ParamValue::Vec3([1.2, 1.0, 0.8])),
+        ("gain", ParamValue::Vec3([1.0, 1.1, 1.3])),
+        ("lut_b_strength", ParamValue::Float(0.25)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: cam,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    let set = look_of(&mut e);
+    assert_eq!(set.exposure, 2.5);
+    assert_eq!(set.tone, Some(ToneCurve::Reinhard));
+    assert_eq!(set.lift, [0.1, 0.0, -0.05]);
+    assert_eq!(set.gamma, [1.2, 1.0, 0.8]);
+    assert_eq!(set.gain, [1.0, 1.1, 1.3]);
+    assert_eq!(set.lut_b_strength, 0.25);
+}
+
+/// A staged `.cube` reaches `CameraDef` as a decoded table.
+///
+/// The table travels on the cook's side cache rather than on a wire, so
+/// this exercises the whole chain the way the environment node's HDRI test
+/// does: stage bytes, cook, and read the lowered scene op.
+#[test]
+fn a_staged_cube_reaches_the_camera_look() {
+    use solarxy_core::scene::SceneOp;
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+
+    // A 2-cubed identity, which is the smallest legal table.
+    let mut src = String::from("LUT_3D_SIZE 2\n");
+    for b in 0..2 {
+        for g in 0..2 {
+            for r in 0..2 {
+                src.push_str(&format!("{r}.0 {g}.0 {b}.0\n"));
+            }
+        }
+    }
+    let id = e.stage_asset("look.cube", "text/plain", src.into_bytes());
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "lut_b".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(id)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let look = e
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the delta")
+        .look;
+    let table = look
+        .lut_b
+        .expect("the display-referred slot carries a table");
+    assert_eq!(table.size, 2);
+    assert_eq!(table.data.len(), 8 * 3);
+    assert!(
+        look.lut_a.is_none(),
+        "only the slot that was pointed at a file may carry one"
+    );
+}
+
+/// A malformed table is a cook error on the node, not a silent no-op.
+///
+/// This is the payoff of decoding engine-side rather than host-side: the
+/// node that references the bad file is the node that reports it.
+#[test]
+fn a_malformed_cube_fails_the_cameras_cook() {
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    let id = e.stage_asset("broken.cube", "text/plain", b"LUT_3D_SIZE 8\n1 2".to_vec());
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "lut_a".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(id)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let status = e.cook.status(cam).expect("the camera cooked");
+    assert!(
+        matches!(status, crate::cook::state::CookStatus::Error { .. }),
+        "a malformed table must surface on the node, got {status:?}"
+    );
+}
+
+/// The camera's look survives a scene-file save and load.
+///
+/// Through the real seam rather than by cloning a struct: to JSON, back
+/// out, into a fresh engine, and cooked. This is the criterion that makes
+/// the look worth putting on the camera at all, since a look that does not
+/// travel with the document is just application state with extra steps.
+#[test]
+fn the_cameras_look_survives_a_scene_file_round_trip() {
+    use solarxy_core::scene::{SceneOp, ToneCurve};
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    for (key, value) in [
+        ("exposure", ParamValue::Float(0.75)),
+        ("tone", ParamValue::Enum("none".to_string())),
+        ("lift", ParamValue::Vec3([0.02, 0.0, 0.03])),
+        ("gain", ParamValue::Vec3([1.4, 1.0, 0.9])),
+        ("lut_a_strength", ParamValue::Float(0.5)),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: cam,
+            key: key.to_string(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+
+    let scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a clean save must not warn: {warnings:?}"
+    );
+
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    let look = reopened
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the reopened delta")
+        .look;
+    assert_eq!(look.exposure, 0.75);
+    assert_eq!(look.tone, Some(ToneCurve::None));
+    assert_eq!(look.lift, [0.02, 0.0, 0.03]);
+    assert_eq!(look.gain, [1.4, 1.0, 0.9]);
+    assert_eq!(look.lut_a_strength, 0.5);
+}
+
+/// A camera written before the look existed opens neutral rather than dark.
+///
+/// The v1-to-v2 bump carries no migration hook because every added
+/// parameter fills from its registry default and every default is the
+/// identity of its effect. That is a claim about the defaults, so it is
+/// worth checking against a document that genuinely lacks the keys rather
+/// than one that round-tripped through the current writer.
+#[test]
+fn a_camera_saved_before_the_look_opens_neutral() {
+    use solarxy_core::scene::SceneOp;
+    let mut e = engine();
+    let cam = add(&mut e, GraphContext::Root, "camera");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node: cam,
+        key: "fov_y".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(60.0)),
+    })
+    .unwrap();
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    // Age it: strip every look key and stamp the node back to v1, which is
+    // exactly what a pre-0.8.2 scene holds on disk.
+    let mut aged = 0;
+    for node in &mut scene.graph.nodes {
+        if node.type_id == "camera" {
+            node.type_version = 1;
+            for key in [
+                "exposure",
+                "tone",
+                "lift",
+                "gamma",
+                "gain",
+                "lut_a",
+                "lut_a_strength",
+                "lut_b",
+                "lut_b_strength",
+            ] {
+                node.params.remove(key);
+            }
+            aged += 1;
+        }
+    }
+    assert_eq!(aged, 1, "the camera node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "filling from defaults must not warn: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    let look = reopened
+        .take_scene_delta()
+        .ops
+        .into_iter()
+        .find_map(|op| match op {
+            SceneOp::SetCameras { cameras } => cameras.into_iter().next(),
+            _ => None,
+        })
+        .expect("a camera in the reopened delta")
+        .look;
+    assert_eq!(look.exposure, 1.0, "a v1 camera must not open darkened");
+    assert_eq!(
+        look.tone, None,
+        "a v1 camera must inherit the pane's tone mapper, not impose one"
+    );
+    assert_eq!(look.lift, [0.0; 3]);
+    assert_eq!(look.gamma, [1.0; 3]);
+    assert_eq!(look.gain, [1.0; 3]);
+    assert!(look.lut_a.is_none() && look.lut_b.is_none());
+}
+
 #[test]
 fn physical_camera_derives_fov_from_focal_and_sensor() {
     let mut e = engine();
@@ -2073,6 +2446,98 @@ fn physical_camera_derives_fov_from_focal_and_sensor() {
         (fov_deg - expected).abs() < 0.01,
         "fov {fov_deg} vs {expected}"
     );
+}
+
+/// Deleting a geo node must remove its object, not merely stop mentioning
+/// it. A rebuilt delta only ever says what exists, so before removals were
+/// emitted the renderer kept the GPU object resident and drew it forever.
+#[test]
+fn deleting_a_geo_node_emits_a_scene_remove() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let _box_id = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+
+    // Baseline: the object exists and nothing is being removed.
+    let first = e.take_scene_delta();
+    let object_id = SceneObjectId(geo.0);
+    assert!(
+        first
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::UpsertGeometry { id, .. } if *id == object_id)),
+        "the geo should upsert before it is deleted"
+    );
+    assert!(
+        !first
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { .. })),
+        "nothing has disappeared yet"
+    );
+
+    e.apply(Command::RemoveNodes {
+        ctx: GraphContext::Root,
+        ids: vec![geo],
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let after = e.take_scene_delta();
+    assert!(
+        after
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { id } if *id == object_id)),
+        "deleting the geo must emit Remove for its object, got {:?}",
+        after.ops
+    );
+
+    // The removal is emitted once. A later pass has nothing left to remove,
+    // so a deleted object cannot keep generating ops for the rest of the
+    // session.
+    let third = e.take_scene_delta();
+    assert!(
+        !third
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { .. })),
+        "Remove should not repeat once the renderer has been told"
+    );
+}
+
+/// Clearing a geo's display flag is indistinguishable from deleting it, as
+/// far as the renderer is concerned: in both cases the object must stop
+/// being drawn.
+#[test]
+fn clearing_the_display_flag_emits_a_scene_remove() {
+    use solarxy_core::scene::{SceneObjectId, SceneOp};
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let sub = GraphContext::Subflow(geo);
+    let box_id = add(&mut e, sub, "box");
+    e.cook(&mut || true);
+    let _ = e.take_scene_delta();
+
+    e.apply(Command::SetActiveOutput {
+        ctx: sub,
+        node: None,
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let after = e.take_scene_delta();
+    assert!(
+        after
+            .ops
+            .iter()
+            .any(|op| matches!(op, SceneOp::Remove { id } if *id == SceneObjectId(geo.0))),
+        "clearing display must remove the object, got {:?}",
+        after.ops
+    );
+    let _ = box_id;
 }
 
 #[test]
@@ -3923,7 +4388,16 @@ fn materials_survive_array_and_mirror() {
         value: ParamSource::Literal(ParamValue::Text("textured".into())),
     })
     .unwrap();
-    // 4 copies, stepped clear of each other on X.
+    // 4 copies, stepped clear of each other on X. Pinned to Bake because
+    // this test's subject is material dedup through a real bake and merge;
+    // Instance never duplicates a material because it never duplicates a mesh.
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "copy_mode".into(),
+        value: ParamSource::Literal(ParamValue::Enum("bake".into())),
+    })
+    .unwrap();
     e.apply(Command::SetParam {
         ctx,
         node: arr,
@@ -3985,6 +4459,425 @@ fn materials_survive_array_and_mirror() {
         set.bounds.min.x < -3.0 && set.bounds.max.x > 3.0,
         "both halves present: {:?}",
         set.bounds
+    );
+}
+
+/// The copy-mode migration proved on a whole document rather than on one
+/// node's param map.
+///
+/// A scene saved before 0.8.2 stores `array` at version 1 with no
+/// `copy_mode`, written by an engine that could only bake. Version 2 defaults
+/// to Instance, so the migration has to write Bake back in. Get it wrong and
+/// the document opens looking entirely plausible: geometry is still there,
+/// the node still cooks clean, and every count downstream is quietly
+/// different. That is why this goes through the real save and load seam
+/// instead of asserting on the hook.
+#[test]
+fn a_document_saved_before_the_copy_mode_split_opens_still_baked() {
+    let (mut e, ctx) = subflow_engine();
+    let prim = add(&mut e, ctx, "box");
+    let arr = add(&mut e, ctx, "array");
+    e.apply(Command::Connect {
+        ctx,
+        from: PortRefDto {
+            node: prim,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: arr,
+            port: "geometry".into(),
+        },
+    })
+    .unwrap();
+    for (key, value) in [
+        ("count", ParamValue::Int(4)),
+        ("offset", ParamValue::Vec3([3.0, 0.0, 0.0])),
+        // What a pre-0.8.2 document effectively said, and the only thing it
+        // could have said.
+        ("copy_mode", ParamValue::Enum("bake".into())),
+    ] {
+        e.apply(Command::SetParam {
+            ctx,
+            node: arr,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(arr),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    /// Everything about the output a wrong migration would move: how the
+    /// copies are partitioned, whether they are placements or geometry, and
+    /// where the points actually are.
+    fn shape(e: &Engine, node: NodeId) -> (u32, Option<usize>, Vec<[f32; 3]>) {
+        let set = e
+            .cook
+            .outputs(node)
+            .expect("cooked")
+            .get("geometry")
+            .and_then(crate::registry::coerce::Value::as_geometry)
+            .expect("geometry out");
+        (
+            set.mesh_count(),
+            set.meshes[0].instances.as_ref().map(|i| i.len()),
+            set.meshes[0].positions.to_vec(),
+        )
+    }
+    let want = shape(&e, arr);
+    assert_eq!(want.0, 4, "the reference cook baked four copies");
+    assert_eq!(want.1, None, "baked output carries no placement list");
+
+    // Save, then age the file: strip `copy_mode` and stamp the array node
+    // back to version 1, which is what a scene written before this release
+    // holds on disk.
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let mut aged = 0;
+    for graph in scene.graph.subflows.values_mut() {
+        for node in &mut graph.nodes {
+            if node.type_id == "array" {
+                node.type_version = 1;
+                node.params.remove("copy_mode");
+                aged += 1;
+            }
+        }
+    }
+    assert_eq!(aged, 1, "the array node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a clean migration must not toast: {warnings:?}"
+    );
+
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+    reopened.cook(&mut || true);
+
+    assert_eq!(
+        shape(&reopened, arr),
+        want,
+        "the reopened document must cook to exactly what it cooked before, \
+         down to the vertex positions"
+    );
+}
+
+/// The geo container's rotate-order migration, proved on a whole document
+/// by the orientation it produces rather than by the value it stores.
+///
+/// A container saved before the rotate-order unification composed its
+/// rotation as ZYX. The current default is XYZ, so a document reopened
+/// without the explicit stamp silently re-orients: nothing errors, nothing
+/// warns, and an object is simply facing somewhere its author never chose.
+///
+/// The unit tests around the hook check the stamp. This checks the thing the
+/// stamp exists for, which is the matrix.
+#[test]
+fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
+    /// The world matrix of the one geo in a document whose stored geo node
+    /// has been aged to `version`, with `rotate_order` stripped.
+    fn reopened_at(version: u32, rotate: [f64; 3]) -> [[f32; 4]; 4] {
+        let mut e = engine();
+        let geo = add(&mut e, GraphContext::Root, "geo");
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: "rotate".into(),
+            value: ParamSource::Literal(ParamValue::Vec3(rotate)),
+        })
+        .unwrap();
+
+        let mut scene = crate::engine::scenefile::document_to_scene(
+            &e.doc.to_data(),
+            e.cook_mode,
+            &crate::runtime::RuntimeSettings::default(),
+            &SceneSidecar::default(),
+            Vec::new(),
+        );
+        let mut aged = 0;
+        for node in &mut scene.graph.nodes {
+            if node.type_id == "geo" {
+                node.type_version = version;
+                node.params.remove("rotate_order");
+                aged += 1;
+            }
+        }
+        assert_eq!(aged, 1, "the geo node was found and aged");
+
+        let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+        assert!(warnings.is_empty(), "clean migration: {warnings:?}");
+        let mut reopened = engine();
+        reopened.load_document(&DocumentFile {
+            format_version: 1,
+            document,
+            cook_mode: e.cook_mode,
+        });
+        crate::engine::scene::geo_world_matrix(
+            &reopened.doc,
+            &reopened.registry,
+            &reopened.previews,
+            geo,
+        )
+        .into()
+    }
+
+    // Two nonzero axes: the only case where the composition order is
+    // observable at all, so the old order has to be preserved explicitly.
+    let observable = [30.0, 40.0, 0.0];
+    let aged = reopened_at(2, observable);
+    let current = reopened_at(3, observable);
+    let differs = aged
+        .iter()
+        .zip(&current)
+        .any(|(a, b)| a.iter().zip(b).any(|(x, y)| (x - y).abs() > 1e-4));
+    assert!(
+        differs,
+        "the fixture has to be a rotation whose order is observable, or this \
+         test would pass with the migration deleted"
+    );
+
+    // What the aged document must produce: the ZYX composition it was
+    // authored against, which is what an explicit stamp gives.
+    let mut e = engine();
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    for (key, value) in [
+        ("rotate", ParamValue::Vec3(observable)),
+        ("rotate_order", ParamValue::Enum("zyx".into())),
+    ] {
+        e.apply(Command::SetParam {
+            ctx: GraphContext::Root,
+            node: geo,
+            key: key.into(),
+            value: ParamSource::Literal(value),
+        })
+        .unwrap();
+    }
+    let want: [[f32; 4]; 4] =
+        crate::engine::scene::geo_world_matrix(&e.doc, &e.registry, &e.previews, geo).into();
+
+    for (row, (a, b)) in aged.iter().zip(&want).enumerate() {
+        for (col, (x, y)) in a.iter().zip(b).enumerate() {
+            assert!(
+                (x - y).abs() < 1e-4,
+                "a reopened pre-split geo faces somewhere its author never \
+                 chose: [{row}][{col}] {x} vs {y}"
+            );
+        }
+    }
+}
+
+/// The downstream contract for instanced geometry, node by node.
+///
+/// Instancing is a representation choice, not a different result, so the
+/// same graph must produce the same geometry whether the copy operation
+/// placed its copies or baked them. A node that cannot carry placements has
+/// to bake them; the failure this guards is the one where it neither
+/// carries nor bakes and quietly returns one copy where the user placed
+/// four.
+///
+/// Each case cooks `box -> array -> <node>` twice, once with the array on
+/// Instance and once on Bake, and compares the two outputs after baking
+/// whatever survives. `carries` records which side of the contract the node
+/// is on, so a node silently changing sides fails here rather than in
+/// someone's scene.
+#[test]
+fn every_downstream_node_agrees_with_its_baked_equivalent() {
+    // (node type, params, whether it carries placements through)
+    let cases: &[(&str, &[(&str, ParamValue)], bool)] = &[
+        // Carry: each works in the prototype's own space with a result
+        // identical for every copy.
+        ("subdivide", &[("iterations", ParamValue::Int(1))], true),
+        ("uv_project", &[], true),
+        ("compute_normals", &[], true),
+        ("material", &[], true),
+        // Bake: the meaning is per copy, or real geometry is needed.
+        (
+            "transform",
+            &[("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
+            false,
+        ),
+        ("delete", &[], false),
+        ("mirror", &[], false),
+        ("bounds", &[], false),
+        ("attribute_create", &[], false),
+        ("points_from_geo", &[], false),
+        ("scatter", &[("count", ParamValue::Int(8))], false),
+    ];
+
+    for (node_type, params, carries) in cases {
+        let mut shapes = Vec::new();
+        for mode in ["instance", "bake"] {
+            let (mut e, ctx) = subflow_engine();
+            let prim = add(&mut e, ctx, "box");
+            let arr = add(&mut e, ctx, "array");
+            let sink = add(&mut e, ctx, node_type);
+            for (from, to) in [(prim, arr), (arr, sink)] {
+                e.apply(Command::Connect {
+                    ctx,
+                    from: PortRefDto {
+                        node: from,
+                        port: "geometry".into(),
+                    },
+                    to: PortRefDto {
+                        node: to,
+                        port: "geometry".into(),
+                    },
+                })
+                .unwrap();
+            }
+            e.apply(Command::SetParam {
+                ctx,
+                node: arr,
+                key: "copy_mode".into(),
+                value: ParamSource::Literal(ParamValue::Enum(mode.into())),
+            })
+            .unwrap();
+            e.apply(Command::SetParam {
+                ctx,
+                node: arr,
+                key: "count".into(),
+                value: ParamSource::Literal(ParamValue::Int(4)),
+            })
+            .unwrap();
+            for (key, value) in *params {
+                e.apply(Command::SetParam {
+                    ctx,
+                    node: sink,
+                    key: (*key).into(),
+                    value: ParamSource::Literal(value.clone()),
+                })
+                .unwrap();
+            }
+            e.apply(Command::SetActiveOutput {
+                ctx,
+                node: Some(sink),
+            })
+            .unwrap();
+            e.cook(&mut || true);
+
+            let set = e
+                .cook
+                .outputs(sink)
+                .unwrap_or_else(|| panic!("{node_type} ({mode}) cooked"))
+                .get("geometry")
+                .and_then(crate::registry::coerce::Value::as_geometry)
+                .unwrap_or_else(|| panic!("{node_type} ({mode}) output geometry"));
+
+            if mode == "instance" {
+                assert_eq!(
+                    set.is_instanced(),
+                    *carries,
+                    "{node_type} changed which side of the carry-or-bake \
+                     contract it is on"
+                );
+            }
+            // Compare after baking, so a carried list and a baked one are
+            // held to the same standard: the geometry the user sees.
+            let baked = set.baked().unwrap_or_else(|e| panic!("{node_type}: {e}"));
+            let mut points: Vec<[f32; 3]> = baked
+                .meshes
+                .iter()
+                .flat_map(|m| m.positions.iter().copied())
+                .collect();
+            points.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            shapes.push(points);
+        }
+        assert_eq!(
+            shapes[0].len(),
+            shapes[1].len(),
+            "{node_type}: instanced input produced a different amount of \
+             geometry than the baked equivalent"
+        );
+        for (i, (a, b)) in shapes[0].iter().zip(&shapes[1]).enumerate() {
+            for lane in 0..3 {
+                assert!(
+                    (a[lane] - b[lane]).abs() < 1e-4,
+                    "{node_type}: point {i} differs between modes: {a:?} vs {b:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Merge is the node the placement level was moved for, so it gets its own
+/// case: it is variadic, and its whole point is combining an instanced
+/// input with a plain one.
+#[test]
+fn merging_a_scatter_with_its_surface_keeps_the_copies_instanced() {
+    let (mut e, ctx) = subflow_engine();
+    let surface = add(&mut e, ctx, "sphere");
+    let template = add(&mut e, ctx, "box");
+    let scatter = add(&mut e, ctx, "scatter");
+    let copy = add(&mut e, ctx, "copy_to_points");
+    let merge = add(&mut e, ctx, "merge");
+
+    for (from, to, port) in [
+        (surface, scatter, "geometry"),
+        (scatter, copy, "points"),
+        (template, copy, "template"),
+        (copy, merge, "inputs"),
+        (surface, merge, "inputs"),
+    ] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: port.into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: scatter,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(40)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(merge),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let set = e
+        .cook
+        .outputs(merge)
+        .expect("merge cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("geometry out");
+
+    // One instanced prototype plus one plain surface, not one of each
+    // baked and not a surface replicated forty times.
+    assert!(set.is_instanced(), "the copies survived the merge");
+    let placed: Vec<usize> = set.meshes.iter().map(|m| m.instance_count()).collect();
+    assert!(
+        placed.contains(&40),
+        "the prototype keeps its forty placements: {placed:?}"
+    );
+    assert!(
+        placed.contains(&1),
+        "the surface is still placed once: {placed:?}"
     );
 }
 
@@ -4473,6 +5366,16 @@ fn scatter_copy_chain_recooks_on_reseed() {
         node: scatter,
         key: "count".into(),
         value: ParamSource::Literal(ParamValue::Int(25)),
+    })
+    .unwrap();
+    // Pinned to Bake so the assertion below reads the tiled positions
+    // directly. The subject here is recook propagation through a downstream
+    // copy, not which representation the copy chose.
+    e.apply(Command::SetParam {
+        ctx,
+        node: copy,
+        key: "copy_mode".into(),
+        value: ParamSource::Literal(ParamValue::Enum("bake".into())),
     })
     .unwrap();
     e.apply(Command::SetActiveOutput {
@@ -6695,4 +7598,280 @@ fn scrubbing_is_not_gated_by_an_unfinished_cook() {
 
     e.apply(Command::SetFrame { frame: 42 }).unwrap();
     assert_eq!(e.clock().frame, 42, "an explicit seek is never gated");
+}
+
+/// A tiny synthetic 4x2 Radiance HDR file, the fixture shape the formats
+/// decoder tests use.
+fn tiny_hdr_bytes() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n");
+    out.extend_from_slice(b"-Y 2 +X 4\n");
+    for _ in 0..8 {
+        out.extend_from_slice(&[128, 64, 32, 128]);
+    }
+    out
+}
+
+#[test]
+fn an_environment_node_lowers_its_hdri_into_the_scene_delta() {
+    // The headline of this feature: an HDRI chosen in the graph reaches
+    // the renderer through the scene contract rather than through host
+    // state, which is what makes it survive a reload at all.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "rotation".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(90.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let delta = e.take_scene_delta();
+    let op = delta
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            solarxy_core::scene::SceneOp::SetEnvironment {
+                hdri,
+                rotation,
+                intensity,
+                background,
+            } => Some((hdri, rotation, intensity, background)),
+            _ => None,
+        })
+        .expect("the delta carries an environment op");
+    let image = op.0.as_ref().expect("the decoded HDRI rides the op");
+    assert_eq!((image.width, image.height), (4, 2));
+    // Degrees in the param, radians on the contract.
+    assert!(
+        (op.1 - std::f32::consts::FRAC_PI_2).abs() < 1e-5,
+        "{}",
+        op.1
+    );
+    assert!((op.2 - 1.0).abs() < 1e-6);
+    assert_eq!(*op.3, solarxy_core::scene::BackgroundKind::Keep);
+}
+
+#[test]
+fn an_environment_survives_a_scene_file_round_trip() {
+    // Journey J3-a's last step: close the tab, reopen the file, and the
+    // lighting is exactly as you left it. Before the node existed the
+    // HDRI was host state and this was impossible.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(2.5)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let before = e.take_scene_delta();
+    let hash_before = environment_hash(&before).expect("an environment before saving");
+
+    let bytes = e.save_slxy(&SceneSidecar::default()).expect("save .slxy");
+
+    let mut e2 = engine();
+    let loaded = e2.load_slxy(&bytes).expect("load .slxy");
+    assert!(
+        loaded.warnings.is_empty(),
+        "clean round-trip has no warnings: {:?}",
+        loaded.warnings
+    );
+    assert!(
+        e2.has_environment_node(),
+        "the reloaded document still holds the node, which is what makes it win over the sidecar"
+    );
+    e2.cook(&mut || true);
+    let after = e2.take_scene_delta();
+
+    // The same bytes decode to the same content hash, so the reloaded
+    // scene lights identically rather than merely similarly.
+    assert_eq!(environment_hash(&after), Some(hash_before));
+    let intensity = after.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { intensity, .. } => Some(*intensity),
+        _ => None,
+    });
+    assert_eq!(intensity, Some(2.5));
+}
+
+/// The content hash of the HDRI a delta's environment op carries, if any.
+fn environment_hash(delta: &solarxy_core::scene::SceneDelta) -> Option<u64> {
+    delta.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { hdri, .. } => hdri.as_ref().map(|h| h.hash),
+        _ => None,
+    })
+}
+
+#[test]
+fn deleting_the_environment_node_clears_the_environment() {
+    // The op is emitted unconditionally for exactly this: absence has to
+    // be communicated, or a deleted node's HDRI lights the scene forever.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let env = add(&mut e, ctx, "environment");
+    let asset = e.stage_asset("sky.hdr", "image/vnd.radiance", tiny_hdr_bytes());
+    e.apply(Command::SetParam {
+        ctx,
+        node: env,
+        key: "hdri".to_string(),
+        value: ParamSource::Literal(ParamValue::Asset(asset)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert!(environment_hash(&e.take_scene_delta()).is_some());
+
+    e.apply(Command::RemoveNodes {
+        ctx,
+        ids: vec![env],
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    assert_eq!(environment_hash(&e.take_scene_delta()), None);
+}
+
+#[test]
+fn only_the_first_environment_node_wins() {
+    // There is exactly one environment. The node's own help promises
+    // document order decides, so a second node must change nothing.
+    let mut e = engine();
+    let ctx = GraphContext::Root;
+    let first = add(&mut e, ctx, "environment");
+    let second = add(&mut e, ctx, "environment");
+    e.apply(Command::SetParam {
+        ctx,
+        node: first,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(3.0)),
+    })
+    .unwrap();
+    e.apply(Command::SetParam {
+        ctx,
+        node: second,
+        key: "intensity".to_string(),
+        value: ParamSource::Literal(ParamValue::Float(9.0)),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+    let delta = e.take_scene_delta();
+    let intensity = delta.ops.iter().find_map(|op| match op {
+        solarxy_core::scene::SceneOp::SetEnvironment { intensity, .. } => Some(*intensity),
+        _ => None,
+    });
+    assert_eq!(
+        intensity,
+        Some(3.0),
+        "the first node in document order wins"
+    );
+}
+
+/// A budgeted cook must never evaluate a cross-network reference before
+/// the network it references has drained. The driver's forward-progress
+/// rule cooks a context's first eligible node without consulting the
+/// budget, so without the engine's deferral gate an interrupted pass
+/// cooked a tex_ref ahead of its source, and the resulting
+/// unresolved-reference error was terminal: nothing re-dirtied the node,
+/// and the scene wedged. Driven at a budget of one extra node per pass,
+/// the worst case.
+#[test]
+fn budgeted_cook_defers_cross_network_references() {
+    let mut e = engine();
+
+    let tex = add(&mut e, GraphContext::Root, "texnet");
+    let t = GraphContext::Subflow(tex);
+    let noise = add(&mut e, t, "noise");
+    e.apply(Command::SetActiveOutput {
+        ctx: t,
+        node: Some(noise),
+    })
+    .expect("display");
+
+    let geo = add(&mut e, GraphContext::Root, "geo");
+    let g = GraphContext::Subflow(geo);
+    let plane = add(&mut e, g, "plane");
+    let tex_ref = add(&mut e, g, "tex_ref");
+    e.apply(Command::SetParam {
+        ctx: g,
+        node: tex_ref,
+        key: "texture_path".into(),
+        value: ParamSource::Literal(ParamValue::NodeRef(Some(tex))),
+    })
+    .expect("reference");
+    let sample = add(&mut e, g, "attribute_from_image");
+    e.apply(Command::Connect {
+        ctx: g,
+        from: PortRefDto {
+            node: plane,
+            port: "geometry".into(),
+        },
+        to: PortRefDto {
+            node: sample,
+            port: "geometry".into(),
+        },
+    })
+    .expect("wire geometry");
+    e.apply(Command::Connect {
+        ctx: g,
+        from: PortRefDto {
+            node: tex_ref,
+            port: "image".into(),
+        },
+        to: PortRefDto {
+            node: sample,
+            port: "image".into(),
+        },
+    })
+    .expect("wire image");
+    e.apply(Command::SetActiveOutput {
+        ctx: g,
+        node: Some(sample),
+    })
+    .expect("display");
+
+    // One free node plus one budgeted node per pass: the harshest
+    // interruption the scheduler can face.
+    let mut errored = Vec::new();
+    for _ in 0..40 {
+        let mut n = 0;
+        for ev in e.cook(&mut || {
+            n += 1;
+            n < 2
+        }) {
+            if let EngineEvent::CookStatus { node, status } = ev
+                && matches!(status, CookStatus::Error { .. })
+            {
+                errored.push(node);
+            }
+        }
+    }
+    assert!(
+        errored.is_empty(),
+        "a budgeted cook errored nodes {errored:?}; the reference ran \
+         ahead of its source network"
+    );
+    assert!(
+        e.geometry_output(sample).is_some(),
+        "the reference-consuming display cooked to geometry"
+    );
 }

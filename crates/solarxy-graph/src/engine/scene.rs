@@ -15,10 +15,14 @@
 //! land (N2): it keys on `type_id`, so an empty or primitive-only root
 //! yields an empty delta.
 
+use std::collections::BTreeSet;
+
 use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Transform, Vector3};
 use solarxy_core::geometry::compute_bounds;
 use solarxy_core::raycast::{MeshView, Ray, raycast_meshes};
-use solarxy_core::scene::{CameraDef, LightDef, SceneDelta, SceneObjectId, SceneOp};
+use solarxy_core::scene::{
+    CameraDef, CameraLook, LightDef, SceneDelta, SceneObjectId, SceneOp, ToneCurve,
+};
 
 use crate::cook::CookEngine;
 use crate::document::{Document, GraphContext, NodeId};
@@ -54,31 +58,51 @@ fn root_refs<'a>(
     )
 }
 
-/// Builds a full scene delta from scratch each frame. The renderer diffs
-/// against its own state, so a full rebuild is safe (and light lists are
-/// tiny). `Clear`-then-rebuild is deliberately avoided: object ids are
-/// stable per geo node, so the renderer keeps unchanged uploads.
+/// Builds a full scene delta from scratch each frame, and reports which
+/// object ids the scene now contains. The renderer diffs against its own
+/// state, so a full rebuild is safe (and light lists are tiny).
+/// `Clear`-then-rebuild is deliberately avoided: object ids are stable per
+/// geo node, so the renderer keeps unchanged uploads.
+///
+/// The returned set is what the renderer should be holding afterwards.
+/// Rebuilding says nothing about objects that *stopped* existing, so the
+/// caller diffs this against the previous set and emits [`SceneOp::Remove`]
+/// for the difference. Without that, deleting a geo node leaves its GPU
+/// object resident and drawn forever.
 #[must_use]
 pub fn build_scene_delta(
     doc: &Document,
     registry: &Registry,
     cook: &CookEngine,
     previews: &Previews,
-) -> SceneDelta {
+) -> (SceneDelta, BTreeSet<SceneObjectId>) {
     let mut delta = SceneDelta::default();
+    let mut present = BTreeSet::new();
     let Ok(root) = doc.graph(GraphContext::Root) else {
-        return delta;
+        return (delta, present);
     };
 
     let mut lights: Vec<LightDef> = Vec::new();
     let mut cameras: Vec<CameraDef> = Vec::new();
+    // There is exactly one environment, so the first in document order
+    // wins and later ones are ignored. The node's own help says so.
+    let mut environment: Option<SceneOp> = None;
 
     for node in root.nodes() {
         match node.type_id.as_str() {
-            "geo" => emit_geo(doc, registry, cook, previews, node.id, &mut delta),
+            "geo" => {
+                if emit_geo(doc, registry, cook, previews, node.id, &mut delta) {
+                    present.insert(SceneObjectId(node.id.0));
+                }
+            }
             "camera" => {
-                if let Some(cam) = camera_from_node(doc, registry, previews, node) {
+                if let Some(cam) = camera_from_node(doc, registry, previews, cook, node) {
                     cameras.push(cam);
+                }
+            }
+            "environment" => {
+                if environment.is_none() {
+                    environment = environment_from_node(doc, registry, previews, cook, node);
                 }
             }
             id if is_light(id) => {
@@ -92,7 +116,16 @@ pub fn build_scene_delta(
 
     delta.push(SceneOp::SetLights { lights });
     delta.push(SceneOp::SetCameras { cameras });
-    delta
+    // Pushed unconditionally, like the lists above: deleting the node has
+    // to clear the environment, and the host's tracker makes the repeat
+    // free when nothing moved.
+    delta.push(environment.unwrap_or(SceneOp::SetEnvironment {
+        hdri: None,
+        rotation: 0.0,
+        intensity: solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
+        background: solarxy_core::scene::BackgroundKind::Keep,
+    }));
+    (delta, present)
 }
 
 /// Whether a type id is one of the six light nodes.
@@ -182,6 +215,14 @@ pub(crate) fn geo_visible(
 /// still upsert (hidden-but-cooked: the geometry stays GPU-resident so
 /// re-show is instant); `SetVisible` is the render gate, never a cook
 /// gate.
+/// Emits one geo container's ops. Returns whether the object is present in
+/// the scene at all: `false` means it has no subflow or nothing flagged for
+/// display, which is indistinguishable to the renderer from the node having
+/// been deleted, and in both cases the object should stop being drawn.
+///
+/// Presence is deliberately *not* the same as having cooked geometry. An
+/// object mid-cook has no `display_output` yet but must stay resident, or it
+/// would be torn down and re-uploaded on every frame of a long cook.
 fn emit_geo(
     doc: &Document,
     registry: &Registry,
@@ -189,13 +230,13 @@ fn emit_geo(
     previews: &Previews,
     geo: NodeId,
     delta: &mut SceneDelta,
-) {
+) -> bool {
     let object_id = SceneObjectId(geo.0);
     let Ok(subflow) = doc.graph(GraphContext::Subflow(geo)) else {
-        return;
+        return false;
     };
     let Some(display) = subflow.active_output else {
-        return;
+        return false;
     };
     // The displayed node's cooked geometry.
     if let Some(set) = display_output(doc, cook, geo) {
@@ -232,6 +273,7 @@ fn emit_geo(
         id: object_id,
         transform: geo_world_matrix(doc, registry, previews, geo).into(),
     });
+    true
 }
 
 /// The nearest cached validation result at or upstream of `display`,
@@ -459,6 +501,7 @@ fn camera_from_node(
     doc: &Document,
     registry: &Registry,
     previews: &Previews,
+    cook: &CookEngine,
     node: &crate::document::NodeData,
 ) -> Option<CameraDef> {
     use solarxy_core::scene::CameraKind;
@@ -488,6 +531,51 @@ fn camera_from_node(
         if v > 1e-4 { v } else { 45.0_f32.to_radians() }
     };
     let aspect = f32p("aspect");
+
+    // The look. Tables come from the cook's per-node side cache rather than
+    // from a param, for the reason the environment's image does: they have
+    // no wire to travel on. A camera whose table failed to parse simply
+    // reports none, and the node carries the diagnostic.
+    let tables = cook.luts(node.id);
+    let table = |slot: usize| {
+        tables
+            .and_then(|t| t[slot].as_ref())
+            .map(std::sync::Arc::clone)
+    };
+    let tone = match p.get("tone") {
+        Some(ParamValue::Enum(k)) if k == "none" => Some(ToneCurve::None),
+        Some(ParamValue::Enum(k)) if k == "linear" => Some(ToneCurve::Linear),
+        Some(ParamValue::Enum(k)) if k == "reinhard" => Some(ToneCurve::Reinhard),
+        Some(ParamValue::Enum(k)) if k == "aces" => Some(ToneCurve::AcesFilmic),
+        // Anything else, including the `inherit` default and a v1 camera
+        // with no such param at all, leaves the pane's choice alone.
+        _ => None,
+    };
+    let exposure = match p.get("exposure") {
+        Some(ParamValue::Float(v)) => *v as f32,
+        // Absent means as-rendered, never black.
+        _ => 1.0,
+    };
+    let strength = |key: &str| match p.get(key) {
+        Some(ParamValue::Float(v)) => (*v as f32).clamp(0.0, 1.0),
+        _ => 1.0,
+    };
+    let vec3_or = |key: &str, fallback: [f32; 3]| match p.get(key) {
+        Some(ParamValue::Vec3(_)) => p.vec3_f32(key),
+        _ => fallback,
+    };
+    let look = CameraLook {
+        exposure,
+        tone,
+        lift: vec3_or("lift", [0.0; 3]),
+        gamma: vec3_or("gamma", [1.0; 3]),
+        gain: vec3_or("gain", [1.0; 3]),
+        lut_a: table(0),
+        lut_a_strength: strength("lut_a_strength"),
+        lut_b: table(1),
+        lut_b_strength: strength("lut_b_strength"),
+    };
+
     Some(CameraDef {
         id: SceneObjectId(node.id.0),
         kind,
@@ -501,6 +589,58 @@ fn camera_from_node(
         aspect: if aspect > 1e-3 { aspect } else { 16.0 / 9.0 },
         show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
         gizmo_size: f32p("gizmo_size"),
+        look,
+    })
+}
+
+/// Build the environment op from an `environment` node.
+///
+/// The decoded image comes from the cook's per-node side cache rather than
+/// from an output value: `Value` has no float-image variant, and adding one
+/// would mean a new `DataType`, which is a deliberate frontend change. A
+/// node whose HDRI has not finished decoding yet (the web path parks on a
+/// worker job) simply reports no image, and the next delta carries it.
+fn environment_from_node(
+    doc: &Document,
+    registry: &Registry,
+    previews: &Previews,
+    cook: &CookEngine,
+    node: &crate::document::NodeData,
+) -> Option<SceneOp> {
+    use solarxy_core::scene::BackgroundKind;
+
+    let desc = registry.get(&node.type_id)?;
+    let params = effective_params(previews, node.id, &node.params);
+    let refs = root_refs(doc, registry, previews, node.id);
+    let eval = crate::expr::EvalCtx::new(crate::expr::SceneTime::default()).with_refs(&refs);
+    let p = resolve_params_with(&params, &desc.params, &eval).ok()?;
+
+    let f32p = |key: &str| -> f32 {
+        match p.get(key) {
+            Some(ParamValue::Float(v)) => *v as f32,
+            _ => 0.0,
+        }
+    };
+    let background = match p.get("background") {
+        Some(ParamValue::Enum(k)) if k == crate::nodes::environment_node::BACKGROUND_HDRI_SKY => {
+            BackgroundKind::HdriSky
+        }
+        _ => BackgroundKind::Keep,
+    };
+    // The param is degrees, because that is what a user dials; the
+    // contract is radians, because that is what the shader rotates by.
+    let rotation = f32p("rotation").to_radians();
+    let intensity = match p.get("intensity") {
+        Some(ParamValue::Float(v)) => *v as f32,
+        // Absent means as-authored, never unlit.
+        _ => solarxy_core::view_config::DEFAULT_HDRI_INTENSITY,
+    };
+
+    Some(SceneOp::SetEnvironment {
+        hdri: cook.environment(node.id).map(std::sync::Arc::clone),
+        rotation,
+        intensity,
+        background,
     })
 }
 

@@ -55,6 +55,7 @@ mod switch_node;
 mod mat_nodes;
 
 // Output: export taps and the render config node.
+pub(crate) mod environment_node;
 mod export_nodes;
 
 // Texture context: the container plus the image ops.
@@ -141,6 +142,7 @@ pub fn builtin_descriptors() -> Vec<NodeTypeDescriptor> {
         export_nodes::image_export_descriptor(),
         export_nodes::render_descriptor(),
         // Lights (root).
+        environment_node::descriptor(),
         lights::point_descriptor(),
         lights::directional_descriptor(),
         lights::spot_descriptor(),
@@ -228,7 +230,7 @@ mod tests {
     #[test]
     fn all_builtin_nodes_registered() {
         let registry = builtin_registry().unwrap();
-        assert_eq!(registry.len(), 76);
+        assert_eq!(registry.len(), 77);
 
         let in_context = |kind: ContextKind| {
             builtin_descriptors()
@@ -265,7 +267,9 @@ mod tests {
             (Category::Shaders, 6),
             (Category::Import, 6),
             (Category::Export, 3),
-            (Category::Lights, 6),
+            // +1: the `environment` node joined in 0.8.2, making the
+            // lighting environment scene data rather than host state.
+            (Category::Lights, 7),
             // 0.8.1: `camera` moved out of Utility into its own section.
             (Category::Cameras, 1),
             // +1: the `text` datablock joined in round 2.
@@ -277,6 +281,6 @@ mod tests {
         for (cat, n) in expected {
             assert_eq!(count(cat), n, "{}", cat.display_name());
         }
-        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 76);
+        assert_eq!(expected.iter().map(|(_, n)| n).sum::<usize>(), 77);
     }
 }

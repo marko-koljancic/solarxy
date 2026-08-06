@@ -14,6 +14,7 @@
 //! hold dozens of objects, not thousands.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use cgmath::{Matrix4, SquareMatrix};
@@ -25,7 +26,8 @@ use solarxy_core::geometry::{
     compute_tangent_from_normal, extract_edges,
 };
 use solarxy_core::scene::{
-    CameraDef, CookedGeometry, CookedMesh, LightDef, SceneDelta, SceneObjectId, SceneOp,
+    CameraDef, CookedGeometry, CookedMesh, InstanceXform, LightDef, SceneDelta, SceneObjectId,
+    SceneOp,
 };
 use solarxy_core::validation::ValidationResult;
 
@@ -40,6 +42,91 @@ use crate::validation::{build_mesh_category_map, build_mesh_edge_indices};
 /// Extra capacity factor for growable buffers (1.5x).
 fn with_headroom(bytes: u64) -> u64 {
     bytes + bytes / 2
+}
+
+/// The object's per-instance GPU rows: its world transform composed with
+/// every mesh's placements, concatenated in mesh order, plus each mesh's
+/// range into that list.
+///
+/// One buffer per object with a slice per mesh, rather than a buffer per
+/// mesh: a mesh with no placements contributes the identity once, so an
+/// object with no instancing anywhere is the single row it has always been.
+///
+/// The composition order matters. The placement is object-local (where a
+/// copy sits within the scatter) and the transform is where the object
+/// sits in the world, so the object transform applies last.
+///
+/// **The row list is never empty**, and that is a GPU requirement rather
+/// than tidiness: the buffer built from these rows is bound whole by eight
+/// per-object passes, each of them above its mesh loop, and wgpu panics on
+/// a zero-length buffer slice. Two inputs would otherwise produce no rows
+/// at all. An object with no meshes has nothing to iterate, which is what
+/// an import node with no file staged cooks to. And an object whose every
+/// mesh carries an empty placement list contributes nothing per mesh,
+/// which is what copying onto a point cloud that came out empty produces.
+/// Both get the single identity row that this function returned for every
+/// object before placements existed; the ranges stay whatever they were,
+/// so no mesh draws it.
+fn instance_raws(
+    transform: Matrix4<f32>,
+    placements: &[Option<Arc<Vec<InstanceXform>>>],
+) -> (Vec<InstanceRaw>, Vec<Range<u32>>) {
+    let mut rows: Vec<InstanceRaw> = Vec::with_capacity(placements.len());
+    let mut ranges: Vec<Range<u32>> = Vec::with_capacity(placements.len());
+    for mesh in placements {
+        let start = rows.len() as u32;
+        match mesh {
+            Some(list) => rows.extend(
+                list.iter()
+                    .map(|p| InstanceRaw::from_matrix(transform * Matrix4::from(p.0))),
+            ),
+            None => rows.push(InstanceRaw::from_matrix(transform)),
+        }
+        ranges.push(start..rows.len() as u32);
+    }
+    if rows.is_empty() {
+        rows.push(InstanceRaw::from_matrix(transform));
+    }
+    (rows, ranges)
+}
+
+/// The byte stride of one `InstanceRaw` row, for slicing a mesh's range out
+/// of the object's buffer.
+const INSTANCE_ROW_BYTES: u64 = std::mem::size_of::<InstanceRaw>() as u64;
+
+/// Uploads every mesh's placements composed with `transform`, and stamps
+/// each mesh's range into the buffer onto its GPU record.
+///
+/// The row count changes whenever a placement count does (a scatter's point
+/// count is a parameter), so the buffer grows by recreation and is written
+/// in place whenever the existing capacity still holds. Returns the new
+/// buffer when it had to grow, `None` when it wrote in place.
+#[must_use]
+fn upload_instances(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    meshes: &mut [Mesh],
+    transform: Matrix4<f32>,
+    placements: &[Option<Arc<Vec<InstanceXform>>>],
+) -> Option<wgpu::Buffer> {
+    let (rows, ranges) = instance_raws(transform, placements);
+    for (mesh, range) in meshes.iter_mut().zip(&ranges) {
+        mesh.instance_offset = u64::from(range.start) * INSTANCE_ROW_BYTES;
+        mesh.instance_count = range.end - range.start;
+    }
+    let needed = rows.len() as u64 * INSTANCE_ROW_BYTES;
+    if needed <= buffer.size() {
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&rows));
+        return None;
+    }
+    Some(
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SceneObject Instance Buffer"),
+            contents: bytemuck::cast_slice(&rows),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        }),
+    )
 }
 
 /// Recorded capacities of one mesh's growable buffers, parallel to
@@ -62,9 +149,14 @@ pub struct SceneObject {
     /// Whether the object is drawn into the shadow map (`SetCastShadow`);
     /// orthogonal to which light owns the map.
     pub cast_shadow: bool,
-    /// One `InstanceRaw` per object — a transform-only change is a single
-    /// small buffer write, never a geometry re-upload.
+    /// Every mesh's placements composed with `transform`, concatenated in
+    /// GPU-mesh order — a transform-only change is a single buffer write,
+    /// never a geometry re-upload.
     pub instance_buffer: wgpu::Buffer,
+    /// Each GPU mesh's placement list (`None` for the ordinary single
+    /// placement), parallel to `model.meshes`. Kept so a transform change
+    /// can recompose every row without rebuilding the meshes.
+    instance_placements: Vec<Option<Arc<Vec<InstanceXform>>>>,
     caps: Vec<MeshCaps>,
     /// The last-applied cooked geometry, for pointer-identity dedupe: the
     /// engine re-lowers the full delta each frame, so an upsert whose
@@ -190,28 +282,22 @@ impl SceneObjects {
         self.cameras.as_deref()
     }
 
-    /// Union world-space-ish bounds over visible objects (object bounds
-    /// only; transforms are not applied in v1 — good enough for the
-    /// camera-framing and shadow-fit callers, refined with the engine).
+    /// Union world-space bounds over visible objects, each carried through
+    /// its own placement.
+    ///
+    /// The transform matters as soon as a scene is authored rather than
+    /// loaded from one file: three consumers read this, and all three are
+    /// wrong without it. Camera framing centres on empty space, the depth
+    /// range fits a box the geometry is not in, and the shadow frustum is
+    /// sized so a placed object falls outside it.
     #[must_use]
     pub fn visible_bounds(&self) -> Option<AABB> {
         let mut acc: Option<AABB> = None;
         for obj in self.objects.values().filter(|o| o.visible) {
-            let b = obj.model.bounds;
+            let b = obj.model.bounds.transformed(&obj.transform);
             acc = Some(match acc {
                 None => b,
-                Some(a) => AABB {
-                    min: cgmath::Point3::new(
-                        a.min.x.min(b.min.x),
-                        a.min.y.min(b.min.y),
-                        a.min.z.min(b.min.z),
-                    ),
-                    max: cgmath::Point3::new(
-                        a.max.x.max(b.max.x),
-                        a.max.y.max(b.max.y),
-                        a.max.z.max(b.max.z),
-                    ),
-                },
+                Some(a) => a.union(&b),
             });
         }
         acc
@@ -233,11 +319,22 @@ impl SceneObjects {
                 SceneOp::SetTransform { id, transform } => {
                     if let Some(obj) = self.objects.get_mut(id) {
                         obj.transform = (*transform).into();
-                        queue.write_buffer(
+                        // Every placement is the object transform times
+                        // the instance's own, so moving the object moves
+                        // all of them: writing only entry zero would leave
+                        // a scatter's copies behind at the old position.
+                        let placements = std::mem::take(&mut obj.instance_placements);
+                        if let Some(grown) = upload_instances(
+                            device,
+                            queue,
                             &obj.instance_buffer,
-                            0,
-                            bytemuck::bytes_of(&InstanceRaw::from_matrix(obj.transform)),
-                        );
+                            &mut obj.model.meshes,
+                            obj.transform,
+                            &placements,
+                        ) {
+                            obj.instance_buffer = grown;
+                        }
+                        obj.instance_placements = placements;
                     }
                 }
                 SceneOp::SetVisible { id, visible } => {
@@ -264,6 +361,14 @@ impl SceneObjects {
                 SceneOp::SetCameras { cameras } => {
                     self.cameras = Some(cameras.clone());
                 }
+                // Handled by the shell, not here: the environment is the
+                // IBL and the skybox, which live in `IblResources` and
+                // `SceneEnvironment`. This type owns per-object GPU
+                // buffers and cannot reach either. `EnvironmentTracker`
+                // is what applies it, and both shells run it over the same
+                // delta. Matched explicitly rather than swept up by a
+                // wildcard so a future op cannot be silently dropped here.
+                SceneOp::SetEnvironment { .. } => {}
                 SceneOp::Clear => {
                     self.objects.clear();
                     self.texture_cache.sweep();
@@ -382,6 +487,23 @@ impl SceneObjects {
             obj.model.mesh_bounds = built.iter().map(|b| b.bounds).collect();
             obj.model.bounds = cooked.bounds;
             obj.model.has_uvs = built.iter().any(|b| b.has_uvs);
+            // The prototype buffers can fit in place while the PLACEMENTS
+            // changed: re-seeding a scatter keeps the same cone and moves
+            // every copy. So the instance buffer is resynced here too, not
+            // only on the rebuild path.
+            obj.instance_placements = built.iter().map(|b| b.instances.clone()).collect();
+            let placements = std::mem::take(&mut obj.instance_placements);
+            if let Some(grown) = upload_instances(
+                device,
+                queue,
+                &obj.instance_buffer,
+                &mut obj.model.meshes,
+                obj.transform,
+                &placements,
+            ) {
+                obj.instance_buffer = grown;
+            }
+            obj.instance_placements = placements;
             obj.geometry = Arc::clone(&cooked_arc);
             obj.raw_to_gpu = raw_to_gpu;
             // Geometry content changed: derived validation resources are
@@ -545,6 +667,10 @@ impl SceneObjects {
                 topology: b.topology,
                 color_buffer,
                 visible: true,
+                // Filled in by `upload_instances` below, once the whole
+                // mesh list exists and the buffer is sized to it.
+                instance_offset: 0,
+                instance_count: 1,
                 edge_data: Some(EdgeData {
                     positions_buffer: edge_positions,
                     index_buffer: edge_index,
@@ -574,9 +700,23 @@ impl SceneObjects {
             has_uvs: built.iter().any(|b| b.has_uvs),
         };
 
+        let placements: Vec<Option<Arc<Vec<InstanceXform>>>> =
+            built.iter().map(|b| b.instances.clone()).collect();
+
         if let Some(existing) = self.objects.get_mut(&id) {
             existing.model = model;
             existing.caps = caps;
+            if let Some(grown) = upload_instances(
+                device,
+                queue,
+                &existing.instance_buffer,
+                &mut existing.model.meshes,
+                existing.transform,
+                &placements,
+            ) {
+                existing.instance_buffer = grown;
+            }
+            existing.instance_placements = placements;
             existing.geometry = Arc::clone(&cooked_arc);
             existing.raw_to_gpu = raw_to_gpu;
             // Fresh meshes carry no degen buffers; drop the stale overlay
@@ -585,9 +725,15 @@ impl SceneObjects {
             existing.validation_gpu = None;
         } else {
             let transform = Matrix4::identity();
+            let mut model = model;
+            let (rows, ranges) = instance_raws(transform, &placements);
+            for (mesh, range) in model.meshes.iter_mut().zip(&ranges) {
+                mesh.instance_offset = u64::from(range.start) * INSTANCE_ROW_BYTES;
+                mesh.instance_count = range.end - range.start;
+            }
             let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("SceneObject Instance Buffer"),
-                contents: bytemuck::bytes_of(&InstanceRaw::from_matrix(transform)),
+                contents: bytemuck::cast_slice(&rows),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
             self.objects.insert(
@@ -598,6 +744,7 @@ impl SceneObjects {
                     visible: true,
                     cast_shadow: true,
                     instance_buffer,
+                    instance_placements: placements,
                     caps,
                     geometry: cooked_arc,
                     raw_to_gpu,
@@ -721,6 +868,10 @@ fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
                 && same_opt(x.normals.as_ref(), y.normals.as_ref())
                 && same_opt(x.tex_coords.as_ref(), y.tex_coords.as_ref())
                 && same_opt(x.colors.as_ref(), y.colors.as_ref())
+                // Placements, or a re-seeded scatter is deduped away: its
+                // prototype buffers are the same allocation, so every other
+                // test here passes while the copies sit where they were.
+                && same_opt(x.instances.as_ref(), y.instances.as_ref())
                 && x.material_index == y.material_index
                 && x.topology == y.topology
         })
@@ -774,6 +925,11 @@ struct BuiltMesh {
     /// upload it as the location-12 vertex buffer; point meshes instead
     /// pack it sRGB8 into `padded_positions[i][3]` at build time.
     colors: Option<Arc<Vec<[f32; 4]>>>,
+    /// The cooked mesh's placements, shared by refcount. Carried here
+    /// rather than read back from the cooked geometry because empty meshes
+    /// are skipped at build, so GPU-mesh order is a subset of cooked order
+    /// and the two would need remapping at every use.
+    instances: Option<Arc<Vec<InstanceXform>>>,
 }
 
 impl BuiltMesh {
@@ -957,6 +1113,7 @@ fn build_mesh(mesh: &CookedMesh) -> BuiltMesh {
         padded_uvs,
         topology: mesh.topology,
         colors: mesh.colors.clone(),
+        instances: mesh.instances.clone(),
     }
 }
 
@@ -980,6 +1137,7 @@ pub fn cooked_from_parts(
             material_index: None,
             topology: MeshTopology::Triangles,
             colors: None,
+            instances: None,
         }],
         materials: Vec::new(),
         bounds,
@@ -1000,6 +1158,7 @@ mod tests {
             material_index: None,
             topology: MeshTopology::Triangles,
             colors: None,
+            instances: None,
         }
     }
 
@@ -1027,6 +1186,128 @@ mod tests {
         assert_eq!(raw_to_gpu, vec![None, Some(0), None]);
     }
 
+    /// A re-seeded scatter changes only its placements: the prototype's
+    /// position and index buffers are the same allocation, so every other
+    /// identity test passes. Without comparing the placement list, the
+    /// upsert is deduped away and the copies never move.
+    #[test]
+    fn same_geometry_sees_a_placement_change() {
+        let base = tri();
+        let placed = |x: f32| CookedMesh {
+            instances: Some(Arc::new(vec![
+                solarxy_core::scene::InstanceXform::IDENTITY,
+                solarxy_core::scene::InstanceXform([
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [x, 0.0, 0.0, 1.0],
+                ]),
+            ])),
+            ..base.clone()
+        };
+        let a = CookedGeometry {
+            meshes: vec![placed(5.0)],
+            materials: Vec::new(),
+            bounds: compute_bounds(&[[0.0; 3]]),
+        };
+        let reseeded = CookedGeometry {
+            meshes: vec![placed(9.0)],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(
+            !same_geometry(&a, &reseeded),
+            "the same prototype at different placements is not the same object"
+        );
+
+        // The same list by identity still dedupes, which is the per-frame
+        // re-lowering case this optimization exists for.
+        let same = CookedGeometry {
+            meshes: vec![a.meshes[0].clone()],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(same_geometry(&a, &same));
+
+        // And gaining placements at all is a change.
+        let plain = CookedGeometry {
+            meshes: vec![base],
+            materials: Vec::new(),
+            bounds: a.bounds,
+        };
+        assert!(!same_geometry(&a, &plain));
+    }
+
+    /// The buffer layout the draw path depends on: every mesh's placements
+    /// concatenated, each mesh pointing at its own slice, with an
+    /// uninstanced mesh contributing exactly one identity row.
+    #[test]
+    fn instance_rows_concatenate_per_mesh_with_one_row_for_the_plain_ones() {
+        let placed = |n: usize| -> Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> {
+            Some(Arc::new(vec![
+                solarxy_core::scene::InstanceXform::IDENTITY;
+                n
+            ]))
+        };
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[placed(3), None, placed(2)]);
+        assert_eq!(rows.len(), 6);
+        assert_eq!(ranges, vec![0..3, 3..4, 4..6]);
+
+        // An object with no instancing anywhere is one row per mesh, which
+        // is exactly what this path uploaded before placements existed.
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[None, None]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(ranges, vec![0..1, 1..2]);
+    }
+
+    /// The two inputs that would otherwise yield no rows at all. An empty
+    /// row list is not a harmless no-op: the buffer built from it is bound
+    /// whole, above the mesh loop, by every per-object pass, and wgpu
+    /// panics on a zero-length slice rather than binding nothing.
+    #[test]
+    fn instance_rows_are_never_empty() {
+        // An object with no meshes: nothing to iterate. What an import
+        // node with no file staged cooks to.
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[]);
+        assert_eq!(rows.len(), 1, "a mesh-less object still needs one row");
+        assert!(ranges.is_empty(), "no mesh, so no mesh points at it");
+
+        // Meshes present, every placement list empty: copying onto a point
+        // cloud that came out empty.
+        let empty: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> =
+            Some(Arc::new(Vec::new()));
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[empty.clone(), empty]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            ranges,
+            vec![0..0, 0..0],
+            "every mesh draws nothing, and the spare row belongs to none of them"
+        );
+    }
+
+    /// Why the draw path returns before binding when a mesh has no copies:
+    /// a trailing empty placement list points at exactly the end of the
+    /// buffer, and slicing a buffer from its end is a wgpu panic, not an
+    /// empty slice. Reachable by merging a copy onto a populated point
+    /// cloud with a copy onto an empty one.
+    #[test]
+    fn a_trailing_empty_placement_list_points_at_the_end_of_the_buffer() {
+        let placed: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> = Some(Arc::new(vec![
+                solarxy_core::scene::InstanceXform::IDENTITY;
+                2
+            ]));
+        let empty: Option<Arc<Vec<solarxy_core::scene::InstanceXform>>> =
+            Some(Arc::new(Vec::new()));
+        let (rows, ranges) = instance_raws(Matrix4::identity(), &[placed, empty]);
+        assert_eq!(rows.len(), 2, "the guard does not fire, there are rows");
+        assert_eq!(ranges, vec![0..2, 2..2]);
+        assert_eq!(
+            u64::from(ranges[1].start) * INSTANCE_ROW_BYTES,
+            rows.len() as u64 * INSTANCE_ROW_BYTES,
+            "the second mesh's offset is the buffer's length, so its slice would be empty"
+        );
+    }
+
     #[test]
     fn same_geometry_compares_by_arc_identity() {
         let a = CookedGeometry {
@@ -1046,6 +1327,7 @@ mod tests {
                 material_index: None,
                 topology: MeshTopology::Triangles,
                 colors: None,
+                instances: None,
             }],
             materials: Vec::new(),
             bounds: a.bounds,
@@ -1127,6 +1409,7 @@ mod tests {
             material_index: None,
             topology: MeshTopology::Points,
             colors: Some(Arc::new(vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])),
+            instances: None,
         };
         let wire = CookedMesh {
             name: "wire".to_string(),
@@ -1137,6 +1420,7 @@ mod tests {
             material_index: None,
             topology: MeshTopology::Lines,
             colors: None,
+            instances: None,
         };
         let cooked = CookedGeometry {
             meshes: vec![cloud, wire],
@@ -1180,6 +1464,7 @@ mod tests {
                 material_index: None,
                 topology: MeshTopology::Lines,
                 colors: None,
+                instances: None,
             }],
             materials: Vec::new(),
             bounds: compute_bounds(&[[0.0; 3]]),

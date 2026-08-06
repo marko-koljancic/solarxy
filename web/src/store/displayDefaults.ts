@@ -54,6 +54,10 @@ export interface DisplayPrefs {
    * Global rather than per pane: there is no comparison worth two point
    * sizes side by side. */
   pointSize: number;
+  /** Screen-space ambient occlusion, renderer-global. */
+  ssaoEnabled: boolean;
+  /** Bloom on emissive and bright surfaces, renderer-global. */
+  bloomEnabled: boolean;
 }
 
 /** The shipped defaults.
@@ -67,6 +71,10 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   background: "Gradient",
   turntableRpm: 6,
   pointSize: 6,
+  // The desktop's shipped defaults; the deep-merge over persisted blobs
+  // fills these in for sessions saved before the fields existed.
+  ssaoEnabled: true,
+  bloomEnabled: true,
   // The label defaults match the renderer's own (`LabelStyle::new_default`),
   // so turning the preference on changes nothing until somebody moves it.
   labelSize: "medium",

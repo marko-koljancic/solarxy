@@ -123,6 +123,12 @@ Every section is addressable. The pattern, which the roadmap page in particular 
   reference implementation for any future page.
 - A sticky contents rail with an IntersectionObserver scroll-spy marking the active section,
   shown only when there are enough sections to warrant it.
+- On narrow viewports a long in-page nav collapses into a single mono uppercase pill
+  disclosure, labelled by the section in view and opening a bordered panel of the same links.
+  The pattern is designed in the web design source's decision series; `initNavCollapse` in
+  `web/src/public/chrome.ts` implements it, and a page opts in from its boot module. Pages
+  with a few static links keep the full row, and without JavaScript the row's scrollable
+  fallback remains.
 - If a page has more than one view, prefix the view hash so it cannot collide with a section
   id.
 

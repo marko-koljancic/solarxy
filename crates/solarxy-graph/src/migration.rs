@@ -437,8 +437,11 @@ mod tests {
             [0.0; 2],
             false,
         );
+        // Silent: this fixture stores no `intensity`, so the v3-to-v4
+        // rescale has nothing to touch and the param fills from the
+        // registry default, which moved by the same factor.
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.node.type_version, 3);
+        assert_eq!(loaded.node.type_version, 4);
         for key in ["rotate", "scale", "uniform_scale"] {
             assert!(
                 !loaded.node.params.contains_key(key),
@@ -472,6 +475,221 @@ mod tests {
             Some(&ParamSource::Literal(ParamValue::Enum("obj".to_string())))
         );
         assert!(!loaded.node.params.contains_key("include_materials"));
+    }
+
+    /// The copy operations' v1 to v2 step, which is the migration in 0.8.2
+    /// that changes what a document MEANS if it gets this wrong.
+    ///
+    /// Both node types gained `copy_mode`, whose default is Instance. Every
+    /// v1 node was authored against an engine that could only bake, so a v1
+    /// document loaded without the pin would open with its copies collapsed
+    /// The intensity rescale, on the four lights it applies to.
+    ///
+    /// The raster path stopped multiplying every light's contribution by
+    /// three, so a stored value has to move by the same factor or every
+    /// scene saved before this release opens two thirds darker. Checked on
+    /// the stored value here; the whole-document version, which checks the
+    /// image instead, lives in `engine::tests`.
+    #[test]
+    fn a_stored_intensity_is_rescaled_on_the_lights_that_carried_the_multiplier() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        // (type id, the version it was stored at, the version it lands on)
+        for (type_id, from, to) in [
+            ("point_light", 1, 2),
+            ("directional_light", 1, 2),
+            ("spot_light", 1, 2),
+            // Already at v3 for unrelated reasons, so its rescale is v4.
+            ("rect_area_light", 3, 4),
+        ] {
+            let loaded = load_node(
+                &reg,
+                NodeId(1),
+                type_id,
+                from,
+                raw(&[("intensity", serde_json::json!(1.5))]),
+                [0.0; 2],
+                false,
+            );
+            assert!(
+                loaded.warnings.is_empty(),
+                "{type_id}: {:?}",
+                loaded.warnings
+            );
+            assert_eq!(loaded.node.type_version, to, "{type_id}");
+            assert_eq!(
+                loaded.node.params.get("intensity"),
+                Some(&ParamSource::Literal(ParamValue::Float(4.5))),
+                "{type_id}: a stored 1.5 rendered as 4.5 before the \
+                 multiplier left the shader, so it has to say 4.5 now"
+            );
+        }
+    }
+
+    /// Ambient and hemisphere must NOT be rescaled.
+    ///
+    /// They fold into the hemisphere rows of the light uniform and never
+    /// entered the per-light loop the multiplier lived in, so their stored
+    /// values already meant what they said. Tripling them would brighten
+    /// every old scene that used one, which is the same class of silent
+    /// wrongness the rescale exists to prevent, pointed the other way.
+    #[test]
+    fn the_two_lights_that_never_saw_the_multiplier_are_left_alone() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        for type_id in ["ambient_light", "hemisphere_light"] {
+            let loaded = load_node(
+                &reg,
+                NodeId(1),
+                type_id,
+                1,
+                raw(&[("intensity", serde_json::json!(0.4))]),
+                [0.0; 2],
+                false,
+            );
+            assert!(
+                loaded.warnings.is_empty(),
+                "{type_id}: {:?}",
+                loaded.warnings
+            );
+            assert_eq!(
+                loaded.node.type_version, 1,
+                "{type_id} has no spec change, so it has no version bump"
+            );
+            assert_eq!(
+                loaded.node.params.get("intensity"),
+                Some(&ParamSource::Literal(ParamValue::Float(0.4))),
+                "{type_id}: rescaling this would make every old scene using \
+                 it three times brighter"
+            );
+        }
+    }
+
+    /// An expression-valued intensity is reported rather than guessed at.
+    ///
+    /// Migrations run on the raw stored JSON, where the only object form a
+    /// param takes is `{"$expr": ...}`. Rewriting that source text to
+    /// inject a factor has no safe general form, and leaving it silently
+    /// would make one light three times dimmer than the rest of the scene
+    /// with nothing said. So it is left as written and surfaced as a load
+    /// warning naming what to do about it.
+    #[test]
+    fn an_expression_intensity_survives_and_warns() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        let stored = serde_json::json!({ "$expr": "$F * 0.1" });
+        let loaded = load_node(
+            &reg,
+            NodeId(1),
+            "point_light",
+            1,
+            raw(&[("intensity", stored)]),
+            [0.0; 2],
+            false,
+        );
+        assert_eq!(loaded.node.type_version, 2);
+        assert_eq!(
+            loaded.warnings.len(),
+            1,
+            "expected exactly one warning, got {:?}",
+            loaded.warnings
+        );
+        let warning = &loaded.warnings[0];
+        assert!(
+            warning.contains("expression") && warning.contains('3'),
+            "the warning must say what happened and what to do: {warning}"
+        );
+        assert_eq!(
+            loaded.node.params.get("intensity"),
+            Some(&ParamSource::Expression {
+                expr: "$F * 0.1".to_string()
+            }),
+            "the expression itself must survive untouched"
+        );
+    }
+
+    /// A light with no stored intensity opens at the new default, which is
+    /// the same brightness the old default rendered at.
+    #[test]
+    fn an_unset_intensity_fills_from_the_rescaled_default() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        let loaded = load_node(&reg, NodeId(1), "point_light", 1, raw(&[]), [0.0; 2], false);
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        // Absent from the stored map: the resolver fills it from the spec.
+        assert!(!loaded.node.params.contains_key("intensity"));
+        let spec = reg
+            .get("point_light")
+            .unwrap()
+            .params
+            .iter()
+            .find(|p| p.key == "intensity")
+            .unwrap();
+        assert_eq!(spec.default, ParamValue::Float(4.5));
+    }
+
+    /// into one prototype and every downstream node reading something
+    /// different, with nothing on screen to say why.
+    #[test]
+    fn v1_copy_nodes_are_pinned_to_bake() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+
+        for (type_id, live_key, live_json, live_value) in [
+            (
+                "copy_to_points",
+                "scale",
+                serde_json::json!(2.5),
+                ParamValue::Float(2.5),
+            ),
+            ("array", "count", serde_json::json!(7), ParamValue::Int(7)),
+        ] {
+            let loaded = load_node(
+                &reg,
+                NodeId(1),
+                type_id,
+                1,
+                raw(&[(live_key, live_json)]),
+                [0.0; 2],
+                false,
+            );
+            assert!(
+                loaded.warnings.is_empty(),
+                "{type_id}: {:?}",
+                loaded.warnings
+            );
+            assert!(loaded.node.placeholder.is_none(), "{type_id}");
+            assert_eq!(loaded.node.type_version, 2, "{type_id}");
+            assert_eq!(
+                loaded.node.params.get("copy_mode"),
+                Some(&ParamSource::Literal(ParamValue::Enum("bake".to_string()))),
+                "{type_id}: a v1 node must open baked, not inherit the new \
+                 Instance default"
+            );
+            assert_eq!(
+                loaded.node.params.get(live_key),
+                Some(&ParamSource::Literal(live_value)),
+                "{type_id}: the live param survives the migration"
+            );
+        }
+    }
+
+    /// A node that already carries the key keeps its own value. The step is
+    /// guarded on absence, so re-running it is a no-op rather than an
+    /// overwrite: a v2 node deliberately set to Instance must not be pinned.
+    #[test]
+    fn the_copy_mode_pin_never_overwrites_a_stored_choice() {
+        let reg = crate::nodes::builtin_registry().unwrap();
+        let loaded = load_node(
+            &reg,
+            NodeId(1),
+            "array",
+            1,
+            raw(&[("copy_mode", serde_json::json!("instance"))]),
+            [0.0; 2],
+            false,
+        );
+        assert_eq!(
+            loaded.node.params.get("copy_mode"),
+            Some(&ParamSource::Literal(ParamValue::Enum(
+                "instance".to_string()
+            )))
+        );
     }
 
     #[test]

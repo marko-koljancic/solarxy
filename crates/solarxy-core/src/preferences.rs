@@ -474,12 +474,37 @@ cycle_enum! {
 }
 
 impl ToneMode {
+    /// The discriminant the composite shader switches on.
+    ///
+    /// Delegates rather than matching, because the scene contract carries
+    /// its own copy of this enum (`scene::ToneCurve`, which exists because
+    /// `scene` is ungated and this module is not) and two independent
+    /// matches on the same four variants is one refactor away from a
+    /// silent mismatch. `ToneCurve::as_u32` is the numbering; this is a
+    /// view of it.
     pub fn as_u32(self) -> u32 {
-        match self {
-            Self::None => 0,
-            Self::Linear => 1,
-            Self::Reinhard => 2,
-            Self::AcesFilmic => 3,
+        crate::scene::ToneCurve::from(self).as_u32()
+    }
+}
+
+impl From<ToneMode> for crate::scene::ToneCurve {
+    fn from(m: ToneMode) -> Self {
+        match m {
+            ToneMode::None => Self::None,
+            ToneMode::Linear => Self::Linear,
+            ToneMode::Reinhard => Self::Reinhard,
+            ToneMode::AcesFilmic => Self::AcesFilmic,
+        }
+    }
+}
+
+impl From<crate::scene::ToneCurve> for ToneMode {
+    fn from(c: crate::scene::ToneCurve) -> Self {
+        match c {
+            crate::scene::ToneCurve::None => Self::None,
+            crate::scene::ToneCurve::Linear => Self::Linear,
+            crate::scene::ToneCurve::Reinhard => Self::Reinhard,
+            crate::scene::ToneCurve::AcesFilmic => Self::AcesFilmic,
         }
     }
 }
@@ -798,9 +823,24 @@ impl Default for RenderingPrefs {
     }
 }
 
+/// Solarxy's own directory under the platform's config root.
+///
+/// Exposed rather than kept private because more than one file lives here:
+/// the GUI's `config.toml` and, from the terminal shell, its own state and a
+/// user theme directory beside it. Each of those resolving its own path from
+/// `dirs` independently is how two of them end up disagreeing about where
+/// "the config directory" is.
+///
+/// `None` when the platform reports no config root, which is a real state on
+/// a bare container and never an error: every caller falls back to defaults.
+#[cfg(feature = "fs")]
+pub fn config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("solarxy"))
+}
+
 #[cfg(feature = "fs")]
 pub fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("solarxy").join("config.toml"))
+    config_dir().map(|d| d.join("config.toml"))
 }
 
 #[cfg(feature = "fs")]
@@ -1306,5 +1346,44 @@ mod tests {
         // Dangling id falls back to the builtin Gradient.
         let miss = BackgroundMode::Custom(99).resolve(&customs);
         assert_eq!(miss, BuiltinBg::Gradient.resolved());
+    }
+
+    /// The two tone enums must stay the same set in the same order.
+    ///
+    /// There are two because `scene::ToneCurve` has to be reachable from
+    /// the ungated scene contract while `ToneMode` carries the serde
+    /// derives and the user-facing labels. Duplication is the price of
+    /// that split, and this is what stops it drifting: add a curve to one
+    /// and forget the other, and either the round trip stops being an
+    /// identity or the discriminants stop lining up with the shader's
+    /// switch.
+    #[test]
+    fn the_two_tone_enums_agree_variant_for_variant() {
+        for (i, mode) in ToneMode::ALL.iter().enumerate() {
+            let curve = crate::scene::ToneCurve::from(*mode);
+            assert_eq!(
+                curve.as_u32(),
+                mode.as_u32(),
+                "{mode} disagrees on its shader discriminant"
+            );
+            assert_eq!(
+                curve.as_u32() as usize,
+                i,
+                "{mode} is at position {i} of ToneMode::ALL but numbers as {}; \
+                 the shader switch reads the number, the combo box reads the order",
+                curve.as_u32()
+            );
+            assert_eq!(
+                ToneMode::from(curve),
+                *mode,
+                "{mode} did not survive the round trip through ToneCurve"
+            );
+        }
+        // Both defaults have to be the same curve, or a camera that
+        // inherits and a pane that was never touched would disagree.
+        assert_eq!(
+            crate::scene::ToneCurve::from(ToneMode::default()),
+            crate::scene::ToneCurve::default()
+        );
     }
 }
