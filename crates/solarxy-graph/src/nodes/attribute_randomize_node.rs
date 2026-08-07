@@ -180,7 +180,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let name = p.text("attr_name").trim().to_string();
     if name.is_empty() {
         cx.warn("attribute_randomize has no attribute name; the input passes through unchanged");

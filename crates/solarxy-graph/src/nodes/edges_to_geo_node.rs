@@ -57,7 +57,6 @@ fn cook(_p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOu
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let out = edges_to_geo(input);
     if out.is_renderable_empty() && !input.meshes.is_empty() {
         cx.warn("edges_to_geo found no edges (point clouds have none); output is empty");

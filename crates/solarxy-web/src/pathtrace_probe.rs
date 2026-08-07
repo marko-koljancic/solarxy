@@ -118,7 +118,7 @@ impl PathtraceProbe {
             })
             .collect();
         let arena = TraceArena::build(&tlas, &[mesh], &arena_placements);
-        let scene = TraceScene::upload(&device, &layouts, &arena);
+        let scene = TraceScene::upload(&device, &queue, &layouts, &arena);
 
         let rays = corpus::rays(0x2545_F491, RAY_COUNT);
         let gpu_rays: Vec<CorpusRay> = rays

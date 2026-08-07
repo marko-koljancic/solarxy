@@ -47,6 +47,24 @@ pub struct PortSpec {
     /// body-drop auto-connect, insert-on-wire, and bypass pass-through
     /// resolution.
     pub is_default: bool,
+    /// Whether instanced geometry arriving here reaches the cook body with
+    /// its placements intact.
+    ///
+    /// False by default, and that default is the safe side of the contract
+    /// `GeometrySet::instances` states: an operation that cannot carry
+    /// placements must bake them rather than drop them, because silently
+    /// losing the list deletes every copy but one with no error anywhere.
+    /// The cook driver enforces it, so a node written with no awareness of
+    /// instancing at all is correct by construction.
+    ///
+    /// A port declares carrying only when the node works in the prototype's
+    /// own space with a result identical for every copy, or when it is a tap
+    /// that hands the set straight on. Declaring it wrongly is the failure
+    /// the registry-wide sweep in the engine tests exists to catch.
+    ///
+    /// Meaningless on an output port and on any port that is not
+    /// [`DataType::Geometry`]; the driver only reads it on geometry inputs.
+    pub carries_placements: bool,
     pub doc: String,
 }
 
@@ -65,6 +83,7 @@ impl PortSpec {
             data_type,
             arity: Arity::Single { required },
             is_default: false,
+            carries_placements: false,
             doc: String::new(),
         }
     }
@@ -83,6 +102,7 @@ impl PortSpec {
             data_type,
             arity: Arity::Variadic { min },
             is_default: false,
+            carries_placements: false,
             doc: String::new(),
         }
     }
@@ -90,6 +110,15 @@ impl PortSpec {
     #[must_use]
     pub fn default_port(mut self) -> Self {
         self.is_default = true;
+        self
+    }
+
+    /// Declares that placements on this port survive into the node's output,
+    /// so the cook driver hands the instanced set through rather than baking
+    /// it. See [`PortSpec::carries_placements`] for when that is true.
+    #[must_use]
+    pub fn carries_placements(mut self) -> Self {
+        self.carries_placements = true;
         self
     }
 

@@ -4694,47 +4694,211 @@ fn a_geo_saved_before_the_rotate_order_split_opens_facing_the_same_way() {
 /// whatever survives. `carries` records which side of the contract the node
 /// is on, so a node silently changing sides fails here rather than in
 /// someone's scene.
+/// How one node type is driven by the sweep, when the defaults are not
+/// enough to drive it at all or not enough to make it do anything.
+struct SweepCase {
+    /// The geometry input the instanced set is wired into. Defaults to the
+    /// node's default input port.
+    port: Option<&'static str>,
+    /// Params applied to the node under test.
+    params: Vec<(&'static str, ParamValue)>,
+    /// A second primitive wired into another of the node's geometry inputs,
+    /// for the nodes that require one.
+    companion: Option<(&'static str, &'static str)>,
+    /// Overrides whether the output is expected to be instanced. `None`
+    /// reads the answer off the port's declaration, which is the normal
+    /// case; a node that creates placements of its own says so here.
+    output_instanced: Option<bool>,
+}
+
+impl SweepCase {
+    fn new() -> Self {
+        Self {
+            port: None,
+            params: Vec::new(),
+            companion: None,
+            output_instanced: None,
+        }
+    }
+}
+
+/// The nodes the default wiring cannot drive, or drives into a no-op.
+///
+/// Everything absent from here is wired into its default geometry input at
+/// registry-default params, which is the great majority.
+fn sweep_wiring(type_id: &str) -> Option<SweepCase> {
+    let case = match type_id {
+        // Registry defaults leave these three doing nothing at all: an
+        // identity transform, and two attribute ops with an empty name that
+        // warn and pass through. They would sail past both assertions while
+        // testing neither.
+        "transform" => SweepCase {
+            params: vec![("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
+            ..SweepCase::new()
+        },
+        "attribute_copy" => SweepCase {
+            params: vec![
+                ("source", ParamValue::Text("N".into())),
+                ("dest", ParamValue::Text("myN".into())),
+            ],
+            ..SweepCase::new()
+        },
+        "attribute_promote" => SweepCase {
+            params: vec![("attr_name", ParamValue::Text("N".into()))],
+            ..SweepCase::new()
+        },
+        // Variadic, and the port is not called "geometry".
+        "merge" | "switch" => SweepCase {
+            port: Some("inputs"),
+            ..SweepCase::new()
+        },
+        // Two geometry inputs. `template` is required, so leaving it
+        // unconnected is a hard `InputRequired` rather than an empty cook.
+        // It also creates placements of its own in the default copy mode.
+        "copy_to_points" => SweepCase {
+            port: Some("points"),
+            companion: Some(("template", "box")),
+            output_instanced: Some(true),
+            ..SweepCase::new()
+        },
+        // Bakes its input and then emits its own placements, so its output
+        // says nothing about which side of the contract the input is on.
+        "array" => SweepCase {
+            output_instanced: Some(true),
+            ..SweepCase::new()
+        },
+        _ => return None,
+    };
+    Some(case)
+}
+
+/// Types this sweep cannot judge, each with the reason.
+///
+/// Being here is a claim that the agreement property is meaningless for the
+/// type, not that the type is untested: both of these have their own
+/// coverage elsewhere.
+fn sweep_exemption(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "attribute_from_image" => Some(
+            "its image input is optional, so without one it warns and passes \
+             through; driving it means staging an image asset and wiring an \
+             import node into a sweep whose subject is geometry. Covered by \
+             the image-chain tests instead.",
+        ),
+        "line" => Some(
+            "its endpoint ports are optional and it has no default input; \
+             its output is a freshly generated two-point polyline rather \
+             than a transformation of what arrived, so the agreement \
+             property holds trivially and proves nothing. Its placement \
+             reading is covered by a unit test in the node's own module.",
+        ),
+        _ => None,
+    }
+}
+
+/// Every registered type with a geometry input is either driven by this
+/// sweep or exempted by name, and a new one that is neither fails here.
+///
+/// This is the half of the contract that cannot be enforced by the cook
+/// driver. The driver guarantees a node that says nothing gets baked input,
+/// which makes silence safe; it cannot tell whether a node that *claims* to
+/// carry actually does. Only cooking it both ways can, so the case list is
+/// derived from the registry rather than maintained by hand, and forgetting
+/// to consider a new node is a failing build rather than a scene that
+/// quietly loses copies.
+#[test]
+fn every_geometry_consuming_node_is_swept_or_exempted() {
+    let registry = crate::nodes::builtin_registry().unwrap();
+    let mut unconsidered = Vec::new();
+    for desc in registry.descriptors() {
+        if !desc
+            .inputs
+            .iter()
+            .any(|p| p.data_type == crate::registry::coerce::DataType::Geometry)
+        {
+            continue;
+        }
+        let considered = sweep_exemption(desc.type_id).is_some()
+            || sweep_wiring(desc.type_id).is_some()
+            || desc
+                .default_input()
+                .is_some_and(|p| p.data_type == crate::registry::coerce::DataType::Geometry);
+        if !considered {
+            unconsidered.push(desc.type_id);
+        }
+    }
+    assert!(
+        unconsidered.is_empty(),
+        "these node types take geometry but the carry-or-bake sweep cannot \
+         reach them: {unconsidered:?}. Give each one a `sweep_wiring` entry \
+         naming the port and any params it needs, or a `sweep_exemption` \
+         entry saying why the agreement property is meaningless for it."
+    );
+}
+
 #[test]
 fn every_downstream_node_agrees_with_its_baked_equivalent() {
-    // (node type, params, whether it carries placements through)
-    let cases: &[(&str, &[(&str, ParamValue)], bool)] = &[
-        // Carry: each works in the prototype's own space with a result
-        // identical for every copy.
-        ("subdivide", &[("iterations", ParamValue::Int(1))], true),
-        ("uv_project", &[], true),
-        ("compute_normals", &[], true),
-        ("material", &[], true),
-        // Bake: the meaning is per copy, or real geometry is needed.
-        (
-            "transform",
-            &[("translate", ParamValue::Vec3([1.0, 2.0, 3.0]))],
-            false,
-        ),
-        ("delete", &[], false),
-        ("mirror", &[], false),
-        ("bounds", &[], false),
-        ("attribute_create", &[], false),
-        ("points_from_geo", &[], false),
-        ("scatter", &[("count", ParamValue::Int(8))], false),
-    ];
+    let registry = crate::nodes::builtin_registry().unwrap();
+    let mut swept = 0usize;
 
-    for (node_type, params, carries) in cases {
+    for desc in registry.descriptors() {
+        if sweep_exemption(desc.type_id).is_some() {
+            continue;
+        }
+        let case = sweep_wiring(desc.type_id).unwrap_or_else(SweepCase::new);
+        let port = match case.port {
+            Some(port) => port,
+            None => match desc.default_input() {
+                Some(p) if p.data_type == crate::registry::coerce::DataType::Geometry => &p.key,
+                _ => continue,
+            },
+        };
+        let node_type = desc.type_id;
+        // Read off the declaration rather than a hand-kept bool, so the
+        // descriptor is the single statement of which side a node is on and
+        // this test is the thing that holds it to it.
+        let carries = desc
+            .inputs
+            .iter()
+            .find(|p| p.key == port)
+            .is_some_and(|p| p.carries_placements);
+        let expect_instanced = case.output_instanced.unwrap_or(carries);
+        swept += 1;
+
         let mut shapes = Vec::new();
         for mode in ["instance", "bake"] {
             let (mut e, ctx) = subflow_engine();
             let prim = add(&mut e, ctx, "box");
             let arr = add(&mut e, ctx, "array");
             let sink = add(&mut e, ctx, node_type);
-            for (from, to) in [(prim, arr), (arr, sink)] {
+            for (from, from_port, to, to_port) in [
+                (prim, "geometry", arr, "geometry"),
+                (arr, "geometry", sink, port),
+            ] {
                 e.apply(Command::Connect {
                     ctx,
                     from: PortRefDto {
                         node: from,
-                        port: "geometry".into(),
+                        port: from_port.into(),
                     },
                     to: PortRefDto {
                         node: to,
+                        port: to_port.into(),
+                    },
+                })
+                .unwrap();
+            }
+            if let Some((companion_port, companion_type)) = case.companion {
+                let companion = add(&mut e, ctx, companion_type);
+                e.apply(Command::Connect {
+                    ctx,
+                    from: PortRefDto {
+                        node: companion,
                         port: "geometry".into(),
+                    },
+                    to: PortRefDto {
+                        node: sink,
+                        port: companion_port.into(),
                     },
                 })
                 .unwrap();
@@ -4753,7 +4917,7 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
                 value: ParamSource::Literal(ParamValue::Int(4)),
             })
             .unwrap();
-            for (key, value) in *params {
+            for (key, value) in &case.params {
                 e.apply(Command::SetParam {
                     ctx,
                     node: sink,
@@ -4772,7 +4936,12 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             let set = e
                 .cook
                 .outputs(sink)
-                .unwrap_or_else(|| panic!("{node_type} ({mode}) cooked"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{node_type} ({mode}) cooked: {:?}",
+                        e.cook.status(sink).cloned()
+                    )
+                })
                 .get("geometry")
                 .and_then(crate::registry::coerce::Value::as_geometry)
                 .unwrap_or_else(|| panic!("{node_type} ({mode}) output geometry"));
@@ -4780,7 +4949,7 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             if mode == "instance" {
                 assert_eq!(
                     set.is_instanced(),
-                    *carries,
+                    expect_instanced,
                     "{node_type} changed which side of the carry-or-bake \
                      contract it is on"
                 );
@@ -4811,6 +4980,154 @@ fn every_downstream_node_agrees_with_its_baked_equivalent() {
             }
         }
     }
+
+    // A floor rather than an equality, so adding a node does not fail here
+    // as well as in the completeness test above. It catches the failure that
+    // test cannot: a filter change that quietly stops sweeping most of them.
+    assert!(
+        swept >= 24,
+        "the sweep only reached {swept} node types; it should reach every \
+         geometry consumer that is not exempted"
+    );
+}
+
+/// A node type written with no awareness of instancing whatsoever: a
+/// geometry input, a geometry output, and a body that reads one and returns
+/// the other. Nothing here mentions placements, and that is the point.
+fn carry_unaware_probe() -> crate::registry::NodeTypeDescriptor {
+    fn cook(
+        _p: &crate::registry::resolve::ResolvedParams,
+        inputs: &crate::cook::Inputs,
+        _cx: &mut crate::cook::CookCtx,
+    ) -> Result<crate::cook::CookOutcome, crate::cook::CookError> {
+        let Some(input) = inputs.geometry("geometry") else {
+            return Ok(crate::cook::CookOutcome::Done(
+                crate::cook::Outputs::geometry(solarxy_kernel::GeometrySet::empty()),
+            ));
+        };
+        Ok(crate::cook::CookOutcome::Done(
+            crate::cook::Outputs::single(
+                "geometry",
+                crate::registry::coerce::Value::Geometry(std::sync::Arc::clone(input)),
+            ),
+        ))
+    }
+
+    crate::registry::NodeTypeDescriptor {
+        type_id: "carry_unaware_probe",
+        version: 1,
+        display_name: "Carry Unaware Probe",
+        category: crate::registry::Category::Utility,
+        contexts: crate::registry::ContextSet::GEO,
+        opens: None,
+        inputs: vec![
+            crate::registry::PortSpec::single(
+                "geometry",
+                "Geometry",
+                crate::registry::coerce::DataType::Geometry,
+                true,
+            )
+            .default_port(),
+        ],
+        outputs: vec![crate::nodes::common::geometry_output()],
+        params: crate::nodes::common::params_with("Probe", vec![]),
+        bypass: crate::registry::BypassBehavior::PassThrough {
+            input: "geometry".to_string(),
+        },
+        doc: "A test fixture, never registered in the builtin set.",
+        search_aliases: &[],
+        glyph: "null",
+        role: crate::registry::NodeRole::Standard,
+        cook,
+        migrate: None,
+    }
+}
+
+/// A new node needs no instancing awareness to be correct on instanced
+/// input, because the driver resolves it before the body runs.
+///
+/// This is the claim the whole change is for. The per-node call it replaced
+/// made a new node wrong by default and right only if its author happened to
+/// know the convention; here silence is the safe answer, and the node above
+/// is the proof: it says nothing about placements and still sees the four
+/// real copies rather than the one prototype.
+#[test]
+fn a_node_with_no_instancing_awareness_cooks_correctly_on_instanced_input() {
+    let mut descriptors = crate::nodes::builtin_descriptors();
+    descriptors.push(carry_unaware_probe());
+    let registry = crate::registry::Registry::with_descriptors(descriptors)
+        .expect("the probe descriptor holds the registry invariants");
+
+    let mut e = Engine::with_registry(registry);
+    let geo = e.doc.mint_node_id();
+    e.doc.create_subflow(geo, ContextKind::Geo);
+    let ctx = GraphContext::Subflow(geo);
+
+    let prim = add(&mut e, ctx, "box");
+    let arr = add(&mut e, ctx, "array");
+    let sink = add(&mut e, ctx, "carry_unaware_probe");
+    for (from, to) in [(prim, arr), (arr, sink)] {
+        e.apply(Command::Connect {
+            ctx,
+            from: PortRefDto {
+                node: from,
+                port: "geometry".into(),
+            },
+            to: PortRefDto {
+                node: to,
+                port: "geometry".into(),
+            },
+        })
+        .unwrap();
+    }
+    e.apply(Command::SetParam {
+        ctx,
+        node: arr,
+        key: "count".into(),
+        value: ParamSource::Literal(ParamValue::Int(4)),
+    })
+    .unwrap();
+    e.apply(Command::SetActiveOutput {
+        ctx,
+        node: Some(sink),
+    })
+    .unwrap();
+    e.cook(&mut || true);
+
+    let prototype = e
+        .cook
+        .outputs(prim)
+        .expect("box cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("box geometry")
+        .point_count();
+    let set = e
+        .cook
+        .outputs(sink)
+        .expect("the probe cooked")
+        .get("geometry")
+        .and_then(crate::registry::coerce::Value::as_geometry)
+        .expect("the probe output geometry");
+
+    assert!(
+        !set.is_instanced(),
+        "the driver should have resolved the placements before the body ran"
+    );
+    assert_eq!(
+        set.point_count(),
+        prototype * 4,
+        "the probe saw one prototype instead of the four copies the user placed"
+    );
+
+    let warnings = e.cook.warnings(sink);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("Carry Unaware Probe")
+            && warnings[0].contains('4')
+            && warnings[0].contains("Geometry"),
+        "the bake should name the node, the count and the port: {warnings:?}"
+    );
 }
 
 /// Merge is the node the placement level was moved for, so it gets its own

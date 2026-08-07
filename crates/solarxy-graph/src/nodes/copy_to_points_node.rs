@@ -157,13 +157,11 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
         )));
     };
 
-    // Both inputs bake if they carry placements. The template's list would
-    // be overwritten by the copy's own, and the points input is read for
-    // its positions, so an instanced cloud would scatter onto one copy's
-    // worth of points and quietly lose the rest.
-    let template = &super::common::baked_input(template, cx)?;
-    let points = &super::common::baked_input(points, cx)?;
-
+    // Neither port declares carrying, so both arrive already resolved into
+    // real copies. Both need it, for different reasons: the template's
+    // placement list would be overwritten by the copy's own, and the points
+    // input is read for its positions, so an instanced cloud would scatter
+    // onto one copy's worth of points and quietly lose the rest.
     let orient = match p.enum_key("orient") {
         "none" => CopyOrient::None,
         _ => CopyOrient::Normal,

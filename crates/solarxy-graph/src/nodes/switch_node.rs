@@ -32,6 +32,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::variadic("inputs", "Inputs", DataType::Geometry, 0)
                 .default_port()
+                .carries_placements()
                 .doc(
                     "The candidate geometries. Order is load-bearing: Index \
                      addresses these by position, so reordering the wires \

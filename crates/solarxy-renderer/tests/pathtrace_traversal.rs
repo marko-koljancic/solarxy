@@ -101,7 +101,7 @@ fn compare(
         })
         .collect();
     let arena = TraceArena::build(&tlas, &[mesh], &arena_placements);
-    let scene = TraceScene::upload(&gpu.device, &gpu.pathtrace, &arena);
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
     assert_eq!(scene.instance_count() as usize, placements.len());
 
     let rays = corpus::rays(seed, count);
@@ -259,7 +259,7 @@ fn an_empty_scene_traverses_without_hitting_anything() {
     };
     let tlas = Bvh::build_tlas(&[]);
     let arena = TraceArena::build(&tlas, &[], &[]);
-    let scene = TraceScene::upload(&gpu.device, &gpu.pathtrace, &arena);
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
     assert_eq!(scene.instance_count(), 0);
 
     let probe = TraversalProbe::new(&gpu.device, &gpu.pathtrace.scene);
@@ -274,5 +274,94 @@ fn an_empty_scene_traverses_without_hitting_anything() {
     for hit in spin(&gpu.device, &mut readback) {
         assert!(!hit.hit(), "empty scene reported a hit: {hit:?}");
         assert!(!hit.occluded(), "empty scene reported an occluder: {hit:?}");
+    }
+}
+
+#[test]
+fn a_scene_that_grows_and_shrinks_keeps_tracing_the_geometry_it_holds() {
+    // The buffers carry headroom and are rewritten in place while a repack
+    // fits, so a bind group outlives most changes and is rebuilt only when one
+    // of them had to be reallocated. The failure this guards is the one where
+    // it is not rebuilt: the group still points at the old allocation, the
+    // dispatch is valid, and the kernel traverses the previous scene at full
+    // speed with nothing failing. Only a real traversal after each step can
+    // see that, which is why this probes rather than inspecting sizes.
+    let Some(gpu) = common::gpu_or_skip() else {
+        return;
+    };
+
+    let identity: [[f32; 4]; 4] = Matrix4::identity().into();
+    let probe = TraversalProbe::new(&gpu.device, &gpu.pathtrace.scene);
+    let mut scene = TraceScene::new(&gpu.device, &gpu.pathtrace);
+
+    // Small, then large enough to force a reallocation, then small again so a
+    // shrink writes into a buffer with a long tail of the previous scene still
+    // sitting in it.
+    for subdivisions in [4u32, 24, 4] {
+        let (positions, indices) = corpus::sphere(subdivisions, subdivisions / 2);
+        let blas = Bvh::build_triangles(&positions, &indices);
+        let tlas = Bvh::build_tlas(&[transformed_bounds(&positions, &identity)]);
+        let arena = TraceArena::build(
+            &tlas,
+            &[ArenaMesh {
+                bvh: &blas,
+                positions: &positions,
+                indices: &indices,
+                normals: None,
+                uv0: None,
+            }],
+            &[ArenaPlacement {
+                mesh: 0,
+                world: identity,
+                inv_world: identity,
+                material_base: 0,
+                flags: INSTANCE_VISIBLE,
+            }],
+        );
+        scene.sync(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
+        assert_eq!(scene.instance_count(), 1);
+
+        let rays = corpus::rays(0x0BAD_F00D, 512);
+        let gpu_rays: Vec<CorpusRay> = rays
+            .iter()
+            .map(|r| CorpusRay {
+                origin: [r.origin[0], r.origin[1], r.origin[2], 0.0],
+                direction: [r.direction[0], r.direction[1], r.direction[2], 0.0],
+            })
+            .collect();
+        let mut readback = probe.submit(&gpu.device, &gpu.queue, &scene, &gpu_rays);
+        let hits = spin(&gpu.device, &mut readback);
+
+        let instances = [Instanced {
+            inv_world: identity,
+            blas: &blas,
+            positions: &positions,
+            indices: &indices,
+        }];
+        let mut hit_count = 0;
+        for (ray, have) in rays.iter().zip(&hits) {
+            let want = tlas.intersect_instances(ray.origin, ray.direction, T_MAX, &instances);
+            assert_eq!(
+                want.is_some(),
+                have.hit(),
+                "at {subdivisions} subdivisions, ray {} disagrees: cpu {want:?}, gpu {have:?}",
+                ray.index
+            );
+            if let Some(want) = want {
+                assert!(
+                    (want.t - have.t).abs() <= 1e-3 * want.t.abs().max(1.0),
+                    "at {subdivisions} subdivisions, ray {} hit a different distance: \
+                     cpu {}, gpu {}",
+                    ray.index,
+                    want.t,
+                    have.t
+                );
+                hit_count += 1;
+            }
+        }
+        assert!(
+            hit_count > 20,
+            "at {subdivisions} subdivisions the corpus barely hit anything ({hit_count})"
+        );
     }
 }

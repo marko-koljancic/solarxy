@@ -91,6 +91,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
     let mut inputs = vec![
         PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
             .default_port()
+            .carries_placements()
             .doc(
                 "The geometry to dress. Required: this node only rewrites \
                  the material table and each mesh's material index, so it \

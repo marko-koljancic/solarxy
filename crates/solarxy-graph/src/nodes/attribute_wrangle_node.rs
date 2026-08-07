@@ -146,7 +146,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
 
     let source = p.text("program");
     if source.trim().is_empty() {

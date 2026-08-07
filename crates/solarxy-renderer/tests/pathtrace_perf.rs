@@ -148,7 +148,7 @@ fn primary_ray_throughput() {
     let plane_bounds = bounds_of(&transformed(&plane_pos, &plane_world));
     let tlas = Bvh::build_tlas(&[subject_bounds, plane_bounds]);
     let arena = TraceArena::build(&tlas, &meshes, &placements);
-    let scene = TraceScene::upload(&gpu.device, &gpu.pathtrace, &arena);
+    let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
 
     let camera = camera_from_bounds(&subject_bounds, WIDTH as f32 / HEIGHT as f32);
     let mut camera_uniform = CameraUniform::new();

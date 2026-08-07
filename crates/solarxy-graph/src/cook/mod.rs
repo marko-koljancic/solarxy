@@ -74,6 +74,18 @@ impl Inputs {
         self.slots.get(key).unwrap_or(&InputSlot::Absent)
     }
 
+    /// The gathered slot for one port, mutably.
+    ///
+    /// Deliberately crate-visible rather than public: the only writer
+    /// between gather and the cook body is the driver's placement bake, and
+    /// a compute body rewriting its own inputs would put the same value in
+    /// two places with nothing keeping them in step. Returns `None` for a
+    /// port with no entry, which reads as [`InputSlot::Absent`] and has
+    /// nothing to rewrite.
+    pub(crate) fn slot_mut(&mut self, key: &str) -> Option<&mut InputSlot> {
+        self.slots.get_mut(key)
+    }
+
     /// The geometry on a single-arity port, if connected.
     #[must_use]
     pub fn geometry(&self, key: &str) -> Option<&Arc<GeometrySet>> {

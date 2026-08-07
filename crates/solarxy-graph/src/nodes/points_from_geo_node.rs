@@ -76,13 +76,12 @@ pub fn descriptor() -> NodeTypeDescriptor {
 }
 
 #[allow(clippy::unnecessary_wraps)] // signature matches CookFn
-fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
+fn cook(p: &ResolvedParams, inputs: &Inputs, _cx: &mut CookCtx) -> Result<CookOutcome, CookError> {
     let Some(input) = inputs.geometry("geometry") else {
         return Ok(CookOutcome::Done(Outputs::geometry(
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let mode = match p.enum_key("mode") {
         "primitive_centers" => PointsFrom::PrimitiveCenters,
         _ => PointsFrom::Vertices,

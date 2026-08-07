@@ -68,6 +68,7 @@ pub fn geo_export_descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
+                .carries_placements()
                 .doc(
                     "The geometry to write out. It also leaves by the output \
                      port untouched, so this node taps a chain rather than \

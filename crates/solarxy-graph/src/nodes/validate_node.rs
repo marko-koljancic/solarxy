@@ -29,6 +29,7 @@ pub fn descriptor() -> NodeTypeDescriptor {
         inputs: vec![
             PortSpec::single("geometry", "Geometry", DataType::Geometry, true)
                 .default_port()
+                .carries_placements()
                 .doc("The geometry to validate (passed through unchanged)."),
         ],
         outputs: vec![

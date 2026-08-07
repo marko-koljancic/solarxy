@@ -149,7 +149,6 @@ fn cook(p: &ResolvedParams, inputs: &Inputs, cx: &mut CookCtx) -> Result<CookOut
             solarxy_kernel::GeometrySet::empty(),
         )));
     };
-    let input = &super::common::baked_input(input, cx)?;
     let amplitude = p.f32("amplitude");
     let normalize = p.bool("normalize");
     let vector = p.vec3_f32("vector");

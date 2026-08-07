@@ -21,9 +21,9 @@
 
 pub mod arena;
 pub mod probe;
+pub mod scene;
 
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 use crate::bind_groups::PathtraceLayouts;
 use arena::TraceArena;
@@ -172,56 +172,115 @@ impl PathTracer {
 }
 
 /// The scene arena on the GPU, plus the bind group over it.
+///
+/// Every buffer grows and is rewritten in place while it fits, on the policy
+/// [`crate::scene_objects`] set for the raster path: a repack that fits is a
+/// `queue.write_buffer`, and one that does not reallocates with headroom. The
+/// bind group is rebuilt only when a buffer was actually recreated, because
+/// that is the only thing that invalidates it.
 pub struct TraceScene {
+    nodes: GrowBuffer,
+    prim_indices: GrowBuffer,
+    vertex_pos: GrowBuffer,
+    vertex_attr: GrowBuffer,
+    instances: GrowBuffer,
     bind_group: wgpu::BindGroup,
     instance_count: u32,
 }
 
 impl TraceScene {
-    /// Uploads a packed arena.
-    ///
-    /// Every buffer is padded to at least one element: a zero-sized storage
-    /// buffer is not a valid binding, and an empty scene is an ordinary state
-    /// rather than an error.
+    /// An empty scene, ready to grow.
     #[must_use]
-    pub fn upload(device: &wgpu::Device, layouts: &PathtraceLayouts, arena: &TraceArena) -> Self {
-        let nodes = storage(device, "Pathtrace Nodes", arena.nodes());
-        let prim_indices = storage(device, "Pathtrace Primitive Indices", arena.prim_indices());
-        let vertex_pos = storage(device, "Pathtrace Vertex Positions", arena.vertex_pos());
-        let vertex_attr = storage(device, "Pathtrace Vertex Attributes", arena.vertex_attr());
-        let instances = storage(device, "Pathtrace Instances", arena.instances());
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        let nodes = GrowBuffer::new::<solarxy_bvh::BvhNode>(device, "Pathtrace Nodes");
+        let prim_indices = GrowBuffer::new::<u32>(device, "Pathtrace Primitive Indices");
+        let vertex_pos = GrowBuffer::new::<[f32; 4]>(device, "Pathtrace Vertex Positions");
+        let vertex_attr =
+            GrowBuffer::new::<arena::VertexAttr>(device, "Pathtrace Vertex Attributes");
+        let instances = GrowBuffer::new::<arena::Instance>(device, "Pathtrace Instances");
+        let bind_group = Self::bind(
+            device,
+            layouts,
+            [&nodes, &prim_indices, &vertex_pos, &vertex_attr, &instances],
+        );
+        Self {
+            nodes,
+            prim_indices,
+            vertex_pos,
+            vertex_attr,
+            instances,
+            bind_group,
+            instance_count: 0,
+        }
+    }
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    /// Brings the GPU buffers up to date with a packed arena.
+    pub fn sync(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layouts: &PathtraceLayouts,
+        arena: &TraceArena,
+    ) {
+        // Five bindings and then one disjunction, rather than a folded `|=`,
+        // so that a later reader cannot "simplify" this into short-circuiting
+        // and leave four buffers holding the previous scene.
+        let a = self.nodes.sync(device, queue, arena.nodes());
+        let b = self.prim_indices.sync(device, queue, arena.prim_indices());
+        let c = self.vertex_pos.sync(device, queue, arena.vertex_pos());
+        let d = self.vertex_attr.sync(device, queue, arena.vertex_attr());
+        let e = self.instances.sync(device, queue, arena.instances());
+        if a || b || c || d || e {
+            self.bind_group = Self::bind(
+                device,
+                layouts,
+                [
+                    &self.nodes,
+                    &self.prim_indices,
+                    &self.vertex_pos,
+                    &self.vertex_attr,
+                    &self.instances,
+                ],
+            );
+        }
+        self.instance_count = u32::try_from(arena.instances().len()).unwrap_or(u32::MAX);
+    }
+
+    /// [`TraceScene::new`] followed by [`TraceScene::sync`], for a caller that
+    /// uploads a scene once and never changes it.
+    #[must_use]
+    pub fn upload(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layouts: &PathtraceLayouts,
+        arena: &TraceArena,
+    ) -> Self {
+        let mut scene = Self::new(device, layouts);
+        scene.sync(device, queue, layouts, arena);
+        scene
+    }
+
+    fn bind(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        buffers: [&GrowBuffer; 5],
+    ) -> wgpu::BindGroup {
+        // Binding 6 rather than 4: the scene group reserves 4, 5 and 7 by
+        // number for the materials, the lights, and the escape hatch.
+        let bindings = [0u32, 1, 2, 3, 6];
+        let entries: Vec<wgpu::BindGroupEntry<'_>> = bindings
+            .iter()
+            .zip(buffers)
+            .map(|(&binding, buffer)| wgpu::BindGroupEntry {
+                binding,
+                resource: buffer.buffer.as_entire_binding(),
+            })
+            .collect();
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtrace Scene Bind Group"),
             layout: &layouts.scene,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: nodes.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: prim_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: vertex_pos.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: vertex_attr.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: instances.as_entire_binding(),
-                },
-            ],
-        });
-
-        Self {
-            bind_group,
-            instance_count: u32::try_from(arena.instances().len()).unwrap_or(u32::MAX),
-        }
+            entries: &entries,
+        })
     }
 
     /// How many placements the kernel will walk.
@@ -423,28 +482,79 @@ impl TraceUniforms {
     }
 }
 
-/// A read-only storage buffer, never shorter than one element.
+/// One growable read-only storage buffer, never shorter than one element.
 ///
 /// An empty scene is a state the renderer reaches in the ordinary course of
-/// editing rather than a bug, and a zero-sized binding is invalid. The padding
-/// has to be one whole element rather than a fixed number of bytes: wgpu checks
-/// a runtime-sized array's binding against the element stride, so an
+/// editing rather than a bug, and a zero-sized binding is invalid. The floor
+/// has to be one whole element rather than a fixed number of bytes: wgpu
+/// checks a runtime-sized array's binding against the element stride, so an
 /// `array<Instance>` backed by sixteen bytes is rejected at dispatch with a
-/// message about a size the shader expects.
+/// message about a size the shader expects. That is a different rule from the
+/// four-byte copy alignment `scene_objects::create_with_capacity` floors at,
+/// which is why the two are not one function despite looking alike.
 ///
 /// A zeroed element is unreachable in every buffer. The node array is never
 /// genuinely empty, because the builder always emits a root and an empty root
 /// is a leaf holding no primitives, so nothing descends into the padding.
-fn storage<T: Pod>(device: &wgpu::Device, label: &str, data: &[T]) -> wgpu::Buffer {
-    let empty = [T::zeroed()];
-    let contents: &[u8] = if data.is_empty() {
-        bytemuck::cast_slice(&empty)
-    } else {
-        bytemuck::cast_slice(data)
-    };
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents,
-        usage: wgpu::BufferUsages::STORAGE,
-    })
+///
+/// There is no capacity field beside the buffer: `wgpu::Buffer::size()` is the
+/// authority and cannot drift from the allocation it describes.
+struct GrowBuffer {
+    buffer: wgpu::Buffer,
+    label: &'static str,
+    /// One element's bytes, which is both the empty-scene floor and what a
+    /// capacity must never round below.
+    stride: u64,
+}
+
+impl GrowBuffer {
+    fn new<T: Pod>(device: &wgpu::Device, label: &'static str) -> Self {
+        let stride = std::mem::size_of::<T>() as u64;
+        Self {
+            buffer: Self::allocate(device, label, stride),
+            label,
+            stride,
+        }
+    }
+
+    /// Writes `data`, reallocating with headroom when it does not fit.
+    /// Returns whether the buffer was recreated, which is exactly when the
+    /// bind group over it has gone stale.
+    fn sync<T: Pod>(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[T]) -> bool {
+        debug_assert_eq!(std::mem::size_of::<T>() as u64, self.stride);
+        let empty = [T::zeroed()];
+        let bytes: &[u8] = if data.is_empty() {
+            bytemuck::cast_slice(&empty)
+        } else {
+            bytemuck::cast_slice(data)
+        };
+        let needed = bytes.len() as u64;
+        if needed <= self.buffer.size() {
+            queue.write_buffer(&self.buffer, 0, bytes);
+            return false;
+        }
+        self.buffer = Self::allocate(
+            device,
+            self.label,
+            crate::scene_objects::with_headroom(needed),
+        );
+        queue.write_buffer(&self.buffer, 0, bytes);
+        true
+    }
+
+    fn allocate(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
+        // The round-up is not decoration. `prim_indices` has a four-byte
+        // stride, and 1.5x of twelve bytes is eighteen, which is not a legal
+        // buffer size.
+        let size = bytes
+            .max(1)
+            .div_ceil(wgpu::COPY_BUFFER_ALIGNMENT)
+            .saturating_mul(wgpu::COPY_BUFFER_ALIGNMENT);
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
 }

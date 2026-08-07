@@ -40,7 +40,11 @@ use crate::resources;
 use crate::validation::{build_mesh_category_map, build_mesh_edge_indices};
 
 /// Extra capacity factor for growable buffers (1.5x).
-fn with_headroom(bytes: u64) -> u64 {
+///
+/// Shared with the traced scene's arena buffers rather than restated there:
+/// "the established headroom policy" is a policy only while there is one
+/// copy of the number.
+pub(crate) fn with_headroom(bytes: u64) -> u64 {
     bytes + bytes / 2
 }
 
@@ -852,7 +856,12 @@ impl SceneObjects {
 /// Whether two cooked geometries are identical by attribute-buffer and
 /// material `Arc` identity (the engine's cook cache shares those `Arc`s
 /// across frames, so pointer equality means content equality).
-fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
+///
+/// Shared with the traced scene, which keys its hierarchy cache on the same
+/// identity. Two consumers deciding "unchanged" two ways would eventually
+/// disagree about whether a re-seeded scatter needs rebuilding, and only one
+/// of them would be right.
+pub(crate) fn same_geometry(a: &CookedGeometry, b: &CookedGeometry) -> bool {
     fn same_opt<T>(x: Option<&Arc<T>>, y: Option<&Arc<T>>) -> bool {
         match (x, y) {
             (Some(x), Some(y)) => Arc::ptr_eq(x, y),

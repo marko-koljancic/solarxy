@@ -16,21 +16,27 @@ use solarxy_kernel::GeometrySet;
 
 /// Wraps the gathered inputs so the evaluator can query them without
 /// knowing what a `GeometrySet` is.
-pub struct InputGeo<'a> {
-    set: Option<&'a GeometrySet>,
+///
+/// It holds a counted reference rather than borrowing the gathered inputs,
+/// which costs one refcount bump per cook and buys two things. The driver
+/// stays free to resolve instanced input on the ports that cannot carry it
+/// without fighting a borrow this would otherwise hold for the whole cook;
+/// and the decoupling is the honest shape, because these queries answer
+/// over the geometry the wires delivered, which is deliberately not the
+/// geometry a baking node's body goes on to work with.
+pub struct InputGeo {
+    set: Option<std::sync::Arc<GeometrySet>>,
 }
 
-impl<'a> InputGeo<'a> {
+impl InputGeo {
     /// Reads the default geometry input, if the node has one connected.
     #[must_use]
-    pub fn new(inputs: &'a Inputs, port: &str) -> Self {
+    pub fn new(inputs: &Inputs, port: &str) -> Self {
         Self {
-            set: inputs.geometry(port).map(std::convert::AsRef::as_ref),
+            set: inputs.geometry(port).map(std::sync::Arc::clone),
         }
     }
-}
 
-impl InputGeo<'_> {
     /// The connected input, or the error every query returns without one.
     ///
     /// A node with nothing plugged in has no answer, and `0` is a
@@ -41,11 +47,12 @@ impl InputGeo<'_> {
     /// a capability that is present but empty.
     fn connected(&self, query: &str) -> Result<&GeometrySet, String> {
         self.set
+            .as_deref()
             .ok_or_else(|| format!("{query}() has no geometry: this node's input is not connected"))
     }
 }
 
-impl GeoQueries for InputGeo<'_> {
+impl GeoQueries for InputGeo {
     fn npoints(&self) -> Result<f64, String> {
         Ok(self.connected("npoints")?.point_count() as f64)
     }
