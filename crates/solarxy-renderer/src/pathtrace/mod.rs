@@ -1,9 +1,10 @@
 //! The path tracer: the renderer's compute path.
 //!
 //! What is here is the foundation rather than the tracer: the compute
-//! pipelines, the scene buffers the kernel binds, and a debug kernel that runs
-//! camera rays through the two-level traversal and writes what it found. The
-//! shading, lighting, accumulation and job orchestration arrive on top of it.
+//! pipelines, the scene buffers the kernel binds, the texture atlas it samples,
+//! and a debug kernel that runs camera rays through the two-level traversal and
+//! writes what it found. The shading, lighting, accumulation and job
+//! orchestration arrive on top of it.
 //!
 //! # Shader composition
 //!
@@ -20,6 +21,7 @@
 //! compiles its own entry point over the exact bytes that ship.
 
 pub mod arena;
+pub mod atlas;
 pub mod probe;
 pub mod scene;
 
@@ -32,9 +34,18 @@ use arena::TraceArena;
 /// closest-hit and any-hit walks. No entry point.
 pub const TRAVERSE_SOURCE: &str = include_str!("../shaders/pathtrace/traverse.wgsl");
 
-/// The debug kernel, composed over the traversal.
+/// The atlas fragment: the sampled group's bindings and `sample_atlas`. No
+/// entry point, like the traversal.
+pub const ATLAS_SOURCE: &str = include_str!("../shaders/pathtrace/atlas.wgsl");
+
+/// The debug kernel, composed over the traversal and the atlas.
+///
+/// It samples no textures. The atlas rides along so that the fragment the
+/// material stage will call is compiled by both WGSL front ends from the day it
+/// is written, rather than first meeting the browser's several stages later.
 const TRACE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/traverse.wgsl"),
+    include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/trace.wgsl"),
 );
 
@@ -88,13 +99,9 @@ pub struct TraceParams {
 
 const _: () = assert!(std::mem::size_of::<TraceParams>() == 24);
 
-/// The compute pipelines and the group-2 placeholder.
+/// The compute pipelines.
 pub struct PathTracer {
     debug: [wgpu::ComputePipeline; 3],
-    /// The sampled group, empty until the atlas and environment exist. A
-    /// pipeline layout is indexed by group number, so the gap has to be
-    /// occupied by something rather than skipped.
-    sampled: wgpu::BindGroup,
 }
 
 impl PathTracer {
@@ -132,24 +139,24 @@ impl PathTracer {
             })
         });
 
-        let sampled = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Pathtrace Sampled Bind Group"),
-            layout: &layouts.sampled,
-            entries: &[],
-        });
-
-        Self { debug, sampled }
+        Self { debug }
     }
 
     /// Encodes one tile of one channel.
     ///
     /// The dispatch is rounded up to whole workgroups and the kernel bounds-
     /// checks twice, because a tile at the image edge is a partial one.
+    ///
+    /// The atlas is a parameter rather than a field for the same reason the
+    /// scene is: it belongs to what is being rendered, not to the pipelines
+    /// that render it, and an untextured scene binds the null atlas rather than
+    /// skipping the group.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         channel: DebugChannel,
         scene: &TraceScene,
+        atlas: &TraceAtlas,
         target: &TraceTarget,
         uniforms: &TraceUniforms,
         tile: [u32; 2],
@@ -161,7 +168,7 @@ impl PathTracer {
         pass.set_pipeline(&self.debug[channel.index()]);
         pass.set_bind_group(0, &scene.bind_group, &[]);
         pass.set_bind_group(1, &target.bind_group, &[]);
-        pass.set_bind_group(2, &self.sampled, &[]);
+        pass.set_bind_group(2, &atlas.bind_group, &[]);
         pass.set_bind_group(3, &uniforms.bind_group, &[]);
         pass.dispatch_workgroups(
             tile[0].div_ceil(WORKGROUP_SIZE),
@@ -290,6 +297,197 @@ impl TraceScene {
     }
 
     /// The scene group, for a pipeline that binds it at group 0.
+    #[must_use]
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+}
+
+/// The atlas texture on the GPU, plus the sampled group over it.
+///
+/// The arrangement is decided by [`atlas::AtlasPlan`], which is wgpu-free; what
+/// is here is the allocation, the upload, and the two samplers the descriptor's
+/// filter bit chooses between.
+///
+/// A resync rewrites every entry rather than diffing. Textures change when a
+/// material changes, which is rare beside the geometry churn the arena absorbs,
+/// and a partial upload would have to reason about a rectangle that moved
+/// between two arrangements. When that becomes the bottleneck, the honest fix
+/// is a stable-placement packer, not a diff over an unstable one.
+pub struct TraceAtlas {
+    #[allow(unused)]
+    texture: wgpu::Texture,
+    nearest: wgpu::Sampler,
+    linear: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+    page: u32,
+    layers: u32,
+}
+
+impl TraceAtlas {
+    /// The null atlas: one transparent texel in one layer.
+    ///
+    /// Not a nicety. A pipeline layout is satisfied by a bind group or by
+    /// nothing, and most scenes carry no textures at all, so the empty case has
+    /// to be a real texture. Nothing samples it, because every descriptor over
+    /// an empty plan carries [`atlas::TEXTURE_UNUSED`].
+    #[must_use]
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        // Nearest is declared non-filtering and linear filtering, matching the
+        // layout: the platform derives a sampler's filtering from its own
+        // filters, so the two cannot be created from one descriptor.
+        let nearest = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Pathtrace Atlas Nearest"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let linear = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Pathtrace Atlas Linear"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let (texture, bind_group) = Self::allocate(device, layouts, &nearest, &linear, 1, 1);
+        Self {
+            texture,
+            nearest,
+            linear,
+            bind_group,
+            page: 1,
+            layers: 1,
+        }
+    }
+
+    /// Brings the atlas up to date with a plan and the images it arranged.
+    ///
+    /// `textures` may hold entries the plan dropped, and the plan may name
+    /// entries `textures` no longer carries; both are skipped, because a plan
+    /// and a texture list that disagree describe a scene mid-edit rather than a
+    /// bug.
+    pub fn sync(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layouts: &PathtraceLayouts,
+        plan: &atlas::AtlasPlan,
+        textures: &[atlas::AtlasTexture],
+    ) {
+        if plan.page() != self.page || plan.layers() != self.layers {
+            let (texture, bind_group) = Self::allocate(
+                device,
+                layouts,
+                &self.nearest,
+                &self.linear,
+                plan.page(),
+                plan.layers(),
+            );
+            self.texture = texture;
+            self.bind_group = bind_group;
+            self.page = plan.page();
+            self.layers = plan.layers();
+        }
+
+        let by_key: std::collections::HashMap<_, _> =
+            textures.iter().map(|t| (t.key, &t.image)).collect();
+        for entry in plan.entries() {
+            let Some(image) = by_key.get(&entry.key) else {
+                continue;
+            };
+            let block = atlas::compose(entry, image);
+            let width = entry.width + 2 * atlas::GUARD;
+            let height = entry.height + 2 * atlas::GUARD;
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: entry.x - atlas::GUARD,
+                        y: entry.y - atlas::GUARD,
+                        z: entry.layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &block,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * atlas::BYTES_PER_TEXEL),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+    }
+
+    fn allocate(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        nearest: &wgpu::Sampler,
+        linear: &wgpu::Sampler,
+        page: u32,
+        layers: u32,
+    ) -> (wgpu::Texture, wgpu::BindGroup) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Pathtrace Atlas"),
+            size: wgpu::Extent3d {
+                width: page,
+                height: page,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // Unorm rather than sRGB throughout, so one page holds a base
+            // colour map beside a normal map; the transfer function is a
+            // per-texture flag the kernel applies.
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Atlas Bind Group"),
+            layout: &layouts.sampled,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(nearest),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(linear),
+                },
+            ],
+        });
+        (texture, bind_group)
+    }
+
+    /// The page edge in texels.
+    #[must_use]
+    pub fn page(&self) -> u32 {
+        self.page
+    }
+
+    /// Allocated array layers.
+    #[must_use]
+    pub fn layers(&self) -> u32 {
+        self.layers
+    }
+
+    /// The sampled group, for a pipeline that binds it at group 2.
     #[must_use]
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group

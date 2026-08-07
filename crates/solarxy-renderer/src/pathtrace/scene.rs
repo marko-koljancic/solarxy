@@ -40,12 +40,13 @@ use std::sync::Arc;
 use cgmath::{Matrix4, SquareMatrix};
 use solarxy_bvh::{Bvh, BvhStats};
 use solarxy_core::aabb::AABB;
-use solarxy_core::geometry::MeshTopology;
+use solarxy_core::geometry::{MeshTopology, RawImageData, RawMaterialData};
 use solarxy_core::scene::{
     CameraDef, CookedGeometry, InstanceXform, LightDef, SceneDelta, SceneObjectId, SceneOp,
 };
 
 use super::arena::{ArenaMesh, ArenaPlacement, INSTANCE_CAST_SHADOW, INSTANCE_VISIBLE, TraceArena};
+use super::atlas::{AtlasFilter, AtlasPlan, AtlasTexture, AtlasWrap, TEXTURE_UNUSED, TextureKey};
 
 /// Identity of the geometry a hierarchy was built over.
 ///
@@ -149,6 +150,117 @@ impl TracedObject {
     }
 }
 
+/// The texture roles a material carries, in the order the kernel reads them.
+///
+/// The same five the raster path binds, with one deliberate difference:
+/// occlusion stays its own role instead of being composited into the
+/// metallic-roughness pack. That compositing exists because a raster draw has
+/// a fixed number of texture bindings and the tracer indexes an atlas, so the
+/// pack buys nothing and costs an image the importer never wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureRole {
+    BaseColor,
+    Normal,
+    MetallicRoughness,
+    Occlusion,
+    Emissive,
+}
+
+impl TextureRole {
+    /// Every role, in slot order. The index into
+    /// [`MaterialTextures::slots`] is this array's index.
+    pub const ALL: [Self; 5] = [
+        Self::BaseColor,
+        Self::Normal,
+        Self::MetallicRoughness,
+        Self::Occlusion,
+        Self::Emissive,
+    ];
+
+    /// Whether the role's texels are sRGB-encoded.
+    ///
+    /// The same split the raster path makes when it picks a texture format:
+    /// base colour and emissive are colour, the rest are data. Here it is a
+    /// descriptor bit instead of a format, which is what lets both share a
+    /// page.
+    #[must_use]
+    pub fn is_srgb(self) -> bool {
+        matches!(self, Self::BaseColor | Self::Emissive)
+    }
+
+    fn image(self, mat: &RawMaterialData) -> Option<&Arc<RawImageData>> {
+        match self {
+            Self::BaseColor => mat.diffuse_texture_data.as_ref(),
+            Self::Normal => mat.normal_texture_data.as_ref(),
+            Self::MetallicRoughness => mat.metallic_roughness_texture_data.as_ref(),
+            Self::Occlusion => mat.occlusion_texture_data.as_ref(),
+            Self::Emissive => mat.emissive_texture_data.as_ref(),
+        }
+    }
+
+    /// Whether the material names this role by path without carrying the
+    /// decoded pixels.
+    ///
+    /// The renderer's raster loader decodes such a path itself. This cannot:
+    /// it holds no device and no filesystem, and on web there is no filesystem
+    /// to hold. Counted rather than ignored, because the symptom is one
+    /// material rendering untextured in the tracer and textured in the
+    /// viewport, which reads as a shading bug.
+    fn path_only(self, mat: &RawMaterialData) -> bool {
+        if self.image(mat).is_some() {
+            return false;
+        }
+        match self {
+            Self::BaseColor => mat.diffuse_texture_path.is_some(),
+            Self::Normal => mat.normal_texture_path.is_some(),
+            Self::MetallicRoughness => mat.metallic_roughness_texture_path.is_some(),
+            Self::Occlusion => mat.occlusion_texture_path.is_some(),
+            Self::Emissive => mat.emissive_texture_path.is_some(),
+        }
+    }
+}
+
+/// One texture slot as the material record will carry it.
+///
+/// Two values rather than one: a descriptor says which layer and how to read
+/// it, and a rectangle says where in the page. The record itself is the
+/// material stage's; what is here is everything the packer can answer, so that
+/// stage copies rather than recomputes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureSlot {
+    /// The packed descriptor, or [`TEXTURE_UNUSED`].
+    pub desc: u32,
+    /// `(u_scale, v_scale, u_offset, v_offset)`, page-normalized.
+    pub rect: [f32; 4],
+}
+
+impl Default for TextureSlot {
+    /// An empty slot. Explicit rather than zeroed: a zero descriptor is a
+    /// legal one naming layer zero.
+    fn default() -> Self {
+        Self {
+            desc: TEXTURE_UNUSED,
+            rect: [0.0; 4],
+        }
+    }
+}
+
+/// One material's five texture slots, in [`TextureRole::ALL`] order.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct MaterialTextures {
+    pub slots: [TextureSlot; 5],
+}
+
+impl MaterialTextures {
+    #[must_use]
+    pub fn slot(&self, role: TextureRole) -> TextureSlot {
+        self.slots[TextureRole::ALL
+            .iter()
+            .position(|r| *r == role)
+            .unwrap_or(0)]
+    }
+}
+
 /// What the last pack took, and what it left behind.
 ///
 /// Recomputed at each pack rather than accumulated, because this describes the
@@ -182,6 +294,21 @@ pub struct TraceSceneStats {
     /// Leaves the depth cap forced. Non-zero means a hierarchy came out worse
     /// than the heuristic wanted.
     pub depth_capped_leaves: u32,
+    /// Distinct textures packed into the atlas, after deduplication.
+    pub textures: u32,
+    /// Atlas array layers, and what they occupy. The bytes are the honest
+    /// number to show: pages are square powers of two, so an atlas costs what
+    /// its largest texture forces rather than what its textures sum to.
+    pub atlas_layers: u32,
+    pub atlas_bytes: u64,
+    /// Textures halved to fit a page.
+    pub downscaled_textures: u32,
+    /// Textures dropped because the layer budget was exhausted.
+    pub dropped_textures: u32,
+    /// Textures a material names by path without carrying the decoded pixels,
+    /// which this side cannot read. The count that explains a material
+    /// rendering untextured here and textured in the viewport.
+    pub undecoded_textures: u32,
 }
 
 /// The traced scene: scene ops in, a packed [`TraceArena`] out.
@@ -195,7 +322,18 @@ pub struct TraceSceneCache {
     /// object that names it.
     hierarchies: HashMap<MeshKey, CachedHierarchy>,
     arena: TraceArena,
+    /// The atlas arrangement and the images it arranged, which travel together
+    /// so an upload cannot read one against the other.
+    atlas: AtlasPlan,
+    textures: Vec<AtlasTexture>,
+    /// One entry per material slot, in the numbering
+    /// [`TraceSceneCache::material_slots`] describes.
+    material_textures: Vec<MaterialTextures>,
     dirty: bool,
+    /// Set by anything that can change which textures the scene holds. Kept
+    /// apart from `dirty` because a transform change repacks the arena and must
+    /// not re-upload every texel in the atlas.
+    atlas_dirty: bool,
     /// Set by anything that can orphan a cached hierarchy.
     needs_sweep: bool,
     stats: TraceSceneStats,
@@ -250,6 +388,7 @@ impl TraceSceneCache {
                 SceneOp::Remove { id } => {
                     if self.objects.remove(id).is_some() {
                         self.dirty = true;
+                        self.atlas_dirty = true;
                         self.needs_sweep = true;
                     }
                 }
@@ -273,6 +412,7 @@ impl TraceSceneCache {
                     self.lights = None;
                     self.cameras = None;
                     self.dirty = true;
+                    self.atlas_dirty = true;
                     self.needs_sweep = false;
                 }
             }
@@ -449,6 +589,9 @@ impl TraceSceneCache {
             }
         }
         self.dirty = true;
+        // Reached only past the identity check above, so a re-lowered upsert
+        // whose buffers all match does not re-upload the atlas every frame.
+        self.atlas_dirty = true;
     }
 
     fn pack(&mut self) {
@@ -464,6 +607,43 @@ impl TraceSceneCache {
             base = base
                 .saturating_add(u32::try_from(obj.geometry.materials.len().max(1)).unwrap_or(1));
         }
+
+        // The atlas is repacked only when the scene's textures could have
+        // changed; the descriptor table is rebuilt every time, because it is
+        // indexed by a material base that a removal moves. Both are cheap
+        // beside the arena; the upload the plan drives is not, which is what
+        // the flag protects.
+        if std::mem::take(&mut self.atlas_dirty) {
+            self.repack_atlas();
+        }
+        self.rebuild_material_textures();
+        stats.textures = u32::try_from(self.atlas.entries().len()).unwrap_or(u32::MAX);
+        stats.atlas_layers = if self.atlas.is_empty() {
+            0
+        } else {
+            self.atlas.layers()
+        };
+        stats.atlas_bytes = if self.atlas.is_empty() {
+            0
+        } else {
+            self.atlas.bytes()
+        };
+        stats.downscaled_textures = self.atlas.halved();
+        stats.dropped_textures = self.atlas.dropped();
+        stats.undecoded_textures = self
+            .objects
+            .values()
+            .flat_map(|o| o.geometry.materials.iter())
+            .map(|m| {
+                u32::try_from(
+                    TextureRole::ALL
+                        .iter()
+                        .filter(|role| role.path_only(m))
+                        .count(),
+                )
+                .unwrap_or(0)
+            })
+            .sum();
 
         // Re-count the skips from the live objects, since a mesh dropped at
         // ingest leaves no trace on the object it came from.
@@ -583,6 +763,103 @@ impl TraceSceneCache {
             .nodes
             .saturating_add(u32::try_from(tlas.nodes().len()).unwrap_or(u32::MAX));
         self.stats = stats;
+    }
+}
+
+impl TraceSceneCache {
+    /// Collects every decoded texture the scene's materials name and packs
+    /// them.
+    ///
+    /// Deduplicated on the way in as well as inside the packer, because the
+    /// same image very commonly arrives from several materials and the list is
+    /// what the upload iterates.
+    fn repack_atlas(&mut self) {
+        let mut seen: HashSet<TextureKey> = HashSet::new();
+        let mut textures: Vec<AtlasTexture> = Vec::new();
+        for obj in self.objects.values() {
+            for mat in &obj.geometry.materials {
+                for role in TextureRole::ALL {
+                    let Some(image) = role.image(mat) else {
+                        continue;
+                    };
+                    let key = texture_key(image);
+                    if seen.insert(key) {
+                        textures.push(AtlasTexture {
+                            key,
+                            image: Arc::clone(image),
+                        });
+                    }
+                }
+            }
+        }
+        self.atlas = AtlasPlan::pack_textures(&textures);
+        self.textures = textures;
+    }
+
+    /// Fills one entry per material slot from the current arrangement.
+    fn rebuild_material_textures(&mut self) {
+        let count = self.material_slots() as usize;
+        let mut table = vec![MaterialTextures::default(); count];
+        for obj in self.objects.values() {
+            for (index, mat) in obj.geometry.materials.iter().enumerate() {
+                let slot = obj.material_base as usize + index;
+                let Some(entry) = table.get_mut(slot) else {
+                    continue;
+                };
+                for (i, role) in TextureRole::ALL.into_iter().enumerate() {
+                    let Some(image) = role.image(mat) else {
+                        continue;
+                    };
+                    let key = texture_key(image);
+                    // A dropped texture leaves the slot empty rather than
+                    // pointing at somebody else's rectangle, which is what
+                    // `descriptor` returning the unused flag already does.
+                    let Some(rect) = self.atlas.rect(key) else {
+                        continue;
+                    };
+                    entry.slots[i] = TextureSlot {
+                        desc: self
+                            .atlas
+                            .descriptor(key, 0, AtlasFilter::Linear, role.is_srgb()),
+                        rect,
+                    };
+                }
+            }
+        }
+        self.material_textures = table;
+    }
+
+    /// The current atlas arrangement.
+    #[must_use]
+    pub fn atlas(&self) -> &AtlasPlan {
+        &self.atlas
+    }
+
+    /// The textures the arrangement covers, in pack-request order.
+    #[must_use]
+    pub fn atlas_textures(&self) -> &[AtlasTexture] {
+        &self.textures
+    }
+
+    /// One material slot's five texture slots, by the global slot number
+    /// [`TraceSceneCache::material_slots`] describes.
+    #[must_use]
+    pub fn material_textures(&self, slot: u32) -> Option<&MaterialTextures> {
+        self.material_textures.get(slot as usize)
+    }
+}
+
+/// How the tracer identifies an image for packing.
+///
+/// Every material texture Solarxy uploads tiles
+/// ([`crate::texture::TextureOpts::material`] sets `repeat`), and no importer
+/// carries per-texture wrap state, so both axes are `Repeat`. When glTF sampler
+/// state does arrive, this is the one place that has to learn to read it.
+fn texture_key(image: &Arc<RawImageData>) -> TextureKey {
+    TextureKey {
+        hash: image.hash,
+        wrap_s: AtlasWrap::Repeat,
+        wrap_t: AtlasWrap::Repeat,
     }
 }
 
@@ -1061,5 +1338,199 @@ mod tests {
         );
         assert!(cache.lights().is_some());
         assert!(cache.cameras().is_some());
+    }
+
+    // ---- the atlas ----
+
+    fn image(width: u32, height: u32, tint: u8) -> Arc<RawImageData> {
+        let pixels = (0..width * height)
+            .flat_map(|i| [tint, (i % 256) as u8, 0, 255])
+            .collect();
+        Arc::new(RawImageData::new(pixels, width, height))
+    }
+
+    fn material(name: &str) -> RawMaterialData {
+        RawMaterialData {
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+
+    fn textured(meshes: Vec<CookedMesh>, materials: Vec<RawMaterialData>) -> Arc<CookedGeometry> {
+        Arc::new(CookedGeometry {
+            bounds: bounds_of(&tri_positions()),
+            meshes,
+            materials: materials.into_iter().map(Arc::new).collect(),
+        })
+    }
+
+    #[test]
+    fn a_material_texture_reaches_the_atlas_with_its_slot_filled() {
+        let albedo = image(16, 16, 1);
+        let mut mat = material("m");
+        mat.diffuse_texture_data = Some(Arc::clone(&albedo));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![mat]),
+        ));
+        cache.repack();
+
+        assert_eq!(cache.stats().textures, 1);
+        assert_eq!(cache.atlas_textures().len(), 1);
+        let slots = cache.material_textures(0).expect("one material slot");
+        let base = slots.slot(TextureRole::BaseColor);
+        assert_ne!(base.desc, TEXTURE_UNUSED);
+        // Base colour is sRGB and every other role is not, which is the same
+        // split the raster path makes when it picks a texture format.
+        let desc = super::super::atlas::TextureDescriptor::unpack(base.desc).expect("present");
+        assert!(desc.srgb);
+        for role in [
+            TextureRole::Normal,
+            TextureRole::MetallicRoughness,
+            TextureRole::Occlusion,
+            TextureRole::Emissive,
+        ] {
+            assert_eq!(slots.slot(role).desc, TEXTURE_UNUSED, "{role:?}");
+        }
+    }
+
+    #[test]
+    fn two_materials_naming_one_image_pack_it_once() {
+        // The engine's cook cache shares a decoded image across materials, so
+        // this is the ordinary case rather than a contrived one.
+        let shared = image(16, 16, 2);
+        let mut a = material("a");
+        a.diffuse_texture_data = Some(Arc::clone(&shared));
+        let mut b = material("b");
+        b.diffuse_texture_data = Some(Arc::clone(&shared));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![a, b]),
+        ));
+        cache.repack();
+
+        assert_eq!(cache.stats().textures, 1);
+        // Both slots point at the same rectangle, which is what sharing means.
+        let first = cache.material_textures(0).expect("slot 0");
+        let second = cache.material_textures(1).expect("slot 1");
+        assert_eq!(
+            first.slot(TextureRole::BaseColor),
+            second.slot(TextureRole::BaseColor)
+        );
+    }
+
+    #[test]
+    fn one_image_in_a_colour_role_and_a_data_role_packs_once_and_decodes_twice() {
+        // The dedupe the raster path cannot make: its cache keys on the colour
+        // space because the format carries it, and here the format does not.
+        let shared = image(16, 16, 3);
+        let mut mat = material("m");
+        mat.diffuse_texture_data = Some(Arc::clone(&shared));
+        mat.occlusion_texture_data = Some(Arc::clone(&shared));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![mat]),
+        ));
+        cache.repack();
+
+        assert_eq!(cache.stats().textures, 1);
+        let slots = cache.material_textures(0).expect("one material slot");
+        let colour = slots.slot(TextureRole::BaseColor);
+        let data = slots.slot(TextureRole::Occlusion);
+        // By bits: the two rectangles come out of one computation, so equality
+        // here is identity rather than an approximation.
+        assert_eq!(colour.rect.map(f32::to_bits), data.rect.map(f32::to_bits));
+        assert_ne!(colour.desc, data.desc);
+    }
+
+    #[test]
+    fn a_transform_change_repacks_the_arena_and_leaves_the_atlas_alone() {
+        // The upload the plan drives is the expensive half, and a scatter being
+        // dragged sends a transform every frame.
+        let mut mat = material("m");
+        mat.diffuse_texture_data = Some(image(64, 64, 4));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![mat]),
+        ));
+        cache.repack();
+        let before = cache.atlas().entries().to_vec();
+
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::SetTransform {
+                id: SceneObjectId(1),
+                transform: translation(5.0).0,
+            }],
+        });
+        assert!(cache.repack().is_some(), "the arena did repack");
+        assert_eq!(cache.atlas().entries(), before.as_slice());
+    }
+
+    #[test]
+    fn removing_an_object_removes_its_textures() {
+        let mut a = material("a");
+        a.diffuse_texture_data = Some(image(16, 16, 5));
+        let mut b = material("b");
+        b.diffuse_texture_data = Some(image(16, 16, 6));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![a]),
+        ));
+        cache.apply(&upsert(
+            2,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![b]),
+        ));
+        cache.repack();
+        assert_eq!(cache.stats().textures, 2);
+
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::Remove {
+                id: SceneObjectId(1),
+            }],
+        });
+        cache.repack();
+        assert_eq!(cache.stats().textures, 1);
+    }
+
+    #[test]
+    fn a_texture_named_only_by_path_is_counted_rather_than_silently_missing() {
+        // This side holds no filesystem, and on web there is none to hold. The
+        // symptom without the count is one material rendering untextured here
+        // and textured in the viewport, which reads as a shading bug.
+        let mut mat = material("m");
+        mat.diffuse_texture_path = Some(std::path::PathBuf::from("albedo.png"));
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![mat]),
+        ));
+        cache.repack();
+
+        assert_eq!(cache.stats().textures, 0);
+        assert_eq!(cache.stats().undecoded_textures, 1);
+        assert_eq!(
+            cache
+                .material_textures(0)
+                .expect("slot")
+                .slot(TextureRole::BaseColor)
+                .desc,
+            TEXTURE_UNUSED
+        );
+    }
+
+    #[test]
+    fn an_untextured_scene_reports_an_empty_atlas() {
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        cache.repack();
+        assert_eq!(cache.stats().textures, 0);
+        assert_eq!(cache.stats().atlas_layers, 0);
+        assert_eq!(cache.stats().atlas_bytes, 0);
+        assert!(cache.atlas().is_empty());
     }
 }

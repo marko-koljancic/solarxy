@@ -29,7 +29,8 @@ use solarxy_core::aabb::AABB;
 use solarxy_renderer::camera::{CameraUniform, camera_from_bounds};
 use solarxy_renderer::pathtrace::arena::{ArenaMesh, ArenaPlacement, INSTANCE_VISIBLE, TraceArena};
 use solarxy_renderer::pathtrace::{
-    DebugChannel, PathTracer, ReadbackPoll, TraceParams, TraceScene, TraceTarget, TraceUniforms,
+    DebugChannel, PathTracer, ReadbackPoll, TraceAtlas, TraceParams, TraceScene, TraceTarget,
+    TraceUniforms,
 };
 
 /// The framing the milestone's other figures use, so the numbers compare.
@@ -163,6 +164,9 @@ fn primary_ray_throughput() {
         .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
 
     let tracer = PathTracer::new(&gpu.device, &gpu.pathtrace);
+    // No textures in a throughput scene; the null atlas satisfies the sampled
+    // group, which a pipeline layout requires whether the kernel samples or not.
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
     let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
     let uniforms = TraceUniforms::new(&gpu.device, &gpu.pathtrace, &camera_buffer);
     uniforms.write(
@@ -184,6 +188,7 @@ fn primary_ray_throughput() {
             &mut encoder,
             channel,
             &scene,
+            &atlas,
             &target,
             &uniforms,
             [WIDTH, HEIGHT],

@@ -329,8 +329,8 @@ pub struct PathtraceLayouts {
     pub scene: wgpu::BindGroupLayout,
     /// Group 1: the storage textures the kernel writes.
     pub target: wgpu::BindGroupLayout,
-    /// Group 2: sampled textures. Empty until the atlas and the environment
-    /// exist, and present so nothing renumbers when they do.
+    /// Group 2: sampled textures. The atlas and its two samplers; the
+    /// environment's equirect and lookup textures are reserved by number.
     pub sampled: wgpu::BindGroupLayout,
     /// Group 3: the camera and per-dispatch uniforms.
     pub params: wgpu::BindGroupLayout,
@@ -367,12 +367,42 @@ impl PathtraceLayouts {
                 wgpu::StorageTextureAccess::WriteOnly,
             )],
         });
-        // wgpu indexes a pipeline layout by group number, so the sampled
-        // group's gap is spelled as an empty layout rather than by renumbering
-        // the uniforms into it and back out again when the atlas lands.
+        // The sampled group. Bindings 3 to 6 are reserved by number for the
+        // environment (its equirect, its sampler, and the two CDF textures the
+        // importance sampler looks up), so nothing renumbers when they arrive.
+        //
+        // Two samplers rather than one because a texture descriptor carries a
+        // filter bit and WGSL cannot index a sampler: the kernel branches, and
+        // both have to be bound for either branch to be legal. Their binding
+        // types differ because the platform ties them to the sampler's own
+        // filters -- an all-nearest sampler is a non-filtering sampler, and
+        // declaring it `Filtering` is rejected at bind group creation.
         let sampled = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_sampled_bind_group_layout"),
-            entries: &[],
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_params_bind_group_layout"),

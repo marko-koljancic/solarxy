@@ -1,6 +1,6 @@
 //! Source-level rules for the path tracer's shaders, checked without a GPU.
 //!
-//! Two things live here that nothing else can catch.
+//! Three things live here that nothing else catches.
 //!
 //! The first is the uniformity discipline. The browser's WGSL analysis rejects
 //! derivative-dependent work under non-uniform control flow at pipeline
@@ -14,6 +14,11 @@
 //! `concat!`, and a fragment that parses alone can still collide with another
 //! over a name. Parsing the real compositions here means a syntax error is a
 //! fast test failure rather than a pipeline-creation failure behind a GPU.
+//!
+//! The third is the binding budget and the descriptor layout. Numbers reserved
+//! for a stage that has not arrived are invisible to the compiler, and a
+//! descriptor is one word with no struct anywhere for the uniform-layout table
+//! to measure, so both are held by grep or by nothing.
 
 use std::path::{Path, PathBuf};
 
@@ -100,34 +105,66 @@ fn no_pathtrace_shader_depends_on_a_derivative_or_a_barrier() {
     }
 }
 
-/// The fragment every kernel is composed over. It declares no entry point and
-/// depends on nothing, so it is the one that must parse alone.
-const BASE: &str = "traverse.wgsl";
+/// The fragments that declare no entry point and are composed under the ones
+/// that do. Each has to parse alone.
+const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl"];
 
 #[test]
-fn the_traversal_fragment_parses_on_its_own() {
-    let source = read(BASE);
-    if let Err(e) = naga::front::wgsl::parse_str(&source) {
-        panic!("{BASE} does not parse: {}", e.emit_to_string(&source));
+fn every_base_fragment_parses_on_its_own() {
+    // A base declares no entry point and depends on nothing above it, so it is
+    // the one composition-independent thing in the directory.
+    for base in BASES {
+        let source = read(base);
+        if let Err(e) = naga::front::wgsl::parse_str(&source) {
+            panic!("{base} does not parse: {}", e.emit_to_string(&source));
+        }
+    }
+}
+
+/// Every composition the host builds, in the order it concatenates them.
+///
+/// A table rather than "base plus each fragment", because that stopped being
+/// true the moment a kernel needed two fragments under it. This mirrors the
+/// `concat!` calls in `pathtrace/mod.rs` and `pathtrace/probe.rs`, so a kernel
+/// added there without a row here is a kernel nothing parses; a row here that
+/// names a file that is gone fails on the read.
+const RECIPES: &[(&str, &[&str])] = &[
+    (
+        "the debug kernel",
+        &["traverse.wgsl", "atlas.wgsl", "trace.wgsl"],
+    ),
+    ("the traversal probe", &["traverse.wgsl", "parity.wgsl"]),
+    ("the atlas probe", &["atlas.wgsl", "atlas_probe.wgsl"]),
+];
+
+#[test]
+fn every_fragment_the_host_composes_appears_in_a_recipe() {
+    // A fragment on disk that nothing composes is either dead or a kernel
+    // nobody is parsing, and the second is the failure this catches.
+    for (name, _) in every_fragment() {
+        assert!(
+            RECIPES
+                .iter()
+                .any(|(_, parts)| parts.contains(&name.as_str())),
+            "{name} is in the shader directory but in no composition; \
+             add it to a recipe or delete it"
+        );
     }
 }
 
 #[test]
-fn every_kernel_fragment_parses_composed_over_the_traversal() {
-    // A kernel fragment is not standalone WGSL by design: it names the
-    // traversal's types and bindings. What has to hold is that the composition
-    // the host actually builds parses, and that two fragments do not collide
-    // over a name. Discovered from the directory rather than listed, so a
-    // fragment added later is covered without anyone remembering to add it.
-    let base = read(BASE);
-    for (name, source) in every_fragment() {
-        if name == BASE {
-            continue;
-        }
-        let composed = format!("{base}{source}");
+fn every_composition_the_host_builds_parses() {
+    // A fragment that parses alone can still collide with another over a name,
+    // and a kernel fragment is not standalone WGSL by design: it names the
+    // types and bindings the fragments beneath it declare. What has to hold is
+    // that what the host actually concatenates parses, which is a fast failure
+    // here instead of a pipeline-creation failure behind a GPU.
+    for (label, parts) in RECIPES {
+        let composed: String = parts.iter().map(|p| read(p)).collect();
         if let Err(e) = naga::front::wgsl::parse_str(&composed) {
             panic!(
-                "{BASE} + {name} does not parse: {}",
+                "{label} ({}) does not parse: {}",
+                parts.join(" + "),
                 e.emit_to_string(&composed)
             );
         }
@@ -184,6 +221,59 @@ fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
             !source.contains(&format!("@group(0) @binding({reserved})")),
             "binding {reserved} of the scene group is reserved; \
              4 and 5 are materials and lights, 7 is the escape hatch"
+        );
+    }
+}
+
+#[test]
+fn the_atlas_declares_the_sampled_group_the_budget_reserved() {
+    // The sampled group is the atlas and its two samplers; 3 to 6 belong to the
+    // environment, which arrives with its own consumer. Group 2 was declared
+    // empty rather than skipped for exactly this: nothing renumbers.
+    let source = read("atlas.wgsl");
+    for (binding, decl) in [
+        (0u32, "var atlas: texture_2d_array<f32>"),
+        (1, "var atlas_nearest: sampler"),
+        (2, "var atlas_linear: sampler"),
+    ] {
+        let expected = format!("@group(2) @binding({binding}) {decl}");
+        assert!(
+            source.contains(&expected),
+            "atlas.wgsl no longer declares `{decl}` at binding {binding}"
+        );
+    }
+    for (name, source) in every_fragment() {
+        for reserved in [3u32, 4, 5, 6] {
+            assert!(
+                !source.contains(&format!("@group(2) @binding({reserved})")),
+                "{name} takes sampled binding {reserved}; 3 to 6 are reserved \
+                 for the environment equirect, its sampler, and the two \
+                 sampling-distribution textures"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_descriptor_bit_layout_is_the_same_on_both_sides() {
+    // The packer writes these bits and the shader reads them, and nothing else
+    // holds the two together: there is no struct here for the uniform-layout
+    // table to measure, because a descriptor is one word inside a material
+    // record that does not exist yet.
+    let source = read("atlas.wgsl");
+    for constant in [
+        "const TEX_LAYER_MASK: u32 = 0xFFu;",
+        "const TEX_UV_SHIFT: u32 = 8u;",
+        "const TEX_WRAP_S_SHIFT: u32 = 11u;",
+        "const TEX_WRAP_T_SHIFT: u32 = 13u;",
+        "const TEX_FILTER_BIT: u32 = 1u << 15u;",
+        "const TEX_SRGB_BIT: u32 = 1u << 16u;",
+        "const TEX_UNUSED_BIT: u32 = 1u << 31u;",
+    ] {
+        assert!(
+            source.contains(constant),
+            "the descriptor layout moved: `{constant}` is gone from atlas.wgsl. \
+             `TextureDescriptor::pack` has to move with it."
         );
     }
 }
