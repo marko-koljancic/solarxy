@@ -4624,6 +4624,27 @@ pub fn prepare_hdri_job(bytes: Vec<u8>, format: String) -> Result<js_sys::Uint8A
     Ok(js_sys::Uint8Array::from(prepared.pack().as_slice()))
 }
 
+/// The import-worker hierarchy-build entry: builds one acceleration structure
+/// over a mesh and returns the packed transfer blob.
+///
+/// The fourth GPU-free worker export, and the reason this one exists is the
+/// same as the first: wasm has no threads, and a build over a million
+/// triangles is seconds rather than milliseconds, so running it on the main
+/// thread would stall the frame loop for the length of the build. Native hosts
+/// call `build_hierarchy_job` directly on their own thread; it is the same
+/// function, so there is one build path rather than two.
+///
+/// `positions` is flat `xyz`. Both arrive as typed arrays and are copied into
+/// this instance's heap by `wasm-bindgen`, which is unavoidable: the worker is
+/// a second wasm instance with its own memory and nothing can be shared into
+/// it.
+#[wasm_bindgen]
+pub fn build_bvh_job(positions: Vec<f32>, indices: Vec<u32>) -> js_sys::Uint8Array {
+    js_sys::Uint8Array::from(
+        solarxy_renderer::pathtrace::scene::build_hierarchy_job(&positions, &indices).as_slice(),
+    )
+}
+
 /// Reads a JS array of `{ name: string, bytes: Uint8Array }` into owned
 /// `(name, bytes)` pairs.
 fn read_files(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, JsError> {

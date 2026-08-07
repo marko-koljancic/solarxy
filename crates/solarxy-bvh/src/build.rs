@@ -155,6 +155,27 @@ impl Bvh {
         build(&prims)
     }
 
+    /// Reassembles a hierarchy from arrays a builder already produced.
+    ///
+    /// The one way to get a [`Bvh`] without building one, and it exists for the
+    /// worker boundary: the build happens in a second wasm instance and the
+    /// result crosses as bytes, so something on this side has to put the pieces
+    /// back together. See [`crate::transfer`].
+    ///
+    /// Nothing is validated. A caller assembling arbitrary arrays gets an
+    /// arbitrary hierarchy, which the traversal tolerates the way it tolerates
+    /// a bad index: it may miss, it will not read out of bounds. Checking the
+    /// tree's shape here would cost a walk on every transfer to defend against
+    /// a caller that does not exist.
+    #[must_use]
+    pub fn from_parts(nodes: Vec<BvhNode>, prim_indices: Vec<u32>, stats: BvhStats) -> Self {
+        Self {
+            nodes,
+            prim_indices,
+            stats,
+        }
+    }
+
     #[must_use]
     pub fn nodes(&self) -> &[BvhNode] {
         &self.nodes

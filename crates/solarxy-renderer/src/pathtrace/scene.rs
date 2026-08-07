@@ -11,14 +11,21 @@
 //! instance with no GPU at all. A device handle reaching in here would make
 //! that move a rewrite instead of a relocation.
 //!
-//! # Cost, and why nothing calls this from a frame loop yet
+//! # Where the build happens
 //!
 //! [`Bvh::build_triangles`] over a million triangles is a few hundred
-//! milliseconds, and it runs inside [`TraceSceneCache::apply`]. Until that
-//! build is asynchronous, calling `apply` on a frame path stalls the frame for
-//! as long as the model is large. That is the reason this type is driven by
-//! tests and by the still-render job, and not by either shell's per-frame
-//! drain of the delta stream.
+//! milliseconds, so where it runs decides whether this can sit on a frame path
+//! at all. [`BuildPolicy`] is that choice. Under [`BuildPolicy::Inline`] the
+//! build happens inside [`TraceSceneCache::apply`], which is right for a native
+//! host and for every test. Under [`BuildPolicy::Deferred`] the build is
+//! recorded, handed out by [`TraceSceneCache::take_build_jobs`], and filed back
+//! by [`TraceSceneCache::submit_hierarchy`]; a mesh whose hierarchy has not
+//! arrived is simply absent from the packed arena, so a scene fills in as
+//! builds land instead of blocking on all of them.
+//!
+//! Nothing in either shell drives this yet. The still-render job is the first
+//! consumer, and until it exists that absence is what keeps the release's
+//! zero-golden-diff host refactor verifiable.
 //!
 //! A repack is a full one: [`TraceArena::build`] concatenates everything, and
 //! the top-level hierarchy sits first in the node and permutation buffers so
@@ -71,6 +78,62 @@ impl MeshKey {
             indices: Arc::as_ptr(&mesh.indices) as usize,
         }
     }
+}
+
+/// Where a hierarchy build happens.
+///
+/// One enum rather than two code paths: [`Bvh::build_triangles`] is the build
+/// under both, and the choice is only about which thread runs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildPolicy {
+    /// Build inside [`TraceSceneCache::apply`], on the calling thread.
+    ///
+    /// The default, and what a native host does: a build is a few hundred
+    /// milliseconds at a million triangles and native hosts have threads if
+    /// they ever want one.
+    #[default]
+    Inline,
+    /// Record the build and hand it out through
+    /// [`TraceSceneCache::take_build_jobs`].
+    ///
+    /// What a web host does, because wasm has no threads and the build would
+    /// otherwise stall the frame loop for as long as the model is large. A
+    /// mesh whose hierarchy has not arrived is simply absent from the packed
+    /// arena, so the scene fills in as builds land rather than blocking on
+    /// all of them.
+    Deferred,
+}
+
+/// A build that has been requested and not yet delivered.
+struct PendingBuild {
+    key: MeshKey,
+    /// Strong clones for the same reason [`CachedHierarchy`] holds them: while
+    /// this entry exists, the two addresses [`MeshKey`] is made of name the
+    /// allocations they were taken from. The sweep also guarantees that today,
+    /// by dropping any entry whose geometry the scene has replaced, so this is
+    /// the second of two guarantees rather than the only one. It is cheap and
+    /// it is local, which is what the sweep is not.
+    positions: Arc<Vec<[f32; 3]>>,
+    indices: Arc<Vec<u32>>,
+    /// Whether a drain has already handed this out.
+    ///
+    /// The entry outlives the drain, which is the guard: a result arrives with
+    /// a token, and having an entry to look that token up in is the only thing
+    /// that distinguishes a wanted build from a superseded one.
+    dispatched: bool,
+}
+
+/// One hierarchy build for a worker to run.
+///
+/// The buffers are counted references rather than copies: the boundary the host
+/// crosses copies once on its way out, and there is no reason to copy again on
+/// the way to it.
+#[derive(Debug, Clone)]
+pub struct BuildJob {
+    /// The token [`TraceSceneCache::submit_hierarchy`] takes back.
+    pub id: u64,
+    pub positions: Arc<Vec<[f32; 3]>>,
+    pub indices: Arc<Vec<u32>>,
 }
 
 /// A cached hierarchy, holding the buffers it was built over.
@@ -321,6 +384,13 @@ pub struct TraceSceneCache {
     /// One hierarchy per distinct positions-and-indices pair, shared by every
     /// object that names it.
     hierarchies: HashMap<MeshKey, CachedHierarchy>,
+    policy: BuildPolicy,
+    /// Requested builds, by token. Ordered so a drain is deterministic.
+    pending: BTreeMap<u64, PendingBuild>,
+    /// The token in flight for a mesh, so one mesh is requested once however
+    /// many objects name it.
+    in_flight: HashMap<MeshKey, u64>,
+    next_job: u64,
     arena: TraceArena,
     /// The atlas arrangement and the images it arranged, which travel together
     /// so an upload cannot read one against the other.
@@ -409,6 +479,13 @@ impl TraceSceneCache {
                 SceneOp::Clear => {
                     self.objects.clear();
                     self.hierarchies.clear();
+                    // Pending builds go too, and their tokens with them, so a
+                    // worker result that arrives after this is refused rather
+                    // than reviving a mesh the scene no longer holds. The
+                    // counter is never reset, which is what makes a stale token
+                    // unmatchable instead of ambiguous.
+                    self.pending.clear();
+                    self.in_flight.clear();
                     self.lights = None;
                     self.cameras = None;
                     self.dirty = true;
@@ -430,6 +507,12 @@ impl TraceSceneCache {
                 .flat_map(|o| o.meshes.iter().map(|m| m.key))
                 .collect();
             self.hierarchies.retain(|key, _| live.contains(key));
+            // Pending builds are swept on the same pass and for the same
+            // reason: an entry is what holds its two buffers alive, so a build
+            // for geometry nothing names any more is both wasted work and a
+            // pair of pinned addresses.
+            self.pending.retain(|_, p| live.contains(&p.key));
+            self.in_flight.retain(|key, _| live.contains(key));
         }
     }
 
@@ -523,6 +606,125 @@ impl TraceSceneCache {
         self.hierarchies.len()
     }
 
+    /// Sets where hierarchy builds happen. See [`BuildPolicy`].
+    ///
+    /// Set it before the first delta. Switching mid-scene is legal and does
+    /// nothing retroactive: hierarchies already built stay built and builds
+    /// already pending stay pending.
+    pub fn set_build_policy(&mut self, policy: BuildPolicy) {
+        self.policy = policy;
+    }
+
+    #[must_use]
+    pub fn build_policy(&self) -> BuildPolicy {
+        self.policy
+    }
+
+    /// Builds waiting on a worker, dispatched or not.
+    #[must_use]
+    pub fn pending_builds(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Hands out every requested build that has not been handed out yet.
+    ///
+    /// The entry stays behind after the drain rather than being consumed by it.
+    /// That is what makes [`TraceSceneCache::submit_hierarchy`] able to tell a
+    /// wanted result from a superseded one: without an entry to look the token
+    /// up in there is no guard at all, only a hierarchy and a hope.
+    ///
+    /// Always empty under [`BuildPolicy::Inline`], so a caller may pump it
+    /// unconditionally.
+    pub fn take_build_jobs(&mut self) -> Vec<BuildJob> {
+        self.pending
+            .iter_mut()
+            .filter(|(_, p)| !p.dispatched)
+            .map(|(id, p)| {
+                p.dispatched = true;
+                BuildJob {
+                    id: *id,
+                    positions: Arc::clone(&p.positions),
+                    indices: Arc::clone(&p.indices),
+                }
+            })
+            .collect()
+    }
+
+    /// Files a finished hierarchy against the build that asked for it.
+    ///
+    /// Returns whether it was accepted. A rejection is the ordinary outcome of
+    /// a scene that moved on: the token names a build the cache no longer has,
+    /// because the geometry was replaced, removed, or cleared while the worker
+    /// was busy. That is the guard, and it is why the token counter never
+    /// resets: a stale token cannot collide with a live one.
+    pub fn submit_hierarchy(&mut self, id: u64, bvh: Bvh) -> bool {
+        let Some(pending) = self.pending.remove(&id) else {
+            return false;
+        };
+        self.in_flight.remove(&pending.key);
+        let live = self
+            .objects
+            .values()
+            .any(|o| o.meshes.iter().any(|m| m.key == pending.key));
+        if !live {
+            return false;
+        }
+        self.hierarchies.insert(
+            pending.key,
+            CachedHierarchy {
+                stats: bvh.stats(),
+                bvh: Arc::new(bvh),
+                _positions: pending.positions,
+                _indices: pending.indices,
+            },
+        );
+        // The arena skipped this mesh while the build was out, so the scene has
+        // genuinely changed and the next repack has work to do.
+        self.dirty = true;
+        true
+    }
+
+    /// Makes sure a hierarchy for `key` exists or is on its way.
+    ///
+    /// The whole difference between the two policies, in one place, so the
+    /// build itself has exactly one call site under either.
+    fn ensure_hierarchy(&mut self, key: MeshKey, mesh: &solarxy_core::scene::CookedMesh) {
+        if self.hierarchies.contains_key(&key) {
+            return;
+        }
+        match self.policy {
+            BuildPolicy::Inline => {
+                let bvh = Bvh::build_triangles(&mesh.positions, &mesh.indices);
+                self.hierarchies.insert(
+                    key,
+                    CachedHierarchy {
+                        stats: bvh.stats(),
+                        bvh: Arc::new(bvh),
+                        _positions: Arc::clone(&mesh.positions),
+                        _indices: Arc::clone(&mesh.indices),
+                    },
+                );
+            }
+            BuildPolicy::Deferred => {
+                if self.in_flight.contains_key(&key) {
+                    return;
+                }
+                let id = self.next_job;
+                self.next_job += 1;
+                self.in_flight.insert(key, id);
+                self.pending.insert(
+                    id,
+                    PendingBuild {
+                        key,
+                        positions: Arc::clone(&mesh.positions),
+                        indices: Arc::clone(&mesh.indices),
+                        dispatched: false,
+                    },
+                );
+            }
+        }
+    }
+
     fn upsert(&mut self, id: SceneObjectId, geometry: &Arc<CookedGeometry>) {
         // The same total-no-op check the raster path makes, against the same
         // identity: the engine re-lowers the whole delta every frame, so an
@@ -546,15 +748,7 @@ impl TraceSceneCache {
             }
 
             let key = MeshKey::of(mesh);
-            self.hierarchies.entry(key).or_insert_with(|| {
-                let bvh = Bvh::build_triangles(&mesh.positions, &mesh.indices);
-                CachedHierarchy {
-                    stats: bvh.stats(),
-                    bvh: Arc::new(bvh),
-                    _positions: Arc::clone(&mesh.positions),
-                    _indices: Arc::clone(&mesh.indices),
-                }
-            });
+            self.ensure_hierarchy(key, mesh);
 
             meshes.push(TracedMesh {
                 cooked_index: u32::try_from(index).unwrap_or(u32::MAX),
@@ -847,6 +1041,24 @@ impl TraceSceneCache {
     pub fn material_textures(&self, slot: u32) -> Option<&MaterialTextures> {
         self.material_textures.get(slot as usize)
     }
+}
+
+/// Builds one hierarchy from flat buffers and packs it for transfer.
+///
+/// The whole of what a worker runs. It lives here rather than in the wasm
+/// boundary crate because this file is the one that already may not touch
+/// `wgpu`, which is the same constraint the worker imposes; putting it here
+/// means the boundary crate re-exports a build rather than owning one, and the
+/// native host calls exactly the same function.
+///
+/// `positions` is flat `xyz` triples. A trailing partial triple is ignored,
+/// because this reads whatever crossed a boundary and a malformed length should
+/// cost a vertex rather than the session.
+#[must_use]
+pub fn build_hierarchy_job(positions: &[f32], indices: &[u32]) -> Vec<u8> {
+    let usable = positions.len() - positions.len() % 3;
+    let points: &[[f32; 3]] = bytemuck::cast_slice(&positions[..usable]);
+    solarxy_bvh::transfer::pack(&Bvh::build_triangles(points, indices))
 }
 
 /// How the tracer identifies an image for packing.
@@ -1532,5 +1744,207 @@ mod tests {
         assert_eq!(cache.stats().atlas_layers, 0);
         assert_eq!(cache.stats().atlas_bytes, 0);
         assert!(cache.atlas().is_empty());
+    }
+
+    // ---- deferred builds ----
+
+    fn deferred() -> TraceSceneCache {
+        let mut cache = TraceSceneCache::new();
+        cache.set_build_policy(BuildPolicy::Deferred);
+        cache
+    }
+
+    /// Runs a pending job the way a worker would: pack on one side, unpack on
+    /// the other, so the test crosses the real codec rather than handing a
+    /// `Bvh` straight back.
+    fn run_job(job: &BuildJob) -> Bvh {
+        let flat: &[f32] = bytemuck::cast_slice(job.positions.as_slice());
+        let blob = build_hierarchy_job(flat, &job.indices);
+        solarxy_bvh::transfer::unpack(&blob).expect("a blob this side just wrote")
+    }
+
+    #[test]
+    fn a_deferred_scene_packs_nothing_until_its_build_lands() {
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        cache.repack();
+        // The object is ingested and its mesh is known; only the hierarchy is
+        // missing, so the arena has no instance to walk yet.
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.hierarchy_count(), 0);
+        assert_eq!(cache.stats().instances, 0);
+        assert_eq!(cache.pending_builds(), 1);
+
+        let jobs = cache.take_build_jobs();
+        assert_eq!(jobs.len(), 1);
+        assert!(cache.submit_hierarchy(jobs[0].id, run_job(&jobs[0])));
+
+        assert!(cache.repack().is_some(), "the submit made the arena stale");
+        assert_eq!(cache.hierarchy_count(), 1);
+        assert_eq!(cache.stats().instances, 1);
+        assert_eq!(cache.pending_builds(), 0);
+    }
+
+    #[test]
+    fn a_deferred_build_produces_the_hierarchy_the_inline_one_would_have() {
+        // The two policies differ in where the build runs and nowhere else, so
+        // the arenas have to come out byte for byte identical.
+        let geo = geometry(vec![mesh(MeshTopology::Triangles)]);
+        let mut inline = TraceSceneCache::new();
+        inline.apply(&upsert(1, &geo));
+        inline.repack();
+
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geo));
+        cache.repack();
+        for job in cache.take_build_jobs() {
+            assert!(cache.submit_hierarchy(job.id, run_job(&job)));
+        }
+        cache.repack();
+
+        assert_eq!(arena_bytes(&cache), arena_bytes(&inline));
+    }
+
+    #[test]
+    fn one_mesh_named_by_two_objects_is_built_once() {
+        let geo = geometry(vec![mesh(MeshTopology::Triangles)]);
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geo));
+        cache.apply(&upsert(2, &geo));
+        assert_eq!(cache.pending_builds(), 1, "one mesh, one build");
+
+        let jobs = cache.take_build_jobs();
+        assert_eq!(jobs.len(), 1);
+        assert!(cache.submit_hierarchy(jobs[0].id, run_job(&jobs[0])));
+        cache.repack();
+        assert_eq!(cache.stats().instances, 2, "both objects placed");
+    }
+
+    #[test]
+    fn a_drain_does_not_hand_the_same_build_out_twice() {
+        // A host pumps this every frame and a worker takes many frames, so the
+        // second drain has to be empty or the same mesh is built repeatedly.
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        assert_eq!(cache.take_build_jobs().len(), 1);
+        assert!(cache.take_build_jobs().is_empty());
+        assert_eq!(cache.pending_builds(), 1, "still in flight, not forgotten");
+    }
+
+    #[test]
+    fn a_result_for_geometry_the_scene_has_dropped_is_refused() {
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        let jobs = cache.take_build_jobs();
+        let bvh = run_job(&jobs[0]);
+
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::Remove {
+                id: SceneObjectId(1),
+            }],
+        });
+        assert!(
+            !cache.submit_hierarchy(jobs[0].id, bvh),
+            "the mesh is gone; filing this would revive it"
+        );
+        assert_eq!(cache.hierarchy_count(), 0);
+    }
+
+    #[test]
+    fn a_result_that_arrives_after_a_clear_is_refused() {
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        let jobs = cache.take_build_jobs();
+        let bvh = run_job(&jobs[0]);
+
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::Clear],
+        });
+        assert_eq!(cache.pending_builds(), 0);
+        assert!(!cache.submit_hierarchy(jobs[0].id, bvh));
+    }
+
+    #[test]
+    fn an_unknown_token_is_refused_rather_than_matched() {
+        // The counter never resets, so a token from a cleared scene cannot
+        // collide with a live one. This is what makes that guarantee testable.
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        let jobs = cache.take_build_jobs();
+        let bvh = run_job(&jobs[0]);
+        assert!(!cache.submit_hierarchy(jobs[0].id + 1000, bvh));
+        assert_eq!(cache.pending_builds(), 1, "the real one is untouched");
+    }
+
+    #[test]
+    fn replacing_geometry_sweeps_the_build_it_had_already_asked_for() {
+        // Two things at once. The obvious one is that a build for geometry
+        // nothing names any more is wasted work. The load-bearing one is that
+        // the sweep is what keeps a pending entry's recorded key meaningful:
+        // the key is a pair of allocation addresses, and an entry that outlived
+        // its geometry would go on naming addresses the allocator is free to
+        // hand to the next mesh.
+        let mut cache = deferred();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        let stale = cache.take_build_jobs();
+        assert_eq!(stale.len(), 1);
+
+        // A different allocation, so a different key.
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        assert_eq!(
+            cache.pending_builds(),
+            1,
+            "the old build is gone and the new one is asked for"
+        );
+        assert!(
+            !cache.submit_hierarchy(stale[0].id, run_job(&stale[0])),
+            "the superseded build has no entry to file against"
+        );
+
+        // The new one still completes normally.
+        let fresh = cache.take_build_jobs();
+        assert_eq!(fresh.len(), 1);
+        assert_ne!(fresh[0].id, stale[0].id);
+        assert!(cache.submit_hierarchy(fresh[0].id, run_job(&fresh[0])));
+        cache.repack();
+        assert_eq!(cache.stats().instances, 1);
+    }
+
+    #[test]
+    fn the_inline_policy_hands_out_no_jobs_at_all() {
+        // A host may pump the drain unconditionally, so under the default this
+        // has to be an empty vector rather than an error or a panic.
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        assert_eq!(cache.build_policy(), BuildPolicy::Inline);
+        assert_eq!(cache.hierarchy_count(), 1);
+        assert!(cache.take_build_jobs().is_empty());
+        assert_eq!(cache.pending_builds(), 0);
+    }
+
+    #[test]
+    fn a_worker_build_of_a_flat_buffer_matches_a_direct_one() {
+        let (positions, indices) = solarxy_bvh::corpus::sphere(12, 8);
+        let flat: &[f32] = bytemuck::cast_slice(&positions);
+        let through_the_boundary =
+            solarxy_bvh::transfer::unpack(&build_hierarchy_job(flat, &indices))
+                .expect("round trip");
+        let direct = Bvh::build_triangles(&positions, &indices);
+        assert_eq!(through_the_boundary.nodes(), direct.nodes());
+        assert_eq!(through_the_boundary.prim_indices(), direct.prim_indices());
+    }
+
+    #[test]
+    fn a_trailing_partial_triple_costs_a_vertex_rather_than_the_session() {
+        let (positions, indices) = solarxy_bvh::corpus::sphere(12, 8);
+        let mut flat: Vec<f32> = bytemuck::cast_slice::<[f32; 3], f32>(&positions).to_vec();
+        flat.push(1.0);
+        flat.push(2.0);
+        let bvh = solarxy_bvh::transfer::unpack(&build_hierarchy_job(&flat, &indices))
+            .expect("round trip");
+        assert_eq!(
+            bvh.nodes(),
+            Bvh::build_triangles(&positions, &indices).nodes()
+        );
     }
 }

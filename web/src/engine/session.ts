@@ -55,7 +55,7 @@ import type {
 let importWorker: Worker | null = null;
 
 interface WorkerResult {
-  kind: "parse" | "validate" | "hdri" | "decodeImage";
+  kind: "parse" | "validate" | "hdri" | "decodeImage" | "buildBvh";
   jobId: number;
   ctx: GraphContext;
   blob?: Uint8Array;
@@ -68,6 +68,8 @@ interface WorkerResult {
   width?: number;
   height?: number;
   pixels?: Uint8Array;
+  /** The packed acceleration structure (buildBvh kind). */
+  bvh?: Uint8Array;
   error?: string;
   /** True when `error` is a wasm trap (our bug) rather than a bad input file
    * (the user's). The worker distinguishes them; only the former is reported. */
@@ -89,6 +91,18 @@ let previewToken = -1_000_000;
 const previewWaiters = new Map<
   number,
   { resolve: (blob: Uint8Array) => void; reject: (e: Error) => void }
+>();
+
+// Hierarchy builds are renderer work rather than engine jobs, so they resolve
+// through their own promise map on their own negative token range, exactly as
+// HDRI preparation and asset previews do. Nothing calls this yet: the traced
+// scene is not on either shell's frame path this release, and the still-render
+// job is its first caller. It is here now so the build has somewhere to happen
+// that is not the main thread, which is the whole point of the exercise.
+let bvhToken = -2_000_000;
+const bvhWaiters = new Map<
+  number,
+  { resolve: (b: Uint8Array) => void; reject: (e: Error) => void }
 >();
 
 /** Parses a staged model in the import worker (off the main thread) and
@@ -159,6 +173,36 @@ function prepareHdriInWorker(bytes: Uint8Array, format: string): Promise<Uint8Ar
   });
 }
 
+/** Builds one acceleration structure in the import worker; resolves with the
+ * packed transfer blob the renderer's codec reads.
+ *
+ * Both buffers are transferred rather than copied, so the caller must not
+ * touch them afterwards. That is the right trade here: they are the largest
+ * things that cross this boundary, and a caller asking for a build over a mesh
+ * has no further use for its own copy of it. */
+export function buildHierarchyInWorker(
+  positions: Float32Array,
+  indices: Uint32Array,
+): Promise<Uint8Array> {
+  const worker = ensureImportWorker();
+  const token = bvhToken;
+  bvhToken -= 1;
+  return new Promise((resolve, reject) => {
+    bvhWaiters.set(token, { resolve, reject });
+    try {
+      worker.postMessage({ kind: "buildBvh", jobId: token, ctx: "root", positions, indices }, [
+        positions.buffer,
+        indices.buffer,
+      ]);
+    } catch (e) {
+      // A failed post never yields a reply; drop the waiter so it does not
+      // leak, and reject so the caller sees the error.
+      bvhWaiters.delete(token);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
+  });
+}
+
 function ensureImportWorker(): Worker {
   if (!importWorker) {
     importWorker = new Worker(new URL("./importWorker.ts", import.meta.url), { type: "module" });
@@ -184,6 +228,18 @@ function onWorkerResult(data: WorkerResult): void {
   if (data.kind === "hdri") {
     hdriWaiters.get(data.jobId)?.(data);
     hdriWaiters.delete(data.jobId);
+    return;
+  }
+  if (data.kind === "buildBvh") {
+    const waiter = bvhWaiters.get(data.jobId);
+    bvhWaiters.delete(data.jobId);
+    if (waiter) {
+      if (data.error !== undefined || !data.bvh) {
+        waiter.reject(new Error(data.error ?? "the build produced nothing"));
+      } else {
+        waiter.resolve(data.bvh);
+      }
+    }
     return;
   }
   // Preview parses resolve their own promise (keyed by the negative token)

@@ -22,6 +22,9 @@
 //! - [`Bvh::intersect_instances`] / [`Bvh::occluded_instances`] — the same two
 //!   queries over the two-level structure, transforming the ray into each
 //!   instance's object space.
+//! - [`transfer`] — [`transfer::pack`] and [`transfer::unpack`], because on web
+//!   the build runs in the import worker's own wasm heap and a finished
+//!   hierarchy has to cross as bytes.
 //! - [`corpus`] — the deterministic meshes and ray set every comparison of
 //!   those implementations draws from, here rather than in a test so the
 //!   comparison that lives in another crate draws from the same one.
@@ -57,6 +60,7 @@ pub mod bounds;
 pub mod build;
 pub mod corpus;
 pub mod node;
+pub mod transfer;
 pub mod traverse;
 
 pub use bounds::Bounds;

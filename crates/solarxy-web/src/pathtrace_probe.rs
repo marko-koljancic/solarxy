@@ -272,3 +272,46 @@ fn transformed_bounds(positions: &[[f32; 3]], world: &[[f32; 4]; 4]) -> AABB {
         max: cgmath::Point3::new(max[0], max[1], max[2]),
     }
 }
+
+/// A deterministic mesh large enough to make a hierarchy build measurable.
+///
+/// Generated rather than fetched so the harness needs no model file and every
+/// run measures the same geometry. Returns `{ positions, indices, triangles }`
+/// with positions as flat `xyz`, which is what
+/// [`solarxy_web::build_bvh_job`](crate::build_bvh_job) takes.
+#[wasm_bindgen]
+pub fn bvh_corpus_mesh(width: u32, height: u32) -> Result<JsValue, JsError> {
+    let (positions, indices) = corpus::sphere(width, height);
+    let flat: &[f32] = bytemuck::cast_slice(&positions);
+    let out = js_sys::Object::new();
+    let set = |key: &str, value: &JsValue| {
+        js_sys::Reflect::set(&out, &JsValue::from_str(key), value)
+            .map_err(|_| JsError::new("bvh_corpus_mesh: reflect set failed"))
+            .map(|_| ())
+    };
+    set("positions", &js_sys::Float32Array::from(flat).into())?;
+    set(
+        "indices",
+        &js_sys::Uint32Array::from(indices.as_slice()).into(),
+    )?;
+    set("triangles", &JsValue::from_f64((indices.len() / 3) as f64))?;
+    Ok(out.into())
+}
+
+/// Reads a packed hierarchy blob back and reports what is in it.
+///
+/// The harness needs this because a build that silently produced nothing takes
+/// the same shape as one that worked: a blob comes back and a promise settles.
+/// Returns `nodes,primitives,triangles`.
+#[wasm_bindgen]
+pub fn bvh_blob_summary(blob: &[u8]) -> Result<String, JsError> {
+    let bvh =
+        solarxy_bvh::transfer::unpack(blob).map_err(|e| JsError::new(&format!("unpack: {e}")))?;
+    let stats = bvh.stats();
+    Ok(format!(
+        "{},{},{}",
+        bvh.nodes().len(),
+        bvh.prim_indices().len(),
+        stats.prim_count
+    ))
+}

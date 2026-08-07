@@ -10,6 +10,7 @@
 // parse (the decision-18 cut-line); see `draco.ts`.
 
 import init, {
+  build_bvh_job,
   parse_model_job,
   prepare_hdri_job,
   validate_geometry_job,
@@ -55,6 +56,19 @@ interface ValidateRequest {
   /** JSON `ValidationConfig`. */
   configJson: string;
   budget?: number;
+}
+
+/** The hierarchy-build request: one mesh in, one packed acceleration
+ * structure out. Here rather than on the main thread because wasm has no
+ * threads and a build over a million triangles is seconds, which on the main
+ * thread is seconds of stalled frame loop. */
+interface BuildBvhRequest {
+  kind: "buildBvh";
+  jobId: number;
+  ctx: GraphContext;
+  /** Flat `xyz` triples. */
+  positions: Float32Array;
+  indices: Uint32Array;
 }
 
 /** The image-decode request (`import_image`). Decoded entirely
@@ -111,7 +125,9 @@ function ensureReady(): Promise<void> {
 const ctx = self as unknown as Worker;
 
 ctx.onmessage = async (
-  event: MessageEvent<ParseRequest | ValidateRequest | HdriRequest | DecodeImageRequest>,
+  event: MessageEvent<
+    ParseRequest | ValidateRequest | HdriRequest | DecodeImageRequest | BuildBvhRequest
+  >,
 ) => {
   const req = event.data;
   try {
@@ -134,6 +150,11 @@ ctx.onmessage = async (
     if (req.kind === "validate") {
       const validation = validate_geometry_job(req.blob, req.configJson, req.budget);
       ctx.postMessage({ kind: "validate", jobId: req.jobId, ctx: req.ctx, validation });
+      return;
+    }
+    if (req.kind === "buildBvh") {
+      const bvh = build_bvh_job(req.positions, req.indices);
+      ctx.postMessage({ kind: "buildBvh", jobId: req.jobId, ctx: req.ctx, bvh }, [bvh.buffer]);
       return;
     }
     // Draco lives only inside glTF; de-compress the primary file first so
