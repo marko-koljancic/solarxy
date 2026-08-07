@@ -5,6 +5,7 @@ members = [
     "crates/solarxy-formats",
     "crates/solarxy-imaging",
     "crates/solarxy-kernel",
+    "crates/solarxy-bvh",
     "crates/solarxy-graph",
     "crates/solarxy-scenefile",
     "crates/solarxy-web",

@@ -153,7 +153,7 @@ The `getrandom_backend="wasm_js"` rustflag for `wasm32` lives in the workspace `
 
 ## Workspace Structure
 
-Solarxy is a Rust workspace of 13 members: the root GUI binary plus 12 crates spanning the desktop GUI, the CLI, and the web shell, alongside the `web/` React frontend.
+Solarxy is a Rust workspace of 14 members: the root GUI binary plus 13 crates spanning the desktop GUI, the CLI, and the web shell, alongside the `web/` React frontend.
 
 | Crate | Description |
 |---|---|
@@ -162,6 +162,7 @@ Solarxy is a Rust workspace of 13 members: the root GUI binary plus 12 crates sp
 | [`solarxy-formats`](crates/solarxy-formats/) | OBJ / STL / PLY / glTF loaders to `RawModelData`. Byte-first API (wasm-clean); path wrappers behind `std-fs`. |
 | [`solarxy-imaging`](crates/solarxy-imaging/) | Pure-CPU image operators for the texture context: adjust, composite, generate, filter, and ORM packing over `RawImageData`. Deterministic, single-threaded, wasm-clean. |
 | [`solarxy-kernel`](crates/solarxy-kernel/) | Pure-CPU parametric geometry: `GeometrySet`, the primitive generators, transform bake, and merge. wasm-clean, no wgpu/fs. |
+| [`solarxy-bvh`](crates/solarxy-bvh/) | GPU-free bounding volume hierarchy for ray queries: the 32-byte node, a binned-SAH BVH2 builder, the two-level structure, and the CPU traversal the shader kernel is a twin of. Depends on `solarxy-core` alone, so the import worker can build one without a GPU. |
 | [`solarxy-graph`](crates/solarxy-graph/) | The headless studio core: node-graph document, topology, cook engine, node registry (77 node types + typed-port coercion), undo, review, and the `Engine` facade (Command in, EventBatch out). No wgpu, no winit. |
 | [`solarxy-scenefile`](crates/solarxy-scenefile/) | The `.slxy` self-contained scene file: schema-owned scene/manifest types, the ZIP container with content-addressed asset blobs, SHA-256 integrity, and the schema-version migration gate. |
 | [`solarxy-renderer`](crates/solarxy-renderer/) | All wgpu state: pipelines, shaders, IBL / SSAO / bloom / shadow / composite, and the multi-object `SceneObjects` path. winit/egui-decoupled; compiles to wasm32. |

@@ -4079,6 +4079,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solarxy-bvh"
+version = "0.8.2"
+dependencies = [
+ "bytemuck",
+ "cgmath",
+ "solarxy-core",
+]
+
+[[package]]
 name = "solarxy-cli"
 version = "0.8.2"
 dependencies = [
