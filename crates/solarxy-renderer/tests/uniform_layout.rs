@@ -34,6 +34,15 @@ use wgpu::naga;
 struct Case {
     /// Shader source, relative to `src/shaders/`.
     shader: &'static str,
+    /// Sources prepended before `shader` so it parses.
+    ///
+    /// Empty for every pass that owns a whole shader. The path tracer's kernels
+    /// are fragments composed by `concat!`, because WGSL has no include
+    /// mechanism and its traversal has to be one text shared by several
+    /// kernels and by the test that pins it to a CPU twin. A fragment that
+    /// names the traversal's types does not parse alone, so the case has to
+    /// name what the host composes it over.
+    prelude: &'static [&'static str],
     /// The `struct` name inside that shader.
     struct_name: &'static str,
     /// `std::mem::size_of` of the Rust type it mirrors.
@@ -52,6 +61,7 @@ struct Case {
 const CASES: &[Case] = &[
     Case {
         shader: "label.wgsl",
+        prelude: &[],
         struct_name: "LabelParams",
         rust_size: solarxy_renderer::labels::LABEL_PARAMS_SIZE,
         rust_type: "solarxy_renderer::labels::LabelParams",
@@ -64,6 +74,7 @@ const CASES: &[Case] = &[
     // assert cannot see the shader.
     Case {
         shader: "shader.wgsl",
+        prelude: &[],
         struct_name: "LightsUniform",
         rust_size: std::mem::size_of::<solarxy_renderer::light::LightsUniform>(),
         rust_type: "solarxy_renderer::light::LightsUniform",
@@ -77,6 +88,7 @@ const CASES: &[Case] = &[
     // else in the build compares the two sides.
     Case {
         shader: "shader.wgsl",
+        prelude: &[],
         struct_name: "MaterialUniform",
         rust_size: std::mem::size_of::<solarxy_renderer::material::MaterialUniform>(),
         rust_type: "solarxy_renderer::material::MaterialUniform",
@@ -89,9 +101,64 @@ const CASES: &[Case] = &[
     // pane's encoder, so a rejected binding discards the whole frame.
     Case {
         shader: "composite.wgsl",
+        prelude: &[],
         struct_name: "CompositeParams",
         rust_size: std::mem::size_of::<solarxy_renderer::composite::CompositeParams>(),
         rust_type: "solarxy_renderer::composite::CompositeParams",
+    },
+    // The path tracer's records. These are storage-buffer structs rather than
+    // uniforms, and they belong here for the same reason: nothing else in the
+    // build compares the two sides, and the arithmetic that reads them is
+    // index arithmetic, so a stride that disagrees does not fail, it reads the
+    // wrong bytes and traces a plausible image of nothing.
+    //
+    // `BvhNode` is the one that most needs watching. Its fourth field is named
+    // `meta` in Rust and `packed` in WGSL, because `meta` is a WGSL reserved
+    // keyword; two names for the same four bytes, held together by nothing
+    // except this row.
+    Case {
+        shader: "pathtrace/traverse.wgsl",
+        prelude: &[],
+        struct_name: "BvhNode",
+        rust_size: std::mem::size_of::<solarxy_bvh::BvhNode>(),
+        rust_type: "solarxy_bvh::BvhNode",
+    },
+    Case {
+        shader: "pathtrace/traverse.wgsl",
+        prelude: &[],
+        struct_name: "Instance",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::arena::Instance>(),
+        rust_type: "solarxy_renderer::pathtrace::arena::Instance",
+    },
+    Case {
+        shader: "pathtrace/traverse.wgsl",
+        prelude: &[],
+        struct_name: "VertexAttr",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::arena::VertexAttr>(),
+        rust_type: "solarxy_renderer::pathtrace::arena::VertexAttr",
+    },
+    // `trace.wgsl` is a fragment: it names the traversal's types, so it only
+    // parses composed over it, the same way the host builds it.
+    Case {
+        shader: "pathtrace/trace.wgsl",
+        prelude: &["pathtrace/traverse.wgsl"],
+        struct_name: "TraceParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::TraceParams>(),
+        rust_type: "solarxy_renderer::pathtrace::TraceParams",
+    },
+    Case {
+        shader: "pathtrace/parity.wgsl",
+        prelude: &["pathtrace/traverse.wgsl"],
+        struct_name: "CorpusRay",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::CorpusRay>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::CorpusRay",
+    },
+    Case {
+        shader: "pathtrace/parity.wgsl",
+        prelude: &["pathtrace/traverse.wgsl"],
+        struct_name: "CorpusHit",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::CorpusHit>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::CorpusHit",
     },
 ];
 
@@ -123,7 +190,11 @@ fn wgsl_struct_size(source: &str, struct_name: &str) -> u32 {
 #[test]
 fn wgsl_uniforms_match_their_rust_structs() {
     for case in CASES {
-        let source = shader_source(case.shader);
+        let mut source = String::new();
+        for fragment in case.prelude {
+            source.push_str(&shader_source(fragment));
+        }
+        source.push_str(&shader_source(case.shader));
         let wgsl = wgsl_struct_size(&source, case.struct_name) as usize;
         assert_eq!(
             wgsl, case.rust_size,

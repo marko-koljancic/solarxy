@@ -77,6 +77,7 @@ pub mod model;
 pub mod outline;
 pub mod overdraw;
 pub mod panes;
+pub mod pathtrace;
 pub mod pipeline_builder;
 pub mod pipelines;
 pub mod resources;

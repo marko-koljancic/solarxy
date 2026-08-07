@@ -481,7 +481,7 @@ fn partition_by_median(prims: &[PrimRef], order: &mut [u32], axis: usize) -> u32
 #[cfg(test)]
 mod tests {
     use super::{Bvh, MAX_DEPTH, MAX_LEAF_SIZE, TARGET_LEAF_SIZE};
-    use crate::test_meshes::grid;
+    use crate::corpus::grid;
 
     #[test]
     fn an_empty_input_still_has_a_root() {

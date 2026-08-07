@@ -14,6 +14,13 @@ publish = false
 # the (mostly wasm-gated) crate as an ordinary library.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The traversal parity probe, off by default so neither it nor the corpus
+# generator it reaches for is in the shipped artifact. On for the smoke
+# harness, which is the only thing that drives it:
+#   bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe
+pt-probe = ["dep:solarxy-bvh"]
+
 [dependencies]
 # Native-safe: these compile on every target, so `cargo build --workspace`
 # stays green. The wasm-only host lives behind cfg(target_arch = "wasm32").
@@ -29,6 +36,9 @@ solarxy-host = { path = "../solarxy-host" }
 # Likewise pure CPU math: the gizmo drag's rotate result is decomposed back into
 # Euler angles through the kernel at the point this shell commits it.
 solarxy-kernel = { path = "../solarxy-kernel" }
+# The hierarchy, for the traversal probe's CPU side only. Optional so the
+# shipped artifact does not carry the corpus generator.
+solarxy-bvh = { path = "../solarxy-bvh", optional = true }
 cgmath = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 

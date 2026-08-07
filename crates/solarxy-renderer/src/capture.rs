@@ -12,7 +12,16 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 /// (`COPY_BYTES_PER_ROW_ALIGNMENT`).
 #[must_use]
 pub fn padded_row_bytes(width: u32) -> u32 {
-    let unpadded = width * 4;
+    padded_row_bytes_for(width, 4)
+}
+
+/// Bytes per padded row for a copy of `width` texels at `bytes_per_pixel`.
+///
+/// The tracer's targets are `Rgba32Float`, four times the width of a screenshot
+/// row, so the alignment arithmetic cannot assume a byte count.
+#[must_use]
+pub fn padded_row_bytes_for(width: u32, bytes_per_pixel: u32) -> u32 {
+    let unpadded = width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     unpadded.div_ceil(align) * align
 }
@@ -28,7 +37,14 @@ pub fn encode_capture(
     rect: (u32, u32, u32, u32),
 ) -> (wgpu::Buffer, u32) {
     let (x, y, width, height) = rect;
-    let padded = padded_row_bytes(width);
+    // Taken from the texture rather than assumed: every caller today copies an
+    // 8-bit-per-channel surface, and the tracer's float targets are the first
+    // that are not.
+    let bytes_per_pixel = texture
+        .format()
+        .block_copy_size(Some(wgpu::TextureAspect::All))
+        .unwrap_or(4);
+    let padded = padded_row_bytes_for(width, bytes_per_pixel);
 
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Capture Staging Buffer"),

@@ -19,6 +19,12 @@
 //! - [`Bvh::intersect_triangles`] / [`Bvh::occluded_triangles`] — the CPU
 //!   traversal the WGSL kernel is a twin of, and the reference a parity corpus
 //!   holds it to.
+//! - [`Bvh::intersect_instances`] / [`Bvh::occluded_instances`] — the same two
+//!   queries over the two-level structure, transforming the ray into each
+//!   instance's object space.
+//! - [`corpus`] — the deterministic meshes and ray set every comparison of
+//!   those implementations draws from, here rather than in a test so the
+//!   comparison that lives in another crate draws from the same one.
 //!
 //! Two invariants hold across the whole crate and the shader that mirrors it:
 //! a node's left child is always the next node, and tree depth stays under
@@ -49,13 +55,12 @@
 
 pub mod bounds;
 pub mod build;
+pub mod corpus;
 pub mod node;
 pub mod traverse;
 
-#[cfg(test)]
-mod test_meshes;
-
 pub use bounds::Bounds;
 pub use build::{Bvh, BvhStats, GpuArrays, MAX_DEPTH, MAX_LEAF_SIZE, TARGET_LEAF_SIZE};
+pub use corpus::CorpusRay;
 pub use node::{BvhNode, LEAF_FLAG};
-pub use traverse::{TRAVERSAL_STACK_SIZE, TriangleHit};
+pub use traverse::{InstanceHit, Instanced, TRAVERSAL_STACK_SIZE, TriangleHit};

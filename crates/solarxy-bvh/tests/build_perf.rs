@@ -20,11 +20,9 @@
 //! signal, and averaging it away would hide exactly what a sustained-load
 //! judgement needs to see.
 
-mod common;
-
 use std::time::Instant;
 
-use solarxy_bvh::Bvh;
+use solarxy_bvh::{Bvh, corpus};
 
 /// A sphere with a million triangles: `1000 * 500 * 2`.
 const WIDTH: u32 = 1000;
@@ -35,7 +33,7 @@ const RUNS: usize = 3;
 #[ignore = "measurement, not a regression gate; run with --release --ignored"]
 fn build_one_million_triangles() {
     let generate = Instant::now();
-    let (positions, indices) = common::sphere(WIDTH, HEIGHT);
+    let (positions, indices) = corpus::sphere(WIDTH, HEIGHT);
     let generate_ms = generate.elapsed().as_secs_f64() * 1000.0;
     let tri_count = indices.len() / 3;
     assert_eq!(tri_count, 1_000_000);

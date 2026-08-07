@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>solarxy pathtrace traversal probe</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #0d1017; color: #cbccc6;
+        font: 14px system-ui, sans-serif; }
+      main { max-width: 720px; margin: 0 auto; padding: 24px; }
+      h1 { font-size: 18px; font-weight: 600; }
+      p { line-height: 1.6; color: #8a8f98; }
+      #status { white-space: pre-wrap; font-family: ui-monospace, monospace;
+        background: #12151c; border: 1px solid #1c1f26; padding: 12px; }
+      .ok { color: #7fd962; } .bad { color: #e5484d; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Path tracer: traversal parity probe</h1>
+      <p>
+        Builds the traversal kernel on this browser's WebGPU implementation, drives a
+        corpus of rays through it, drives the same corpus through the CPU traversal in
+        the same wasm instance, and compares. The desktop runs the exhaustive version of
+        this check; what only a browser can answer is whether its own WGSL front end
+        accepts the kernel at all.
+      </p>
+      <p>
+        Build with the probe on:
+        <code>bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe</code>
+      </p>
+      <div id="status">booting...</div>
+    </main>
+    <script type="module">
+      const statusEl = document.getElementById("status");
+      const set = (msg, cls) => {
+        statusEl.textContent = msg;
+        statusEl.className = cls || "";
+        // A machine-readable marker, matching the convention the other smoke
+        // page uses.
+        console.log("PT_PROBE " + (cls || "info") + " :: " + msg);
+      };
+
+      try {
+        if (!navigator.gpu) throw new Error("WebGPU unavailable (navigator.gpu missing)");
+        const mod = await import("./pkg/solarxy_web.js?v=" + Date.now());
+        await mod.default();
+        mod.start && mod.start();
+        if (!mod.PathtraceProbe) {
+          throw new Error("this wasm was built without --features pt-probe");
+        }
+
+        set("requesting a device and building the pipeline...");
+        const probe = await mod.PathtraceProbe.create();
+        set("pipeline built; dispatching the corpus...");
+
+        // Polled on a timer rather than an animation frame. An occluded or
+        // backgrounded tab gets no animation frames at all, so a harness that
+        // awaited one would hang here rather than report, which is exactly the
+        // situation an automated run is in.
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        let json = null;
+        for (let attempt = 0; attempt < 600 && json === null; attempt += 1) {
+          json = probe.poll();
+          if (json === null || json === undefined) await wait(16);
+        }
+        if (!json) throw new Error("the corpus readback never resolved");
+
+        const result = JSON.parse(json);
+        const summary =
+          `rays: ${result.rays}\n` +
+          `hits: ${result.hits}\n` +
+          `instances: ${result.instances}\n` +
+          (result.mismatches.length
+            ? `mismatches:\n  ${result.mismatches.join("\n  ")}`
+            : "the kernel agrees with the CPU traversal on every ray");
+        set(summary, result.ok ? "ok" : "bad");
+        console.log("PT_PROBE_DONE " + (result.ok ? "pass" : "fail"));
+      } catch (e) {
+        set("failed: " + (e && e.message ? e.message : String(e)), "bad");
+        console.log("PT_PROBE_DONE fail");
+      }
+    </script>
+  </body>
+</html>

@@ -277,6 +277,7 @@ impl BindGroupLayouts {
             label: Some("outline_params_bind_group_layout"),
             entries: &[bgl_uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
         });
+
         BindGroupLayouts {
             texture,
             camera,
@@ -307,6 +308,88 @@ impl BindGroupLayouts {
     }
 }
 
+/// The path tracer's four bind group layouts.
+///
+/// Declared here with every other layout, so this file stays the single source
+/// of truth, but built separately and only when a tracer exists. That is not
+/// tidiness: the scene group binds five storage buffers in the compute stage,
+/// which core WebGPU allows (eight per stage) and
+/// `Limits::downlevel_defaults()` does not (four). Building them inside
+/// [`BindGroupLayouts::new`] would impose the tracer's limits on every consumer
+/// of the registry, including the desktop shell, the golden harness, and any
+/// headless tool that never traces a ray. It is not a hypothetical: it broke
+/// the renderer's own smoke suite, which requests downlevel limits deliberately.
+///
+/// The numbering across the four groups is a budget rather than a convention.
+/// Core WebGPU grants four bind groups, eight storage buffers and four storage
+/// textures per stage, and the tracer's final shape spends all of them, so a
+/// ninth logical array is a design error rather than a refactor.
+pub struct PathtraceLayouts {
+    /// Group 0: the scene arena's storage buffers.
+    pub scene: wgpu::BindGroupLayout,
+    /// Group 1: the storage textures the kernel writes.
+    pub target: wgpu::BindGroupLayout,
+    /// Group 2: sampled textures. Empty until the atlas and the environment
+    /// exist, and present so nothing renumbers when they do.
+    pub sampled: wgpu::BindGroupLayout,
+    /// Group 3: the camera and per-dispatch uniforms.
+    pub params: wgpu::BindGroupLayout,
+}
+
+impl PathtraceLayouts {
+    /// Builds all four. Requires a device with core WebGPU limits.
+    #[must_use]
+    pub fn new(device: &wgpu::Device) -> Self {
+        // Bindings 4 and 5 of the scene group are materials and lights, and 7
+        // is the ninth-array escape hatch. They arrive with their consumers
+        // rather than as placeholders, so the numbering is deliberately not
+        // contiguous and a later stage does not renegotiate it.
+        let scene = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_scene_bind_group_layout"),
+            entries: &[
+                bgl_compute_storage_entry(0),
+                bgl_compute_storage_entry(1),
+                bgl_compute_storage_entry(2),
+                bgl_compute_storage_entry(3),
+                bgl_compute_storage_entry(6),
+            ],
+        });
+        // The accumulation group. It ends as four ping-ponged `Rgba32Float`
+        // storage textures, colour and auxiliary; the tracer writes one debug
+        // target until the accumulator arrives. Read-write on this format is
+        // not portable -- core WebGPU grants it for `r32uint`, `r32sint` and
+        // `r32float` only -- which is why the pair ping-pongs rather than
+        // accumulating in place, and why this group has no headroom.
+        let target = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_target_bind_group_layout"),
+            entries: &[bgl_storage_texture_entry(
+                0,
+                wgpu::StorageTextureAccess::WriteOnly,
+            )],
+        });
+        // wgpu indexes a pipeline layout by group number, so the sampled
+        // group's gap is spelled as an empty layout rather than by renumbering
+        // the uniforms into it and back out again when the atlas lands.
+        let sampled = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_sampled_bind_group_layout"),
+            entries: &[],
+        });
+        let params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_params_bind_group_layout"),
+            entries: &[
+                bgl_uniform_entry(0, wgpu::ShaderStages::COMPUTE),
+                bgl_uniform_entry(1, wgpu::ShaderStages::COMPUTE),
+            ],
+        });
+        Self {
+            scene,
+            target,
+            sampled,
+            params,
+        }
+    }
+}
+
 fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
@@ -315,6 +398,47 @@ fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::Bind
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
             min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage read-only storage buffer entry.
+///
+/// Separate from [`bgl_storage_entry`] rather than taking a visibility, because
+/// every raster storage binding is vertex-stage and every tracer one is
+/// compute-stage; a shared parameter would be a parameter with two callers and
+/// one value each.
+fn bgl_compute_storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A compute-stage `Rgba32Float` 2D storage texture entry.
+///
+/// The access mode is explicit at every call site because it is the thing the
+/// platform constrains: `ReadWrite` is not available for this format on core
+/// WebGPU, and native wgpu only rejects it at bind *group* creation, so a probe
+/// that stops at the layout gets a false all-clear.
+fn bgl_storage_texture_entry(
+    binding: u32,
+    access: wgpu::StorageTextureAccess,
+) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::StorageTexture {
+            access,
+            format: wgpu::TextureFormat::Rgba32Float,
+            view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
     }

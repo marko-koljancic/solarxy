@@ -160,6 +160,215 @@ impl Bvh {
 
         false
     }
+
+    /// Nearest hit within `t_max` across every instance, or `None`.
+    ///
+    /// `self` is the top-level hierarchy, built by [`Bvh::build_tlas`] over the
+    /// instances' world-space boxes, so its leaves name entries of
+    /// `instances` rather than triangles. Each candidate instance transforms
+    /// the ray into its own object space and descends its own hierarchy, which
+    /// is what makes an instanced mesh one hierarchy and N placements instead
+    /// of N hierarchies.
+    ///
+    /// An out-of-range instance index is skipped rather than panicking, for the
+    /// same reason the triangle test tolerates a bad vertex index: this runs
+    /// over whatever a scene contained.
+    #[must_use]
+    pub fn intersect_instances(
+        &self,
+        origin: [f32; 3],
+        direction: [f32; 3],
+        t_max: f32,
+        instances: &[Instanced<'_>],
+    ) -> Option<InstanceHit> {
+        let inv_dir = invert(direction);
+        let mut stack = [0u32; TRAVERSAL_STACK_SIZE];
+        let mut sp = 0usize;
+        let mut node_idx = 0u32;
+        let mut best: Option<InstanceHit> = None;
+        let mut t_best = t_max;
+
+        loop {
+            let node = &self.nodes()[node_idx as usize];
+            if slab_hit(origin, inv_dir, node.min, node.max, t_best) {
+                if node.is_leaf() {
+                    let first = node.first_prim() as usize;
+                    for slot in first..first + node.prim_count() as usize {
+                        let index = self.prim_indices()[slot];
+                        let Some(inst) = instances.get(index as usize) else {
+                            continue;
+                        };
+                        let (o, d) = to_object_space(&inst.inv_world, origin, direction);
+                        if let Some(hit) = inst.blas.intersect_triangles(
+                            o,
+                            d,
+                            t_best,
+                            inst.positions,
+                            inst.indices,
+                        ) {
+                            t_best = hit.t;
+                            best = Some(InstanceHit {
+                                instance: index,
+                                prim: hit.prim,
+                                t: hit.t,
+                                bary: hit.bary,
+                            });
+                        }
+                    }
+                } else {
+                    let left = node_idx + 1;
+                    let right = node.right_child();
+                    let (near, far) = if direction[node.axis() as usize] < 0.0 {
+                        (right, left)
+                    } else {
+                        (left, right)
+                    };
+                    debug_assert!(sp < TRAVERSAL_STACK_SIZE, "traversal stack overflow");
+                    if sp < TRAVERSAL_STACK_SIZE {
+                        stack[sp] = far;
+                        sp += 1;
+                    }
+                    node_idx = near;
+                    continue;
+                }
+            }
+            if sp == 0 {
+                break;
+            }
+            sp -= 1;
+            node_idx = stack[sp];
+        }
+
+        best
+    }
+
+    /// Whether any instance blocks the ray within `t_max`.
+    ///
+    /// The two-level counterpart of [`Bvh::occluded_triangles`], and the same
+    /// bargain: no child ordering, and it returns on the first hit at either
+    /// level.
+    #[must_use]
+    pub fn occluded_instances(
+        &self,
+        origin: [f32; 3],
+        direction: [f32; 3],
+        t_max: f32,
+        instances: &[Instanced<'_>],
+    ) -> bool {
+        let inv_dir = invert(direction);
+        let mut stack = [0u32; TRAVERSAL_STACK_SIZE];
+        let mut sp = 0usize;
+        let mut node_idx = 0u32;
+
+        loop {
+            let node = &self.nodes()[node_idx as usize];
+            if slab_hit(origin, inv_dir, node.min, node.max, t_max) {
+                if node.is_leaf() {
+                    let first = node.first_prim() as usize;
+                    for slot in first..first + node.prim_count() as usize {
+                        let index = self.prim_indices()[slot];
+                        let Some(inst) = instances.get(index as usize) else {
+                            continue;
+                        };
+                        let (o, d) = to_object_space(&inst.inv_world, origin, direction);
+                        if inst
+                            .blas
+                            .occluded_triangles(o, d, t_max, inst.positions, inst.indices)
+                        {
+                            return true;
+                        }
+                    }
+                } else {
+                    debug_assert!(sp < TRAVERSAL_STACK_SIZE, "traversal stack overflow");
+                    if sp < TRAVERSAL_STACK_SIZE {
+                        stack[sp] = node.right_child();
+                        sp += 1;
+                    }
+                    node_idx += 1;
+                    continue;
+                }
+            }
+            if sp == 0 {
+                break;
+            }
+            sp -= 1;
+            node_idx = stack[sp];
+        }
+
+        false
+    }
+}
+
+/// One placement the top-level hierarchy indexes.
+///
+/// Borrowed rather than owned because an instanced mesh is one hierarchy and
+/// several placements: the whole point of the two-level structure is that
+/// `blas`, `positions` and `indices` are shared.
+#[derive(Debug, Clone, Copy)]
+pub struct Instanced<'a> {
+    /// World-to-object transform, column-major so `inv_world[c][r]` indexes the
+    /// same float WGSL's `mat4x4f` does. Assumed affine; the tracer does not
+    /// place geometry through a perspective transform.
+    pub inv_world: [[f32; 4]; 4],
+    /// The hierarchy built over `positions` and `indices`, in object space.
+    pub blas: &'a Bvh,
+    pub positions: &'a [[f32; 3]],
+    pub indices: &'a [u32],
+}
+
+/// Where a ray met an instance's geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InstanceHit {
+    /// Which entry of the instance slice was hit.
+    pub instance: u32,
+    /// Triangle within that instance's geometry, in the caller's numbering.
+    pub prim: u32,
+    /// Distance along the **world-space** ray. See [`to_object_space`].
+    pub t: f32,
+    /// Barycentric coordinates `[w, u, v]`, unaffected by the transform.
+    pub bary: [f32; 3],
+}
+
+/// The world-space ray in an instance's object space.
+///
+/// The direction is transformed but deliberately **not** renormalized. That is
+/// what keeps `t` in world units at both levels, so one `t_max` compares
+/// correctly across instances of different scale and the top-level box test can
+/// keep tightening against a hit found inside a child. Renormalizing here is
+/// the classic way to get a two-level traversal that looks right until two
+/// instances overlap.
+#[must_use]
+pub fn to_object_space(
+    inv_world: &[[f32; 4]; 4],
+    origin: [f32; 3],
+    direction: [f32; 3],
+) -> ([f32; 3], [f32; 3]) {
+    let o = [
+        inv_world[0][0] * origin[0]
+            + inv_world[1][0] * origin[1]
+            + inv_world[2][0] * origin[2]
+            + inv_world[3][0],
+        inv_world[0][1] * origin[0]
+            + inv_world[1][1] * origin[1]
+            + inv_world[2][1] * origin[2]
+            + inv_world[3][1],
+        inv_world[0][2] * origin[0]
+            + inv_world[1][2] * origin[1]
+            + inv_world[2][2] * origin[2]
+            + inv_world[3][2],
+    ];
+    let d = [
+        inv_world[0][0] * direction[0]
+            + inv_world[1][0] * direction[1]
+            + inv_world[2][0] * direction[2],
+        inv_world[0][1] * direction[0]
+            + inv_world[1][1] * direction[1]
+            + inv_world[2][1] * direction[2],
+        inv_world[0][2] * direction[0]
+            + inv_world[1][2] * direction[1]
+            + inv_world[2][2] * direction[2],
+    ];
+    (o, d)
 }
 
 /// Reciprocal direction, with infinities left in for axis-aligned rays.
@@ -445,7 +654,7 @@ mod tests {
 
     #[test]
     fn the_hierarchy_agrees_with_brute_force() {
-        let (positions, indices) = crate::test_meshes::sphere(40, 20);
+        let (positions, indices) = crate::corpus::sphere(40, 20);
         let bvh = Bvh::build_triangles(&positions, &indices);
         let tri_count = indices.len() as u32 / 3;
 

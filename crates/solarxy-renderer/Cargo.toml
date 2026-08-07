@@ -21,6 +21,9 @@ std-fs = ["solarxy-formats/std-fs"]
 # preferences enums, view_config, and validation types, never file IO.
 solarxy-core    = { path = "../solarxy-core", default-features = false, features = ["serde"] }
 solarxy-formats = { path = "../solarxy-formats", default-features = false }
+# The acceleration structure the path tracer traverses. GPU-free by design, so
+# it stays buildable in the import worker; this crate is only its consumer.
+solarxy-bvh     = { path = "../solarxy-bvh" }
 wgpu        = "27.0.1"
 cgmath      = { workspace = true }
 bytemuck    = { version = "1.24", features = ["derive"] }
