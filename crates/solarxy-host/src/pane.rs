@@ -1,6 +1,6 @@
 //! One pane's render: the uniform writes, the pass chain, and the composite.
 //!
-//! [`render_pane`] is the whole body, 3D and UV alike. It arrived after the
+//! [`encode_pane_passes`] is the whole body, 3D and UV alike. It arrived after the
 //! pieces below did, and collapsing the last two hand-rolled copies onto it
 //! meant settling five places where the shells had quietly drifted apart.
 //! Recording them here, because each one is a decision and four of them look
@@ -23,7 +23,8 @@
 //! - **`scene_present` at the composite.** One shell computed it and the other
 //!   passed a constant `true`, so a pane with a camera and an empty scene had
 //!   bloom and ambient occlusion folded into its composite on one shell and not
-//!   the other. The computed answer wins; see [`PaneFrame::scene_present`].
+//!   the other. The computed answer wins; see the scene-present field on the
+//!   frame context.
 //!
 //! One thing deliberately **not** settled here: the UV overlap statistics pass
 //! writes the identity UV camera, encodes, then writes the pane camera back,
@@ -36,6 +37,7 @@
 use solarxy_core::AABB;
 use solarxy_core::preferences::{InspectionMode, ResolvedBackground, UvMapBackground};
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
+use solarxy_renderer::backend::{FrameCtx, PaneContent};
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
@@ -337,137 +339,56 @@ pub fn composite_and_submit(
     queue.submit(std::iter::once(encoder.finish()));
 }
 
-/// What a pane draws this frame.
-///
-/// The shell decides which arm applies; the arm decides which pass chain runs
-/// and how the composite is parameterised. Splitting it this way is what lets
-/// one body serve both shells: everything that differs between them is either
-/// resolved into a field here or done at the call site before the call.
-pub enum PaneContent<'a> {
-    /// The slot has no camera yet. Clear to the background and composite as a
-    /// non-UV pane with no scene, which is what both shells did.
-    Empty,
-    /// A 3D scene pane.
-    Scene {
-        /// The draw list, already assembled. The desktop puts its file-loaded
-        /// model first; the web shell has only the delta-fed objects.
-        objects: &'a [DrawObject<'a>],
-        /// The camera as it read **before** the aspect write, which is what
-        /// both shells passed into the main pass. Copied by the shell rather
-        /// than re-read here, because the aspect write happens in between.
-        cam_data: Camera,
-        /// Whether this pane re-renders the shadow map.
-        shadow: bool,
-    },
-    /// A UV layout pane. `None`, or an object with no UV set, renders the
-    /// pane background only and still composites as a UV pane.
-    Uv { object: Option<DrawObject<'a>> },
-}
-
-/// Everything one pane's render needs that is not the camera.
-///
-/// The camera travels separately, as `Option<&mut CameraState>`, because it is
-/// the one thing the body mutates and threading it through here would make the
-/// whole bundle mutable.
-pub struct PaneFrame<'a> {
-    /// The pane's slot. Only pane 0 clears the surface.
-    pub index: usize,
-    pub rect: PaneRect,
-    pub is_split: bool,
-    pub pds: &'a PaneDisplaySettings,
-    pub display: &'a DisplaySettings,
-    /// Already resolved against whatever registry of user backgrounds the
-    /// shell keeps.
-    pub background: ResolvedBackground,
-    pub env: &'a SceneEnvironment,
-    pub bounds: Option<&'a AABB>,
-    /// See [`PaneUniforms::grid_plane`]: `None` is not `Some(0)`.
-    pub grid_plane: Option<u32>,
-    /// Already resolved against whatever camera this pane looks through.
-    pub look: CompositeLook,
-    /// Whether the frame has scene content at all. The composite folds in
-    /// bloom and ambient occlusion only when it does: a pane with a camera and
-    /// nothing in it renders the background, the grid and the floor, and
-    /// blooming that puts a glow on a bare viewport nobody asked for.
-    pub scene_present: bool,
-    /// Whether to blit the selection rim after tone mapping.
-    pub outline: bool,
-    pub content: PaneContent<'a>,
-}
-
-/// Render one pane end to end: encoder, uniform writes, pass chain, composite,
-/// submit.
-///
-/// This is the body both shells drive. What stays at the call site is policy
-/// and assembly, per this crate's rule: which panes exist, whether the light
-/// rig follows this pane's camera, how the draw list is built, which object a
-/// UV pane sources, and any capability one shell has and the other does not
-/// (the web's grading tables, manipulator and camera helpers).
-///
-/// `renderer` is taken mutably for exactly two reasons, both on the UV path:
-/// the UV camera writes through `&mut self`, and arming the overlap readback
-/// flips a flag on the overlap resources. Everything else reborrows shared.
-pub fn render_pane(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    renderer: &mut Renderer,
-    surface_view: &wgpu::TextureView,
-    camera: Option<&mut CameraState>,
-    f: &PaneFrame<'_>,
-) {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Pane Encoder"),
-    });
-    let out = encode_pane_passes(device, queue, renderer, &mut encoder, camera, f);
-
-    composite_and_submit(
-        queue,
-        renderer,
-        encoder,
-        surface_view,
-        &PaneComposite {
-            index: f.index,
-            rect: f.rect,
-            look: f.look,
-            inspection: f.pds.inspection_mode,
-            is_uv_map: out.is_uv_map,
-            scene_present: out.scene_present,
-            outline: f.outline,
-        },
-    );
-}
-
 /// What a pane's passes decided, and what its composite needs to know.
-pub struct PaneOutcome {
+///
+/// Distinct from [`solarxy_renderer::backend::FrameOutcome`], which answers a
+/// different question: that one says whether a progressive backend has
+/// converged, this one says how to parameterise the composite that follows.
+pub struct EncodedPane {
     /// Whether this pane rendered a UV layout rather than a 3D scene.
     pub is_uv_map: bool,
     /// Whether the pane had scene content. `false` for a slot with no camera,
-    /// whatever [`PaneFrame::scene_present`] said.
+    /// whatever [`FrameCtx::scene_present`] said.
     pub scene_present: bool,
 }
 
-/// Encode one pane's uniform writes and pass chain into an existing encoder,
+/// Encode one pane's uniform writes and pass chain into the context's encoder,
 /// without compositing or submitting.
 ///
-/// Separate from [`render_pane`] because the web shell's offscreen capture
-/// runs the identical chain and then composites differently: always clearing,
-/// into a full-rect offscreen target, and without the selection rim. That is
-/// one genuine difference, so it keeps its own composite and shares
-/// everything above it rather than carrying a third copy of the pass chain.
-pub fn encode_pane_passes(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    renderer: &mut Renderer,
-    encoder: &mut wgpu::CommandEncoder,
-    camera: Option<&mut CameraState>,
-    f: &PaneFrame<'_>,
-) -> PaneOutcome {
+/// This is the raster pass chain both shells drive, and the body the raster
+/// backend adapter wraps. It stops short of the composite for two reasons: the
+/// encoder has to be submitted by whoever owns it, and the web shell's
+/// offscreen capture runs this identical chain and then composites differently,
+/// always clearing, into a full-rect target, and without the selection rim.
+pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
+    // Destructured rather than reached through `ctx.`, because the renderer,
+    // the encoder and the camera are all borrowed mutably at once and only
+    // field-level bindings let the compiler see they are disjoint.
+    let FrameCtx {
+        device,
+        queue,
+        renderer,
+        encoder,
+        rect,
+        is_split,
+        pds,
+        display,
+        background,
+        camera,
+        env,
+        bounds,
+        grid_plane,
+        scene_present,
+        content,
+        ..
+    } = ctx;
+
     // The 3D scene renders the full pane; the per-pane toolbar labels float on
     // top of it, so no strip is reserved. The floor guards a zero-height pane,
     // which the desktop shell used to let through as a division by zero.
-    let pane_aspect = f.rect.width / f.rect.height.max(1.0);
+    let pane_aspect = rect.width / rect.height.max(1.0);
 
-    let (is_uv_map, scene_present) = match (&f.content, camera) {
+    let (is_uv_map, present) = match (&*content, camera.as_deref_mut()) {
         (
             PaneContent::Scene {
                 objects,
@@ -479,25 +400,25 @@ pub fn encode_pane_passes(
             camera.write_with_aspect(queue, pane_aspect);
             write_pane_uniforms(
                 queue,
-                &*renderer,
+                renderer,
                 &PaneUniforms {
-                    background: f.background,
-                    pds: f.pds,
-                    display: f.display,
+                    background: *background,
+                    pds,
+                    display,
                     camera: Some(&*camera),
-                    env: f.env,
-                    bounds: f.bounds,
-                    grid_plane: f.grid_plane,
+                    env,
+                    bounds: *bounds,
+                    grid_plane: *grid_plane,
                 },
             );
-            if f.pds.inspection_mode == InspectionMode::Overdraw {
+            if pds.inspection_mode == InspectionMode::Overdraw {
                 render_overdraw_pane(
                     renderer,
                     encoder,
                     objects,
                     &camera.bind_group,
-                    f.rect,
-                    f.is_split,
+                    *rect,
+                    *is_split,
                 );
             } else {
                 render_3d_passes(
@@ -506,11 +427,11 @@ pub fn encode_pane_passes(
                     encoder,
                     &PaneScene {
                         objects,
-                        env: f.env,
+                        env,
                         cam_bg: &camera.bind_group,
                         cam_data,
-                        pds: f.pds,
-                        background: f.background,
+                        pds,
+                        background: *background,
                         shadow: *shadow,
                         // Asked of the list rather than of the shell's
                         // selection, because a selection that resolves to
@@ -520,45 +441,52 @@ pub fn encode_pane_passes(
                     },
                 );
             }
-            (false, f.scene_present)
+            (false, *scene_present)
         }
         (PaneContent::Uv { object }, Some(_)) => {
             render_uv_pane(
-                device,
-                queue,
+                &UvPane {
+                    device,
+                    queue,
+                    pane_aspect,
+                    pds,
+                    display,
+                    background: *background,
+                    object: object.as_ref(),
+                },
                 renderer,
                 encoder,
-                pane_aspect,
-                f,
-                object.as_ref(),
             );
-            (true, f.scene_present)
+            (true, *scene_present)
         }
         // No camera in this slot, whatever the pane mode says.
         _ => {
-            renderer.render_empty_pass(encoder, f.background);
+            renderer.render_empty_pass(encoder, *background);
             (false, false)
         }
     };
 
-    PaneOutcome {
+    EncodedPane {
         is_uv_map,
-        scene_present,
+        scene_present: present,
     }
 }
 
 /// The UV pane's chain: the UV camera and wireframe writes, the optional
 /// overlap count pass and its one-shot statistics readback, then the layout
 /// pass itself.
-fn render_uv_pane(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    renderer: &mut Renderer,
-    encoder: &mut wgpu::CommandEncoder,
+struct UvPane<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
     pane_aspect: f32,
-    f: &PaneFrame<'_>,
-    object: Option<&DrawObject<'_>>,
-) {
+    pds: &'a PaneDisplaySettings,
+    display: &'a DisplaySettings,
+    background: ResolvedBackground,
+    object: Option<&'a DrawObject<'a>>,
+}
+
+fn render_uv_pane(f: &UvPane<'_>, renderer: &mut Renderer, encoder: &mut wgpu::CommandEncoder) {
+    let (device, queue, pane_aspect) = (f.device, f.queue, f.pane_aspect);
     renderer
         .uv_cam
         .write(queue, f.pds.uv_offset, f.pds.uv_zoom, pane_aspect);
@@ -591,7 +519,7 @@ fn render_uv_pane(
         && renderer.uv_overlap.stats_dirty
         && !renderer.uv_overlap.readback_pending;
 
-    let Some(object) = object.filter(|o| o.model.has_uvs) else {
+    let Some(object) = f.object.filter(|o| o.model.has_uvs) else {
         renderer.render_empty_pass(encoder, f.background);
         return;
     };

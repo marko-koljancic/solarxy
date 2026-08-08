@@ -49,6 +49,7 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
+use solarxy_renderer::backend::{FrameCtx, PaneContent};
 use solarxy_renderer::frame::{DrawObject, Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
 use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
@@ -1589,8 +1590,8 @@ impl SolarxyApp {
 
         let objects;
         let content = match cam_data {
-            None => solarxy_host::PaneContent::Empty,
-            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+            None => PaneContent::Empty,
+            Some(_) if is_uv_map => PaneContent::Uv {
                 object: if self.uv_use_preview {
                     self.uv_scene.draw_object(UV_PREVIEW_ID)
                 } else {
@@ -1601,7 +1602,7 @@ impl SolarxyApp {
             },
             Some(cam_data) => {
                 objects = draw_objects(&self.scene_objects, self.selected_object);
-                solarxy_host::PaneContent::Scene {
+                PaneContent::Scene {
                     objects: &objects,
                     cam_data,
                     // A capture is one pane on its own, so it owns the shadow
@@ -1611,29 +1612,27 @@ impl SolarxyApp {
             }
         };
 
-        let out = solarxy_host::encode_pane_passes(
-            &self.device,
-            &self.queue,
-            &mut self.renderer,
-            &mut encoder,
-            self.view.cameras[pane_idx].as_mut(),
-            &solarxy_host::PaneFrame {
-                index: 0,
-                rect: full,
-                is_split: false,
-                pds: &pds,
-                display: &self.view.display,
-                background,
-                env: &self.env,
-                bounds: Some(&bounds),
-                grid_plane,
-                look,
-                scene_present: self.scene_objects.draw_objects().next().is_some(),
-                // A capture never carries the selection rim.
-                outline: false,
-                content,
-            },
-        );
+        let out = solarxy_host::encode_pane_passes(&mut FrameCtx {
+            device: &self.device,
+            queue: &self.queue,
+            renderer: &mut self.renderer,
+            encoder: &mut encoder,
+            index: 0,
+            rect: full,
+            is_split: false,
+            pds: &pds,
+            display: &self.view.display,
+            background,
+            camera: self.view.cameras[pane_idx].as_mut(),
+            env: &self.env,
+            bounds: Some(&bounds),
+            grid_plane,
+            look,
+            scene_present: self.scene_objects.draw_objects().next().is_some(),
+            // A capture never carries the selection rim.
+            outline: false,
+            content,
+        });
 
         self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, &out);
     }
@@ -1651,7 +1650,7 @@ impl SolarxyApp {
         target: &CaptureTarget,
         pane_idx: usize,
         inspection: InspectionMode,
-        out: &solarxy_host::PaneOutcome,
+        out: &solarxy_host::EncodedPane,
     ) {
         let bloom = self.renderer.post.bloom_enabled && !out.is_uv_map && out.scene_present;
         let ssao = self.renderer.post.ssao_enabled && !out.is_uv_map && out.scene_present;
@@ -3840,8 +3839,8 @@ impl SolarxyApp {
         // renderer mutably while the draw list borrows the scene.
         let objects;
         let content = match cam_data {
-            None => solarxy_host::PaneContent::Empty,
-            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+            None => PaneContent::Empty,
+            Some(_) if is_uv_map => PaneContent::Uv {
                 object: if self.uv_use_preview {
                     self.uv_scene.draw_object(UV_PREVIEW_ID)
                 } else {
@@ -3852,7 +3851,7 @@ impl SolarxyApp {
             },
             Some(cam_data) => {
                 objects = draw_objects(&self.scene_objects, self.selected_object);
-                solarxy_host::PaneContent::Scene {
+                PaneContent::Scene {
                     objects: &objects,
                     cam_data,
                     shadow: i == 0 || !self.view.display.lights_locked,
@@ -3860,26 +3859,45 @@ impl SolarxyApp {
             }
         };
 
-        solarxy_host::render_pane(
-            &self.device,
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Pane Encoder"),
+            });
+        let pass = solarxy_host::encode_pane_passes(&mut FrameCtx {
+            device: &self.device,
+            queue: &self.queue,
+            renderer: &mut self.renderer,
+            encoder: &mut encoder,
+            index: i,
+            rect: pane,
+            is_split,
+            pds: &pds,
+            display: &self.view.display,
+            background,
+            camera: self.view.cameras[i].as_mut(),
+            env: &self.env,
+            bounds: Some(&bounds),
+            grid_plane,
+            look,
+            scene_present,
+            outline,
+            content,
+        });
+
+        solarxy_host::composite_and_submit(
             &self.queue,
-            &mut self.renderer,
+            &self.renderer,
+            encoder,
             surface_view,
-            self.view.cameras[i].as_mut(),
-            &solarxy_host::PaneFrame {
+            &solarxy_host::PaneComposite {
                 index: i,
                 rect: pane,
-                is_split,
-                pds: &pds,
-                display: &self.view.display,
-                background,
-                env: &self.env,
-                bounds: Some(&bounds),
-                grid_plane,
                 look,
-                scene_present,
+                inspection: pds.inspection_mode,
+                is_uv_map: pass.is_uv_map,
+                scene_present: pass.scene_present,
                 outline,
-                content,
             },
         );
     }

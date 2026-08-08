@@ -12,6 +12,7 @@
 //! IBL).
 
 use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
+use solarxy_renderer::backend::{FrameCtx, PaneContent};
 use solarxy_renderer::camera::Camera;
 
 use super::view_state::PaneDisplaySettings;
@@ -179,8 +180,8 @@ impl State {
         // renderer mutably while the draw list borrows the scene.
         let objects;
         let content = match cam_data {
-            None => solarxy_host::PaneContent::Empty,
-            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+            None => PaneContent::Empty,
+            Some(_) if is_uv_map => PaneContent::Uv {
                 object: self
                     .scene
                     .as_ref()
@@ -193,7 +194,7 @@ impl State {
                     &self.env.instance_buffer,
                     self.selected_object,
                 );
-                solarxy_host::PaneContent::Scene {
+                PaneContent::Scene {
                     objects: &objects,
                     cam_data,
                     shadow: i == 0 || !self.view.display.lights_locked,
@@ -201,28 +202,47 @@ impl State {
             }
         };
 
-        solarxy_host::render_pane(
-            &self.device,
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Pane Encoder"),
+            });
+        let encoded = solarxy_host::encode_pane_passes(&mut FrameCtx {
+            device: &self.device,
+            queue: &self.queue,
+            renderer: &mut self.renderer,
+            encoder: &mut encoder,
+            index: i,
+            rect: *pane,
+            is_split,
+            pds: &pds,
+            display: &self.view.display,
+            background,
+            camera: self.view.cameras[i].as_mut(),
+            env: &self.env,
+            bounds: Some(&bounds),
+            // This shell does not steer the grid plane from the camera, so the
+            // plane offset is left exactly as it was initialised.
+            grid_plane: None,
+            look,
+            scene_present,
+            outline,
+            content,
+        });
+
+        solarxy_host::composite_and_submit(
             &self.queue,
-            &mut self.renderer,
+            &self.renderer,
+            encoder,
             surface_view,
-            self.view.cameras[i].as_mut(),
-            &solarxy_host::PaneFrame {
+            &solarxy_host::PaneComposite {
                 index: i,
                 rect: *pane,
-                is_split,
-                pds: &pds,
-                display: &self.view.display,
-                background,
-                env: &self.env,
-                bounds: Some(&bounds),
-                // This shell does not steer the grid plane from the camera, so
-                // the plane offset is left exactly as it was initialised.
-                grid_plane: None,
                 look,
-                scene_present,
+                inspection: pds.inspection_mode,
+                is_uv_map: encoded.is_uv_map,
+                scene_present: encoded.scene_present,
                 outline,
-                content,
             },
         );
     }
