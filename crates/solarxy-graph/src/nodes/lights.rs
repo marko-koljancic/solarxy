@@ -30,7 +30,8 @@ fn helper_group(show_helper_doc: &str, helper_size_doc: &str) -> Vec<ParamSpec> 
         .doc(
             "Whether this light is in the scene at all. Off removes its \
              contribution and hides its helper, and releases its slot in the \
-             8-light budget for the next light that wants one.",
+             interactive viewport's 8-light budget for the next light that \
+             wants one.",
         ),
         ParamSpec::new(
             "show_helper",
@@ -325,8 +326,10 @@ pub fn directional_descriptor() -> NodeTypeDescriptor {
          Position-to-Target direction, and the shadow frustum auto-fits the \
          scene bounds instead of sitting at Position, so moving the node in \
          space moves nothing but its helper arrow. It spends one of the 8 \
-         direct-light slots, and Cast Shadow is exclusive: granting it here \
-         revokes it from every other light in a single undo step.",
+         direct-light slots the interactive viewport binds -- that ceiling is \
+         the viewport's, not the scene's -- and Cast Shadow is exclusive: \
+         granting it here revokes it from every other light in a single undo \
+         step.",
         &["light", "sun", "sky"],
         "directional",
         vec![
@@ -411,8 +414,9 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
          classic tell of a CG spotlight, and rarely what you want; a little \
          goes a long way. Angle is the HALF-angle, so the default 45 spreads \
          90 degrees in total. The light spends one of the 8 direct-light \
-         slots, and Cast Shadow is exclusive: granting it here revokes it \
-         from every other light in a single undo step.",
+         slots the interactive viewport binds -- that ceiling is the \
+         viewport's, not the scene's -- and Cast Shadow is exclusive: granting \
+         it here revokes it from every other light in a single undo step.",
         &["light", "cone", "flashlight"],
         "spot",
         vec![
@@ -526,8 +530,8 @@ pub fn ambient_descriptor() -> NodeTypeDescriptor {
          ambient when you specifically want flatness, or want a quick global \
          lift while blocking out a scene.\n\n\
          It costs no light slot: ambient and hemisphere lights fold into the \
-         ambient term instead of competing for the 8 direct-light slots, so \
-         stack as many as you like. Two honest limits: it ADDS to the IBL \
+         ambient term instead of competing for the interactive viewport's 8 \
+         direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL \
          environment rather than scaling it, so it cannot dim an HDRI, and \
          ambient occlusion still darkens it, so it will not fully flatten \
          creases. Show Helper and Helper Size do nothing here -- with no \
@@ -638,7 +642,8 @@ pub fn rect_area_descriptor() -> NodeTypeDescriptor {
          shadow caster stays with the punctual lights -- so it lights \
          through geometry. And Helper Size is ignored, because the helper \
          rectangle takes its size from Width and Height. It spends one of \
-         the 8 direct-light slots like any other.",
+         the 8 direct-light slots the interactive viewport binds, like any \
+         other.",
         &["light", "area", "softbox", "panel"],
         "rect_area",
         vec![

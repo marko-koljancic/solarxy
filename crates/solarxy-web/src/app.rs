@@ -1634,7 +1634,7 @@ impl SolarxyApp {
             content,
         });
 
-        self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, &out);
+        self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, out);
     }
 
     /// Composite an encoded capture into its offscreen target and arm the
@@ -1650,7 +1650,7 @@ impl SolarxyApp {
         target: &CaptureTarget,
         pane_idx: usize,
         inspection: InspectionMode,
-        out: &solarxy_host::EncodedPane,
+        out: solarxy_host::EncodedPane,
     ) {
         let bloom = self.renderer.post.bloom_enabled && !out.is_uv_map && out.scene_present;
         let ssao = self.renderer.post.ssao_enabled && !out.is_uv_map && out.scene_present;

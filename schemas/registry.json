@@ -97,7 +97,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -136,7 +136,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A uniform fill: it adds the same light to every surface, whatever its position and whichever way it faces. No position, no direction, no shadow, no falloff.\n\nThe blunt instrument for lifting shadows that a key light left too dark. `hemisphere_light` is usually the better answer -- it costs the same and at least varies from sky to ground -- so reach for ambient when you specifically want flatness, or want a quick global lift while blocking out a scene.\n\nIt costs no light slot: ambient and hemisphere lights fold into the ambient term instead of competing for the 8 direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL environment rather than scaling it, so it cannot dim an HDRI, and ambient occlusion still darkens it, so it will not fully flatten creases. Show Helper and Helper Size do nothing here -- with no position and no direction there is no honest shape to draw.",
+      "doc": "A uniform fill: it adds the same light to every surface, whatever its position and whichever way it faces. No position, no direction, no shadow, no falloff.\n\nThe blunt instrument for lifting shadows that a key light left too dark. `hemisphere_light` is usually the better answer -- it costs the same and at least varies from sky to ground -- so reach for ambient when you specifically want flatness, or want a quick global lift while blocking out a scene.\n\nIt costs no light slot: ambient and hemisphere lights fold into the ambient term instead of competing for the interactive viewport's 8 direct-light slots, so stack as many as you like. Two honest limits: it ADDS to the IBL environment rather than scaling it, so it cannot dim an HDRI, and ambient occlusion still darkens it, so it will not fully flatten creases. Show Helper and Helper Size do nothing here -- with no position and no direction there is no honest shape to draw.",
       "searchAliases": [
         "light",
         "fill",
@@ -4458,7 +4458,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -4497,7 +4497,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A parallel light, like the sun: every ray travels the same direction, so nothing is nearer to it and nothing falls off with distance. Only the direction from Position to Target matters.\n\nThe key light for most scenes -- sun, moon, a large window. Aim it by moving Target rather than Position, and pair it with a `hemisphere_light` or `ambient_light` to lift the shadow side, because a directional light on its own leaves every face turned away from it black.\n\nIts Position lights nothing. The shading uses only the Position-to-Target direction, and the shadow frustum auto-fits the scene bounds instead of sitting at Position, so moving the node in space moves nothing but its helper arrow. It spends one of the 8 direct-light slots, and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
+      "doc": "A parallel light, like the sun: every ray travels the same direction, so nothing is nearer to it and nothing falls off with distance. Only the direction from Position to Target matters.\n\nThe key light for most scenes -- sun, moon, a large window. Aim it by moving Target rather than Position, and pair it with a `hemisphere_light` or `ambient_light` to lift the shadow side, because a directional light on its own leaves every face turned away from it black.\n\nIts Position lights nothing. The shading uses only the Position-to-Target direction, and the shadow frustum auto-fits the scene bounds instead of sitting at Position, so moving the node in space moves nothing but its helper arrow. It spends one of the 8 direct-light slots the interactive viewport binds -- that ceiling is the viewport's, not the scene's -- and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
       "searchAliases": [
         "light",
         "sun",
@@ -5820,7 +5820,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -9731,7 +9731,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -10915,7 +10915,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -10954,7 +10954,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down until you rotate it.\n\nWhat you reach for it for: soft key and fill on a product or character shot, and the broad specular roll-off a panel gives that a pinpoint source cannot. Widen it and the highlight spreads and the terminator softens; turn it edge-on and it dims, because you are looking at less of it.\n\nThe shading integrates over the whole rectangle (linearly transformed cosines), so Width, Height and Rotate all reach the image rather than only the helper. Two caveats remain. It cannot cast shadows -- it has no Cast Shadow param, and the exclusive shadow caster stays with the punctual lights -- so it lights through geometry. And Helper Size is ignored, because the helper rectangle takes its size from Width and Height. It spends one of the 8 direct-light slots like any other.",
+      "doc": "A rectangular emitter -- the softbox of the light kit -- with a Width and Height, sitting at Translate and facing straight down until you rotate it.\n\nWhat you reach for it for: soft key and fill on a product or character shot, and the broad specular roll-off a panel gives that a pinpoint source cannot. Widen it and the highlight spreads and the terminator softens; turn it edge-on and it dims, because you are looking at less of it.\n\nThe shading integrates over the whole rectangle (linearly transformed cosines), so Width, Height and Rotate all reach the image rather than only the helper. Two caveats remain. It cannot cast shadows -- it has no Cast Shadow param, and the exclusive shadow caster stays with the punctual lights -- so it lights through geometry. And Helper Size is ignored, because the helper rectangle takes its size from Width and Height. It spends one of the 8 direct-light slots the interactive viewport binds, like any other.",
       "searchAliases": [
         "light",
         "area",
@@ -11738,7 +11738,7 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the 8-light budget for the next light that wants one."
+          "doc": "Whether this light is in the scene at all. Off removes its contribution and hides its helper, and releases its slot in the interactive viewport's 8-light budget for the next light that wants one."
         },
         {
           "key": "show_helper",
@@ -11777,7 +11777,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "A cone of light from Position toward Target: full intensity in the middle, nothing past the outer Angle, and a Penumbra that controls how abruptly it gets there.\n\nThe pick for a deliberate pool of light -- a lamp, a torch, a stage special. It falls off with distance exactly like a `point_light` and shares its Range and Decay, so think of it as a point light wearing a cone; use the point light when you do not need the cone.\n\nPenumbra defaults to 0, which gives a razor-hard cone edge -- the classic tell of a CG spotlight, and rarely what you want; a little goes a long way. Angle is the HALF-angle, so the default 45 spreads 90 degrees in total. The light spends one of the 8 direct-light slots, and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
+      "doc": "A cone of light from Position toward Target: full intensity in the middle, nothing past the outer Angle, and a Penumbra that controls how abruptly it gets there.\n\nThe pick for a deliberate pool of light -- a lamp, a torch, a stage special. It falls off with distance exactly like a `point_light` and shares its Range and Decay, so think of it as a point light wearing a cone; use the point light when you do not need the cone.\n\nPenumbra defaults to 0, which gives a razor-hard cone edge -- the classic tell of a CG spotlight, and rarely what you want; a little goes a long way. Angle is the HALF-angle, so the default 45 spreads 90 degrees in total. The light spends one of the 8 direct-light slots the interactive viewport binds -- that ceiling is the viewport's, not the scene's -- and Cast Shadow is exclusive: granting it here revokes it from every other light in a single undo step.",
       "searchAliases": [
         "light",
         "cone",

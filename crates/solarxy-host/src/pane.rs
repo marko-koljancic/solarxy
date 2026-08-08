@@ -344,6 +344,7 @@ pub fn composite_and_submit(
 /// Distinct from [`solarxy_renderer::backend::FrameOutcome`], which answers a
 /// different question: that one says whether a progressive backend has
 /// converged, this one says how to parameterise the composite that follows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncodedPane {
     /// Whether this pane rendered a UV layout rather than a 3D scene.
     pub is_uv_map: bool,

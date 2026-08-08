@@ -74,6 +74,7 @@ pub mod display_defaults;
 pub mod gizmo;
 pub mod lighting;
 pub mod pane;
+pub mod raster;
 pub mod view;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
@@ -83,4 +84,5 @@ pub use pane::{
     render_3d_passes, render_overdraw_pane, setup_pane_lighting, write_inspection_block,
     write_pane_uniforms, write_wireframe_params,
 };
+pub use raster::RasterBackend;
 pub use view::HostViewState;
