@@ -150,10 +150,11 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::material::TracedMaterial>(),
         rust_type: "solarxy_renderer::pathtrace::material::TracedMaterial",
     },
-    // `trace.wgsl` is a fragment: it names the traversal's types, so it only
-    // parses composed over it, the same way the host builds it.
+    // `camera.wgsl` is a fragment: it returns the traversal's `Ray`, so it only
+    // parses composed over it, the same way the host builds it. The struct lived
+    // in `trace.wgsl` until a second kernel needed a camera ray.
     Case {
-        shader: "pathtrace/trace.wgsl",
+        shader: "pathtrace/camera.wgsl",
         prelude: &["pathtrace/traverse.wgsl"],
         struct_name: "TraceParams",
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::TraceParams>(),
@@ -189,6 +190,42 @@ const CASES: &[Case] = &[
         struct_name: "MaterialTap",
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::MaterialTap>(),
         rust_type: "solarxy_renderer::pathtrace::probe::MaterialTap",
+    },
+    // The BSDF probe's tap, for the same reason. Its scalar tail packs into the
+    // third sixteen-byte block and needs no pad, which is a shape that only stays
+    // true while all four fields are scalars: promoting any of them to a vector
+    // would move the struct to 64 on the WGSL side and leave Rust at 48.
+    Case {
+        shader: "pathtrace/bsdf_probe.wgsl",
+        prelude: &[
+            "pathtrace/traverse.wgsl",
+            "pathtrace/atlas.wgsl",
+            "pathtrace/material.wgsl",
+            "pathtrace/rand.wgsl",
+            "pathtrace/bsdf.wgsl",
+        ],
+        struct_name: "BsdfTap",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::BsdfTap>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::BsdfTap",
+    },
+    // The furnace harness's environment, declared whole on both sides. It is two
+    // `vec4f` today and could as easily have been two `vec3f` with the spare lane
+    // used for something, which is the shape that would measure 32 in Rust and 32
+    // in WGSL only by luck; a row here means the next person to reach for that lane
+    // finds out from a test rather than from a black image.
+    Case {
+        shader: "pathtrace/furnace.wgsl",
+        prelude: &[
+            "pathtrace/traverse.wgsl",
+            "pathtrace/atlas.wgsl",
+            "pathtrace/material.wgsl",
+            "pathtrace/rand.wgsl",
+            "pathtrace/bsdf.wgsl",
+            "pathtrace/camera.wgsl",
+        ],
+        struct_name: "FurnaceParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::FurnaceParams>(),
+        rust_type: "solarxy_renderer::pathtrace::FurnaceParams",
     },
 ];
 

@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>solarxy pathtrace traversal probe</title>
+    <title>solarxy pathtrace probes</title>
     <style>
       html, body { margin: 0; min-height: 100%; background: #0d1017; color: #cbccc6;
         font: 14px system-ui, sans-serif; }
       main { max-width: 720px; margin: 0 auto; padding: 24px; }
       h1 { font-size: 18px; font-weight: 600; }
       p { line-height: 1.6; color: #8a8f98; }
-      #status { white-space: pre-wrap; font-family: ui-monospace, monospace;
+      #status, #bsdf { white-space: pre-wrap; font-family: ui-monospace, monospace;
         background: #12151c; border: 1px solid #1c1f26; padding: 12px; }
       .ok { color: #7fd962; } .bad { color: #e5484d; }
     </style>
@@ -30,6 +30,18 @@
         <code>bash crates/solarxy-web/build-wasm.sh crates/solarxy-web/smoke/pkg --features pt-probe</code>
       </p>
       <div id="status">booting...</div>
+
+      <h1>Path tracer: material response probe</h1>
+      <p>
+        Builds both BSDF probe pipelines and the furnace kernel, which is the deepest
+        composition in the shader directory, then draws a small batch and reports the
+        directional albedo at four roughnesses. Two things are being asked. Whether this
+        browser's WGSL front end accepts the lobes at all, which is the half only a
+        browser can answer and the reason the uniformity discipline exists. And whether a
+        browser that compiles them computes the same thing: an albedo above one would mean
+        the surface returns more light than reached it.
+      </p>
+      <div id="bsdf">waiting...</div>
     </main>
     <script type="module">
       const statusEl = document.getElementById("status");
@@ -41,9 +53,13 @@
         console.log("PT_PROBE " + (cls || "info") + " :: " + msg);
       };
 
+      // ONE module instance for both checks. Two dynamic imports with different
+      // query strings are two separate instances, and only the first one's wasm gets
+      // initialized by `default()`, so the second sees every export as undefined.
+      let mod = null;
       try {
         if (!navigator.gpu) throw new Error("WebGPU unavailable (navigator.gpu missing)");
-        const mod = await import("./pkg/solarxy_web.js?v=" + Date.now());
+        mod = await import("./pkg/solarxy_web.js?v=" + Date.now());
         await mod.default();
         mod.start && mod.start();
         if (!mod.PathtraceProbe) {
@@ -88,6 +104,59 @@
       } catch (e) {
         set("failed: " + (e && e.message ? e.message : String(e)), "bad");
         console.log("PT_PROBE_DONE fail");
+      }
+
+      // The material response, on its own device, so a failure in one probe does
+      // not take the other's device down with it.
+      const bsdfEl = document.getElementById("bsdf");
+      const setBsdf = (msg, cls) => {
+        bsdfEl.textContent = msg;
+        bsdfEl.className = cls || "";
+        console.log("PT_BSDF " + (cls || "info") + " :: " + msg);
+      };
+
+      try {
+        if (!mod) throw new Error("the wasm module never loaded; see the probe above");
+        if (!mod.BsdfProbeCheck) {
+          throw new Error("this wasm was built without --features pt-probe");
+        }
+
+        setBsdf("building the lobe and furnace pipelines...");
+        const check = await mod.BsdfProbeCheck.create();
+        setBsdf("pipelines built; drawing a batch...");
+
+        // Same polling contract as above, and the same reason for it: the pending
+        // value is `undefined` rather than `null`, and an automated tab gets no
+        // animation frames.
+        const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+        let out = null;
+        for (let attempt = 0; attempt < 600; attempt += 1) {
+          const got = check.poll();
+          if (got) {
+            out = got;
+            break;
+          }
+          await pause(16);
+        }
+        if (!out) throw new Error("the bsdf readback never resolved in 10 s");
+
+        const r = JSON.parse(out);
+        const rows = r.roughness
+          .map((rough, i) => `  roughness ${rough}: albedo ${r.albedo[i]}`)
+          .join("\n");
+        setBsdf(
+          `furnace kernel: ${r.furnace ? "built and dispatched" : "failed"}\n` +
+            `samples per material: ${r.samples}\n` +
+            `metal, normal incidence:\n${rows}\n` +
+            (r.ok
+              ? "every albedo is at or below one; no energy is created"
+              : "an albedo exceeded one: this browser computes something else"),
+          r.ok ? "ok" : "bad"
+        );
+        console.log("PT_BSDF_DONE " + (r.ok ? "pass" : "fail"));
+      } catch (e) {
+        setBsdf("failed: " + (e && e.message ? e.message : String(e)), "bad");
+        console.log("PT_BSDF_DONE fail");
       }
     </script>
   </body>

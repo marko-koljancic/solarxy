@@ -19,6 +19,14 @@
 //! guard measures a total and the Rust offset assertions measure one side, so two
 //! transposed sixteen-byte blocks satisfy both and shade wrong.
 //!
+//! [`BsdfProbe`] pins the lobes to themselves. Its two subjects are whether the
+//! density a sampler reports describes the directions it actually produces, which
+//! only a histogram over many samples can answer, and whether the throughput
+//! integrates to something a surface could reflect, which is the furnace question.
+//! Neither is visible from Rust, and in an image both look like noise or like a
+//! surface that is slightly too bright, which is to say like nothing at all until
+//! someone compares two renderers.
+//!
 //! They live in the library rather than in the tests that use them because the
 //! browser needs to run the same checks: the desktop's WGSL front end and the
 //! browser's are different implementations of the same specification, and the
@@ -54,6 +62,18 @@ const MATERIAL_PROBE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/material_probe.wgsl"),
 );
 
+/// The BSDF kernel, composed over everything the material response reads: the
+/// traversal for the record, the atlas and the material fragment for the taps, the
+/// sampler for the generator, and the lobes themselves.
+const BSDF_PROBE_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/traverse.wgsl"),
+    include_str!("../shaders/pathtrace/atlas.wgsl"),
+    include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/rand.wgsl"),
+    include_str!("../shaders/pathtrace/bsdf.wgsl"),
+    include_str!("../shaders/pathtrace/bsdf_probe.wgsl"),
+);
+
 /// Rays per row of the dispatch grid. The kernel's workgroup shape is shared
 /// with the real one, so a linear corpus is walked as a 2D grid.
 const CORPUS_WIDTH: u32 = 64;
@@ -65,6 +85,12 @@ const TAP_WIDTH: u32 = 64;
 /// then the three the resolved surface takes. The kernel is given this value, so
 /// a change here is a change there.
 pub const MATERIAL_RESULT_WIDTH: usize = 12;
+
+/// How many `vec4` the BSDF probe writes per tap: the sampled or evaluated
+/// direction with its density, the throughput with the lobe that produced it, and
+/// the selection distribution. Both modes write the same three, so the host reads
+/// one shape and the two are comparable.
+pub const BSDF_RESULT_WIDTH: usize = 3;
 
 /// Bit 0 of [`CorpusHit::flags`]: the closest-hit walk found something.
 pub const HIT_CLOSEST: u32 = 1 << 0;
@@ -697,6 +723,224 @@ impl MaterialProbe {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, scene.bind_group(), &[]);
+            pass.set_bind_group(1, &io, &[]);
+            pass.set_bind_group(2, atlas.bind_group(), &[]);
+            let rows = (count as u32).div_ceil(TAP_WIDTH);
+            pass.dispatch_workgroups(TAP_WIDTH / WORKGROUP_SIZE, rows.div_ceil(WORKGROUP_SIZE), 1);
+        }
+        encoder.copy_buffer_to_buffer(&result_buffer, 0, &staging, 0, result_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        ColorReadback {
+            buffer: staging,
+            count: entries,
+            receiver: None,
+        }
+    }
+}
+
+/// Which half of the BSDF one dispatch exercises.
+///
+/// Two pipelines from one module, specialized by overridable constant, the same
+/// arrangement [`super::DebugChannel`] uses: the dead half folds away at pipeline
+/// creation rather than costing a uniform branch per invocation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum BsdfProbeMode {
+    /// Draw a direction and report it with its density and throughput.
+    Sample,
+    /// Take a direction and report the density and throughput for it.
+    Evaluate,
+}
+
+impl BsdfProbeMode {
+    /// Both, so a caller can build the pair without naming them.
+    pub const ALL: [Self; 2] = [Self::Sample, Self::Evaluate];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Sample => 0,
+            Self::Evaluate => 1,
+        }
+    }
+}
+
+/// One question the BSDF probe asks.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct BsdfTap {
+    /// Outgoing direction, **tangent space**, z up. `w` unused.
+    ///
+    /// The probe fixes the surface's frame, so a direction handed in this way and
+    /// one handed back round-trip exactly through an orthonormal rotation. That is
+    /// what lets a test compare a sampled direction against a density it computes
+    /// in the same space.
+    pub wo: [f32; 4],
+    /// Incident direction, tangent space. Read in
+    /// [`BsdfProbeMode::Evaluate`] only.
+    pub wi: [f32; 4],
+    /// Index into the material pool.
+    pub material: u32,
+    /// Which sample of [`Self::strata`] this tap draws.
+    pub sample_index: u32,
+    /// How many samples the batch holds, which is what the stratified sampler
+    /// divides its domain into. Zero or one asks for white noise.
+    pub strata: u32,
+    /// Fixed across a batch, so every sample in it shares one stratified sequence
+    /// and only [`Self::sample_index`] moves. Varying this per tap instead would
+    /// give every sample its own scramble and stratify nothing.
+    pub seed: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<BsdfTap>() == 48);
+
+/// The material-response pipelines and their own io layout.
+///
+/// What they answer is whether the lobes agree with themselves: whether the
+/// density `bsdf_sample` returns describes the directions it actually produces,
+/// and whether the throughput integrates to something a surface could reflect.
+/// Neither is visible from Rust, and neither is visible in an image until it is
+/// visible as noise or as a surface that is too bright.
+///
+/// It binds the **real** scene and sampled groups, so the record is read through
+/// binding 4 with the layout the kernel uses rather than one a test invented.
+pub struct BsdfProbe {
+    pipelines: [wgpu::ComputePipeline; 2],
+    io_layout: wgpu::BindGroupLayout,
+}
+
+impl BsdfProbe {
+    /// Builds both pipelines. Like the other probes, this is the call a browser
+    /// check is watching: it is where the WGSL front end either accepts the lobes
+    /// or does not.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pathtrace BSDF Probe Shader"),
+            source: wgpu::ShaderSource::Wgsl(BSDF_PROBE_KERNEL.into()),
+        });
+        let io_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_bsdf_probe_io_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        // Group 1, like the material probe: the io takes the accumulation group's
+        // number, which no probe binds, so the scene and the atlas keep theirs.
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pathtrace BSDF Probe Pipeline Layout"),
+            bind_group_layouts: &[&layouts.scene, &io_layout, &layouts.sampled],
+            push_constant_ranges: &[],
+        });
+        let pipelines = BsdfProbeMode::ALL.map(|mode| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Pathtrace BSDF Probe Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: Some("bsdf_probe"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[
+                        ("BSDF_TAP_WIDTH", f64::from(TAP_WIDTH)),
+                        ("BSDF_RESULT_WIDTH", BSDF_RESULT_WIDTH as f64),
+                        ("BSDF_PROBE_MODE", mode.index() as f64),
+                    ],
+                    zero_initialize_workgroup_memory: false,
+                },
+                cache: None,
+            })
+        });
+        Self {
+            pipelines,
+            io_layout,
+        }
+    }
+
+    /// Encodes and submits one batch, returning a readback to poll.
+    ///
+    /// The readback holds [`BSDF_RESULT_WIDTH`] entries per tap, in the kernel's
+    /// write order.
+    #[must_use]
+    pub fn submit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mode: BsdfProbeMode,
+        scene: &TraceScene,
+        atlas: &TraceAtlas,
+        taps: &[BsdfTap],
+    ) -> ColorReadback {
+        let count = taps.len().max(1);
+        // An empty batch is a caller mistake rather than a scene state, but a
+        // zero-sized binding is invalid, so it becomes one tap of material zero.
+        let placeholder = [BsdfTap::default()];
+        let tap_bytes: &[u8] = if taps.is_empty() {
+            bytemuck::cast_slice(&placeholder)
+        } else {
+            bytemuck::cast_slice(taps)
+        };
+        let tap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Pathtrace BSDF Taps"),
+            contents: tap_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let entries = count * BSDF_RESULT_WIDTH;
+        let result_bytes = (entries * 16) as u64;
+        let result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace BSDF Results"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace BSDF Results Readback"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let io = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace BSDF Probe IO Bind Group"),
+            layout: &self.io_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tap_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: result_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Pathtrace BSDF Probe Encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Pathtrace BSDF Probe Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines[mode.index()]);
             pass.set_bind_group(0, scene.bind_group(), &[]);
             pass.set_bind_group(1, &io, &[]);
             pass.set_bind_group(2, atlas.bind_group(), &[]);

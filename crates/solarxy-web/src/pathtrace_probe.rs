@@ -315,3 +315,254 @@ pub fn bvh_blob_summary(blob: &[u8]) -> Result<String, JsError> {
         stats.prim_count
     ))
 }
+
+/// The BSDF probe and the furnace kernel, as a browser can drive them.
+///
+/// Its first job is pipeline creation, and that is the half only a browser can
+/// answer. The lobes are the branchiest thing in the directory and the composition
+/// beneath them is six fragments deep, so if either WGSL front end is going to
+/// reject the uniformity discipline this is where it happens, with a validation
+/// message rather than silently.
+///
+/// Its second job is a sanity number. It draws a small batch for a few materials
+/// and reports the directional albedo, so a browser that compiles the kernel but
+/// computes something else does not read as a pass.
+#[wasm_bindgen]
+pub struct BsdfProbeCheck {
+    device: wgpu::Device,
+    readback: Option<solarxy_renderer::pathtrace::probe::ColorReadback>,
+    /// One entry per material, in the order the batch was built.
+    roughness: Vec<f32>,
+    /// Samples drawn per material.
+    samples: usize,
+    /// Whether the furnace pipeline built and dispatched.
+    furnace_ok: bool,
+}
+
+#[wasm_bindgen]
+impl BsdfProbeCheck {
+    /// Requests a device, builds both probe pipelines and the furnace pipeline,
+    /// and submits a batch.
+    #[wasm_bindgen]
+    pub async fn create() -> Result<BsdfProbeCheck, JsError> {
+        use solarxy_renderer::pathtrace::TraceAtlas;
+        use solarxy_renderer::pathtrace::probe::{BsdfProbe, BsdfProbeMode, BsdfTap};
+
+        /// Samples per material. Small on purpose: this is a compile-and-agree
+        /// check in a second browser, not the sweep, which runs natively where it
+        /// can fail a build.
+        const SAMPLES: u32 = 1024;
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..Default::default()
+        });
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .map_err(|e| JsError::new(&format!("requestAdapter: {e}")))?;
+        // Exactly what both shells ask for, for the same reason as above.
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("solarxy bsdf probe device"),
+                required_features: wgpu::Features::empty(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .map_err(|e| JsError::new(&format!("requestDevice: {e}")))?;
+
+        let layouts = PathtraceLayouts::new(&device);
+
+        // A white surface at four roughnesses, which is the diagonal of the furnace
+        // grid and enough to tell a compiled-but-wrong kernel from a correct one.
+        let roughness = vec![0.05f32, 0.35, 0.65, 0.95];
+        let materials: Vec<solarxy_renderer::pathtrace::material::TracedMaterial> = roughness
+            .iter()
+            .map(|r| {
+                let raw = solarxy_core::geometry::RawMaterialData {
+                    base_color_factor: [1.0, 1.0, 1.0, 1.0],
+                    roughness_factor: *r,
+                    metallic_factor: 1.0,
+                    ..Default::default()
+                };
+                solarxy_renderer::pathtrace::material::TracedMaterial::from_raw(
+                    &raw,
+                    &solarxy_renderer::pathtrace::scene::MaterialTextures::default(),
+                )
+            })
+            .collect();
+
+        let (positions, indices) = corpus::sphere(8, 4);
+        let blas = Bvh::build_triangles(&positions, &indices);
+        let (world, inv_world) = mat(1.0, 1.0, 1.0, [0.0, 0.0, 0.0]);
+        let boxes = [transformed_bounds(&positions, &world)];
+        let tlas = Bvh::build_tlas(&boxes);
+        let mesh = ArenaMesh {
+            bvh: &blas,
+            positions: &positions,
+            indices: &indices,
+            normals: None,
+            uv0: None,
+        };
+        let arena = TraceArena::build(
+            &tlas,
+            &[mesh],
+            &[ArenaPlacement {
+                mesh: 0,
+                world,
+                inv_world,
+                material_base: 0,
+                flags: INSTANCE_VISIBLE,
+            }],
+        )
+        .with_materials(materials);
+        let scene = TraceScene::upload(&device, &queue, &layouts, &arena);
+        let atlas = TraceAtlas::new(&device, &layouts);
+
+        // Pipeline creation for both probe modes. This is the check.
+        let probe = BsdfProbe::new(&device, &layouts);
+
+        // And the furnace kernel, which is the deepest composition in the directory.
+        let furnace_ok = dispatch_furnace_once(&device, &queue, &layouts, &scene, &atlas);
+
+        let taps: Vec<BsdfTap> = (0..roughness.len() as u32)
+            .flat_map(|material| {
+                (0..SAMPLES).map(move |i| BsdfTap {
+                    wo: [0.0, 0.0, 1.0, 0.0],
+                    wi: [0.0; 4],
+                    material,
+                    sample_index: i,
+                    strata: SAMPLES,
+                    seed: 0x9E37_79B9,
+                })
+            })
+            .collect();
+        let readback = probe.submit(
+            &device,
+            &queue,
+            BsdfProbeMode::Sample,
+            &scene,
+            &atlas,
+            &taps,
+        );
+
+        Ok(BsdfProbeCheck {
+            device,
+            readback: Some(readback),
+            roughness,
+            samples: SAMPLES as usize,
+            furnace_ok,
+        })
+    }
+
+    /// Polls the readback. Returns `null` while pending, else a JSON verdict.
+    #[wasm_bindgen(js_name = poll)]
+    pub fn poll(&mut self) -> Option<String> {
+        use solarxy_renderer::pathtrace::probe::{BSDF_RESULT_WIDTH, ColorPoll};
+
+        let readback = self.readback.as_mut()?;
+        let values = match readback.poll(&self.device) {
+            ColorPoll::Pending => return None,
+            ColorPoll::Failed => {
+                self.readback = None;
+                return Some(
+                    r#"{"ok":false,"error":"the bsdf readback could not be mapped"}"#.to_string(),
+                );
+            }
+            ColorPoll::Ready(v) => v,
+        };
+        self.readback = None;
+
+        let mut albedos = Vec::with_capacity(self.roughness.len());
+        let mut ok = self.furnace_ok;
+        for m in 0..self.roughness.len() {
+            let mut sum = 0.0f64;
+            for i in 0..self.samples {
+                let base = (m * self.samples + i) * BSDF_RESULT_WIDTH;
+                let pdf = values[base][3];
+                if pdf > 0.0 {
+                    sum += f64::from(values[base + 1][0]) / f64::from(pdf);
+                }
+            }
+            let albedo = sum / self.samples as f64;
+            // The same ceiling the native sweep asserts. A browser that compiles
+            // the kernel and computes something else fails here.
+            if albedo > 1.05 {
+                ok = false;
+            }
+            albedos.push(albedo);
+        }
+
+        Some(format!(
+            r#"{{"ok":{},"furnace":{},"samples":{},"roughness":[{}],"albedo":[{}]}}"#,
+            ok,
+            self.furnace_ok,
+            self.samples,
+            self.roughness
+                .iter()
+                .map(|r| format!("{r:.2}"))
+                .collect::<Vec<_>>()
+                .join(","),
+            albedos
+                .iter()
+                .map(|a| format!("{a:.4}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        ))
+    }
+}
+
+/// Builds the furnace pipeline and dispatches one small tile.
+///
+/// Separate from the probe's own setup because it is a separate question: the probe
+/// asks whether the lobes compile, and this asks whether the whole integrator does,
+/// bindings and dispatch included. Sixteen by sixteen at one sample, because what is
+/// being tested is that the browser accepts it, not what it draws.
+fn dispatch_furnace_once(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layouts: &PathtraceLayouts,
+    scene: &TraceScene,
+    atlas: &solarxy_renderer::pathtrace::TraceAtlas,
+) -> bool {
+    use solarxy_renderer::pathtrace::{
+        FurnaceKernel, FurnaceParams, FurnaceUniforms, TraceParams, TraceTarget,
+    };
+
+    const EDGE: u32 = 16;
+
+    let camera = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("bsdf probe camera"),
+        size: std::mem::size_of::<solarxy_renderer::camera::CameraUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let uniforms = FurnaceUniforms::new(device, &camera);
+    let kernel = FurnaceKernel::new(device, layouts, &uniforms);
+    let target = TraceTarget::new(device, layouts, EDGE, EDGE);
+    uniforms.write(
+        queue,
+        &TraceParams {
+            tile_offset: [0, 0],
+            tile_size: [EDGE, EDGE],
+            resolution: [EDGE, EDGE],
+            bounces: 2,
+            transmissive_bounces: 1,
+            samples: 1,
+            seed: 1,
+        },
+        &FurnaceParams {
+            env_up: [0.5, 0.5, 0.5, 0.0],
+            env_down: [0.5, 0.5, 0.5, 0.0],
+        },
+    );
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("bsdf probe furnace encoder"),
+    });
+    kernel.encode(&mut encoder, scene, atlas, &target, &uniforms, [EDGE, EDGE]);
+    queue.submit(Some(encoder.finish()));
+    true
+}

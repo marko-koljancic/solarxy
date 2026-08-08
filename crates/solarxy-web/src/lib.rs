@@ -47,7 +47,7 @@ mod pathtrace_probe;
 pub use app::SolarxyApp;
 
 #[cfg(all(target_arch = "wasm32", feature = "pt-probe"))]
-pub use pathtrace_probe::PathtraceProbe;
+pub use pathtrace_probe::{BsdfProbeCheck, PathtraceProbe};
 
 /// Installs the panic hook that routes Rust panics to `console.error`, so a
 /// boundary panic is legible in the browser devtools. Called once by JS

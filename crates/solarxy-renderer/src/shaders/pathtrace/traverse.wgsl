@@ -508,6 +508,40 @@ fn trace_any(origin: vec3f, direction: vec3f, t_max: f32, shadow_only: bool) -> 
     return false;
 }
 
+// An object-space normal in world space.
+//
+// The inverse transpose, not the transform: a non-uniformly scaled instance
+// shears its normals otherwise, and non-uniform scale is exactly what an
+// instanced scene is full of. `inv_world` is already the inverse, so its
+// transpose is one `transpose` away.
+//
+// Lives here rather than in a kernel because it belongs with the vertex-fetch
+// helpers below it: every caller of `shading_normal` needs it, and the tangent
+// beside it needs the other transform.
+fn world_normal(inst: Instance, n: vec3f) -> vec3f {
+    let m = transpose(mat3x3f(
+        inst.inv_world[0].xyz,
+        inst.inv_world[1].xyz,
+        inst.inv_world[2].xyz,
+    ));
+    return normalize(m * n);
+}
+
+// An object-space tangent in world space.
+//
+// A tangent lies IN the surface, so it transforms by the world matrix, not by the
+// inverse transpose a normal needs. Getting the two the same way round is the
+// difference between a normal map that shades correctly under non-uniform scale
+// and one that shears.
+fn world_tangent(inst: Instance, t: vec3f) -> vec3f {
+    let m = mat3x3f(
+        inst.world[0].xyz,
+        inst.world[1].xyz,
+        inst.world[2].xyz,
+    );
+    return normalize(m * t);
+}
+
 // The shading normal at a hit, object space, falling back to the geometric
 // normal when the source mesh carried none.
 fn shading_normal(hit: Hit) -> vec3f {
@@ -523,4 +557,91 @@ fn shading_normal(hit: Hit) -> vec3f {
         return hit.geo_normal;
     }
     return n;
+}
+
+// The interpolated texture coordinates at a hit: uv0 in `xy`, uv1 in `zw`, which
+// is the shape `material_sample` reads. The arena writes only uv0 today, so the
+// upper pair is zero.
+fn shading_uv(hit: Hit) -> vec4f {
+    let inst = instances[hit.instance];
+    let base = inst.index_base + hit.prim * 3u;
+    let i0 = inst.vertex_base + prim_indices[base];
+    let i1 = inst.vertex_base + prim_indices[base + 1u];
+    let i2 = inst.vertex_base + prim_indices[base + 2u];
+    return vertex_attr[i0].uv * hit.bary.x
+        + vertex_attr[i1].uv * hit.bary.y
+        + vertex_attr[i2].uv * hit.bary.z;
+}
+
+// Where to restart a ray so it does not immediately hit the surface it left.
+//
+// The offset scales with the magnitude of the point rather than being a constant,
+// because floating-point spacing does: a fixed epsilon that works at the origin is
+// smaller than one representable step a thousand units out, and the ray then
+// re-intersects the triangle it started on. `offset` is the direction to step in,
+// normally the shading normal signed towards the side the ray is leaving on.
+fn step_ray_origin(origin: vec3f, direction: vec3f, offset: vec3f, dist: f32) -> vec3f {
+    let point = origin + direction * dist;
+    let abs_point = abs(point);
+    let scale = max(abs_point.x, max(abs_point.y, abs_point.z)) + 1.0;
+    return point + offset * scale * 1e-4;
+}
+
+// A tangent at a hit, object space, derived from the triangle rather than
+// interpolated from vertices. `w` carries handedness, and a `w` of zero means
+// there is no usable tangent here.
+//
+// `VertexAttr.tangent` is written zero by the arena and this does not read it: a
+// per-triangle basis needs no extra vertex attribute and no import-time pass, and
+// it is available for every mesh that carries texture coordinates at all.
+//
+// The cost is that it is constant across a triangle and discontinuous at an edge
+// wherever the texture parameterization changes direction. For a normal map that
+// is the ordinary trade-off. For an anisotropic highlight it is visible as
+// faceting on a surface whose normal is smooth, which is why the pack-time
+// smoothed alternative is written down as the fix rather than forgotten: it wants
+// a per-vertex accumulation the arena does not do yet.
+//
+// Two degeneracies return `w == 0` rather than a direction that happens to be
+// finite: a mesh with no texture coordinates at all, where every uv is zero, and
+// a triangle whose uv image has no area, which a seam or a collapsed island
+// produces legitimately.
+fn shading_tangent(hit: Hit) -> vec4f {
+    let inst = instances[hit.instance];
+    let base = inst.index_base + hit.prim * 3u;
+    let i0 = inst.vertex_base + prim_indices[base];
+    let i1 = inst.vertex_base + prim_indices[base + 1u];
+    let i2 = inst.vertex_base + prim_indices[base + 2u];
+
+    let p0 = vertex_pos[i0].xyz;
+    let p1 = vertex_pos[i1].xyz;
+    let p2 = vertex_pos[i2].xyz;
+
+    let t0 = vertex_attr[i0].uv.xy;
+    let t1 = vertex_attr[i1].uv.xy;
+    let t2 = vertex_attr[i2].uv.xy;
+
+    let e1 = p1 - p0;
+    let e2 = p2 - p0;
+    let d1 = t1 - t0;
+    let d2 = t2 - t0;
+
+    let det = d1.x * d2.y - d2.x * d1.y;
+    if abs(det) < EPS {
+        return vec4f(0.0);
+    }
+    let inv_det = 1.0 / det;
+
+    let tangent = (e1 * d2.y - e2 * d1.y) * inv_det;
+    if dot(tangent, tangent) < EPS {
+        return vec4f(0.0);
+    }
+    let bitangent = (e2 * d1.x - e1 * d2.x) * inv_det;
+
+    // Handedness from the sign of the determinant of the three, which is what a
+    // mirrored uv island flips. The geometric normal is the reference rather than
+    // the shading normal, because a shading normal can be bent far enough by
+    // interpolation to invert the sign on a silhouette triangle.
+    let handedness = select(-1.0, 1.0, dot(cross(hit.geo_normal, tangent), bitangent) >= 0.0);
+    return vec4f(normalize(tangent), handedness);
 }

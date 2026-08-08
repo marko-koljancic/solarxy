@@ -44,7 +44,21 @@ pub const ATLAS_SOURCE: &str = include_str!("../shaders/pathtrace/atlas.wgsl");
 /// declares the record, and the atlas, which it samples through.
 pub const MATERIAL_SOURCE: &str = include_str!("../shaders/pathtrace/material.wgsl");
 
-/// The debug kernel, composed over the traversal, the atlas and the material.
+/// The sampler fragment: the generator, stratification, and `sample_sphere`. No
+/// entry point and no bindings, so it is a base like the traversal and the
+/// atlas.
+pub const RAND_SOURCE: &str = include_str!("../shaders/pathtrace/rand.wgsl");
+
+/// The camera fragment: the per-dispatch uniforms and the ray through a pixel.
+/// No entry point, and composed after the traversal, whose `Ray` it returns.
+///
+/// Extracted from the debug kernel when a second kernel needed a camera ray.
+/// Composing the two kernels together would have worked and would have dragged a
+/// second entry point into every kernel that wanted one.
+pub const CAMERA_SOURCE: &str = include_str!("../shaders/pathtrace/camera.wgsl");
+
+/// The debug kernel, composed over the traversal, the atlas, the material and
+/// the camera.
 ///
 /// It shades nothing. The atlas and the material ride along so that the
 /// fragments the shading stage will call are compiled by both WGSL front ends
@@ -54,7 +68,26 @@ const TRACE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/traverse.wgsl"),
     include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/camera.wgsl"),
     include_str!("../shaders/pathtrace/trace.wgsl"),
+);
+
+/// The furnace kernel: the whole material response driven by camera rays against a
+/// constant environment. Composed over everything.
+///
+/// Not the path tracer, and not a stand-in for one: no light sampling, no
+/// next-event estimation, no accumulation buffer. It is the smallest thing that can
+/// drive the BSDF end to end, which is what turns the white furnace test into a
+/// picture and what exercises the frame construction, the ray offset, the
+/// transmissive budget and the volume attenuation on curved geometry.
+const FURNACE_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/traverse.wgsl"),
+    include_str!("../shaders/pathtrace/atlas.wgsl"),
+    include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/rand.wgsl"),
+    include_str!("../shaders/pathtrace/bsdf.wgsl"),
+    include_str!("../shaders/pathtrace/camera.wgsl"),
+    include_str!("../shaders/pathtrace/furnace.wgsl"),
 );
 
 /// Invocations per workgroup edge. 64 per workgroup, comfortably inside core
@@ -103,9 +136,27 @@ pub struct TraceParams {
     pub tile_size: [u32; 2],
     /// The whole image.
     pub resolution: [u32; 2],
+    /// How many scattering events a path may have, counted for every scatter.
+    pub bounces: u32,
+    /// How many of those may additionally be transmissive.
+    ///
+    /// A separate budget rather than the reference's trick of handing a bounce
+    /// back on a transmissive hit, which keeps glass from eating a whole path at
+    /// the cost of making the bounce count mean two things.
+    pub transmissive_bounces: u32,
+    /// Samples per pixel in this dispatch, and the count the stratified sampler
+    /// divides its domain into. Zero or one turns stratification off.
+    pub samples: u32,
+    /// Decorrelates one dispatch from the next. A fixed value is what makes a
+    /// render reproducible.
+    pub seed: u32,
 }
 
-const _: () = assert!(std::mem::size_of::<TraceParams>() == 24);
+// Forty bytes with no padding field: every member aligns to eight or four, so
+// the struct aligns to eight and forty is already a multiple of it. A `vec3f` or
+// `vec4f` appended here would raise the alignment to sixteen and need a pad,
+// which is why the harness environment is its own uniform instead.
+const _: () = assert!(std::mem::size_of::<TraceParams>() == 40);
 
 /// The compute pipelines.
 pub struct PathTracer {
@@ -700,6 +751,186 @@ impl TraceUniforms {
     /// Writes the tile this dispatch covers.
     pub fn write(&self, queue: &wgpu::Queue, params: &TraceParams) {
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(params));
+    }
+}
+
+/// The stand-in environment the furnace kernel integrates against.
+///
+/// Two colours blended by the world up axis. Equal colours are the furnace
+/// configuration; different ones make curved geometry legible, which a genuinely
+/// uniform environment does not, since a conserving surface under one is invisible.
+///
+/// Its own uniform rather than four more floats on [`TraceParams`], because real
+/// environment sampling replaces it wholesale and a field documented offset by
+/// offset in the shipped per-dispatch struct would have to be deleted rather than
+/// superseded.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct FurnaceParams {
+    /// Radiance looking up, in `rgb`. `w` unused.
+    pub env_up: [f32; 4],
+    /// Radiance looking down.
+    pub env_down: [f32; 4],
+}
+
+const _: () = assert!(std::mem::size_of::<FurnaceParams>() == 32);
+
+/// The furnace kernel's group-3 uniforms: camera, per-dispatch, environment.
+///
+/// A layout of its own rather than an entry added to [`PathtraceLayouts::params`],
+/// because the debug kernel binds two uniforms and must not be made to bind three
+/// for a harness it does not use. Built here the way each probe builds its own io
+/// layout, and for the same reason.
+pub struct FurnaceUniforms {
+    layout: wgpu::BindGroupLayout,
+    params: wgpu::Buffer,
+    furnace: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl FurnaceUniforms {
+    /// Binds an existing camera uniform buffer beside fresh params and environment
+    /// buffers.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, camera: &wgpu::Buffer) -> Self {
+        let uniform = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_furnace_params_bind_group_layout"),
+            entries: &[uniform(0), uniform(1), uniform(2)],
+        });
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Furnace Params"),
+            size: std::mem::size_of::<TraceParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let furnace = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Furnace Environment"),
+            size: std::mem::size_of::<FurnaceParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Furnace Params Bind Group"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: furnace.as_entire_binding(),
+                },
+            ],
+        });
+        Self {
+            layout,
+            params,
+            furnace,
+            bind_group,
+        }
+    }
+
+    /// The layout, which the pipeline needs before the bind group exists.
+    #[must_use]
+    pub fn layout(&self) -> &wgpu::BindGroupLayout {
+        &self.layout
+    }
+
+    /// Writes the tile this dispatch covers and the environment it integrates
+    /// against.
+    pub fn write(&self, queue: &wgpu::Queue, params: &TraceParams, furnace: &FurnaceParams) {
+        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(params));
+        queue.write_buffer(&self.furnace, 0, bytemuck::bytes_of(furnace));
+    }
+}
+
+/// The furnace pipeline.
+///
+/// Separate from [`PathTracer`] rather than a fourth channel on it, because it
+/// binds a different group-3 layout and answers a different question. Nothing in
+/// either shell reaches it; it exists so the BSDF can be driven end to end before
+/// the integrator that will drive it for real exists.
+pub struct FurnaceKernel {
+    pipeline: wgpu::ComputePipeline,
+}
+
+impl FurnaceKernel {
+    /// Builds the pipeline. Like the probes, this is the call a browser check is
+    /// watching: it is where a WGSL front end either accepts the whole composition
+    /// or does not.
+    #[must_use]
+    pub fn new(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        uniforms: &FurnaceUniforms,
+    ) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pathtrace Furnace Shader"),
+            source: wgpu::ShaderSource::Wgsl(FURNACE_KERNEL.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pathtrace Furnace Pipeline Layout"),
+            bind_group_layouts: &[
+                &layouts.scene,
+                &layouts.target,
+                &layouts.sampled,
+                uniforms.layout(),
+            ],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Pathtrace Furnace Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("furnace_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        });
+        Self { pipeline }
+    }
+
+    /// Encodes one tile's dispatch.
+    pub fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &TraceScene,
+        atlas: &TraceAtlas,
+        target: &TraceTarget,
+        uniforms: &FurnaceUniforms,
+        tile: [u32; 2],
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Pathtrace Furnace Pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, scene.bind_group(), &[]);
+        pass.set_bind_group(1, &target.bind_group, &[]);
+        pass.set_bind_group(2, atlas.bind_group(), &[]);
+        pass.set_bind_group(3, &uniforms.bind_group, &[]);
+        pass.dispatch_workgroups(
+            tile[0].div_ceil(WORKGROUP_SIZE),
+            tile[1].div_ceil(WORKGROUP_SIZE),
+            1,
+        );
     }
 }
 

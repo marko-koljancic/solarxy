@@ -112,7 +112,7 @@ fn no_pathtrace_shader_depends_on_a_derivative_or_a_barrier() {
 /// either, but it names the record the traversal declares and samples through
 /// the atlas, so it parses only in a composition. Membership here is "depends on
 /// nothing above it", not "has no entry point".
-const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl"];
+const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl", "rand.wgsl"];
 
 #[test]
 fn every_base_fragment_parses_on_its_own() {
@@ -136,7 +136,13 @@ fn every_base_fragment_parses_on_its_own() {
 const RECIPES: &[(&str, &[&str])] = &[
     (
         "the debug kernel",
-        &["traverse.wgsl", "atlas.wgsl", "material.wgsl", "trace.wgsl"],
+        &[
+            "traverse.wgsl",
+            "atlas.wgsl",
+            "material.wgsl",
+            "camera.wgsl",
+            "trace.wgsl",
+        ],
     ),
     ("the traversal probe", &["traverse.wgsl", "parity.wgsl"]),
     ("the atlas probe", &["atlas.wgsl", "atlas_probe.wgsl"]),
@@ -147,6 +153,29 @@ const RECIPES: &[(&str, &[&str])] = &[
             "atlas.wgsl",
             "material.wgsl",
             "material_probe.wgsl",
+        ],
+    ),
+    (
+        "the bsdf probe",
+        &[
+            "traverse.wgsl",
+            "atlas.wgsl",
+            "material.wgsl",
+            "rand.wgsl",
+            "bsdf.wgsl",
+            "bsdf_probe.wgsl",
+        ],
+    ),
+    (
+        "the furnace kernel",
+        &[
+            "traverse.wgsl",
+            "atlas.wgsl",
+            "material.wgsl",
+            "rand.wgsl",
+            "bsdf.wgsl",
+            "camera.wgsl",
+            "furnace.wgsl",
         ],
     ),
 ];
