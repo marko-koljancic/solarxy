@@ -104,6 +104,10 @@ impl State {
             uv_checker_png: include_bytes!("../../../../res/textures/uv-checker_1k.png"),
         };
         let renderer = Renderer::new(&device, &queue, &config, &renderer_init)?;
+        // Built before the renderer moves into `State`: the backend keeps its
+        // own handle on the layouts so it can upload without being handed the
+        // renderer back.
+        let raster = solarxy_host::RasterBackend::new(std::sync::Arc::clone(&renderer.layouts));
 
         // The viewport renders before any model is chosen, so the scene
         // environment exists from startup, fitted to a placeholder box.
@@ -172,7 +176,7 @@ impl State {
             engine: None,
             engine_scene: None,
             selected_object: None,
-            scene_objects: solarxy_renderer::scene_objects::SceneObjects::new(),
+            raster,
             env,
             env_bounds,
             pending_scene_deltas: Vec::new(),

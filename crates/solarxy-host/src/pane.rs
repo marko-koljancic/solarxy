@@ -37,7 +37,8 @@
 use solarxy_core::AABB;
 use solarxy_core::preferences::{InspectionMode, ResolvedBackground, UvMapBackground};
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
-use solarxy_renderer::backend::{FrameCtx, PaneContent};
+use solarxy_renderer::backend::{FrameCtx, PaneContent, UvSource};
+use solarxy_renderer::scene_objects::SceneObjects;
 use solarxy_renderer::camera::{Camera, CameraUniform};
 use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
@@ -361,7 +362,7 @@ pub struct EncodedPane {
 /// encoder has to be submitted by whoever owns it, and the web shell's
 /// offscreen capture runs this identical chain and then composites differently,
 /// always clearing, into a full-rect target, and without the selection rim.
-pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
+pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> EncodedPane {
     // Destructured rather than reached through `ctx.`, because the renderer,
     // the encoder and the camera are all borrowed mutably at once and only
     // field-level bindings let the compiler see they are disjoint.
@@ -392,12 +393,14 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
     let (is_uv_map, present) = match (&*content, camera.as_deref_mut()) {
         (
             PaneContent::Scene {
-                objects,
+                extra,
+                selected,
                 cam_data,
                 shadow,
             },
             Some(camera),
         ) => {
+            let objects = &build_draw_list(scene, *extra, *selected);
             camera.write_with_aspect(queue, pane_aspect);
             write_pane_uniforms(
                 queue,
@@ -444,7 +447,14 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
             }
             (false, *scene_present)
         }
-        (PaneContent::Uv { object }, Some(_)) => {
+        (PaneContent::Uv { source }, Some(_)) => {
+            let resolved = match source {
+                UvSource::External(object) => Some(*object),
+                UvSource::Scene { preferred } => preferred
+                    .and_then(|id| scene.draw_object(id))
+                    .or_else(|| scene.draw_objects().next()),
+                UvSource::None => None,
+            };
             render_uv_pane(
                 &UvPane {
                     device,
@@ -453,7 +463,7 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
                     pds,
                     display,
                     background: *background,
-                    object: object.as_ref(),
+                    object: resolved.as_ref(),
                 },
                 renderer,
                 encoder,
@@ -471,6 +481,46 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>) -> EncodedPane {
         is_uv_map,
         scene_present: present,
     }
+}
+
+/// Assemble the raster draw list: the host's extra object first, then every
+/// visible object the backend owns, with the selection flagged.
+///
+/// Order is load-bearing, not incidental. Overdraw counts fragments in
+/// submission order, and the depth-equal overlays (edge wireframe, validation
+/// lines) resolve against whatever landed first, so the host's own object
+/// stays ahead of the delta-fed ones exactly as it did when it was the only
+/// entry that could come first.
+///
+/// An empty list is a legitimate frame: the background, grid, floor and axes
+/// come from the environment, not from this list.
+///
+/// This was written twice, once per shell, with the selection loop duplicated
+/// character for character. It belongs to whichever component owns the scene,
+/// and that is now the backend.
+fn build_draw_list<'a>(
+    scene: &'a SceneObjects,
+    extra: Option<DrawObject<'a>>,
+    selected: Option<solarxy_core::scene::SceneObjectId>,
+) -> Vec<DrawObject<'a>> {
+    let mut objects = Vec::with_capacity(usize::from(extra.is_some()) + scene.len());
+    if let Some(extra) = extra {
+        objects.push(extra);
+    }
+    objects.extend(scene.draw_objects());
+    // `SceneObjects` hands out its draw objects unselected, so the flag is set
+    // here by matching on model identity, which is also why the lookup filters
+    // hidden objects: a hidden one is not in this list at all.
+    if let Some(id) = selected
+        && let Some(selected) = scene.draw_object(id)
+    {
+        for object in &mut objects {
+            if std::ptr::eq(object.model, selected.model) {
+                object.selected = true;
+            }
+        }
+    }
+    objects
 }
 
 /// The UV pane's chain: the UV camera and wireframe writes, the optional

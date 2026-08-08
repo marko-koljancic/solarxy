@@ -39,7 +39,7 @@
 
 use solarxy_core::AABB;
 use solarxy_core::preferences::ResolvedBackground;
-use solarxy_core::scene::SceneDelta;
+use solarxy_core::scene::{SceneDelta, SceneObjectId};
 use solarxy_core::view_config::{DisplaySettings, PaneDisplaySettings};
 
 use crate::camera::Camera;
@@ -175,11 +175,26 @@ pub enum PaneContent<'a> {
     /// non-UV pane with no scene.
     Empty,
     /// A 3D scene pane.
+    ///
+    /// The draw list is **not** here, deliberately. A backend that ingests
+    /// deltas owns the scene, so it assembles its own list; what it cannot
+    /// know is what the host draws that did not come down the delta stream,
+    /// and which object the host considers selected. Those two are what this
+    /// arm carries.
     Scene {
-        /// The draw list, already assembled. The desktop shell puts its
-        /// file-loaded model first; the web shell has only the delta-fed
-        /// objects.
-        objects: &'a [DrawObject<'a>],
+        /// An object drawn first, from a scene the backend does not own. The
+        /// desktop shell's file-loaded model; `None` on a host that has no
+        /// such thing.
+        ///
+        /// Drawn first because order is load-bearing: overdraw counts
+        /// fragments in submission order, and the depth-equal overlays resolve
+        /// against whatever landed first.
+        extra: Option<DrawObject<'a>>,
+        /// The host's selected object, flagged in the list so the main pass
+        /// tints it and the outline stages find a silhouette. A selection that
+        /// resolves to nothing drawable flags nothing, which is what stops the
+        /// mask and jump-flood stages running for an empty silhouette.
+        selected: Option<SceneObjectId>,
         /// The camera as it read **before** the aspect write, which is what
         /// the main pass takes. Copied by the host rather than re-read here,
         /// because the aspect write happens in between.
@@ -187,9 +202,26 @@ pub enum PaneContent<'a> {
         /// Whether this pane re-renders the shadow map.
         shadow: bool,
     },
-    /// A UV layout pane. `None`, or an object with no UV set, renders the pane
-    /// background only and still composites as a UV pane.
-    Uv { object: Option<DrawObject<'a>> },
+    /// A UV layout pane.
+    Uv { source: UvSource<'a> },
+}
+
+/// Where a UV pane's geometry comes from.
+///
+/// Two arms rather than one object, because the two hosts answer differently
+/// and only one of them can hand over an object directly: the desktop's comes
+/// from its file-loaded model and the web's preview from a scene of its own,
+/// both outside the backend, while the web's fallback is an object the backend
+/// itself owns and therefore cannot be borrowed out and passed back in.
+pub enum UvSource<'a> {
+    /// An object the host resolved from a scene the backend does not own.
+    External(DrawObject<'a>),
+    /// Resolve against the backend's own scene: this object if it is there,
+    /// else the first drawable one.
+    Scene { preferred: Option<SceneObjectId> },
+    /// Nothing to lay out. Renders the pane background and still composites as
+    /// a UV pane.
+    None,
 }
 
 /// Everything encoding one pane needs.

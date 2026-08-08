@@ -616,14 +616,15 @@ impl State {
     fn scene_issue_aabb(&self, idx: usize) -> Option<solarxy_core::AABB> {
         let info = self.engine_scene.as_ref()?;
         let (id, local) = info.validation.owners.get(idx).copied()?;
-        let object = self.scene_objects.get(id)?;
+        let object = self.raster.scene().get(id)?;
         let issue = self
-            .scene_objects
+            .raster
+            .scene()
             .validation(id)?
             .report
             .issues
             .get(local)?;
-        let raw_to_gpu = self.scene_objects.raw_to_gpu(id)?;
+        let raw_to_gpu = self.raster.scene().raw_to_gpu(id)?;
         resolve_issue_aabb(&issue.scope, &object.model, raw_to_gpu)
             .map(|b| b.transformed(&object.transform))
     }
@@ -727,7 +728,8 @@ impl State {
                 // untransformed box would send the camera to the origin for
                 // anything the scene has moved.
                 let aabb = self
-                    .scene_objects
+                    .raster
+                    .scene()
                     .get(id)
                     .map(|o| o.model.bounds.transformed(&o.transform));
                 if let Some(aabb) = aabb {
@@ -735,7 +737,7 @@ impl State {
                 }
             }
             OutlinerAction::FrameObjectMesh(id, mesh) => {
-                let aabb = self.scene_objects.get(id).and_then(|o| {
+                let aabb = self.raster.scene().get(id).and_then(|o| {
                     o.model
                         .mesh_bounds
                         .get(mesh)
@@ -780,7 +782,11 @@ impl State {
                 // Absent or hidden objects are filtered out of the draw
                 // list entirely, so pointing at one would outline nothing
                 // while claiming a selection is showing.
-                self.scene_objects.get(id).filter(|o| o.visible).map(|_| id)
+                self.raster
+                    .scene()
+                    .get(id)
+                    .filter(|o| o.visible)
+                    .map(|_| id)
             }
             GraphContext::Subflow(_) => None,
         };
@@ -794,7 +800,7 @@ impl State {
     /// the only durable place to put this. Routing it through the engine
     /// also puts the toggle in the undo stack for free.
     fn toggle_scene_object(&mut self, id: SceneObjectId) {
-        let Some(visible) = self.scene_objects.get(id).map(|o| o.visible) else {
+        let Some(visible) = self.raster.scene().get(id).map(|o| o.visible) else {
             return;
         };
         let Some(engine) = self.engine.as_mut() else {

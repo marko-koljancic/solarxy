@@ -111,9 +111,15 @@ impl RenderBackend for RasterBackend {
     /// into an explicit view; pointing the whole raster pass chain at an
     /// arbitrary view would touch every pass, for no gain to anything that
     /// exists today.
+    ///
+    /// The draw list is assembled here rather than handed in, from this
+    /// backend's own scene plus whatever the host draws that never came down
+    /// the delta stream. That is what owning the scene means, and it is also
+    /// what makes this callable at all: a list built by the host would borrow
+    /// the scene inside this backend while this call needs it mutably.
     fn encode(&mut self, ctx: &mut FrameCtx<'_>, _target: &wgpu::TextureView) -> FrameOutcome {
         let pane = ctx.index;
-        let encoded = encode_pane_passes(ctx);
+        let encoded = encode_pane_passes(ctx, &self.scene);
         if let Some(slot) = self.encoded.get_mut(pane) {
             *slot = Some(encoded);
         }

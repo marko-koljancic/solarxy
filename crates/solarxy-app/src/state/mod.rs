@@ -128,11 +128,16 @@ pub struct State {
     /// selects engine-side and leaves the viewport alone, which is what
     /// the web shell does with the same gesture.
     pub(super) selected_object: Option<solarxy_core::scene::SceneObjectId>,
-    /// Multi-object dynamic scene drawn beside `scene`. Fed by
-    /// [`SceneDelta`] batches queued in `pending_scene_deltas` and applied at
-    /// the top of each frame. The engine above is the producer once a scene
-    /// file is open; the developer harness is the only other one.
-    pub(super) scene_objects: solarxy_renderer::scene_objects::SceneObjects,
+    /// The rasterizer, behind the render backend contract, owning the
+    /// multi-object dynamic scene drawn beside `scene`.
+    ///
+    /// That scene is fed by [`SceneDelta`] batches queued in
+    /// `pending_scene_deltas` and applied at the top of each frame; the engine
+    /// above is the producer once a scene file is open, and the developer
+    /// harness is the only other one. Everything this shell asks of the
+    /// document that is not rendering reads through `raster.scene()`, because
+    /// that is where the answer lives.
+    pub(super) raster: solarxy_host::RasterBackend,
     /// Scene-level GPU state every pane draws through: the light rig, the
     /// shadow map, the identity instance buffer bound for scene-level draws,
     /// and the grid/floor/axes buffers. Owned here rather than by `scene`, so

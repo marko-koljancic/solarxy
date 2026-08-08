@@ -12,7 +12,8 @@
 //! IBL).
 
 use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
-use solarxy_renderer::backend::{FrameCtx, PaneContent};
+use solarxy_host::EncodedPane;
+use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
 use solarxy_renderer::camera::Camera;
 
 use super::view_state::PaneDisplaySettings;
@@ -60,12 +61,11 @@ impl State {
         // pane encodes (the engine's per-frame commit point, next milestone).
         if !self.pending_scene_deltas.is_empty() {
             for delta in std::mem::take(&mut self.pending_scene_deltas) {
-                if let Err(e) = self.scene_objects.apply(
-                    &self.device,
-                    &self.queue,
-                    &self.renderer.layouts,
-                    &delta,
-                ) {
+                self.raster.apply(&self.device, &self.queue, &delta);
+                // The backend collects upload failures rather than logging
+                // them: it has no logging facility and this shell is the layer
+                // that knows a console line is what is wanted here.
+                for e in self.raster.take_errors() {
                     tracing::error!("Scene delta apply failed: {e}");
                 }
                 self.apply_scene_environment(&delta);
@@ -174,32 +174,28 @@ impl State {
             == solarxy_renderer::frame::SelectionStyle::Outline
             && self
                 .selected_object
-                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+                .is_some_and(|id| self.raster.scene().draw_object(id).is_some());
 
-        // Field-level borrows from here on, so the shared body can take the
-        // renderer mutably while the draw list borrows the scene.
-        let objects;
+        // Everything below borrows fields other than `raster`, so the backend
+        // can be driven mutably: the file-loaded model and the UV source both
+        // come from this shell's own state, and the backend assembles the rest
+        // of the draw list from the scene it owns.
         let content = match cam_data {
             None => PaneContent::Empty,
             Some(_) if is_uv_map => PaneContent::Uv {
-                object: self
+                source: self.scene.as_ref().map_or(UvSource::None, |s| {
+                    UvSource::External(s.draw_object(&self.env.instance_buffer))
+                }),
+            },
+            Some(cam_data) => PaneContent::Scene {
+                extra: self
                     .scene
                     .as_ref()
                     .map(|s| s.draw_object(&self.env.instance_buffer)),
+                selected: self.selected_object,
+                cam_data,
+                shadow: i == 0 || !self.view.display.lights_locked,
             },
-            Some(cam_data) => {
-                objects = draw_objects(
-                    self.scene.as_ref(),
-                    &self.scene_objects,
-                    &self.env.instance_buffer,
-                    self.selected_object,
-                );
-                PaneContent::Scene {
-                    objects: &objects,
-                    cam_data,
-                    shadow: i == 0 || !self.view.display.lights_locked,
-                }
-            }
         };
 
         let mut encoder = self
@@ -207,27 +203,35 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Pane Encoder"),
             });
-        let encoded = solarxy_host::encode_pane_passes(&mut FrameCtx {
-            device: &self.device,
-            queue: &self.queue,
-            renderer: &mut self.renderer,
-            encoder: &mut encoder,
-            index: i,
-            rect: *pane,
-            is_split,
-            pds: &pds,
-            display: &self.view.display,
-            background,
-            camera: self.view.cameras[i].as_mut(),
-            env: &self.env,
-            bounds: Some(&bounds),
-            // This shell does not steer the grid plane from the camera, so the
-            // plane offset is left exactly as it was initialised.
-            grid_plane: None,
-            look,
-            scene_present,
-            outline,
-            content,
+        let target = self.renderer.targets.hdr_resolve_view.clone();
+        let _outcome = self.raster.encode(
+            &mut FrameCtx {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.renderer,
+                encoder: &mut encoder,
+                index: i,
+                rect: *pane,
+                is_split,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                camera: self.view.cameras[i].as_mut(),
+                env: &self.env,
+                bounds: Some(&bounds),
+                // This shell does not steer the grid plane from the camera, so the
+                // plane offset is left exactly as it was initialised.
+                grid_plane: None,
+                look,
+                scene_present,
+                outline,
+                content,
+            },
+            &target,
+        );
+        let encoded = self.raster.encoded(i).unwrap_or(EncodedPane {
+            is_uv_map: false,
+            scene_present: false,
         });
 
         solarxy_host::composite_and_submit(
@@ -256,7 +260,7 @@ impl State {
     /// background, the grid and the floor, and blooming that would put a glow
     /// on a bare viewport nobody asked for.
     fn scene_present(&self) -> bool {
-        self.scene.is_some() || self.scene_objects.draw_objects().next().is_some()
+        self.scene.is_some() || self.raster.scene().draw_objects().next().is_some()
     }
 
     /// Recompute the camera-relative light rig for a non-primary pane
@@ -409,7 +413,7 @@ impl State {
         let outliner_source = match (&self.scene, &self.engine_scene) {
             (Some(scene), _) => crate::gui::OutlinerSource::Model(&scene.model),
             (None, Some(info)) => crate::gui::OutlinerSource::Scene {
-                objects: &self.scene_objects,
+                objects: self.raster.scene(),
                 names: &info.object_names,
             },
             (None, None) => crate::gui::OutlinerSource::Empty,
@@ -627,47 +631,4 @@ impl State {
         }
         self.resize_render_targets(target_w, target_h);
     }
-}
-
-/// The frame's draw list: the file-loaded model when one is open, then every
-/// visible multi-object entry, with the Node Tree's selection flagged so the
-/// main pass and the outline pass can find it.
-///
-/// Order is load-bearing, not incidental. Overdraw counts fragments in
-/// submission order, and the depth-equal overlays (edge wireframe, validation
-/// lines) resolve against whatever landed first, so the file model stays ahead
-/// of the delta-fed objects exactly as it did when it was the only entry that
-/// could come first.
-///
-/// An empty list is a legitimate frame. The background, grid, floor and axes
-/// come from the environment, not from this list.
-///
-/// A free function over the three fields it reads rather than a method,
-/// because the caller holds the renderer mutably while this list is alive and
-/// a `&self` receiver would borrow the whole shell.
-fn draw_objects<'a>(
-    scene: Option<&'a super::ModelScene>,
-    scene_objects: &'a solarxy_renderer::scene_objects::SceneObjects,
-    instance_buffer: &'a wgpu::Buffer,
-    selected_object: Option<solarxy_core::scene::SceneObjectId>,
-) -> Vec<solarxy_renderer::frame::DrawObject<'a>> {
-    let mut objects = Vec::with_capacity(usize::from(scene.is_some()) + scene_objects.len());
-    if let Some(scene) = scene {
-        objects.push(scene.draw_object(instance_buffer));
-    }
-    objects.extend(scene_objects.draw_objects());
-    // `SceneObjects` hands out its draw objects unselected, so the flag is set
-    // here by matching on model identity — the same approach the web host
-    // takes, and the reason the lookup filters hidden objects: a hidden one is
-    // not in this list at all.
-    if let Some(id) = selected_object
-        && let Some(selected) = scene_objects.draw_object(id)
-    {
-        for object in &mut objects {
-            if std::ptr::eq(object.model, selected.model) {
-                object.selected = true;
-            }
-        }
-    }
-    objects
 }

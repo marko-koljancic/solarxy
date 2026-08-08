@@ -44,7 +44,7 @@ impl State {
     pub(super) fn scene_bounds(&self) -> solarxy_core::AABB {
         match (
             self.scene.as_ref().map(|s| s.model.bounds),
-            self.scene_objects.visible_bounds(),
+            self.raster.scene().visible_bounds(),
         ) {
             (Some(model), Some(objects)) => model.union(&objects),
             (Some(only), None) | (None, Some(only)) => only,
@@ -116,7 +116,8 @@ impl State {
     /// fixed placeholder underneath them would read as the ground jumping.
     pub(super) fn reset_env_for_empty_scene(&mut self) {
         let bounds = self
-            .scene_objects
+            .raster
+            .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds);
         self.rebuild_env(bounds);
@@ -140,7 +141,7 @@ impl State {
         // to a placeholder moves the floor and the grid under a camera that
         // has not moved. Framing and sizing do not read the environment for
         // this, they ask `scene_bounds`, which answers with the placeholder.
-        let Some(bounds) = self.scene_objects.visible_bounds() else {
+        let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
         let eps = (self.env_bounds.diagonal() * 1e-3).max(1e-6);
@@ -286,7 +287,8 @@ impl State {
         let registry = engine.registry();
         let graph = engine.document().graph(GraphContext::Root).ok();
         info.object_names = self
-            .scene_objects
+            .raster
+            .scene()
             .iter()
             .map(|(id, _)| {
                 let name = graph
@@ -296,24 +298,26 @@ impl State {
             })
             .collect();
 
-        info.counts = engine_scene::count_geometry(&self.scene_objects);
+        info.counts = engine_scene::count_geometry(self.raster.scene());
 
         // Zipped rather than looked up per object: `object_names` was built
         // from this same iterator a moment ago, so the orders agree by
         // construction and the merged issue order is the iteration order.
         let merged = engine_scene::merge_validation(
-            self.scene_objects
+            self.raster
+                .scene()
                 .iter()
                 .zip(&info.object_names)
                 .filter_map(|((id, _), (_, name))| {
-                    let result = self.scene_objects.validation(*id)?;
+                    let result = self.raster.scene().validation(*id)?;
                     Some((*id, name.as_str(), &result.report))
                 }),
         );
         info.validation = merged;
 
         let bounds = self
-            .scene_objects
+            .raster
+            .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds)
             .size();
@@ -713,7 +717,7 @@ impl State {
     /// alone would let the other overwrite the authored rig on the next
     /// frame.
     pub(super) fn install_authored_lights(&mut self) -> bool {
-        let Some(defs) = self.scene_objects.lights() else {
+        let Some(defs) = self.raster.scene().lights() else {
             return false;
         };
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;

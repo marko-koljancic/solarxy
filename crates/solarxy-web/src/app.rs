@@ -49,8 +49,8 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
-use solarxy_renderer::backend::{FrameCtx, PaneContent};
-use solarxy_renderer::frame::{DrawObject, Renderer, RendererInit};
+use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
+use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
 use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
 use solarxy_renderer::input::PointerButton;
@@ -265,7 +265,7 @@ pub struct SolarxyApp {
     /// surface formats, so it rides `view_formats`).
     render_format: wgpu::TextureFormat,
     renderer: Renderer,
-    scene_objects: SceneObjects,
+    raster: solarxy_host::RasterBackend,
     env: SceneEnvironment,
     /// Makes `SceneOp::SetEnvironment` idempotent. The engine re-emits the
     /// whole environment on every rebuild and installing one convolves an
@@ -573,6 +573,10 @@ impl SolarxyApp {
         };
         let renderer = Renderer::new(&device, &queue, &render_config, &init)
             .map_err(|e| JsError::new(&format!("Renderer::new: {e}")))?;
+        // Built before the renderer moves into the host: the backend keeps its
+        // own handle on the layouts so it can upload without being handed the
+        // renderer back.
+        let raster = solarxy_host::RasterBackend::new(std::sync::Arc::clone(&renderer.layouts));
 
         let bounds = default_bounds();
         let vis = VisualizationState::new_from_parts(
@@ -625,7 +629,7 @@ impl SolarxyApp {
             render_format,
             renderer,
             preview: None,
-            scene_objects: SceneObjects::new(),
+            raster,
             env,
             environment: solarxy_renderer::environment::EnvironmentTracker::default(),
             env_bounds: bounds,
@@ -726,10 +730,11 @@ impl SolarxyApp {
         if !delta.ops.is_empty() {
             self.viz_dirty = true;
             self.attr_dirty = true;
-            if let Err(e) =
-                self.scene_objects
-                    .apply(&self.device, &self.queue, &self.renderer.layouts, &delta)
-            {
+            self.raster.apply(&self.device, &self.queue, &delta);
+            // The backend collects upload failures rather than logging them:
+            // it has no logging facility and this host is the layer that knows
+            // where a message belongs.
+            for e in self.raster.take_errors() {
                 log(&format!("scene delta apply failed: {e}"));
             }
             self.apply_scene_environment(&delta);
@@ -1588,53 +1593,70 @@ impl SolarxyApp {
             .as_ref()
             .map(|c| grid_plane_for(&c.destination_camera()));
 
-        let objects;
         let content = match cam_data {
             None => PaneContent::Empty,
             Some(_) if is_uv_map => PaneContent::Uv {
-                object: if self.uv_use_preview {
-                    self.uv_scene.draw_object(UV_PREVIEW_ID)
+                source: if self.uv_use_preview {
+                    self.uv_scene
+                        .draw_object(UV_PREVIEW_ID)
+                        .map_or(UvSource::None, UvSource::External)
                 } else {
-                    self.selected_object
-                        .and_then(|id| self.scene_objects.draw_object(id))
-                        .or_else(|| self.scene_objects.draw_objects().next())
+                    UvSource::Scene {
+                        preferred: self.selected_object,
+                    }
                 },
             },
-            Some(cam_data) => {
-                objects = draw_objects(&self.scene_objects, self.selected_object);
-                PaneContent::Scene {
-                    objects: &objects,
-                    cam_data,
-                    // A capture is one pane on its own, so it owns the shadow
-                    // map the way pane 0 does in the frame loop.
-                    shadow: true,
-                }
-            }
+            Some(cam_data) => PaneContent::Scene {
+                extra: None,
+                selected: self.selected_object,
+                cam_data,
+                // A capture is one pane on its own, so it owns the shadow map
+                // the way pane 0 does in the frame loop.
+                shadow: true,
+            },
         };
 
-        let out = solarxy_host::encode_pane_passes(&mut FrameCtx {
-            device: &self.device,
-            queue: &self.queue,
-            renderer: &mut self.renderer,
-            encoder: &mut encoder,
-            index: 0,
-            rect: full,
-            is_split: false,
-            pds: &pds,
-            display: &self.view.display,
-            background,
-            camera: self.view.cameras[pane_idx].as_mut(),
-            env: &self.env,
-            bounds: Some(&bounds),
-            grid_plane,
-            look,
-            scene_present: self.scene_objects.draw_objects().next().is_some(),
-            // A capture never carries the selection rim.
-            outline: false,
-            content,
+        let capture_scene_present = self.raster.scene().draw_objects().next().is_some();
+        let hdr_target = self.renderer.targets.hdr_resolve_view.clone();
+        let out = self.raster.encode(
+            &mut FrameCtx {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.renderer,
+                encoder: &mut encoder,
+                index: 0,
+                rect: full,
+                is_split: false,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                camera: self.view.cameras[pane_idx].as_mut(),
+                env: &self.env,
+                bounds: Some(&bounds),
+                grid_plane,
+                look,
+                scene_present: capture_scene_present,
+                // A capture never carries the selection rim.
+                outline: false,
+                content,
+            },
+            &hdr_target,
+        );
+        // Read back at slot 0, not at `pane_idx`: the context above encoded as
+        // pane 0, because a capture composites as the pane that clears. It
+        // overwrites what pane 0 recorded during the last frame, which is
+        // harmless only because a capture runs outside the frame loop and the
+        // next frame re-encodes every pane before compositing any of them.
+        let pass = self.raster.encoded(0).unwrap_or(solarxy_host::EncodedPane {
+            is_uv_map: false,
+            scene_present: false,
         });
+        debug_assert!(matches!(
+            out,
+            solarxy_renderer::backend::FrameOutcome::Complete
+        ));
 
-        self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, out);
+        self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, pass);
     }
 
     /// Composite an encoded capture into its offscreen target and arm the
@@ -1710,7 +1732,8 @@ impl SolarxyApp {
             .map(|c| c.camera)?;
         if let Some(node) = self.look_through.get(pane).copied().flatten()
             && let Some(def) = self
-                .scene_objects
+                .raster
+                .scene()
                 .cameras()
                 .and_then(|cams| cams.iter().find(|c| c.id == SceneObjectId(node.0)))
         {
@@ -1886,7 +1909,8 @@ impl SolarxyApp {
         if pane < 4 && camera.is_finite() && camera >= 0.0 {
             let id = SceneObjectId(camera as u64);
             let def = self
-                .scene_objects
+                .raster
+                .scene()
                 .cameras()
                 .and_then(|cams| cams.iter().find(|c| c.id == id).cloned());
             if let (Some(def), Some(cam)) = (def, self.view.cameras[pane].as_mut()) {
@@ -1931,8 +1955,8 @@ impl SolarxyApp {
         let source = solarxy_graph::document::NodeId(source as u64);
         let aabb = self.engine.validation(source).and_then(|v| {
             let issue = v.report.issues.get(issue)?;
-            let obj = self.scene_objects.get(id)?;
-            let raw_to_gpu = self.scene_objects.raw_to_gpu(id)?;
+            let obj = self.raster.scene().get(id)?;
+            let raw_to_gpu = self.raster.scene().raw_to_gpu(id)?;
             solarxy_renderer::validation::resolve_issue_aabb(&issue.scope, &obj.model, raw_to_gpu)
         });
         if let Some(aabb) = aabb {
@@ -2095,7 +2119,7 @@ impl SolarxyApp {
     /// The number of rendered objects (a smoke check that cooked geometry
     /// reached the GPU).
     pub fn object_count(&self) -> usize {
-        self.scene_objects.draw_objects().count()
+        self.raster.scene().draw_objects().count()
     }
 
     // ---- asset staging + the import-worker pump ----
@@ -3067,7 +3091,8 @@ impl SolarxyApp {
 
     /// The scene's visible bounds, or the placeholder before anything cooks.
     fn scene_bounds(&self) -> AABB {
-        self.scene_objects
+        self.raster
+            .scene()
             .visible_bounds()
             .unwrap_or(self.env_bounds)
     }
@@ -3100,7 +3125,7 @@ impl SolarxyApp {
             Some((node, addr, _)) => Some((*node, *addr)),
             None => self
                 .selected_object
-                .or_else(|| self.scene_objects.iter().next().map(|(id, _)| *id))
+                .or_else(|| self.raster.scene().iter().next().map(|(id, _)| *id))
                 .map(|id| (id.0, 0)),
         };
         if identity != self.last_uv_source {
@@ -3154,7 +3179,7 @@ impl SolarxyApp {
         if !self.viz_dirty || !self.viz_overlays_wanted() {
             return;
         }
-        let Some(bounds) = self.scene_objects.visible_bounds() else {
+        let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
         self.viz_dirty = false;
@@ -3465,7 +3490,7 @@ impl SolarxyApp {
         if self.engine.clock().playing {
             return;
         }
-        let Some(bounds) = self.scene_objects.visible_bounds() else {
+        let Some(bounds) = self.raster.scene().visible_bounds() else {
             return;
         };
         let eps = (self.env_bounds.diagonal() * 1e-3).max(1e-6);
@@ -3523,7 +3548,7 @@ impl SolarxyApp {
         // Snapshot the cloned defs first, ending the scene_objects borrow before
         // the pane cameras are mutated.
         let updates: Vec<(usize, solarxy_core::scene::CameraDef)> = {
-            let Some(cams) = self.scene_objects.cameras() else {
+            let Some(cams) = self.raster.scene().cameras() else {
                 return;
             };
             (0..4)
@@ -3605,7 +3630,8 @@ impl SolarxyApp {
     fn write_pane_camera_helpers(&mut self, i: usize) {
         let skip = self.look_through[i].map(|n| SceneObjectId(n.0));
         let cams: Vec<solarxy_core::scene::CameraDef> = self
-            .scene_objects
+            .raster
+            .scene()
             .cameras()
             .map(<[_]>::to_vec)
             .unwrap_or_default();
@@ -3642,12 +3668,12 @@ impl SolarxyApp {
         // never describe a light the renderer is not actually using. Sized in
         // world units, so unlike the manipulator this is once per frame, not
         // once per pane.
-        match self.scene_objects.lights() {
+        match self.raster.scene().lights() {
             Some(defs) => self.renderer.write_light_helpers(&self.queue, defs),
             None => self.renderer.write_light_helpers(&self.queue, &[]),
         }
 
-        if let Some(defs) = self.scene_objects.lights() {
+        if let Some(defs) = self.raster.scene().lights() {
             self.env.lights_uniform =
                 LightsUniform::from_defs(defs, bounds.diagonal() * 0.04, ibl_avg);
         } else if !self.view.display.lights_locked {
@@ -3820,12 +3846,12 @@ impl SolarxyApp {
         // The composite folds bloom and ambient occlusion in only when there
         // is something to fold them around. This shell used to pass a constant
         // here, which put a glow on an empty viewport.
-        let scene_present = self.scene_objects.draw_objects().next().is_some();
+        let scene_present = self.raster.scene().draw_objects().next().is_some();
         let outline = self.renderer.selection_style
             == solarxy_renderer::frame::SelectionStyle::Outline
             && self
                 .selected_object
-                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+                .is_some_and(|id| self.raster.scene().draw_object(id).is_some());
         // The grid plane follows the pane camera: perspective keeps the XZ
         // ground; an orthographic axis elevation (front/side) gets a view-plane
         // grid so it is not seen edge-on. Keyed off the transition destination
@@ -3837,26 +3863,30 @@ impl SolarxyApp {
 
         // Field-level borrows from here on, so the shared body can take the
         // renderer mutably while the draw list borrows the scene.
-        let objects;
+        // Everything below borrows fields other than `raster`, so the backend
+        // can be driven mutably. The preview scene is this host's own; the
+        // fallback is an object the backend owns, so it resolves that itself.
         let content = match cam_data {
             None => PaneContent::Empty,
             Some(_) if is_uv_map => PaneContent::Uv {
-                object: if self.uv_use_preview {
-                    self.uv_scene.draw_object(UV_PREVIEW_ID)
+                source: if self.uv_use_preview {
+                    self.uv_scene
+                        .draw_object(UV_PREVIEW_ID)
+                        .map_or(UvSource::None, UvSource::External)
                 } else {
-                    self.selected_object
-                        .and_then(|id| self.scene_objects.draw_object(id))
-                        .or_else(|| self.scene_objects.draw_objects().next())
+                    UvSource::Scene {
+                        preferred: self.selected_object,
+                    }
                 },
             },
-            Some(cam_data) => {
-                objects = draw_objects(&self.scene_objects, self.selected_object);
-                PaneContent::Scene {
-                    objects: &objects,
-                    cam_data,
-                    shadow: i == 0 || !self.view.display.lights_locked,
-                }
-            }
+            Some(cam_data) => PaneContent::Scene {
+                // This host draws nothing that did not come down the delta
+                // stream, so there is no extra object.
+                extra: None,
+                selected: self.selected_object,
+                cam_data,
+                shadow: i == 0 || !self.view.display.lights_locked,
+            },
         };
 
         let mut encoder = self
@@ -3864,25 +3894,33 @@ impl SolarxyApp {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Pane Encoder"),
             });
-        let pass = solarxy_host::encode_pane_passes(&mut FrameCtx {
-            device: &self.device,
-            queue: &self.queue,
-            renderer: &mut self.renderer,
-            encoder: &mut encoder,
-            index: i,
-            rect: pane,
-            is_split,
-            pds: &pds,
-            display: &self.view.display,
-            background,
-            camera: self.view.cameras[i].as_mut(),
-            env: &self.env,
-            bounds: Some(&bounds),
-            grid_plane,
-            look,
-            scene_present,
-            outline,
-            content,
+        let hdr_target = self.renderer.targets.hdr_resolve_view.clone();
+        let _outcome = self.raster.encode(
+            &mut FrameCtx {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.renderer,
+                encoder: &mut encoder,
+                index: i,
+                rect: pane,
+                is_split,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                camera: self.view.cameras[i].as_mut(),
+                env: &self.env,
+                bounds: Some(&bounds),
+                grid_plane,
+                look,
+                scene_present,
+                outline,
+                content,
+            },
+            &hdr_target,
+        );
+        let pass = self.raster.encoded(i).unwrap_or(solarxy_host::EncodedPane {
+            is_uv_map: false,
+            scene_present: false,
         });
 
         solarxy_host::composite_and_submit(
@@ -3909,7 +3947,8 @@ impl SolarxyApp {
     /// camera's cook decoded.
     fn pane_camera_look(&self, pane: usize) -> Option<&solarxy_core::scene::CameraLook> {
         let node = (*self.look_through.get(pane)?)?;
-        self.scene_objects
+        self.raster
+            .scene()
             .cameras()?
             .iter()
             .find(|c| c.id == solarxy_core::scene::SceneObjectId(node.0))
@@ -3950,7 +3989,7 @@ impl SolarxyApp {
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
         // Engine light nodes are world-fixed and owe nothing to a camera, so
         // the synthesized viewer rig is the only thing this applies to.
-        if self.view.display.lights_locked || self.scene_objects.lights().is_some() {
+        if self.view.display.lights_locked || self.raster.scene().lights().is_some() {
             return;
         }
         let bounds = self.scene_bounds();
@@ -3968,7 +4007,7 @@ impl SolarxyApp {
             )
             .to_string()
         });
-        let cams = self.scene_objects.cameras();
+        let cams = self.raster.scene().cameras();
         let pane_look_through = std::array::from_fn(|i| self.look_through[i].map(|n| n.0 as f64));
         let pane_gate_aspect = std::array::from_fn(|i| {
             let node = self.look_through[i]?;
@@ -4095,6 +4134,15 @@ impl SolarxyApp {
 /// The asset-preview pane's isolated render state: its own surface
 /// (a second canvas from the SAME instance/device), a throwaway `SceneObjects`
 /// holding one parsed model, and an orbit camera. Never touches the document.
+///
+/// **The one place in this host that still drives the renderer's passes
+/// directly rather than through a backend, and deliberately so.** It is not a
+/// document pane: it holds a staged asset nobody has imported, and it runs a
+/// reduced chain on purpose, shadow and main only, with bloom and ambient
+/// occlusion off, because a preview is a shaded look rather than a beauty
+/// frame. Routing it through the shared pane body would encode the gbuffer,
+/// ambient-occlusion and bloom passes it exists to skip, which is a behaviour
+/// change dressed as a cleanup. Left as it is, on purpose.
 struct PreviewState {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -4372,29 +4420,6 @@ impl CaptureTarget {
             height,
         }
     }
-}
-
-/// The frame's draw list, with the picking-sync selection flagged so the main
-/// pass draws its accent tint and the outline stages find a silhouette.
-///
-/// A free function over the scene rather than a method, because the caller
-/// holds the renderer mutably while this list is alive and a `&self` receiver
-/// would borrow the whole host.
-fn draw_objects(
-    scene_objects: &SceneObjects,
-    selected_object: Option<SceneObjectId>,
-) -> Vec<DrawObject<'_>> {
-    let mut objects: Vec<DrawObject<'_>> = scene_objects.draw_objects().collect();
-    if let Some(id) = selected_object
-        && let Some(selected) = scene_objects.draw_object(id)
-    {
-        for o in &mut objects {
-            if std::ptr::eq(o.model, selected.model) {
-                o.selected = true;
-            }
-        }
-    }
-    objects
 }
 
 fn map_button(button: u32) -> Option<PointerButton> {
