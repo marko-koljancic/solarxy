@@ -107,6 +107,11 @@ fn no_pathtrace_shader_depends_on_a_derivative_or_a_barrier() {
 
 /// The fragments that declare no entry point and are composed under the ones
 /// that do. Each has to parse alone.
+///
+/// Not every entry-point-free fragment qualifies: `material.wgsl` declares none
+/// either, but it names the record the traversal declares and samples through
+/// the atlas, so it parses only in a composition. Membership here is "depends on
+/// nothing above it", not "has no entry point".
 const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl"];
 
 #[test]
@@ -131,10 +136,19 @@ fn every_base_fragment_parses_on_its_own() {
 const RECIPES: &[(&str, &[&str])] = &[
     (
         "the debug kernel",
-        &["traverse.wgsl", "atlas.wgsl", "trace.wgsl"],
+        &["traverse.wgsl", "atlas.wgsl", "material.wgsl", "trace.wgsl"],
     ),
     ("the traversal probe", &["traverse.wgsl", "parity.wgsl"]),
     ("the atlas probe", &["atlas.wgsl", "atlas_probe.wgsl"]),
+    (
+        "the material probe",
+        &[
+            "traverse.wgsl",
+            "atlas.wgsl",
+            "material.wgsl",
+            "material_probe.wgsl",
+        ],
+    ),
 ];
 
 #[test]
@@ -200,14 +214,15 @@ fn the_workgroup_size_matches_the_constant_the_host_dispatches_against() {
 fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
     // Core WebGPU grants eight storage buffers per stage and the design spends
     // seven, leaving one as the escape hatch a ninth logical array would
-    // otherwise force. Materials and lights are 4 and 5; nothing may quietly
-    // renumber into them or into 7.
+    // otherwise force. Materials took 4 with the traced material record; the
+    // lights are 5 and nothing may quietly renumber into them or into 7.
     let source = read("traverse.wgsl");
     for (binding, name) in [
         (0u32, "bvh_nodes"),
         (1, "prim_indices"),
         (2, "vertex_pos"),
         (3, "vertex_attr"),
+        (4, "materials"),
         (6, "instances"),
     ] {
         let decl = format!("@group(0) @binding({binding}) var<storage, read> {name}");
@@ -216,12 +231,18 @@ fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
             "traverse.wgsl no longer declares `{name}` at binding {binding}"
         );
     }
-    for reserved in [4u32, 5, 7] {
-        assert!(
-            !source.contains(&format!("@group(0) @binding({reserved})")),
-            "binding {reserved} of the scene group is reserved; \
-             4 and 5 are materials and lights, 7 is the escape hatch"
-        );
+    // Read over every fragment, not just this one. The scene group is declared
+    // here by convention, so a declaration anywhere else would take a reserved
+    // number with nothing objecting: the assertion above cannot see it and this
+    // one is the only thing that can.
+    for (name, source) in every_fragment() {
+        for reserved in [5u32, 7] {
+            assert!(
+                !source.contains(&format!("@group(0) @binding({reserved})")),
+                "{name} takes scene binding {reserved}; 5 is the lights and 7 \
+                 is the escape hatch a ninth logical array would otherwise force"
+            );
+        }
     }
 }
 

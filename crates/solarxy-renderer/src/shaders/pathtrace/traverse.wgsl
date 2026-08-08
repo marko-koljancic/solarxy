@@ -64,16 +64,79 @@ struct VertexAttr {
     uv: vec4f,
 }
 
+// 256 bytes, and the offsets are not negotiable: every vector below sits on a
+// 16-byte boundary because WGSL aligns vec3f and vec4f to 16 in the storage
+// address space while Rust aligns [f32; 3] to 4. The Rust twin is
+// `pathtrace::material::TracedMaterial`, which states each offset and is pinned
+// to this by `tests/uniform_layout.rs` for size and by
+// `tests/pathtrace_material.rs` for field order, since a transposition of two
+// same-sized blocks changes no size.
+//
+// Five texture slots, not the seventeen the authoring model carries: the other
+// twelve modulate scalars that are all present here, and the atlas packs five.
+// See the Rust module documentation.
+struct TracedMaterial {
+    base_color: vec4f,
+
+    emissive: vec3f,
+    emissive_strength: f32,
+
+    attenuation_color: vec3f,
+    // Zero means no attenuation, standing in for an infinite default.
+    attenuation_distance: f32,
+
+    sheen_color: vec3f,
+    sheen_roughness: f32,
+
+    specular_color: vec3f,
+    specular_intensity: f32,
+
+    metallic: f32,
+    roughness: f32,
+    ior: f32,
+    transmission: f32,
+
+    // Zero thickness is thin-walled: no interior to attenuate through.
+    thickness: f32,
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    anisotropy: f32,
+
+    anisotropy_rotation: f32,
+    iridescence: f32,
+    iridescence_ior: f32,
+    iridescence_thickness_min: f32,
+
+    iridescence_thickness_max: f32,
+    occlusion_strength: f32,
+    alpha_cutoff: f32,
+    // Bits 0 to 1 alpha mode, bits 2 to 5 shading model, the rest reserved.
+    flags: u32,
+
+    // Per slot, in role order: base colour, normal, metallic-roughness,
+    // occlusion, emissive.
+    tex_rect: array<vec4f, 5>,
+    // A descriptor of TEX_UNUSED_BIT means the slot carries no texture. Zero is
+    // a legal descriptor naming layer zero, never an absent one.
+    tex_desc: array<u32, 5>,
+}
+
 // The scene group. Binding numbers are fixed by the storage-buffer budget and
-// are deliberately not contiguous: 4 and 5 belong to materials and lights, and
-// 7 is the escape hatch a ninth logical array would otherwise force. Core
-// WebGPU grants eight per stage and the design has to fit inside that
-// permanently, so the numbering is not something a later stage renegotiates.
+// are deliberately not contiguous: 5 belongs to the lights and 7 is the escape
+// hatch a ninth logical array would otherwise force. Core WebGPU grants eight
+// per stage and the design has to fit inside that permanently, so the numbering
+// is not something a later stage renegotiates.
 @group(0) @binding(0) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(1) var<storage, read> prim_indices: array<u32>;
 @group(0) @binding(2) var<storage, read> vertex_pos: array<vec4f>;
 @group(0) @binding(3) var<storage, read> vertex_attr: array<VertexAttr>;
+@group(0) @binding(4) var<storage, read> materials: array<TracedMaterial>;
 @group(0) @binding(6) var<storage, read> instances: array<Instance>;
+
+// Alpha-mode and shading-model fields of `TracedMaterial.flags`.
+const MAT_ALPHA_MODE_MASK: u32 = 0x3u;
+const MAT_SHADING_MODEL_SHIFT: u32 = 2u;
+const MAT_SHADING_MODEL_MASK: u32 = 0xFu;
 
 const LEAF_FLAG: u32 = 0x80000000u;
 

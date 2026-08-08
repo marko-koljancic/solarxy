@@ -14,6 +14,11 @@
 //! of a sub-rectangle stays inside its own border or reaches the neighbour is a
 //! question about hardware interpolation, and nothing on the CPU can answer it.
 //!
+//! [`MaterialProbe`] pins the two declarations of the material record to each
+//! other. Its subject is field order, which no automatic check reaches: the size
+//! guard measures a total and the Rust offset assertions measure one side, so two
+//! transposed sixteen-byte blocks satisfy both and shade wrong.
+//!
 //! They live in the library rather than in the tests that use them because the
 //! browser needs to run the same checks: the desktop's WGSL front end and the
 //! browser's are different implementations of the same specification, and the
@@ -39,12 +44,27 @@ const ATLAS_PROBE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/atlas_probe.wgsl"),
 );
 
+/// The material kernel, composed over all three fragments that ship. It binds
+/// the real scene group, so it reads the pool through binding 4 rather than
+/// through one of its own.
+const MATERIAL_PROBE_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/traverse.wgsl"),
+    include_str!("../shaders/pathtrace/atlas.wgsl"),
+    include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/material_probe.wgsl"),
+);
+
 /// Rays per row of the dispatch grid. The kernel's workgroup shape is shared
 /// with the real one, so a linear corpus is walked as a 2D grid.
 const CORPUS_WIDTH: u32 = 64;
 
 /// Taps per row of the atlas probe's dispatch grid, for the same reason.
 const TAP_WIDTH: u32 = 64;
+
+/// How many `vec4` the material probe writes per tap: the record's nine blocks
+/// then the three the resolved surface takes. The kernel is given this value, so
+/// a change here is a change there.
+pub const MATERIAL_RESULT_WIDTH: usize = 12;
 
 /// Bit 0 of [`CorpusHit::flags`]: the closest-hit walk found something.
 pub const HIT_CLOSEST: u32 = 1 << 0;
@@ -518,5 +538,178 @@ impl ColorReadback {
         drop(data);
         self.buffer.unmap();
         ColorPoll::Ready(colors)
+    }
+}
+
+/// One material the probe asks about.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct MaterialTap {
+    /// The vertex uv set: uv0 in `xy`, uv1 in `zw`, exactly as `VertexAttr`
+    /// carries it.
+    pub uv: [f32; 4],
+    /// Index into the material pool.
+    pub material: u32,
+    pub _pad: [u32; 3],
+}
+
+const _: () = assert!(std::mem::size_of::<MaterialTap>() == 32);
+
+/// The material readout pipeline and its own io layout.
+///
+/// What it answers is whether the two sides of [`super::material::TracedMaterial`]
+/// agree about field order. Nothing else can: the size guard measures the total
+/// and the Rust offset assertions measure one side, so a transposition of two
+/// sixteen-byte blocks passes both and shades wrong.
+///
+/// It binds the **real** scene group, so the pool is read through binding 4 with
+/// the layout the kernel uses rather than through a layout the test invented.
+pub struct MaterialProbe {
+    pipeline: wgpu::ComputePipeline,
+    io_layout: wgpu::BindGroupLayout,
+}
+
+impl MaterialProbe {
+    /// Builds the pipeline. Like the other two, this is the call a browser check
+    /// is watching.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pathtrace Material Probe Shader"),
+            source: wgpu::ShaderSource::Wgsl(MATERIAL_PROBE_KERNEL.into()),
+        });
+        let io_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_material_probe_io_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        // Group 1 rather than a gap: the probe's io takes the accumulation
+        // group's number, which no probe binds, so the scene and the atlas keep
+        // theirs and are bound through the layouts the kernel uses.
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pathtrace Material Probe Pipeline Layout"),
+            bind_group_layouts: &[&layouts.scene, &io_layout, &layouts.sampled],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Pathtrace Material Probe Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("material_probe"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[
+                    ("MATERIAL_TAP_WIDTH", f64::from(TAP_WIDTH)),
+                    ("MATERIAL_RESULT_WIDTH", MATERIAL_RESULT_WIDTH as f64),
+                ],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        });
+        Self {
+            pipeline,
+            io_layout,
+        }
+    }
+
+    /// Encodes and submits one batch, returning a readback to poll.
+    ///
+    /// The readback holds [`MATERIAL_RESULT_WIDTH`] entries per tap, in the
+    /// kernel's write order.
+    #[must_use]
+    pub fn submit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &TraceScene,
+        atlas: &TraceAtlas,
+        taps: &[MaterialTap],
+    ) -> ColorReadback {
+        let count = taps.len().max(1);
+        // An empty batch is a caller mistake rather than a scene state, but a
+        // zero-sized binding is invalid, so it becomes one tap of material zero.
+        let placeholder = [MaterialTap::default()];
+        let tap_bytes: &[u8] = if taps.is_empty() {
+            bytemuck::cast_slice(&placeholder)
+        } else {
+            bytemuck::cast_slice(taps)
+        };
+        let tap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Pathtrace Material Taps"),
+            contents: tap_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let entries = count * MATERIAL_RESULT_WIDTH;
+        let result_bytes = (entries * 16) as u64;
+        let result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Material Results"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Material Results Readback"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let io = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Material Probe IO Bind Group"),
+            layout: &self.io_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tap_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: result_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Pathtrace Material Probe Encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Pathtrace Material Probe Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, scene.bind_group(), &[]);
+            pass.set_bind_group(1, &io, &[]);
+            pass.set_bind_group(2, atlas.bind_group(), &[]);
+            let rows = (count as u32).div_ceil(TAP_WIDTH);
+            pass.dispatch_workgroups(TAP_WIDTH / WORKGROUP_SIZE, rows.div_ceil(WORKGROUP_SIZE), 1);
+        }
+        encoder.copy_buffer_to_buffer(&result_buffer, 0, &staging, 0, result_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        ColorReadback {
+            buffer: staging,
+            count: entries,
+            receiver: None,
+        }
     }
 }

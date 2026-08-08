@@ -22,6 +22,7 @@
 
 pub mod arena;
 pub mod atlas;
+pub mod material;
 pub mod probe;
 pub mod scene;
 
@@ -38,14 +39,21 @@ pub const TRAVERSE_SOURCE: &str = include_str!("../shaders/pathtrace/traverse.wg
 /// entry point, like the traversal.
 pub const ATLAS_SOURCE: &str = include_str!("../shaders/pathtrace/atlas.wgsl");
 
-/// The debug kernel, composed over the traversal and the atlas.
+/// The material fragment: the record's texture taps resolved against its
+/// factors. No entry point, and composed after both the traversal, which
+/// declares the record, and the atlas, which it samples through.
+pub const MATERIAL_SOURCE: &str = include_str!("../shaders/pathtrace/material.wgsl");
+
+/// The debug kernel, composed over the traversal, the atlas and the material.
 ///
-/// It samples no textures. The atlas rides along so that the fragment the
-/// material stage will call is compiled by both WGSL front ends from the day it
-/// is written, rather than first meeting the browser's several stages later.
+/// It shades nothing. The atlas and the material ride along so that the
+/// fragments the shading stage will call are compiled by both WGSL front ends
+/// from the day they are written, rather than first meeting the browser's
+/// several stages later.
 const TRACE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/traverse.wgsl"),
     include_str!("../shaders/pathtrace/atlas.wgsl"),
+    include_str!("../shaders/pathtrace/material.wgsl"),
     include_str!("../shaders/pathtrace/trace.wgsl"),
 );
 
@@ -191,6 +199,7 @@ pub struct TraceScene {
     vertex_pos: GrowBuffer,
     vertex_attr: GrowBuffer,
     instances: GrowBuffer,
+    materials: GrowBuffer,
     bind_group: wgpu::BindGroup,
     instance_count: u32,
 }
@@ -205,10 +214,18 @@ impl TraceScene {
         let vertex_attr =
             GrowBuffer::new::<arena::VertexAttr>(device, "Pathtrace Vertex Attributes");
         let instances = GrowBuffer::new::<arena::Instance>(device, "Pathtrace Instances");
+        let materials = GrowBuffer::new::<material::TracedMaterial>(device, "Pathtrace Materials");
         let bind_group = Self::bind(
             device,
             layouts,
-            [&nodes, &prim_indices, &vertex_pos, &vertex_attr, &instances],
+            [
+                &nodes,
+                &prim_indices,
+                &vertex_pos,
+                &vertex_attr,
+                &materials,
+                &instances,
+            ],
         );
         Self {
             nodes,
@@ -216,6 +233,7 @@ impl TraceScene {
             vertex_pos,
             vertex_attr,
             instances,
+            materials,
             bind_group,
             instance_count: 0,
         }
@@ -229,15 +247,16 @@ impl TraceScene {
         layouts: &PathtraceLayouts,
         arena: &TraceArena,
     ) {
-        // Five bindings and then one disjunction, rather than a folded `|=`,
-        // so that a later reader cannot "simplify" this into short-circuiting
-        // and leave four buffers holding the previous scene.
+        // Six bindings and then one disjunction, rather than a folded `|=`, so
+        // that a later reader cannot "simplify" this into short-circuiting and
+        // leave five buffers holding the previous scene.
         let a = self.nodes.sync(device, queue, arena.nodes());
         let b = self.prim_indices.sync(device, queue, arena.prim_indices());
         let c = self.vertex_pos.sync(device, queue, arena.vertex_pos());
         let d = self.vertex_attr.sync(device, queue, arena.vertex_attr());
         let e = self.instances.sync(device, queue, arena.instances());
-        if a || b || c || d || e {
+        let f = self.materials.sync(device, queue, arena.materials());
+        if a || b || c || d || e || f {
             self.bind_group = Self::bind(
                 device,
                 layouts,
@@ -246,6 +265,7 @@ impl TraceScene {
                     &self.prim_indices,
                     &self.vertex_pos,
                     &self.vertex_attr,
+                    &self.materials,
                     &self.instances,
                 ],
             );
@@ -270,11 +290,14 @@ impl TraceScene {
     fn bind(
         device: &wgpu::Device,
         layouts: &PathtraceLayouts,
-        buffers: [&GrowBuffer; 5],
+        buffers: [&GrowBuffer; 6],
     ) -> wgpu::BindGroup {
-        // Binding 6 rather than 4: the scene group reserves 4, 5 and 7 by
-        // number for the materials, the lights, and the escape hatch.
-        let bindings = [0u32, 1, 2, 3, 6];
+        // Not contiguous, and not in buffer order: the instances are binding 6
+        // because the scene group reserves 5 for the lights and 7 as the
+        // escape hatch a ninth logical array would otherwise force. Binding 4
+        // is the material pool, which is why the array's fifth entry is the
+        // materials and its sixth is the instances.
+        let bindings = [0u32, 1, 2, 3, 4, 6];
         let entries: Vec<wgpu::BindGroupEntry<'_>> = bindings
             .iter()
             .zip(buffers)

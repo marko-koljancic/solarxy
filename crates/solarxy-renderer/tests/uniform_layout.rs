@@ -137,6 +137,19 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::arena::VertexAttr>(),
         rust_type: "solarxy_renderer::pathtrace::arena::VertexAttr",
     },
+    // `TracedMaterial` is the widest of them and the one where a same-size
+    // transposition is most plausible: nine sixteen-byte blocks, five of which
+    // are a colour and a scalar. This row buys the total only. Field order is
+    // pinned on the Rust side by `record_offsets_are_the_documented_ones` and
+    // across the boundary by `tests/pathtrace_material.rs`, which reads a record
+    // back through the real binding.
+    Case {
+        shader: "pathtrace/traverse.wgsl",
+        prelude: &[],
+        struct_name: "TracedMaterial",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::material::TracedMaterial>(),
+        rust_type: "solarxy_renderer::pathtrace::material::TracedMaterial",
+    },
     // `trace.wgsl` is a fragment: it names the traversal's types, so it only
     // parses composed over it, the same way the host builds it.
     Case {
@@ -159,6 +172,23 @@ const CASES: &[Case] = &[
         struct_name: "CorpusHit",
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::CorpusHit>(),
         rust_type: "solarxy_renderer::pathtrace::probe::CorpusHit",
+    },
+    // A probe's request struct crosses the boundary like anything else, and this
+    // row is here because the omission bit immediately: the material probe's tap
+    // was written with a `vec3u` tail, which WGSL aligns to 16, so it measured 48
+    // against the Rust twin's 32 and every dispatch failed validation. That was a
+    // loud failure. The same mistake inside a record the kernel indexes is a
+    // silent one.
+    Case {
+        shader: "pathtrace/material_probe.wgsl",
+        prelude: &[
+            "pathtrace/traverse.wgsl",
+            "pathtrace/atlas.wgsl",
+            "pathtrace/material.wgsl",
+        ],
+        struct_name: "MaterialTap",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::MaterialTap>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::MaterialTap",
     },
 ];
 

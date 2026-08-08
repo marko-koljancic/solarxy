@@ -312,7 +312,7 @@ impl BindGroupLayouts {
 ///
 /// Declared here with every other layout, so this file stays the single source
 /// of truth, but built separately and only when a tracer exists. That is not
-/// tidiness: the scene group binds five storage buffers in the compute stage,
+/// tidiness: the scene group binds six storage buffers in the compute stage,
 /// which core WebGPU allows (eight per stage) and
 /// `Limits::downlevel_defaults()` does not (four). Building them inside
 /// [`BindGroupLayouts::new`] would impose the tracer's limits on every consumer
@@ -340,10 +340,11 @@ impl PathtraceLayouts {
     /// Builds all four. Requires a device with core WebGPU limits.
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
-        // Bindings 4 and 5 of the scene group are materials and lights, and 7
-        // is the ninth-array escape hatch. They arrive with their consumers
-        // rather than as placeholders, so the numbering is deliberately not
-        // contiguous and a later stage does not renegotiate it.
+        // Binding 4 is the material pool, which arrived with the traced
+        // material record. Binding 5 is the lights and 7 is the ninth-array
+        // escape hatch; both arrive with their consumers rather than as
+        // placeholders, so the numbering is deliberately not contiguous and a
+        // later stage does not renegotiate it.
         let scene = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_scene_bind_group_layout"),
             entries: &[
@@ -351,6 +352,7 @@ impl PathtraceLayouts {
                 bgl_compute_storage_entry(1),
                 bgl_compute_storage_entry(2),
                 bgl_compute_storage_entry(3),
+                bgl_compute_storage_entry(4),
                 bgl_compute_storage_entry(6),
             ],
         });

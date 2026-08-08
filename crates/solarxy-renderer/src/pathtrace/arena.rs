@@ -21,6 +21,8 @@
 use bytemuck::{Pod, Zeroable};
 use solarxy_bvh::{Bvh, BvhNode};
 
+use super::material::TracedMaterial;
+
 /// Bit 0 of [`Instance::flags`]: the instance is drawn.
 pub const INSTANCE_VISIBLE: u32 = 1 << 0;
 /// Bit 1 of [`Instance::flags`]: the instance blocks shadow rays.
@@ -111,6 +113,7 @@ pub struct TraceArena {
     vertex_pos: Vec<[f32; 4]>,
     vertex_attr: Vec<VertexAttr>,
     instances: Vec<Instance>,
+    materials: Vec<TracedMaterial>,
 }
 
 impl TraceArena {
@@ -134,6 +137,7 @@ impl TraceArena {
             vertex_pos: Vec::new(),
             vertex_attr: Vec::new(),
             instances: Vec::with_capacity(placements.len()),
+            materials: Vec::new(),
         };
         debug_assert_eq!(tlas_arrays.nodes.len(), arena.nodes.len() * 32);
 
@@ -196,6 +200,24 @@ impl TraceArena {
         arena
     }
 
+    /// Attaches the material pool an [`Instance::material_base`] indexes.
+    ///
+    /// A builder rather than a fourth parameter to [`TraceArena::build`], and
+    /// deliberately: the records are built by the ingestion above this file
+    /// from the scene's materials and its atlas arrangement, neither of which
+    /// [`TraceArena::build`] is given or should be. Taking them as a parameter
+    /// would also change every one of `build`'s call sites, all of which pack
+    /// geometry and have no materials to hand it.
+    ///
+    /// Materials are per material slot rather than per mesh or per placement,
+    /// so nothing here indexes or reorders them; they ride along because they
+    /// are one buffer of the kernel's scene group, which is what this type is.
+    #[must_use]
+    pub fn with_materials(mut self, materials: Vec<TracedMaterial>) -> Self {
+        self.materials = materials;
+        self
+    }
+
     /// The concatenated node buffer: the top-level hierarchy, then one per mesh.
     #[must_use]
     pub fn nodes(&self) -> &[BvhNode] {
@@ -224,6 +246,18 @@ impl TraceArena {
     #[must_use]
     pub fn instances(&self) -> &[Instance] {
         &self.instances
+    }
+
+    /// The material pool, indexed by [`Instance::material_base`].
+    ///
+    /// Empty when nothing attached one, which is every caller that packs
+    /// geometry alone. An empty pool uploads as one zeroed record, and a zeroed
+    /// record is a wrong material rather than an absent one, so the ingestion
+    /// that does attach a pool always emits at least one entry. See
+    /// `TracedMaterial::fallback`.
+    #[must_use]
+    pub fn materials(&self) -> &[TracedMaterial] {
+        &self.materials
     }
 
     /// Whether the arena holds nothing worth dispatching over.

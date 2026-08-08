@@ -54,6 +54,7 @@ use solarxy_core::scene::{
 
 use super::arena::{ArenaMesh, ArenaPlacement, INSTANCE_CAST_SHADOW, INSTANCE_VISIBLE, TraceArena};
 use super::atlas::{AtlasFilter, AtlasPlan, AtlasTexture, AtlasWrap, TEXTURE_UNUSED, TextureKey};
+use super::material::TracedMaterial;
 
 /// Identity of the geometry a hierarchy was built over.
 ///
@@ -948,7 +949,8 @@ impl TraceSceneCache {
             .collect();
 
         let tlas = Bvh::build_tlas(&boxes);
-        self.arena = TraceArena::build(&tlas, &arena_meshes, &placements);
+        let materials = self.build_material_records();
+        self.arena = TraceArena::build(&tlas, &arena_meshes, &placements).with_materials(materials);
 
         stats.objects = u32::try_from(self.objects.len()).unwrap_or(u32::MAX);
         stats.meshes = u32::try_from(arena_meshes.len()).unwrap_or(u32::MAX);
@@ -1021,6 +1023,40 @@ impl TraceSceneCache {
             }
         }
         self.material_textures = table;
+    }
+
+    /// Builds one record per material slot, in the numbering
+    /// [`TraceSceneCache::material_slots`] describes.
+    ///
+    /// Runs after [`TraceSceneCache::rebuild_material_textures`], because the
+    /// texture half of a record is that table's entry copied verbatim rather
+    /// than re-derived from the arrangement.
+    ///
+    /// Two things about the shape are load-bearing. **The table starts as
+    /// fallbacks, not as zeroes**: a slot no object's material list covers is a
+    /// real case, since `material_slots` gives an object with no materials one
+    /// slot anyway, and a zeroed record is not an absent material but a black
+    /// mirror-smooth one whose five texture slots all name atlas layer zero.
+    /// **An empty scene still emits one record**, because an empty slice
+    /// uploads as one zeroed element and lands in exactly that trap.
+    fn build_material_records(&self) -> Vec<TracedMaterial> {
+        let count = (self.material_slots() as usize).max(1);
+        let mut records = vec![TracedMaterial::fallback(); count];
+        for obj in self.objects.values() {
+            for (index, mat) in obj.geometry.materials.iter().enumerate() {
+                let slot = obj.material_base as usize + index;
+                let Some(record) = records.get_mut(slot) else {
+                    continue;
+                };
+                let textures = self
+                    .material_textures
+                    .get(slot)
+                    .copied()
+                    .unwrap_or_default();
+                *record = TracedMaterial::from_raw(mat, &textures);
+            }
+        }
+        records
     }
 
     /// The current atlas arrangement.
@@ -1744,6 +1780,108 @@ mod tests {
         assert_eq!(cache.stats().atlas_layers, 0);
         assert_eq!(cache.stats().atlas_bytes, 0);
         assert!(cache.atlas().is_empty());
+    }
+
+    // ---- the material pool ----
+
+    // Exact equality is the assertion: these compare a copy against its source,
+    // so anything but a bit-for-bit match is the bug being looked for.
+    #[allow(clippy::float_cmp)]
+    #[test]
+    fn the_pool_has_one_record_per_slot_carrying_that_material() {
+        let mut red = material("red");
+        red.base_color_factor = [1.0, 0.0, 0.0, 1.0];
+        let mut green = material("green");
+        green.base_color_factor = [0.0, 1.0, 0.0, 1.0];
+
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![red, green]),
+        ));
+        let arena = cache.repack().expect("packed");
+
+        assert_eq!(arena.materials().len(), 2);
+        assert_eq!(arena.materials()[0].base_color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(arena.materials()[1].base_color, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[allow(clippy::float_cmp)]
+    #[test]
+    fn a_records_texture_half_is_the_arrangements_entry() {
+        let albedo = image(16, 16, 3);
+        let mut mat = material("m");
+        mat.diffuse_texture_data = Some(albedo);
+
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(
+            1,
+            &textured(vec![mesh(MeshTopology::Triangles)], vec![mat]),
+        ));
+        let record = cache.repack().expect("packed").materials()[0];
+        let slots = cache.material_textures(0).copied().expect("one slot");
+        for (i, slot) in slots.slots.iter().enumerate() {
+            assert_eq!(record.tex_desc[i], slot.desc, "slot {i} descriptor");
+            assert_eq!(record.tex_rect[i], slot.rect, "slot {i} rectangle");
+        }
+        assert_ne!(record.tex_desc[0], TEXTURE_UNUSED, "the base colour packed");
+    }
+
+    /// A mesh with no material still gets a slot, and that slot gets a material
+    /// rather than a hole.
+    ///
+    /// The raster path synthesizes a default here, so this is where the two
+    /// consumers would otherwise diverge for the commonest scene there is: an
+    /// imported mesh with no material at all.
+    #[test]
+    fn an_object_with_no_materials_gets_one_fallback_record() {
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        let arena = cache.repack().expect("packed");
+
+        assert_eq!(arena.materials().len(), 1);
+        assert_eq!(arena.materials()[0], TracedMaterial::fallback());
+    }
+
+    /// An empty pool would upload as one zeroed record, which is a black mirror
+    /// naming atlas layer zero five times rather than an absent material.
+    #[test]
+    fn a_scene_with_no_objects_still_emits_one_record() {
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::Clear],
+        });
+        let arena = cache.repack().expect("packed");
+
+        assert_eq!(arena.materials().len(), 1);
+        assert_eq!(arena.materials()[0], TracedMaterial::fallback());
+    }
+
+    #[test]
+    fn the_pool_follows_the_same_bases_the_instances_carry() {
+        let two = textured(
+            vec![mesh(MeshTopology::Triangles)],
+            vec![material("a"), material("b")],
+        );
+        let one = textured(vec![mesh(MeshTopology::Triangles)], vec![material("c")]);
+
+        let mut cache = TraceSceneCache::new();
+        cache.apply(&upsert(1, &two));
+        cache.apply(&upsert(2, &one));
+        let (count, bases) = {
+            let arena = cache.repack().expect("packed");
+            let bases: Vec<u32> = arena.instances().iter().map(|i| i.material_base).collect();
+            (arena.materials().len(), bases)
+        };
+
+        assert_eq!(count, cache.material_slots() as usize);
+        for base in bases {
+            assert!(
+                (base as usize) < count,
+                "instance material base {base} is outside a pool of {count}"
+            );
+        }
     }
 
     // ---- deferred builds ----

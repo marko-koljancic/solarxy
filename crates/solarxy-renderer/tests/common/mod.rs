@@ -15,7 +15,7 @@ pub struct Gpu {
     pub queue: wgpu::Queue,
     pub layouts: BindGroupLayouts,
     /// Built separately from the registry: the tracer's scene group binds
-    /// five compute-stage storage buffers, which core WebGPU allows and
+    /// six compute-stage storage buffers, which core WebGPU allows and
     /// downlevel limits do not, so a non-tracing consumer must not pay for it.
     pub pathtrace: PathtraceLayouts,
 }
