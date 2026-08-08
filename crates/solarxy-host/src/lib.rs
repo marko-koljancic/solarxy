@@ -7,14 +7,21 @@
 //! `solarxy-web`'s `app.rs`, whose own header said so. This crate is the one
 //! copy.
 //!
-//! # What this crate is not
+//! # Where the backend trait sits
 //!
-//! **There is no renderer trait here, and no dynamic dispatch.** This is
-//! deduplication validated by two callers of one implementation, not an
-//! abstraction over two backends. A trait would have to be designed against a
-//! backend that does not exist yet, then changed when the real one arrives,
-//! refactoring every host twice. When a second *implementation* exists, it
-//! shapes the trait.
+//! Through 0.8.2 this crate deliberately had no renderer trait: one
+//! implementation with two callers is deduplication, and a trait designed
+//! against a backend that does not exist yet gets redesigned when the real one
+//! arrives, refactoring every host twice. 0.9.0 is when the second
+//! implementation shows up, so the trait was written then, from three call
+//! sites rather than one guess.
+//!
+//! **It is declared in `solarxy_renderer::backend`, not here**, so a backend
+//! living in the renderer can implement it without depending on this crate.
+//! What lives here is [`RasterBackend`], the implementation that wraps
+//! [`pane::encode_pane_passes`], because that is where the pass chain is.
+//!
+//! # What this crate is not
 //!
 //! **It does not depend on `solarxy-graph`.** The engine and the renderer
 //! meet only at `solarxy_core::scene::SceneDelta`, and this crate sits on
