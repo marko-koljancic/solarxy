@@ -21,8 +21,7 @@ use std::collections::BTreeMap;
 use cgmath::{InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use solarxy_core::preferences::{
-    BackgroundMode, IblMode, InspectionMode, PaneMode, ProjectionMode, ResolvedBackground,
-    ToneMode, UvMapBackground,
+    BackgroundMode, IblMode, InspectionMode, PaneMode, ProjectionMode, ResolvedBackground, ToneMode,
 };
 use solarxy_core::raycast::{Ray, screen_to_world_ray};
 use solarxy_core::scene::{SceneDelta, SceneObjectId, SceneOp};
@@ -50,7 +49,7 @@ use solarxy_renderer::camera_state::CameraState;
 use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
-use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, RendererInit, WireframeParams};
+use solarxy_renderer::frame::{DrawObject, Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
 use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
 use solarxy_renderer::input::PointerButton;
@@ -1558,31 +1557,10 @@ impl SolarxyApp {
     /// requested overlay toggles applied; the composite always clears (a
     /// fresh texture has no prior pane to load).
     fn render_screenshot(&mut self, opts: &ScreenshotOptsDto) {
-        let (w, h) = (opts.width, opts.height);
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Screenshot Target"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.render_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
+        let target = CaptureTarget::new(&self.device, self.render_format, opts.width, opts.height);
+        let (w, h, full) = (target.width, target.height, target.rect);
         self.set_target_dims(w, h);
         let pane_idx = self.view.active_pane;
-        let full = PaneRect {
-            x: 0.0,
-            y: 0.0,
-            width: w as f32,
-            height: h as f32,
-        };
         let mut pds = self.view.pane_settings[pane_idx];
         if !opts.overlays.grid {
             pds.show_grid = false;
@@ -1600,33 +1578,83 @@ impl SolarxyApp {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Screenshot Encoder"),
             });
-        let aspect = full.width / full.height.max(1.0);
         let cam_data = self.view.cameras[pane_idx].as_ref().map(|c| c.camera);
-        let mut is_uv = false;
-        let mut scene_present = true;
-        if pds.pane_mode == PaneMode::UvMap {
-            self.render_uv_map_pane(&mut encoder, aspect, &pds);
-            is_uv = true;
-        } else if let Some(cam_data) = cam_data {
-            if let Some(cam) = self.view.cameras[pane_idx].as_mut() {
-                cam.write_with_aspect(&self.queue, aspect);
-            }
-            self.write_3d_pane_uniforms(pane_idx, &pds);
-            if pds.inspection_mode == InspectionMode::Overdraw {
-                self.render_overdraw_pane(&mut encoder, pane_idx, full, false);
-            } else {
-                self.render_3d_passes(&mut encoder, pane_idx, &cam_data, &pds);
-            }
-        } else {
-            self.renderer
-                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
-            scene_present = false;
-        }
+        let is_uv_map = pds.pane_mode == PaneMode::UvMap;
+        let background = self.resolve_background(&pds);
+        let bounds = self.scene_bounds();
+        let look = self.pane_look(pane_idx);
+        let grid_plane = self.view.cameras[pane_idx]
+            .as_ref()
+            .map(|c| grid_plane_for(&c.destination_camera()));
 
-        // Composite into the offscreen target: full-rect viewport, always
-        // cleared (unlike the per-pane path, which clears only pane 0).
-        let bloom = self.renderer.post.bloom_enabled && !is_uv && scene_present;
-        let ssao = self.renderer.post.ssao_enabled && !is_uv && scene_present;
+        let objects;
+        let content = match cam_data {
+            None => solarxy_host::PaneContent::Empty,
+            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+                object: if self.uv_use_preview {
+                    self.uv_scene.draw_object(UV_PREVIEW_ID)
+                } else {
+                    self.selected_object
+                        .and_then(|id| self.scene_objects.draw_object(id))
+                        .or_else(|| self.scene_objects.draw_objects().next())
+                },
+            },
+            Some(cam_data) => {
+                objects = draw_objects(&self.scene_objects, self.selected_object);
+                solarxy_host::PaneContent::Scene {
+                    objects: &objects,
+                    cam_data,
+                    // A capture is one pane on its own, so it owns the shadow
+                    // map the way pane 0 does in the frame loop.
+                    shadow: true,
+                }
+            }
+        };
+
+        let out = solarxy_host::encode_pane_passes(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            &mut encoder,
+            self.view.cameras[pane_idx].as_mut(),
+            &solarxy_host::PaneFrame {
+                index: 0,
+                rect: full,
+                is_split: false,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                env: &self.env,
+                bounds: Some(&bounds),
+                grid_plane,
+                look,
+                scene_present: self.scene_objects.draw_objects().next().is_some(),
+                // A capture never carries the selection rim.
+                outline: false,
+                content,
+            },
+        );
+
+        self.finish_capture(encoder, &target, pane_idx, pds.inspection_mode, &out);
+    }
+
+    /// Composite an encoded capture into its offscreen target and arm the
+    /// readback.
+    ///
+    /// Deliberately not `composite_and_submit`: a capture always clears, uses
+    /// a full-rect viewport rather than a pane rect, and carries no selection
+    /// rim. Those three are the whole difference between this and the frame
+    /// loop's tail, and everything above it is now shared.
+    fn finish_capture(
+        &mut self,
+        mut encoder: wgpu::CommandEncoder,
+        target: &CaptureTarget,
+        pane_idx: usize,
+        inspection: InspectionMode,
+        out: &solarxy_host::PaneOutcome,
+    ) {
+        let bloom = self.renderer.post.bloom_enabled && !out.is_uv_map && out.scene_present;
+        let ssao = self.renderer.post.ssao_enabled && !out.is_uv_map && out.scene_present;
         // A capture runs outside the frame loop, so the slots still hold
         // whatever the last pane drawn happened to bind. Without this, a
         // screenshot of one camera could carry another camera's tables.
@@ -1637,15 +1665,16 @@ impl SolarxyApp {
             ssao,
             &self.pane_look(pane_idx),
             &self.renderer.post.luts,
-            pds.inspection_mode,
+            inspection,
         );
+        let rect = target.rect;
         self.renderer.post.composite.render(
             &mut encoder,
             &self.renderer.pipelines,
-            &view,
+            &target.view,
             ssao,
             &self.renderer.post.ssao,
-            Some([full.x, full.y, full.width, full.height]),
+            Some([rect.x, rect.y, rect.width, rect.height]),
             true,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1659,12 +1688,15 @@ impl SolarxyApp {
         let (buffer, padded) = solarxy_renderer::capture::encode_capture(
             &self.device,
             &mut copy_encoder,
-            &texture,
-            (0, 0, w, h),
+            &target.texture,
+            (0, 0, target.width, target.height),
         );
         self.queue.submit(std::iter::once(copy_encoder.finish()));
         self.pending_screenshot = Some(solarxy_renderer::capture::PendingCapture::arm(
-            buffer, padded, w, h,
+            buffer,
+            padded,
+            target.width,
+            target.height,
         ));
     }
 
@@ -3094,100 +3126,6 @@ impl SolarxyApp {
         }
     }
 
-    /// Renders one UV pane: the UV-space checker/wire pass, plus the
-    /// overlap count pass and its one-shot stats readback when enabled
-    /// (the desktop `render_uv_map_pane` recipe). A source without real
-    /// UVs, or no source, renders the pane background only.
-    fn render_uv_map_pane(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        pane_aspect: f32,
-        pds: &PaneDisplaySettings,
-    ) {
-        self.renderer
-            .uv_cam
-            .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
-        let uv_wire = WireframeParams {
-            color: [0.8, 0.8, 0.8, 1.0],
-            line_width: pds.line_weight.width_px(),
-            screen_width: self.renderer.target_width as f32,
-            screen_height: self.renderer.target_height as f32,
-            // The UV pass draws no points, but this write clobbers the
-            // shared uniform, so it carries the real size for the next 3D
-            // pass rather than a zero that would make points vanish.
-            point_size: self.view.display.point_size,
-        };
-        self.queue.write_buffer(
-            &self.renderer.wire.wireframe_params_buffer,
-            0,
-            bytemuck::bytes_of(&uv_wire),
-        );
-        if pds.uv_bg == UvMapBackground::Dark {
-            let dark = GradientUniform {
-                top_color: [0.10, 0.10, 0.10, 1.0],
-                bottom_color: [0.10, 0.10, 0.10, 1.0],
-                uv_y_offset: 0.0,
-                uv_y_scale: 1.0,
-                _pad: [0.0; 2],
-            };
-            self.queue.write_buffer(
-                &self.renderer.wire._gradient_buffer,
-                0,
-                bytemuck::bytes_of(&dark),
-            );
-        }
-        let stats_needed = pds.show_uv_overlap
-            && self.renderer.uv_overlap.stats_dirty
-            && !self.renderer.uv_overlap.readback_pending;
-
-        let bg = self.resolve_background(pds);
-        let uv_object = if self.uv_use_preview {
-            self.uv_scene.draw_object(UV_PREVIEW_ID)
-        } else {
-            self.selected_object
-                .and_then(|id| self.scene_objects.draw_object(id))
-                .or_else(|| self.scene_objects.draw_objects().next())
-        };
-        let Some(uv_object) = uv_object.filter(|o| o.model.has_uvs) else {
-            self.renderer.render_empty_pass(encoder, bg);
-            return;
-        };
-
-        if pds.show_uv_overlap {
-            self.renderer.render_uv_overlap_count_pass(
-                encoder,
-                &uv_object,
-                &self.renderer.uv_cam.bind_group,
-                &self.renderer.uv_overlap.count_view,
-            );
-            if stats_needed {
-                // One-shot statistics render at the identity UV camera,
-                // then restore the pane view.
-                self.renderer
-                    .uv_cam
-                    .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
-                self.renderer.render_uv_overlap_count_pass(
-                    encoder,
-                    &uv_object,
-                    &self.renderer.uv_cam.bind_group,
-                    &self.renderer.uv_overlap.stats_view,
-                );
-                self.renderer
-                    .uv_overlap
-                    .request_readback(&self.device, encoder);
-                self.renderer
-                    .uv_cam
-                    .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
-            }
-        }
-        self.renderer.render_uv_map_pass(
-            encoder,
-            &uv_object,
-            &self.renderer.uv_cam.bind_group,
-            pds,
-        );
-    }
-
     fn resolve_background(&self, pds: &PaneDisplaySettings) -> ResolvedBackground {
         // The web has no user custom-background registry yet.
         pds.background_mode.resolve(&[])
@@ -3841,8 +3779,13 @@ impl SolarxyApp {
             .resize(&self.device, &layouts, width, height);
     }
 
-    /// Renders one pane: 3D passes (or overdraw / empty) into the shared
-    /// HDR target, then composites into the pane's surface rect.
+    /// Assemble this pane's parameters and hand them to the shared body.
+    ///
+    /// What is left here is policy and assembly: the grading tables, the
+    /// manipulator and the camera helpers, all of which this shell has and the
+    /// desktop does not; the light-rig guard, which writes through `&mut self`;
+    /// and the draw list and the UV source, which this shell resolves against
+    /// the document rather than a loaded file.
     fn render_pane(
         &mut self,
         i: usize,
@@ -3850,50 +3793,95 @@ impl SolarxyApp {
         surface_view: &wgpu::TextureView,
         is_split: bool,
     ) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Pane Encoder"),
-            });
-        let pane_aspect = pane.width / pane.height.max(1.0);
         let pds = self.view.pane_settings[i];
         let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
-        // Before any of the three exits below, all of which composite.
+        let is_uv_map = pds.pane_mode == PaneMode::UvMap;
+
+        // Before the pane renders, whichever of the three arms it takes: all
+        // of them composite, and the composite is what reads the tables.
         self.bind_pane_luts(i);
 
-        let Some(cam_data) = cam_data else {
+        if let Some(cam_data) = cam_data
+            && !is_uv_map
+        {
+            // The gizmo's world size is per-pane (a pane's camera and height
+            // decide how many world units a pixel is), so it is re-written
+            // before each pane's pass rather than once per frame.
             self.renderer
-                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
-            self.composite_and_submit(encoder, surface_view, i, pane, false, false);
-            return;
+                .write_manipulator(&self.queue, &cam_data, pane.height / self.dpr);
+            self.write_pane_camera_helpers(i);
+            if is_split && i >= 1 {
+                self.setup_pane_lighting(&cam_data);
+            }
+        }
+
+        let background = self.resolve_background(&pds);
+        let bounds = self.scene_bounds();
+        let look = self.pane_look(i);
+        // The composite folds bloom and ambient occlusion in only when there
+        // is something to fold them around. This shell used to pass a constant
+        // here, which put a glow on an empty viewport.
+        let scene_present = self.scene_objects.draw_objects().next().is_some();
+        let outline = self.renderer.selection_style
+            == solarxy_renderer::frame::SelectionStyle::Outline
+            && self
+                .selected_object
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+        // The grid plane follows the pane camera: perspective keeps the XZ
+        // ground; an orthographic axis elevation (front/side) gets a view-plane
+        // grid so it is not seen edge-on. Keyed off the transition destination
+        // so a view-preset animation switches plane once, at click time, not
+        // partway through the lerp.
+        let grid_plane = self.view.cameras[i]
+            .as_ref()
+            .map(|c| grid_plane_for(&c.destination_camera()));
+
+        // Field-level borrows from here on, so the shared body can take the
+        // renderer mutably while the draw list borrows the scene.
+        let objects;
+        let content = match cam_data {
+            None => solarxy_host::PaneContent::Empty,
+            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+                object: if self.uv_use_preview {
+                    self.uv_scene.draw_object(UV_PREVIEW_ID)
+                } else {
+                    self.selected_object
+                        .and_then(|id| self.scene_objects.draw_object(id))
+                        .or_else(|| self.scene_objects.draw_objects().next())
+                },
+            },
+            Some(cam_data) => {
+                objects = draw_objects(&self.scene_objects, self.selected_object);
+                solarxy_host::PaneContent::Scene {
+                    objects: &objects,
+                    cam_data,
+                    shadow: i == 0 || !self.view.display.lights_locked,
+                }
+            }
         };
 
-        if pds.pane_mode == PaneMode::UvMap {
-            self.render_uv_map_pane(&mut encoder, pane_aspect, &pds);
-            self.composite_and_submit(encoder, surface_view, i, pane, true, true);
-            return;
-        }
-
-        if let Some(cam) = self.view.cameras[i].as_mut() {
-            cam.write_with_aspect(&self.queue, pane_aspect);
-        }
-        // The gizmo's world size is per-pane (a pane's camera and height decide
-        // how many world units a pixel is), so it is re-written before each
-        // pane's pass rather than once per frame.
-        self.renderer
-            .write_manipulator(&self.queue, &cam_data, pane.height / self.dpr);
-        self.write_pane_camera_helpers(i);
-        if is_split && i >= 1 {
-            self.setup_pane_lighting(&cam_data);
-        }
-        self.write_3d_pane_uniforms(i, &pds);
-
-        if pds.inspection_mode == InspectionMode::Overdraw {
-            self.render_overdraw_pane(&mut encoder, i, pane, is_split);
-        } else {
-            self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
-        }
-        self.composite_and_submit(encoder, surface_view, i, pane, false, true);
+        solarxy_host::render_pane(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            surface_view,
+            self.view.cameras[i].as_mut(),
+            &solarxy_host::PaneFrame {
+                index: i,
+                rect: pane,
+                is_split,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                env: &self.env,
+                bounds: Some(&bounds),
+                grid_plane,
+                look,
+                scene_present,
+                outline,
+                content,
+            },
+        );
     }
 
     /// The look of the `camera` node a pane is looking through, if any.
@@ -3938,101 +3926,6 @@ impl SolarxyApp {
             .set_lut(&self.device, &self.queue, LutSlot::B, b.as_deref());
     }
 
-    fn composite_and_submit(
-        &self,
-        encoder: wgpu::CommandEncoder,
-        surface_view: &wgpu::TextureView,
-        i: usize,
-        pane: PaneRect,
-        is_uv_map: bool,
-        scene_present: bool,
-    ) {
-        let outline = self.renderer.selection_style
-            == solarxy_renderer::frame::SelectionStyle::Outline
-            && self
-                .selected_object
-                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
-        solarxy_host::composite_and_submit(
-            &self.queue,
-            &self.renderer,
-            encoder,
-            surface_view,
-            &solarxy_host::PaneComposite {
-                index: i,
-                rect: pane,
-                look: self.pane_look(i),
-                inspection: self.view.pane_settings[i].inspection_mode,
-                is_uv_map,
-                scene_present,
-                outline,
-            },
-        );
-    }
-
-    fn render_overdraw_pane(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        i: usize,
-        pane: PaneRect,
-        is_split: bool,
-    ) {
-        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            return;
-        };
-        let objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        solarxy_host::render_overdraw_pane(
-            &self.renderer,
-            encoder,
-            &objects,
-            cam_bg,
-            pane,
-            is_split,
-        );
-    }
-
-    fn render_3d_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        i: usize,
-        cam_data: &Camera,
-        pds: &PaneDisplaySettings,
-    ) {
-        let mut objects: Vec<DrawObject<'_>> = self.scene_objects.draw_objects().collect();
-        // The picking-sync selection highlight: flag the selected node's object
-        // so the main pass draws its accent tint.
-        if let Some(id) = self.selected_object
-            && let Some(selected) = self.scene_objects.draw_object(id)
-        {
-            for o in &mut objects {
-                if std::ptr::eq(o.model, selected.model) {
-                    o.selected = true;
-                }
-            }
-        }
-
-        let background = self.resolve_background(pds);
-        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            self.renderer.render_empty_pass(encoder, background);
-            return;
-        };
-        let selected = objects.iter().any(|o| o.selected);
-        solarxy_host::render_3d_passes(
-            &self.renderer,
-            &self.queue,
-            encoder,
-            &solarxy_host::PaneScene {
-                objects: &objects,
-                env: &self.env,
-                cam_bg,
-                cam_data,
-                pds,
-                background,
-                shadow: i == 0 || !self.view.display.lights_locked,
-                selected,
-            },
-        );
-    }
-
     /// Recomputes the camera-relative light rig for a non-primary pane
     /// (only meaningful for the synthesized viewer rig; engine light nodes
     /// are world-fixed).
@@ -4045,33 +3938,6 @@ impl SolarxyApp {
         let bounds = self.scene_bounds();
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;
         solarxy_host::setup_pane_lighting(&self.queue, &mut self.env, cam_data, &bounds, ibl_avg);
-    }
-
-    /// Per-pane uniform writes ahead of the 3D passes: grid color,
-    /// wireframe params, gradient colors, and the camera inspection block.
-    fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
-        // The grid plane follows the pane camera: perspective keeps the XZ
-        // ground; an orthographic axis elevation (front/side) gets a view-plane
-        // grid so it is not seen edge-on. Keyed off the transition destination
-        // so a view-preset animation switches plane once, at click time, not
-        // partway through the lerp.
-        let grid_plane = self.view.cameras[i]
-            .as_ref()
-            .map(|c| grid_plane_for(&c.destination_camera()));
-        let bounds = self.scene_bounds();
-        solarxy_host::write_pane_uniforms(
-            &self.queue,
-            &self.renderer,
-            &solarxy_host::PaneUniforms {
-                background: self.resolve_background(pds),
-                pds,
-                display: &self.view.display,
-                camera: self.view.cameras[i].as_ref(),
-                env: &self.env,
-                bounds: Some(&bounds),
-                grid_plane,
-            },
-        );
     }
 
     fn view_state_dto(&self) -> ViewStateDto {
@@ -4445,6 +4311,72 @@ impl SolarxyApp {
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
     }
+}
+
+/// An offscreen render target for a capture, with the pane rect that covers
+/// it. Bundled because the composite and the readback both need most of it and
+/// passing the pieces separately runs the argument count into the lint.
+struct CaptureTarget {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    rect: PaneRect,
+    width: u32,
+    height: u32,
+}
+
+impl CaptureTarget {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Screenshot Target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self {
+            texture,
+            view,
+            rect: PaneRect {
+                x: 0.0,
+                y: 0.0,
+                width: width as f32,
+                height: height as f32,
+            },
+            width,
+            height,
+        }
+    }
+}
+
+/// The frame's draw list, with the picking-sync selection flagged so the main
+/// pass draws its accent tint and the outline stages find a silhouette.
+///
+/// A free function over the scene rather than a method, because the caller
+/// holds the renderer mutably while this list is alive and a `&self` receiver
+/// would borrow the whole host.
+fn draw_objects(
+    scene_objects: &SceneObjects,
+    selected_object: Option<SceneObjectId>,
+) -> Vec<DrawObject<'_>> {
+    let mut objects: Vec<DrawObject<'_>> = scene_objects.draw_objects().collect();
+    if let Some(id) = selected_object
+        && let Some(selected) = scene_objects.draw_object(id)
+    {
+        for o in &mut objects {
+            if std::ptr::eq(o.model, selected.model) {
+                o.selected = true;
+            }
+        }
+    }
+    objects
 }
 
 fn map_button(button: u32) -> Option<PointerButton> {

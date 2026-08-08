@@ -79,8 +79,8 @@ pub mod view;
 pub use cameras::{depth_bounds, ensure_pane_cameras};
 pub use lighting::{active_ibl, rebuild_light_bind_group};
 pub use pane::{
-    PaneComposite, PaneScene, PaneUniforms, composite_and_submit, render_3d_passes,
-    render_overdraw_pane, setup_pane_lighting, write_inspection_block, write_pane_uniforms,
-    write_wireframe_params,
+    PaneComposite, PaneContent, PaneFrame, PaneOutcome, PaneScene, PaneUniforms,
+    composite_and_submit, encode_pane_passes, render_3d_passes, render_overdraw_pane, render_pane,
+    setup_pane_lighting, write_inspection_block, write_pane_uniforms, write_wireframe_params,
 };
 pub use view::HostViewState;

@@ -130,10 +130,16 @@ pub struct IblResources {
 }
 
 pub struct WireframeResources {
-    pub _gradient_buffer: wgpu::Buffer,
+    /// The sky gradient the background pass reads. Written from outside this
+    /// crate, by the shared host's per-pane uniform write, which is why it
+    /// carries no underscore: the prefix said "kept alive, never touched" and
+    /// that stopped being true when the pane path moved to `solarxy-host`.
+    pub gradient_buffer: wgpu::Buffer,
     pub gradient_bind_group: wgpu::BindGroup,
     pub wireframe_params_buffer: wgpu::Buffer,
     pub wireframe_params_bind_group: wgpu::BindGroup,
+    /// Genuinely a keep-alive: the bind group below borrows it and nothing
+    /// else ever names it. The underscore stays for that reason.
     pub _checker_texture: texture::Texture,
     pub uv_checker_bind_group: wgpu::BindGroup,
 }
@@ -727,7 +733,7 @@ impl Renderer {
                 },
             },
             wire: WireframeResources {
-                _gradient_buffer: gradient_buffer,
+                gradient_buffer,
                 gradient_bind_group,
                 wireframe_params_buffer,
                 wireframe_params_bind_group,

@@ -1,20 +1,21 @@
-//! `State::render`: per-frame entry point. Builds a per-pane camera,
-//! invokes [`solarxy_renderer::frame::Renderer::render_pane`] for each pane,
-//! and drives the egui sidebar/menu/HUD/console paint at the end.
+//! `State::render`: per-frame entry point. Computes the pane rectangles,
+//! assembles each pane's parameters and hands them to `solarxy_host::render_pane`,
+//! then drives the egui sidebar/menu/HUD/console paint at the end.
+//!
+//! The pane body itself is not here. It lives in `solarxy-host` beside the web
+//! shell's copy of the same call, which is the point: what remains in this file
+//! is the assembly only a desktop shell can do.
 //!
 //! Reads `GuiSnapshot::from_state` then calls `apply_to_state` after the
 //! sidebar has had a chance to mutate it; the resulting `SidebarChanges`
 //! drives any expensive recomputations (background, wireframe, composite,
 //! IBL).
 
+use solarxy_core::preferences::{InspectionMode, MaterialOverride, PaneMode, ResolvedBackground};
 use solarxy_renderer::camera::Camera;
-use solarxy_core::preferences::{
-    InspectionMode, MaterialOverride, PaneMode, ResolvedBackground, UvMapBackground,
-};
 
-use super::overlap::request_overlap_readback_impl;
 use super::view_state::PaneDisplaySettings;
-use super::{GradientUniform, Pane, State, WireframeParams};
+use super::{Pane, State};
 
 impl State {
     /// Resolve a pane's background choice against the user
@@ -129,6 +130,12 @@ impl State {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
+    /// Assemble this pane's parameters and hand them to the shared body.
+    ///
+    /// What is left here is policy and assembly: the light-rig guard, which
+    /// writes through `&mut self` and so cannot travel, and the draw list,
+    /// which this shell builds differently because it has a file-loaded model
+    /// the web shell does not.
     fn render_pane(
         &mut self,
         i: usize,
@@ -136,116 +143,88 @@ impl State {
         surface_view: &wgpu::TextureView,
         is_split: bool,
     ) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Pane Encoder"),
-            });
-        // The 3D scene renders the full pane — the per-pane toolbar labels
-        // float on top of it (3ds Max style), no reserved strip.
-        let pane_aspect = pane.width / pane.height;
-
-        let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
-
         let pds = self.view.pane_settings[i];
-
-        let Some(cam_data) = cam_data else {
-            self.renderer
-                .render_empty_pass(&mut encoder, self.resolve_background(&pds));
-            self.composite_and_submit(encoder, surface_view, i, pane, false, false);
-            return;
-        };
-
+        let cam_data = self.view.cameras[i].as_ref().map(|c| c.camera);
         let is_uv_map = pds.pane_mode == PaneMode::UvMap;
 
-        if is_uv_map {
-            self.render_uv_map_pane(&mut encoder, pane_aspect, &pds);
-        } else {
-            if let Some(cam) = &mut self.view.cameras[i] {
-                cam.write_with_aspect(&self.queue, pane_aspect);
-            }
-
-            if is_split && i >= 1 {
-                self.setup_pane_lighting(&cam_data);
-            }
-
-            self.write_3d_pane_uniforms(i, &pds);
-
-            if pds.inspection_mode == InspectionMode::Overdraw {
-                self.render_overdraw_pane(&mut encoder, i, *pane, is_split);
-            } else {
-                self.render_3d_passes(&mut encoder, i, &cam_data, &pds);
-            }
-        }
-
-        self.composite_and_submit(
-            encoder,
-            surface_view,
-            i,
-            pane,
-            is_uv_map,
-            self.scene_present(),
-        );
-    }
-
-    fn render_overdraw_pane(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        i: usize,
-        pane: Pane,
-        is_split: bool,
-    ) {
-        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            return;
-        };
-        // No scene guard: the count target is cleared by the pass itself and
-        // the show pass writes the zero-count colour, so a pane with nothing
-        // in it reads black — which is what overdraw already shows wherever
-        // geometry does not cover.
-        let objects = self.draw_objects();
-        solarxy_host::render_overdraw_pane(
-            &self.renderer,
-            encoder,
-            &objects,
-            cam_bg,
-            pane,
-            is_split,
-        );
-    }
-
-    /// The frame's draw list: the file-loaded model when one is open, then
-    /// every visible multi-object entry, with the Node Tree's selection
-    /// flagged so the main pass and the outline pass can find it.
-    ///
-    /// Order is load-bearing, not incidental. Overdraw counts fragments in
-    /// submission order, and the depth-equal overlays (edge wireframe,
-    /// validation lines) resolve against whatever landed first, so the file
-    /// model stays ahead of the delta-fed objects exactly as it did when it
-    /// was the only entry that could come first.
-    ///
-    /// An empty list is a legitimate frame. The background, grid, floor and
-    /// axes come from the environment, not from this list.
-    fn draw_objects(&self) -> Vec<solarxy_renderer::frame::DrawObject<'_>> {
-        let mut objects =
-            Vec::with_capacity(usize::from(self.scene.is_some()) + self.scene_objects.len());
-        if let Some(scene) = &self.scene {
-            objects.push(scene.draw_object(&self.env.instance_buffer));
-        }
-        objects.extend(self.scene_objects.draw_objects());
-        // `SceneObjects` hands out its draw objects unselected, so the
-        // flag is set here by matching on model identity — the same
-        // approach the web host takes, and the reason the lookup filters
-        // hidden objects: a hidden one is not in this list at all.
-        if let Some(id) = self.selected_object
-            && let Some(selected) = self.scene_objects.draw_object(id)
+        // Before the field borrows below, because it takes `&mut self`: the
+        // authored-light install writes inside its own guard.
+        if !is_uv_map
+            && is_split
+            && i >= 1
+            && let Some(cam_data) = cam_data
         {
-            for object in &mut objects {
-                if std::ptr::eq(object.model, selected.model) {
-                    object.selected = true;
+            self.setup_pane_lighting(&cam_data);
+        }
+
+        let background = self.resolve_background(&pds);
+        let bounds = self.scene_bounds();
+        // This shell has no camera nodes yet, so every pane is a free view and
+        // resolves to its own look.
+        let look = solarxy_renderer::composite::resolve_look(
+            None,
+            &solarxy_core::view_config::PaneLook::from_tone(
+                self.renderer.post.tone_mode,
+                self.renderer.post.exposure,
+            ),
+        );
+        let scene_present = self.scene_present();
+        let outline = self.renderer.selection_style
+            == solarxy_renderer::frame::SelectionStyle::Outline
+            && self
+                .selected_object
+                .is_some_and(|id| self.scene_objects.draw_object(id).is_some());
+
+        // Field-level borrows from here on, so the shared body can take the
+        // renderer mutably while the draw list borrows the scene.
+        let objects;
+        let content = match cam_data {
+            None => solarxy_host::PaneContent::Empty,
+            Some(_) if is_uv_map => solarxy_host::PaneContent::Uv {
+                object: self
+                    .scene
+                    .as_ref()
+                    .map(|s| s.draw_object(&self.env.instance_buffer)),
+            },
+            Some(cam_data) => {
+                objects = draw_objects(
+                    self.scene.as_ref(),
+                    &self.scene_objects,
+                    &self.env.instance_buffer,
+                    self.selected_object,
+                );
+                solarxy_host::PaneContent::Scene {
+                    objects: &objects,
+                    cam_data,
+                    shadow: i == 0 || !self.view.display.lights_locked,
                 }
             }
-        }
-        objects
+        };
+
+        solarxy_host::render_pane(
+            &self.device,
+            &self.queue,
+            &mut self.renderer,
+            surface_view,
+            self.view.cameras[i].as_mut(),
+            &solarxy_host::PaneFrame {
+                index: i,
+                rect: *pane,
+                is_split,
+                pds: &pds,
+                display: &self.view.display,
+                background,
+                env: &self.env,
+                bounds: Some(&bounds),
+                // This shell does not steer the grid plane from the camera, so
+                // the plane offset is left exactly as it was initialised.
+                grid_plane: None,
+                look,
+                scene_present,
+                outline,
+                content,
+            },
+        );
     }
 
     /// Whether this frame has scene content: a file-loaded model, or at least
@@ -258,196 +237,6 @@ impl State {
     /// on a bare viewport nobody asked for.
     fn scene_present(&self) -> bool {
         self.scene.is_some() || self.scene_objects.draw_objects().next().is_some()
-    }
-
-    fn composite_and_submit(
-        &self,
-        encoder: wgpu::CommandEncoder,
-        surface_view: &wgpu::TextureView,
-        i: usize,
-        pane: &Pane,
-        is_uv_map: bool,
-        scene_present: bool,
-    ) {
-        // This shell has no camera nodes yet, so every pane is a free view and
-        // resolves to its own look. Equal field for field to the
-        // `CompositeLook::from_tone` this used to build, which is what makes
-        // adopting the shared path golden-neutral here.
-        let look = solarxy_renderer::composite::resolve_look(
-            None,
-            &solarxy_core::view_config::PaneLook::from_tone(
-                self.renderer.post.tone_mode,
-                self.renderer.post.exposure,
-            ),
-        );
-        solarxy_host::composite_and_submit(
-            &self.queue,
-            &self.renderer,
-            encoder,
-            surface_view,
-            &solarxy_host::PaneComposite {
-                index: i,
-                rect: *pane,
-                look,
-                inspection: self.view.pane_settings[i].inspection_mode,
-                is_uv_map,
-                scene_present,
-                // Must agree with `PaneScene.selected` above: that switches
-                // the rim's offscreen stages on, this blits the result. A
-                // blit with no mask behind it paints nothing, but it is a
-                // pass submitted for no reason.
-                outline: self.selected_object.is_some(),
-            },
-        );
-    }
-
-    fn render_uv_map_pane(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        pane_aspect: f32,
-        pds: &PaneDisplaySettings,
-    ) {
-        if let Some(scene) = &self.scene {
-            if scene.model.has_uvs {
-                let uv_object = scene.draw_object(&self.env.instance_buffer);
-                self.renderer
-                    .uv_cam
-                    .write(&self.queue, pds.uv_offset, pds.uv_zoom, pane_aspect);
-                let uv_wire = WireframeParams {
-                    color: [0.8, 0.8, 0.8, 1.0],
-                    line_width: pds.line_weight.width_px(),
-                    screen_width: self.renderer.target_width as f32,
-                    screen_height: self.renderer.target_height as f32,
-                    // The UV pass draws no points; carrying the default keeps
-                    // the shared uniform coherent for the next 3D pass.
-                    point_size: solarxy_core::view_config::DEFAULT_POINT_SIZE,
-                };
-                self.queue.write_buffer(
-                    &self.renderer.wire.wireframe_params_buffer,
-                    0,
-                    bytemuck::bytes_of(&uv_wire),
-                );
-                if pds.show_uv_overlap {
-                    self.renderer.render_uv_overlap_count_pass(
-                        encoder,
-                        &uv_object,
-                        &self.renderer.uv_cam.bind_group,
-                        &self.renderer.uv_overlap.count_view,
-                    );
-                    if self.renderer.uv_overlap.stats_dirty
-                        && !self.renderer.uv_overlap.readback_pending
-                    {
-                        self.renderer
-                            .uv_cam
-                            .write(&self.queue, [0.0, 0.0], 1.0, 1.0);
-                        self.renderer.render_uv_overlap_count_pass(
-                            encoder,
-                            &uv_object,
-                            &self.renderer.uv_cam.bind_group,
-                            &self.renderer.uv_overlap.stats_view,
-                        );
-                        request_overlap_readback_impl(
-                            &self.device,
-                            &mut self.renderer.uv_overlap,
-                            encoder,
-                        );
-                        self.renderer.uv_cam.write(
-                            &self.queue,
-                            pds.uv_offset,
-                            pds.uv_zoom,
-                            pane_aspect,
-                        );
-                    }
-                }
-                if pds.uv_bg == UvMapBackground::Dark {
-                    let dark = GradientUniform {
-                        top_color: [0.10, 0.10, 0.10, 1.0],
-                        bottom_color: [0.10, 0.10, 0.10, 1.0],
-                        uv_y_offset: 0.0,
-                        uv_y_scale: 1.0,
-                        _pad: [0.0; 2],
-                    };
-                    self.queue.write_buffer(
-                        &self.renderer.wire._gradient_buffer,
-                        0,
-                        bytemuck::bytes_of(&dark),
-                    );
-                }
-                self.renderer.render_uv_map_pass(
-                    encoder,
-                    &uv_object,
-                    &self.renderer.uv_cam.bind_group,
-                    pds,
-                );
-            } else {
-                self.renderer
-                    .render_empty_pass(encoder, self.resolve_background(pds));
-            }
-        } else {
-            self.renderer
-                .render_empty_pass(encoder, self.resolve_background(pds));
-        }
-    }
-
-    fn write_3d_pane_uniforms(&self, i: usize, pds: &PaneDisplaySettings) {
-        // Bound locally: `PaneUniforms` holds a borrow, so an inline
-        // `Some(&self.scene_bounds())` would not outlive the statement.
-        let bounds = self.scene_bounds();
-        solarxy_host::write_pane_uniforms(
-            &self.queue,
-            &self.renderer,
-            &solarxy_host::PaneUniforms {
-                background: self.resolve_background(pds),
-                pds,
-                display: &self.view.display,
-                camera: self.view.cameras[i].as_ref(),
-                env: &self.env,
-                bounds: Some(&bounds),
-                // This shell does not steer the grid plane from the camera, so
-                // the plane offset is left exactly as it was initialised.
-                grid_plane: None,
-            },
-        );
-    }
-
-    fn render_3d_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        i: usize,
-        cam_data: &Camera,
-        pds: &PaneDisplaySettings,
-    ) {
-        let background = self.resolve_background(pds);
-        // The camera is what binds this chain to a viewpoint, so without one
-        // there is nothing sensible to encode. A pane in that state has
-        // already been sent to the empty path by `render_pane`; the guard
-        // stays because the invariant belongs next to the code that needs it.
-        // The scene is a different matter: an empty draw list still renders
-        // the background, grid, floor and axes off the environment.
-        let Some(cam_bg) = self.view.cameras[i].as_ref().map(|c| &c.bind_group) else {
-            self.renderer.render_empty_pass(encoder, background);
-            return;
-        };
-        let objects = self.draw_objects();
-        // Asked of the list rather than of `selected_object`, because a
-        // selection that resolves to nothing drawable must not switch on
-        // the mask and jump-flood stages for an empty silhouette.
-        let selected = objects.iter().any(|o| o.selected);
-        solarxy_host::render_3d_passes(
-            &self.renderer,
-            &self.queue,
-            encoder,
-            &solarxy_host::PaneScene {
-                objects: &objects,
-                env: &self.env,
-                cam_bg,
-                cam_data,
-                pds,
-                background,
-                shadow: i == 0 || !self.view.display.lights_locked,
-                selected,
-            },
-        );
     }
 
     /// Recompute the camera-relative light rig for a non-primary pane
@@ -818,4 +607,47 @@ impl State {
         }
         self.resize_render_targets(target_w, target_h);
     }
+}
+
+/// The frame's draw list: the file-loaded model when one is open, then every
+/// visible multi-object entry, with the Node Tree's selection flagged so the
+/// main pass and the outline pass can find it.
+///
+/// Order is load-bearing, not incidental. Overdraw counts fragments in
+/// submission order, and the depth-equal overlays (edge wireframe, validation
+/// lines) resolve against whatever landed first, so the file model stays ahead
+/// of the delta-fed objects exactly as it did when it was the only entry that
+/// could come first.
+///
+/// An empty list is a legitimate frame. The background, grid, floor and axes
+/// come from the environment, not from this list.
+///
+/// A free function over the three fields it reads rather than a method,
+/// because the caller holds the renderer mutably while this list is alive and
+/// a `&self` receiver would borrow the whole shell.
+fn draw_objects<'a>(
+    scene: Option<&'a super::ModelScene>,
+    scene_objects: &'a solarxy_renderer::scene_objects::SceneObjects,
+    instance_buffer: &'a wgpu::Buffer,
+    selected_object: Option<solarxy_core::scene::SceneObjectId>,
+) -> Vec<solarxy_renderer::frame::DrawObject<'a>> {
+    let mut objects = Vec::with_capacity(usize::from(scene.is_some()) + scene_objects.len());
+    if let Some(scene) = scene {
+        objects.push(scene.draw_object(instance_buffer));
+    }
+    objects.extend(scene_objects.draw_objects());
+    // `SceneObjects` hands out its draw objects unselected, so the flag is set
+    // here by matching on model identity — the same approach the web host
+    // takes, and the reason the lookup filters hidden objects: a hidden one is
+    // not in this list at all.
+    if let Some(id) = selected_object
+        && let Some(selected) = scene_objects.draw_object(id)
+    {
+        for object in &mut objects {
+            if std::ptr::eq(object.model, selected.model) {
+                object.selected = true;
+            }
+        }
+    }
+    objects
 }

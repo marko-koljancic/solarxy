@@ -92,23 +92,42 @@ Each renders without artifacts and the HUD/status bar names the active mode.
 
 ## Golden captures
 
-The automated regression gate. Capture and compare:
+The automated regression gate. The harness lives in `solarxy-host`, not in
+`solarxy-renderer`: it drives the shared pane path, which is what puts the
+extracted orchestration under the gate rather than beside it.
+
+The script captures both models in one go, into `<out>/dragon` and `<out>/frog`:
+
+```bash
+bash scripts/capture_goldens.sh .goldens/<name>
+```
+
+Then compare each against a baseline captured the same way:
+
+```bash
+cargo run --release -p solarxy-host --example golden -- \
+    compare .goldens/<baseline>/dragon .goldens/<name>/dragon --tolerance 0
+cargo run --release -p solarxy-host --example golden -- \
+    compare .goldens/<baseline>/frog .goldens/<name>/frog --tolerance 0
+```
+
+To capture one model on its own, which is what the script does twice:
 
 ```bash
 # Untextured geometry/lighting/inspection coverage
-cargo run --release -p solarxy-renderer --example golden -- \
-    capture --model res/models/xyzrgb_dragon.obj --out .goldens/<name>-dragon
+cargo run --release -p solarxy-host --example golden -- \
+    capture --model res/models/xyzrgb_dragon.obj --out .goldens/<name>/dragon
 
 # TEXTURED coverage -- do not skip this one, see the note below
-cargo run --release -p solarxy-renderer --example golden -- \
+cargo run --release -p solarxy-host --example golden -- \
     capture --model "res/models/frog/ooz3d-export-model-20260329-181053.obj" \
-    --out .goldens/<name>-frog
-
-cargo run --release -p solarxy-renderer --example golden -- \
-    compare .goldens/<baseline>-dragon .goldens/<name>-dragon --tolerance 0
-cargo run --release -p solarxy-renderer --example golden -- \
-    compare .goldens/<baseline>-frog .goldens/<name>-frog --tolerance 0
+    --out .goldens/<name>/frog
 ```
+
+**Capture the baseline from a clean tree before you start**, not from an older
+commit. CI compares against the pull request's base on one runner because
+golden pixels are driver-dependent; locally, a before-and-after capture on the
+same tree proves the same thing and needs no second checkout.
 
 **Both models are required.** The dragon OBJ declares no `mtllib` and no `usemtl`,
 so it exercises no material and no texture: it is structurally blind to the

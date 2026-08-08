@@ -36,9 +36,7 @@ pub(crate) mod view_state;
 pub(super) use view_state::{BoundsMode, DisplaySettings, PaneDisplaySettings, ViewLayout, ViewState};
 
 pub(super) use solarxy_renderer::composite::CompositeLook;
-pub(super) use solarxy_renderer::frame::{
-    GradientUniform, Renderer, UvOverlapResources, WireframeParams,
-};
+pub(super) use solarxy_renderer::frame::Renderer;
 pub(super) use solarxy_renderer::scene::{
     BackgroundModeExt, LoadedModel, ModelScene, create_light_bind_group,
 };
