@@ -272,7 +272,32 @@ pub struct FrameCtx<'a> {
     pub scene_present: bool,
     /// Whether to blit the selection rim after tone mapping.
     pub outline: bool,
+    /// Set when this pane is one tile of a larger image rather than a view in
+    /// its own right. `None` for every ordinary frame.
+    pub window: Option<ImageWindow>,
     pub content: PaneContent<'a>,
+}
+
+/// Where a pane sits inside a larger image.
+///
+/// A still render draws a picture too big for one pass by rendering windows of
+/// it and assembling them. Both backends need to know, and they need it for
+/// different reasons, which is why this is a field on the frame rather than a
+/// setter on either of them: the rasterizer turns it into an asymmetric frustum
+/// on the camera, and the path tracer turns it into a dispatch offset while
+/// leaving the camera alone. A host sets one field and neither backend has to
+/// be asked which it is.
+///
+/// Stateless on purpose. A `set_tile` that persisted would be left switched on
+/// by a job that ended badly, and the next ordinary frame would render one
+/// corner of itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ImageWindow {
+    /// The top-left of this tile in the whole image, in pixels. The tile's size
+    /// is [`FrameCtx::rect`].
+    pub origin: [u32; 2],
+    /// The whole image, in pixels.
+    pub full: [u32; 2],
 }
 
 #[cfg(test)]

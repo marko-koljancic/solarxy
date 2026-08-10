@@ -47,7 +47,6 @@ pub(super) use solarxy_core::preferences::{
     ViewMode,
 };
 pub(super) use solarxy_renderer::ibl::{BrdfLut, IblState};
-pub(super) use solarxy_renderer::texture;
 
 use std::sync::{Arc, mpsc};
 use std::time::Instant;

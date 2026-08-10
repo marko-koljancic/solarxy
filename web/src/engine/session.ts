@@ -24,6 +24,7 @@ import { useReview } from "../store/review";
 import { pushToast, useToasts } from "../store/toasts";
 import { useViewState } from "../store/viewState";
 import { SolarxyClient } from "./client";
+import { useRenderJob } from "../store/renderJob";
 import { useAttrPinStats } from "./attrPins";
 import { applyMarkerPositions, hideAllMarkers } from "./markers";
 import { hasMissing, missingSidecars, referencedSidecars } from "./sidecars";
@@ -1146,6 +1147,7 @@ export function runFrame(dtMs: number): void {
     else if (ev.type === "uvOverlap") useViewState.getState().setUvOverlap(ev.pct, ev.pending);
     else if (ev.type === "viewChanged") refreshViewState();
     else if (ev.type === "attrPinStats") useAttrPinStats.getState().set(ev.capacity, ev.total);
+    else if (ev.type === "renderProgress") useRenderJob.getState().progress(ev);
   }
   // The gizmo's live delta. Polled here rather than pushed from `pointerMove`,
   // which stays void so the drag keeps costing zero boundary crossings; the

@@ -442,81 +442,17 @@ impl State {
     }
 
     pub(super) fn resize_render_targets(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
+        if !self.renderer.resize_targets(&self.device, width, height) {
             return;
         }
-        if width == self.renderer.target_width && height == self.renderer.target_height {
-            return;
-        }
-        self.renderer.target_width = width;
-        self.renderer.target_height = height;
-        self.renderer.targets.depth_texture = texture::Texture::create_depth_texture(
-            &self.device,
-            width,
-            height,
-            "depth_texture",
-            self.renderer.msaa_sample_count,
-        );
-        self.renderer.targets.msaa_hdr_view = texture::create_msaa_hdr_texture(
-            &self.device,
-            width,
-            height,
-            self.renderer.msaa_sample_count,
-        );
-        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
-        self.renderer.targets._hdr_resolve_texture = hdr_tex;
-        self.renderer.targets.hdr_resolve_view = hdr_view;
-        self.renderer.post.bloom.resize(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            width,
-            height,
-        );
-        self.renderer.post.composite.rebuild_bind_group(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            &self.renderer.post.bloom.ping_view,
-            &self.renderer.post.bloom.sampler,
-            &self.renderer.post.luts,
-        );
-        let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
-        self.renderer.uv_overlap.count_texture = ct;
-        self.renderer.uv_overlap.count_view = cv;
-        self.renderer.uv_overlap.overlay_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("UV Overlap Overlay Bind Group"),
-                layout: &self.renderer.layouts.uv_overlap_read,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.renderer.uv_overlap.count_view,
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.renderer.uv_overlap.sampler),
-                    },
-                ],
-            });
+        // Shell policy, which is why it stays here rather than moving into the
+        // renderer with the body above: the overlap statistic is measured over
+        // a texture that just changed size, so a pane showing it has to
+        // remeasure. The web shell has no equivalent because it recomputes the
+        // statistic from its own view state.
         if self.view.pane_settings.iter().any(|p| p.show_uv_overlap) {
             self.renderer.uv_overlap.stats_dirty = true;
         }
-
-        self.renderer
-            .post
-            .ssao
-            .resize(&self.device, &self.renderer.layouts, width, height);
-
-        self.renderer
-            .overdraw
-            .resize(&self.device, &self.renderer.layouts, width, height);
-        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
-        self.renderer
-            .outline
-            .resize(&self.device, &layouts, width, height);
     }
 
     pub fn update(&mut self) {

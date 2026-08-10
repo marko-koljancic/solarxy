@@ -3319,6 +3319,24 @@ impl Engine {
         events
     }
 
+    /// The whole scene as it stands, without consuming anything.
+    ///
+    /// For a consumer that arrives late. A renderer built mid-session -- the
+    /// path tracer, which is only constructed when a traced still is first
+    /// asked for -- has missed every delta since boot, and the deltas are not
+    /// kept. This gives it the same "what exists" rebuild
+    /// [`Engine::take_scene_delta`] starts from.
+    ///
+    /// It carries no removals, and that is correct rather than a limitation:
+    /// removals exist to tell a renderer about objects it is holding, and a
+    /// renderer seeing the scene for the first time holds none. Taking the
+    /// delta here instead would swallow a removal the frame loop's own call
+    /// was about to deliver.
+    #[must_use]
+    pub fn scene_snapshot(&self) -> SceneDelta {
+        scene::build_scene_delta(&self.doc, &self.registry, &self.cook, &self.previews).0
+    }
+
     /// Drains the accumulated scene delta for the renderer, rebuilding it
     /// from the current committed display outputs and light nodes, and
     /// closing it with the removals the rebuild cannot express.

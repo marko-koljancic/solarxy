@@ -278,10 +278,22 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
     if gid.x >= params.tile_size.x || gid.y >= params.tile_size.y {
         return;
     }
+    // Which pixel of the **whole image** this invocation is. Everything that
+    // depends on where the pixel sits in the picture reads this: the camera ray
+    // through it, and the sampler's per-pixel decorrelation, so a tile draws the
+    // same samples it would have drawn as part of an untiled render.
     let pixel = params.tile_offset + gid.xy;
     if pixel.x >= params.resolution.x || pixel.y >= params.resolution.y {
         return;
     }
+    // Where it is **stored**, which is tile-local and not the same thing.
+    //
+    // This is what makes a tile cost a tile-sized target rather than an
+    // image-sized one, and at eight thousand pixels square the difference is
+    // two gigabytes of float storage against thirty-two megabytes. An untiled
+    // render has a zero offset and the two coincide, which is why nothing
+    // before this needed to tell them apart.
+    let coord = vec2i(gid.xy);
 
     // This dispatch's slice of the run. `chunk` of zero means the whole thing,
     // which is what a one-shot dispatch wants and what every caller written
@@ -312,7 +324,6 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
 
     let base = f32(params.sample_base);
     let drawn = f32(draw);
-    let coord = vec2i(pixel);
     let fresh = params.sample_base == 0u;
 
     // What the run knew before this dispatch. Read once, because the read slot

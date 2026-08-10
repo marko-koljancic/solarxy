@@ -50,6 +50,7 @@ use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::lut::LutSlot;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::backend::{FrameCtx, PaneContent, RenderBackend, UvSource};
+use solarxy_renderer::capture::CaptureTarget;
 use solarxy_renderer::frame::{Renderer, RendererInit};
 use solarxy_renderer::geometry::build_normals_geometry;
 use solarxy_renderer::model::{GizmoVertex, NormalsGeometry};
@@ -59,7 +60,6 @@ use solarxy_renderer::panes::{self, PaneRect};
 use solarxy_renderer::visualization::grid_plane_for;
 use solarxy_renderer::scene::{create_light_bind_group, lights_from_camera, BackgroundModeExt};
 use solarxy_renderer::scene_objects::SceneObjects;
-use solarxy_renderer::texture;
 use solarxy_renderer::visualization::VisualizationState;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -185,6 +185,16 @@ enum HostEvent {
     /// strip's sampling notice reads `capacity < total`. Total rides f64
     /// for the 53-bit JS number boundary.
     AttrPinStats { capacity: u32, total: f64 },
+    /// A still render advanced: which tile of how many, and how many samples
+    /// of how many within it. `done` is set on the frame the last tile lands,
+    /// which is what closes a modal's progress out.
+    RenderProgress {
+        tile: u32,
+        tiles: u32,
+        sample: u32,
+        samples: u32,
+        done: bool,
+    },
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -219,6 +229,17 @@ struct MarkerScreenDto {
     pane: usize,
     x: f32,
     y: f32,
+}
+
+/// A still-render request. `engine` is `"raster"` or `"pathTraced"`.
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StillOptsDto {
+    width: u32,
+    height: u32,
+    samples: u32,
+    engine: String,
+    denoise: bool,
 }
 
 /// A screenshot request: capture resolution (physical pixels) plus the
@@ -361,6 +382,18 @@ pub struct SolarxyApp {
     turntable_request: Option<(usize, f32, ScreenshotOptsDto)>,
     /// The in-flight screenshot readback (one at a time).
     pending_screenshot: Option<solarxy_renderer::capture::PendingCapture>,
+    /// The running still render, if any.
+    ///
+    /// While this is `Some` the frame loop renders the job instead of the
+    /// panes: the shared targets are sized to the tile for the job's duration,
+    /// and a viewport rendering at layout size in the same frame would resize
+    /// them back twice a frame for the length of the render.
+    still: Option<solarxy_host::StillRenderJob>,
+    /// The tracer, built the first time a traced still is asked for. A session
+    /// that never renders one never pays for the pipelines.
+    tracer: Option<solarxy_renderer::pathtrace::backend::PathBackend>,
+    /// Finished tiles waiting for the frontend to take them.
+    still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
     /// Whether the normals/bounds visualization aggregate is stale
     /// (geometry changed, env rebuilt, or an overlay mode just turned on).
     viz_dirty: bool,
@@ -664,6 +697,9 @@ impl SolarxyApp {
             screenshot_request: None,
             turntable_request: None,
             pending_screenshot: None,
+            still: None,
+            tracer: None,
+            still_tiles: std::collections::VecDeque::new(),
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
             label_colors: {
@@ -809,9 +845,16 @@ impl SolarxyApp {
         });
 
         let pane_rects = self.compute_panes();
-        let is_split = pane_rects.len() > 1;
-        for (i, pane) in pane_rects.iter().enumerate() {
-            self.render_pane(i, *pane, &surface_view, is_split);
+        if self.still.is_some() {
+            // The job owns the frame. The surface is acquired and presented
+            // anyway so the browser does not treat the canvas as stalled, and
+            // it keeps whatever the last ordinary frame left on it.
+            self.pump_still_render();
+        } else {
+            let is_split = pane_rects.len() > 1;
+            for (i, pane) in pane_rects.iter().enumerate() {
+                self.render_pane(i, *pane, &surface_view, is_split);
+            }
         }
         output.present();
 
@@ -1405,6 +1448,178 @@ impl SolarxyApp {
         to_js(&out)
     }
 
+    /// Starts a still render: `{ width, height, samples, engine, denoise }`.
+    ///
+    /// `engine` is `"raster"` or `"pathTraced"`. Rejects while one is already
+    /// running, because both would want the shared targets at their own tile
+    /// size in the same frame.
+    ///
+    /// The job then advances one chunk per `frame()`, reports itself through
+    /// the `renderProgress` host event, and hands finished tiles over through
+    /// `take_still_tile`.
+    #[wasm_bindgen(js_name = startStillRender)]
+    pub fn start_still_render(&mut self, opts: JsValue) -> Result<(), JsError> {
+        use solarxy_host::still::{StillEngine, StillRenderJob, StillSpec, TILE_BUDGET_PIXELS};
+
+        if self.still.is_some() {
+            return Err(JsError::new("a still render is already running"));
+        }
+        let opts: StillOptsDto = serde_wasm_bindgen::from_value(opts)
+            .map_err(|e| JsError::new(&format!("bad still options: {e}")))?;
+        let engine = match opts.engine.as_str() {
+            "pathTraced" => StillEngine::PathTraced,
+            _ => StillEngine::Raster,
+        };
+        if engine == StillEngine::PathTraced && self.tracer.is_none() {
+            self.tracer = Some(solarxy_renderer::pathtrace::backend::PathBackend::new(
+                &self.device,
+                &self.queue,
+            ));
+            // The tracer has never seen this document. A full snapshot rather
+            // than a delta, because deltas since boot are long gone.
+            let delta = self.engine.scene_snapshot();
+            if let Some(t) = self.tracer.as_mut() {
+                t.apply(&self.device, &self.queue, &delta);
+            }
+        }
+        if let Some(t) = self.tracer.as_mut() {
+            let mut settings = t.settings();
+            settings.samples = opts.samples.max(1);
+            // One sample per animation frame. The pacing that keeps the page
+            // responsive, and the bound on how large any one dispatch is.
+            settings.chunk = 1;
+            settings.denoise = opts.denoise;
+            t.set_settings(settings);
+            t.invalidate();
+        }
+        let spec = StillSpec {
+            width: opts.width,
+            height: opts.height,
+            engine,
+            samples: opts.samples,
+            // Bloom is the only screen-space pass a still keeps; ambient
+            // occlusion is off for traced output and a raster still inherits
+            // whatever the viewport had.
+            screen_space_post: self.renderer.post.bloom_enabled,
+            tile_budget: TILE_BUDGET_PIXELS,
+        };
+        self.still_tiles.clear();
+        self.still = Some(StillRenderJob::new(spec));
+        Ok(())
+    }
+
+    /// Cancels the running still render, dropping the job and everything it
+    /// allocated. Safe to call when nothing is running.
+    #[wasm_bindgen(js_name = cancelStillRender)]
+    pub fn cancel_still_render(&mut self) {
+        self.still = None;
+        self.still_tiles.clear();
+        // The next frame renders the panes again, and the frame after that
+        // resizes the targets back to the layout.
+    }
+
+    /// A finished tile as `{ x, y, width, height, pixels }` (RGBA8), or
+    /// `undefined` when none is waiting.
+    ///
+    /// Tiles cross one at a time and are assembled on the JavaScript side,
+    /// which is what keeps a sixty-seven megapixel image out of the wasm heap
+    /// and gives the modal its live preview for nothing.
+    #[wasm_bindgen(js_name = takeStillTile)]
+    pub fn take_still_tile(&mut self) -> JsValue {
+        let Some(tile) = self.still_tiles.pop_front() else {
+            return JsValue::UNDEFINED;
+        };
+        let obj = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), v);
+        };
+        set("x", &JsValue::from_f64(f64::from(tile.rect.x)));
+        set("y", &JsValue::from_f64(f64::from(tile.rect.y)));
+        set("width", &JsValue::from_f64(f64::from(tile.rect.width)));
+        set("height", &JsValue::from_f64(f64::from(tile.rect.height)));
+        set(
+            "pixels",
+            &JsValue::from(js_sys::Uint8Array::from(tile.pixels.as_slice())),
+        );
+        obj.into()
+    }
+
+    /// Advances the running job by one chunk and reports where it got to.
+    fn pump_still_render(&mut self) {
+        use solarxy_host::still::{StillEngine, StillStep};
+
+        let Some(mut job) = self.still.take() else {
+            return;
+        };
+        let Some(tile) = job.current() else {
+            self.still = None;
+            return;
+        };
+        // The shell's half of the arrangement: the job renders into the shared
+        // targets and does not resize them, because the two shells resize with
+        // different policy around the same body.
+        self.set_target_dims(tile.render.width, tile.render.height);
+
+        let pane = self.view.active_pane;
+        let pds = self.view.pane_settings[pane];
+        let display = self.view.display;
+        let background = self.resolve_background(&pds);
+        let bounds = self.scene_bounds();
+        let look = self.pane_look(pane);
+        let scene_present = self.raster.scene().draw_objects().next().is_some();
+        let engine = job.spec().engine;
+        let format = self.render_format;
+
+        let step = {
+            let Some(camera) = self.view.cameras[pane].as_mut() else {
+                self.still = None;
+                return;
+            };
+            let mut ctx = solarxy_host::StillCtx {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.renderer,
+                camera,
+                env: &self.env,
+                pds: &pds,
+                display: &display,
+                background,
+                bounds: Some(&bounds),
+                look,
+                format,
+                scene_present,
+            };
+            match engine {
+                StillEngine::Raster => job.advance(&mut ctx, &mut self.raster),
+                StillEngine::PathTraced => match self.tracer.as_mut() {
+                    Some(t) => job.advance(&mut ctx, t),
+                    None => StillStep::Failed,
+                },
+            }
+        };
+
+        if step == StillStep::Tile {
+            while let Some(t) = job.take_tile() {
+                self.still_tiles.push_back(t);
+            }
+        }
+        let progress = job.progress();
+        let done =
+            matches!(step, StillStep::Done | StillStep::Failed) || progress.tile >= progress.tiles;
+        self.host_events.push(HostEvent::RenderProgress {
+            tile: progress.tile,
+            tiles: progress.tiles,
+            sample: progress.sample,
+            samples: progress.samples,
+            done,
+        });
+        if done {
+            self.still = None;
+        } else {
+            self.still = Some(job);
+        }
+    }
+
     /// Requests a screenshot of the active pane, rendered offscreen at the
     /// given resolution at the end of the current frame. One capture at a
     /// time; poll with [`SolarxyApp::poll_screenshot`].
@@ -1638,6 +1853,10 @@ impl SolarxyApp {
                 scene_present: capture_scene_present,
                 // A capture never carries the selection rim.
                 outline: false,
+                // A screenshot is the whole picture in one pass, capped at four
+                // megapixels. Rendering one larger than that is the still job's,
+                // and windowing is how it does it.
+                window: None,
                 content,
             },
             &hdr_target,
@@ -3732,76 +3951,11 @@ impl SolarxyApp {
     }
 
     /// Resizes the shared render targets to exact dimensions (the layout
-    /// sync above, and the screenshot path's capture-resolution render;
-    /// restoration after a capture is the next frame's sync call).
+    /// sync above, the screenshot path's capture-resolution render, and the
+    /// still job's per-tile size; restoration after a capture is the next
+    /// frame's sync call).
     fn set_target_dims(&mut self, width: u32, height: u32) {
-        if width == self.renderer.target_width && height == self.renderer.target_height {
-            return;
-        }
-        self.renderer.target_width = width;
-        self.renderer.target_height = height;
-        self.renderer.targets.depth_texture = texture::Texture::create_depth_texture(
-            &self.device,
-            width,
-            height,
-            "depth_texture",
-            self.renderer.msaa_sample_count,
-        );
-        self.renderer.targets.msaa_hdr_view = texture::create_msaa_hdr_texture(
-            &self.device,
-            width,
-            height,
-            self.renderer.msaa_sample_count,
-        );
-        let (hdr_tex, hdr_view) = texture::create_hdr_resolve_texture(&self.device, width, height);
-        self.renderer.targets._hdr_resolve_texture = hdr_tex;
-        self.renderer.targets.hdr_resolve_view = hdr_view;
-        self.renderer.post.bloom.resize(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            width,
-            height,
-        );
-        self.renderer.post.composite.rebuild_bind_group(
-            &self.device,
-            &self.renderer.layouts,
-            &self.renderer.targets.hdr_resolve_view,
-            &self.renderer.post.bloom.ping_view,
-            &self.renderer.post.bloom.sampler,
-            &self.renderer.post.luts,
-        );
-        let (ct, cv) = texture::create_overlap_count_texture(&self.device, width, height, false);
-        self.renderer.uv_overlap.count_texture = ct;
-        self.renderer.uv_overlap.count_view = cv;
-        self.renderer.uv_overlap.overlay_bind_group =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("UV Overlap Overlay Bind Group"),
-                layout: &self.renderer.layouts.uv_overlap_read,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.renderer.uv_overlap.count_view,
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.renderer.uv_overlap.sampler),
-                    },
-                ],
-            });
-        self.renderer
-            .post
-            .ssao
-            .resize(&self.device, &self.renderer.layouts, width, height);
-        self.renderer
-            .overdraw
-            .resize(&self.device, &self.renderer.layouts, width, height);
-        let layouts = std::sync::Arc::clone(&self.renderer.layouts);
-        self.renderer
-            .outline
-            .resize(&self.device, &layouts, width, height);
+        self.renderer.resize_targets(&self.device, width, height);
     }
 
     /// Assemble this pane's parameters and hand them to the shared body.
@@ -3914,6 +4068,9 @@ impl SolarxyApp {
                 look,
                 scene_present,
                 outline,
+                // An ordinary frame is a view in its own right, not a window on
+                // a larger picture. Only the still render sets this.
+                window: None,
                 content,
             },
             &hdr_target,
@@ -4376,49 +4533,6 @@ impl SolarxyApp {
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-    }
-}
-
-/// An offscreen render target for a capture, with the pane rect that covers
-/// it. Bundled because the composite and the readback both need most of it and
-/// passing the pieces separately runs the argument count into the lint.
-struct CaptureTarget {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    rect: PaneRect,
-    width: u32,
-    height: u32,
-}
-
-impl CaptureTarget {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Screenshot Target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self {
-            texture,
-            view,
-            rect: PaneRect {
-                x: 0.0,
-                y: 0.0,
-                width: width as f32,
-                height: height as f32,
-            },
-            width,
-            height,
-        }
     }
 }
 

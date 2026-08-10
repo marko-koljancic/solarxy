@@ -225,6 +225,9 @@ impl State {
                 look,
                 scene_present,
                 outline,
+                // An ordinary frame is a view in its own right, not a window on
+                // a larger picture. Only the still render sets this.
+                window: None,
                 content,
             },
             &target,

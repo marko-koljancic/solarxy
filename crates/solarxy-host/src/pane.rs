@@ -53,6 +53,17 @@ use solarxy_renderer::visualization::GridUniform;
 /// Several of these are `Option` because one shell has a capability the other
 /// does not, and in every case the `None` arm is what that shell already did.
 pub struct PaneUniforms<'a> {
+    /// Set when this pane is one tile of a larger image, so the background
+    /// gradient draws its slice of the picture's sweep rather than a whole
+    /// sweep of its own.
+    ///
+    /// This is what `uv_y_offset` and `uv_y_scale` on the gradient uniform have
+    /// always been for; nothing needed them until a tile did, so both call
+    /// sites wrote the identity.
+    pub window: Option<solarxy_renderer::backend::ImageWindow>,
+    /// This pane's height in pixels, which the window needs and the rect the
+    /// caller already has carries.
+    pub tile_height: f32,
     /// The pane's background, already resolved against whatever registry of
     /// user backgrounds the shell keeps.
     pub background: ResolvedBackground,
@@ -112,11 +123,33 @@ pub fn write_pane_uniforms(queue: &wgpu::Queue, renderer: &Renderer, u: &PaneUni
     write_wireframe_params(queue, renderer, u.background, u.pds, u.display);
 
     let (top, bottom) = u.background.sky_colors();
+    // A tile takes its slice of the whole image's gradient. Without this every
+    // tile sweeps top to bottom within itself, which assembles into a picture
+    // banded once per tile row -- and it is invisible in a single-tile render,
+    // which is every render there was before the still job.
+    //
+    // The offset is measured from the **bottom**, because the background's
+    // `uv.y` is: its vertex stage maps `uv` straight onto clip space, where
+    // `-1` is the bottom of the target, so `uv.y` of zero is the bottom row.
+    // Tile rectangles are measured from the top like every other rect here, so
+    // the two have to be reconciled exactly once, and this is the place.
+    #[allow(clippy::cast_precision_loss)]
+    let (uv_y_offset, uv_y_scale) = match u.window {
+        Some(w) => {
+            let full = w.full[1].max(1) as f32;
+            let from_top = w.origin[1] as f32;
+            (
+                1.0 - (from_top + u.tile_height) / full,
+                u.tile_height / full,
+            )
+        }
+        None => (0.0, 1.0),
+    };
     let gradient = GradientUniform {
         top_color: [top[0], top[1], top[2], 1.0],
         bottom_color: [bottom[0], bottom[1], bottom[2], 1.0],
-        uv_y_offset: 0.0,
-        uv_y_scale: 1.0,
+        uv_y_offset,
+        uv_y_scale,
         _pad: [0.0; 2],
     };
     queue.write_buffer(
@@ -382,6 +415,7 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
         grid_plane,
         scene_present,
         content,
+        window,
         ..
     } = ctx;
 
@@ -401,7 +435,25 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
             Some(camera),
         ) => {
             let objects = &build_draw_list(scene, *extra, *selected);
-            camera.write_with_aspect(queue, pane_aspect);
+            // A tile of a larger image gets an asymmetric frustum cut from that
+            // image's, and the image's aspect rather than its own: the two
+            // differ for every tile that is not the same shape as the picture,
+            // and using the tile's would render a different shot per tile.
+            if let Some(w) = *window {
+                #[allow(clippy::cast_precision_loss)]
+                let full = [w.full[0] as f32, w.full[1] as f32];
+                #[allow(clippy::cast_precision_loss)]
+                let origin = [w.origin[0] as f32, w.origin[1] as f32];
+                camera.write_windowed(
+                    queue,
+                    full[0] / full[1].max(1.0),
+                    origin,
+                    [rect.width, rect.height],
+                    full,
+                );
+            } else {
+                camera.write_with_aspect(queue, pane_aspect);
+            }
             write_pane_uniforms(
                 queue,
                 renderer,
@@ -413,6 +465,8 @@ pub fn encode_pane_passes(ctx: &mut FrameCtx<'_>, scene: &SceneObjects) -> Encod
                     env,
                     bounds: *bounds,
                     grid_plane: *grid_plane,
+                    window: *window,
+                    tile_height: rect.height,
                 },
             );
             if pds.inspection_mode == InspectionMode::Overdraw {

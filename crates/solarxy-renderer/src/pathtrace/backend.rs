@@ -379,11 +379,28 @@ impl RenderBackend for PathBackend {
             (ctx.rect.height.max(1.0)) as u32,
         );
 
+        // Where this pane sits in the picture. An ordinary frame is the whole
+        // of a one-pane image; a still render's tile is a window on a larger
+        // one, and the difference reaches the kernel as a dispatch offset.
+        //
+        // The camera is **not** windowed here, unlike the raster path's. The
+        // kernel builds its ray from the pixel's coordinate in the whole image,
+        // so it needs the whole image's camera; windowing it as well would
+        // apply the offset twice.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let (tile_offset, resolution) = match ctx.window {
+            Some(w) => (w.origin, w.full),
+            None => ([0, 0], [width, height]),
+        };
+
         // The aspect write has to land before the camera buffer is read, the
         // same way the raster path does it, or the first traced frame after a
         // resize frames the previous shape.
         #[allow(clippy::cast_precision_loss)]
-        let aspect = ctx.rect.width / ctx.rect.height.max(1.0);
+        let aspect = match ctx.window {
+            Some(w) => w.full[0] as f32 / (w.full[1].max(1) as f32),
+            None => ctx.rect.width / ctx.rect.height.max(1.0),
+        };
         camera.write_with_aspect(ctx.queue, aspect);
 
         let stale = slot
@@ -439,9 +456,9 @@ impl RenderBackend for PathBackend {
 
         let chunk = settings.chunk.max(1).min(total - pane.samples);
         let params = TraceParams {
-            tile_offset: [0, 0],
+            tile_offset,
             tile_size: [width, height],
-            resolution: [width, height],
+            resolution,
             bounces: settings.bounces,
             transmissive_bounces: settings.transmissive_bounces,
             samples: total,

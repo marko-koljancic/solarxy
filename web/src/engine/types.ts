@@ -759,7 +759,37 @@ export type HostEvent =
   | { type: "activePane"; pane: number }
   | { type: "uvOverlap"; pct: number | null; pending: boolean }
   | { type: "viewChanged" }
-  | { type: "attrPinStats"; capacity: number; total: number };
+  | { type: "attrPinStats"; capacity: number; total: number }
+  | {
+      type: "renderProgress";
+      tile: number;
+      tiles: number;
+      sample: number;
+      samples: number;
+      done: boolean;
+    };
+
+/** One finished tile of a still render, as it crosses the boundary.
+ *
+ * Tiles cross one at a time and the frontend assembles them, which is what
+ * keeps a 67-megapixel image out of the wasm heap and gives the modal its
+ * live preview for free. */
+export interface StillTileDto {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pixels: Uint8Array;
+}
+
+/** What to render. `engine` picks which renderer draws it. */
+export interface StillRenderOpts {
+  width: number;
+  height: number;
+  samples: number;
+  engine: "raster" | "pathTraced";
+  denoise: boolean;
+}
 
 /** The viewport tool. Rotate and Scale select, draw and
  * grab nothing, which is why their buttons ship disabled rather than dead. */

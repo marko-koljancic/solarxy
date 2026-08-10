@@ -8,6 +8,65 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+use crate::panes::PaneRect;
+
+/// An offscreen render target for a capture, with the pane rect that covers it.
+///
+/// Bundled because the composite and the readback both need most of it and
+/// passing the pieces separately runs the argument count into the lint.
+///
+/// Shared rather than per shell: the web screenshot path and the still render
+/// job allocate the same thing for the same reason, and a second copy would be
+/// the one that stopped matching when the usage flags changed.
+pub struct CaptureTarget {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    /// The whole target, as a pane rect, which is what a capture composites
+    /// with: full-rect viewport, always clearing, never a sub-rect of a layout.
+    pub rect: PaneRect,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl CaptureTarget {
+    #[must_use]
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Capture Target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self {
+            texture,
+            view,
+            #[allow(clippy::cast_precision_loss)]
+            rect: PaneRect {
+                x: 0.0,
+                y: 0.0,
+                width: width as f32,
+                height: height as f32,
+            },
+            width,
+            height,
+        }
+    }
+}
+
 /// Bytes per padded row for a `width`-pixel RGBA8 copy
 /// (`COPY_BYTES_PER_ROW_ALIGNMENT`).
 #[must_use]

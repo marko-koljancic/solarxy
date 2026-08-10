@@ -44,6 +44,65 @@ impl Camera {
         }
     }
 
+    /// The same projection restricted to a rectangle of the image, which is how
+    /// a still render draws one tile of a picture too large to draw at once.
+    ///
+    /// `origin` and `size` are the tile in pixels, `full` the whole image, with
+    /// the origin at the top left the way every rect in this renderer is. The
+    /// result is an **asymmetric** frustum: a tile off to one side sees the
+    /// same cone of the world it would have occupied in the whole image, viewed
+    /// off the view axis, which is exactly what makes the tiles reassemble into
+    /// one picture rather than into a grid of separate renders each looking
+    /// straight ahead.
+    ///
+    /// [`Camera::aspect`] is read as the **whole image's** aspect, not the
+    /// tile's. The frustum is derived from the picture and then cut down; a
+    /// tile that recomputed its own aspect would be a different camera.
+    ///
+    /// Windowing the whole rect reproduces [`Camera::build_proj_matrix`], which
+    /// is asserted rather than assumed: it is what says a one-tile render and
+    /// an untiled one are the same render.
+    #[must_use]
+    pub fn build_proj_matrix_windowed(
+        &self,
+        origin: [f32; 2],
+        size: [f32; 2],
+        full: [f32; 2],
+    ) -> cgmath::Matrix4<f32> {
+        let (fw, fh) = (full[0].max(1.0), full[1].max(1.0));
+        // Fractions of the image the tile spans. `y` is measured down from the
+        // top, and the frustum's is measured up from the bottom, which is the
+        // one place the flip has to happen.
+        let x0 = origin[0] / fw;
+        let x1 = (origin[0] + size[0]) / fw;
+        let y0 = origin[1] / fh;
+        let y1 = (origin[1] + size[1]) / fh;
+
+        let (left, right, bottom, top) = match self.projection {
+            ProjectionMode::Perspective => {
+                let top = self.znear * (self.fovy.to_radians() * 0.5).tan();
+                let right = top * self.aspect;
+                (-right, right, -top, top)
+            }
+            ProjectionMode::Orthographic => {
+                let half_h = self.ortho_scale;
+                let half_w = half_h * self.aspect;
+                (-half_w, half_w, -half_h, half_h)
+            }
+        };
+        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+        let l = lerp(left, right, x0);
+        let r = lerp(left, right, x1);
+        // Top first, because the tile's `y0` edge is the upper one.
+        let t = lerp(top, bottom, y0);
+        let b = lerp(top, bottom, y1);
+
+        match self.projection {
+            ProjectionMode::Perspective => cgmath::frustum(l, r, b, t, self.znear, self.zfar),
+            ProjectionMode::Orthographic => cgmath::ortho(l, r, b, t, self.znear, self.zfar),
+        }
+    }
+
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         OPENGL_TO_WGPU_MATRIX * self.build_proj_matrix() * self.build_view_matrix()
     }
@@ -260,11 +319,30 @@ impl CameraUniform {
         self.material_override = 0;
     }
 
+    /// The camera restricted to one tile of a larger image. Everything else is
+    /// identical to [`CameraUniform::update_view_proj`], which is what makes a
+    /// tile a window on the same shot rather than a different one.
+    pub fn update_view_proj_windowed(
+        &mut self,
+        camera: &Camera,
+        origin: [f32; 2],
+        size: [f32; 2],
+        full: [f32; 2],
+    ) {
+        self.write_view_proj(
+            camera,
+            OPENGL_TO_WGPU_MATRIX * camera.build_proj_matrix_windowed(origin, size, full),
+        );
+    }
+
     pub fn update_view_proj(&mut self, camera: &Camera) {
+        self.write_view_proj(camera, OPENGL_TO_WGPU_MATRIX * camera.build_proj_matrix());
+    }
+
+    fn write_view_proj(&mut self, camera: &Camera, proj: cgmath::Matrix4<f32>) {
         use cgmath::SquareMatrix;
         self.view_position = camera.eye.to_homogeneous().into();
         let view = camera.build_view_matrix();
-        let proj = OPENGL_TO_WGPU_MATRIX * camera.build_proj_matrix();
         self.view_proj = (proj * view).into();
         self.view = view.into();
         self.proj = proj.into();
@@ -774,5 +852,112 @@ mod tests {
         let wpp1 = cam.world_per_pixel(target, 800.0);
         assert!((d1 - d0).abs() < 1e-4, "distance round-trips: {d1} vs {d0}");
         assert!((wpp1 - wpp0).abs() < 1e-6, "apparent size round-trips");
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+    use solarxy_core::preferences::ProjectionMode;
+
+    fn cam(projection: ProjectionMode) -> Camera {
+        Camera {
+            eye: cgmath::Point3::new(1.0, 2.0, 6.0),
+            target: cgmath::Point3::new(0.0, 0.5, 0.0),
+            up: cgmath::Vector3::unit_y(),
+            aspect: 16.0 / 9.0,
+            fovy: 42.0,
+            znear: 0.1,
+            zfar: 120.0,
+            projection,
+            ortho_scale: 3.0,
+        }
+    }
+
+    fn close(a: cgmath::Matrix4<f32>, b: cgmath::Matrix4<f32>, tol: f32, what: &str) {
+        let (a, b): ([[f32; 4]; 4], [[f32; 4]; 4]) = (a.into(), b.into());
+        for c in 0..4 {
+            for r in 0..4 {
+                assert!(
+                    (a[c][r] - b[c][r]).abs() <= tol,
+                    "{what}: [{c}][{r}] {} against {}",
+                    a[c][r],
+                    b[c][r]
+                );
+            }
+        }
+    }
+
+    /// The property the whole tiling rests on: one tile covering the image is
+    /// the image.
+    ///
+    /// If this fails, every tiled render is a slightly different shot from the
+    /// untiled one, which shows up as a seam only where two tiles meet and as
+    /// nothing at all in a single-tile render.
+    #[test]
+    fn windowing_the_whole_image_is_the_unwindowed_projection() {
+        for projection in [ProjectionMode::Perspective, ProjectionMode::Orthographic] {
+            let c = cam(projection);
+            close(
+                c.build_proj_matrix_windowed([0.0, 0.0], [1920.0, 1080.0], [1920.0, 1080.0]),
+                c.build_proj_matrix(),
+                1e-5,
+                "the whole rect",
+            );
+        }
+    }
+
+    /// Four tiles reassemble into the same frustum they were cut from.
+    ///
+    /// Checked at the corners rather than on the matrices, because that is the
+    /// statement that matters: a point on the shared edge of two tiles has to
+    /// land on the edge of both, or the assembled image has a seam.
+    #[test]
+    fn adjacent_tiles_agree_on_the_edge_between_them() {
+        let c = cam(ProjectionMode::Perspective);
+        let full = [1024.0, 512.0];
+        let left = c.build_proj_matrix_windowed([0.0, 0.0], [512.0, 512.0], full);
+        let right = c.build_proj_matrix_windowed([512.0, 0.0], [512.0, 512.0], full);
+
+        // A point on the vertical seam projects to the right edge of the left
+        // tile and the left edge of the right one.
+        let view = c.build_view_matrix();
+        let world = cgmath::Point3::new(0.0, 0.0, 0.0);
+        let eye = view * world.to_homogeneous();
+        let ndc = |m: cgmath::Matrix4<f32>| {
+            let p = m * eye;
+            p.x / p.w
+        };
+        assert!(
+            (ndc(left) - 1.0).abs() < 1e-4,
+            "the seam is at {} of the left tile rather than its right edge",
+            ndc(left)
+        );
+        assert!(
+            (ndc(right) + 1.0).abs() < 1e-4,
+            "the seam is at {} of the right tile rather than its left edge",
+            ndc(right)
+        );
+    }
+
+    /// A tile is a window, not a zoom: the top-left tile has to look up and
+    /// left, which is what an asymmetric frustum is for and what a symmetric
+    /// one with a narrower field of view would get wrong.
+    #[test]
+    fn a_corner_tile_looks_off_axis() {
+        let c = cam(ProjectionMode::Perspective);
+        let m: [[f32; 4]; 4] = c
+            .build_proj_matrix_windowed([0.0, 0.0], [256.0, 256.0], [1024.0, 1024.0])
+            .into();
+        // In a symmetric frustum the third column's x and y are zero; in an
+        // off-axis one they carry the shear that aims it.
+        assert!(
+            m[2][0].abs() > 0.1,
+            "the corner tile's frustum is not sheared horizontally"
+        );
+        assert!(
+            m[2][1].abs() > 0.1,
+            "the corner tile's frustum is not sheared vertically"
+        );
     }
 }

@@ -456,6 +456,77 @@ pub struct RendererInit<'a> {
 }
 
 impl Renderer {
+    /// Resizes every render target that follows the drawn area.
+    ///
+    /// The drawn area is not the surface: it is the largest pane of the current
+    /// layout, and during a still render it is one tile. Both shells and the
+    /// still job need this, and all three had their own copy of it until the
+    /// tiled still made a third; what stays in a shell is the policy around it,
+    /// such as the desktop marking its overlap statistics stale.
+    ///
+    /// Returns whether anything was reallocated, so a caller can skip the work
+    /// that only matters when it was. A no-op resize is the common case: a job
+    /// calls this once per tile and the tiles are almost all the same size.
+    pub fn resize_targets(&mut self, device: &wgpu::Device, width: u32, height: u32) -> bool {
+        if width == 0 || height == 0 {
+            return false;
+        }
+        if width == self.target_width && height == self.target_height {
+            return false;
+        }
+        self.target_width = width;
+        self.target_height = height;
+        self.targets.depth_texture = crate::texture::Texture::create_depth_texture(
+            device,
+            width,
+            height,
+            "depth_texture",
+            self.msaa_sample_count,
+        );
+        self.targets.msaa_hdr_view =
+            crate::texture::create_msaa_hdr_texture(device, width, height, self.msaa_sample_count);
+        let (hdr_tex, hdr_view) = crate::texture::create_hdr_resolve_texture(device, width, height);
+        self.targets._hdr_resolve_texture = hdr_tex;
+        self.targets.hdr_resolve_view = hdr_view;
+        self.post.bloom.resize(
+            device,
+            &self.layouts,
+            &self.targets.hdr_resolve_view,
+            width,
+            height,
+        );
+        self.post.composite.rebuild_bind_group(
+            device,
+            &self.layouts,
+            &self.targets.hdr_resolve_view,
+            &self.post.bloom.ping_view,
+            &self.post.bloom.sampler,
+            &self.post.luts,
+        );
+        let (ct, cv) = crate::texture::create_overlap_count_texture(device, width, height, false);
+        self.uv_overlap.count_texture = ct;
+        self.uv_overlap.count_view = cv;
+        self.uv_overlap.overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UV Overlap Overlay Bind Group"),
+            layout: &self.layouts.uv_overlap_read,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.uv_overlap.count_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.uv_overlap.sampler),
+                },
+            ],
+        });
+        self.post.ssao.resize(device, &self.layouts, width, height);
+        self.overdraw.resize(device, &self.layouts, width, height);
+        let layouts = Arc::clone(&self.layouts);
+        self.outline.resize(device, &layouts, width, height);
+        true
+    }
+
     /// Build the full renderer: bind-group layouts, every pipeline, render
     /// targets, IBL (BRDF LUT + sky convolution), post-FX state, UV/overlap
     /// resources, validation colors, and overdraw resources. Pure code

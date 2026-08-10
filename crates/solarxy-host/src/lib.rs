@@ -82,6 +82,7 @@ pub mod gizmo;
 pub mod lighting;
 pub mod pane;
 pub mod raster;
+pub mod still;
 pub mod view;
 
 pub use cameras::{depth_bounds, ensure_pane_cameras};
@@ -92,4 +93,5 @@ pub use pane::{
     write_pane_uniforms, write_wireframe_params,
 };
 pub use raster::RasterBackend;
+pub use still::{StillCtx, StillRenderJob, StillSpec, StillStep};
 pub use view::HostViewState;

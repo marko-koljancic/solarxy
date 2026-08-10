@@ -225,6 +225,28 @@ impl CameraState {
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
         self.camera.aspect = saved;
     }
+
+    /// Writes the camera restricted to one tile of a larger image.
+    ///
+    /// `aspect` is the **whole image's**, because the frustum this windows is
+    /// the whole image's frustum; a tile that passed its own aspect would be
+    /// looking through a different lens. See
+    /// [`crate::camera::Camera::build_proj_matrix_windowed`].
+    pub fn write_windowed(
+        &mut self,
+        queue: &wgpu::Queue,
+        aspect: f32,
+        origin: [f32; 2],
+        size: [f32; 2],
+        full: [f32; 2],
+    ) {
+        let saved = self.camera.aspect;
+        self.camera.aspect = aspect;
+        self.uniform
+            .update_view_proj_windowed(&self.camera, origin, size, full);
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        self.camera.aspect = saved;
+    }
 }
 
 /// The transition's endpoint applied to a camera, as a value: the pure half

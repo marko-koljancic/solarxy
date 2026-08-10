@@ -36,6 +36,8 @@ import type {
   ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
+  StillRenderOpts,
+  StillTileDto,
   SaveExtra,
   SlxyLoadResult,
   ValidateJob,
@@ -156,6 +158,26 @@ export class SolarxyClient {
   /** Polls the in-flight capture; undefined while pending. */
   pollScreenshot(): ScreenshotResult | undefined {
     return (this.app.poll_screenshot() ?? undefined) as ScreenshotResult | undefined;
+  }
+
+  /** Starts a still render. Throws if one is already running.
+   *
+   * The job then advances one chunk per frame on its own: nothing here drives
+   * it. Progress arrives as `renderProgress` host events and finished tiles
+   * through `takeStillTile`, which is why this returns nothing. */
+  startStillRender(opts: StillRenderOpts): void {
+    this.app.startStillRender(opts);
+  }
+
+  /** Cancels the running still render. Safe when nothing is running. */
+  cancelStillRender(): void {
+    this.app.cancelStillRender();
+  }
+
+  /** A finished tile, or undefined when none is waiting. Drain in a loop:
+   * more than one can land between frames. */
+  takeStillTile(): StillTileDto | undefined {
+    return (this.app.takeStillTile() ?? undefined) as StillTileDto | undefined;
   }
 
   /** Marks the picked node's scene object as selected (viewport tint). */
