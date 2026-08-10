@@ -160,6 +160,16 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::TraceParams>(),
         rust_type: "solarxy_renderer::pathtrace::TraceParams",
     },
+    // The denoiser's per-level uniforms. Its own kernel, its own layout, and a
+    // struct the shader declares whole, so it belongs here for the same reason
+    // the tracer's do: the failure it catches is a silent one.
+    Case {
+        shader: "pathtrace/denoise.wgsl",
+        prelude: &["pathtrace/aov.wgsl"],
+        struct_name: "DenoiseParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::denoise::DenoiseParams>(),
+        rust_type: "solarxy_renderer::pathtrace::denoise::DenoiseParams",
+    },
     // The light record. Six sixteen-byte blocks, each a vec3f plus a scalar, so
     // it needs no pad on either side -- which is exactly the shape that stops
     // being true the moment someone promotes one of those scalars to a vector

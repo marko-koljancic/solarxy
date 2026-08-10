@@ -23,6 +23,7 @@
 pub mod arena;
 pub mod atlas;
 pub mod backend;
+pub mod denoise;
 pub mod environment;
 pub mod light;
 pub mod material;
@@ -90,10 +91,12 @@ const TRACE_KERNEL: &str = concat!(
 /// table reproducing through this loop is the evidence that adding a second
 /// density did not disturb the first.
 ///
-/// What it still lacks is accumulation. The sample loop is inside the kernel
-/// and there is no history texture, so long renders are paced by tiling; the
-/// ping-ponged accumulator replaces that loop rather than starting over.
+/// Each dispatch draws a slice of one run's samples and folds them into the
+/// ping-ponged running mean, so a long render is paced by chunking. The
+/// auxiliary packing composes first, because the denoiser reads the guides this
+/// writes and the two halves have to be one text.
 const PATH_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/aov.wgsl"),
     include_str!("../shaders/pathtrace/traverse.wgsl"),
     include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/material.wgsl"),
@@ -106,12 +109,12 @@ const PATH_KERNEL: &str = concat!(
 );
 
 /// Steps per octahedral component in the auxiliary target's packed normal.
-/// Mirrors `OCT_STEPS` in `path.wgsl`.
+/// Mirrors `OCT_STEPS` in `aov.wgsl`.
 const OCT_STEPS: f32 = 4096.0;
 
 /// Decodes a world normal from the auxiliary target's alpha lane.
 ///
-/// The other half of `pack_octahedral` in `path.wgsl`, which packs two
+/// The other half of `pack_octahedral` in `aov.wgsl`, which packs two
 /// twelve-bit octahedral components arithmetically into one float rather than
 /// reinterpreting bits: an integer below 2^24 is exact in an `f32` on every
 /// platform, where an arbitrary bit pattern read as a float may be a denormal
@@ -795,6 +798,8 @@ pub struct TraceTarget {
     /// Held so the resolve and the denoiser can bind the colour without
     /// creating a view per frame.
     color_views: [wgpu::TextureView; 2],
+    /// The same for the guides the denoiser reads.
+    aux_views: [wgpu::TextureView; 2],
     /// The slot the next dispatch writes, and the slot every reader reads.
     write: usize,
     width: u32,
@@ -871,6 +876,7 @@ impl TraceTarget {
             auxiliary,
             groups,
             color_views,
+            aux_views,
             write: 0,
             width,
             height,
@@ -913,6 +919,13 @@ impl TraceTarget {
     #[must_use]
     pub fn color_view(&self) -> &wgpu::TextureView {
         &self.color_views[self.write]
+    }
+
+    /// A view of [`TraceTarget::auxiliary_texture`], for the denoiser that
+    /// steers by it.
+    #[must_use]
+    pub fn auxiliary_view(&self) -> &wgpu::TextureView {
+        &self.aux_views[self.write]
     }
 
     /// Encodes a full-image copy of the auxiliary target, the same way

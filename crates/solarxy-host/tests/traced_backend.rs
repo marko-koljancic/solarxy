@@ -306,7 +306,7 @@ fn read_surface(h: &Harness) -> Vec<u8> {
         (0, 0, WIDTH, HEIGHT),
     );
     h.queue.submit(Some(encoder.finish()));
-    let mut pending = solarxy_renderer::capture::PendingCapture::arm(buffer, padded, WIDTH, HEIGHT);
+    let pending = solarxy_renderer::capture::PendingCapture::arm(buffer, padded, WIDTH, HEIGHT);
     loop {
         match pending.poll(&h.device, h.format) {
             solarxy_renderer::capture::CapturePoll::Ready(pixels) => return pixels,
@@ -499,5 +499,45 @@ fn a_traced_pane_inherits_the_camera_owned_look() {
     assert!(
         reds_rose > (WIDTH * HEIGHT / 2) as usize,
         "lifting the red channel raised it on only {reds_rose} pixels"
+    );
+}
+
+/// The denoise toggle, from a shell's side of the contract.
+///
+/// The bit-identity half of the criterion is structural rather than
+/// statistical: with the filter off the resolve is handed the accumulator's own
+/// view, so what reaches the composite is the running mean and nothing else has
+/// touched it. What is worth checking here is the other half, that the flag is
+/// wired at all, because a toggle that silently does nothing looks exactly like
+/// a filter that is very gentle.
+#[test]
+fn the_denoise_toggle_reaches_the_image() {
+    let Some(mut h) = skip_or(harness()) else {
+        return;
+    };
+    let mut backend = tracer(&h, 1, 1);
+
+    frame(&mut h, &mut backend, CompositeLook::default());
+    let plain = read_surface(&h);
+    backend.invalidate();
+    frame(&mut h, &mut backend, CompositeLook::default());
+    let plain_again = read_surface(&h);
+    assert_eq!(
+        plain, plain_again,
+        "two runs of the same seed with the filter off disagreed, so this test \
+         cannot tell the filter apart from the noise"
+    );
+
+    backend.set_settings(TraceSettings {
+        samples: 1,
+        chunk: 1,
+        denoise: true,
+        ..TraceSettings::default()
+    });
+    frame(&mut h, &mut backend, CompositeLook::default());
+    let filtered = read_surface(&h);
+    assert_ne!(
+        plain, filtered,
+        "turning the filter on changed nothing at one sample per pixel"
     );
 }

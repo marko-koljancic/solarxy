@@ -38,6 +38,7 @@ use solarxy_core::scene::SceneDelta;
 
 use crate::backend::{BackendCaps, FrameCtx, FrameOutcome, PaneContent, RenderBackend, TopologyMask};
 use crate::bind_groups::PathtraceLayouts;
+use crate::pathtrace::denoise::{DenoiseSettings, Denoiser};
 use crate::pathtrace::environment::TraceEnvironment;
 use crate::pathtrace::resolve::TraceResolve;
 use crate::pathtrace::scene::TraceSceneCache;
@@ -82,6 +83,14 @@ pub struct TraceSettings {
     pub focus_distance: f32,
     /// Aperture blades. Zero, one and two are circular.
     pub aperture_blades: u32,
+    /// Whether the edge-aware filter runs before the resolve.
+    ///
+    /// **Off by default, which is the still's default and the only one this
+    /// release has a consumer for.** A converged still does not need it and a
+    /// filter can only take detail out of one. The interactive preview turns it
+    /// on, because a one-sample frame is unusable without it; that preview is
+    /// the per-pane traced display mode, which is not in this release.
+    pub denoise: bool,
 }
 
 impl Default for TraceSettings {
@@ -96,6 +105,7 @@ impl Default for TraceSettings {
             aperture_radius: 0.0,
             focus_distance: 0.0,
             aperture_blades: 0,
+            denoise: false,
         }
     }
 }
@@ -135,6 +145,9 @@ pub struct PathBackend {
     layouts: PathtraceLayouts,
     kernel: PathKernel,
     resolve: TraceResolve,
+    /// Allocates nothing until the filter is switched on, so a still with it
+    /// off pays neither the scratch nor the dispatches.
+    denoiser: Denoiser,
     /// The CPU half: what the document says, hierarchies included.
     cache: TraceSceneCache,
     /// The GPU half: the arena the kernel binds.
@@ -170,12 +183,14 @@ impl PathBackend {
         let seed_uniforms = PathUniforms::new(device, &seed_camera);
         let kernel = PathKernel::new(device, &layouts, &seed_uniforms);
         let resolve = TraceResolve::new(device);
+        let denoiser = Denoiser::new(device);
         let scene = TraceScene::new(device, &layouts);
         let atlas = TraceAtlas::new(device, queue, &layouts);
         Self {
             layouts,
             kernel,
             resolve,
+            denoiser,
             cache: TraceSceneCache::new(),
             scene,
             atlas,
@@ -199,6 +214,21 @@ impl PathBackend {
     #[must_use]
     pub fn settings(&self) -> TraceSettings {
         self.settings
+    }
+
+    /// How the filter is steered, when [`TraceSettings::denoise`] turns it on.
+    ///
+    /// Separate from [`TraceSettings`] because it is not authored: the render
+    /// node carries a toggle and not three sigmas, and a control whose effect
+    /// is "how much detail would you like removed" is not one a person can
+    /// reason about.
+    pub fn set_denoise_settings(&mut self, settings: DenoiseSettings) {
+        self.denoiser.set_settings(settings);
+    }
+
+    #[must_use]
+    pub fn denoise_settings(&self) -> DenoiseSettings {
+        self.denoiser.settings()
     }
 
     /// Installs a prepared environment image and the look the environment node
@@ -331,6 +361,7 @@ impl RenderBackend for PathBackend {
             layouts,
             kernel,
             resolve,
+            denoiser,
             scene,
             atlas,
             panes,
@@ -376,8 +407,21 @@ impl RenderBackend for PathBackend {
         if pane.samples >= total {
             // Converged, and the mean is still in the target, so the pane is
             // re-resolved rather than re-traced. That is what makes a finished
-            // still cost nothing to keep on screen.
-            resolve.encode(ctx.device, ctx.encoder, pane.target.color_view(), target);
+            // still cost nothing to keep on screen. The filter re-runs, because
+            // its output is scratch rather than a cached image and it is off by
+            // default on exactly the renders that reach this branch.
+            let source = if settings.denoise {
+                denoiser.encode(
+                    ctx.device,
+                    ctx.queue,
+                    ctx.encoder,
+                    &pane.target,
+                    pane.samples,
+                )
+            } else {
+                pane.target.color_view()
+            };
+            resolve.encode(ctx.device, ctx.encoder, source, target);
             return FrameOutcome::Complete;
         }
 
@@ -425,7 +469,22 @@ impl RenderBackend for PathBackend {
             [width, height],
         );
         pane.samples += chunk;
-        resolve.encode(ctx.device, ctx.encoder, pane.target.color_view(), target);
+        // Filtered before the resolve rather than after it, so the whole look
+        // chain runs on the filtered image the way it runs on the raw one.
+        // Filtering after tone mapping would smooth a display-referred picture
+        // and put the grain back the moment the exposure moved.
+        let source = if settings.denoise {
+            denoiser.encode(
+                ctx.device,
+                ctx.queue,
+                ctx.encoder,
+                &pane.target,
+                pane.samples,
+            )
+        } else {
+            pane.target.color_view()
+        };
+        resolve.encode(ctx.device, ctx.encoder, source, target);
 
         if pane.samples >= total {
             FrameOutcome::Complete

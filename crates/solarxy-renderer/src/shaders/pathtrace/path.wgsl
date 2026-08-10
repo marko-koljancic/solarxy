@@ -2,7 +2,7 @@
 // importance sampling, and an environment.
 //
 // Composed over the traversal, the atlas, the material fragment, the sampler,
-// the lobes, the environment, the lights and the camera.
+// the lobes, the environment, the lights, the camera and the auxiliary packing.
 //
 // This grew from the furnace kernel rather than replacing it, and the white
 // furnace test still drives it: set both environment colours the same and every
@@ -12,10 +12,11 @@
 // stage-four albedo table reproducing through this loop is the evidence that
 // adding a second density did not disturb the first.
 //
-// What is still missing is accumulation: the sample loop lives inside the
-// kernel and there is no history texture, so a long render is paced by tiling.
-// Replacing that loop with a ping-ponged accumulator is the next stage, and the
-// shape here is what it replaces rather than what it starts over from.
+// Each dispatch draws a slice of one run's samples and folds them into a
+// ping-ponged running mean, so a long render is paced by chunking rather than
+// by asking for every sample at once. What one dispatch draws, where its slice
+// starts, and how many the run converges to are three separate fields on the
+// per-dispatch uniform for exactly that reason.
 
 @group(1) @binding(0) var path_out: texture_storage_2d<rgba32float, write>;
 // Albedo in `rgb` and the world normal folded into `a`. What the surface looked
@@ -54,69 +55,8 @@ struct PathResult {
 // first hit rough enough to look like itself.
 const AOV_MIN_ROUGHNESS: f32 = 0.05;
 
-// Quantization steps per octahedral component. Two of these multiply out to
-// 2^24 - 1, which is the largest integer an f32 represents exactly, so the pair
-// packs into one lane and comes back unchanged.
-const OCT_STEPS: f32 = 4096.0;
-
-// The world normal packed into one float, octahedrally.
-//
-// Two components rather than three, because the storage-texture budget is four
-// and the accumulator needs two of them: the albedo takes three lanes and this
-// takes the fourth. Octahedral mapping is the standard way to spend two numbers
-// on a unit vector, and twelve bits each is about a twentieth of a degree, on a
-// vector whose whole job is to steer an edge-stopping filter.
-//
-// Packed **arithmetically** rather than by reinterpreting the bits of a
-// `pack2x16snorm`. The destination is a float texture, and an arbitrary bit
-// pattern read as a float can be a denormal or a NaN, neither of which every
-// platform is obliged to store and load unchanged. An integer below 2^24 is
-// exact in an f32 everywhere, so this survives the round trip by construction
-// rather than by luck. `solarxy_renderer::pathtrace::unpack_aov_normal` is the
-// other half.
-fn pack_octahedral(n: vec3f) -> f32 {
-    let scaled = n / max(abs(n.x) + abs(n.y) + abs(n.z), 1e-8);
-    var p = scaled.xy;
-    if scaled.z < 0.0 {
-        // Fold the lower hemisphere out across the octahedron's edges, which is
-        // what makes the mapping continuous rather than seamed at the equator.
-        p = (vec2f(1.0) - abs(scaled.yx)) * vec2f(
-            select(-1.0, 1.0, scaled.x >= 0.0),
-            select(-1.0, 1.0, scaled.y >= 0.0),
-        );
-    }
-    let q = clamp((p * 0.5 + vec2f(0.5)) * (OCT_STEPS - 1.0), vec2f(0.0), vec2f(OCT_STEPS - 1.0));
-    return floor(q.x + 0.5) * OCT_STEPS + floor(q.y + 0.5);
-}
-
-// The inverse of `pack_octahedral`, needed on the GPU now that a chunk averages
-// against the run's stored normal rather than owning the only one.
-//
-// `solarxy_renderer::pathtrace::unpack_aov_normal` is the same arithmetic in
-// Rust, and the two are held together by the round-trip test rather than by
-// this comment.
-fn unpack_octahedral(packed: f32) -> vec3f {
-    let combined = max(packed, 0.0);
-    let qx = floor(combined / OCT_STEPS);
-    let qy = combined - qx * OCT_STEPS;
-    let e = (vec2f(qx, qy) / (OCT_STEPS - 1.0)) * 2.0 - vec2f(1.0);
-
-    let z = 1.0 - abs(e.x) - abs(e.y);
-    var v = vec3f(e, z);
-    if z < 0.0 {
-        // The inverse of the fold: the lower hemisphere was mapped out across
-        // the octahedron's edges, so it comes back the same way.
-        v = vec3f(
-            (1.0 - abs(e.y)) * select(-1.0, 1.0, e.x >= 0.0),
-            (1.0 - abs(e.x)) * select(-1.0, 1.0, e.y >= 0.0),
-            z,
-        );
-    }
-    if dot(v, v) <= 0.0 {
-        return vec3f(0.0, 0.0, 1.0);
-    }
-    return normalize(v);
-}
+// The octahedral packing the auxiliary lane uses lives in `aov.wgsl`, composed
+// under this one, because the denoiser that reads the lane needs the same text.
 
 // One camera ray carried until it leaves, is absorbed, or runs out of budget.
 fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {

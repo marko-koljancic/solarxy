@@ -112,7 +112,7 @@ fn no_pathtrace_shader_depends_on_a_derivative_or_a_barrier() {
 /// either, but it names the record the traversal declares and samples through
 /// the atlas, so it parses only in a composition. Membership here is "depends on
 /// nothing above it", not "has no entry point".
-const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl", "rand.wgsl"];
+const BASES: &[&str] = &["traverse.wgsl", "atlas.wgsl", "rand.wgsl", "aov.wgsl"];
 
 #[test]
 fn every_base_fragment_parses_on_its_own() {
@@ -180,9 +180,11 @@ const RECIPES: &[(&str, &[&str])] = &[
             "light_probe.wgsl",
         ],
     ),
+    ("the denoiser", &["aov.wgsl", "denoise.wgsl"]),
     (
         "the path kernel",
         &[
+            "aov.wgsl",
             "traverse.wgsl",
             "atlas.wgsl",
             "material.wgsl",
