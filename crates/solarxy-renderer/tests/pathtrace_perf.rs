@@ -174,7 +174,7 @@ fn primary_ray_throughput() {
     let tracer = PathTracer::new(&gpu.device, &gpu.pathtrace);
     // No textures in a throughput scene; the null atlas satisfies the sampled
     // group, which a pipeline layout requires whether the kernel samples or not.
-    let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
     let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
     let uniforms = TraceUniforms::new(&gpu.device, &gpu.pathtrace, &camera_buffer);
     uniforms.write(
@@ -192,6 +192,11 @@ fn primary_ray_throughput() {
             transmissive_bounces: 0,
             samples: 1,
             seed: 0,
+            // No lights: the debug kernel does no shading, and a count
+            // above zero would only make the estimator it does not run
+            // look reachable.
+            light_count: 0,
+            _pad: 0,
         },
     );
 
@@ -311,7 +316,7 @@ fn write_png(gpu: &common::Gpu, target: &TraceTarget, path: &str) {
 #[test]
 #[ignore = "measurement, not a regression gate; run with --release --ignored"]
 fn incoherent_ray_throughput() {
-    use solarxy_renderer::pathtrace::{FurnaceKernel, FurnaceParams, FurnaceUniforms};
+    use solarxy_renderer::pathtrace::{EnvParams, PathEstimator, PathKernel, PathUniforms};
 
     let Some(gpu) = common::gpu_or_skip() else {
         return;
@@ -403,14 +408,11 @@ fn incoherent_ray_throughput() {
     gpu.queue
         .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
 
-    let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
     let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
-    let uniforms = FurnaceUniforms::new(&gpu.device, &camera_buffer);
-    let kernel = FurnaceKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
-    let environment = FurnaceParams {
-        env_up: [0.6, 0.6, 0.6, 0.0],
-        env_down: [0.3, 0.3, 0.3, 0.0],
-    };
+    let uniforms = PathUniforms::new(&gpu.device, &camera_buffer);
+    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+    let environment = EnvParams::constant([0.6, 0.6, 0.6], [0.3, 0.3, 0.3]);
 
     let pixels = f64::from(WIDTH) * f64::from(HEIGHT);
     // Russian roulette starts cutting paths at three bounces, so a depth past that
@@ -428,6 +430,8 @@ fn incoherent_ray_throughput() {
                     transmissive_bounces: 0,
                     samples: 1,
                     seed: 0x9E37_79B9,
+                    light_count: 0,
+                    _pad: 0,
                 },
                 &environment,
             );
@@ -438,6 +442,9 @@ fn incoherent_ray_throughput() {
                 });
             kernel.encode(
                 &mut encoder,
+                // The mode a render uses, so the figure describes the work a
+                // render does rather than a cheaper specialization of it.
+                PathEstimator::Mis,
                 &scene,
                 &atlas,
                 &target,

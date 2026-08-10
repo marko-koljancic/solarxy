@@ -121,16 +121,46 @@ struct TracedMaterial {
     tex_desc: array<u32, 5>,
 }
 
-// The scene group. Binding numbers are fixed by the storage-buffer budget and
-// are deliberately not contiguous: 5 belongs to the lights and 7 is the escape
-// hatch a ninth logical array would otherwise force. Core WebGPU grants eight
-// per stage and the design has to fit inside that permanently, so the numbering
-// is not something a later stage renegotiates.
+// 96 bytes, six 16-byte blocks, each a vec3f plus a scalar so nothing needs a
+// pad. The Rust twin is `pathtrace::light::TracedLight` and the sizes are
+// pinned by `tests/uniform_layout.rs`.
+//
+// `axis` points **from the scene back toward the light** for a directional and
+// a spot, and is the emitting face normal for a rectangle. Stated that way
+// round because every consumer compares it against a surface-to-light vector,
+// and a convention needing a negation at four call sites gets negated at three.
+struct TracedLight {
+    position: vec3f,
+    kind: u32,
+    color: vec3f,
+    intensity: f32,
+    // Rect: the full width edge. Spot: one unit vector across the disc.
+    u: vec3f,
+    // Emitter size in metres. Zero is a point, and a hard shadow.
+    radius: f32,
+    // Rect: the full height edge. Spot: the other unit vector.
+    v: vec3f,
+    // Rect: the emitting area, which is the density's denominator.
+    area: f32,
+    axis: vec3f,
+    flags: u32,
+    range: f32,
+    decay: f32,
+    cone_cos: f32,
+    penumbra_cos: f32,
+}
+
+// The scene group, seven of core WebGPU's eight compute-stage storage buffers,
+// which is the whole budget the design set out to spend. Binding 7 is the last
+// one and stays unspent: it is the escape hatch a ninth logical array would
+// otherwise force, and the numbering is not something a later stage
+// renegotiates.
 @group(0) @binding(0) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(1) var<storage, read> prim_indices: array<u32>;
 @group(0) @binding(2) var<storage, read> vertex_pos: array<vec4f>;
 @group(0) @binding(3) var<storage, read> vertex_attr: array<VertexAttr>;
 @group(0) @binding(4) var<storage, read> materials: array<TracedMaterial>;
+@group(0) @binding(5) var<storage, read> lights: array<TracedLight>;
 @group(0) @binding(6) var<storage, read> instances: array<Instance>;
 
 // Alpha-mode and shading-model fields of `TracedMaterial.flags`.

@@ -14,6 +14,7 @@ use std::path::Path;
 
 use half::f16;
 
+use crate::env_dist::EnvDistribution;
 use crate::error::RendererError;
 use crate::skybox::EquirectTexture;
 
@@ -269,6 +270,9 @@ impl IblState {
 
         let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        // Built here as well as in `prepare`, so the inline path and the worker
+        // path produce the same value rather than one of them producing none.
+        let distribution = EnvDistribution::build(width, height, &pixels);
         Self::from_prepared(
             device,
             queue,
@@ -278,6 +282,7 @@ impl IblState {
                 pixels: pixels.into_owned(),
                 irradiance_faces,
                 irradiance_average,
+                distribution,
             },
         )
     }
@@ -387,6 +392,17 @@ pub struct PreparedHdri {
     /// The 32x32 convolved irradiance cubemap faces.
     pub irradiance_faces: [Vec<[f32; 3]>; 6],
     pub irradiance_average: [f32; 3],
+    /// The sampling distribution the path tracer draws directions from.
+    ///
+    /// It rides here rather than being built where it is used because of where
+    /// the work has to happen: on the web the decode and the convolution run in
+    /// the import worker so the main thread keeps its frame rate, and this is a
+    /// third pass over the same pixels that would otherwise have to cross the
+    /// boundary twice or block the renderer. Nothing else about the transfer
+    /// changes, which is what "no new worker plumbing" means in the milestone.
+    ///
+    /// Empty for a black image, which is a scene state rather than a failure.
+    pub distribution: EnvDistribution,
 }
 
 impl PreparedHdri {
@@ -407,18 +423,24 @@ impl PreparedHdri {
         sanitize_hdr_pixels(&mut pixels);
         let irradiance_faces = convolve_equirect(width, height, rgb(&pixels));
         let irradiance_average = compute_irradiance_average(&irradiance_faces);
+        let distribution = EnvDistribution::build(width, height, &pixels);
         Ok(Self {
             width,
             height,
             pixels,
             irradiance_faces,
             irradiance_average,
+            distribution,
         })
     }
 
     /// Packs into a little-endian byte blob for the worker boundary:
     /// `width, height`, the average, the six fixed-size irradiance faces,
-    /// then the equirect pixels.
+    /// the equirect pixels, then the sampling distribution.
+    ///
+    /// The distribution goes last and is length-prefixed by its own dimensions,
+    /// so a blob whose image is black carries two zeroes rather than an absent
+    /// section, and the reader never has to guess whether one is present.
     #[must_use]
     pub fn pack(&self) -> Vec<u8> {
         let face_len: usize = self.irradiance_faces.iter().map(Vec::len).sum();
@@ -440,6 +462,15 @@ impl PreparedHdri {
         // produced: components in order, little-endian. Flattening the CPU
         // representation did not move the wire format.
         for c in &self.pixels {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        out.extend_from_slice(&self.distribution.width().to_le_bytes());
+        out.extend_from_slice(&self.distribution.height().to_le_bytes());
+        out.extend_from_slice(&self.distribution.total_weight().to_le_bytes());
+        for c in self.distribution.marginal() {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        for c in self.distribution.conditional() {
             out.extend_from_slice(&c.to_le_bytes());
         }
         out
@@ -492,12 +523,34 @@ impl PreparedHdri {
         let data = take(sample_count.checked_mul(4).ok_or_else(bad)?)?;
         let pixels = data.chunks_exact(4).map(read_f32).collect();
 
+        let dist_width = read_u32(take(4)?);
+        let dist_height = read_u32(take(4)?);
+        let total_weight = read_f32(take(4)?);
+        let rows = dist_height as usize;
+        let cells = (dist_width as usize).checked_mul(rows).ok_or_else(bad)?;
+        let marginal: Vec<f32> = take(rows.checked_mul(4).ok_or_else(bad)?)?
+            .chunks_exact(4)
+            .map(read_f32)
+            .collect();
+        let conditional: Vec<f32> = take(cells.checked_mul(4).ok_or_else(bad)?)?
+            .chunks_exact(4)
+            .map(read_f32)
+            .collect();
+        let distribution = EnvDistribution::from_parts(
+            dist_width,
+            dist_height,
+            marginal,
+            conditional,
+            total_weight,
+        );
+
         Ok(Self {
             width,
             height,
             pixels,
             irradiance_faces,
             irradiance_average,
+            distribution,
         })
     }
 }
@@ -1148,6 +1201,14 @@ mod prepared_tests {
         assert_eq!(back.pixels, prepared.pixels);
         assert_eq!(back.irradiance_faces, prepared.irradiance_faces);
         assert_eq!(back.irradiance_average, prepared.irradiance_average);
+        // The sampling distribution rides the same blob, and it is the half a
+        // reader is most likely to add a section for and forget to read back:
+        // an environment whose tables arrived empty falls silently back to
+        // uniform sampling, which converges to the right picture slowly enough
+        // that it reads as the tracer being slow rather than as a broken
+        // transfer.
+        assert_eq!(back.distribution, prepared.distribution);
+        assert!(!back.distribution.is_empty());
     }
 
     #[test]

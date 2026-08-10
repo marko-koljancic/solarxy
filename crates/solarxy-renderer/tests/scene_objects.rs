@@ -258,6 +258,7 @@ fn set_lights_stores_and_flags_dirty_once() {
         intensity: 2.0,
         range: 0.0,
         decay: 0.0,
+        radius: 0.0,
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0, 0.0],

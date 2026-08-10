@@ -155,6 +155,40 @@ fn decay_param() -> ParamSpec {
     )
 }
 
+/// Shared by point and spot: the emitter's physical size.
+///
+/// Only the path tracer reads it, and the doc says so rather than leaving a
+/// control that does nothing in the viewport look broken. A shadow map is a
+/// visibility test from a single place, so it has no way to be half in
+/// shadow; softening it means blurring the map, which softens a contact
+/// shadow and a distant one by the same amount and is a different effect
+/// wearing this one's name.
+fn radius_param() -> ParamSpec {
+    ParamSpec::new(
+        "radius",
+        "Radius",
+        "light",
+        ParamType::Float,
+        ParamValue::Float(0.0),
+    )
+    .hard(0.0, 1000.0)
+    .soft(0.0, 5.0)
+    .unit(Unit::Meters)
+    .doc(
+        "How big the emitter is, in metres. 0, the default, is a \
+         mathematical point, which casts a shadow with a perfectly hard \
+         edge -- the giveaway that a light is not a real object. Give it a \
+         size and the shadow gains a penumbra that widens with distance \
+         from the surface, the way a real lamp's does, because part of the \
+         emitter is visible where the rest is hidden.\n\n\
+         This is read by rendered output only; the interactive viewport \
+         draws hard-edged shadows whatever you set here. That is not an \
+         oversight to be fixed later: a shadow map answers one visibility \
+         question from one place, and blurring it would soften a contact \
+         shadow as much as a distant one.",
+    )
+}
+
 fn map_size_param(default: &str) -> ParamSpec {
     ParamSpec::new(
         "map_size",
@@ -251,13 +285,15 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
          off the node rather than passing a light down a chain. Reach for \
          `directional_light` when you want a sun instead, or `spot_light` \
          when you want the same falloff inside a cone.\n\n\
-         Two limits bite. Only 8 point, spot, directional, and rect-area \
-         lights reach the shader: the first 8 in document order win and the \
-         rest are dropped with no warning anywhere, so a scene that quietly \
-         stops responding to new lights is probably at the cap (ambient and \
-         hemisphere lights are free, and an invisible light gives its slot \
-         back). And shadow casting is exclusive -- switching Cast Shadow on \
-         here switches it off on every other light, in one undo step.",
+         Two limits bite. It spends one of the 8 direct-light slots the \
+         interactive viewport binds, and past 8 the first 8 in document \
+         order win with the rest dropped silently, so a scene that quietly \
+         stops responding to new lights is probably at that cap (ambient \
+         and hemisphere lights are free, and an invisible light gives its \
+         slot back). That ceiling is the viewport's, not the scene's -- \
+         rendered output reads every light. And shadow casting is \
+         exclusive: switching Cast Shadow on here switches it off on every \
+         other light, in one undo step.",
         &["light", "omni", "bulb"],
         "point",
         vec![
@@ -286,6 +322,7 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
             intensity(4.5, 30.0),
             range_param(),
             decay_param(),
+            radius_param(),
             cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
@@ -304,7 +341,12 @@ pub fn point_descriptor() -> NodeTypeDescriptor {
     // to move by the same factor to mean what it did. Ambient and
     // hemisphere deliberately do NOT bump, because they fold into the
     // hemisphere rows of the light uniform and never entered that loop.
-    desc.version = 2;
+    //
+    // v3 adds Radius. A pure addition whose default is the identity of its
+    // effect -- a zero radius is the point emitter every earlier scene
+    // already had -- so it needs no arm of its own, and the hook stays the
+    // one v2 installed because it already keys on the version it came from.
+    desc.version = 3;
     desc.migrate = Some(super::common::migrate_scale_intensity);
     desc
 }
@@ -491,6 +533,7 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
                  and fades across the gap, so 1 spreads the falloff over the \
                  whole cone and leaves no flat core at all.",
             ),
+            radius_param(),
             cast_shadow_param(),
             map_size_param("1024"),
             bias_param(-0.0001),
@@ -511,7 +554,10 @@ pub fn spot_descriptor() -> NodeTypeDescriptor {
     // to move by the same factor to mean what it did. Ambient and
     // hemisphere deliberately do NOT bump, because they fold into the
     // hemisphere rows of the light uniform and never entered that loop.
-    desc.version = 2;
+    //
+    // v3 adds Radius, on the same reasoning as the point light's: a pure
+    // addition whose default is the identity of its effect.
+    desc.version = 3;
     desc.migrate = Some(super::common::migrate_scale_intensity);
     desc
 }

@@ -679,6 +679,7 @@ fn light_from_node(
         intensity: f32p("intensity"),
         range: 0.0,
         decay: 0.0,
+        radius: 0.0,
         inner_cone: 0.0,
         outer_cone: 0.0,
         area_extent: [0.0; 2],
@@ -713,6 +714,7 @@ fn light_from_node(
             light.position = p.vec3_f32("position");
             light.range = f32p("range");
             light.decay = f32p("decay");
+            light.radius = f32p("radius");
             light.cast_shadow = boolp("cast_shadow");
             light.shadow_map_size = map_size(&p);
         }
@@ -733,6 +735,7 @@ fn light_from_node(
             light.direction = direction_to_target(&p);
             light.range = f32p("range");
             light.decay = f32p("decay");
+            light.radius = f32p("radius");
             // `angle` is the outer cone half-angle (radians after resolve);
             // penumbra narrows the inner cone toward it.
             let outer = f32p("angle");

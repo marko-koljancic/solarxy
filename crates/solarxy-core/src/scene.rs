@@ -166,6 +166,21 @@ pub struct LightDef {
     pub range: f32,
     /// Point / Spot falloff exponent.
     pub decay: f32,
+    /// Point / Spot emitter size, in meters. `0` is a mathematical point.
+    ///
+    /// The raster path ignores this: a shadow map is a visibility test from
+    /// one place and has no way to be half in shadow, so softness there
+    /// would have to be faked by blurring, which blurs contact and distance
+    /// alike. A tracer gets it for free by sampling the emitter's extent,
+    /// so this is the one light field that is deliberately renderer-specific
+    /// rather than a shared description that one consumer approximates.
+    ///
+    /// A point light samples a sphere of this radius and a spot samples a
+    /// disc of it. Both still report a probability of one and are still
+    /// weighted as delta lights, which is the source's treatment: the extent
+    /// buys a penumbra without making the light a surface that a scattered
+    /// ray could find.
+    pub radius: f32,
     /// Spot inner cone half-angle (radians); full intensity inside.
     pub inner_cone: f32,
     /// Spot outer cone half-angle (radians); zero intensity outside.
@@ -520,6 +535,7 @@ mod tests {
             intensity: 1.0,
             range: 0.0,
             decay: 2.0,
+            radius: 0.0,
             inner_cone: 0.0,
             outer_cone: 0.0,
             area_extent: [0.0; 2],

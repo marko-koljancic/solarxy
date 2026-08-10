@@ -54,6 +54,7 @@ use solarxy_core::scene::{
 
 use super::arena::{ArenaMesh, ArenaPlacement, INSTANCE_CAST_SHADOW, INSTANCE_VISIBLE, TraceArena};
 use super::atlas::{AtlasFilter, AtlasPlan, AtlasTexture, AtlasWrap, TEXTURE_UNUSED, TextureKey};
+use super::light::TracedLight;
 use super::material::TracedMaterial;
 
 /// Identity of the geometry a hierarchy was built over.
@@ -340,6 +341,11 @@ pub struct TraceSceneStats {
     pub meshes: u32,
     /// Placements the kernel will walk.
     pub instances: u32,
+    /// Lights next-event estimation may pick from: every visible light of a
+    /// samplable kind, with **no eight-slot ceiling**. Smaller than the scene's
+    /// light count whenever it holds an ambient or hemisphere light, which
+    /// modulate the ambient term and have no place to sample.
+    pub lights: u32,
     /// Drawable polyline meshes the tracer does not render.
     pub skipped_lines: u32,
     /// Drawable point clouds the tracer does not render.
@@ -463,7 +469,21 @@ impl TraceSceneCache {
                         self.needs_sweep = true;
                     }
                 }
-                SceneOp::SetLights { lights } => self.lights = Some(lights.clone()),
+                // Dirty, because the light pool is packed by the repack and a
+                // scene whose lights moved is a scene that renders differently.
+                // It was not dirty until next-event estimation existed to read
+                // the pool, and that is exactly the shape of bug this arm now
+                // cannot have: the list was recorded and the arena kept the
+                // previous one indefinitely.
+                SceneOp::SetLights { lights } => {
+                    if self.lights.as_deref() != Some(lights.as_slice()) {
+                        self.lights = Some(lights.clone());
+                        self.dirty = true;
+                    }
+                }
+                // Cameras are not packed into anything, so unlike the lights
+                // above they carry no dirty flag: a host reads `cameras()`
+                // directly and the arena has no camera in it.
                 SceneOp::SetCameras { cameras } => self.cameras = Some(cameras.clone()),
                 // Validation is an editor overlay: category tints and issue
                 // edge lists drawn over the raster image. There is no traced
@@ -472,10 +492,19 @@ impl TraceSceneCache {
                 // annotations of it.
                 SceneOp::SetValidation { .. } => {}
                 // The environment is IBL and skybox state the shells' own
-                // tracker owns, and for the tracer it becomes the equirect and
-                // its sampling distribution in the sampled group, which a
-                // wgpu-free type cannot build. Keeping the image here as well
-                // would make a second authority for one HDRI.
+                // tracker owns, and for the tracer it becomes
+                // `pathtrace::environment::TraceEnvironment`: the equirect and
+                // its two distribution tables in the sampled group, which a
+                // wgpu-free type cannot build.
+                //
+                // It is still not recorded here, and that is the decision rather
+                // than an omission. Both shells already hold the decoded and
+                // convolved image as a `PreparedHdri`, which is what the
+                // distribution rides on, so a host builds the traced
+                // environment straight from what it has. Keeping a second copy
+                // of the same HDRI in this cache would make two authorities for
+                // one image and double the memory the largest asset in a scene
+                // occupies.
                 SceneOp::SetEnvironment { .. } => {}
                 SceneOp::Clear => {
                     self.objects.clear();
@@ -950,11 +979,19 @@ impl TraceSceneCache {
 
         let tlas = Bvh::build_tlas(&boxes);
         let materials = self.build_material_records();
-        self.arena = TraceArena::build(&tlas, &arena_meshes, &placements).with_materials(materials);
+        // The light pool rides the repack rather than a path of its own. It is
+        // rebuilt from the definitions wholesale each time, which costs nothing
+        // beside the geometry: a scene has tens of lights where it has millions
+        // of triangles, and a light's record depends on nothing that is cached.
+        let lights = TracedLight::pool(self.lights.as_deref().unwrap_or(&[]));
+        self.arena = TraceArena::build(&tlas, &arena_meshes, &placements)
+            .with_materials(materials)
+            .with_lights(lights);
 
         stats.objects = u32::try_from(self.objects.len()).unwrap_or(u32::MAX);
         stats.meshes = u32::try_from(arena_meshes.len()).unwrap_or(u32::MAX);
         stats.instances = u32::try_from(placements.len()).unwrap_or(u32::MAX);
+        stats.lights = u32::try_from(self.arena.lights().len()).unwrap_or(u32::MAX);
         stats.nodes = stats
             .nodes
             .saturating_add(u32::try_from(tlas.nodes().len()).unwrap_or(u32::MAX));
@@ -1567,25 +1604,50 @@ mod tests {
     }
 
     #[test]
-    fn lights_and_cameras_are_stored_without_dirtying_the_arena() {
+    fn a_light_change_repacks_and_a_camera_change_does_not() {
+        // The two are stored the same way and mean different things to the
+        // arena: the lights are packed into a buffer the kernel binds, so a
+        // scene whose lights moved renders differently, while a camera is read
+        // by a host and appears in no buffer here.
+        //
+        // Lights did not dirty the cache until next-event estimation gave them a
+        // consumer, and the failure that would have caused is worth naming: the
+        // list was recorded, nothing repacked, and the arena went on holding the
+        // previous scene's lights indefinitely.
         let mut cache = TraceSceneCache::new();
         cache.apply(&upsert(1, &geometry(vec![mesh(MeshTopology::Triangles)])));
         cache.repack();
 
         cache.apply(&SceneDelta {
-            ops: vec![
-                SceneOp::SetLights { lights: Vec::new() },
-                SceneOp::SetCameras {
-                    cameras: Vec::new(),
-                },
-            ],
+            ops: vec![SceneOp::SetCameras {
+                cameras: Vec::new(),
+            }],
         });
         assert!(
             cache.repack().is_none(),
-            "neither has a buffer in this arena yet"
+            "a camera has no buffer in this arena"
+        );
+        assert!(cache.cameras().is_some());
+
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::SetLights { lights: Vec::new() }],
+        });
+        assert!(
+            cache.repack().is_some(),
+            "a light change has to reach the buffer the estimator picks from"
         );
         assert!(cache.lights().is_some());
-        assert!(cache.cameras().is_some());
+
+        // And an unchanged list is not a change: the engine re-emits the scene's
+        // lights on every cook, so treating each one as a repack would rebuild
+        // the whole arena on every parameter drag.
+        cache.apply(&SceneDelta {
+            ops: vec![SceneOp::SetLights { lights: Vec::new() }],
+        });
+        assert!(
+            cache.repack().is_none(),
+            "re-sending the same lights must not repack the scene"
+        );
     }
 
     // ---- the atlas ----

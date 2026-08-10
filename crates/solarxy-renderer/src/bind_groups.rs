@@ -340,11 +340,13 @@ impl PathtraceLayouts {
     /// Builds all four. Requires a device with core WebGPU limits.
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
-        // Binding 4 is the material pool, which arrived with the traced
-        // material record. Binding 5 is the lights and 7 is the ninth-array
-        // escape hatch; both arrive with their consumers rather than as
-        // placeholders, so the numbering is deliberately not contiguous and a
-        // later stage does not renegotiate it.
+        // Seven of core WebGPU's eight compute-stage storage buffers, which is
+        // the whole budget the design set out to spend: 4 is the material pool
+        // and 5 the lights, both arriving with their consumers rather than as
+        // placeholders. **Binding 7 is the last one and stays unspent**, the
+        // escape hatch a ninth logical array would otherwise force, which is
+        // why the numbering is not contiguous and why nothing may renumber
+        // into it.
         let scene = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_scene_bind_group_layout"),
             entries: &[
@@ -353,6 +355,7 @@ impl PathtraceLayouts {
                 bgl_compute_storage_entry(2),
                 bgl_compute_storage_entry(3),
                 bgl_compute_storage_entry(4),
+                bgl_compute_storage_entry(5),
                 bgl_compute_storage_entry(6),
             ],
         });
@@ -369,16 +372,29 @@ impl PathtraceLayouts {
                 wgpu::StorageTextureAccess::WriteOnly,
             )],
         });
-        // The sampled group. Bindings 3 to 6 are reserved by number for the
-        // environment (its equirect, its sampler, and the two CDF textures the
-        // importance sampler looks up), so nothing renumbers when they arrive.
+        // The sampled group: the atlas and its two samplers at 0 to 2, and the
+        // environment at 3 to 6, which are the numbers reserved for it two
+        // stages before it arrived. Nothing renumbered when it did.
         //
-        // Two samplers rather than one because a texture descriptor carries a
-        // filter bit and WGSL cannot index a sampler: the kernel branches, and
-        // both have to be bound for either branch to be legal. Their binding
-        // types differ because the platform ties them to the sampler's own
-        // filters -- an all-nearest sampler is a non-filtering sampler, and
-        // declaring it `Filtering` is rejected at bind group creation.
+        // Two atlas samplers rather than one because a texture descriptor
+        // carries a filter bit and WGSL cannot index a sampler: the kernel
+        // branches, and both have to be bound for either branch to be legal.
+        // Their binding types differ because the platform ties them to the
+        // sampler's own filters -- an all-nearest sampler is a non-filtering
+        // sampler, and declaring it `Filtering` is rejected at bind group
+        // creation.
+        //
+        // The environment's two tables are declared **non-filterable** and are
+        // read with `textureLoad`. That is not a limitation worked around: a
+        // cumulative distribution is searched rather than interpolated, and
+        // `R32Float` is unfilterable on core WebGPU anyway, so the honest
+        // declaration and the useful one are the same one.
+        //
+        // Its image is non-filterable too, and that is a decision rather than a
+        // constraint: the sampling distribution is piecewise constant over
+        // texels, so a *filtered* radiance would describe a different
+        // environment from the one the density describes. See
+        // `pathtrace::environment`.
         let sampled = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_sampled_bind_group_layout"),
             entries: &[
@@ -404,6 +420,15 @@ impl PathtraceLayouts {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                bgl_compute_texture_entry(3, false),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                bgl_compute_texture_entry(5, false),
+                bgl_compute_texture_entry(6, false),
             ],
         });
         let params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -441,6 +466,26 @@ fn bgl_uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::Bind
 /// every raster storage binding is vertex-stage and every tracer one is
 /// compute-stage; a shared parameter would be a parameter with two callers and
 /// one value each.
+/// A compute-stage sampled 2D float texture entry.
+///
+/// `filterable` is explicit at every call site because it is the thing the
+/// platform constrains and the thing a reader most wants stated: the
+/// environment's image is filtered and its two distribution tables are not,
+/// and declaring a table filterable would be rejected against the `R32Float`
+/// it is bound to.
+fn bgl_compute_texture_entry(binding: u32, filterable: bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable },
+        },
+        count: None,
+    }
+}
+
 fn bgl_compute_storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

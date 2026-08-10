@@ -431,6 +431,10 @@ fn capture(args: &[String]) -> anyhow::Result<()> {
             // intensity rather than the attenuation curve.
             range: 0.0,
             decay: 0.0,
+            // A point emitter, so the golden's shadows stay hard: a radius
+            // would change nothing the raster path draws, and stating it here
+            // says the capture is not relying on that.
+            radius: 0.0,
             inner_cone: 0.0,
             outer_cone: 0.0,
             area_extent: [0.0; 2],

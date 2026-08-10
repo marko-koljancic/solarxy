@@ -168,11 +168,17 @@ fn raster_drawable_meshes(objects: &SceneObjects) -> u32 {
 }
 
 fn spin(device: &wgpu::Device, readback: &mut HitReadback) -> Vec<CorpusHit> {
-    for _ in 0..10_000 {
+    for _ in 0..2000 {
         match readback.poll(device) {
             HitPoll::Ready(hits) => return hits,
             HitPoll::Failed => panic!("probe readback failed"),
-            HitPoll::Pending => {}
+            // Yield, which the sibling harnesses all do and this one did not.
+            // A non-blocking poll returns in microseconds, so a bare loop is a
+            // busy-wait that races the GPU rather than waiting for it: ten
+            // thousand iterations came and went in under twenty milliseconds
+            // and the test reported a readback that "never completed" when it
+            // had simply not been given time to.
+            HitPoll::Pending => std::thread::sleep(std::time::Duration::from_millis(1)),
         }
     }
     panic!("probe readback never completed");

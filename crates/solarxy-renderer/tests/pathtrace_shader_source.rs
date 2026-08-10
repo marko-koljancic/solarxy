@@ -167,15 +167,30 @@ const RECIPES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "the furnace kernel",
+        "the light probe",
         &[
             "traverse.wgsl",
             "atlas.wgsl",
             "material.wgsl",
             "rand.wgsl",
             "bsdf.wgsl",
+            "environment.wgsl",
+            "light.wgsl",
+            "light_probe.wgsl",
+        ],
+    ),
+    (
+        "the path kernel",
+        &[
+            "traverse.wgsl",
+            "atlas.wgsl",
+            "material.wgsl",
+            "rand.wgsl",
+            "bsdf.wgsl",
+            "environment.wgsl",
+            "light.wgsl",
             "camera.wgsl",
-            "furnace.wgsl",
+            "path.wgsl",
         ],
     ),
 ];
@@ -243,8 +258,9 @@ fn the_workgroup_size_matches_the_constant_the_host_dispatches_against() {
 fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
     // Core WebGPU grants eight storage buffers per stage and the design spends
     // seven, leaving one as the escape hatch a ninth logical array would
-    // otherwise force. Materials took 4 with the traced material record; the
-    // lights are 5 and nothing may quietly renumber into them or into 7.
+    // otherwise force. Materials took 4 with the traced material record and the
+    // lights took 5 with next-event estimation; **7 is the last one and nothing
+    // may quietly renumber into it**.
     let source = read("traverse.wgsl");
     for (binding, name) in [
         (0u32, "bvh_nodes"),
@@ -252,6 +268,7 @@ fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
         (2, "vertex_pos"),
         (3, "vertex_attr"),
         (4, "materials"),
+        (5, "lights"),
         (6, "instances"),
     ] {
         let decl = format!("@group(0) @binding({binding}) var<storage, read> {name}");
@@ -261,26 +278,28 @@ fn the_traversal_declares_the_binding_numbers_the_budget_reserved() {
         );
     }
     // Read over every fragment, not just this one. The scene group is declared
-    // here by convention, so a declaration anywhere else would take a reserved
-    // number with nothing objecting: the assertion above cannot see it and this
-    // one is the only thing that can.
+    // here by convention, so a declaration anywhere else would take the last
+    // free number with nothing objecting: the assertion above cannot see it and
+    // this one is the only thing that can.
     for (name, source) in every_fragment() {
-        for reserved in [5u32, 7] {
-            assert!(
-                !source.contains(&format!("@group(0) @binding({reserved})")),
-                "{name} takes scene binding {reserved}; 5 is the lights and 7 \
-                 is the escape hatch a ninth logical array would otherwise force"
-            );
-        }
+        assert!(
+            !source.contains("@group(0) @binding(7)"),
+            "{name} takes scene binding 7, which is the last free storage \
+             buffer of core WebGPU's eight and is the escape hatch a ninth \
+             logical array would otherwise force"
+        );
     }
 }
 
 #[test]
 fn the_atlas_declares_the_sampled_group_the_budget_reserved() {
-    // The sampled group is the atlas and its two samplers; 3 to 6 belong to the
-    // environment, which arrives with its own consumer. Group 2 was declared
-    // empty rather than skipped for exactly this: nothing renumbers.
-    let source = read("atlas.wgsl");
+    // The sampled group is the atlas and its two samplers at 0 to 2, and the
+    // environment at 3 to 6. Those four numbers were reserved two stages before
+    // the environment arrived, and it took them without renumbering anything,
+    // which is what the reservation was for. **The group is now full**: seven of
+    // seven, and a later stage wanting a sampled texture has to negotiate rather
+    // than append.
+    let atlas = read("atlas.wgsl");
     for (binding, decl) in [
         (0u32, "var atlas: texture_2d_array<f32>"),
         (1, "var atlas_nearest: sampler"),
@@ -288,19 +307,39 @@ fn the_atlas_declares_the_sampled_group_the_budget_reserved() {
     ] {
         let expected = format!("@group(2) @binding({binding}) {decl}");
         assert!(
-            source.contains(&expected),
+            atlas.contains(&expected),
             "atlas.wgsl no longer declares `{decl}` at binding {binding}"
         );
     }
-    for (name, source) in every_fragment() {
-        for reserved in [3u32, 4, 5, 6] {
-            assert!(
-                !source.contains(&format!("@group(2) @binding({reserved})")),
-                "{name} takes sampled binding {reserved}; 3 to 6 are reserved \
-                 for the environment equirect, its sampler, and the two \
-                 sampling-distribution textures"
-            );
-        }
+    let environment = read("environment.wgsl");
+    for (binding, decl) in [
+        (3u32, "var env_map: texture_2d<f32>"),
+        (4, "var env_sampler: sampler"),
+        (5, "var env_marginal: texture_2d<f32>"),
+        (6, "var env_conditional: texture_2d<f32>"),
+    ] {
+        let expected = format!("@group(2) @binding({binding}) {decl}");
+        assert!(
+            environment.contains(&expected),
+            "environment.wgsl no longer declares `{decl}` at binding {binding}"
+        );
+    }
+    // One declaration per number, across the whole directory. Two fragments
+    // taking the same binding parse fine alone and collide only in the
+    // composition that uses both, which is the failure this catches early.
+    for binding in 0u32..7 {
+        let decl = format!("@group(2) @binding({binding})");
+        let owners: Vec<String> = every_fragment()
+            .into_iter()
+            .filter(|(_, source)| source.contains(&decl))
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(
+            owners.len(),
+            1,
+            "sampled binding {binding} is declared by {owners:?}; each number \
+             has exactly one owner"
+        );
     }
 }
 

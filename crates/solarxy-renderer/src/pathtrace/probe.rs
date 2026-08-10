@@ -74,6 +74,22 @@ const BSDF_PROBE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/bsdf_probe.wgsl"),
 );
 
+/// The light kernel, composed over everything light sampling reads. The
+/// environment rides along because the light fragment's estimator calls into it,
+/// and the estimator is not what this probe drives: the two functions it does
+/// call, `sample_light` and `intersect_lights`, read only the light array, which
+/// is why this needs no camera and no environment uniform bound.
+const LIGHT_PROBE_KERNEL: &str = concat!(
+    include_str!("../shaders/pathtrace/traverse.wgsl"),
+    include_str!("../shaders/pathtrace/atlas.wgsl"),
+    include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/rand.wgsl"),
+    include_str!("../shaders/pathtrace/bsdf.wgsl"),
+    include_str!("../shaders/pathtrace/environment.wgsl"),
+    include_str!("../shaders/pathtrace/light.wgsl"),
+    include_str!("../shaders/pathtrace/light_probe.wgsl"),
+);
+
 /// Rays per row of the dispatch grid. The kernel's workgroup shape is shared
 /// with the real one, so a linear corpus is walked as a 2D grid.
 const CORPUS_WIDTH: u32 = 64;
@@ -91,6 +107,11 @@ pub const MATERIAL_RESULT_WIDTH: usize = 12;
 /// the selection distribution. Both modes write the same three, so the host reads
 /// one shape and the two are comparable.
 pub const BSDF_RESULT_WIDTH: usize = 3;
+
+/// How many `vec4` the light probe writes per tap: the direction with its
+/// density, and the radiance with the distance. Both modes write the same two,
+/// so the host reads one shape and the two are comparable.
+pub const LIGHT_RESULT_WIDTH: usize = 2;
 
 /// Bit 0 of [`CorpusHit::flags`]: the closest-hit walk found something.
 pub const HIT_CLOSEST: u32 = 1 << 0;
@@ -938,6 +959,213 @@ impl BsdfProbe {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Pathtrace BSDF Probe Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines[mode.index()]);
+            pass.set_bind_group(0, scene.bind_group(), &[]);
+            pass.set_bind_group(1, &io, &[]);
+            pass.set_bind_group(2, atlas.bind_group(), &[]);
+            let rows = (count as u32).div_ceil(TAP_WIDTH);
+            pass.dispatch_workgroups(TAP_WIDTH / WORKGROUP_SIZE, rows.div_ceil(WORKGROUP_SIZE), 1);
+        }
+        encoder.copy_buffer_to_buffer(&result_buffer, 0, &staging, 0, result_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        ColorReadback {
+            buffer: staging,
+            count: entries,
+            receiver: None,
+        }
+    }
+}
+
+/// Which half of light sampling one dispatch exercises.
+///
+/// Two pipelines from one module, specialized by overridable constant, the same
+/// arrangement [`BsdfProbeMode`] uses.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LightProbeMode {
+    /// Draw a connection to a light and report its direction and density.
+    Sample,
+    /// Take a direction and report the density of the light it lands on.
+    Intersect,
+}
+
+impl LightProbeMode {
+    /// Both, so a caller can build the pair without naming them.
+    pub const ALL: [Self; 2] = [Self::Sample, Self::Intersect];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Sample => 0,
+            Self::Intersect => 1,
+        }
+    }
+}
+
+/// One question the light probe asks.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+pub struct LightTap {
+    /// The shading point a connection starts from. `w` unused.
+    pub origin: [f32; 4],
+    /// A direction to test, in [`LightProbeMode::Intersect`] only.
+    pub direction: [f32; 4],
+    /// Index into the light pool.
+    pub light: u32,
+    /// Which sample of [`Self::strata`] this tap draws.
+    pub sample_index: u32,
+    /// How many samples the batch holds, which is what the stratified sampler
+    /// divides its domain into. Zero or one asks for white noise.
+    pub strata: u32,
+    /// Fixed across a batch, so every sample in it shares one stratified
+    /// sequence and only [`Self::sample_index`] moves.
+    pub seed: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<LightTap>() == 48);
+
+/// The light-sampling pipelines and their own io layout.
+///
+/// What they answer is whether a light's density describes the directions its
+/// sampler produces. Get that wrong and every image is still plausible: it
+/// converges, it has no artefacts, and every surface facing that light is the
+/// wrong brightness by a constant. The instrument is the same as the BSDF's, a
+/// histogram against an independently written density, and the independence here
+/// is real rather than nominal: the sampler's density comes from the point it
+/// chose on the rectangle, and the intersection's comes from where a ray landed
+/// on it.
+///
+/// It binds the **real** scene group, so the light array is read through binding
+/// 5 with the layout the kernel uses rather than one a test invented.
+pub struct LightProbe {
+    pipelines: [wgpu::ComputePipeline; 2],
+    io_layout: wgpu::BindGroupLayout,
+}
+
+impl LightProbe {
+    /// Builds both pipelines.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pathtrace Light Probe Shader"),
+            source: wgpu::ShaderSource::Wgsl(LIGHT_PROBE_KERNEL.into()),
+        });
+        let io_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace_light_probe_io_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pathtrace Light Probe Pipeline Layout"),
+            bind_group_layouts: &[&layouts.scene, &io_layout, &layouts.sampled],
+            push_constant_ranges: &[],
+        });
+        let pipelines = LightProbeMode::ALL.map(|mode| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Pathtrace Light Probe Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: Some("light_probe"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[
+                        ("LIGHT_TAP_WIDTH", f64::from(TAP_WIDTH)),
+                        ("LIGHT_RESULT_WIDTH", LIGHT_RESULT_WIDTH as f64),
+                        ("LIGHT_PROBE_MODE", mode.index() as f64),
+                    ],
+                    zero_initialize_workgroup_memory: false,
+                },
+                cache: None,
+            })
+        });
+        Self {
+            pipelines,
+            io_layout,
+        }
+    }
+
+    /// Encodes and submits one batch, returning a readback to poll.
+    ///
+    /// The readback holds [`LIGHT_RESULT_WIDTH`] entries per tap, in the
+    /// kernel's write order.
+    #[must_use]
+    pub fn submit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mode: LightProbeMode,
+        scene: &TraceScene,
+        atlas: &TraceAtlas,
+        taps: &[LightTap],
+    ) -> ColorReadback {
+        let count = taps.len().max(1);
+        let placeholder = [LightTap::default()];
+        let tap_bytes: &[u8] = if taps.is_empty() {
+            bytemuck::cast_slice(&placeholder)
+        } else {
+            bytemuck::cast_slice(taps)
+        };
+        let tap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Pathtrace Light Taps"),
+            contents: tap_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let entries = count * LIGHT_RESULT_WIDTH;
+        let result_bytes = (entries * 16) as u64;
+        let result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Light Results"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Light Results Readback"),
+            size: result_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let io = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Light Probe IO Bind Group"),
+            layout: &self.io_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tap_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: result_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Pathtrace Light Probe Encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Pathtrace Light Probe Pass"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.pipelines[mode.index()]);

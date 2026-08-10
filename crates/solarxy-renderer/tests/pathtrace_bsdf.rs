@@ -127,7 +127,7 @@ impl Harness {
         let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
         // No textures: every descriptor is unused, so each factor stands alone and
         // the answer is a property of the lobes rather than of the atlas.
-        let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+        let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
         let probe = BsdfProbe::new(&gpu.device, &gpu.pathtrace);
 
         Some(Self {
@@ -596,7 +596,7 @@ fn the_sphere_grid_renders() {
     use solarxy_core::preferences::ProjectionMode;
     use solarxy_renderer::camera::{Camera, CameraUniform};
     use solarxy_renderer::pathtrace::{
-        FurnaceKernel, FurnaceParams, ReadbackPoll, TraceParams, TraceTarget,
+        EnvParams, PathEstimator, PathKernel, ReadbackPoll, TraceParams, TraceTarget,
     };
 
     const GRID: usize = 11;
@@ -667,7 +667,7 @@ fn the_sphere_grid_renders() {
     };
     let arena = TraceArena::build(&tlas, &[mesh], &placements).with_materials(materials);
     let scene = TraceScene::upload(&gpu.device, &gpu.queue, &gpu.pathtrace, &arena);
-    let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
 
     let camera = Camera {
         eye: cgmath::Point3::new(0.0, 0.0, 18.0),
@@ -693,20 +693,14 @@ fn the_sphere_grid_renders() {
         .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
 
     let target = TraceTarget::new(&gpu.device, &gpu.pathtrace, WIDTH, HEIGHT);
-    let uniforms = solarxy_renderer::pathtrace::FurnaceUniforms::new(&gpu.device, &camera_buffer);
-    let kernel = FurnaceKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
+    let uniforms = solarxy_renderer::pathtrace::PathUniforms::new(&gpu.device, &camera_buffer);
+    let kernel = PathKernel::new(&gpu.device, &gpu.pathtrace, &uniforms);
 
     let gradient = std::env::var("SOLARXY_PT_BSDF_GRADIENT").is_ok();
     let environment = if gradient {
-        FurnaceParams {
-            env_up: [0.35, 0.45, 0.70, 0.0],
-            env_down: [0.75, 0.72, 0.66, 0.0],
-        }
+        EnvParams::constant([0.35, 0.45, 0.70], [0.75, 0.72, 0.66])
     } else {
-        FurnaceParams {
-            env_up: [GREY, GREY, GREY, 0.0],
-            env_down: [GREY, GREY, GREY, 0.0],
-        }
+        EnvParams::constant([GREY, GREY, GREY], [GREY, GREY, GREY])
     };
 
     // Tiled, one dispatch per tile, which is the pacing the tile uniforms exist
@@ -726,6 +720,11 @@ fn the_sphere_grid_renders() {
                     transmissive_bounces: 6,
                     samples: SPP,
                     seed: 0x9E37_79B9,
+                    // The furnace has no lights by construction: the whole
+                    // point is a surface lit only by a uniform environment, so
+                    // whatever it returns came from the material.
+                    light_count: 0,
+                    _pad: 0,
                 },
                 &environment,
             );
@@ -734,7 +733,15 @@ fn the_sphere_grid_renders() {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Sphere Grid Encoder"),
                 });
-            kernel.encode(&mut encoder, &scene, &atlas, &target, &uniforms, [w, h]);
+            kernel.encode(
+                &mut encoder,
+                PathEstimator::Mis,
+                &scene,
+                &atlas,
+                &target,
+                &uniforms,
+                [w, h],
+            );
             gpu.queue.submit(Some(encoder.finish()));
             // Each tile is waited on before the next is written, because the tile
             // uniform is one buffer: queueing two dispatches against it would give

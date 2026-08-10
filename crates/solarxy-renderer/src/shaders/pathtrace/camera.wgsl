@@ -21,14 +21,13 @@ struct Camera {
     inv_proj: mat4x4f,
 }
 
-// 40 bytes, and declared whole, so it is in the uniform-layout table.
+// 48 bytes, and declared whole, so it is in the uniform-layout table.
 //
-// No padding field: every member aligns to eight or four, so the struct aligns
-// to eight and forty is already a multiple of it. Adding a `vec3f` or a `vec4f`
-// here would raise the alignment to sixteen and need a pad, which is why the
-// harness environment is a separate uniform rather than four more floats on the
-// end: it is a stand-in for the environment sampling a later stage brings, and a
-// field documented here would have to be deleted rather than replaced.
+// One padding word: every member aligns to eight or four, so the struct aligns
+// to eight and its size has to be a multiple of it. Adding a `vec3f` or a
+// `vec4f` here would raise the alignment to sixteen and need more, which is why
+// the environment is a separate uniform rather than four more floats on the
+// end.
 struct TraceParams {
     // Where this dispatch's tile sits in the image, in pixels.
     tile_offset: vec2u,
@@ -55,6 +54,16 @@ struct TraceParams {
     // Decorrelates one dispatch from the next. A fixed value is what makes a
     // render reproducible.
     seed: u32,
+    // How many entries of `lights` next-event estimation may pick from.
+    //
+    // Here rather than `arrayLength(&lights)`, which WGSL does offer, because
+    // the buffer never shrinks below one whole record: an empty scene's
+    // padding record would otherwise be a black light at the origin taking a
+    // share of the estimator's probability.
+    light_count: u32,
+    // Unspent. Keeps the struct a multiple of its own eight-byte alignment,
+    // which a lone u32 above would break on one side only.
+    _pad: u32,
 }
 
 @group(3) @binding(0) var<uniform> camera: Camera;

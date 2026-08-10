@@ -60,6 +60,7 @@ pub mod camera;
 pub mod camera_state;
 pub mod capture;
 pub mod composite;
+pub mod env_dist;
 pub mod environment;
 pub mod error;
 pub mod frame;

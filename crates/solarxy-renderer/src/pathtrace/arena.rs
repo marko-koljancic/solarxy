@@ -21,6 +21,7 @@
 use bytemuck::{Pod, Zeroable};
 use solarxy_bvh::{Bvh, BvhNode};
 
+use super::light::TracedLight;
 use super::material::TracedMaterial;
 
 /// Bit 0 of [`Instance::flags`]: the instance is drawn.
@@ -114,6 +115,7 @@ pub struct TraceArena {
     vertex_attr: Vec<VertexAttr>,
     instances: Vec<Instance>,
     materials: Vec<TracedMaterial>,
+    lights: Vec<TracedLight>,
 }
 
 impl TraceArena {
@@ -138,6 +140,7 @@ impl TraceArena {
             vertex_attr: Vec::new(),
             instances: Vec::with_capacity(placements.len()),
             materials: Vec::new(),
+            lights: Vec::new(),
         };
         debug_assert_eq!(tlas_arrays.nodes.len(), arena.nodes.len() * 32);
 
@@ -218,6 +221,19 @@ impl TraceArena {
         self
     }
 
+    /// Attaches the light pool the estimator picks from.
+    ///
+    /// A builder for the same reason the materials are one, and unlike them it
+    /// is indexed by nothing at all: next-event estimation picks a light
+    /// uniformly by index into this array, so its order is the array's own and
+    /// no instance or mesh refers to it. That is also why an unsamplable light
+    /// must never appear here -- see [`TracedLight::from_def`].
+    #[must_use]
+    pub fn with_lights(mut self, lights: Vec<TracedLight>) -> Self {
+        self.lights = lights;
+        self
+    }
+
     /// The concatenated node buffer: the top-level hierarchy, then one per mesh.
     #[must_use]
     pub fn nodes(&self) -> &[BvhNode] {
@@ -258,6 +274,17 @@ impl TraceArena {
     #[must_use]
     pub fn materials(&self) -> &[TracedMaterial] {
         &self.materials
+    }
+
+    /// The light pool next-event estimation picks from, in document order.
+    ///
+    /// Empty is a real state and not a placeholder one: a scene lit only by
+    /// its environment has no lights, and the estimator reads the count rather
+    /// than the buffer's length, so the single zeroed record an empty buffer
+    /// uploads is never sampled.
+    #[must_use]
+    pub fn lights(&self) -> &[TracedLight] {
+        &self.lights
     }
 
     /// Whether the arena holds nothing worth dispatching over.

@@ -22,6 +22,8 @@
 
 pub mod arena;
 pub mod atlas;
+pub mod environment;
+pub mod light;
 pub mod material;
 pub mod probe;
 pub mod scene;
@@ -72,22 +74,29 @@ const TRACE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/trace.wgsl"),
 );
 
-/// The furnace kernel: the whole material response driven by camera rays against a
-/// constant environment. Composed over everything.
+/// The path kernel: camera rays, the material response, next-event estimation
+/// with multiple importance sampling, and an environment. Composed over
+/// everything.
 ///
-/// Not the path tracer, and not a stand-in for one: no light sampling, no
-/// next-event estimation, no accumulation buffer. It is the smallest thing that can
-/// drive the BSDF end to end, which is what turns the white furnace test into a
-/// picture and what exercises the frame construction, the ray offset, the
-/// transmissive budget and the volume attenuation on curved geometry.
-const FURNACE_KERNEL: &str = concat!(
+/// It grew from the furnace kernel rather than replacing it, which is why the
+/// white furnace test still drives it: both environment colours the same and no
+/// lights in the scene is the furnace configuration, and the stage-four albedo
+/// table reproducing through this loop is the evidence that adding a second
+/// density did not disturb the first.
+///
+/// What it still lacks is accumulation. The sample loop is inside the kernel
+/// and there is no history texture, so long renders are paced by tiling; the
+/// ping-ponged accumulator replaces that loop rather than starting over.
+const PATH_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/traverse.wgsl"),
     include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/material.wgsl"),
     include_str!("../shaders/pathtrace/rand.wgsl"),
     include_str!("../shaders/pathtrace/bsdf.wgsl"),
+    include_str!("../shaders/pathtrace/environment.wgsl"),
+    include_str!("../shaders/pathtrace/light.wgsl"),
     include_str!("../shaders/pathtrace/camera.wgsl"),
-    include_str!("../shaders/pathtrace/furnace.wgsl"),
+    include_str!("../shaders/pathtrace/path.wgsl"),
 );
 
 /// Invocations per workgroup edge. 64 per workgroup, comfortably inside core
@@ -150,13 +159,26 @@ pub struct TraceParams {
     /// Decorrelates one dispatch from the next. A fixed value is what makes a
     /// render reproducible.
     pub seed: u32,
+    /// How many entries of the light array next-event estimation may pick
+    /// from.
+    ///
+    /// Here rather than read from `arrayLength(&lights)`, which WGSL does
+    /// offer, because the buffer never shrinks below one whole record and an
+    /// empty scene's padding record would otherwise be a light. It is also
+    /// what makes the tracer's light ceiling nothing at all: the raster path's
+    /// eight is the size of a uniform, and this is a count.
+    pub light_count: u32,
+    /// Unspent. Present so the struct stays a multiple of its own eight-byte
+    /// alignment, which a lone `u32` above would break; WGSL would round the
+    /// size up and the Rust side would not.
+    pub _pad: u32,
 }
 
-// Forty bytes with no padding field: every member aligns to eight or four, so
-// the struct aligns to eight and forty is already a multiple of it. A `vec3f` or
-// `vec4f` appended here would raise the alignment to sixteen and need a pad,
-// which is why the harness environment is its own uniform instead.
-const _: () = assert!(std::mem::size_of::<TraceParams>() == 40);
+// Forty-eight bytes with one padding word: every member aligns to eight or
+// four, so the struct aligns to eight and the size has to be a multiple of it.
+// A `vec3f` or `vec4f` appended here would raise the alignment to sixteen and
+// need more, which is why the environment is its own uniform instead.
+const _: () = assert!(std::mem::size_of::<TraceParams>() == 48);
 
 /// The compute pipelines.
 pub struct PathTracer {
@@ -251,8 +273,10 @@ pub struct TraceScene {
     vertex_attr: GrowBuffer,
     instances: GrowBuffer,
     materials: GrowBuffer,
+    lights: GrowBuffer,
     bind_group: wgpu::BindGroup,
     instance_count: u32,
+    light_count: u32,
 }
 
 impl TraceScene {
@@ -266,6 +290,7 @@ impl TraceScene {
             GrowBuffer::new::<arena::VertexAttr>(device, "Pathtrace Vertex Attributes");
         let instances = GrowBuffer::new::<arena::Instance>(device, "Pathtrace Instances");
         let materials = GrowBuffer::new::<material::TracedMaterial>(device, "Pathtrace Materials");
+        let lights = GrowBuffer::new::<light::TracedLight>(device, "Pathtrace Lights");
         let bind_group = Self::bind(
             device,
             layouts,
@@ -275,6 +300,7 @@ impl TraceScene {
                 &vertex_pos,
                 &vertex_attr,
                 &materials,
+                &lights,
                 &instances,
             ],
         );
@@ -285,8 +311,10 @@ impl TraceScene {
             vertex_attr,
             instances,
             materials,
+            lights,
             bind_group,
             instance_count: 0,
+            light_count: 0,
         }
     }
 
@@ -298,16 +326,17 @@ impl TraceScene {
         layouts: &PathtraceLayouts,
         arena: &TraceArena,
     ) {
-        // Six bindings and then one disjunction, rather than a folded `|=`, so
-        // that a later reader cannot "simplify" this into short-circuiting and
-        // leave five buffers holding the previous scene.
+        // Seven bindings and then one disjunction, rather than a folded `|=`,
+        // so that a later reader cannot "simplify" this into short-circuiting
+        // and leave six buffers holding the previous scene.
         let a = self.nodes.sync(device, queue, arena.nodes());
         let b = self.prim_indices.sync(device, queue, arena.prim_indices());
         let c = self.vertex_pos.sync(device, queue, arena.vertex_pos());
         let d = self.vertex_attr.sync(device, queue, arena.vertex_attr());
         let e = self.instances.sync(device, queue, arena.instances());
         let f = self.materials.sync(device, queue, arena.materials());
-        if a || b || c || d || e || f {
+        let g = self.lights.sync(device, queue, arena.lights());
+        if a || b || c || d || e || f || g {
             self.bind_group = Self::bind(
                 device,
                 layouts,
@@ -317,11 +346,16 @@ impl TraceScene {
                     &self.vertex_pos,
                     &self.vertex_attr,
                     &self.materials,
+                    &self.lights,
                     &self.instances,
                 ],
             );
         }
         self.instance_count = u32::try_from(arena.instances().len()).unwrap_or(u32::MAX);
+        // The count, not the buffer's length: an empty pool still uploads one
+        // zeroed record, because a zero-sized binding is invalid, and that
+        // record is a black light at the origin rather than an absent one.
+        self.light_count = u32::try_from(arena.lights().len()).unwrap_or(u32::MAX);
     }
 
     /// [`TraceScene::new`] followed by [`TraceScene::sync`], for a caller that
@@ -341,14 +375,14 @@ impl TraceScene {
     fn bind(
         device: &wgpu::Device,
         layouts: &PathtraceLayouts,
-        buffers: [&GrowBuffer; 6],
+        buffers: [&GrowBuffer; 7],
     ) -> wgpu::BindGroup {
         // Not contiguous, and not in buffer order: the instances are binding 6
-        // because the scene group reserves 5 for the lights and 7 as the
-        // escape hatch a ninth logical array would otherwise force. Binding 4
-        // is the material pool, which is why the array's fifth entry is the
-        // materials and its sixth is the instances.
-        let bindings = [0u32, 1, 2, 3, 4, 6];
+        // because 4 is the material pool and 5 the lights, which is why the
+        // array runs materials, lights, instances at the end. Binding 7 is the
+        // escape hatch a ninth logical array would otherwise force and stays
+        // unspent.
+        let bindings = [0u32, 1, 2, 3, 4, 5, 6];
         let entries: Vec<wgpu::BindGroupEntry<'_>> = bindings
             .iter()
             .zip(buffers)
@@ -370,6 +404,16 @@ impl TraceScene {
         self.instance_count
     }
 
+    /// How many lights next-event estimation may pick from.
+    ///
+    /// The number the caller writes into [`TraceParams::light_count`], and the
+    /// only thing that keeps the estimator off the padding record an empty
+    /// pool leaves in the buffer.
+    #[must_use]
+    pub fn light_count(&self) -> u32 {
+        self.light_count
+    }
+
     /// The scene group, for a pipeline that binds it at group 0.
     #[must_use]
     pub fn bind_group(&self) -> &wgpu::BindGroup {
@@ -377,11 +421,18 @@ impl TraceScene {
     }
 }
 
-/// The atlas texture on the GPU, plus the sampled group over it.
+/// The atlas texture on the GPU, and the **whole sampled group** over it.
 ///
 /// The arrangement is decided by [`atlas::AtlasPlan`], which is wgpu-free; what
 /// is here is the allocation, the upload, and the two samplers the descriptor's
 /// filter bit chooses between.
+///
+/// It owns the environment's four bindings as well, and that is not a
+/// conflation: group 2 is one bind group, a bind group has to belong to
+/// something, and the alternative of a third type owning the group with both
+/// halves feeding it costs every call site a parameter to buy a name. A scene
+/// with no HDRI holds the null environment, which is a real set of textures for
+/// the same reason the null atlas is.
 ///
 /// A resync rewrites every entry rather than diffing. Textures change when a
 /// material changes, which is rare beside the geometry churn the arena absorbs,
@@ -393,6 +444,7 @@ pub struct TraceAtlas {
     texture: wgpu::Texture,
     nearest: wgpu::Sampler,
     linear: wgpu::Sampler,
+    environment: environment::TraceEnvironment,
     bind_group: wgpu::BindGroup,
     page: u32,
     layers: u32,
@@ -406,7 +458,7 @@ impl TraceAtlas {
     /// to be a real texture. Nothing samples it, because every descriptor over
     /// an empty plan carries [`atlas::TEXTURE_UNUSED`].
     #[must_use]
-    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, layouts: &PathtraceLayouts) -> Self {
         // Nearest is declared non-filtering and linear filtering, matching the
         // layout: the platform derives a sampler's filtering from its own
         // filters, so the two cannot be created from one descriptor.
@@ -424,15 +476,50 @@ impl TraceAtlas {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let (texture, bind_group) = Self::allocate(device, layouts, &nearest, &linear, 1, 1);
+        let environment = environment::TraceEnvironment::null(device, queue);
+        let (texture, bind_group) =
+            Self::allocate(device, layouts, &nearest, &linear, &environment, 1, 1);
         Self {
             texture,
             nearest,
             linear,
+            environment,
             bind_group,
             page: 1,
             layers: 1,
         }
+    }
+
+    /// Installs a prepared environment and rebuilds the group over it.
+    ///
+    /// Separate from the atlas sync because the two change on different
+    /// occasions: an environment arrives when an HDRI is dropped or an
+    /// environment node cooks, and the atlas is repacked when a material's
+    /// textures move. Rebuilding the group is the whole cost either way, since
+    /// a bind group cannot be edited in place.
+    pub fn set_environment(
+        &mut self,
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        environment: environment::TraceEnvironment,
+    ) {
+        self.environment = environment;
+        self.bind_group = Self::rebind(
+            device,
+            layouts,
+            &self.texture,
+            &self.nearest,
+            &self.linear,
+            &self.environment,
+        );
+    }
+
+    /// What the kernel needs to know about the environment: its distribution's
+    /// size, zero when there is nothing to sample, and the density's
+    /// denominator.
+    #[must_use]
+    pub fn environment(&self) -> &environment::TraceEnvironment {
+        &self.environment
     }
 
     /// Brings the atlas up to date with a plan and the images it arranged.
@@ -455,6 +542,7 @@ impl TraceAtlas {
                 layouts,
                 &self.nearest,
                 &self.linear,
+                &self.environment,
                 plan.page(),
                 plan.layers(),
             );
@@ -499,11 +587,13 @@ impl TraceAtlas {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn allocate(
         device: &wgpu::Device,
         layouts: &PathtraceLayouts,
         nearest: &wgpu::Sampler,
         linear: &wgpu::Sampler,
+        environment: &environment::TraceEnvironment,
         page: u32,
         layers: u32,
     ) -> (wgpu::Texture, wgpu::BindGroup) {
@@ -524,29 +614,43 @@ impl TraceAtlas {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let bind_group = Self::rebind(device, layouts, &texture, nearest, linear, environment);
+        (texture, bind_group)
+    }
+
+    /// The sampled group: the atlas at 0 to 2 and the environment at 3 to 6.
+    fn rebind(
+        device: &wgpu::Device,
+        layouts: &PathtraceLayouts,
+        texture: &wgpu::Texture,
+        nearest: &wgpu::Sampler,
+        linear: &wgpu::Sampler,
+        environment: &environment::TraceEnvironment,
+    ) -> wgpu::BindGroup {
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Pathtrace Atlas Bind Group"),
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(nearest),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(linear),
+            },
+        ];
+        entries.extend(environment.entries());
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Pathtrace Sampled Bind Group"),
             layout: &layouts.sampled,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(nearest),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(linear),
-                },
-            ],
-        });
-        (texture, bind_group)
+            entries: &entries,
+        })
     }
 
     /// The page edge in texels.
@@ -754,41 +858,135 @@ impl TraceUniforms {
     }
 }
 
-/// The stand-in environment the furnace kernel integrates against.
+/// [`EnvParams::sampling`]: draw in proportion to how bright the environment is.
+pub const ENV_SAMPLING_IMPORTANCE: u32 = 0;
+/// [`EnvParams::sampling`]: draw uniformly over the sphere. The baseline the
+/// importance-sampled variance is measured against, and nothing else.
+pub const ENV_SAMPLING_UNIFORM: u32 = 1;
+
+/// The environment the kernel integrates against.
 ///
-/// Two colours blended by the world up axis. Equal colours are the furnace
-/// configuration; different ones make curved geometry legible, which a genuinely
-/// uniform environment does not, since a conserving surface under one is invisible.
+/// Two colours blended by the world up axis, which is a stand-in for the sampled
+/// environment that arrives with importance sampling and its two lookup
+/// textures. Equal colours are the white furnace configuration; different ones
+/// make curved geometry legible, which a genuinely uniform environment does not,
+/// since a conserving surface under one is invisible.
 ///
-/// Its own uniform rather than four more floats on [`TraceParams`], because real
-/// environment sampling replaces it wholesale and a field documented offset by
+/// Its own uniform rather than four more floats on [`TraceParams`], because this
+/// is the part that gets replaced wholesale and a field documented offset by
 /// offset in the shipped per-dispatch struct would have to be deleted rather than
 /// superseded.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
-pub struct FurnaceParams {
-    /// Radiance looking up, in `rgb`. `w` unused.
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct EnvParams {
+    /// Radiance looking up, in `rgb`. `w` unused. Read only when there is no
+    /// image.
     pub env_up: [f32; 4],
     /// Radiance looking down.
     pub env_down: [f32; 4],
+    /// The distribution's dimensions. **Zero means there is no image**, and it
+    /// is the one flag the kernel's environment branches on.
+    pub size: [u32; 2],
+    /// The sum of every weight, which is the density's denominator.
+    pub total_weight: f32,
+    /// A plain multiplier on the environment's contribution, as authored.
+    pub intensity: f32,
+    /// Yaw about the world up axis as `[cos, sin]`.
+    ///
+    /// Precomputed rather than taken as an angle, because the kernel needs both
+    /// at every lookup and neither changes within a dispatch. It is also what
+    /// keeps the traced environment and the raster skybox in step: both apply
+    /// the same two numbers the same way round, and a rotation applied one way
+    /// here and the other there is a scene lit from the opposite side of itself.
+    pub rotation: [f32; 2],
+    /// Which strategy `env_sample` uses: 0 draws in proportion to brightness,
+    /// 1 draws uniformly over the sphere.
+    ///
+    /// It exists to be **measured**, not configured, and nothing offers it to a
+    /// user. Both are unbiased and converge to the same image, so the only thing
+    /// that separates them is variance, and a claim that importance sampling
+    /// converges faster is worth exactly as much as the measurement behind it.
+    /// Keeping the baseline in the shipped kernel is what makes that
+    /// measurement repeatable rather than a number recorded once.
+    ///
+    /// A uniform branch rather than a pipeline-overridable constant, unlike the
+    /// estimator selector: this is one `if` inside one function, where that one
+    /// restructures the whole bounce loop.
+    pub sampling: u32,
+    pub _pad: u32,
 }
 
-const _: () = assert!(std::mem::size_of::<FurnaceParams>() == 32);
+const _: () = assert!(std::mem::size_of::<EnvParams>() == 64);
 
-/// The furnace kernel's group-3 uniforms: camera, per-dispatch, environment.
+impl Default for EnvParams {
+    /// A black constant environment: no image, and nothing to sample.
+    ///
+    /// Hand-written rather than derived because `intensity` has to default to
+    /// one. A zeroed intensity would make every environment silently absent,
+    /// including one whose image and tables were uploaded correctly, and the
+    /// symptom would be an unlit scene rather than an error.
+    fn default() -> Self {
+        Self {
+            env_up: [0.0; 4],
+            env_down: [0.0; 4],
+            size: [0, 0],
+            total_weight: 0.0,
+            intensity: 1.0,
+            rotation: [1.0, 0.0],
+            sampling: ENV_SAMPLING_IMPORTANCE,
+            _pad: 0,
+        }
+    }
+}
+
+impl EnvParams {
+    /// The constant environment: two colours blended by the world up axis.
+    ///
+    /// Equal colours are the white furnace configuration, where a surface lit by
+    /// a uniform environment must return exactly what reached it. Different ones
+    /// make curved geometry legible, which a genuinely uniform environment does
+    /// not, since a conserving surface under one is invisible.
+    #[must_use]
+    pub fn constant(up: [f32; 3], down: [f32; 3]) -> Self {
+        Self {
+            env_up: [up[0], up[1], up[2], 0.0],
+            env_down: [down[0], down[1], down[2], 0.0],
+            ..Self::default()
+        }
+    }
+
+    /// The uploaded environment: its distribution's size and denominator, plus
+    /// the rotation and intensity the environment node authored.
+    #[must_use]
+    pub fn image(
+        environment: &environment::TraceEnvironment,
+        rotation: f32,
+        intensity: f32,
+    ) -> Self {
+        Self {
+            size: environment.size(),
+            total_weight: environment.total_weight(),
+            intensity,
+            rotation: [rotation.cos(), rotation.sin()],
+            ..Self::default()
+        }
+    }
+}
+
+/// The path kernel's group-3 uniforms: camera, per-dispatch, environment.
 ///
 /// A layout of its own rather than an entry added to [`PathtraceLayouts::params`],
 /// because the debug kernel binds two uniforms and must not be made to bind three
-/// for a harness it does not use. Built here the way each probe builds its own io
-/// layout, and for the same reason.
-pub struct FurnaceUniforms {
+/// for an environment it does not read. Built here the way each probe builds its
+/// own io layout, and for the same reason.
+pub struct PathUniforms {
     layout: wgpu::BindGroupLayout,
     params: wgpu::Buffer,
-    furnace: wgpu::Buffer,
+    environment: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
-impl FurnaceUniforms {
+impl PathUniforms {
     /// Binds an existing camera uniform buffer beside fresh params and environment
     /// buffers.
     #[must_use]
@@ -804,23 +1002,23 @@ impl FurnaceUniforms {
             count: None,
         };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("pathtrace_furnace_params_bind_group_layout"),
+            label: Some("pathtrace_path_params_bind_group_layout"),
             entries: &[uniform(0), uniform(1), uniform(2)],
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Pathtrace Furnace Params"),
+            label: Some("Pathtrace Path Params"),
             size: std::mem::size_of::<TraceParams>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let furnace = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Pathtrace Furnace Environment"),
-            size: std::mem::size_of::<FurnaceParams>() as u64,
+        let environment = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Environment"),
+            size: std::mem::size_of::<EnvParams>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Pathtrace Furnace Params Bind Group"),
+            label: Some("Pathtrace Path Params Bind Group"),
             layout: &layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -833,14 +1031,14 @@ impl FurnaceUniforms {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: furnace.as_entire_binding(),
+                    resource: environment.as_entire_binding(),
                 },
             ],
         });
         Self {
             layout,
             params,
-            furnace,
+            environment,
             bind_group,
         }
     }
@@ -853,38 +1051,69 @@ impl FurnaceUniforms {
 
     /// Writes the tile this dispatch covers and the environment it integrates
     /// against.
-    pub fn write(&self, queue: &wgpu::Queue, params: &TraceParams, furnace: &FurnaceParams) {
+    pub fn write(&self, queue: &wgpu::Queue, params: &TraceParams, environment: &EnvParams) {
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(params));
-        queue.write_buffer(&self.furnace, 0, bytemuck::bytes_of(furnace));
+        queue.write_buffer(&self.environment, 0, bytemuck::bytes_of(environment));
     }
 }
 
-/// The furnace pipeline.
+/// The path-tracing pipeline: the one that renders an image.
 ///
 /// Separate from [`PathTracer`] rather than a fourth channel on it, because it
-/// binds a different group-3 layout and answers a different question. Nothing in
-/// either shell reaches it; it exists so the BSDF can be driven end to end before
-/// the integrator that will drive it for real exists.
-pub struct FurnaceKernel {
-    pipeline: wgpu::ComputePipeline,
+/// binds a different group-3 layout and answers a different question: that one
+/// is a readout of what the traversal returned, and this one is light transport.
+/// Nothing in either shell reaches it yet, which is what has kept the compute
+/// path unable to move a golden capture.
+pub struct PathKernel {
+    pipelines: [wgpu::ComputePipeline; 3],
 }
 
-impl FurnaceKernel {
-    /// Builds the pipeline. Like the probes, this is the call a browser check is
-    /// watching: it is where a WGSL front end either accepts the whole composition
-    /// or does not.
+/// Which estimator a dispatch runs.
+///
+/// This exists to be **tested**, not to be configured, and nothing ships a way
+/// to choose it. Multiple importance sampling is a partition of unity across
+/// the two techniques, so all three converge to the same image and differ only
+/// in variance. That equality is the sharpest available check that the
+/// material's one-sample mixture density is the right quantity to weight a
+/// light's density against, and a disagreement between these three is a
+/// disagreement between the two densities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PathEstimator {
+    /// Both techniques, weighted by the power heuristic. What a render uses.
+    #[default]
+    Mis,
+    /// Scattering alone. Correct, and hopeless at finding a small light.
+    Scatter,
+    /// Connections alone. Correct, and blind to anything a connection cannot
+    /// reach.
+    NextEvent,
+}
+
+impl PathEstimator {
+    /// Every mode, so a caller can build or compare all three by iterating.
+    pub const ALL: [Self; 3] = [Self::Mis, Self::Scatter, Self::NextEvent];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Mis => 0,
+            Self::Scatter => 1,
+            Self::NextEvent => 2,
+        }
+    }
+}
+
+impl PathKernel {
+    /// Builds every pipeline. Like the probes, this is the call a browser check
+    /// is watching: it is where a WGSL front end either accepts the whole
+    /// composition or does not.
     #[must_use]
-    pub fn new(
-        device: &wgpu::Device,
-        layouts: &PathtraceLayouts,
-        uniforms: &FurnaceUniforms,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts, uniforms: &PathUniforms) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Pathtrace Furnace Shader"),
-            source: wgpu::ShaderSource::Wgsl(FURNACE_KERNEL.into()),
+            label: Some("Pathtrace Path Shader"),
+            source: wgpu::ShaderSource::Wgsl(PATH_KERNEL.into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Pathtrace Furnace Pipeline Layout"),
+            label: Some("Pathtrace Path Pipeline Layout"),
             bind_group_layouts: &[
                 &layouts.scene,
                 &layouts.target,
@@ -893,35 +1122,38 @@ impl FurnaceKernel {
             ],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Pathtrace Furnace Pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: Some("furnace_main"),
-            compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[],
-                zero_initialize_workgroup_memory: false,
-            },
-            cache: None,
+        let pipelines = PathEstimator::ALL.map(|estimator| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Pathtrace Path Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: Some("path_main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("PATH_ESTIMATOR", estimator.index() as f64)],
+                    zero_initialize_workgroup_memory: false,
+                },
+                cache: None,
+            })
         });
-        Self { pipeline }
+        Self { pipelines }
     }
 
     /// Encodes one tile's dispatch.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
+        estimator: PathEstimator,
         scene: &TraceScene,
         atlas: &TraceAtlas,
         target: &TraceTarget,
-        uniforms: &FurnaceUniforms,
+        uniforms: &PathUniforms,
         tile: [u32; 2],
     ) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Pathtrace Furnace Pass"),
+            label: Some("Pathtrace Path Pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(&self.pipelines[estimator.index()]);
         pass.set_bind_group(0, scene.bind_group(), &[]);
         pass.set_bind_group(1, &target.bind_group, &[]);
         pass.set_bind_group(2, atlas.bind_group(), &[]);

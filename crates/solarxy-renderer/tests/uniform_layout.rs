@@ -160,6 +160,17 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::TraceParams>(),
         rust_type: "solarxy_renderer::pathtrace::TraceParams",
     },
+    // The light record. Six sixteen-byte blocks, each a vec3f plus a scalar, so
+    // it needs no pad on either side -- which is exactly the shape that stops
+    // being true the moment someone promotes one of those scalars to a vector
+    // or inserts a scalar between two vectors.
+    Case {
+        shader: "pathtrace/traverse.wgsl",
+        prelude: &[],
+        struct_name: "TracedLight",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::light::TracedLight>(),
+        rust_type: "solarxy_renderer::pathtrace::light::TracedLight",
+    },
     Case {
         shader: "pathtrace/parity.wgsl",
         prelude: &["pathtrace/traverse.wgsl"],
@@ -208,24 +219,45 @@ const CASES: &[Case] = &[
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::BsdfTap>(),
         rust_type: "solarxy_renderer::pathtrace::probe::BsdfTap",
     },
-    // The furnace harness's environment, declared whole on both sides. It is two
-    // `vec4f` today and could as easily have been two `vec3f` with the spare lane
-    // used for something, which is the shape that would measure 32 in Rust and 32
-    // in WGSL only by luck; a row here means the next person to reach for that lane
-    // finds out from a test rather than from a black image.
+    // The light probe's tap, on the same reasoning as the BSDF probe's: its
+    // scalar tail packs into the third sixteen-byte block and needs no pad, and
+    // that stays true only while all four of those fields are scalars.
     Case {
-        shader: "pathtrace/furnace.wgsl",
+        shader: "pathtrace/light_probe.wgsl",
         prelude: &[
             "pathtrace/traverse.wgsl",
             "pathtrace/atlas.wgsl",
             "pathtrace/material.wgsl",
             "pathtrace/rand.wgsl",
             "pathtrace/bsdf.wgsl",
-            "pathtrace/camera.wgsl",
+            "pathtrace/environment.wgsl",
+            "pathtrace/light.wgsl",
         ],
-        struct_name: "FurnaceParams",
-        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::FurnaceParams>(),
-        rust_type: "solarxy_renderer::pathtrace::FurnaceParams",
+        struct_name: "LightTap",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::probe::LightTap>(),
+        rust_type: "solarxy_renderer::pathtrace::probe::LightTap",
+    },
+    // The environment uniform, declared whole on both sides. It is two `vec4f`
+    // today and could as easily have been two `vec3f` with the spare lane used for
+    // something, which is the shape that would measure 32 in Rust and 32 in WGSL
+    // only by luck; a row here means the next person to reach for that lane finds
+    // out from a test rather than from a black image. The importance-sampled
+    // environment replaces these fields, and this row is what will catch its
+    // replacement being a different size on one side.
+    Case {
+        shader: "pathtrace/environment.wgsl",
+        // The whole stack beneath it: the sampler for the stratified draws, and
+        // the lobes for `luminance`, which the density reads a texel through.
+        prelude: &[
+            "pathtrace/traverse.wgsl",
+            "pathtrace/atlas.wgsl",
+            "pathtrace/material.wgsl",
+            "pathtrace/rand.wgsl",
+            "pathtrace/bsdf.wgsl",
+        ],
+        struct_name: "EnvParams",
+        rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::EnvParams>(),
+        rust_type: "solarxy_renderer::pathtrace::EnvParams",
     },
 ];
 

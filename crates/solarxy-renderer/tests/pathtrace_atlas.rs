@@ -75,7 +75,7 @@ fn run(
         .collect();
     let plan = AtlasPlan::pack_textures(&textures);
 
-    let mut atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let mut atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
     atlas.sync(&gpu.device, &gpu.queue, &gpu.pathtrace, &plan, &textures);
 
     let taps = taps_for(&plan);
@@ -288,7 +288,7 @@ fn an_untextured_scene_binds_a_null_atlas_and_samples_nothing() {
     let Some(gpu) = common::gpu_or_skip() else {
         return;
     };
-    let atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
     assert_eq!(atlas.page(), 1);
     assert_eq!(atlas.layers(), 1);
 

@@ -9501,7 +9501,7 @@
     },
     {
       "typeId": "point_light",
-      "version": 2,
+      "version": 3,
       "displayName": "Point Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -9642,6 +9642,27 @@
           "doc": "Falloff exponent: brightness is divided by the distance raised to this power. The default 2 is physical inverse-square. 0 disables decay outright, so the light is equally bright at any distance -- handy for a flat fill, wrong for anything meant to read as a real source. Values between 0 and 2 give the gentler falloff that is often easier to light with than the physical answer."
         },
         {
+          "key": "radius",
+          "label": "Radius",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            5.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "How big the emitter is, in metres. 0, the default, is a mathematical point, which casts a shadow with a perfectly hard edge -- the giveaway that a light is not a real object. Give it a size and the shadow gains a penumbra that widens with distance from the surface, the way a real lamp's does, because part of the emitter is visible where the rest is hidden.\n\nThis is read by rendered output only; the interactive viewport draws hard-edged shadows whatever you set here. That is not an oversight to be fixed later: a shadow map answers one visibility question from one place, and blurring it would soften a contact shadow as much as a distant one."
+        },
+        {
           "key": "cast_shadow",
           "label": "Cast Shadow",
           "group": "light",
@@ -9770,7 +9791,7 @@
       "bypass": {
         "mode": "mute"
       },
-      "doc": "An omnidirectional light: it emits from Position equally in every direction, dimming with distance according to Range and Decay.\n\nThe workhorse for a local source -- a bulb, a candle, a muzzle flash. Drop it in the root graph beside your `geo` containers; it takes no wires, because the scene builder reads its params straight off the node rather than passing a light down a chain. Reach for `directional_light` when you want a sun instead, or `spot_light` when you want the same falloff inside a cone.\n\nTwo limits bite. Only 8 point, spot, directional, and rect-area lights reach the shader: the first 8 in document order win and the rest are dropped with no warning anywhere, so a scene that quietly stops responding to new lights is probably at the cap (ambient and hemisphere lights are free, and an invisible light gives its slot back). And shadow casting is exclusive -- switching Cast Shadow on here switches it off on every other light, in one undo step.",
+      "doc": "An omnidirectional light: it emits from Position equally in every direction, dimming with distance according to Range and Decay.\n\nThe workhorse for a local source -- a bulb, a candle, a muzzle flash. Drop it in the root graph beside your `geo` containers; it takes no wires, because the scene builder reads its params straight off the node rather than passing a light down a chain. Reach for `directional_light` when you want a sun instead, or `spot_light` when you want the same falloff inside a cone.\n\nTwo limits bite. It spends one of the 8 direct-light slots the interactive viewport binds, and past 8 the first 8 in document order win with the rest dropped silently, so a scene that quietly stops responding to new lights is probably at that cap (ambient and hemisphere lights are free, and an invisible light gives its slot back). That ceiling is the viewport's, not the scene's -- rendered output reads every light. And shadow casting is exclusive: switching Cast Shadow on here switches it off on every other light, in one undo step.",
       "searchAliases": [
         "light",
         "omni",
@@ -11453,7 +11474,7 @@
     },
     {
       "typeId": "spot_light",
-      "version": 2,
+      "version": 3,
       "displayName": "Spot Light",
       "category": "lights",
       "categoryLabel": "Lights",
@@ -11647,6 +11668,27 @@
           "unit": "normalized",
           "drivenByPort": null,
           "doc": "How soft the cone edge is, 0 to 1. 0, the default, is a hard edge: full intensity right up to Angle, then nothing. Raising it shrinks the full-intensity inner cone toward the centre -- the inner half-angle is Angle * (1 - Penumbra) -- and fades across the gap, so 1 spreads the falloff over the whole cone and leaves no flat core at all."
+        },
+        {
+          "key": "radius",
+          "label": "Radius",
+          "group": "light",
+          "paramType": "float",
+          "enumVariants": [],
+          "accept": [],
+          "default": 0.0,
+          "hard": [
+            0.0,
+            1000.0
+          ],
+          "soft": [
+            0.0,
+            5.0
+          ],
+          "step": null,
+          "unit": "meters",
+          "drivenByPort": null,
+          "doc": "How big the emitter is, in metres. 0, the default, is a mathematical point, which casts a shadow with a perfectly hard edge -- the giveaway that a light is not a real object. Give it a size and the shadow gains a penumbra that widens with distance from the surface, the way a real lamp's does, because part of the emitter is visible where the rest is hidden.\n\nThis is read by rendered output only; the interactive viewport draws hard-edged shadows whatever you set here. That is not an oversight to be fixed later: a shadow map answers one visibility question from one place, and blurring it would soften a contact shadow as much as a distant one."
         },
         {
           "key": "cast_shadow",

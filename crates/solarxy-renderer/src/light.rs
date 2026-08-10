@@ -239,6 +239,7 @@ mod tests {
             intensity: 2.0,
             range: 10.0,
             decay: 2.0,
+            radius: 0.0,
             inner_cone: 0.3,
             outer_cone: 0.6,
             area_extent: [1.0, 1.0],

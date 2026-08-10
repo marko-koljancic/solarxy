@@ -40,6 +40,12 @@ const RNG_DIM_LOBE: u32 = 2u;
 const RNG_DIM_DIRECTION: u32 = 3u;
 const RNG_DIM_APERTURE: u32 = 4u;
 const RNG_DIM_ROULETTE: u32 = 5u;
+// Which light or the environment the estimator connects to, and where on it.
+// Two dimensions rather than one draw split in two: the choice is discrete and
+// the position is continuous, and a stratified sequence that had to serve both
+// would stratify neither.
+const RNG_DIM_LIGHT_PICK: u32 = 6u;
+const RNG_DIM_LIGHT: u32 = 7u;
 const RNG_DIM_ALPHA_TEST: u32 = 50u;
 
 struct RngState {

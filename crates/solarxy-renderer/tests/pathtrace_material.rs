@@ -85,7 +85,7 @@ fn run(
         })
         .collect();
     let plan = AtlasPlan::pack_textures(&packed);
-    let mut atlas = TraceAtlas::new(&gpu.device, &gpu.pathtrace);
+    let mut atlas = TraceAtlas::new(&gpu.device, &gpu.queue, &gpu.pathtrace);
     atlas.sync(&gpu.device, &gpu.queue, &gpu.pathtrace, &plan, &packed);
 
     let probe = MaterialProbe::new(&gpu.device, &gpu.pathtrace);

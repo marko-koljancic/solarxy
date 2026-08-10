@@ -493,11 +493,17 @@ mod tests {
     #[test]
     fn a_stored_intensity_is_rescaled_on_the_lights_that_carried_the_multiplier() {
         let reg = crate::nodes::builtin_registry().unwrap();
-        // (type id, the version it was stored at, the version it lands on)
+        // (type id, the version it was stored at, the version it lands on).
+        //
+        // The landing version is not the rescale's own: a v1 node is carried to
+        // whatever the current spec is, and point and spot have since gained
+        // Radius on top. That the rescale still runs across two bumps is the
+        // thing worth pinning, because the hook keys on the version it came
+        // *from* rather than on the one it lands at.
         for (type_id, from, to) in [
-            ("point_light", 1, 2),
+            ("point_light", 1, 3),
             ("directional_light", 1, 2),
-            ("spot_light", 1, 2),
+            ("spot_light", 1, 3),
             // Already at v3 for unrelated reasons, so its rescale is v4.
             ("rect_area_light", 3, 4),
         ] {
@@ -584,7 +590,7 @@ mod tests {
             [0.0; 2],
             false,
         );
-        assert_eq!(loaded.node.type_version, 2);
+        assert_eq!(loaded.node.type_version, 3);
         assert_eq!(
             loaded.warnings.len(),
             1,
