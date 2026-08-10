@@ -72,10 +72,27 @@ struct Rendered {
     /// Every pixel is an independent estimate of nearly the same quantity, so
     /// this is the estimator's own noise rather than a property of the scene.
     relative_spread: f64,
+    /// The measured pixels themselves, for the comparison a statistic cannot
+    /// make: a flat plane facing up integrates the sky symmetrically in
+    /// longitude, so two environments that disagree about *where* the sun is
+    /// can still agree about the mean.
+    interior: Vec<f64>,
+}
+
+/// How the environment reached the GPU.
+///
+/// Two routes to one image. `Uploaded` owns its equirect; `Shared` borrows the
+/// one the raster path already retains for the sky pass, which is how a host
+/// installs a scene's environment on the tracer without holding the largest
+/// asset in the scene twice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum EnvRoute {
+    Uploaded,
+    Shared,
 }
 
 /// Renders a flat diffuse plane under the sky and reports its statistics.
-fn render(sampling: u32, spp: u32, seed: u32) -> Option<Rendered> {
+fn render(sampling: u32, spp: u32, seed: u32, route: EnvRoute) -> Option<Rendered> {
     let gpu = common::gpu_or_skip()?;
 
     let (plane_pos, plane_idx) = solarxy_bvh::corpus::coplanar_grid(4, 6.0);
@@ -118,14 +135,35 @@ fn render(sampling: u32, spp: u32, seed: u32) -> Option<Rendered> {
     let pixels = sky_pixels();
     let distribution = EnvDistribution::build(SKY_W, SKY_H, &pixels);
     assert!(!distribution.is_empty());
-    let environment = TraceEnvironment::upload(
-        &gpu.device,
-        &gpu.queue,
-        SKY_W,
-        SKY_H,
-        &pixels,
-        &distribution,
-    );
+    let environment = match route {
+        EnvRoute::Uploaded => TraceEnvironment::upload(
+            &gpu.device,
+            &gpu.queue,
+            SKY_W,
+            SKY_H,
+            &pixels,
+            &distribution,
+        ),
+        // Through the raster path's own IBL, which is what a host has in hand:
+        // it sanitizes, convolves, retains the equirect for the sky pass and
+        // retains the distribution for this. The `IblState` is dropped
+        // immediately and the environment keeps working, because a view holds
+        // its texture alive.
+        EnvRoute::Shared => {
+            let image = solarxy_core::RawImageHdr::new(pixels.clone(), SKY_W, SKY_H);
+            let ibl =
+                solarxy_renderer::ibl::IblState::from_hdr_image(&gpu.device, &gpu.queue, &image);
+            let equirect = ibl
+                .equirect
+                .as_ref()
+                .expect("an image-backed IBL retains its equirect");
+            let shared = ibl
+                .distribution
+                .as_ref()
+                .expect("an image-backed IBL retains its distribution");
+            TraceEnvironment::from_shared_equirect(&gpu.device, &gpu.queue, &equirect.view, shared)
+        }
+    };
     let mut env_params = EnvParams::image(&environment, 0.0, 1.0);
     env_params.sampling = sampling;
 
@@ -222,6 +260,7 @@ fn render(sampling: u32, spp: u32, seed: u32) -> Option<Rendered> {
     Some(Rendered {
         mean,
         relative_spread: variance.sqrt() / mean.max(1e-9),
+        interior: values,
     })
 }
 
@@ -242,16 +281,27 @@ fn importance_sampling_converges_far_faster_than_uniform_and_agrees_with_it() {
     /// sphere, so this is some ten thousand hits across the measured region.
     const REFERENCE_SPP: u32 = 65536;
 
-    let Some(importance) = render(ENV_SAMPLING_IMPORTANCE, SPP, 0x9E37_79B9) else {
+    let Some(importance) = render(
+        ENV_SAMPLING_IMPORTANCE,
+        SPP,
+        0x9E37_79B9,
+        EnvRoute::Uploaded,
+    ) else {
         return;
     };
-    let uniform = render(ENV_SAMPLING_UNIFORM, SPP, 0x9E37_79B9).expect("a device was found once");
+    let uniform = render(ENV_SAMPLING_UNIFORM, SPP, 0x9E37_79B9, EnvRoute::Uploaded)
+        .expect("a device was found once");
     // Drawn uniformly, so it shares nothing with the distribution under test
     // but the image itself. Uniform sampling is unbiased and merely slow, so
     // enough of it is the ground truth that says the fast answer is the right
     // answer.
-    let reference =
-        render(ENV_SAMPLING_UNIFORM, REFERENCE_SPP, 0x1234_5678).expect("a device was found once");
+    let reference = render(
+        ENV_SAMPLING_UNIFORM,
+        REFERENCE_SPP,
+        0x1234_5678,
+        EnvRoute::Uploaded,
+    )
+    .expect("a device was found once");
 
     let error = |r: &Rendered| (r.mean - reference.mean).abs() / reference.mean;
     let importance_error = error(&importance);
@@ -314,4 +364,56 @@ fn rotating_the_environment_moves_the_light_the_way_the_viewport_does() {
         at_sun > elsewhere * 1000.0,
         "the sun should dominate its own row: {at_sun} against {elsewhere}"
     );
+}
+
+/// The environment a host installs from what it already holds is the same
+/// environment as one uploaded from the pixels.
+///
+/// This is the test that makes sharing safe, and sharing is what lets a host
+/// give the tracer the scene's environment without a second copy of the largest
+/// asset in the scene. The raster path retains the equirect for the sky pass
+/// and, since this wiring landed, the distribution for this; the tracer borrows
+/// both. Sharing the wrong texture, sharing one in another format, or an
+/// `IblState` that quietly stops retaining either would each produce a
+/// plausible picture, and only a comparison against the uploading route says
+/// which picture is the right one.
+///
+/// Compared pixel by pixel rather than by the mean, and that is not fussiness.
+/// The measured surface is a flat plane facing up, which integrates the sky
+/// symmetrically in longitude: two environments that disagree about where the
+/// sun is can agree about the mean to every digit. The statistic cannot see the
+/// failure this test exists for.
+#[test]
+fn a_shared_equirect_renders_the_same_environment_as_an_uploaded_one() {
+    // Modest, because the two runs are the same integration of the same
+    // numbers under the same seed rather than two estimates being reconciled.
+    const SPP: u32 = 16;
+    const SEED: u32 = 0x5EED_0E11;
+
+    let Some(uploaded) = render(ENV_SAMPLING_IMPORTANCE, SPP, SEED, EnvRoute::Uploaded) else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let shared = render(ENV_SAMPLING_IMPORTANCE, SPP, SEED, EnvRoute::Shared)
+        .expect("a device was found once");
+
+    assert_eq!(
+        uploaded.interior.len(),
+        shared.interior.len(),
+        "the two routes measured different regions"
+    );
+    // The sun is eight thousand against a sky of five hundredths, so a wrong
+    // image is not a near miss. The tolerance is here for the last bit of the
+    // half-float the equirect is stored in, not for a difference of substance.
+    for (i, (a, b)) in uploaded
+        .interior
+        .iter()
+        .zip(shared.interior.iter())
+        .enumerate()
+    {
+        assert!(
+            (a - b).abs() <= 1e-6 * a.abs().max(1.0),
+            "pixel {i} differs between the uploaded and shared environments: {a} against {b}"
+        );
+    }
 }

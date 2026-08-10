@@ -40,6 +40,18 @@ pub struct IblState {
     /// `None` for the procedural ([`IblState::fallback`] /
     /// [`IblState::from_sky_colors`]) constructors.
     pub equirect: Option<EquirectTexture>,
+    /// The sampling distribution built over the same pixels, retained for the
+    /// same reason `equirect` is: a consumer other than the light bind group
+    /// needs the source, and rebuilding it means a second full pass over the
+    /// largest asset in a scene.
+    ///
+    /// That consumer is the path tracer, which aims its escaping rays with it.
+    /// Both HDRI routes already build one and dropped it here until the tracer
+    /// had somewhere to read it from; the worker even ships it across the
+    /// boundary inside [`PreparedHdri`] precisely so the main thread does not
+    /// have to compute it. `None` alongside a `None` equirect, because a
+    /// procedural sky has no image to distribute over.
+    pub distribution: Option<EnvDistribution>,
 }
 
 const F16_MAX: f32 = 65504.0;
@@ -183,6 +195,7 @@ impl IblState {
             prefiltered_texture,
             [0.2, 0.2, 0.2],
             None,
+            None,
         )
     }
 
@@ -208,6 +221,7 @@ impl IblState {
             irradiance_texture,
             prefiltered_texture,
             irradiance_average,
+            None,
             None,
         )
     }
@@ -320,6 +334,7 @@ impl IblState {
             prefiltered_texture,
             prepared.irradiance_average,
             Some(equirect),
+            Some(prepared.distribution.clone()),
         )
     }
 
@@ -329,6 +344,7 @@ impl IblState {
         prefiltered_texture: wgpu::Texture,
         irradiance_average: [f32; 3],
         equirect: Option<EquirectTexture>,
+        distribution: Option<EnvDistribution>,
     ) -> Self {
         let irradiance_view = irradiance_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("IBL Irradiance View"),
@@ -372,6 +388,7 @@ impl IblState {
             prefiltered_sampler,
             irradiance_average,
             equirect,
+            distribution,
         }
     }
 }

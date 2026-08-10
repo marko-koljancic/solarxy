@@ -409,6 +409,14 @@ pub struct SolarxyApp {
     /// The tracer, built the first time a traced still is asked for. A session
     /// that never renders one never pays for the pipelines.
     tracer: Option<solarxy_renderer::pathtrace::backend::PathBackend>,
+    /// Whether the tracer's environment is behind the scene's.
+    ///
+    /// Set where the image behind the IBL actually changes, not where the
+    /// environment op arrives: the engine re-emits that op on every rebuild,
+    /// and installing on every one would upload the distribution once a cook.
+    /// Read lazily when a traced render starts, so a session that never traces
+    /// pays nothing for the tables.
+    traced_env_dirty: bool,
     /// Finished tiles waiting for the frontend to take them.
     still_tiles: std::collections::VecDeque<solarxy_host::still::StillTile>,
     /// Whether the normals/bounds visualization aggregate is stale
@@ -718,6 +726,7 @@ impl SolarxyApp {
             still_camera: None,
             still_look: CompositeLook::default(),
             tracer: None,
+            traced_env_dirty: true,
             still_tiles: std::collections::VecDeque::new(),
             viz_dirty: true,
             attr_viz: AttrVizState::default(),
@@ -1500,7 +1509,12 @@ impl SolarxyApp {
             if let Some(t) = self.tracer.as_mut() {
                 t.apply(&self.device, &self.queue, &delta);
             }
+            // A tracer built after the environment was installed has missed
+            // it, and the snapshot above cannot carry it: the scene cache
+            // drops that op by design.
+            self.traced_env_dirty = true;
         }
+        self.sync_traced_environment();
         if let Some(t) = self.tracer.as_mut() {
             let mut settings = t.settings();
             settings.samples = opts.samples.max(1);
@@ -2875,6 +2889,7 @@ impl SolarxyApp {
             solarxy_renderer::ibl::IblState::from_prepared(&self.device, &self.queue, &prepared);
         self.hdri = Some(HdriMeta { hash, name });
         self.environment.invalidate();
+        self.traced_env_dirty = true;
         self.rebuild_light_bind_group();
         Ok(())
     }
@@ -2893,6 +2908,7 @@ impl SolarxyApp {
         );
         self.hdri = None;
         self.environment.invalidate();
+        self.traced_env_dirty = true;
         self.rebuild_light_bind_group();
     }
 
@@ -3304,6 +3320,63 @@ impl SolarxyApp {
         );
     }
 
+    /// Brings the tracer's environment up to date with the scene's, which is
+    /// what makes a traced still light the way the viewport does.
+    ///
+    /// The traced scene cache deliberately drops the environment op, on the
+    /// reasoning that a host already holds the decoded and convolved image and
+    /// should build the traced environment from that rather than keep a second
+    /// copy of the largest asset in a scene. This is the host half of that
+    /// decision. Without it the kernel integrates against its own constant sky
+    /// and an image lit by a sunset renders as though lit by a dim room.
+    ///
+    /// Nothing here uploads the image. The equirect the sky pass retains and
+    /// the equirect the kernel walks are the same texture in the same format,
+    /// so the view is shared and only the two distribution tables are built,
+    /// from the distribution both HDRI routes already compute.
+    fn sync_traced_environment(&mut self) {
+        if self.tracer.is_none() {
+            return;
+        }
+        let intensity = self.view.display.hdri_intensity;
+        let rotation = self.view.display.hdri_rotation;
+        if !std::mem::take(&mut self.traced_env_dirty) {
+            if let Some(tracer) = self.tracer.as_mut() {
+                tracer.set_environment_params(intensity, rotation);
+            }
+            return;
+        }
+        // Resolved before the tracer is borrowed, because resolving reads the
+        // whole host and the tracer is a field of it.
+        let (top, bottom) = self
+            .resolve_background(&self.view.pane_settings[0])
+            .sky_colors();
+        let ibl = &self.renderer.ibl_res.ibl;
+        let built = match (ibl.equirect.as_ref(), ibl.distribution.as_ref()) {
+            (Some(equirect), Some(distribution)) => Some(
+                solarxy_renderer::pathtrace::environment::TraceEnvironment::from_shared_equirect(
+                    &self.device,
+                    &self.queue,
+                    &equirect.view,
+                    distribution,
+                ),
+            ),
+            _ => None,
+        };
+        let Some(tracer) = self.tracer.as_mut() else {
+            return;
+        };
+        match built {
+            Some(environment) => {
+                tracer.set_environment(&self.device, environment, intensity, rotation);
+            }
+            // No image is not black. The kernel's constant sky comes from the
+            // same background the raster path resolves, so the two agree by
+            // construction rather than by coincidence.
+            None => tracer.set_sky(top, bottom),
+        }
+    }
+
     /// Apply any `SceneOp::SetEnvironment` in the frame's delta.
     ///
     /// Separate from `SceneObjects::apply` because the environment is the
@@ -3341,6 +3414,7 @@ impl SolarxyApp {
                 // when the HDRI did not.
                 EnvironmentOutcome::Unchanged => {}
                 EnvironmentOutcome::HdriInstalled => {
+                    self.traced_env_dirty = true;
                     if *background == BackgroundKind::HdriSky {
                         self.view.pane_settings[0].background_mode =
                             solarxy_core::preferences::BackgroundMode::HDRI_SKY;
@@ -3359,6 +3433,7 @@ impl SolarxyApp {
                         top,
                         bottom,
                     );
+                    self.traced_env_dirty = true;
                 }
             }
             self.rebuild_light_bind_group();

@@ -29,8 +29,11 @@ use crate::env_dist::EnvDistribution;
 
 /// The environment's textures and the sampler over its image.
 pub struct TraceEnvironment {
+    /// `None` when the image is shared rather than owned. A view keeps its
+    /// texture alive on its own, so the owned handle exists only for the
+    /// upload path that created one.
     #[allow(unused)]
-    equirect: wgpu::Texture,
+    equirect: Option<wgpu::Texture>,
     equirect_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
     #[allow(unused)]
@@ -108,6 +111,43 @@ impl TraceEnvironment {
         )
     }
 
+    /// Shares an equirect already on the GPU instead of uploading a second
+    /// copy of it, and builds only the two tables over it.
+    ///
+    /// The image the raster path retains for the sky pass and the image the
+    /// kernel walks are the same image in the same format, so the honest
+    /// relationship between them is one texture with two readers rather than
+    /// two textures with one each. A view holds its texture alive, so the
+    /// borrow is safe without either side knowing about the other; what the
+    /// two do *not* share is the sampler, because this one reads NEAREST for
+    /// the reason spelled out below and the sky pass reads filtered.
+    ///
+    /// The caller is trusted for the format, which must be the `Rgba16Float`
+    /// both sides already use. A mismatch is a bind-group error at creation
+    /// rather than a wrong picture.
+    #[must_use]
+    pub fn from_shared_equirect(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        equirect_view: &wgpu::TextureView,
+        distribution: &EnvDistribution,
+    ) -> Self {
+        if distribution.is_empty() {
+            return Self::null(device, queue);
+        }
+        Self::assemble(
+            device,
+            queue,
+            None,
+            equirect_view.clone(),
+            distribution.marginal(),
+            distribution.conditional(),
+            distribution.total_weight(),
+            distribution.width(),
+            distribution.height(),
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build(
         device: &wgpu::Device,
@@ -155,6 +195,36 @@ impl TraceEnvironment {
             },
         );
 
+        let equirect_view = equirect.create_view(&wgpu::TextureViewDescriptor::default());
+        Self::assemble(
+            device,
+            queue,
+            Some(equirect),
+            equirect_view,
+            marginal_data,
+            conditional_data,
+            total_weight,
+            dist_width,
+            dist_height,
+        )
+    }
+
+    /// Everything both constructors share: the two tables, the sampler, and
+    /// the record. Split so the uploading path and the sharing path cannot
+    /// drift on the sampler, which is where the environment's load-bearing
+    /// decision lives.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        equirect: Option<wgpu::Texture>,
+        equirect_view: wgpu::TextureView,
+        marginal_data: &[f32],
+        conditional_data: &[f32],
+        total_weight: f32,
+        dist_width: u32,
+        dist_height: u32,
+    ) -> Self {
         // The tables. The marginal is one row of `dist_height` entries and the
         // conditional is `dist_height` rows of `dist_width`, so both are 2D
         // textures and the kernel indexes them with `textureLoad`.
@@ -177,7 +247,6 @@ impl TraceEnvironment {
             conditional_data,
         );
 
-        let equirect_view = equirect.create_view(&wgpu::TextureViewDescriptor::default());
         let marginal_view = marginal.create_view(&wgpu::TextureViewDescriptor::default());
         let conditional_view = conditional.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {

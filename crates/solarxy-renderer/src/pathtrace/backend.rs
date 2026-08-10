@@ -251,6 +251,21 @@ impl PathBackend {
         self.invalidate();
     }
 
+    /// The two scalars that scale and turn the environment, without rebuilding
+    /// it.
+    ///
+    /// Separate from [`Self::set_environment`] because a rotation slider is
+    /// dragged: rebuilding through that entry point would upload the
+    /// distribution once per frame of the drag, for two values the kernel
+    /// reads out of a uniform.
+    pub fn set_environment_params(&mut self, intensity: f32, rotation: f32) {
+        if (self.env_intensity, self.env_rotation) != (intensity, rotation) {
+            self.env_intensity = intensity;
+            self.env_rotation = rotation;
+            self.invalidate();
+        }
+    }
+
     /// The two colours the kernel blends by the world up axis when there is no
     /// environment image, which is the ordinary case for a scene that has never
     /// been given one.
