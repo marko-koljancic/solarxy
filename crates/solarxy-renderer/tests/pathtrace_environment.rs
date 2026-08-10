@@ -172,7 +172,9 @@ fn render(sampling: u32, spp: u32, seed: u32) -> Option<Rendered> {
             samples: spp,
             seed,
             light_count: 0,
-            _pad: 0,
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            aperture_blades: 0,
         },
         &env_params,
     );

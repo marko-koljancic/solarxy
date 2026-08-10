@@ -466,6 +466,7 @@ mod tests {
             show_gizmo: true,
             gizmo_size: 1.0,
             look: solarxy_core::scene::CameraLook::default(),
+            lens: solarxy_core::scene::CameraLens::default(),
         }
     }
 

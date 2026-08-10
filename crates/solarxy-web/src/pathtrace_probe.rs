@@ -70,14 +70,12 @@ impl PathtraceProbe {
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
             .map_err(|e| JsError::new(&format!("requestAdapter: {e}")))?;
-        // Exactly what both shells ask for. Asking for more here would prove
-        // something the shipped app cannot run.
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("solarxy pathtrace probe device"),
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: probe_limits(),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -316,6 +314,32 @@ pub fn bvh_blob_summary(blob: &[u8]) -> Result<String, JsError> {
     ))
 }
 
+/// The limits a probe device asks for, which are **not** the shipped app's.
+///
+/// Core WebGPU grants eight compute-stage storage buffers and the traced scene
+/// group spends seven of them. A probe binds that group and adds two of its own,
+/// for the corpus it reads and the answers it writes, which is nine. Chrome
+/// rejects the pipeline layout at that point and says so precisely; native wgpu
+/// on Metal accepts it, and the wasm backend swallows the rejection, so the
+/// dispatch runs against an invalid pipeline and every answer comes back zero.
+/// That is the third time in this milestone that the browser has been the
+/// authority on a limit and the desktop has not, and the first two are in the
+/// gate amendment.
+///
+/// So a probe asks for ten, which every adapter this has met reports. **The
+/// shipped kernel is unaffected and its own claim is unweakened**: it binds
+/// seven and no io group, and [`BsdfProbeCheck`] builds it on a separate device
+/// at exactly [`wgpu::Limits::default()`] for that reason. What a raised limit
+/// buys is a harness that can hold both a scene and a question about it; what it
+/// must never do is let the thing that ships stop being measured at the limits
+/// it ships under.
+fn probe_limits() -> wgpu::Limits {
+    wgpu::Limits {
+        max_storage_buffers_per_shader_stage: 10,
+        ..wgpu::Limits::default()
+    }
+}
+
 /// The BSDF probe and the furnace kernel, as a browser can drive them.
 ///
 /// Its first job is pipeline creation, and that is the half only a browser can
@@ -335,8 +359,13 @@ pub struct BsdfProbeCheck {
     roughness: Vec<f32>,
     /// Samples drawn per material.
     samples: usize,
-    /// Whether the furnace pipeline built and dispatched.
+    /// Whether the path pipelines built and dispatched.
     furnace_ok: bool,
+    /// Whether the shipped path kernel builds at **core WebGPU limits**, which
+    /// is a different and stricter question: the probes run on a device that
+    /// asks for a raised storage-buffer limit, and the thing that ships must
+    /// not.
+    core_limits: Result<(), String>,
 }
 
 #[wasm_bindgen]
@@ -367,7 +396,7 @@ impl BsdfProbeCheck {
                 label: Some("solarxy bsdf probe device"),
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: probe_limits(),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -420,13 +449,21 @@ impl BsdfProbeCheck {
         )
         .with_materials(materials);
         let scene = TraceScene::upload(&device, &queue, &layouts, &arena);
-        let atlas = TraceAtlas::new(&device, &layouts);
+        let atlas = TraceAtlas::new(&device, &queue, &layouts);
 
         // Pipeline creation for both probe modes. This is the check.
         let probe = BsdfProbe::new(&device, &layouts);
 
-        // And the furnace kernel, which is the deepest composition in the directory.
+        // And the light probe's two, which compose the environment and the
+        // light fragments over the same stack. Built rather than dispatched:
+        // what a browser answers here is whether it accepts the composition,
+        // and the numbers those probes produce are asserted on the desktop.
+        let _lights = solarxy_renderer::pathtrace::probe::LightProbe::new(&device, &layouts);
+
+        // And the path kernel, which is the deepest composition in the
+        // directory, on this device and then again on one at core limits.
         let furnace_ok = dispatch_furnace_once(&device, &queue, &layouts, &scene, &atlas);
+        let core_limits = build_path_kernel_at_core_limits().await;
 
         let taps: Vec<BsdfTap> = (0..roughness.len() as u32)
             .flat_map(|material| {
@@ -455,6 +492,7 @@ impl BsdfProbeCheck {
             roughness,
             samples: SAMPLES as usize,
             furnace_ok,
+            core_limits,
         })
     }
 
@@ -477,7 +515,7 @@ impl BsdfProbeCheck {
         self.readback = None;
 
         let mut albedos = Vec::with_capacity(self.roughness.len());
-        let mut ok = self.furnace_ok;
+        let mut ok = self.furnace_ok && self.core_limits.is_ok();
         for m in 0..self.roughness.len() {
             let mut sum = 0.0f64;
             for i in 0..self.samples {
@@ -496,10 +534,15 @@ impl BsdfProbeCheck {
             albedos.push(albedo);
         }
 
+        let core = match &self.core_limits {
+            Ok(()) => "\"built\"".to_string(),
+            Err(e) => format!("\"{}\"", e.replace('"', "'").replace('\n', " ")),
+        };
         Some(format!(
-            r#"{{"ok":{},"furnace":{},"samples":{},"roughness":[{}],"albedo":[{}]}}"#,
+            r#"{{"ok":{},"furnace":{},"coreLimits":{},"samples":{},"roughness":[{}],"albedo":[{}]}}"#,
             ok,
             self.furnace_ok,
+            core,
             self.samples,
             self.roughness
                 .iter()
@@ -515,12 +558,17 @@ impl BsdfProbeCheck {
     }
 }
 
-/// Builds the furnace pipeline and dispatches one small tile.
+/// Builds the path pipelines and dispatches one small tile through each.
 ///
 /// Separate from the probe's own setup because it is a separate question: the probe
 /// asks whether the lobes compile, and this asks whether the whole integrator does,
 /// bindings and dispatch included. Sixteen by sixteen at one sample, because what is
 /// being tested is that the browser accepts it, not what it draws.
+///
+/// All three estimators are built and dispatched, not just the one a render uses.
+/// They are three specializations of one source through a pipeline-overridable
+/// constant, and a browser rejecting a specialization is exactly the kind of
+/// failure that arrives at pipeline creation in one front end and not the other.
 fn dispatch_furnace_once(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -529,7 +577,7 @@ fn dispatch_furnace_once(
     atlas: &solarxy_renderer::pathtrace::TraceAtlas,
 ) -> bool {
     use solarxy_renderer::pathtrace::{
-        FurnaceKernel, FurnaceParams, FurnaceUniforms, TraceParams, TraceTarget,
+        EnvParams, PathEstimator, PathKernel, PathUniforms, TraceParams, TraceTarget,
     };
 
     const EDGE: u32 = 16;
@@ -540,8 +588,8 @@ fn dispatch_furnace_once(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let uniforms = FurnaceUniforms::new(device, &camera);
-    let kernel = FurnaceKernel::new(device, layouts, &uniforms);
+    let uniforms = PathUniforms::new(device, &camera);
+    let kernel = PathKernel::new(device, layouts, &uniforms);
     let target = TraceTarget::new(device, layouts, EDGE, EDGE);
     uniforms.write(
         queue,
@@ -553,16 +601,81 @@ fn dispatch_furnace_once(
             transmissive_bounces: 1,
             samples: 1,
             seed: 1,
+            light_count: 0,
+            // An open aperture, so the browser compiles the lens arm rather
+            // than the branch that skips it.
+            aperture_radius: 0.05,
+            focus_distance: 4.0,
+            aperture_blades: 6,
         },
-        &FurnaceParams {
-            env_up: [0.5, 0.5, 0.5, 0.0],
-            env_down: [0.5, 0.5, 0.5, 0.0],
-        },
+        // The furnace configuration: one uniform colour, no image, no lights.
+        &EnvParams::constant([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     );
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("bsdf probe furnace encoder"),
+        label: Some("bsdf probe path encoder"),
     });
-    kernel.encode(&mut encoder, scene, atlas, &target, &uniforms, [EDGE, EDGE]);
+    for estimator in PathEstimator::ALL {
+        kernel.encode(
+            &mut encoder,
+            estimator,
+            scene,
+            atlas,
+            &target,
+            &uniforms,
+            [EDGE, EDGE],
+        );
+    }
     queue.submit(Some(encoder.finish()));
     true
+}
+
+/// Builds the shipped path kernel on a device at **core WebGPU limits**, which
+/// is the claim the whole milestone rests on.
+///
+/// Separate from every other check here and deliberately so. The probes above
+/// run on a device that asks for a raised storage-buffer limit, because a
+/// harness binds the scene *and* a question about it; the thing that ships binds
+/// only the scene, and if it ever stopped fitting inside what a browser grants
+/// by default, everything else on this page would still pass. So this asks the
+/// one question in the one configuration that matters, and reports what it
+/// finds rather than that it was asked.
+async fn build_path_kernel_at_core_limits() -> Result<(), String> {
+    use solarxy_renderer::pathtrace::{PathKernel, PathUniforms};
+
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+        .map_err(|e| format!("requestAdapter: {e}"))?;
+    let (device, _queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("solarxy core-limits device"),
+            required_features: wgpu::Features::empty(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            // Exactly what both shells ask for. Asking for more here would
+            // prove something the shipped app cannot run.
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        })
+        .await
+        .map_err(|e| format!("requestDevice: {e}"))?;
+
+    // An error scope around the whole build, because the wasm backend does not
+    // surface a rejected pipeline layout as a Rust error: it logs and carries
+    // on, which is how a dead pipeline reaches a dispatch and returns zeros.
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let layouts = PathtraceLayouts::new(&device);
+    let camera = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("core-limits camera"),
+        size: std::mem::size_of::<solarxy_renderer::camera::CameraUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let uniforms = PathUniforms::new(&device, &camera);
+    let _kernel = PathKernel::new(&device, &layouts, &uniforms);
+    match device.pop_error_scope().await {
+        Some(error) => Err(error.to_string()),
+        None => Ok(()),
+    }
 }

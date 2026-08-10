@@ -51,7 +51,7 @@ fn trace_debug(@builtin(global_invocation_id) gid: vec3u) {
     // The pixel centre: a readout of what the traversal returned wants no
     // filtering, and a jittered debug channel would shimmer between frames for
     // no diagnostic gain.
-    let ray = camera_ray(pixel, vec2f(0.5));
+    let ray = camera_ray(pixel, vec2f(0.5), vec2f(0.5));
     let hit = trace_closest(ray.origin, ray.direction, 1e30);
 
     // Alpha carries whether anything was hit, so a reader can tell a miss from

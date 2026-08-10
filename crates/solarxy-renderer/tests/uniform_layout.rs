@@ -155,7 +155,7 @@ const CASES: &[Case] = &[
     // in `trace.wgsl` until a second kernel needed a camera ray.
     Case {
         shader: "pathtrace/camera.wgsl",
-        prelude: &["pathtrace/traverse.wgsl"],
+        prelude: &["pathtrace/traverse.wgsl", "pathtrace/rand.wgsl"],
         struct_name: "TraceParams",
         rust_size: std::mem::size_of::<solarxy_renderer::pathtrace::TraceParams>(),
         rust_type: "solarxy_renderer::pathtrace::TraceParams",

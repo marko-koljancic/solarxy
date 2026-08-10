@@ -33,8 +33,9 @@
 
       <h1>Path tracer: material response probe</h1>
       <p>
-        Builds both BSDF probe pipelines and the furnace kernel, which is the deepest
-        composition in the shader directory, then draws a small batch and reports the
+        Builds both BSDF probe pipelines and the path kernel, which is the deepest
+        composition in the shader directory, checks separately that the path kernel
+        builds on a device at core WebGPU limits, then draws a small batch and reports the
         directional albedo at four roughnesses. Two things are being asked. Whether this
         browser's WGSL front end accepts the lobes at all, which is the half only a
         browser can answer and the reason the uniformity discipline exists. And whether a
@@ -144,13 +145,18 @@
         const rows = r.roughness
           .map((rough, i) => `  roughness ${rough}: albedo ${r.albedo[i]}`)
           .join("\n");
+        const core =
+          r.coreLimits === "built"
+            ? "the shipped path kernel builds at core WebGPU limits"
+            : `the shipped path kernel FAILED at core WebGPU limits: ${r.coreLimits}`;
         setBsdf(
-          `furnace kernel: ${r.furnace ? "built and dispatched" : "failed"}\n` +
+          `path kernel: ${r.furnace ? "built and dispatched" : "failed"}\n` +
+            `${core}\n` +
             `samples per material: ${r.samples}\n` +
             `metal, normal incidence:\n${rows}\n` +
             (r.ok
               ? "every albedo is at or below one; no energy is created"
-              : "an albedo exceeded one: this browser computes something else"),
+              : "a check failed: see above"),
           r.ok ? "ok" : "bad"
         );
         console.log("PT_BSDF_DONE " + (r.ok ? "pass" : "fail"));

@@ -724,7 +724,9 @@ fn the_sphere_grid_renders() {
                     // point is a surface lit only by a uniform environment, so
                     // whatever it returns came from the material.
                     light_count: 0,
-                    _pad: 0,
+                    aperture_radius: 0.0,
+                    focus_distance: 0.0,
+                    aperture_blades: 0,
                 },
                 &environment,
             );

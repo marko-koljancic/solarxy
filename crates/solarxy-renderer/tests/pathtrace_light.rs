@@ -660,7 +660,9 @@ fn the_three_estimators_agree_on_the_same_scene() {
         samples: SPP,
         seed: 0x9E37_79B9,
         light_count: scene.light_count(),
-        _pad: 0,
+        aperture_radius: 0.0,
+        focus_distance: 0.0,
+        aperture_blades: 0,
     };
 
     let mut means = Vec::new();
@@ -874,7 +876,9 @@ fn a_transmissive_blocker_tints_the_shadow_it_casts() {
             samples: SPP,
             seed: 0x9E37_79B9,
             light_count: scene.light_count(),
-            _pad: 0,
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            aperture_blades: 0,
         },
         &environment,
     );

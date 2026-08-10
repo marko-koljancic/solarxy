@@ -196,7 +196,9 @@ fn primary_ray_throughput() {
             // above zero would only make the estimator it does not run
             // look reachable.
             light_count: 0,
-            _pad: 0,
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            aperture_blades: 0,
         },
     );
 
@@ -431,7 +433,9 @@ fn incoherent_ray_throughput() {
                     samples: 1,
                     seed: 0x9E37_79B9,
                     light_count: 0,
-                    _pad: 0,
+                    aperture_radius: 0.0,
+                    focus_distance: 0.0,
+                    aperture_blades: 0,
                 },
                 &environment,
             );

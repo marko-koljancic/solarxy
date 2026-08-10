@@ -412,6 +412,49 @@ pub struct CameraDef {
     /// The shot's rendering intent. A pane looking through this camera
     /// composites with it; a free pane uses its own.
     pub look: CameraLook,
+    /// The shot's optics: what the aperture does to everything not at the
+    /// focus distance.
+    pub lens: CameraLens,
+}
+
+/// A camera's aperture, already resolved out of the photographic controls
+/// the node exposes.
+///
+/// Resolved here rather than carried as an f-stop for the same reason
+/// [`CameraDef::fov_y`] is resolved out of focal length and sensor width:
+/// this is the runtime description of a camera, and a consumer of it should
+/// not have to know which of three projections the user authored in order
+/// to work out how wide the lens is open.
+///
+/// **Only rendered output reads this.** The interactive viewport draws
+/// through a pinhole, because a rasterizer has one sample per pixel per
+/// draw and no aperture to integrate over; faking it means a depth-driven
+/// blur, which is a different effect wearing this one's name.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CameraLens {
+    /// The aperture's radius in world units. Zero is a pinhole, and a
+    /// pinhole is what every camera authored before this existed had.
+    pub aperture_radius: f32,
+    /// How far in front of the camera is sharp, in world units. Zero means
+    /// the distance to the camera's own target, which is what makes aiming
+    /// a camera also focus it.
+    pub focus_distance: f32,
+    /// Aperture blades. Zero is a perfectly circular opening; three or more
+    /// is a polygon, which is what gives an out-of-focus highlight the shape
+    /// a real iris leaves on it.
+    pub blades: u32,
+}
+
+impl Default for CameraLens {
+    /// A pinhole, which renders exactly as every camera did before there was
+    /// a lens to describe.
+    fn default() -> Self {
+        Self {
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            blades: 0,
+        }
+    }
 }
 
 /// One scene mutation. Transforms are column-major world matrices; a

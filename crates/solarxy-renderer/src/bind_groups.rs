@@ -359,18 +359,23 @@ impl PathtraceLayouts {
                 bgl_compute_storage_entry(6),
             ],
         });
-        // The accumulation group. It ends as four ping-ponged `Rgba32Float`
-        // storage textures, colour and auxiliary; the tracer writes one debug
-        // target until the accumulator arrives. Read-write on this format is
-        // not portable -- core WebGPU grants it for `r32uint`, `r32sint` and
-        // `r32float` only -- which is why the pair ping-pongs rather than
-        // accumulating in place, and why this group has no headroom.
+        // The accumulation group: the colour the kernel returns and the
+        // auxiliary channels that describe the surface it came from.
+        //
+        // **Two of four, and the other two are spoken for.** Core WebGPU grants
+        // four storage textures per stage and read-write on `Rgba32Float` is
+        // not portable -- it grants that for `r32uint`, `r32sint` and
+        // `r32float` only -- so the accumulator ping-pongs rather than
+        // accumulating in place, and needs a read side for each of these two.
+        // That is the whole budget. A third auxiliary channel does not fit,
+        // which is why the world normal is folded into the albedo's alpha lane
+        // rather than taking a texture of its own.
         let target = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_target_bind_group_layout"),
-            entries: &[bgl_storage_texture_entry(
-                0,
-                wgpu::StorageTextureAccess::WriteOnly,
-            )],
+            entries: &[
+                bgl_storage_texture_entry(0, wgpu::StorageTextureAccess::WriteOnly),
+                bgl_storage_texture_entry(1, wgpu::StorageTextureAccess::WriteOnly),
+            ],
         });
         // The sampled group: the atlas and its two samplers at 0 to 2, and the
         // environment at 3 to 6, which are the numbers reserved for it two

@@ -140,6 +140,7 @@ const RECIPES: &[(&str, &[&str])] = &[
             "traverse.wgsl",
             "atlas.wgsl",
             "material.wgsl",
+            "rand.wgsl",
             "camera.wgsl",
             "trace.wgsl",
         ],

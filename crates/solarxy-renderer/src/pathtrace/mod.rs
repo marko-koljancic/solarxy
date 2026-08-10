@@ -52,7 +52,8 @@ pub const MATERIAL_SOURCE: &str = include_str!("../shaders/pathtrace/material.wg
 pub const RAND_SOURCE: &str = include_str!("../shaders/pathtrace/rand.wgsl");
 
 /// The camera fragment: the per-dispatch uniforms and the ray through a pixel.
-/// No entry point, and composed after the traversal, whose `Ray` it returns.
+/// No entry point, and composed after the traversal, whose `Ray` it returns,
+/// and after the sampler, whose constants its aperture reads.
 ///
 /// Extracted from the debug kernel when a second kernel needed a camera ray.
 /// Composing the two kernels together would have worked and would have dragged a
@@ -65,11 +66,14 @@ pub const CAMERA_SOURCE: &str = include_str!("../shaders/pathtrace/camera.wgsl")
 /// It shades nothing. The atlas and the material ride along so that the
 /// fragments the shading stage will call are compiled by both WGSL front ends
 /// from the day they are written, rather than first meeting the browser's
-/// several stages later.
+/// several stages later. The sampler rides along because the camera fragment
+/// reads its constants: this kernel draws a pixel centre and no random number
+/// at all, and still cannot be built without it.
 const TRACE_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/traverse.wgsl"),
     include_str!("../shaders/pathtrace/atlas.wgsl"),
     include_str!("../shaders/pathtrace/material.wgsl"),
+    include_str!("../shaders/pathtrace/rand.wgsl"),
     include_str!("../shaders/pathtrace/camera.wgsl"),
     include_str!("../shaders/pathtrace/trace.wgsl"),
 );
@@ -98,6 +102,45 @@ const PATH_KERNEL: &str = concat!(
     include_str!("../shaders/pathtrace/camera.wgsl"),
     include_str!("../shaders/pathtrace/path.wgsl"),
 );
+
+/// Steps per octahedral component in the auxiliary target's packed normal.
+/// Mirrors `OCT_STEPS` in `path.wgsl`.
+const OCT_STEPS: f32 = 4096.0;
+
+/// Decodes a world normal from the auxiliary target's alpha lane.
+///
+/// The other half of `pack_octahedral` in `path.wgsl`, which packs two
+/// twelve-bit octahedral components arithmetically into one float rather than
+/// reinterpreting bits: an integer below 2^24 is exact in an `f32` on every
+/// platform, where an arbitrary bit pattern read as a float may be a denormal
+/// the hardware is free to flush.
+///
+/// Returns a unit vector. A lane written by a pixel that found no surface
+/// decodes to `+Z`, which is what the kernel writes there.
+#[must_use]
+pub fn unpack_aov_normal(packed: f32) -> [f32; 3] {
+    let combined = packed.max(0.0);
+    let qx = (combined / OCT_STEPS).floor();
+    let qy = combined - qx * OCT_STEPS;
+    let to_signed = |q: f32| (q / (OCT_STEPS - 1.0)) * 2.0 - 1.0;
+    let (ex, ey) = (to_signed(qx), to_signed(qy));
+
+    let z = 1.0 - ex.abs() - ey.abs();
+    let (mut x, mut y) = (ex, ey);
+    if z < 0.0 {
+        // The inverse of the fold: the lower hemisphere was mapped out across
+        // the octahedron's edges, so it comes back the same way.
+        let sx = if ex >= 0.0 { 1.0 } else { -1.0 };
+        let sy = if ey >= 0.0 { 1.0 } else { -1.0 };
+        x = (1.0 - ey.abs()) * sx;
+        y = (1.0 - ex.abs()) * sy;
+    }
+    let len = (x * x + y * y + z * z).sqrt();
+    if len <= 0.0 {
+        return [0.0, 0.0, 1.0];
+    }
+    [x / len, y / len, z / len]
+}
 
 /// Invocations per workgroup edge. 64 per workgroup, comfortably inside core
 /// WebGPU's 256, and matched by `@workgroup_size(8, 8, 1)` in every kernel;
@@ -168,17 +211,24 @@ pub struct TraceParams {
     /// what makes the tracer's light ceiling nothing at all: the raster path's
     /// eight is the size of a uniform, and this is a count.
     pub light_count: u32,
-    /// Unspent. Present so the struct stays a multiple of its own eight-byte
-    /// alignment, which a lone `u32` above would break; WGSL would round the
-    /// size up and the Rust side would not.
-    pub _pad: u32,
+    /// The aperture's radius in world units, already resolved out of the
+    /// camera's f-number. Zero is a pinhole and costs nothing: the sampling is
+    /// branched away rather than multiplied by zero.
+    pub aperture_radius: f32,
+    /// How far in front of the camera is sharp, in world units. Resolved, so
+    /// the "focus on the target" default has already become a distance.
+    pub focus_distance: f32,
+    /// Aperture blades. Zero, one and two are a circular opening; three or
+    /// more is a polygon.
+    pub aperture_blades: u32,
 }
 
-// Forty-eight bytes with one padding word: every member aligns to eight or
-// four, so the struct aligns to eight and the size has to be a multiple of it.
+// Fifty-six bytes and no padding word: every member aligns to eight or four, so
+// the struct aligns to eight and fifty-six is already a multiple of it. The pad
+// the light count needed was spent by the aperture rather than left beside it.
 // A `vec3f` or `vec4f` appended here would raise the alignment to sixteen and
 // need more, which is why the environment is its own uniform instead.
-const _: () = assert!(std::mem::size_of::<TraceParams>() == 48);
+const _: () = assert!(std::mem::size_of::<TraceParams>() == 56);
 
 /// The compute pipelines.
 pub struct PathTracer {
@@ -675,6 +725,8 @@ impl TraceAtlas {
 /// A `Rgba32Float` image the kernel writes, and the bind group over it.
 pub struct TraceTarget {
     texture: wgpu::Texture,
+    #[allow(unused)]
+    auxiliary: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     width: u32,
     height: u32,
@@ -698,20 +750,74 @@ impl TraceTarget {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        // The auxiliary target: what the surface looked like, as opposed to
+        // what it returned. One texture rather than two, because the storage
+        // group's budget is four and the accumulator needs the other two: the
+        // albedo takes three lanes and the normal is folded into the fourth,
+        // octahedrally, which costs a little precision on a vector that only
+        // has to steer an edge-stopping filter.
+        let auxiliary = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Pathtrace Auxiliary Target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let aux_view = auxiliary.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Pathtrace Target Bind Group"),
             layout: &layouts.target,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&aux_view),
+                },
+            ],
         });
         Self {
             texture,
+            auxiliary,
             bind_group,
             width,
             height,
+        }
+    }
+
+    /// Encodes a full-image copy of the auxiliary target, the same way
+    /// [`TraceTarget::encode_readback`] does for the colour.
+    ///
+    /// Albedo in `rgb`; the world normal is octahedrally packed into `a` and
+    /// comes back through [`unpack_aov_normal`].
+    #[must_use]
+    pub fn encode_auxiliary_readback(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> FloatReadback {
+        let (buffer, padded) = crate::capture::encode_capture(
+            device,
+            encoder,
+            &self.auxiliary,
+            (0, 0, self.width, self.height),
+        );
+        FloatReadback {
+            buffer,
+            padded_row_bytes: padded,
+            width: self.width,
+            height: self.height,
+            receiver: None,
         }
     }
 

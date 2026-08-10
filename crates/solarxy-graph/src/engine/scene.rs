@@ -576,6 +576,46 @@ fn camera_from_node(
         lut_b_strength: strength("lut_b_strength"),
     };
 
+    // The lens, resolved the way `fov_y` above is: the runtime description of
+    // a camera should not make its consumer work out which of three
+    // projections the user authored.
+    //
+    // An f-number is the focal length over the aperture's diameter, so the
+    // radius is `focal / (2 * f)`. A physical camera states its focal length in
+    // millimetres; a perspective one has none, so one is derived back out of
+    // the field of view against the same 36mm sensor width the node documents
+    // as driving it. That is what makes f/2.8 mean the same blur on both, and
+    // it is the exact inverse of the formula the physical arm above applies.
+    let lens = if kind == CameraKind::Orthographic {
+        // Parallel rays have no lens and nothing to focus. The node hides the
+        // controls here too, but a stored value survives a projection change,
+        // so this is what stops one taking effect where it means nothing.
+        solarxy_core::scene::CameraLens::default()
+    } else {
+        let f_stop = f32p("f_stop");
+        let aperture_radius = if f_stop > 0.0 {
+            let focal_mm = if kind == CameraKind::Physical {
+                f32p("focal_length").max(1e-3)
+            } else {
+                const DEFAULT_SENSOR_MM: f32 = 36.0;
+                DEFAULT_SENSOR_MM / (2.0 * (fov_y * 0.5).tan().max(1e-6))
+            };
+            // Millimetres to world units, which are metres everywhere else in
+            // the scene contract.
+            focal_mm / (2.0 * f_stop) / 1000.0
+        } else {
+            0.0
+        };
+        solarxy_core::scene::CameraLens {
+            aperture_radius,
+            focus_distance: f32p("focus_distance").max(0.0),
+            blades: match p.get("aperture_blades") {
+                Some(ParamValue::Int(v)) => u32::try_from(*v).unwrap_or(0),
+                _ => 0,
+            },
+        }
+    };
+
     Some(CameraDef {
         id: SceneObjectId(node.id.0),
         kind,
@@ -590,6 +630,7 @@ fn camera_from_node(
         show_gizmo: matches!(p.get("show_gizmo"), Some(ParamValue::Bool(true))),
         gizmo_size: f32p("gizmo_size"),
         look,
+        lens,
     })
 }
 
