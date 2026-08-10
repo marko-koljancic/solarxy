@@ -607,6 +607,7 @@ fn dispatch_furnace_once(
             aperture_radius: 0.05,
             focus_distance: 4.0,
             aperture_blades: 6,
+            ..TraceParams::default()
         },
         // The furnace configuration: one uniform colour, no image, no lights.
         &EnvParams::constant([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
@@ -674,6 +675,18 @@ async fn build_path_kernel_at_core_limits() -> Result<(), String> {
     });
     let uniforms = PathUniforms::new(&device, &camera);
     let _kernel = PathKernel::new(&device, &layouts, &uniforms);
+    // The accumulation **bind group**, not just its layout.
+    //
+    // This is the one check the gate found no substitute for. A read-only
+    // `rgba32float` storage binding is validated by native wgpu at bind group
+    // creation rather than at layout creation, and the adapter's own format
+    // query reported the capability as present on a platform that then rejected
+    // the binding. So a probe that stops at the layout, or asks the adapter,
+    // returns a false all-clear. Building one is what asks the browser.
+    let _target = solarxy_renderer::pathtrace::TraceTarget::new(&device, &layouts, 16, 16);
+    // And the resolve, which is where the traced image meets the shared post
+    // chain and the only render pipeline this path adds.
+    let _resolve = solarxy_renderer::pathtrace::resolve::TraceResolve::new(&device);
     match device.pop_error_scope().await {
         Some(error) => Err(error.to_string()),
         None => Ok(()),

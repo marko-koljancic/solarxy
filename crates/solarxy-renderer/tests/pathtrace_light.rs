@@ -663,6 +663,7 @@ fn the_three_estimators_agree_on_the_same_scene() {
         aperture_radius: 0.0,
         focus_distance: 0.0,
         aperture_blades: 0,
+        ..TraceParams::default()
     };
 
     let mut means = Vec::new();
@@ -879,6 +880,7 @@ fn a_transmissive_blocker_tints_the_shadow_it_casts() {
             aperture_radius: 0.0,
             focus_distance: 0.0,
             aperture_blades: 0,
+            ..TraceParams::default()
         },
         &environment,
     );

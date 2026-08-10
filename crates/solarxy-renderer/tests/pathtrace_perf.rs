@@ -199,6 +199,7 @@ fn primary_ray_throughput() {
             aperture_radius: 0.0,
             focus_distance: 0.0,
             aperture_blades: 0,
+            ..TraceParams::default()
         },
     );
 
@@ -436,6 +437,7 @@ fn incoherent_ray_throughput() {
                     aperture_radius: 0.0,
                     focus_distance: 0.0,
                     aperture_blades: 0,
+                    ..TraceParams::default()
                 },
                 &environment,
             );

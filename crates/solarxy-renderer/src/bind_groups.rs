@@ -360,21 +360,31 @@ impl PathtraceLayouts {
             ],
         });
         // The accumulation group: the colour the kernel returns and the
-        // auxiliary channels that describe the surface it came from.
+        // auxiliary channels that describe the surface it came from, each with
+        // a read side to average against.
         //
-        // **Two of four, and the other two are spoken for.** Core WebGPU grants
-        // four storage textures per stage and read-write on `Rgba32Float` is
-        // not portable -- it grants that for `r32uint`, `r32sint` and
-        // `r32float` only -- so the accumulator ping-pongs rather than
-        // accumulating in place, and needs a read side for each of these two.
-        // That is the whole budget. A third auxiliary channel does not fit,
-        // which is why the world normal is folded into the albedo's alpha lane
-        // rather than taking a texture of its own.
+        // **Four of four, and there is no spare.** Core WebGPU grants four
+        // storage textures per stage and read-write on `Rgba32Float` is not
+        // portable -- it grants that for `r32uint`, `r32sint` and `r32float`
+        // only -- so the accumulator ping-pongs rather than accumulating in
+        // place, and a ping-pong needs a read side for each of the two written
+        // channels. That is the whole budget. A third auxiliary channel does
+        // not fit, which is why the world normal is folded into the albedo's
+        // alpha lane rather than taking a texture of its own.
+        //
+        // The write sides keep bindings 0 and 1, which they had before the
+        // read sides arrived, so every kernel that only writes -- the debug
+        // readout, every probe -- compiles unchanged. A pipeline may leave a
+        // layout entry unused; a bind *group* may not, which is why
+        // `TraceTarget` allocates both pairs whether or not anything reads
+        // them.
         let target = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pathtrace_target_bind_group_layout"),
             entries: &[
                 bgl_storage_texture_entry(0, wgpu::StorageTextureAccess::WriteOnly),
                 bgl_storage_texture_entry(1, wgpu::StorageTextureAccess::WriteOnly),
+                bgl_storage_texture_entry(2, wgpu::StorageTextureAccess::ReadOnly),
+                bgl_storage_texture_entry(3, wgpu::StorageTextureAccess::ReadOnly),
             ],
         });
         // The sampled group: the atlas and its two samplers at 0 to 2, and the

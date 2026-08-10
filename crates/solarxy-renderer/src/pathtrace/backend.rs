@@ -1,0 +1,503 @@
+//! The path tracer behind the render backend contract.
+//!
+//! The first thing in this release that a host can hold and drive without
+//! knowing it is holding a tracer. Everything under it -- the arena, the atlas,
+//! the hierarchy cache, the kernel -- existed before this and had no caller;
+//! this is the caller.
+//!
+//! # What a progressive backend has to do differently
+//!
+//! One [`RenderBackend::encode`] does not produce a finished pane. It draws a
+//! chunk of samples, folds them into a running mean and reports
+//! [`FrameOutcome::Converging`] until the mean has all the samples it was asked
+//! for. A host reads that and keeps scheduling frames; it does not have to know
+//! why.
+//!
+//! The other half of the contract is [`RenderBackend::invalidate`], which is
+//! how everything a mean is no longer valid over -- a moved camera, an edited
+//! parameter, a cooked scene -- reaches an accumulator that has no idea any of
+//! those things exist.
+//!
+//! # What it deliberately does not draw
+//!
+//! No background, no grid, no axis gizmo, no bounds, no validation overlay.
+//! Those are raster passes over a depth buffer this path does not produce, and
+//! a traced image is what the tracer integrates: the environment where a ray
+//! left, and nothing where a viewport would have drawn furniture. The pane's
+//! background mode does not apply to it, which is a product decision recorded
+//! in the render node's help rather than an omission.
+//!
+//! # Per pane, inside the backend
+//!
+//! A host holds one of these however many panes it shows, because the scene is
+//! per session. The accumulator is not: it is keyed by [`FrameCtx::index`],
+//! which is the arrangement the trait's documentation sets out and the reason
+//! `encode` takes a pane index at all.
+
+use solarxy_core::scene::SceneDelta;
+
+use crate::backend::{BackendCaps, FrameCtx, FrameOutcome, PaneContent, RenderBackend, TopologyMask};
+use crate::bind_groups::PathtraceLayouts;
+use crate::pathtrace::environment::TraceEnvironment;
+use crate::pathtrace::resolve::TraceResolve;
+use crate::pathtrace::scene::TraceSceneCache;
+use crate::pathtrace::{
+    EnvParams, PathEstimator, PathKernel, PathUniforms, TraceAtlas, TraceParams, TraceScene,
+    TraceTarget,
+};
+
+/// The most panes a layout can show at once, and so the width of any per-pane
+/// array a backend keeps. Mirrors the rasterizer's.
+const PANE_SLOTS: usize = 4;
+
+/// What a render is, as opposed to what the scene is.
+///
+/// Everything here is authored: it comes from the render node in a document or
+/// from a shell's defaults, and none of it is derived from the geometry. Kept
+/// as one struct so a host sets a render up in one call and so the fields a
+/// still and a preview disagree about are visible side by side.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TraceSettings {
+    /// Samples per pixel the accumulation converges to.
+    pub samples: u32,
+    /// How many of them one [`RenderBackend::encode`] draws.
+    ///
+    /// The pacing control, and the only thing standing between a large image
+    /// and a lost device: every dispatch is bounded by this times the pane's
+    /// pixels, whatever the sample count asks for.
+    pub chunk: u32,
+    /// Scattering events a path may have.
+    pub bounces: u32,
+    /// How many of those may additionally be transmissive.
+    pub transmissive_bounces: u32,
+    /// The luminance one sample's indirect contribution may reach. See
+    /// [`TraceParams::firefly_clamp`].
+    pub firefly_clamp: f32,
+    /// Fixed, so two runs of the same scene produce the same image.
+    pub seed: u32,
+    /// The aperture's radius in world units, already resolved out of the
+    /// camera's f-number. Zero is a pinhole.
+    pub aperture_radius: f32,
+    /// How far in front of the camera is sharp, in world units.
+    pub focus_distance: f32,
+    /// Aperture blades. Zero, one and two are circular.
+    pub aperture_blades: u32,
+}
+
+impl Default for TraceSettings {
+    fn default() -> Self {
+        Self {
+            samples: 64,
+            chunk: 1,
+            bounces: 6,
+            transmissive_bounces: 4,
+            firefly_clamp: DEFAULT_FIREFLY_CLAMP,
+            seed: 0x9E37_79B9,
+            aperture_radius: 0.0,
+            focus_distance: 0.0,
+            aperture_blades: 0,
+        }
+    }
+}
+
+/// The luminance one sample's indirect contribution may reach before it is
+/// scaled back to it.
+///
+/// Sixteen, which is well above anything a surface returns under an authored
+/// environment of unit brightness and well below what a near-specular scatter
+/// onto a small bright source charges. It is not authored: a control whose
+/// effect is "how much energy would you like removed from the parts of the
+/// image you cannot predict" is not one a person can reason about, and the
+/// render node carries no parameter for it.
+pub const DEFAULT_FIREFLY_CLAMP: f32 = 16.0;
+
+/// One pane's accumulation.
+struct PaneAccumulator {
+    target: TraceTarget,
+    uniforms: PathUniforms,
+    /// How many samples the mean already averages. Zero means the read slot
+    /// holds nothing.
+    samples: u32,
+    width: u32,
+    height: u32,
+    /// The camera buffer the uniforms bind, so a pane whose camera slot is
+    /// replaced rebinds rather than writing into a buffer nobody reads.
+    ///
+    /// A handle rather than a flag, because `wgpu::Buffer` compares by the
+    /// allocation it names rather than by its description: two cameras of the
+    /// same size are two buffers, and a bind group built over the wrong one
+    /// keeps it alive and shows its view.
+    camera: wgpu::Buffer,
+}
+
+/// The path tracer, as a host drives it.
+pub struct PathBackend {
+    layouts: PathtraceLayouts,
+    kernel: PathKernel,
+    resolve: TraceResolve,
+    /// The CPU half: what the document says, hierarchies included.
+    cache: TraceSceneCache,
+    /// The GPU half: the arena the kernel binds.
+    scene: TraceScene,
+    /// The sampled group: the texture atlas and the environment.
+    atlas: TraceAtlas,
+    panes: [Option<PaneAccumulator>; PANE_SLOTS],
+    settings: TraceSettings,
+    /// The sky the kernel integrates against when no environment image is
+    /// installed. Looking up, then looking down.
+    sky: ([f32; 3], [f32; 3]),
+    env_intensity: f32,
+    env_rotation: f32,
+}
+
+impl PathBackend {
+    /// Builds every pipeline and an empty scene.
+    ///
+    /// Fails only if the device rejects a module, which on the web is the
+    /// moment the browser's WGSL front end sees the whole composition for the
+    /// first time.
+    #[must_use]
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let layouts = PathtraceLayouts::new(device);
+        // A throwaway camera buffer, only so the kernel's pipeline layout can
+        // be built before any pane has a camera. Each pane binds its own.
+        let seed_camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pathtrace Layout Seed Camera"),
+            size: std::mem::size_of::<crate::camera::CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let seed_uniforms = PathUniforms::new(device, &seed_camera);
+        let kernel = PathKernel::new(device, &layouts, &seed_uniforms);
+        let resolve = TraceResolve::new(device);
+        let scene = TraceScene::new(device, &layouts);
+        let atlas = TraceAtlas::new(device, queue, &layouts);
+        Self {
+            layouts,
+            kernel,
+            resolve,
+            cache: TraceSceneCache::new(),
+            scene,
+            atlas,
+            panes: [None, None, None, None],
+            settings: TraceSettings::default(),
+            sky: ([0.05, 0.06, 0.08], [0.02, 0.02, 0.02]),
+            env_intensity: 1.0,
+            env_rotation: 0.0,
+        }
+    }
+
+    /// What the next render uses. Changing any of it drops every accumulation,
+    /// because a mean over two settings is a mean over neither.
+    pub fn set_settings(&mut self, settings: TraceSettings) {
+        if self.settings != settings {
+            self.settings = settings;
+            self.invalidate();
+        }
+    }
+
+    #[must_use]
+    pub fn settings(&self) -> TraceSettings {
+        self.settings
+    }
+
+    /// Installs a prepared environment image and the look the environment node
+    /// authored over it.
+    ///
+    /// The tracer's equivalent of the rasterizer's lighting chokepoint: one
+    /// place an environment reaches the GPU, so a caller cannot install half of
+    /// one.
+    pub fn set_environment(
+        &mut self,
+        device: &wgpu::Device,
+        environment: TraceEnvironment,
+        intensity: f32,
+        rotation: f32,
+    ) {
+        self.atlas
+            .set_environment(device, &self.layouts, environment);
+        self.env_intensity = intensity;
+        self.env_rotation = rotation;
+        self.invalidate();
+    }
+
+    /// The two colours the kernel blends by the world up axis when there is no
+    /// environment image, which is the ordinary case for a scene that has never
+    /// been given one.
+    pub fn set_sky(&mut self, up: [f32; 3], down: [f32; 3]) {
+        if self.sky != (up, down) {
+            self.sky = (up, down);
+            self.invalidate();
+        }
+    }
+
+    /// The scene the tracer holds, for the hierarchy jobs a host pumps and for
+    /// the counts a progress readout wants.
+    #[must_use]
+    pub fn scene_cache(&self) -> &TraceSceneCache {
+        &self.cache
+    }
+
+    /// The same, mutably, which is how a completed hierarchy build is handed
+    /// back under [`crate::pathtrace::scene::BuildPolicy::Deferred`].
+    pub fn scene_cache_mut(&mut self) -> &mut TraceSceneCache {
+        &mut self.cache
+    }
+
+    /// How many samples the given pane's mean averages, and how many it is
+    /// converging to.
+    #[must_use]
+    pub fn progress(&self, pane: usize) -> (u32, u32) {
+        let done = self
+            .panes
+            .get(pane)
+            .and_then(Option::as_ref)
+            .map_or(0, |p| p.samples);
+        (done, self.settings.samples.max(1))
+    }
+
+    /// Brings the GPU side up to date with whatever the cache holds.
+    ///
+    /// Separate from [`RenderBackend::apply`] because a hierarchy that finished
+    /// building in a worker changes the scene without any delta arriving, and
+    /// that path has to reach the same three uploads.
+    pub fn sync(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let Some(arena) = self.cache.repack() else {
+            return;
+        };
+        self.scene.sync(device, queue, &self.layouts, arena);
+        self.atlas.sync(
+            device,
+            queue,
+            &self.layouts,
+            self.cache.atlas(),
+            self.cache.atlas_textures(),
+        );
+        self.invalidate();
+    }
+
+    /// The environment uniform this frame: the image when one is installed, the
+    /// two-colour sky when not.
+    fn environment(&self) -> EnvParams {
+        if self.atlas.environment().size() == [0, 0] {
+            EnvParams::constant(self.sky.0, self.sky.1)
+        } else {
+            EnvParams::image(
+                self.atlas.environment(),
+                self.env_rotation,
+                self.env_intensity,
+            )
+        }
+    }
+}
+
+impl RenderBackend for PathBackend {
+    fn apply(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, delta: &SceneDelta) {
+        self.cache.apply(delta);
+        self.sync(device, queue);
+    }
+
+    /// Draw one chunk of samples into this pane's mean and resolve it into
+    /// `target`.
+    ///
+    /// `target` is used, unlike the rasterizer's, and that asymmetry is the
+    /// whole reason the parameter exists: this backend has its own float
+    /// accumulation and has to put a linear half-float image somewhere the
+    /// shared composite can read it.
+    fn encode(&mut self, ctx: &mut FrameCtx<'_>, target: &wgpu::TextureView) -> FrameOutcome {
+        let PaneContent::Scene { .. } = &ctx.content else {
+            // No camera, or a UV layout, which this backend does not draw.
+            return FrameOutcome::Complete;
+        };
+        // The arm's `cam_data` is deliberately unread. It is the camera as it
+        // stood *before* the aspect write, which the raster main pass takes as
+        // a value; this path reads the camera's uniform buffer through a bind
+        // group, so what it needs is the write below to have happened.
+        let Some(camera) = ctx.camera.as_deref_mut() else {
+            return FrameOutcome::Complete;
+        };
+
+        // Read before the destructure below, because both borrow `self` and
+        // the accumulator's is mutable.
+        let settings = self.settings;
+        let environment = self.environment();
+
+        // Destructured rather than reached through `self.`, for the reason the
+        // shared pane body destructures its context: the accumulator is
+        // borrowed mutably while the scene, the atlas and the pipelines are
+        // borrowed immutably, and only field-level bindings let the compiler
+        // see that those are disjoint.
+        let Self {
+            layouts,
+            kernel,
+            resolve,
+            scene,
+            atlas,
+            panes,
+            ..
+        } = self;
+        let Some(slot) = panes.get_mut(ctx.index) else {
+            return FrameOutcome::Complete;
+        };
+
+        // The pane's own pixels, not the pane's rect in CSS units: the
+        // accumulator is sized in the same texels the shared target is.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let (width, height) = (
+            (ctx.rect.width.max(1.0)) as u32,
+            (ctx.rect.height.max(1.0)) as u32,
+        );
+
+        // The aspect write has to land before the camera buffer is read, the
+        // same way the raster path does it, or the first traced frame after a
+        // resize frames the previous shape.
+        #[allow(clippy::cast_precision_loss)]
+        let aspect = ctx.rect.width / ctx.rect.height.max(1.0);
+        camera.write_with_aspect(ctx.queue, aspect);
+
+        let stale = slot
+            .as_ref()
+            .is_none_or(|p| p.width != width || p.height != height || p.camera != camera.buffer);
+        if stale {
+            *slot = Some(PaneAccumulator {
+                target: TraceTarget::new(ctx.device, layouts, width, height),
+                uniforms: PathUniforms::new(ctx.device, &camera.buffer),
+                samples: 0,
+                width,
+                height,
+                camera: camera.buffer.clone(),
+            });
+        }
+        let Some(pane) = slot.as_mut() else {
+            return FrameOutcome::Complete;
+        };
+
+        let total = settings.samples.max(1);
+        if pane.samples >= total {
+            // Converged, and the mean is still in the target, so the pane is
+            // re-resolved rather than re-traced. That is what makes a finished
+            // still cost nothing to keep on screen.
+            resolve.encode(ctx.device, ctx.encoder, pane.target.color_view(), target);
+            return FrameOutcome::Complete;
+        }
+
+        // Swapped **before** the dispatch, not after it, and the difference is
+        // not cosmetic. Everything that reads the accumulator reads the write
+        // slot, so a swap after the last dispatch of a run would leave the
+        // converged branch above resolving the slot from the dispatch before
+        // it -- or, after a single dispatch, one nothing has ever written.
+        //
+        // The first dispatch of a run does not swap, which is what pairs with
+        // `sample_base` of zero: it writes one slot and never reads the other.
+        if pane.samples > 0 {
+            pane.target.swap();
+        }
+
+        let chunk = settings.chunk.max(1).min(total - pane.samples);
+        let params = TraceParams {
+            tile_offset: [0, 0],
+            tile_size: [width, height],
+            resolution: [width, height],
+            bounces: settings.bounces,
+            transmissive_bounces: settings.transmissive_bounces,
+            samples: total,
+            seed: settings.seed,
+            light_count: scene.light_count(),
+            aperture_radius: settings.aperture_radius,
+            focus_distance: settings.focus_distance,
+            aperture_blades: settings.aperture_blades,
+            chunk,
+            sample_base: pane.samples,
+            firefly_clamp: settings.firefly_clamp,
+            ..TraceParams::default()
+        };
+        pane.uniforms.write(ctx.queue, &params, &environment);
+        kernel.encode(
+            ctx.encoder,
+            // The estimator is not a setting. All three converge to the same
+            // image and the other two exist so a test can prove it; a render
+            // uses both techniques.
+            PathEstimator::Mis,
+            scene,
+            atlas,
+            &pane.target,
+            &pane.uniforms,
+            [width, height],
+        );
+        pane.samples += chunk;
+        resolve.encode(ctx.device, ctx.encoder, pane.target.color_view(), target);
+
+        if pane.samples >= total {
+            FrameOutcome::Complete
+        } else {
+            FrameOutcome::Converging {
+                samples: pane.samples,
+                target_samples: total,
+            }
+        }
+    }
+
+    fn caps(&self) -> BackendCaps {
+        BackendCaps {
+            // Repeated frames of an unchanged pane keep improving it, which is
+            // the whole difference between this backend and the other one.
+            progressive: true,
+            // A count rather than a uniform's capacity. The rasterizer's eight
+            // is the size of a struct; this reads a storage array and is bound
+            // by nothing a user will reach.
+            max_lights: None,
+            supports_instancing: true,
+            // Points and lines are not surfaces and the traversal has no
+            // primitive for them. A host states that rather than letting a
+            // point cloud silently vanish.
+            supports_topology: TopologyMask::TRIANGLES,
+            writes_aovs: true,
+        }
+    }
+
+    /// Drop every pane's accumulation.
+    ///
+    /// The counter, not the textures: a mean with no samples behind it does not
+    /// read its history, so zeroing the count is the whole reset and the
+    /// allocation survives to be written over.
+    fn invalidate(&mut self) {
+        for pane in self.panes.iter_mut().flatten() {
+            pane.samples = 0;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_describe_a_progressive_backend_without_naming_it() {
+        let caps = BackendCaps {
+            progressive: true,
+            max_lights: None,
+            supports_instancing: true,
+            supports_topology: TopologyMask::TRIANGLES,
+            writes_aovs: true,
+        };
+        assert!(caps.progressive);
+        // Unbounded is not a large number, which is the whole point of the
+        // `Option`: a host says "every light in the scene" rather than "8192".
+        assert!(caps.max_lights.is_none());
+        assert!(!caps.supports_topology.contains(TopologyMask::POINTS));
+        assert!(!caps.supports_topology.contains(TopologyMask::LINES));
+        assert!(caps.writes_aovs);
+    }
+
+    #[test]
+    fn the_default_settings_pace_themselves() {
+        let s = TraceSettings::default();
+        // One sample per encode by default, which is what keeps a dispatch
+        // bounded no matter what sample count is asked for.
+        assert_eq!(s.chunk, 1);
+        assert!(s.samples >= s.chunk);
+        // On by default, because the speckle it removes is the one stage-four
+        // limitation this stage closes.
+        assert!(s.firefly_clamp > 0.0);
+    }
+}

@@ -22,10 +22,12 @@
 
 pub mod arena;
 pub mod atlas;
+pub mod backend;
 pub mod environment;
 pub mod light;
 pub mod material;
 pub mod probe;
+pub mod resolve;
 pub mod scene;
 
 use bytemuck::{Pod, Zeroable};
@@ -196,8 +198,12 @@ pub struct TraceParams {
     /// back on a transmissive hit, which keeps glass from eating a whole path at
     /// the cost of making the bounce count mean two things.
     pub transmissive_bounces: u32,
-    /// Samples per pixel in this dispatch, and the count the stratified sampler
-    /// divides its domain into. Zero or one turns stratification off.
+    /// Samples per pixel the **run** converges to, and the count the stratified
+    /// sampler divides its domain into. Zero or one turns stratification off.
+    ///
+    /// The whole run rather than one dispatch, which is what lets a chunked
+    /// render stratify globally: every dispatch draws a disjoint slice of one
+    /// domain rather than re-drawing its own. See [`TraceParams::chunk`].
     pub samples: u32,
     /// Decorrelates one dispatch from the next. A fixed value is what makes a
     /// render reproducible.
@@ -221,14 +227,46 @@ pub struct TraceParams {
     /// Aperture blades. Zero, one and two are a circular opening; three or
     /// more is a polygon.
     pub aperture_blades: u32,
+    /// How many of [`TraceParams::samples`] this dispatch draws, starting at
+    /// [`TraceParams::sample_base`].
+    ///
+    /// **Zero means all of them**, which is what a one-shot dispatch wants and
+    /// is what every caller written before the accumulator existed gets from
+    /// [`Default`]. A chunked render sets it to the slice it can afford between
+    /// two frames.
+    pub chunk: u32,
+    /// How many samples the accumulator's read slot already averages, and the
+    /// global index of this dispatch's first sample.
+    ///
+    /// **Zero means the read slot holds nothing**, so the kernel does not read
+    /// it. That is what makes the first dispatch of a run correct without a
+    /// zero-fill pass, and what makes a one-shot dispatch byte-identical to
+    /// what it produced before there was an accumulator.
+    pub sample_base: u32,
+    /// The luminance one sample's indirect contribution may reach before it is
+    /// scaled back to it. Zero or less turns the clamp off.
+    ///
+    /// Bounds the single enormous sample a 32-bit accumulator tolerates and a
+    /// viewer does not: one path in ten thousand finding a small bright source
+    /// through a near-specular scatter leaves a pixel that never averages away.
+    /// It bites only what the path found **after** its first scatter, so a
+    /// directly-viewed emitter or environment keeps its authored brightness;
+    /// see `path.wgsl`.
+    pub firefly_clamp: f32,
+    /// Pads the struct to its own alignment. See below. Never read; build one
+    /// of these through [`Default`] rather than naming this.
+    pub _pad: u32,
 }
 
-// Fifty-six bytes and no padding word: every member aligns to eight or four, so
-// the struct aligns to eight and fifty-six is already a multiple of it. The pad
-// the light count needed was spent by the aperture rather than left beside it.
+// Seventy-two bytes with one padding word. Every member aligns to eight or
+// four, so the struct aligns to eight, and the sixty-eight bytes the members
+// occupy round up to the next multiple of it. WGSL does that rounding whether
+// or not the pad is written, so writing it is what keeps the Rust size equal to
+// the shader's; `tests/uniform_layout.rs` is what checks that it does.
+//
 // A `vec3f` or `vec4f` appended here would raise the alignment to sixteen and
 // need more, which is why the environment is its own uniform instead.
-const _: () = assert!(std::mem::size_of::<TraceParams>() == 56);
+const _: () = assert!(std::mem::size_of::<TraceParams>() == 72);
 
 /// The compute pipelines.
 pub struct PathTracer {
@@ -298,7 +336,7 @@ impl PathTracer {
         });
         pass.set_pipeline(&self.debug[channel.index()]);
         pass.set_bind_group(0, &scene.bind_group, &[]);
-        pass.set_bind_group(1, &target.bind_group, &[]);
+        pass.set_bind_group(1, target.bind_group(), &[]);
         pass.set_bind_group(2, &atlas.bind_group, &[]);
         pass.set_bind_group(3, &uniforms.bind_group, &[]);
         pass.dispatch_workgroups(
@@ -722,12 +760,43 @@ impl TraceAtlas {
     }
 }
 
-/// A `Rgba32Float` image the kernel writes, and the bind group over it.
+/// The accumulator: two `Rgba32Float` colour images, two auxiliary images, and
+/// a bind group for each direction of the ping-pong.
+///
+/// # Why two of each
+///
+/// A running mean has to read what it is averaging against, and a
+/// `Rgba32Float` storage texture cannot be read and written by the same
+/// dispatch: WebGPU grants read-write storage access to `r32uint`, `r32sint`
+/// and `r32float` only. So each channel is a pair, one written while the other
+/// is read, and [`TraceTarget::swap`] exchanges their roles between dispatches.
+/// That spends all four of core WebGPU's storage textures, which is why there
+/// is no third auxiliary channel and no depth lane.
+///
+/// # Which one holds the answer
+///
+/// [`TraceTarget::swap`] runs **between** dispatches rather than after one, so
+/// the slot a dispatch wrote is still the write slot when it finishes. Every
+/// reader here -- the two readbacks and the resolve -- therefore reads the
+/// write slot, and a caller that never accumulates (the debug readout, every
+/// probe) never swaps and sees a single fixed target.
+///
+/// Nothing clears these. A dispatch with no samples behind it ignores the read
+/// side entirely, which is what makes the first dispatch of a run correct
+/// without a zero-fill pass.
 pub struct TraceTarget {
-    texture: wgpu::Texture,
-    #[allow(unused)]
-    auxiliary: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    /// Colour, indexed by slot.
+    color: [wgpu::Texture; 2],
+    /// Albedo in `rgb` with the octahedral world normal in `a`, indexed by
+    /// the same slot as the colour it describes.
+    auxiliary: [wgpu::Texture; 2],
+    /// `groups[i]` writes slot `i` and reads slot `i ^ 1`.
+    groups: [wgpu::BindGroup; 2],
+    /// Held so the resolve and the denoiser can bind the colour without
+    /// creating a view per frame.
+    color_views: [wgpu::TextureView; 2],
+    /// The slot the next dispatch writes, and the slot every reader reads.
+    write: usize,
     width: u32,
     height: u32,
 }
@@ -736,63 +805,114 @@ impl TraceTarget {
     /// Allocates a target of `width` by `height`.
     #[must_use]
     pub fn new(device: &wgpu::Device, layouts: &PathtraceLayouts, width: u32, height: u32) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Pathtrace Debug Target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        let storage = |label: &str| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
         // The auxiliary target: what the surface looked like, as opposed to
-        // what it returned. One texture rather than two, because the storage
-        // group's budget is four and the accumulator needs the other two: the
+        // what it returned. One texture per slot rather than two, because the
         // albedo takes three lanes and the normal is folded into the fourth,
         // octahedrally, which costs a little precision on a vector that only
         // has to steer an edge-stopping filter.
-        let auxiliary = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Pathtrace Auxiliary Target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let aux_view = auxiliary.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Pathtrace Target Bind Group"),
-            layout: &layouts.target,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&aux_view),
-                },
-            ],
-        });
+        let color = [storage("Pathtrace Colour A"), storage("Pathtrace Colour B")];
+        let auxiliary = [
+            storage("Pathtrace Auxiliary A"),
+            storage("Pathtrace Auxiliary B"),
+        ];
+        let views = |t: &[wgpu::Texture; 2]| {
+            [
+                t[0].create_view(&wgpu::TextureViewDescriptor::default()),
+                t[1].create_view(&wgpu::TextureViewDescriptor::default()),
+            ]
+        };
+        let color_views = views(&color);
+        let aux_views = views(&auxiliary);
+        let group = |slot: usize| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Pathtrace Target Bind Group"),
+                layout: &layouts.target,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&color_views[slot]),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&aux_views[slot]),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&color_views[slot ^ 1]),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&aux_views[slot ^ 1]),
+                    },
+                ],
+            })
+        };
+        let groups = [group(0), group(1)];
         Self {
-            texture,
+            color,
             auxiliary,
-            bind_group,
+            groups,
+            color_views,
+            write: 0,
             width,
             height,
         }
+    }
+
+    /// Exchanges the read and write slots.
+    ///
+    /// Call **before** a dispatch that has history to average against, never
+    /// after one. Every reader here reads the write slot, so a swap that
+    /// follows the last dispatch of a run hands back the image from the
+    /// dispatch before it, or from no dispatch at all if there was only one.
+    /// The first dispatch of a run does not swap: it writes one slot and, with
+    /// a sample base of zero, never reads the other.
+    pub fn swap(&mut self) {
+        self.write ^= 1;
+    }
+
+    /// The colour a reader outside this module binds: the slot the last
+    /// dispatch wrote.
+    #[must_use]
+    pub fn color_texture(&self) -> &wgpu::Texture {
+        &self.color[self.write]
+    }
+
+    /// The auxiliary channels beside [`TraceTarget::color_texture`].
+    #[must_use]
+    pub fn auxiliary_texture(&self) -> &wgpu::Texture {
+        &self.auxiliary[self.write]
+    }
+
+    /// The accumulation group, for a pipeline that binds it at group 1.
+    #[must_use]
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.groups[self.write]
+    }
+
+    /// A view of [`TraceTarget::color_texture`], for a pass that samples the
+    /// running mean rather than copying it.
+    #[must_use]
+    pub fn color_view(&self) -> &wgpu::TextureView {
+        &self.color_views[self.write]
     }
 
     /// Encodes a full-image copy of the auxiliary target, the same way
@@ -809,7 +929,7 @@ impl TraceTarget {
         let (buffer, padded) = crate::capture::encode_capture(
             device,
             encoder,
-            &self.auxiliary,
+            self.auxiliary_texture(),
             (0, 0, self.width, self.height),
         );
         FloatReadback {
@@ -845,7 +965,7 @@ impl TraceTarget {
         let (buffer, padded) = crate::capture::encode_capture(
             device,
             encoder,
-            &self.texture,
+            self.color_texture(),
             (0, 0, self.width, self.height),
         );
         FloatReadback {
@@ -1261,7 +1381,7 @@ impl PathKernel {
         });
         pass.set_pipeline(&self.pipelines[estimator.index()]);
         pass.set_bind_group(0, scene.bind_group(), &[]);
-        pass.set_bind_group(1, &target.bind_group, &[]);
+        pass.set_bind_group(1, target.bind_group(), &[]);
         pass.set_bind_group(2, atlas.bind_group(), &[]);
         pass.set_bind_group(3, &uniforms.bind_group, &[]);
         pass.dispatch_workgroups(

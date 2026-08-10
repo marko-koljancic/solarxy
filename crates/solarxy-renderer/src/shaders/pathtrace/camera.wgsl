@@ -46,9 +46,14 @@ struct TraceParams {
     // Here the accounting is explicit: `bounces` is the ceiling on scattering
     // events and this is the ceiling on the transmissive subset.
     transmissive_bounces: u32,
-    // How many samples this dispatch integrates per pixel, and the count the
-    // stratified sampler divides its domain into. Zero or one turns
+    // How many samples the whole **run** integrates per pixel, and the count
+    // the stratified sampler divides its domain into. Zero or one turns
     // stratification off.
+    //
+    // The run rather than the dispatch, so a chunked render stratifies
+    // globally: each dispatch draws a disjoint slice of one domain rather than
+    // re-drawing its own, which would repeat the same strata every chunk and
+    // never converge. See `chunk` and `sample_base`.
     samples: u32,
     // Decorrelates one dispatch from the next. A fixed value is what makes a
     // render reproducible.
@@ -68,6 +73,20 @@ struct TraceParams {
     // Aperture blades. Zero, one and two are circular; three or more is a
     // polygon.
     aperture_blades: u32,
+    // How many of `samples` this dispatch draws, starting at `sample_base`.
+    // Zero means all of them.
+    chunk: u32,
+    // How many samples the accumulator's read slot already averages, and the
+    // global index of this dispatch's first sample. Zero means the read slot
+    // holds nothing and is not read.
+    sample_base: u32,
+    // The luminance one sample's indirect contribution may reach. Zero or less
+    // turns the clamp off. See `path.wgsl`.
+    firefly_clamp: f32,
+    // Pads the struct to its own eight-byte alignment. WGSL rounds the size up
+    // whether or not this is here; naming it is what keeps the Rust record the
+    // same size as this one.
+    reserved: u32,
 }
 
 @group(3) @binding(0) var<uniform> camera: Camera;

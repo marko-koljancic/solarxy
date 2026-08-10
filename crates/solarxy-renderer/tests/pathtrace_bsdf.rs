@@ -727,6 +727,7 @@ fn the_sphere_grid_renders() {
                     aperture_radius: 0.0,
                     focus_distance: 0.0,
                     aperture_blades: 0,
+                    ..TraceParams::default()
                 },
                 &environment,
             );

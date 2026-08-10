@@ -21,6 +21,15 @@
 // Albedo in `rgb` and the world normal folded into `a`. What the surface looked
 // like, as opposed to what it returned.
 @group(1) @binding(1) var path_aux: texture_storage_2d<rgba32float, write>;
+// The other half of the ping-pong: what the run has averaged so far. Read only
+// when `params.sample_base` says there is something in them, which is why
+// nothing has to clear them before a run.
+//
+// A read side rather than reading `path_out` back: WebGPU grants read-write
+// storage access to `r32uint`, `r32sint` and `r32float`, and this is none of
+// those.
+@group(1) @binding(2) var path_prev: texture_storage_2d<rgba32float, read>;
+@group(1) @binding(3) var path_aux_prev: texture_storage_2d<rgba32float, read>;
 
 // What one path saw, beyond the light it carried back.
 struct PathResult {
@@ -80,6 +89,35 @@ fn pack_octahedral(n: vec3f) -> f32 {
     return floor(q.x + 0.5) * OCT_STEPS + floor(q.y + 0.5);
 }
 
+// The inverse of `pack_octahedral`, needed on the GPU now that a chunk averages
+// against the run's stored normal rather than owning the only one.
+//
+// `solarxy_renderer::pathtrace::unpack_aov_normal` is the same arithmetic in
+// Rust, and the two are held together by the round-trip test rather than by
+// this comment.
+fn unpack_octahedral(packed: f32) -> vec3f {
+    let combined = max(packed, 0.0);
+    let qx = floor(combined / OCT_STEPS);
+    let qy = combined - qx * OCT_STEPS;
+    let e = (vec2f(qx, qy) / (OCT_STEPS - 1.0)) * 2.0 - vec2f(1.0);
+
+    let z = 1.0 - abs(e.x) - abs(e.y);
+    var v = vec3f(e, z);
+    if z < 0.0 {
+        // The inverse of the fold: the lower hemisphere was mapped out across
+        // the octahedron's edges, so it comes back the same way.
+        v = vec3f(
+            (1.0 - abs(e.y)) * select(-1.0, 1.0, e.x >= 0.0),
+            (1.0 - abs(e.x)) * select(-1.0, 1.0, e.y >= 0.0),
+            z,
+        );
+    }
+    if dot(v, v) <= 0.0 {
+        return vec3f(0.0, 0.0, 1.0);
+    }
+    return normalize(v);
+}
+
 // One camera ray carried until it leaves, is absorbed, or runs out of budget.
 fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
     var out: PathResult;
@@ -102,6 +140,11 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
     var radiance = vec3f(0.0);
     var throughput = vec3f(1.0);
     var transmissive_left = params.transmissive_bounces;
+
+    // Everything the path had gathered when it first scattered, which is what
+    // the firefly clamp is forbidden to touch. See `clamp_firefly`.
+    var direct = vec3f(0.0);
+    var scattered = false;
 
     // The density of the scatter that produced the current ray, which is what
     // radiance found by chance is weighted against. Negative means the ray came
@@ -240,6 +283,16 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
         }
         scatter_pdf = rec.pdf;
 
+        // The path has left its first surface, so everything gathered up to
+        // here is direct: the emitter or environment a camera ray landed on,
+        // this surface's own emission, and the connection this surface made to
+        // a light. All three are found by aiming rather than by luck, and none
+        // of them is what a clamp exists to bound.
+        if !scattered {
+            direct = radiance;
+            scattered = true;
+        }
+
         // Step off the surface on the side the new direction leaves by, which
         // is the far side for a transmitted ray.
         let offset_dir = normal_ws * select(-1.0, 1.0, dot(rec.direction, normal_ws) > 0.0);
@@ -248,8 +301,34 @@ fn path_trace(pixel: vec2u, sample_index: u32) -> PathResult {
         rng_next_bounce(&rng);
     }
 
-    out.radiance = radiance;
+    out.radiance = direct + clamp_firefly(radiance - direct);
     return out;
+}
+
+// Scales one sample's indirect contribution back to `params.firefly_clamp` if
+// it exceeds it, leaving its colour alone.
+//
+// A firefly is one sample in thousands that found a small bright source through
+// a scatter whose density said it almost certainly would not, so the estimator
+// charges it an enormous weight to stay unbiased. Averaging removes it
+// eventually; at any sample count a person will wait for, it is a white speck
+// that never fades. Clamping it is deliberately biased and the bias is bounded
+// by what it removes, which is the trade the alternative -- a correct image
+// nobody renders long enough to see -- does not offer.
+//
+// Only the indirect part is bounded, and that is what makes the default safe to
+// leave on: a light panel viewed directly, or a sun in the environment, is
+// radiance the camera ray aimed at rather than stumbled onto, and clamping it
+// would dim the authored scene rather than remove noise from it.
+fn clamp_firefly(v: vec3f) -> vec3f {
+    if params.firefly_clamp <= 0.0 {
+        return v;
+    }
+    let l = luminance(v);
+    if l <= params.firefly_clamp {
+        return v;
+    }
+    return v * (params.firefly_clamp / l);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -264,20 +343,26 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
         return;
     }
 
-    // The sample loop is inside the kernel and there is no accumulation
-    // texture, which is the one place this deliberately differs from what the
-    // finished kernel will do: ping-ponged accumulation is the next stage's,
-    // and a harness that owned one would have to be unwound to get there. Long
-    // renders are paced by tiling instead, which is what the tile uniforms
-    // already exist for.
-    let samples = max(1u, params.samples);
-    var accumulated = vec3f(0.0);
+    // This dispatch's slice of the run. `chunk` of zero means the whole thing,
+    // which is what a one-shot dispatch wants and what every caller written
+    // before there was an accumulator gets by default.
+    let total = max(1u, params.samples);
+    var draw = params.chunk;
+    if draw == 0u {
+        draw = total;
+    }
+
+    // The sample index is global, not local to the chunk. That is the whole
+    // reason `sample_base` exists on the sampling side: the stratified sampler
+    // divides one domain of `total` samples, so a chunk that re-drew indices
+    // from zero would re-draw the same strata and the mean would stop moving.
+    var sum = vec3f(0.0);
     var albedo = vec3f(0.0);
     var normal = vec3f(0.0);
     var described = 0u;
-    for (var s = 0u; s < samples; s += 1u) {
-        let result = path_trace(pixel, s);
-        accumulated += result.radiance;
+    for (var s = 0u; s < draw; s += 1u) {
+        let result = path_trace(pixel, params.sample_base + s);
+        sum += result.radiance;
         if result.hit {
             albedo += result.albedo;
             normal += result.normal;
@@ -285,22 +370,90 @@ fn path_main(@builtin(global_invocation_id) gid: vec3u) {
         }
     }
 
-    textureStore(path_out, vec2i(pixel), vec4f(accumulated / f32(samples), 1.0));
+    let base = f32(params.sample_base);
+    let drawn = f32(draw);
+    let coord = vec2i(pixel);
+    let fresh = params.sample_base == 0u;
 
-    // Averaged over the samples that found a surface rather than over all of
-    // them, so a pixel on the silhouette of an object reports that object's
-    // colour at the strength it covers the pixel, not diluted by the sky behind
-    // it. The normal is renormalized after averaging, which is what makes the
-    // average of several samples across an edge point between them instead of
-    // shrinking toward zero.
-    var aux = vec4f(0.0, 0.0, 0.0, pack_octahedral(vec3f(0.0, 0.0, 1.0)));
-    if described > 0u {
-        let averaged = normal / f32(described);
-        var n = vec3f(0.0, 0.0, 1.0);
-        if dot(averaged, averaged) > 1e-12 {
-            n = normalize(averaged);
-        }
-        aux = vec4f(albedo / f32(described), pack_octahedral(n));
+    // What the run knew before this dispatch. Read once, because the read slot
+    // is a storage texture and this is the only pixel of it anything here
+    // touches.
+    var prev_color = vec4f(0.0);
+    var prev_aux = vec4f(0.0);
+    if !fresh {
+        prev_color = textureLoad(path_prev, coord);
+        prev_aux = textureLoad(path_aux_prev, coord);
     }
-    textureStore(path_aux, vec2i(pixel), aux);
+
+    // An explicit running mean rather than a running sum, so the texture holds
+    // a displayable image at every sample count and the resolve is a format
+    // conversion rather than a division that has to be told the count.
+    var color = sum / drawn;
+    if !fresh {
+        color = (prev_color.rgb * base + sum) / (base + drawn);
+    }
+
+    // How many samples across the whole run have found a surface worth
+    // describing, carried in the colour target's alpha lane.
+    //
+    // That lane was a constant one and nothing read it: the resolve writes its
+    // own alpha, because a partially transparent scene handed to the composite
+    // would darken against whatever the target held. Spending it here is what
+    // makes the auxiliary mean **exact** across chunks rather than an
+    // approximation. The alternative was a fifth storage texture, and core
+    // WebGPU grants four.
+    //
+    // It has to be a count of described samples and not of samples: a pixel on
+    // a silhouette describes a surface in some samples and not others, and
+    // weighting a chunk that described nothing as if it had described black is
+    // exactly the drift this replaced.
+    let described_before = select(0.0, prev_color.a, !fresh);
+    let described_now = described_before + f32(described);
+    textureStore(path_out, coord, vec4f(color, described_now));
+
+    // The auxiliary channels: the albedo of the first surface rough enough to
+    // look like itself, and its world normal.
+    //
+    // The normal is why this cannot be a plain running mean of the stored
+    // value. A unit vector folded octahedrally into one lane comes back as a
+    // direction and not as the magnitude a weighted mean needs, so the merge
+    // reduces this chunk to its own mean first and then weights the two means
+    // by how many samples each describes. With the count above, that is the
+    // same number the one-shot dispatch computes.
+    var chunk_albedo = vec3f(0.0);
+    var chunk_normal = vec3f(0.0, 0.0, 1.0);
+    if described > 0u {
+        chunk_albedo = albedo / f32(described);
+        // Renormalized after averaging, which is what makes several samples
+        // across an edge point between the two surfaces instead of shrinking
+        // toward zero.
+        if dot(normal, normal) > 1e-12 {
+            chunk_normal = normalize(normal);
+        }
+    }
+
+    if described == 0u {
+        // This chunk says nothing about a surface. Fresh, that is the sentinel
+        // -- a lane written by a pixel that found nothing decodes to `+Z`, not
+        // to a black wall facing nowhere. Otherwise it is what the run already
+        // knows, unchanged.
+        let keep = select(prev_aux, vec4f(chunk_albedo, pack_octahedral(chunk_normal)), fresh);
+        textureStore(path_aux, coord, keep);
+        return;
+    }
+    if described_before <= 0.0 {
+        // The first surface this pixel has found, however many dispatches in.
+        textureStore(path_aux, coord, vec4f(chunk_albedo, pack_octahedral(chunk_normal)));
+        return;
+    }
+
+    let now = f32(described);
+    let merged_albedo = (prev_aux.rgb * described_before + chunk_albedo * now) / described_now;
+    var merged_normal = unpack_octahedral(prev_aux.a) * described_before + chunk_normal * now;
+    if dot(merged_normal, merged_normal) > 1e-12 {
+        merged_normal = normalize(merged_normal);
+    } else {
+        merged_normal = chunk_normal;
+    }
+    textureStore(path_aux, coord, vec4f(merged_albedo, pack_octahedral(merged_normal)));
 }

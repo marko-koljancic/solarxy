@@ -181,6 +181,7 @@ fn params(samples: u32) -> TraceParams {
         aperture_radius: 0.0,
         focus_distance: 0.0,
         aperture_blades: 0,
+        ..TraceParams::default()
     }
 }
 
