@@ -283,7 +283,13 @@ fn cook_passthrough_image(
 pub fn render_descriptor() -> NodeTypeDescriptor {
     NodeTypeDescriptor {
         type_id: "render",
-        version: 1,
+        // v2 added the engine choice, the quality preset, the bounce budgets
+        // and the denoise toggle, and raised the resolution clamp. A pure
+        // addition, like the camera node's v2 and v3: a parameter a document
+        // has never heard of resolves to its descriptor default, so there is
+        // nothing for a migration to do and the round-trip test is what says
+        // so.
+        version: 2,
         display_name: "Render",
         category: Category::Export,
         contexts: ContextSet::OBJ,
@@ -317,7 +323,7 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
                     ParamType::Int,
                     ParamValue::Int(1920),
                 )
-                .hard(16.0, 4096.0)
+                .hard(16.0, 8192.0)
                 .step(1.0)
                 .doc(
                     "Output width in pixels. Together with Height it also \
@@ -331,46 +337,149 @@ pub fn render_descriptor() -> NodeTypeDescriptor {
                     ParamType::Int,
                     ParamValue::Int(1080),
                 )
-                .hard(16.0, 4096.0)
+                .hard(16.0, 8192.0)
                 .step(1.0)
                 .doc(
-                    "Output height in pixels. Note that width times height is \
-                     capped at 4 megapixels on the way to the GPU: ask for \
-                     more and the capture is scaled down to fit, keeping the \
-                     aspect ratio, and reports the size it actually produced.",
+                    "Output height in pixels. Large renders are drawn in \
+                     tiles, each inside the four-megapixel budget a browser \
+                     reliably survives, and assembled afterwards -- so the \
+                     size you ask for is the size you get, however long it \
+                     takes.",
+                ),
+                ParamSpec::new(
+                    "engine",
+                    "Engine",
+                    "render",
+                    ParamType::Enum {
+                        variants: vec![
+                            EnumVariant::new("raster", "Rasterized"),
+                            EnumVariant::new("traced", "Path traced"),
+                        ],
+                    },
+                    ParamValue::Enum("raster".to_string()),
+                )
+                .doc(
+                    "Which renderer draws the still. Rasterized is the \
+                     viewport's own renderer: fast, and its shadows, ambient \
+                     occlusion and reflections are approximations. Path traced \
+                     follows light through the scene instead, so shadows, \
+                     bounced colour and soft reflections come out of the same \
+                     calculation rather than being added on top -- and it \
+                     takes as long as it takes.\n\n\
+                     A traced still shows what the tracer integrates: the \
+                     environment where a ray leaves the scene, and no grid, \
+                     gizmo or overlay. It is a photograph of the scene rather \
+                     than a screenshot of the viewport.",
+                ),
+                ParamSpec::new(
+                    "quality",
+                    "Quality",
+                    "render",
+                    ParamType::Enum {
+                        variants: vec![
+                            EnumVariant::new("draft", "Draft (16 samples)"),
+                            EnumVariant::new("good", "Good (64 samples)"),
+                            EnumVariant::new("high", "High (256 samples)"),
+                            EnumVariant::new("reference", "Reference (1024 samples)"),
+                        ],
+                    },
+                    ParamValue::Enum("good".to_string()),
+                )
+                .doc(
+                    "How many samples each pixel averages, and so how much \
+                     grain is left. Four times the samples is half the noise, \
+                     not a quarter, which is why the steps are wide: Draft to \
+                     Good is a visible improvement and Draft to Reference is \
+                     sixty-four times the wait.\n\n\
+                     Path traced only. A rasterized still draws each pixel \
+                     once.",
+                ),
+                ParamSpec::new(
+                    "bounces",
+                    "Bounces",
+                    "render",
+                    ParamType::Int,
+                    ParamValue::Int(6),
+                )
+                .hard(1.0, 32.0)
+                .step(1.0)
+                .doc(
+                    "How many times light may scatter before a path is given \
+                     up on. Higher opens up interiors and deep folds, where \
+                     most of the light arrives after several bounces; an \
+                     exterior on a bright day is usually finished by four.\n\n\
+                     Path traced only.",
+                ),
+                ParamSpec::new(
+                    "transmissive_bounces",
+                    "Glass Bounces",
+                    "render",
+                    ParamType::Int,
+                    ParamValue::Int(4),
+                )
+                .hard(0.0, 32.0)
+                .step(1.0)
+                .doc(
+                    "How many of the bounces above may additionally pass \
+                     through transmissive surfaces. Counted separately so a \
+                     pane of glass does not spend a whole path's budget \
+                     getting through it: a window is two surfaces, a tumbler \
+                     is four, and running out ends the path rather than \
+                     turning the glass opaque.\n\n\
+                     Path traced only.",
+                ),
+                ParamSpec::new(
+                    "denoise",
+                    "Denoise",
+                    "render",
+                    ParamType::Bool,
+                    ParamValue::Bool(false),
+                )
+                .doc(
+                    "Smooths the remaining grain, steered by what each pixel's \
+                     surface looks like so material boundaries survive.\n\n\
+                     Off by default, and that is the right default for a \
+                     finished still: at a high sample count there is little \
+                     grain left to remove and a filter can only take detail \
+                     away. Turn it on for a Draft, where the grain is the \
+                     thing standing between you and seeing the shot.",
                 ),
                 ParamSpec::new(
                     "render",
-                    "Render",
+                    "Render Still",
                     "render",
                     ParamType::Action,
                     ParamValue::Bool(false),
                 )
                 .doc(
-                    "Jumps the active viewport to the chosen camera and opens \
-                     the screenshot dialog at this resolution. Nothing is \
-                     written until you save from there.",
+                    "Renders the still and opens a dialog showing it arrive, \
+                     tile by tile, with a running count and a cancel. Nothing \
+                     is written until you save from there.\n\n\
+                     The viewport is left where it is. The shot comes from the \
+                     camera above, not from what you happen to be looking at, \
+                     so pressing this never moves your view.",
                 ),
             ],
         ),
         bypass: BypassBehavior::NotBypassable,
-        doc: "Holds a render setup: which camera to shoot through and at what \
-              resolution. It carries settings and nothing else -- no ports, \
-              no cook, no output. Pressing Render jumps the active viewport to \
-              the chosen camera and opens the screenshot dialog at this \
-              resolution, where you review the frame and choose whether to \
-              save it.\n\n\
+        doc: "Holds a render setup: which camera to shoot through, at what \
+              resolution, with which renderer and how much patience. It \
+              carries settings and nothing else -- no ports, no cook, no \
+              output. Pressing Render Still renders it and opens a dialog \
+              showing it arrive, where you review the frame and choose whether \
+              to save it.\n\n\
               It lives at the object level beside the cameras and lights it \
               refers to, and it is how a shot stops being something you \
               re-find by orbiting. Point it at a `camera` node and the same \
               framing comes back every session; keep several around, one per \
               shot, each named for what it captures.\n\n\
-              A capture is capped at 4 megapixels. The width and height go up \
-              to 4096 each, but anything past the cap is scaled down to fit, \
-              preserving aspect -- so asking for 3840x2160 does not get you a \
-              4K frame, and the result tells you the size it really made. The \
-              limit is deliberate: larger captures can lose the WebGPU device \
-              outright, and there is no recovery from that on the web yet.",
+              Up to 8192 pixels an edge. Anything larger than a browser draws \
+              in one pass is rendered in tiles and assembled, so the size you \
+              ask for is the size you get -- what changes with resolution is \
+              how long it takes, not whether it works.\n\n\
+              Depth of field belongs to the camera, not here: aperture, focus \
+              distance and blade count live on the `camera` node this points \
+              at, so the same lens applies wherever that camera is used.",
         search_aliases: &["render", "rop", "output", "capture", "screenshot"],
         glyph: "render",
         role: NodeRole::Terminal,

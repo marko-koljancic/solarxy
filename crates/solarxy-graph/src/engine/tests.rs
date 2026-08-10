@@ -8192,3 +8192,87 @@ fn budgeted_cook_defers_cross_network_references() {
         "the reference-consuming display cooked to geometry"
     );
 }
+
+/// A render node written before the still render existed opens with the whole
+/// new set filled from defaults, and round-trips.
+///
+/// The v1-to-v2 bump carries no migration hook for the same reason the camera's
+/// two bumps did not: every added parameter fills from its registry default.
+/// That is a claim about the defaults rather than about the loader, so it is
+/// checked against a document that genuinely lacks the keys and is stamped back
+/// to v1, which is what a pre-0.9.0 scene holds on disk.
+#[test]
+fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+    e.apply(Command::SetParam {
+        ctx: GraphContext::Root,
+        node,
+        key: "width".to_string(),
+        value: ParamSource::Literal(ParamValue::Int(1280)),
+    })
+    .unwrap();
+
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    let mut aged = 0;
+    for n in &mut scene.graph.nodes {
+        if n.type_id == "render" {
+            n.type_version = 1;
+            for key in [
+                "engine",
+                "quality",
+                "bounces",
+                "transmissive_bounces",
+                "denoise",
+            ] {
+                n.params.remove(key);
+            }
+            aged += 1;
+        }
+    }
+    assert_eq!(aged, 1, "the render node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "filling from defaults must not warn: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let g = reopened.doc.graph(GraphContext::Root).unwrap();
+    let n = g
+        .nodes()
+        .find(|n| n.type_id == "render")
+        .expect("the render node survived the round trip");
+    assert_eq!(n.type_version, 2, "reopening stamps the current version");
+    let id = n.id;
+
+    let value = |key: &str| {
+        reopened
+            .resolved_param(GraphContext::Root, id, key)
+            .unwrap_or_else(|e| panic!("{key} resolves: {e}"))
+    };
+    // What the author set is what the author set.
+    assert_eq!(value("width"), ParamValue::Int(1280));
+    // And everything v2 added arrives at its default rather than at zero, which
+    // is the whole claim: an engine of "" would render nothing and a bounce
+    // budget of 0 would end every path before it started.
+    assert_eq!(value("engine"), ParamValue::Enum("raster".to_string()));
+    assert_eq!(value("quality"), ParamValue::Enum("good".to_string()));
+    assert_eq!(value("bounces"), ParamValue::Int(6));
+    assert_eq!(value("transmissive_bounces"), ParamValue::Int(4));
+    // Off, which is the still's default: a converged render has little grain
+    // left and a filter can only take detail away.
+    assert_eq!(value("denoise"), ParamValue::Bool(false));
+}

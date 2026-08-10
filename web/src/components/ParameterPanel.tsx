@@ -19,7 +19,6 @@ import {
 } from "../engine/session";
 import { saveExportToFile } from "../persistence/opfs";
 import { pushToast } from "../store/toasts";
-import { useViewState } from "../store/viewState";
 import { hasMissing, missingSidecars, referencedSidecars } from "../engine/sidecars";
 import { useUi } from "../store/ui";
 import { DIRECTORY_PICKER } from "./directoryPicker";
@@ -28,10 +27,10 @@ import type {
   NodeMirror,
   ParamSnapshot,
   ParamSource,
-  RegistrySnapshot,
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
+import { stillRequestFor } from "./stillRequest";
 import { ExpressionField } from "./inputs/ExpressionField";
 import {
   acceptsExpression,
@@ -414,15 +413,10 @@ function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode
       const camSrc = node.params.camera_path;
       const cam =
         camSrc && camSrc.kind === "literal" ? ((camSrc as { value: number | null }).value) : null;
-      const width = numberParam(node, registry, "width", 1920);
-      const height = numberParam(node, registry, "height", 1080);
-      if (cam != null) {
-        const pane = useViewState.getState().view?.activePane ?? 0;
-        const view = getClient().jumpToCamera(pane, cam);
-        useViewState.getState().setView(view);
-      }
-      useUi.getState().setScreenshotPreset({ width, height });
-      useUi.getState().setScreenshotOpen(true);
+      // The viewport is deliberately left alone. A shot is a property of the
+      // scene and the pane is where someone happens to be looking, so the job
+      // builds its own camera from the node's and nothing moves.
+      useUi.getState().setStillRequest(stillRequestFor(node, registry, cam));
       return;
     }
     try {
@@ -441,19 +435,6 @@ function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode
       </button>
     </div>
   );
-}
-
-/** A numeric param's effective value (literal else registry default). */
-function numberParam(
-  node: NodeMirror,
-  registry: RegistrySnapshot | null,
-  key: string,
-  fallback: number,
-): number {
-  const src = node.params[key];
-  if (src && src.kind === "literal") return Number((src as { value: unknown }).value) || fallback;
-  const spec = descriptorFor(registry, node.typeId)?.params.find((p) => p.key === key);
-  return Number(spec?.default) || fallback;
 }
 
 /** The cross-context reference picker: candidates come from

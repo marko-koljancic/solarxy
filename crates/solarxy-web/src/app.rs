@@ -240,6 +240,13 @@ struct StillOptsDto {
     samples: u32,
     engine: String,
     denoise: bool,
+    /// The `camera` node to shoot through, or `null` to shoot the active
+    /// pane's current view.
+    ///
+    /// The still never moves a pane. A shot is a property of the scene and the
+    /// viewport is where someone happens to be looking, so the job builds its
+    /// own camera from this and leaves every pane where it was.
+    camera: Option<f64>,
 }
 
 /// A screenshot request: capture resolution (physical pixels) plus the
@@ -382,6 +389,16 @@ pub struct SolarxyApp {
     turntable_request: Option<(usize, f32, ScreenshotOptsDto)>,
     /// The in-flight screenshot readback (one at a time).
     pending_screenshot: Option<solarxy_renderer::capture::PendingCapture>,
+    /// The camera the running still shoots through, owned by the job rather
+    /// than borrowed from a pane, so rendering never moves the view.
+    still_camera: Option<solarxy_renderer::camera_state::CameraState>,
+    /// The look that camera carries, resolved once when the job starts.
+    ///
+    /// The camera owns the look as of 0.8.2, so a still through camera X gets
+    /// X's exposure, tone map and grade rather than whichever pane happened to
+    /// be active. Resolved at start rather than per tile because a look that
+    /// changed mid-render would band the picture at a tile boundary.
+    still_look: CompositeLook,
     /// The running still render, if any.
     ///
     /// While this is `Some` the frame loop renders the job instead of the
@@ -698,6 +715,8 @@ impl SolarxyApp {
             turntable_request: None,
             pending_screenshot: None,
             still: None,
+            still_camera: None,
+            still_look: CompositeLook::default(),
             tracer: None,
             still_tiles: std::collections::VecDeque::new(),
             viz_dirty: true,
@@ -1503,6 +1522,64 @@ impl SolarxyApp {
             screen_space_post: self.renderer.post.bloom_enabled,
             tile_budget: TILE_BUDGET_PIXELS,
         };
+        // The job's own camera. Built from the named `camera` node when there
+        // is one, and otherwise from the active pane's current view copied by
+        // value: either way the panes are untouched, which is what makes
+        // pressing Render Still not move what you are looking at.
+        let mut camera = self.view.cameras[self.view.active_pane]
+            .as_ref()
+            .map_or_else(
+                || {
+                    solarxy_renderer::camera::camera_from_bounds(
+                        &self.scene_bounds(),
+                        #[allow(clippy::cast_precision_loss)]
+                        {
+                            opts.width as f32 / opts.height.max(1) as f32
+                        },
+                    )
+                },
+                |c| c.camera,
+            );
+        if let Some(node) = opts.camera {
+            let id = SceneObjectId(node as u64);
+            if let Some(def) = self
+                .raster
+                .scene()
+                .cameras()
+                .and_then(|cams| cams.iter().find(|c| c.id == id).cloned())
+            {
+                apply_camera_def(&mut camera, &def);
+            }
+        }
+        // The image's aspect, not a pane's: the render's width and height fix
+        // the composition, which is what the node's help says they do.
+        #[allow(clippy::cast_precision_loss)]
+        {
+            camera.aspect = opts.width as f32 / opts.height.max(1) as f32;
+        }
+        self.still_camera = Some(solarxy_renderer::camera_state::CameraState::from_camera(
+            &self.device,
+            &self.renderer.layouts.camera,
+            camera,
+        ));
+        // The look belongs to the camera being shot through. Falling back to
+        // the active pane's is right only when the render names no camera, and
+        // that is exactly when the shot *is* the active pane's view.
+        let camera_look = opts.camera.and_then(|node| {
+            let id = SceneObjectId(node as u64);
+            self.raster
+                .scene()
+                .cameras()
+                .and_then(|cams| cams.iter().find(|c| c.id == id).map(|c| c.look.clone()))
+        });
+        self.still_look = match camera_look.as_ref() {
+            Some(look) => solarxy_renderer::composite::resolve_look(
+                Some(look),
+                &self.pane_looks[self.view.active_pane],
+            ),
+            None => self.pane_look(self.view.active_pane),
+        };
+
         self.still_tiles.clear();
         self.still = Some(StillRenderJob::new(spec));
         Ok(())
@@ -1513,6 +1590,7 @@ impl SolarxyApp {
     #[wasm_bindgen(js_name = cancelStillRender)]
     pub fn cancel_still_render(&mut self) {
         self.still = None;
+        self.still_camera = None;
         self.still_tiles.clear();
         // The next frame renders the panes again, and the frame after that
         // resizes the targets back to the layout.
@@ -1565,13 +1643,13 @@ impl SolarxyApp {
         let display = self.view.display;
         let background = self.resolve_background(&pds);
         let bounds = self.scene_bounds();
-        let look = self.pane_look(pane);
+        let look = self.still_look;
         let scene_present = self.raster.scene().draw_objects().next().is_some();
         let engine = job.spec().engine;
         let format = self.render_format;
 
         let step = {
-            let Some(camera) = self.view.cameras[pane].as_mut() else {
+            let Some(camera) = self.still_camera.as_mut() else {
                 self.still = None;
                 return;
             };
@@ -1615,6 +1693,7 @@ impl SolarxyApp {
         });
         if done {
             self.still = None;
+            self.still_camera = None;
         } else {
             self.still = Some(job);
         }

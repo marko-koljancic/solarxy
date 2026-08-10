@@ -11,6 +11,7 @@ import { MenuBar } from "./components/menu/MenuBar";
 import { RecoveryPrompt } from "./components/RecoveryPrompt";
 import { PreferencesModal } from "./components/preferences/PreferencesModal";
 import { ScreenshotModal } from "./components/ScreenshotModal";
+import { StillRenderModal } from "./components/StillRenderModal";
 import { TurntableExportModal } from "./components/TurntableExportModal";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { Toasts } from "./components/Toasts";
@@ -34,6 +35,7 @@ export function App() {
   const prefsOpen = useUi((s) => s.prefsOpen);
   const screenshotOpen = useUi((s) => s.screenshotOpen);
   const turntableOpen = useUi((s) => s.turntableOpen);
+  const stillRequest = useUi((s) => s.stillRequest);
   const bootError = useUi((s) => s.bootError);
   const reviewMode = useReview((s) => s.reviewMode);
   const [dropActive, setDropActive] = useState(false);
@@ -156,6 +158,12 @@ export function App() {
       {screenshotOpen && <ScreenshotModal onClose={() => useUi.getState().setScreenshotOpen(false)} />}
       {turntableOpen && (
         <TurntableExportModal onClose={() => useUi.getState().setTurntableOpen(false)} />
+      )}
+      {stillRequest && (
+        <StillRenderModal
+          request={stillRequest}
+          onClose={() => useUi.getState().setStillRequest(null)}
+        />
       )}
       {gate === "warn" && <DeviceWarning />}
     </div>

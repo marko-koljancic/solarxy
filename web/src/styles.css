@@ -2556,6 +2556,30 @@ body.reduce-motion * {
 .screenshot-placeholder {
   color: var(--text-tertiary);
 }
+
+/* The still render's preview. The canvas is the real output size, so it is
+   scaled to fit rather than sized: one buffer serves both the preview and the
+   save, and a second scaled copy would double the memory of the one thing here
+   that can reach hundreds of megabytes. */
+.still-preview {
+  flex: 1;
+  min-height: 12rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.still-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* Checkerboard-free: a still is opaque, and a transparent-looking backdrop
+     would read as alpha the render does not have. */
+  background: var(--background-tertiary);
+}
 .modal-actions .prefs-unit {
   margin-right: auto;
 }

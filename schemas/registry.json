@@ -11077,7 +11077,7 @@
     },
     {
       "typeId": "render",
-      "version": 1,
+      "version": 2,
       "displayName": "Render",
       "category": "export",
       "categoryLabel": "Export",
@@ -11147,7 +11147,7 @@
           "default": 1920,
           "hard": [
             16.0,
-            4096.0
+            8192.0
           ],
           "soft": null,
           "step": 1.0,
@@ -11165,17 +11165,124 @@
           "default": 1080,
           "hard": [
             16.0,
-            4096.0
+            8192.0
           ],
           "soft": null,
           "step": 1.0,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Output height in pixels. Note that width times height is capped at 4 megapixels on the way to the GPU: ask for more and the capture is scaled down to fit, keeping the aspect ratio, and reports the size it actually produced."
+          "doc": "Output height in pixels. Large renders are drawn in tiles, each inside the four-megapixel budget a browser reliably survives, and assembled afterwards -- so the size you ask for is the size you get, however long it takes."
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "group": "render",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "raster",
+              "Rasterized"
+            ],
+            [
+              "traced",
+              "Path traced"
+            ]
+          ],
+          "accept": [],
+          "default": "raster",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Which renderer draws the still. Rasterized is the viewport's own renderer: fast, and its shadows, ambient occlusion and reflections are approximations. Path traced follows light through the scene instead, so shadows, bounced colour and soft reflections come out of the same calculation rather than being added on top -- and it takes as long as it takes.\n\nA traced still shows what the tracer integrates: the environment where a ray leaves the scene, and no grid, gizmo or overlay. It is a photograph of the scene rather than a screenshot of the viewport."
+        },
+        {
+          "key": "quality",
+          "label": "Quality",
+          "group": "render",
+          "paramType": "enum",
+          "enumVariants": [
+            [
+              "draft",
+              "Draft (16 samples)"
+            ],
+            [
+              "good",
+              "Good (64 samples)"
+            ],
+            [
+              "high",
+              "High (256 samples)"
+            ],
+            [
+              "reference",
+              "Reference (1024 samples)"
+            ]
+          ],
+          "accept": [],
+          "default": "good",
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many samples each pixel averages, and so how much grain is left. Four times the samples is half the noise, not a quarter, which is why the steps are wide: Draft to Good is a visible improvement and Draft to Reference is sixty-four times the wait.\n\nPath traced only. A rasterized still draws each pixel once."
+        },
+        {
+          "key": "bounces",
+          "label": "Bounces",
+          "group": "render",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 6,
+          "hard": [
+            1.0,
+            32.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many times light may scatter before a path is given up on. Higher opens up interiors and deep folds, where most of the light arrives after several bounces; an exterior on a bright day is usually finished by four.\n\nPath traced only."
+        },
+        {
+          "key": "transmissive_bounces",
+          "label": "Glass Bounces",
+          "group": "render",
+          "paramType": "int",
+          "enumVariants": [],
+          "accept": [],
+          "default": 4,
+          "hard": [
+            0.0,
+            32.0
+          ],
+          "soft": null,
+          "step": 1.0,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "How many of the bounces above may additionally pass through transmissive surfaces. Counted separately so a pane of glass does not spend a whole path's budget getting through it: a window is two surfaces, a tumbler is four, and running out ends the path rather than turning the glass opaque.\n\nPath traced only."
+        },
+        {
+          "key": "denoise",
+          "label": "Denoise",
+          "group": "render",
+          "paramType": "bool",
+          "enumVariants": [],
+          "accept": [],
+          "default": false,
+          "hard": null,
+          "soft": null,
+          "step": null,
+          "unit": "none",
+          "drivenByPort": null,
+          "doc": "Smooths the remaining grain, steered by what each pixel's surface looks like so material boundaries survive.\n\nOff by default, and that is the right default for a finished still: at a high sample count there is little grain left to remove and a filter can only take detail away. Turn it on for a Draft, where the grain is the thing standing between you and seeing the shot."
         },
         {
           "key": "render",
-          "label": "Render",
+          "label": "Render Still",
           "group": "render",
           "paramType": "action",
           "enumVariants": [],
@@ -11186,13 +11293,13 @@
           "step": null,
           "unit": "none",
           "drivenByPort": null,
-          "doc": "Jumps the active viewport to the chosen camera and opens the screenshot dialog at this resolution. Nothing is written until you save from there."
+          "doc": "Renders the still and opens a dialog showing it arrive, tile by tile, with a running count and a cancel. Nothing is written until you save from there.\n\nThe viewport is left where it is. The shot comes from the camera above, not from what you happen to be looking at, so pressing this never moves your view."
         }
       ],
       "bypass": {
         "mode": "notBypassable"
       },
-      "doc": "Holds a render setup: which camera to shoot through and at what resolution. It carries settings and nothing else -- no ports, no cook, no output. Pressing Render jumps the active viewport to the chosen camera and opens the screenshot dialog at this resolution, where you review the frame and choose whether to save it.\n\nIt lives at the object level beside the cameras and lights it refers to, and it is how a shot stops being something you re-find by orbiting. Point it at a `camera` node and the same framing comes back every session; keep several around, one per shot, each named for what it captures.\n\nA capture is capped at 4 megapixels. The width and height go up to 4096 each, but anything past the cap is scaled down to fit, preserving aspect -- so asking for 3840x2160 does not get you a 4K frame, and the result tells you the size it really made. The limit is deliberate: larger captures can lose the WebGPU device outright, and there is no recovery from that on the web yet.",
+      "doc": "Holds a render setup: which camera to shoot through, at what resolution, with which renderer and how much patience. It carries settings and nothing else -- no ports, no cook, no output. Pressing Render Still renders it and opens a dialog showing it arrive, where you review the frame and choose whether to save it.\n\nIt lives at the object level beside the cameras and lights it refers to, and it is how a shot stops being something you re-find by orbiting. Point it at a `camera` node and the same framing comes back every session; keep several around, one per shot, each named for what it captures.\n\nUp to 8192 pixels an edge. Anything larger than a browser draws in one pass is rendered in tiles and assembled, so the size you ask for is the size you get -- what changes with resolution is how long it takes, not whether it works.\n\nDepth of field belongs to the camera, not here: aperture, focus distance and blade count live on the `camera` node this points at, so the same lens applies wherever that camera is used.",
       "searchAliases": [
         "render",
         "rop",
