@@ -782,13 +782,23 @@ export interface StillTileDto {
   pixels: Uint8Array;
 }
 
-/** What to render. `engine` picks which renderer draws it. */
-export interface StillRenderOpts {
+/** What a `render` node is asking for, resolved by the engine.
+ *
+ * Read out of the engine rather than assembled here. The rule for turning
+ * authored parameters into a render lived on this side until 0.9.0, which is
+ * how the node's two bounce budgets came to be authored and read by nothing:
+ * this shape had no field for them. A render is now asked for by naming the
+ * node, and this travels one way, out, for the dialog to show. */
+export interface RenderSettings {
   width: number;
   height: number;
   samples: number;
   engine: "raster" | "pathTraced";
+  bounces: number;
+  transmissiveBounces: number;
   denoise: boolean;
+  /** The `camera` node to shoot through, or null for the active pane's view. */
+  camera: number | null;
 }
 
 /** The viewport tool. Rotate and Scale select, draw and

@@ -74,6 +74,7 @@ mod lights;
 mod note_node;
 mod text_node;
 
+pub use export_nodes::{DEFAULT_QUALITY, RenderEngine, RenderSettings, quality_samples};
 pub use imports::{parse_bytes, parse_model, parse_model_validated};
 
 use crate::GraphError;

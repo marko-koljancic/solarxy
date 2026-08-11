@@ -8276,3 +8276,122 @@ fn a_render_node_saved_before_the_still_opens_with_the_new_defaults() {
     // left and a filter can only take detail away.
     assert_eq!(value("denoise"), ParamValue::Bool(false));
 }
+
+/// Every quality preset the `render` node declares has a sample count.
+///
+/// The case list is derived from the registry rather than written out, so a
+/// preset added to the node without a count fails the build instead of quietly
+/// rendering at the fallback. That is the failure this guards: the table lived
+/// in the frontend until this release, where nothing could compare it against
+/// the node at all.
+#[test]
+fn every_quality_preset_the_render_node_declares_has_a_sample_count() {
+    use crate::registry::param_spec::ParamType;
+
+    let e = engine();
+    let desc = e
+        .registry
+        .get("render")
+        .expect("the render node is registered");
+    let spec = desc
+        .param("quality")
+        .expect("the render node declares a quality");
+    let ParamType::Enum { variants } = &spec.ty else {
+        panic!("quality stopped being an enum, which this test reads through");
+    };
+    assert!(!variants.is_empty(), "a preset list with no presets");
+
+    for variant in variants {
+        assert!(
+            crate::nodes::quality_samples(&variant.key).is_some(),
+            "the quality preset {:?} has no sample count; add one beside the enum \
+             that declares it",
+            variant.key
+        );
+    }
+    // The fallback has to be one of them, or an unknown preset falls back to
+    // something the node does not offer.
+    assert!(
+        variants
+            .iter()
+            .any(|v| v.key == crate::nodes::DEFAULT_QUALITY),
+        "the default quality preset is not among the ones the node declares"
+    );
+}
+
+/// A `render` node saved before its second version resolves to the current
+/// defaults rather than to zeroes.
+///
+/// The distinction is not cosmetic. An engine of nothing renders nothing and a
+/// bounce budget of zero ends every path before it starts, so a reader that
+/// answered "absent" with "zero" would turn an old document into a black
+/// picture rather than into a default one.
+///
+/// A sibling test already checks that the aged *params* arrive at their
+/// defaults. This checks the resolver over them, which is a different unit and
+/// covers the one value no param carries: the sample count, which comes from
+/// the quality preset's table rather than from the node.
+#[test]
+fn a_render_node_saved_before_its_second_version_resolves_to_the_current_defaults() {
+    use crate::nodes::RenderEngine;
+
+    let mut e = engine();
+    let node = add(&mut e, GraphContext::Root, "render");
+
+    // Age the file the way one written before this release holds it: version 1,
+    // and none of the keys that version never had.
+    let mut scene = crate::engine::scenefile::document_to_scene(
+        &e.doc.to_data(),
+        e.cook_mode,
+        &crate::runtime::RuntimeSettings::default(),
+        &SceneSidecar::default(),
+        Vec::new(),
+    );
+    // The root graph, not a subflow: a render node is an object-level node.
+    let mut aged = 0;
+    {
+        for stored in &mut scene.graph.nodes {
+            if stored.type_id == "render" {
+                stored.type_version = 1;
+                for key in [
+                    "engine",
+                    "quality",
+                    "bounces",
+                    "transmissive_bounces",
+                    "denoise",
+                ] {
+                    stored.params.remove(key);
+                }
+                aged += 1;
+            }
+        }
+    }
+    assert_eq!(aged, 1, "the render node was found and aged");
+
+    let (document, warnings) = crate::engine::scenefile::scene_to_document(&scene, &e.registry);
+    assert!(
+        warnings.is_empty(),
+        "a pure addition must not warn on reopen: {warnings:?}"
+    );
+    let mut reopened = engine();
+    reopened.load_document(&DocumentFile {
+        format_version: 1,
+        document,
+        cook_mode: e.cook_mode,
+    });
+
+    let settings = reopened
+        .render_settings(GraphContext::Root, node)
+        .expect("an aged render node still resolves");
+    assert_eq!(settings.engine, RenderEngine::Raster);
+    assert_eq!(settings.samples, 64, "the Good preset, not no samples");
+    assert_eq!(settings.bounces, 6, "the node's default, not zero bounces");
+    assert_eq!(
+        settings.transmissive_bounces, 4,
+        "the node's default, not zero glass bounces"
+    );
+    assert!(!settings.denoise);
+    assert_eq!(settings.width, 1920);
+    assert_eq!(settings.height, 1080);
+    assert_eq!(settings.camera, None);
+}

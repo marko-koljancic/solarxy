@@ -231,14 +231,22 @@ struct MarkerScreenDto {
     y: f32,
 }
 
-/// A still-render request. `engine` is `"raster"` or `"pathTraced"`.
-#[derive(Deserialize, Clone)]
+/// What a `render` node says, as the frontend displays it.
+///
+/// Produced by the engine rather than assembled by the frontend, which is the
+/// point: the browser and a headless command resolve the same document through
+/// one rule instead of two that agree until they do not. It travels out for the
+/// dialog to show and never travels back in, because a render is asked for by
+/// naming the node.
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StillOptsDto {
+struct RenderSettingsDto {
     width: u32,
     height: u32,
     samples: u32,
     engine: String,
+    bounces: u32,
+    transmissive_bounces: u32,
     denoise: bool,
     /// The `camera` node to shoot through, or `null` to shoot the active
     /// pane's current view.
@@ -247,6 +255,26 @@ struct StillOptsDto {
     /// viewport is where someone happens to be looking, so the job builds its
     /// own camera from this and leaves every pane where it was.
     camera: Option<f64>,
+}
+
+impl From<solarxy_graph::nodes::RenderSettings> for RenderSettingsDto {
+    fn from(s: solarxy_graph::nodes::RenderSettings) -> Self {
+        Self {
+            width: s.width,
+            height: s.height,
+            samples: s.samples,
+            engine: match s.engine {
+                solarxy_graph::nodes::RenderEngine::PathTraced => "pathTraced",
+                solarxy_graph::nodes::RenderEngine::Raster => "raster",
+            }
+            .to_string(),
+            bounces: s.bounces,
+            transmissive_bounces: s.transmissive_bounces,
+            denoise: s.denoise,
+            #[allow(clippy::cast_precision_loss)]
+            camera: s.camera.map(|n| n.0 as f64),
+        }
+    }
 }
 
 /// A screenshot request: capture resolution (physical pixels) plus the
@@ -1485,18 +1513,42 @@ impl SolarxyApp {
     /// The job then advances one chunk per `frame()`, reports itself through
     /// the `renderProgress` host event, and hands finished tiles over through
     /// `take_still_tile`.
+    /// What a `render` node is asking for, for the dialog to show before
+    /// anything is rendered.
+    ///
+    /// A pull-read of the same resolver `startStillRender` runs, so the numbers
+    /// on the confirmation screen are the numbers the job will use rather than
+    /// a second opinion about the same node.
+    #[wasm_bindgen(js_name = renderSettings)]
+    pub fn render_settings(&self, ctx: JsValue, node: f64) -> Result<JsValue, JsError> {
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let settings = self
+            .engine
+            .render_settings(ctx, NodeId(node as u64))
+            .map_err(|e| JsError::new(&e))?;
+        to_js(&RenderSettingsDto::from(settings))
+    }
+
     #[wasm_bindgen(js_name = startStillRender)]
-    pub fn start_still_render(&mut self, opts: JsValue) -> Result<(), JsError> {
+    pub fn start_still_render(&mut self, ctx: JsValue, node: f64) -> Result<(), JsError> {
         use solarxy_host::still::{StillEngine, StillRenderJob, StillSpec, TILE_BUDGET_PIXELS};
 
         if self.still.is_some() {
             return Err(JsError::new("a still render is already running"));
         }
-        let opts: StillOptsDto = serde_wasm_bindgen::from_value(opts)
-            .map_err(|e| JsError::new(&format!("bad still options: {e}")))?;
-        let engine = match opts.engine.as_str() {
-            "pathTraced" => StillEngine::PathTraced,
-            _ => StillEngine::Raster,
+        // Resolved here rather than accepted from the caller, and re-resolved
+        // rather than carried over from the dialog's read: what runs is what
+        // the node says at the moment Render is pressed.
+        let ctx: GraphContext = serde_wasm_bindgen::from_value(ctx)
+            .map_err(|e| JsError::new(&format!("bad ctx: {e}")))?;
+        let opts = self
+            .engine
+            .render_settings(ctx, NodeId(node as u64))
+            .map_err(|e| JsError::new(&e))?;
+        let engine = match opts.engine {
+            solarxy_graph::nodes::RenderEngine::PathTraced => StillEngine::PathTraced,
+            solarxy_graph::nodes::RenderEngine::Raster => StillEngine::Raster,
         };
         if engine == StillEngine::PathTraced && self.tracer.is_none() {
             self.tracer = Some(solarxy_renderer::pathtrace::backend::PathBackend::new(
@@ -1522,6 +1574,11 @@ impl SolarxyApp {
             // responsive, and the bound on how large any one dispatch is.
             settings.chunk = 1;
             settings.denoise = opts.denoise;
+            // Authored since the node reached its second version and read by
+            // nothing until the resolver existed: the frontend's request had
+            // no field for either, so lowering them changed no picture.
+            settings.bounces = opts.bounces;
+            settings.transmissive_bounces = opts.transmissive_bounces;
             t.set_settings(settings);
             t.invalidate();
         }
@@ -1555,7 +1612,7 @@ impl SolarxyApp {
                 |c| c.camera,
             );
         if let Some(node) = opts.camera {
-            let id = SceneObjectId(node as u64);
+            let id = SceneObjectId(node.0);
             if let Some(def) = self
                 .raster
                 .scene()
@@ -1580,7 +1637,7 @@ impl SolarxyApp {
         // the active pane's is right only when the render names no camera, and
         // that is exactly when the shot *is* the active pane's view.
         let camera_look = opts.camera.and_then(|node| {
-            let id = SceneObjectId(node as u64);
+            let id = SceneObjectId(node.0);
             self.raster
                 .scene()
                 .cameras()

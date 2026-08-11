@@ -36,7 +36,7 @@ import type {
   ResolvedParam,
   ScreenshotOpts,
   ScreenshotResult,
-  StillRenderOpts,
+  RenderSettings,
   StillTileDto,
   SaveExtra,
   SlxyLoadResult,
@@ -165,8 +165,17 @@ export class SolarxyClient {
    * The job then advances one chunk per frame on its own: nothing here drives
    * it. Progress arrives as `renderProgress` host events and finished tiles
    * through `takeStillTile`, which is why this returns nothing. */
-  startStillRender(opts: StillRenderOpts): void {
-    this.app.startStillRender(opts);
+  startStillRender(ctx: GraphContext, node: number): void {
+    this.app.startStillRender(ctx, node);
+  }
+
+  /** What a `render` node is asking for, for the dialog to show before
+   * anything renders.
+   *
+   * The same resolver the start runs, so the confirmation screen and the job
+   * cannot hold two opinions about one node. */
+  renderSettings(ctx: GraphContext, node: number): RenderSettings {
+    return this.app.renderSettings(ctx, node) as RenderSettings;
   }
 
   /** Cancels the running still render. Safe when nothing is running. */

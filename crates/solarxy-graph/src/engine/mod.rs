@@ -2772,6 +2772,77 @@ impl Engine {
     /// The node or param not existing, or the expression failing to parse
     /// or evaluate. The message is what the editor shows in its error
     /// state.
+    /// What a `render` node says, resolved once for every host.
+    ///
+    /// The browser and a headless command have to agree about what a document
+    /// asks for, and the only way two implementations of that rule agree is by
+    /// there being one. There were two until this release, and the cost was
+    /// visible: the node had carried a bounce budget and a glass bounce budget
+    /// since its second version and neither reached any render, because the
+    /// host that read the node did not know to look for them.
+    ///
+    /// Every field goes through [`Self::resolved_param`], so an expression on
+    /// the resolution evaluates and a document saved before the second version
+    /// answers with the current defaults rather than with zeroes.
+    ///
+    /// # Errors
+    /// The node not existing, not being a `render` node, or a param failing to
+    /// resolve. A value of the wrong shape is not an error: it falls back to
+    /// the type's default the way any registry-driven reader does.
+    pub fn render_settings(
+        &self,
+        ctx: GraphContext,
+        node: NodeId,
+    ) -> Result<crate::nodes::RenderSettings, String> {
+        use crate::nodes::{DEFAULT_QUALITY, RenderEngine, RenderSettings, quality_samples};
+
+        let graph = self.doc.graph(ctx).map_err(|e| e.to_string())?;
+        let data = graph.node(node).ok_or_else(|| "no such node".to_string())?;
+        if data.type_id != "render" {
+            return Err(format!("node is a {} rather than a render", data.type_id));
+        }
+
+        let int = |key: &str, floor: u32| -> Result<u32, String> {
+            match self.resolved_param(ctx, node, key)? {
+                ParamValue::Int(v) => Ok(u32::try_from(v).unwrap_or(floor).max(floor)),
+                _ => Ok(floor),
+            }
+        };
+        let text = |key: &str| -> Result<String, String> {
+            match self.resolved_param(ctx, node, key)? {
+                ParamValue::Enum(v) | ParamValue::Text(v) => Ok(v),
+                _ => Ok(String::new()),
+            }
+        };
+
+        let quality = text("quality")?;
+        Ok(RenderSettings {
+            camera: match self.resolved_param(ctx, node, "camera_path")? {
+                ParamValue::NodeRef(id) => id,
+                _ => None,
+            },
+            // The floors are the node's own hard minimum, so a resolution
+            // arriving as an expression that evaluated to nothing renders a
+            // small picture rather than an empty one.
+            width: int("width", 16)?,
+            height: int("height", 16)?,
+            engine: if text("engine")? == "traced" {
+                RenderEngine::PathTraced
+            } else {
+                RenderEngine::Raster
+            },
+            samples: quality_samples(&quality)
+                .or_else(|| quality_samples(DEFAULT_QUALITY))
+                .unwrap_or(64),
+            bounces: int("bounces", 1)?,
+            transmissive_bounces: int("transmissive_bounces", 0)?,
+            denoise: matches!(
+                self.resolved_param(ctx, node, "denoise")?,
+                ParamValue::Bool(true)
+            ),
+        })
+    }
+
     pub fn resolved_param(
         &self,
         ctx: GraphContext,

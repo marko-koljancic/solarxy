@@ -22,6 +22,72 @@ use crate::registry::param_spec::{EnumVariant, NodePathAccept, ParamSpec, ParamT
 use crate::registry::resolve::ResolvedParams;
 use crate::registry::{BypassBehavior, Category, ContextSet, NodeRole, NodeTypeDescriptor, PortSpec};
 
+/// Which renderer a still is drawn with, as the node declares it.
+///
+/// Named here rather than in a host because the choice is authored on the node
+/// and saved with the document. A host maps it onto its own backend; the engine
+/// does not know what a backend is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderEngine {
+    #[default]
+    Raster,
+    PathTraced,
+}
+
+/// What a `render` node says, resolved.
+///
+/// One answer for every host. The rule each field is read by is the registry's
+/// own: the node's literal if it has one, else the type's declared default,
+/// which is what makes a document saved before the node's second version render
+/// with the current defaults rather than with zeroes. An engine of nothing
+/// renders nothing and a bounce budget of zero ends every path before it
+/// starts, so "or zero" would not be a degraded picture but no picture.
+///
+/// Deliberately neutral about rendering: no pixel formats, no backend types, no
+/// sample chunking. It reports what was authored and leaves every host to map
+/// it, which is what keeps renderer vocabulary out of the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderSettings {
+    /// The camera the shot is taken through, or `None` to use whatever view
+    /// the host would otherwise render. Never a path: references cross
+    /// contexts by stable id so a rename cannot break one.
+    pub camera: Option<crate::document::NodeId>,
+    pub width: u32,
+    pub height: u32,
+    pub engine: RenderEngine,
+    /// Samples per pixel, resolved from the quality preset. The node carries no
+    /// sample count of its own, which is the point of the preset.
+    pub samples: u32,
+    pub bounces: u32,
+    pub transmissive_bounces: u32,
+    pub denoise: bool,
+}
+
+/// The sample count a quality preset means.
+///
+/// Beside the enum that declares the presets, so the two cannot drift, and
+/// asserted against it by `every_quality_preset_has_a_sample_count`. It lived
+/// in the frontend until this release, where nothing could check it against the
+/// node and a preset added in Rust would have rendered at the fallback.
+///
+/// An unknown key answers `None`, and the caller substitutes the default
+/// preset: the node stays authoritative and a host degrades rather than
+/// refusing, which is what a registry-driven consumer does with anything it has
+/// not been taught.
+#[must_use]
+pub fn quality_samples(key: &str) -> Option<u32> {
+    match key {
+        "draft" => Some(16),
+        "good" => Some(64),
+        "high" => Some(256),
+        "reference" => Some(1024),
+        _ => None,
+    }
+}
+
+/// The preset every unknown key falls back to.
+pub const DEFAULT_QUALITY: &str = "good";
+
 fn filename_param(default: &str) -> ParamSpec {
     ParamSpec::new(
         "filename",

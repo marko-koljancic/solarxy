@@ -16,21 +16,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getClient } from "../engine/session";
+import type { GraphContext, RenderSettings } from "../engine/types";
 import { pushToast } from "../store/toasts";
 import { useRenderJob } from "../store/renderJob";
 import { Modal } from "./Modal";
 import { Row, Section } from "./DialogRow";
 import { Select } from "./Select";
 
-/** What the render node asked for, handed over when the action fires. */
+/** What the render node asked for, handed over when the action fires.
+ *
+ * The settings are the engine's answer rather than this side's, so what the
+ * dialog shows is what the job will use. The node's address rides along because
+ * pressing Render re-resolves it: what renders is what the node says at that
+ * moment, not what it said when the dialog opened. */
 export interface StillRenderRequest {
-  width: number;
-  height: number;
-  samples: number;
-  engine: "raster" | "pathTraced";
-  denoise: boolean;
-  /** The `camera` node to shoot through, or null for the active pane's view. */
-  camera: number | null;
+  ctx: GraphContext;
+  node: number;
+  settings: RenderSettings;
 }
 
 /** Above this many megapixels the canvas is worth warning about. */
@@ -59,7 +61,7 @@ export function StillRenderModal({
   const [error, setError] = useState<string | null>(null);
   const busy = job.busy;
 
-  const megapixels = (request.width * request.height) / 1_000_000;
+  const megapixels = (request.settings.width * request.settings.height) / 1_000_000;
 
   // Escape cancels the run rather than closing the dialog, which is the
   // established rule for every multi-frame job here: a render that vanished
@@ -116,14 +118,14 @@ export function StillRenderModal({
     setError(null);
     setFinished(false);
     try {
-      getClient().startStillRender(request);
+      getClient().startStillRender(request.ctx, request.node);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       pushToast(message, "error");
       return;
     }
-    useRenderJob.getState().start(request.width, request.height);
+    useRenderJob.getState().start(request.settings.width, request.settings.height);
     setStarted(true);
   };
 
@@ -160,7 +162,7 @@ export function StillRenderModal({
       <Section title="Output">
         <Row label="Size" doc="Set on the render node. Large renders are drawn in tiles and assembled, so the size you ask for is the size you get.">
           <span className="prefs-unit">
-            {request.width} x {request.height}
+            {request.settings.width} x {request.settings.height}
             {megapixels >= CANVAS_WARN_MP
               ? ` (${megapixels.toFixed(0)} megapixels; this needs about ${Math.round(
                   megapixels * 4,
@@ -171,7 +173,7 @@ export function StillRenderModal({
         <Row label="Engine" doc="Set on the render node. Path traced follows light through the scene; rasterized is the viewport's own renderer.">
           <Select
             ariaLabel="Engine"
-            value={request.engine}
+            value={request.settings.engine}
             options={[
               { value: "raster", label: "Rasterized" },
               { value: "pathTraced", label: "Path traced" },
@@ -182,10 +184,10 @@ export function StillRenderModal({
             disabled
           />
         </Row>
-        {request.engine === "pathTraced" && (
+        {request.settings.engine === "pathTraced" && (
           <Row label="Samples" doc="Set on the render node's Quality. Four times the samples is half the noise.">
             <span className="prefs-unit">
-              {request.samples} per pixel{request.denoise ? ", denoised" : ""}
+              {request.settings.samples} per pixel{request.settings.denoise ? ", denoised" : ""}
             </span>
           </Row>
         )}
@@ -194,8 +196,8 @@ export function StillRenderModal({
       <div className="still-preview">
         <canvas
           ref={canvasRef}
-          width={request.width}
-          height={request.height}
+          width={request.settings.width}
+          height={request.settings.height}
           className="still-canvas"
           aria-label="The still being rendered"
         />

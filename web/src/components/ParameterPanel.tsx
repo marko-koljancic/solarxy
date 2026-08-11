@@ -30,7 +30,6 @@ import type {
   ValidationIssue,
 } from "../engine/types";
 import { descriptorFor } from "../registry/datatypes";
-import { stillRequestFor } from "./stillRequest";
 import { ExpressionField } from "./inputs/ExpressionField";
 import {
   acceptsExpression,
@@ -403,20 +402,26 @@ function SnippetRow({
 
 /** An Action param: a button whose press is routed by node
  * type. Export nodes run the engine's encoder and save the bytes through
- * the File System Access flow; the render node is HOST-interpreted (jump
- * the active pane to its camera, then open the screenshot modal with its
- * resolution preset). */
+ * the File System Access flow; the render node is HOST-interpreted: the engine
+ * resolves what the node asks for and the still dialog opens on it, without
+ * moving any pane. */
 function ActionField({ ctx, node, spec, label }: FieldProps & { label: ReactNode }) {
-  const registry = useMirror((s) => s.registry);
   const run = async () => {
     if (node.typeId === "render") {
-      const camSrc = node.params.camera_path;
-      const cam =
-        camSrc && camSrc.kind === "literal" ? ((camSrc as { value: number | null }).value) : null;
+      // The engine answers what the node says. This side used to work it out
+      // from the node's params, which is how two of them came to be authored
+      // and read by nothing, and it is not a rule two implementations can hold
+      // in step.
+      //
       // The viewport is deliberately left alone. A shot is a property of the
       // scene and the pane is where someone happens to be looking, so the job
       // builds its own camera from the node's and nothing moves.
-      useUi.getState().setStillRequest(stillRequestFor(node, registry, cam));
+      try {
+        const settings = getClient().renderSettings(ctx, node.id);
+        useUi.getState().setStillRequest({ ctx, node: node.id, settings });
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : String(e), "error");
+      }
       return;
     }
     try {
