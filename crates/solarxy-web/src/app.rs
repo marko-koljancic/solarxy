@@ -1631,6 +1631,9 @@ impl SolarxyApp {
         {
             camera.aspect = opts.width as f32 / opts.height.max(1) as f32;
         }
+        if engine == StillEngine::PathTraced {
+            self.light_traced_still(&camera);
+        }
         self.still_camera = Some(solarxy_renderer::camera_state::CameraState::from_camera(
             &self.device,
             &self.renderer.layouts.camera,
@@ -4117,7 +4120,7 @@ impl SolarxyApp {
             None => self.renderer.write_light_helpers(&self.queue, &[]),
         }
 
-        if let Some(defs) = self.raster.scene().lights() {
+        if let Some(defs) = self.raster.scene().authored_lights() {
             self.env.lights_uniform =
                 LightsUniform::from_defs(defs, bounds.diagonal() * 0.04, ibl_avg);
         } else if !self.view.display.lights_locked {
@@ -4365,13 +4368,32 @@ impl SolarxyApp {
             .set_lut(&self.device, &self.queue, LutSlot::B, b.as_deref());
     }
 
+    /// The tracer's half of the viewer rig, before a still starts.
+    ///
+    /// A scene with no light nodes is lit in the viewport by the rig the panes
+    /// write into the lights uniform. The tracer binds no such uniform, so it
+    /// takes the same three definitions as scene data, from the camera this
+    /// shot is taken through rather than from whichever pane happens to be
+    /// active.
+    fn light_traced_still(&mut self, camera: &Camera) {
+        if let Some(t) = self.tracer.as_mut() {
+            solarxy_host::apply_viewer_rig(
+                &self.device,
+                &self.queue,
+                t,
+                self.raster.scene(),
+                camera,
+            );
+        }
+    }
+
     /// Recomputes the camera-relative light rig for a non-primary pane
     /// (only meaningful for the synthesized viewer rig; engine light nodes
     /// are world-fixed).
     fn setup_pane_lighting(&mut self, cam_data: &Camera) {
         // Engine light nodes are world-fixed and owe nothing to a camera, so
         // the synthesized viewer rig is the only thing this applies to.
-        if self.view.display.lights_locked || self.raster.scene().lights().is_some() {
+        if self.view.display.lights_locked || self.raster.scene().authored_lights().is_some() {
             return;
         }
         let bounds = self.scene_bounds();

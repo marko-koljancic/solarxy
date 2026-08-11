@@ -89,9 +89,9 @@ pub mod view;
 pub use cameras::{depth_bounds, ensure_pane_cameras};
 pub use lighting::{active_ibl, rebuild_light_bind_group};
 pub use pane::{
-    EncodedPane, PaneComposite, PaneScene, PaneUniforms, composite_and_submit, encode_pane_passes,
-    render_3d_passes, render_overdraw_pane, setup_pane_lighting, write_inspection_block,
-    write_pane_uniforms, write_wireframe_params,
+    EncodedPane, PaneComposite, PaneScene, PaneUniforms, apply_viewer_rig, composite_and_submit,
+    encode_pane_passes, render_3d_passes, render_overdraw_pane, setup_pane_lighting,
+    write_inspection_block, write_pane_uniforms, write_wireframe_params,
 };
 pub use raster::RasterBackend;
 pub use still::{StillCtx, StillRenderJob, StillSpec, StillStep};

@@ -45,7 +45,8 @@ use solarxy_renderer::composite::CompositeLook;
 use solarxy_renderer::environment::SceneEnvironment;
 use solarxy_renderer::frame::{DrawObject, GradientUniform, Renderer, SelectionStyle, WireframeParams};
 use solarxy_renderer::panes::PaneRect;
-use solarxy_renderer::scene::{BackgroundModeExt, lights_from_camera};
+use solarxy_core::scene::{SceneDelta, SceneOp};
+use solarxy_renderer::scene::{BackgroundModeExt, lights_from_camera, viewer_rig};
 use solarxy_renderer::visualization::GridUniform;
 
 /// What a pane needs written before its passes encode.
@@ -684,4 +685,44 @@ pub fn setup_pane_lighting(
         bounds.center(),
         bounds.diagonal() / 2.0,
     );
+}
+
+/// Hands the viewer rig to a backend that reads its lights from the scene.
+///
+/// The rasterizer takes the rig through [`setup_pane_lighting`] above, which
+/// writes the lights uniform its passes bind. A tracer binds no such uniform:
+/// it walks a light array that came from the scene, so a scene with no light
+/// nodes contributed none, and a file that looked lit in the viewport came out
+/// of a traced still lit by the environment alone. Both now read the same three
+/// definitions, [`solarxy_renderer::scene::viewer_rig`], each by the route it
+/// already had.
+///
+/// Applies on exactly the condition the shells already apply the rig on: a
+/// scene that authored lights of its own keeps them untouched. The camera is
+/// the shot's, not a viewport's, so a still through an authored camera is lit
+/// relative to that camera.
+///
+/// Callers pass the traced backend. The rasterizer must not be given these as
+/// scene data: its `SceneObjects` is the live viewport scene, and lights
+/// written into it would make the condition above answer differently ever
+/// after.
+///
+/// Returns whether the rig was applied.
+pub fn apply_viewer_rig(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    backend: &mut dyn solarxy_renderer::backend::RenderBackend,
+    scene: &SceneObjects,
+    camera: &Camera,
+) -> bool {
+    if scene.authored_lights().is_some() {
+        return false;
+    }
+    let delta = SceneDelta {
+        ops: vec![SceneOp::SetLights {
+            lights: viewer_rig(camera).to_vec(),
+        }],
+    };
+    backend.apply(device, queue, &delta);
+    true
 }

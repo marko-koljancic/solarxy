@@ -286,8 +286,42 @@ fn set_lights_stores_and_flags_dirty_once() {
         .expect("lights");
 
     assert_eq!(scene.lights().map(<[LightDef]>::len), Some(1));
+    assert_eq!(scene.authored_lights().map(<[LightDef]>::len), Some(1));
     assert!(scene.take_lights_dirty());
     assert!(!scene.take_lights_dirty(), "dirty consumed once");
+}
+
+/// An empty light list is a cook, not a lighting setup.
+///
+/// The engine pushes `SetLights` for every document, including one with no
+/// light nodes, so `lights()` answering `Some` says only that a cook has
+/// happened. Every shell asked it whether the scene lights itself, read the
+/// empty list as yes, and switched the camera rig off. That is why the
+/// distinction is a second accessor rather than a comment.
+#[test]
+fn an_empty_light_list_is_not_an_authored_lighting_setup() {
+    let g = require_gpu!();
+    let mut scene = SceneObjects::new();
+    scene
+        .apply(
+            &g.device,
+            &g.queue,
+            &g.layouts,
+            &SceneDelta {
+                ops: vec![SceneOp::SetLights { lights: vec![] }],
+            },
+        )
+        .expect("lights");
+
+    assert!(
+        scene.lights().is_some(),
+        "the op arrived, which is what this accessor reports"
+    );
+    assert!(
+        scene.authored_lights().is_none(),
+        "a document with no light nodes does not describe its own lighting, \
+         and a shell that thinks it does renders it unlit"
+    );
 }
 
 #[test]

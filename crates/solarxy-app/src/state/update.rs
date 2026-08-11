@@ -653,7 +653,7 @@ impl State {
     /// alone would let the other overwrite the authored rig on the next
     /// frame.
     pub(super) fn install_authored_lights(&mut self) -> bool {
-        let Some(defs) = self.raster.scene().lights() else {
+        let Some(defs) = self.raster.scene().authored_lights() else {
             return false;
         };
         let ibl_avg = solarxy_host::active_ibl(&self.renderer).irradiance_average;

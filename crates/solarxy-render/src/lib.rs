@@ -227,29 +227,20 @@ pub fn run_render(input: &Path, opts: &RenderOptions) -> Result<RenderOutcome, R
         host.bounds = b;
     }
 
-    let (mut camera, look) =
-        build_camera(&device, &queue, &mut host, &probe, &settings, &mut warnings);
+    let (mut camera, look) = build_camera(
+        &device,
+        &queue,
+        &mut host,
+        &probe,
+        backend.as_mut(),
+        &settings,
+        &mut warnings,
+    );
 
     let pds = PaneDisplaySettings::for_still(background_mode);
     let display = still_display_settings();
 
-    let spec = StillSpec {
-        width: settings.width,
-        height: settings.height,
-        engine: match settings.engine {
-            RenderEngine::PathTraced => StillEngine::PathTraced,
-            RenderEngine::Raster => StillEngine::Raster,
-        },
-        samples: settings.samples,
-        // Both screen-space post passes are off in a headless bring-up, so the
-        // apron would be a margin around nothing.
-        screen_space_post: false,
-        tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
-        // Eight bits for now; the float modes arrive with the file format that
-        // can hold them.
-        readback: solarxy_host::still::StillReadback::Display8,
-    };
-    let mut job = StillRenderJob::new(spec);
+    let mut job = StillRenderJob::new(still_spec(&settings));
     let spec = job.spec();
     let tiles = job.plan().len();
 
@@ -348,6 +339,26 @@ fn resolve_settings(
     engine
         .render_settings(GraphContext::Root, chosen)
         .map_err(RenderError::RenderNode)
+}
+
+/// The still the settings describe.
+fn still_spec(settings: &RenderSettings) -> StillSpec {
+    StillSpec {
+        width: settings.width,
+        height: settings.height,
+        engine: match settings.engine {
+            RenderEngine::PathTraced => StillEngine::PathTraced,
+            RenderEngine::Raster => StillEngine::Raster,
+        },
+        samples: settings.samples,
+        // Both screen-space post passes are off in a headless bring-up, so the
+        // apron would be a margin around nothing.
+        screen_space_post: false,
+        tile_budget: solarxy_host::still::TILE_BUDGET_PIXELS,
+        // Eight bits for now; the float modes arrive with the file format that
+        // can hold them.
+        readback: solarxy_host::still::StillReadback::Display8,
+    }
 }
 
 /// What a document with no render node renders at.
@@ -553,11 +564,17 @@ fn build_backend(
 /// The viewer rig is applied on the same condition both shells use: only when
 /// the scene authored no lights of its own. Applying it unconditionally would
 /// overwrite an authored lighting setup with a camera-relative one.
+///
+/// Both halves of the rig are applied here, from the shot's camera: the
+/// rasterizer's, which is a uniform, and the tracer's, which is scene data,
+/// because a tracer binds no lights uniform and would otherwise render this
+/// scene by the environment alone.
 fn build_camera(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     host: &mut HeadlessHost,
     probe: &RasterBackend,
+    backend: &mut dyn RenderBackend,
     settings: &RenderSettings,
     warnings: &mut Vec<String>,
 ) -> (CameraState, solarxy_renderer::composite::CompositeLook) {
@@ -581,7 +598,7 @@ fn build_camera(
         camera.camera.aspect = aspect;
     }
 
-    if probe.scene().lights().is_none() {
+    if probe.scene().authored_lights().is_none() {
         let cam_data = camera.camera;
         solarxy_host::setup_pane_lighting(
             queue,
@@ -590,6 +607,7 @@ fn build_camera(
             &host.bounds,
             host.renderer.ibl_res.ibl.irradiance_average,
         );
+        solarxy_host::apply_viewer_rig(device, queue, backend, probe.scene(), &cam_data);
     }
 
     let look = camera_def

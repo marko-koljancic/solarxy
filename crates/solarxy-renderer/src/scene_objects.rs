@@ -266,10 +266,26 @@ impl SceneObjects {
     }
 
     /// The engine-provided light list; `None` means no `SetLights` has
-    /// arrived and the shell keeps its synthesized viewer rig.
+    /// arrived at all.
+    ///
+    /// Rarely the question a shell wants. See [`SceneObjects::authored_lights`].
     #[must_use]
     pub fn lights(&self) -> Option<&[LightDef]> {
         self.lights.as_deref()
+    }
+
+    /// The scene's own lights, when it has any.
+    ///
+    /// **This is the question every shell means when it asks about lights, and
+    /// [`SceneObjects::lights`] is not it.** The engine pushes `SetLights`
+    /// unconditionally, including for a document with no light nodes, because
+    /// absence has to be communicated too. So `lights()` answering `Some` says
+    /// only that a cook has happened, and an empty list read as "the scene
+    /// describes its own lighting" is how a cooked scene with no lights ended
+    /// up with the camera rig switched off in every shell that holds an engine.
+    #[must_use]
+    pub fn authored_lights(&self) -> Option<&[LightDef]> {
+        self.lights.as_deref().filter(|l| !l.is_empty())
     }
 
     /// True once after each `SetLights`, so the shell knows to rebuild
