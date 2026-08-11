@@ -321,6 +321,52 @@ fn the_dashboard_hands_back_to_the_plain_line_when_it_cannot_have_a_terminal() {
     }
 }
 
+/// A build without the window explains itself and renders anyway.
+///
+/// The acceptance criterion is that the flag still parses: a reader whose
+/// build has no window should be told that, not told that `--watch` is not a
+/// thing. Only meaningful in a build that does not have it, which is the
+/// default set, and continuous integration builds with every feature so this
+/// is compiled out exactly where it would be a lie.
+#[cfg(not(feature = "watch"))]
+#[test]
+fn a_build_without_the_window_says_so_rather_than_refusing_the_flag() {
+    let dir = std::env::temp_dir().join("solarxy-render-contract");
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let out = dir.join("nowatch.png");
+    let _ = std::fs::remove_file(&out);
+    let model = repo_root().join("res/models/armadillo.obj");
+
+    let Some(result) = render(&[
+        model.to_str().expect("utf8 path"),
+        "--out",
+        out.to_str().expect("utf8 path"),
+        "--res",
+        "64x48",
+        "--watch",
+    ]) else {
+        return;
+    };
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("'watch' feature"),
+        "the build did not name what it is missing: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "the flag was refused rather than explained: {stderr}"
+    );
+    match code(&result) {
+        // It renders regardless: a missing window is not a missing render.
+        0 => {
+            assert!(out.exists(), "the render stopped because it had no window");
+            let _ = std::fs::remove_file(&out);
+        }
+        4 => eprintln!("skipping the success arm: no GPU adapter"),
+        other => panic!("unexpected exit {other}; stderr said: {stderr}"),
+    }
+}
+
 /// The subcommand did not displace the shipped surface.
 ///
 /// The analyze and view modes are flags with users, and a pipeline that runs

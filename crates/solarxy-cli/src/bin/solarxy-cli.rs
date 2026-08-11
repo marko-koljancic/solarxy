@@ -372,6 +372,8 @@ struct Sinks {
     plain: Option<solarxy_cli::render_sink::PlainSink<std::io::Stderr>>,
     #[cfg(feature = "tui")]
     dashboard: Option<solarxy_cli::render_tui::DashboardSink>,
+    #[cfg(feature = "watch")]
+    watch: Option<solarxy_cli::render_watch::WatchSink>,
 }
 
 #[cfg(feature = "render")]
@@ -384,12 +386,20 @@ impl solarxy_render::RenderSink for Sinks {
         if let Some(dashboard) = self.dashboard.as_mut() {
             solarxy_render::RenderSink::report(dashboard, progress);
         }
+        #[cfg(feature = "watch")]
+        if let Some(watch) = self.watch.as_mut() {
+            solarxy_render::RenderSink::report(watch, progress);
+        }
     }
 
     fn preview(&mut self, image: &solarxy_render::Preview<'_>) {
         #[cfg(feature = "tui")]
         if let Some(dashboard) = self.dashboard.as_mut() {
             solarxy_render::RenderSink::preview(dashboard, image);
+        }
+        #[cfg(feature = "watch")]
+        if let Some(watch) = self.watch.as_mut() {
+            solarxy_render::RenderSink::preview(watch, image);
         }
         let _ = image;
     }
@@ -403,13 +413,27 @@ impl Sinks {
     /// finishes, and an ordinary image is one tile, so a surface that shows the
     /// picture would show nothing until the render ended.
     fn wants_pixels(&self) -> bool {
+        let mut wants = false;
         #[cfg(feature = "tui")]
         {
-            self.dashboard.is_some()
+            wants |= self.dashboard.is_some();
         }
-        #[cfg(not(feature = "tui"))]
+        #[cfg(feature = "watch")]
         {
-            false
+            wants |= self.watch.is_some();
+        }
+        wants
+    }
+
+    /// Hold whatever a surface wants held after the render has ended.
+    ///
+    /// The window keeps the finished picture until it is dismissed, because
+    /// the frame a person waited for is the one that would otherwise vanish at
+    /// the moment it arrived. Nothing else here holds anything.
+    fn linger(&mut self) {
+        #[cfg(feature = "watch")]
+        if let Some(watch) = self.watch.as_mut() {
+            watch.hold();
         }
     }
 }
@@ -521,6 +545,23 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> Ex
     };
 
     let mut sinks = Sinks::default();
+    #[cfg(feature = "watch")]
+    if args.watch {
+        match solarxy_cli::render_watch::WatchSink::new(std::sync::Arc::clone(&cancel_for_sinks)) {
+            Ok(watch) => sinks.watch = Some(watch),
+            Err(why) => eprintln!("the render window could not open: {why}. The render continues."),
+        }
+    }
+    // Before the dashboard takes the screen, so anything the window says about
+    // failing to open lands on the reader's own terminal rather than on one
+    // that is about to be covered.
+    #[cfg(all(feature = "render", not(feature = "watch")))]
+    if args.watch {
+        eprintln!(
+            "the render window is not available: rebuild solarxy-cli with the \
+             'watch' feature. The render continues."
+        );
+    }
     #[cfg(feature = "tui")]
     if args.tui {
         match solarxy_cli::render_tui::unavailable() {
@@ -567,6 +608,11 @@ fn run_render(args: &solarxy_cli::parser::RenderArgs, theme: Option<&str>) -> Ex
     }
 
     let rendered = solarxy_render::run_render(&args.input, &opts, &mut sinks);
+    // The window holds the finished picture until it is dismissed. Before the
+    // terminal goes back, because the dashboard is still the thing on screen
+    // and a report printed over it would be printed onto a surface that is
+    // still being painted.
+    sinks.linger();
     // The terminal goes back before anything else writes to it, so a warning or
     // a report lands on the reader's own screen rather than on one being torn
     // down underneath it.

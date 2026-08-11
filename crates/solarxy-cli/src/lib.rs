@@ -26,6 +26,9 @@ pub mod render_sink;
 /// terminal machinery to draw it on.
 #[cfg(all(feature = "render", feature = "tui"))]
 pub mod render_tui;
+/// The live window. Its own build feature, off by default.
+#[cfg(feature = "watch")]
+pub mod render_watch;
 #[cfg(feature = "tui")]
 pub mod tui;
 mod validators;

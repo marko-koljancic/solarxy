@@ -22,6 +22,11 @@ updater = ["dep:axoupdater"]
 # install channel; it is what brings the GPU stack into an otherwise pure-CPU
 # binary, which is why it is a feature at all rather than a plain dependency.
 render = ["dep:solarxy-render", "dep:ctrlc"]
+# The live window. Off by default because it is the one thing here that opens
+# a window, and a build for a machine with no display should not carry the
+# code that would. The distribution build turns it on; a build without it
+# answers `--watch` with a message rather than refusing to parse the flag.
+watch = ["render", "dep:winit", "dep:wgpu", "dep:pollster"]
 
 [dependencies]
 solarxy-render = { path = "../solarxy-render", features = ["clap"], optional = true }
@@ -46,6 +51,18 @@ crossterm = { version = "0.28.1", optional = true }
 # than reached through solarxy-core because the theme files are this crate's.
 toml = { version = "0.8", optional = true }
 axoupdater = { version = "0.10", features = ["blocking"], optional = true }
+# The live window's three, all of them already vendored for the desktop shell
+# at exactly these versions, so this adds edges to the graph rather than
+# packages to the lockfile. Default features on winit deliberately: its Linux
+# backends load at run time that way, so a headless image can still start a
+# binary that carries it.
+winit = { version = "0.30.12", optional = true }
+wgpu = { version = "27.0.1", optional = true }
+pollster = { version = "0.4.0", optional = true }
 
 [package.metadata.dist]
 installers = ["shell", "powershell"]
+# The live window ships. It is off in the default feature set so a plain
+# `cargo build` carries no window code, and on here so the binary a person
+# installs answers `--watch` with a window rather than with an explanation.
+features = ["watch"]
